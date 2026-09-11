@@ -409,13 +409,17 @@ private slots:
     }
     void emptyAndImportError() {
         QVERIFY(!bible->ready());
+        QSignalSpy newWindow(window,SIGNAL(newWindowRequested()));
+        QVERIFY(newWindow.isValid());
+        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(newWindow.count(),1);
         QCOMPARE(window->title(),QString("OmaWord"));
         QVERIFY(item("setupScroll")->isVisible());
         click(item("setupImport"));
         QTRY_VERIFY(prop("importGuide","opened").toBool());
         QVERIFY(!item("importReplacement")->isVisible());
-        QVERIFY(prop("importSupported","text").toString().contains("official NET Bible 2.1 EPUB"));
-        QVERIFY(prop("importSupported","text").toString().contains("KJV 2006 Haiola/eBible EPUB"));
+        QVERIFY(prop("importSupported","text").toString().contains("Verse-tagged Bible EPUBs"));
+        QVERIFY(prop("importSupported","text").toString().contains("NET format and Haiola/eBible markup supported"));
         capture("revision-import-guide-setup");
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("importGuide","visible").toBool());
@@ -680,7 +684,9 @@ private slots:
             type(" unsaved");
             const auto draft = prop("noteEditor","text").toString();
             QVERIFY(draft != bible->noteText());
-            for (int dismissal = 0; dismissal < 8; ++dismissal) {
+            QSignalSpy newWindow(window,SIGNAL(newWindowRequested()));
+            QVERIFY(newWindow.isValid());
+            for (int dismissal = 0; dismissal < 9; ++dismissal) {
                 if (dismissal == 0) key(Qt::Key_Escape);
                 if (dismissal == 1) key(Qt::Key_N,Qt::ControlModifier);
                 if (dismissal == 2) QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,QPoint(30,200));
@@ -704,6 +710,10 @@ private slots:
                     QVERIFY(!bible->busy());
                     QVERIFY(bible->error().contains("test note failure"));
                 }
+                if (dismissal == 8) {
+                    key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+                    QCOMPARE(newWindow.count(),0);
+                }
                 QTest::qWait(250);
                 QVERIFY(prop("notesDrawer","opened").toBool());
                 QCOMPARE(prop("noteEditor","text").toString(),draft);
@@ -718,6 +728,105 @@ private slots:
         key(Qt::Key_N); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QCOMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),18);
+    }
+    void peerNoteUpdatesPreserveDirtyDraft() {
+        reference("John 3:16");
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("Initial note");
+        QCOMPARE(window->property("loadedNoteText").toString(),QString("Initial note"));
+        QCOMPARE(window->property("loadedVersionId").toString(),bible->versionId());
+        BibleBackend peer;
+        QVERIFY(peer.navigate("John 3:16"));
+        peer.setNoteText("Clean peer update");
+        QTRY_COMPARE(prop("noteEditor","text").toString(),QString("Clean peer update"));
+        QVERIFY(!window->property("noteConflict").toBool());
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-peer-note-failure");
+            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+            QVERIFY(db.open()); QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TRIGGER reject_peer_note BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'peer draft save failure'); END"));
+            QVERIFY(object("noteEditor")->setProperty("text","My unsaved draft"));
+            QVERIFY(bible->error().contains("peer draft save failure"));
+            QCOMPARE(window->property("loadedNoteText").toString(),QString("Clean peer update"));
+            QVERIFY(q.exec("DROP TRIGGER reject_peer_note"));
+        }
+        QSqlDatabase::removeDatabase("ui-peer-note-failure");
+        peer.toggleHighlight();
+        QVERIFY(QMetaObject::invokeMethod(window,"syncNote"));
+        QCOMPARE(prop("noteEditor","text").toString(),QString("My unsaved draft"));
+        QVERIFY(!window->property("noteConflict").toBool());
+        peer.setNoteText("Newer peer text");
+        bible->refreshCollection();
+        QTRY_VERIFY(window->property("noteConflict").toBool());
+        QCOMPARE(prop("noteEditor","text").toString(),QString("My unsaved draft"));
+        QCOMPARE(bible->noteText(),QString("Newer peer text"));
+        QVERIFY(item("noteConflictMessage")->isVisible());
+        QVERIFY(prop("noteConflictSaved","text").toString().contains("Newer peer text"));
+        // Editing, navigation, and window creation cannot silently overwrite it.
+        QVERIFY(object("noteEditor")->setProperty("text","My revised draft"));
+        QVariant flushed;
+        QVERIFY(QMetaObject::invokeMethod(window,"flushNote",Q_RETURN_ARG(QVariant,flushed)));
+        QVERIFY(!flushed.toBool());
+        QSignalSpy requested(window,SIGNAL(newWindowRequested()));
+        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(requested.count(),0);
+        key(Qt::Key_Escape); QVERIFY(prop("notesDrawer","visible").toBool());
+        QCOMPARE(peer.noteText(),QString("Newer peer text"));
+        // Returning to the old baseline is still an edit, not consent to load
+        // or overwrite the newer peer revision.
+        QVERIFY(object("noteEditor")->setProperty("text","Clean peer update"));
+        QCOMPARE(prop("noteEditor","text").toString(),QString("Clean peer update"));
+        QVERIFY(window->property("noteConflict").toBool());
+        QCOMPARE(peer.noteText(),QString("Newer peer text"));
+        QVERIFY(object("noteEditor")->setProperty("text","My revised draft"));
+        QVERIFY(QMetaObject::invokeMethod(object("noteRetry"),"clicked"));
+        QCOMPARE(peer.noteText(),QString("My revised draft"));
+        QVERIFY(!window->property("noteConflict").toBool());
+        QCOMPARE(window->property("loadedNoteText").toString(),peer.noteText());
+        QVERIFY(object("noteEditor")->setProperty("text","Autosave continues"));
+        QCOMPARE(peer.noteText(),QString("Autosave continues"));
+        // A repeated peer notification cannot make a staged draft clean.
+        QVERIFY(window->setProperty("syncingNote",true));
+        QVERIFY(object("noteEditor")->setProperty("text","Another draft"));
+        QVERIFY(window->setProperty("syncingNote",false));
+        peer.setNoteText("Use this peer revision");
+        bible->refreshCollection();
+        QVERIFY(window->property("noteConflict").toBool());
+        QCOMPARE(prop("noteEditor","text").toString(),QString("Another draft"));
+        QVERIFY(QMetaObject::invokeMethod(object("noteUseSaved"),"clicked"));
+        QCOMPARE(prop("noteEditor","text").toString(),QString("Use this peer revision"));
+        QVERIFY(!window->property("noteConflict").toBool());
+    }
+    void dirtyDraftScopeGuard() {
+        reference("John 3:16");
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        QVERIFY(window->setProperty("syncingNote",true));
+        QVERIFY(object("noteEditor")->setProperty("text","Draft for original scope"));
+        QVERIFY(window->setProperty("syncingNote",false));
+        // Exercise an external scope change bypassing the UI's normal flush guard.
+        QVERIFY(bible->navigate("John 3:17"));
+        QVERIFY(window->property("noteConflict").toBool());
+        QCOMPARE(window->property("loadedNoteReference").toString(),QString("John 3:16"));
+        QCOMPARE(prop("noteEditor","text").toString(),QString("Draft for original scope"));
+        QVERIFY(!item("noteRetry")->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(window,"retryNote"));
+        QVERIFY(bible->noteText().isEmpty());
+        QVERIFY(bible->navigate("John 3:16"));
+        QVERIFY(QMetaObject::invokeMethod(window,"retryNote"));
+        QCOMPARE(bible->noteText(),QString("Draft for original scope"));
+        QVERIFY(!window->property("noteConflict").toBool());
+        QVERIFY(window->setProperty("syncingNote",true));
+        QVERIFY(object("noteEditor")->setProperty("text","Draft for another version"));
+        QVERIFY(window->setProperty("syncingNote",false));
+        // Same verse reference must not authorize a write to a different edition.
+        QVERIFY(window->setProperty("loadedVersionId",QString("other-version")));
+        QVERIFY(QMetaObject::invokeMethod(window,"syncNote"));
+        QVERIFY(window->property("noteConflict").toBool());
+        QVERIFY(!item("noteRetry")->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(window,"retryNote"));
+        QCOMPARE(bible->noteText(),QString("Draft for original scope"));
+        QCOMPARE(prop("noteEditor","text").toString(),QString("Draft for another version"));
+        QVERIFY(QMetaObject::invokeMethod(window,"loadSavedNote"));
     }
     void actionableKeybindingsAndPreferences() {
         reference("John 3:16");
@@ -1008,16 +1117,22 @@ private slots:
             QVERIFY(rect.top() >= -1 && rect.bottom() <= list->height() + 1);
             if (top <= first + 1) break;
         }
+        // Use executable panel rows for the dispatch check; their order/height
+        // can change independently of the full-catalog geometry checks above.
+        type("panel");
         key(Qt::Key_Home); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
         key(Qt::Key_PageDown);
         QVERIFY(current()->isEnabled());
         const auto selectedAction = current()->property("modelData").toMap().value("id").toString();
-        QCOMPARE(selectedAction,QString("toggleNotes"));
         // The paged row is also the executable choice when focus stays in search.
+        const QHash<QString,const char *> panels = {{"saved","savedDrawer"},{"toggleNotes","notesDrawer"}};
+        QVERIFY(panels.contains(selectedAction));
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("helpDialog","visible").toBool());
-        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(prop(panels.value(selectedAction),"opened").toBool());
+        key(Qt::Key_Escape);
+        QTRY_VERIFY(!window->property("modalOpen").toBool());
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("verse picker");
         key(Qt::Key_PageDown); key(Qt::Key_PageUp);
@@ -1076,6 +1191,89 @@ private slots:
         QCOMPARE(prop("collectionList","currentIndex").toInt(),-1);
         QCOMPARE(prop("collectionList","count").toInt(),0);
         key(Qt::Key_Delete); QVERIFY(!prop("deleteConfirmation","visible").toBool());
+    }
+    void pendingDeleteVersionScope_data() {
+        QTest::addColumn<bool>("peerRemoval");
+        QTest::newRow("active-switch") << false;
+        QTest::newRow("peer-removal") << true;
+    }
+    void pendingDeleteVersionScope() {
+        QFETCH(bool,peerRemoval);
+        // A synthetic second edition keeps this UI scope regression independent
+        // of optional downloaded EPUBs and WindowManager's separate test target.
+        const QString name = "bible-11111111-2222-3333-4444-555555555555.sqlite";
+        const QString path = bible->dataDirectory() + '/' + name;
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-delete-kjv");
+            db.setDatabaseName(path); QVERIFY(db.open()); QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)"));
+            QVERIFY(q.exec("INSERT INTO metadata VALUES('schema','1'),('edition','King James (Authorized) Version'),('version_id','kjv-2006'),('abbreviation','KJV'),('copyright','')"));
+            QVERIFY(q.exec("CREATE TABLE verses(book INTEGER,chapter INTEGER,number INTEGER,text TEXT,html TEXT,heading TEXT,poetry INTEGER,PRIMARY KEY(book,chapter,number))"));
+            QVERIFY(db.transaction());
+            q.prepare("INSERT INTO verses VALUES(?,?,?,'Original second-edition UI fixture.','Original second-edition UI fixture.','',0)");
+            for (int b = 1; b <= 66; ++b) for (int c = 1; c <= EpubImporter::canon()[b-1].chapters; ++c) {
+                const int maximum = (b == 47 && c == 13) || b == 64 ? 14
+                    : b == 66 && c == 12 ? 17 : EpubImporter::chapterMaximum(b,c);
+                for (int v = 1; v <= maximum; ++v) {
+                    q.bindValue(0,b); q.bindValue(1,c); q.bindValue(2,v); QVERIFY(q.exec());
+                }
+            }
+            QVERIFY(db.commit());
+        }
+        QSqlDatabase::removeDatabase("ui-delete-kjv");
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-delete-library");
+            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+            QVERIFY(db.open()); QSqlQuery q(db);
+            q.prepare("INSERT INTO installed(version_id,path,abbreviation,name,copyright) VALUES('kjv-2006',?,'KJV','King James (Authorized) Version','')");
+            q.addBindValue(name); QVERIFY(q.exec());
+        }
+        QSqlDatabase::removeDatabase("ui-delete-library");
+        BibleBackend peer;
+        QVERIFY2(peer.switchVersion("kjv-2006"),qPrintable(peer.error()));
+        QVERIFY(peer.navigate("John 3:16"));
+        peer.setNoteText("Keep KJV note"); peer.toggleBookmark(); peer.toggleHighlight();
+        const auto kjv = peer.collection();
+        reference("John 3:16");
+        bible->setNoteText("NET deletion target"); bible->toggleBookmark();
+        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
+        QCOMPARE(prop("deleteConfirmation","versionId").toString(),QString("net-2.1"));
+        QCOMPARE(prop("deleteConfirmation","reference").toString(),QString("John 3:16"));
+        QSignalSpy commits(bible.get(),&BibleBackend::sharedCommitted);
+        if (peerRemoval) QVERIFY2(peer.removeVersion("net-2.1",false),qPrintable(peer.error()));
+        else QVERIFY2(bible->switchVersion("kjv-2006"),qPrintable(bible->error()));
+        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        commits.clear(); // Switching publishes library metadata; confirmation must not publish anything.
+        QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved")); // Even during close animation.
+        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        QVERIFY(prop("deleteConfirmation","versionId").toString().isEmpty());
+        QVERIFY(prop("deleteConfirmation","reference").toString().isEmpty());
+        QCOMPARE(commits.count(),0);
+        QCOMPARE(bible->collection(),kjv); QCOMPARE(peer.collection(),kjv);
+        QCOMPARE(bible->noteText(),QString("Keep KJV note"));
+        if (!peerRemoval) {
+            QVERIFY(bible->switchVersion("net-2.1"));
+            QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved"));
+            QCOMPARE(bible->noteText(),QString("NET deletion target"));
+        }
+    }
+    void pendingDeleteMissingCapture() {
+        reference("John 3:16"); bible->setNoteText("Original target");
+        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
+        BibleBackend peer;
+        QVERIFY(peer.navigate("John 3:16"));
+        QVERIFY(peer.deleteAnnotation("John 3:16"));
+        peer.setNoteText("A newly created note at the same reference");
+        const auto annotations = peer.collection();
+        QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved"));
+        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        QCOMPARE(bible->collection(),annotations);
+        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved"));
+        QCOMPARE(bible->collection(),annotations);
     }
     void savedDeleteFailureAndIndexClamping() {
         for (int verse = 1; verse <= 3; ++verse) {
@@ -1796,7 +1994,7 @@ private slots:
         bible->setShowVerseNumbers(numbers);
         bible->setBlockMode(true);
         QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() > 3);
-        QTest::qWait(100);
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
         bible->selectVerses(1,3);
         bible->setNoteText("Keep this canonical range note");
         bible->toggleBookmark(); bible->toggleHighlight();
@@ -1811,6 +2009,21 @@ private slots:
         const auto expected = cursor.selectedText();
         QVERIFY(expected.contains(QString::fromUtf8("café — λόγος 🌿")));
         QVERIFY(expected.contains(QString::fromUtf8("שלום")));
+        // Selection changes schedule viewport restoration; annotation commits
+        // schedule block geometry work. Sample only after both have settled,
+        // otherwise restoration moves the text beneath an in-progress drag.
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        QSignalSpy frames(window,&QQuickWindow::frameSwapped);
+        const auto settled = [&] {
+            const auto first = blockPoint(1,6), last = blockPoint(3,18);
+            const auto y = prop("reading","contentY");
+            const int before = frames.count();
+            window->update();
+            if (!QTest::qWaitFor([&] { return frames.count() > before; },1000)) return false;
+            return !window->property("restoringPosition").toBool() && y == prop("reading","contentY")
+                && first == blockPoint(1,6) && last == blockPoint(3,18);
+        };
+        QTRY_VERIFY(settled());
         const auto first = blockPoint(1,6), last = blockPoint(3,18);
         drag(reverse ? last : first,reverse ? first : last);
         QCOMPARE(window->property("freeSelectedText").toString(),expected);
@@ -2819,6 +3032,99 @@ private slots:
         key(Qt::Key_V,Qt::ShiftModifier);
         QTRY_VERIFY(prop("versionDialog","opened").toBool());
     }
+    void newRootSignal() {
+        reference("John 3:16-18");
+        const auto selected = bible->selectionReference();
+        QSignalSpy requested(window,SIGNAL(newWindowRequested()));
+        QVERIFY(requested.isValid());
+        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(requested.count(),1);
+        QVERIFY(!window->property("notesOpen").toBool());
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        QVERIFY(window->setProperty("syncingNote",true));
+        QVERIFY(object("noteEditor")->setProperty("text","Save before opening a window"));
+        QVERIFY(window->setProperty("syncingNote",false));
+        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(requested.count(),2);
+        QCOMPARE(bible->noteText(),QString("Save before opening a window"));
+        QVERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_Space,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("new window");
+        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(requested.count(),2); // A modal owns its keyboard until closed.
+        QCOMPARE(prop("paletteResults","count").toInt(),1);
+        key(Qt::Key_Return);
+        QTRY_COMPARE(requested.count(),3);
+        QVERIFY(!prop("passagePalette","visible").toBool());
+        key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        type("new window");
+        QCOMPARE(prop("keybindingResults","count").toInt(),1);
+        key(Qt::Key_Return);
+        QTRY_COMPARE(requested.count(),4);
+        QVERIFY(!prop("helpDialog","visible").toBool());
+        QCOMPARE(bible->selectionReference(),selected);
+        QCOMPARE(engine->rootObjects().size(),1); // UI requests creation; the host owns it.
+    }
+    void blockDeferredWorkEndsWithReader() {
+        bible->setReadingMode("block");
+        QTRY_VERIFY(blockMapping());
+        QTRY_VERIFY(blockTextDocument() && !blockTextDocument()->isEmpty());
+        // Queue a rebuild and geometry refresh, then destroy only the reader
+        // while its engine remains alive to deliver any escaped callbacks.
+        for (int i = 0; i < 3; ++i) {
+            bible->setLineHeight(1.6 + i * 0.1);
+            bible->setFontSize(19 + i);
+            bible->setReadingMode("verse");
+            QTRY_VERIFY(!blockMapping());
+            QTest::qWait(50);
+            QVERIFY2(qmlWarnings.isEmpty(),qPrintable(qmlWarnings.join('\n')));
+            bible->setReadingMode("block");
+            QTRY_VERIFY(blockMapping());
+            QTRY_VERIFY(blockTextDocument() && !blockTextDocument()->isEmpty());
+        }
+        bible->setLineHeight(2.0);
+        bible->setFontSize(24);
+        window->close();
+        delete window;
+        window = nullptr;
+        QTest::qWait(50);
+        QVERIFY2(qmlWarnings.isEmpty(),qPrintable(qmlWarnings.join('\n')));
+    }
+    void independentWindowUiShortcuts() {
+        QSignalSpy first(window,SIGNAL(newWindowRequested()));
+        QVERIFY(first.isValid());
+        // Two UI roots exercise shortcut ownership without the host's window factory.
+        QQmlApplicationEngine secondEngine;
+        secondEngine.rootContext()->setContextProperty("bible",bible.get());
+        secondEngine.rootContext()->setContextProperty("desktop",desktop.get());
+        connect(&secondEngine,&QQmlEngine::warnings,this,[this](const QList<QQmlError> &errors) {
+            for (const auto &error : errors) qmlWarnings.append(error.toString());
+        });
+        secondEngine.load(QUrl("qrc:/qml/Main.qml"));
+        QVERIFY(!secondEngine.rootObjects().isEmpty());
+        auto second = qobject_cast<QQuickWindow *>(secondEngine.rootObjects().first());
+        QVERIFY(second && second != window);
+        QSignalSpy other(second,SIGNAL(newWindowRequested()));
+        QVERIFY(other.isValid());
+        second->show(); second->requestActivate();
+        QVERIFY(QTest::qWaitForWindowExposed(second));
+        QTRY_VERIFY(second->isActive());
+        QTest::keyClick(second,Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(other.count(),1);
+        QCOMPARE(first.count(),0);
+        window->requestActivate(); QTRY_VERIFY(window->isActive());
+        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(first.count(),1); QCOMPARE(other.count(),1);
+        key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
+        QVERIFY(!second->property("modalOpen").toBool());
+        second->requestActivate(); QTRY_VERIFY(second->isActive());
+        QTest::keyClick(second,Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(other.count(),2);
+        QCOMPARE(first.count(),1);
+        second->close();
+        window->requestActivate(); QTRY_VERIFY(window->isActive());
+    }
     void revisedKeybindingRecords() {
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         QVERIFY(!records.isEmpty());
@@ -2840,6 +3146,7 @@ private slots:
             {"middleCopy","Copy passage as plain text","Middle Click"},
             {"settings","Reading settings","Shift R"},
             {"commands","Open commands","Ctrl Space · Ctrl Shift P"},
+            {"newWindow","New window","Ctrl Shift N"},
             {"switchVersion","Switch version","Shift V"},
             {"removeVersion","Remove version",""},
             {"import","Add version",""}
@@ -2927,7 +3234,15 @@ private slots:
         click(version);
         QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
         QVERIFY(!item("versionClose"));
-        QCOMPARE(item("versionSearch")->width(),item("versionResults")->width());
+        auto search = item("versionSearch");
+        auto add = item("versionAdd");
+        QVERIFY(add && add->isVisible());
+        QCOMPARE(add->height(),search->height());
+        QCOMPARE(add->width(),add->height());
+        QCOMPARE(add->y(),search->y());
+        QVERIFY(add->x() > search->x() + search->width());
+        QCOMPARE(add->x() + add->width(),item("versionResults")->width());
+        QCOMPARE(prop("versionAdd","tip").toString(),QString("Add version"));
         type("no such version");
         QCOMPARE(prop("versionResults","count").toInt(),0);
         QVERIFY(item("versionEmpty")->isVisible());
@@ -2945,7 +3260,7 @@ private slots:
         QVERIFY(prop("versionDialog","opened").toBool());
         QVERIFY(!window->property("verseMode").toBool());
         QTest::qWait(100);
-        for (auto name : {"versionSearch","versionResults","versionCancel","versionNext"}) {
+        for (auto name : {"versionSearch","versionAdd","versionResults","versionCancel","versionNext"}) {
             auto target = item(name);
             QVERIFY(QRectF(QPointF(),window->size()).contains(target->mapRectToScene(target->boundingRect())));
         }
@@ -2969,6 +3284,53 @@ private slots:
         type("switch version"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("versionDialog","opened").toBool());
     }
+    void versionPlusCancel_data() {
+        QTest::addColumn<int>("activation");
+        QTest::newRow("click") << 0;
+        QTest::newRow("tab-return") << 1;
+        QTest::newRow("tab-enter-empty-search") << 2;
+    }
+    void versionPlusCancel() {
+        QFETCH(int,activation);
+        reference("John 3:16-18");
+        bible->setNoteText("Preserve the version and range");
+        bible->toggleBookmark(); bible->toggleHighlight();
+        QTest::qWait(450);
+        const auto versions = bible->versions();
+        const auto annotations = bible->collection();
+        const auto selected = bible->selectionReference();
+        const auto position = bible->readingPosition();
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
+        key(Qt::Key_V,Qt::ShiftModifier);
+        QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+        if (activation == 2) type("no matching version");
+        bool overlapped = false;
+        const auto observe = connect(window,&QQuickWindow::activeFocusItemChanged,this,[&] {
+            overlapped |= prop("versionDialog","visible").toBool() && prop("importGuide","visible").toBool();
+        });
+        if (activation == 0) click(item("versionAdd"));
+        else {
+            key(Qt::Key_Tab); QTRY_VERIFY(item("versionAdd")->hasActiveFocus());
+            key(Qt::Key_Return,Qt::ShiftModifier);
+            QVERIFY(prop("versionDialog","opened").toBool());
+            QVERIFY(!prop("importGuide","visible").toBool());
+            key(activation == 1 ? Qt::Key_Return : Qt::Key_Enter);
+        }
+        QTRY_VERIFY(prop("importGuide","opened").toBool());
+        QVERIFY(!prop("versionDialog","visible").toBool());
+        QVERIFY(!prop("importDialog","visible").toBool());
+        disconnect(observe);
+        QVERIFY(!overlapped);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        QVERIFY(!prop("versionDialog","visible").toBool());
+        QVERIFY(!prop("importDialog","visible").toBool());
+        QVERIFY(!bible->busy());
+        QCOMPARE(navigation.count(),0); QCOMPARE(selection.count(),0);
+        QCOMPARE(bible->versions(),versions); QCOMPARE(bible->collection(),annotations);
+        QCOMPARE(bible->selectionReference(),selected); QCOMPARE(bible->readingPosition(),position);
+    }
     void removalWizardCancellationAndLastVersion() {
         reference("John 3:16");
         bible->setNoteText("Retain this edition's note");
@@ -2980,6 +3342,7 @@ private slots:
             type("remove version"); key(Qt::Key_Return);
             QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
             QCOMPARE(prop("versionDialog","step").toInt(),0);
+            QVERIFY(!item("versionAdd")->isVisible());
         };
         // Every step supports Escape and Cancel, including after opting to delete annotations.
         for (int step = 0; step <= 2; ++step) for (bool escape : {false,true}) {
@@ -2987,12 +3350,14 @@ private slots:
             if (step > 0) {
                 key(Qt::Key_Return);
                 QCOMPARE(prop("versionDialog","step").toInt(),1);
+                QVERIFY(!item("versionAdd")->isVisible());
                 QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
                 QVERIFY(!prop("versionDialog","removeAnnotations").toBool());
             }
             if (step > 1) {
                 key(Qt::Key_Down); key(Qt::Key_Return);
                 QCOMPARE(prop("versionDialog","step").toInt(),2);
+                QVERIFY(!item("versionAdd")->isVisible());
                 QVERIFY(prop("versionSummary","text").toString().contains("Delete its notes"));
                 QTRY_VERIFY(item("versionCancel")->hasActiveFocus());
             }
@@ -3024,6 +3389,7 @@ private slots:
         QVERIFY(item("setupImport")->isVisible());
         key(Qt::Key_V,Qt::ShiftModifier); QTRY_VERIFY(prop("versionDialog","opened").toBool());
         QVERIFY(item("versionEmpty")->isVisible()); QVERIFY(!item("versionNext")->isEnabled());
+        QTest::qWait(100); // Polish the newly opened, empty picker before clicking.
         click(item("versionAdd")); QTRY_VERIFY(prop("importGuide","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
         const QString epub = qEnvironmentVariable("OMAWORD_TEST_EPUB");
@@ -3060,6 +3426,19 @@ private slots:
             QCOMPARE(prop("noteEditor","text").toString(),QString("Unsaved version draft"));
             QVERIFY(bible->noteText().isEmpty());
             QVERIFY(prop("versionDialog","opened").toBool());
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+            QVERIFY(QMetaObject::invokeMethod(window,"openVersions",Q_ARG(QVariant,false)));
+            QVERIFY(!prop("versionDialog","visible").toBool());
+            // A draft can also change while the picker is already open.
+            QVERIFY(object("versionDialog")->setProperty("removing",false));
+            QVERIFY(object("versionDialog")->setProperty("step",0));
+            QVERIFY(QMetaObject::invokeMethod(object("versionDialog"),"open"));
+            QTRY_VERIFY(prop("versionDialog","opened").toBool());
+            click(item("versionAdd"));
+            QVERIFY(prop("versionDialog","opened").toBool());
+            QVERIFY(!prop("importGuide","visible").toBool());
+            QVERIFY(!prop("versionDialog","addPending").toBool());
+            QCOMPARE(prop("noteEditor","text").toString(),QString("Unsaved version draft"));
             QVERIFY(q.exec("DROP TRIGGER reject_version_note"));
         }
         QSqlDatabase::removeDatabase("ui-version-note-failure");
@@ -3255,12 +3634,12 @@ private slots:
         if (notes) QCOMPARE(bible->noteText(),QString("A draft before adding a version"));
         QVERIFY(item("importReplacement")->isVisible());
         QVERIFY(prop("importReplacement","text").toString().contains("preserves your notes, bookmarks, highlights, and settings"));
-        QVERIFY(prop("importSupported","text").toString().contains("Other Bible EPUB layouts are not automatically supported"));
+        QVERIFY(prop("importSupported","text").toString().contains("ordinary ebook/OCR may lack chapter/verse anchors"));
+        QVERIFY(prop("importSupported","text").toString().contains("not an exact edition or filename"));
         QVERIFY(prop("importOcr","text").toString().contains("metadata and verse anchors"));
-        QVERIFY(prop("importOcr","text").toString().contains("including the replacement, use unsupported OCR layouts"));
-        QVERIFY(!prop("importOcr","text").toString().contains("pending"));
+        QVERIFY(prop("importOcr","text").toString().contains("without those anchors cannot be imported as Scripture"));
         QCOMPARE(prop("importDownloadLink","downloadUrl").toUrl(),QUrl("https://bible.org/downloads"));
-        QVERIFY(prop("importSteps","text").toString().contains("NET Bible 2.1 EPUB"));
+        QVERIFY(prop("importSteps","text").toString().contains("NET-format or Haiola/eBible"));
         QVERIFY(prop("importSteps","text").toString().contains("OmaWord validates"));
         QVERIFY(prop("importSteps","text").toString().contains("local SQLite database"));
         QCOMPARE(prop("importDataPath","text").toString(),bible->dataDirectory());

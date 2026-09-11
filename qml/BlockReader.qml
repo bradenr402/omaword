@@ -8,6 +8,7 @@ import OmaWord.Reader 1.0
 
 Item {
     id: root
+    property bool destroying: false
     required property var controller
     required property var backend
     required property var theme
@@ -17,14 +18,15 @@ Item {
     property alias mapping: document
     readonly property bool annotationMenuOpen: annotationMenu.visible
     readonly property real railWidth: 40 * controller.scale
-    onRailWidthChanged: Qt.callLater(updateAnnotations)
+    onRailWidthChanged: if (!destroying) geometryTimer.restart()
     property var annotationRanges: []
     property var annotationGroups: []
     property real annotationScale: 0
     readonly property string annotationKey: JSON.stringify(backend.verses) + JSON.stringify(backend.collection)
         + backend.book + ":" + backend.chapter
-    onAnnotationKeyChanged: Qt.callLater(updateAnnotations)
+    onAnnotationKeyChanged: if (!destroying) geometryTimer.restart()
     function updateAnnotations() {
+        if (destroying) return
         const ranges = document.annotations(backend.verses, backend.collection, backend.book, backend.chapter)
         if (JSON.stringify(ranges) === JSON.stringify(annotationRanges) && annotationScale === controller.scale) return
         annotationScale = controller.scale
@@ -60,14 +62,15 @@ Item {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart }
     })) + numbers + headings + backend.lineHeight + mode
     height: body.height
-    onContentKeyChanged: Qt.callLater(rebuild)
+    onContentKeyChanged: if (!destroying) rebuildTimer.restart()
     function rebuild() {
+        if (destroying) return
         controller.clearTextSelection()
         cancelDrag()
         document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight, mode)
-        Qt.callLater(refreshGeometry)
+        geometryTimer.restart()
     }
-    function refreshGeometry() { paint.requestPaint(); updateAnnotations() }
+    function refreshGeometry() { if (!destroying) { paint.requestPaint(); updateAnnotations() } }
     function cancelDrag() { dragging = false; pressed = false; autoscroll.stop() }
     function clearSelection() { body.deselect() }
     function verseRect(number) { return body.positionToRectangle(document.positionFor(number)) }
@@ -86,7 +89,7 @@ Item {
     // qmllint disable import
     BlockDocument {
         id: document
-        onGeometryChanged: Qt.callLater(root.refreshGeometry)
+        onGeometryChanged: if (!root.destroying) geometryTimer.restart()
     }
     // qmllint enable import
     // Paint logical ranges behind the single text layout. A range joins through
@@ -104,9 +107,10 @@ Item {
         onLastChanged: requestPaint()
         onAccentChanged: requestPaint()
         onFocusedChanged: requestPaint()
-        onWidthChanged: Qt.callLater(requestPaint)
-        onHeightChanged: Qt.callLater(requestPaint)
+        onWidthChanged: if (!root.destroying) geometryTimer.restart()
+        onHeightChanged: if (!root.destroying) geometryTimer.restart()
         onPaint: {
+            if (root.destroying) return
             const ctx = getContext("2d")
             ctx.reset()
             const spans = document.spans
@@ -142,8 +146,8 @@ Item {
         textFormat: TextEdit.RichText
         font.family: root.theme.fontFamily
         font.pixelSize: root.controller.readerSize * root.controller.scale
-        onFontChanged: Qt.callLater(root.refreshGeometry)
-        onWidthChanged: Qt.callLater(root.refreshGeometry)
+        onFontChanged: if (!root.destroying) geometryTimer.restart()
+        onWidthChanged: if (!root.destroying) geometryTimer.restart()
         color: root.theme.foreground
         selectionColor: root.controller.tint(root.theme.accent, 0.35)
         selectedTextColor: root.theme.foreground
@@ -399,5 +403,15 @@ Item {
             if (speed) { root.controller.scrollBy(speed * 0.35); root.updateDrag() }
         }
     }
+    // Owned timers coalesce layout work and are canceled with this reader. A
+    // global callLater callback can outlive the QML context on window teardown.
+    Timer { id: rebuildTimer; interval: 0; onTriggered: root.rebuild() }
+    Timer { id: geometryTimer; interval: 0; onTriggered: root.refreshGeometry() }
     Component.onCompleted: rebuild()
+    Component.onDestruction: {
+        destroying = true
+        rebuildTimer.stop()
+        geometryTimer.stop()
+        autoscroll.stop()
+    }
 }

@@ -9,6 +9,7 @@ import QtQml
 ApplicationWindow {
     id: app
     objectName: "readerWindow"
+    signal newWindowRequested()
     width: 1120
     height: 820
     minimumWidth: 640
@@ -37,6 +38,10 @@ ApplicationWindow {
     property bool notePreview: false
     property bool syncingNote: true
     property string loadedNoteReference: ""
+    property string loadedVersionId: ""
+    property string loadedNoteText: ""
+    property bool noteConflict: false
+    readonly property bool noteScopeMatches: loadedVersionId === bible.versionId && loadedNoteReference === bible.selectionReference
     readonly property string observedNoteText: bible.noteText
     onObservedNoteTextChanged: syncNote()
     readonly property bool observedReady: bible.ready
@@ -102,7 +107,7 @@ ApplicationWindow {
     onObservedReadingModeChanged: {
         if (!readerInitialized) return
         clearTextSelection()
-        Qt.callLater(function() { app.restorePosition(app.hasSelection) })
+        readingModeRestoreTimer.restart()
     }
     readonly property bool observedFocusMode: bible.focusMode
     onObservedFocusModeChanged: { toastTimer.stop(); Qt.callLater(app.applyFocusMode) }
@@ -277,16 +282,45 @@ ApplicationWindow {
     }
     function syncNote() {
         if (!noteEditor) return
+        if (noteConflict && (!noteScopeMatches || noteEditor.text !== bible.noteText)) return
+        // A failed local save leaves the editor ahead of its last synced value.
+        // Peer notifications must neither replace that draft nor authorize a save
+        // over the peer's newer text. Local successful saves match the editor.
+        if (!syncingNote && noteEditor.text !== loadedNoteText) {
+            if (!noteScopeMatches || (bible.noteText !== loadedNoteText && bible.noteText !== noteEditor.text)) {
+                noteConflict = true
+                return
+            }
+            if (noteEditor.text !== bible.noteText) return
+        }
+        loadSavedNote()
+    }
+    function loadSavedNote() {
         syncingNote = true
         loadedNoteReference = bible.selectionReference
+        loadedVersionId = bible.versionId
+        loadedNoteText = bible.noteText
         if (noteEditor.text !== bible.noteText)
             noteEditor.text = bible.noteText
+        noteConflict = false
         syncingNote = false
     }
     function flushNote() {
-        if (!syncingNote && hasSelection && loadedNoteReference === bible.selectionReference && noteEditor.text !== bible.noteText)
+        if (syncingNote) return true
+        syncNote()
+        if (noteConflict) return false
+        if (hasSelection && noteScopeMatches && noteEditor.text !== bible.noteText)
             bible.setNoteText(noteEditor.text)
-        return syncingNote || !hasSelection || loadedNoteReference !== bible.selectionReference || noteEditor.text === bible.noteText
+        // Also advance the baseline when setNoteText was a no-op or emitted no signal.
+        syncNote()
+        return !noteConflict && noteEditor.text === loadedNoteText
+    }
+    function retryNote() {
+        if (!hasSelection || !noteScopeMatches || bible.busy) return
+        // Explicit user choice to replace the current saved text with this draft.
+        loadedNoteText = bible.noteText
+        noteConflict = false
+        flushNote()
     }
     function readerFocus() { readerSurface.forceActiveFocus() }
     function restorePanelFocus() {
@@ -555,14 +589,35 @@ ApplicationWindow {
         let entry = focused instanceof SavedEntry ? (focused as SavedEntry).modelData : collectionList.model[row]
         if (!entry || !flushNote() || bible.busy) return
         deleteConfirmation.reference = entry.reference
+        deleteConfirmation.versionId = bible.versionId
         deleteConfirmation.row = row
         deleteConfirmation.open()
     }
+    function deleteScopeValid() {
+        return deleteConfirmation.versionId.length > 0 && deleteConfirmation.versionId === bible.versionId
+            && deleteConfirmation.reference.length > 0 && Array.from(bible.collection).some(function(entry) {
+                return entry.reference === deleteConfirmation.reference
+            })
+    }
+    function invalidateDeleteSaved() {
+        deleteConfirmation.versionId = ""
+        deleteConfirmation.reference = ""
+        deleteConfirmation.row = -1
+        deleteConfirmation.close()
+    }
     function confirmDeleteSaved() {
+        if (!deleteConfirmation.opened || !deleteScopeValid()) { invalidateDeleteSaved(); return }
+        const version = deleteConfirmation.versionId
+        const reference = deleteConfirmation.reference
+        const row = deleteConfirmation.row
         if (!flushNote() || bible.busy) return
-        if (!bible.deleteAnnotation(deleteConfirmation.reference)) return
+        if (!deleteScopeValid() || deleteConfirmation.versionId !== version || deleteConfirmation.reference !== reference) {
+            invalidateDeleteSaved()
+            return
+        }
+        if (!bible.deleteAnnotation(reference, version)) return
         syncNote()
-        collectionList.currentIndex = Math.min(deleteConfirmation.row, collectionList.count - 1)
+        collectionList.currentIndex = Math.min(row, collectionList.count - 1)
         deleteConfirmation.close()
     }
     function openBookmark(reference) {
@@ -617,6 +672,7 @@ ApplicationWindow {
     }
     function acceptVersion() {
         if (bible.busy) return
+        if (versionAdd.activeFocus) { addVersionFromPicker(); return }
         if (versionCancel.activeFocus) { versionDialog.close(); return }
         if (versionBack.activeFocus) { backVersion(); return }
         if (versionDialog.step === 2) { confirmRemoveVersion(); return }
@@ -636,6 +692,11 @@ ApplicationWindow {
         versionResults.currentIndex = versionDialog.step === 1 && versionDialog.removeAnnotations ? 1 : 0
         if (versionDialog.step === 0) versionSearch.forceActiveFocus()
         else versionResults.forceActiveFocus()
+    }
+    function addVersionFromPicker() {
+        if (versionDialog.removing || versionDialog.step !== 0 || bible.busy || !flushNote()) return
+        versionDialog.addPending = true
+        versionDialog.close()
     }
     function switchVersion(id) {
         if (bible.busy || !flushNote()) return
@@ -664,6 +725,7 @@ ApplicationWindow {
     readonly property var actions: [
         { id: "books", title: "Search for a passage", keys: "s · Ctrl k", sequences: ["S", "Ctrl+K"], scope: "palette", command: true },
         { id: "commands", title: "Open commands", keys: "Ctrl Space · Ctrl Shift P", sequences: ["Ctrl+Space", "Ctrl+Shift+P"], scope: "palette" },
+        { id: "newWindow", title: "New window", keys: "Ctrl Shift N", sequences: ["Ctrl+Shift+N"], scope: "global", command: true },
         { id: "saved", title: "Saved panel", keys: "Ctrl l", sequences: ["Ctrl+L"], command: true },
         { id: "toggleNotes", title: "Notes panel", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
         { id: "notes", title: "Write a note", keys: "n", sequences: ["N"], scope: "notes", command: true },
@@ -728,7 +790,7 @@ ApplicationWindow {
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         if (action.scope === "palette") return !modalOpen || passagePalette.opened
-        if (action.scope === "global") return !modalOpen && (bible.ready || ["help", "about", "import", "switchVersion", "removeVersion"].includes(action.id))
+        if (action.scope === "global") return !modalOpen && (bible.ready || ["newWindow", "help", "about", "import", "switchVersion", "removeVersion"].includes(action.id))
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
         return readerKeys
     }
@@ -738,7 +800,15 @@ ApplicationWindow {
         if (action.id === "copyText") return bible.ready
         if (action.id === "bookmark" || action.id === "highlight") return hasSelection
         return bible.ready || !!action.setting
-            || ["books", "commands", "help", "about", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
+            || ["books", "commands", "newWindow", "help", "about", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
+    }
+    function scopeTitle(action) {
+        if (action.explanation) return "Reader gesture"
+        if (action.id === "switchVersion") return "Reader shortcut · also available in commands while writing notes"
+        if (action.scope === "global") return "This window · also available while writing notes"
+        if (action.scope === "palette") return "This window · passage and command search"
+        if (action.scope === "notes") return "Reader or notes preview"
+        return "Reader · outside text editing and dialogs"
     }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
@@ -852,6 +922,7 @@ ApplicationWindow {
         const previousLineHeight = bible.lineHeight
         const previousReaderSize = readerSize
         switch (action) {
+        case "newWindow": if (!modalOpen) newWindowRequested(); break
         case "books": openPalette(false); break
         case "commands": openPalette(true); break
         case "resume": openPalette(false, true); break
@@ -1183,13 +1254,13 @@ ApplicationWindow {
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
                         ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
                     } else if (glyph === "visual") {
-                        ctx.rect(3, 3, 18, 18)
-                        ctx.globalAlpha = 0.25
-                        ctx.fillRect(6, 6, 12, 9)
-                        ctx.globalAlpha = 1
-                        ctx.moveTo(7, 8); ctx.lineTo(17, 8)
-                        ctx.moveTo(7, 12); ctx.lineTo(17, 12)
-                        ctx.moveTo(7, 17); ctx.lineTo(13, 17)
+                        // Three verses; the bracket and square handles select two.
+                        ctx.moveTo(8, 6); ctx.lineTo(21, 6)
+                        ctx.moveTo(8, 12); ctx.lineTo(21, 12)
+                        ctx.moveTo(8, 19); ctx.lineTo(17, 19)
+                        ctx.moveTo(5, 3); ctx.lineTo(3, 3); ctx.lineTo(3, 15); ctx.lineTo(5, 15)
+                        ctx.fillRect(4, 2, 3, 3)
+                        ctx.fillRect(4, 14, 3, 3)
                     } else {
                         ctx.moveTo(12, 6); ctx.lineTo(8, 4); ctx.lineTo(2, 4)
                         ctx.lineTo(2, 19); ctx.lineTo(8, 19); ctx.lineTo(12, 21)
@@ -1660,7 +1731,7 @@ ApplicationWindow {
                 SectionLabel { text: "A QUIET PLACE TO READ"; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 10 }
                 Label { text: "Make room for the Word."; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -0.8; color: desktop.foreground; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label {
-                    text: "Add a supported NET Bible 2.1 or KJV 2006 EPUB to begin. Read offline, mark passages, and keep your thoughts alongside the text."
+                    text: "Add a verse-tagged Bible EPUB to begin. NET format and Haiola/eBible markup are supported. Read offline, mark passages, and keep your thoughts alongside the text."
                     color: desktop.muted
                     font.pixelSize: 15 * app.scale
                     horizontalAlignment: Text.AlignHCenter
@@ -1718,7 +1789,7 @@ ApplicationWindow {
                     x: 22
                     y: 22
                     width: notesScroll.availableWidth - 44
-                    height: Math.max(notesPanel.height - 44, 440 * app.scale)
+                    height: Math.max(notesPanel.height - 44, (app.noteConflict ? 700 : 440) * app.scale)
                     spacing: 16
                     RowLayout {
                         Layout.fillWidth: true
@@ -1741,6 +1812,41 @@ ApplicationWindow {
                         QuietButton { objectName: "notesCopy"; text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy passage as quotation · y · Ctrl c" }
                     }
                     FineRule { Layout.fillWidth: true }
+                    ColumnLayout {
+                        visible: app.noteConflict
+                        Layout.fillWidth: true
+                        Label {
+                            objectName: "noteConflictMessage"
+                            text: "This note changed in another window. Your unsaved draft is preserved. Review the saved text before replacing it."
+                            color: desktop.accent; font.pixelSize: 12 * app.scale
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                            Accessible.role: Accessible.AlertMessage
+                        }
+                        Label {
+                            objectName: "noteConflictSaved"
+                            text: app.noteScopeMatches ? "Saved text: " + (bible.noteText || "(empty note)")
+                                : "Draft belongs to " + app.loadedVersionId + " · " + app.loadedNoteReference
+                            textFormat: Text.PlainText
+                            color: desktop.muted; font.pixelSize: 12 * app.scale
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                            maximumLineCount: 4; elide: Text.ElideRight
+                        }
+                        RowLayout {
+                            QuietButton {
+                                objectName: "noteRetry"
+                                text: "Save my draft"; tip: "Replace the saved note with your draft"
+                                enabled: app.noteScopeMatches && app.hasSelection && !bible.busy
+                                onClicked: app.retryNote()
+                                Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
+                            }
+                            QuietButton {
+                                objectName: "noteUseSaved"
+                                text: "Use saved text"
+                                onClicked: app.loadSavedNote()
+                                Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
+                            }
+                        }
+                    }
                     RowLayout {
                         visible: app.hasSelection
                         spacing: 4
@@ -1781,8 +1887,7 @@ ApplicationWindow {
                                     })
                                 }
                                 onTextChanged: {
-                                    if (!app.syncingNote && app.hasSelection && app.loadedNoteReference === bible.selectionReference && text !== bible.noteText)
-                                        bible.setNoteText(text)
+                                    if (!app.syncingNote) app.flushNote()
                                 }
                                 Keys.onEscapePressed: function(event) { app.closeNotes(); event.accepted = true }
                                 Accessible.name: "Markdown note for " + bible.selectionReference
@@ -1821,7 +1926,7 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                         }
                     }
-                    Label { text: app.hasSelection ? (noteEditor.text === bible.noteText ? "Saved on this device · changes save as you type" : "Not saved · your draft is still in the editor") : "A page icon beside a verse marks a note."; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { text: app.noteConflict ? "Not saved · resolve the other window's change above" : app.hasSelection ? (noteEditor.text === bible.noteText ? "Saved on this device · changes save as you type" : "Not saved · your draft is still in the editor") : "A page icon beside a verse marks a note."; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
                 }
         }
@@ -1942,21 +2047,43 @@ ApplicationWindow {
                 color: desktop.foreground; font.pixelSize: 20 * versionDialog.uiScale
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
-            TextField {
-                id: versionSearch
-                objectName: "versionSearch"
+            RowLayout {
                 visible: versionDialog.step === 0
-                enabled: !bible.busy
                 Layout.fillWidth: true
-                implicitHeight: 42 * versionDialog.uiScale
-                placeholderText: "Search versions…"
-                font.pixelSize: 15 * versionDialog.uiScale
-                selectByMouse: true
-                padding: 10 * versionDialog.uiScale
-                background: Rectangle { color: desktop.surface; border.color: versionSearch.activeFocus ? desktop.accent : desktop.border }
-                onTextChanged: { versionResults.currentIndex = 0; versionResults.positionViewAtBeginning() }
-                Keys.onPressed: function(event) { app.versionKey(event) }
-                Accessible.name: "Search installed versions"
+                spacing: 8 * versionDialog.uiScale
+                TextField {
+                    id: versionSearch
+                    objectName: "versionSearch"
+                    enabled: !bible.busy
+                    Layout.fillWidth: true
+                    implicitHeight: Math.round(42 * versionDialog.uiScale)
+                    placeholderText: "Search versions…"
+                    font.pixelSize: 15 * versionDialog.uiScale
+                    selectByMouse: true
+                    padding: 10 * versionDialog.uiScale
+                    background: Rectangle { color: desktop.surface; border.color: versionSearch.activeFocus ? desktop.accent : desktop.border }
+                    onTextChanged: { versionResults.currentIndex = 0; versionResults.positionViewAtBeginning() }
+                    Keys.onPressed: function(event) { app.versionKey(event) }
+                    KeyNavigation.tab: versionAdd.visible ? versionAdd : versionResults
+                    Accessible.name: "Search installed versions"
+                }
+                QuietButton {
+                    id: versionAdd
+                    objectName: "versionAdd"
+                    text: "+"
+                    tip: "Add version"
+                    Accessible.name: tip
+                    visible: !versionDialog.removing
+                    enabled: !bible.busy
+                    focusPolicy: Qt.StrongFocus
+                    font.pixelSize: 24 * versionDialog.uiScale
+                    Layout.preferredWidth: versionSearch.implicitHeight
+                    Layout.preferredHeight: versionSearch.implicitHeight
+                    onClicked: app.addVersionFromPicker()
+                    Keys.onPressed: function(event) { app.versionKey(event) }
+                    ToolTip.visible: hovered || activeFocus
+                    KeyNavigation.tab: versionResults
+                }
             }
             ListView {
                 id: versionResults
@@ -2036,7 +2163,8 @@ ApplicationWindow {
             }
             FineRule { Layout.fillWidth: true }
             Label {
-                text: versionDialog.step === 2 ? "← → choose    Enter select    Esc cancel" : "↑ ↓ choose    Home / End    Enter select    Esc cancel"
+                text: versionDialog.step === 2 ? "← → choose    Enter select    Esc cancel"
+                    : !versionDialog.removing ? "↑ ↓ choose    Tab to +    Enter select    Esc cancel" : "↑ ↓ choose    Home / End    Enter select    Esc cancel"
                 color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
@@ -2053,17 +2181,6 @@ ApplicationWindow {
                     enabled: !bible.busy
                     onClicked: app.backVersion()
                     Keys.onPressed: function(event) { app.versionKey(event) }
-                }
-                QuietButton {
-                    objectName: "versionAdd"
-                    font.pixelSize: 13 * versionDialog.uiScale
-                    implicitHeight: 38 * versionDialog.uiScale
-                    text: "Add version"
-                    visible: versionDialog.step === 0 && !bible.versions.length
-                    enabled: !bible.busy
-                    onClicked: { versionDialog.addPending = true; versionDialog.close() }
-                    Keys.onReturnPressed: function(event) { if (event.modifiers === Qt.NoModifier) clicked() }
-                    Keys.onEnterPressed: function(event) { if (event.modifiers === Qt.NoModifier) clicked() }
                 }
                 Item { Layout.fillWidth: true }
                 QuietButton {
@@ -2386,6 +2503,7 @@ ApplicationWindow {
         id: deleteConfirmation
         objectName: "deleteConfirmation"
         property string reference: ""
+        property string versionId: ""
         property int row: -1
         closePolicy: Popup.CloseOnEscape
         onOpened: deleteCancel.forceActiveFocus()
@@ -2399,7 +2517,9 @@ ApplicationWindow {
         }
         onClosed: {
             reference = ""
-            Qt.callLater(function() { if (savedDrawer.opened) app.moveSaved(0); else app.restorePanelFocus() })
+            versionId = ""
+            row = -1
+            deleteFocusTimer.restart()
         }
         contentItem: ColumnLayout {
             spacing: 18 * app.scale
@@ -2490,6 +2610,9 @@ ApplicationWindow {
                     width: keybindingResults.width
                     height: keybindingContent.implicitHeight + 20 * app.scale
                     enabled: app.actionAvailable(modelData)
+                    ToolTip.visible: hovered
+                    ToolTip.text: app.scopeTitle(modelData)
+                    ToolTip.delay: 650
                     highlighted: ListView.isCurrentItem
                     onClicked: app.activateKeybinding(modelData)
                     Keys.onReturnPressed: clicked()
@@ -2679,7 +2802,7 @@ ApplicationWindow {
                     spacing: 16 * app.scale
                     Label {
                         objectName: "importSupported"
-                        text: "Supported layouts: the official NET Bible 2.1 EPUB, and the structured KJV 2006 Haiola/eBible EPUB (eng-kjv2006.epub). These specific layouts include edition metadata and chapter/verse anchors. Other Bible EPUB layouts are not automatically supported."
+                        text: "Verse-tagged Bible EPUBs. NET format and Haiola/eBible markup supported; ordinary ebook/OCR may lack chapter/verse anchors. Support depends on the file's structure, not an exact edition or filename."
                         color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     Label {
@@ -2689,8 +2812,8 @@ ApplicationWindow {
                         color: desktop.accent; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     FineRule { Layout.fillWidth: true }
-                    Label { objectName: "importOcr"; text: "Scanned/OCR study-Bible EPUBs are unsupported: reliable structured edition metadata and verse anchors are required. Both assessed NKJV study-Bible EPUBs, including the replacement, use unsupported OCR layouts and cannot be imported as native Scripture. Supported structured editions are NET Bible 2.1 and Haiola/eBible KJV 2006."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    Label { text: "1. Obtain one of the supported EPUB editions. NET downloads are available from Bible.org; the supported KJV 2006 file is available from eBible.org."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { objectName: "importOcr"; text: "Reliable structured metadata and verse anchors are required. OCR or ordinary ebook layouts without those anchors cannot be imported as Scripture. Study notes are not assumed to be Bible verses."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { text: "1. Obtain a verse-tagged Bible EPUB. Bible.org and eBible.org offer examples of supported structured layouts."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     QuietButton {
                         objectName: "importDownloadLink"
                         property url downloadUrl: "https://bible.org/downloads"
@@ -2700,7 +2823,7 @@ ApplicationWindow {
                         onClicked: desktop.openExternal(downloadUrl)
                     }
                     QuietButton { objectName: "importKjvLink"; text: "eBible.org KJV 2006 ↗"; compact: true; Layout.fillWidth: true; onClicked: desktop.openExternal("https://ebible.org/eng-kjv2006/") }
-                    Label { objectName: "importSteps"; text: "2. Download the official NET Bible 2.1 EPUB or structured KJV 2006 EPUB.\n\n3. Choose EPUB… below, then select the downloaded .epub file.\n\n4. " + desktop.appName + " validates the file and imports the Bible into its own local SQLite database, then activates that version."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { objectName: "importSteps"; text: "2. Download an EPUB with NET-format or Haiola/eBible chapter and verse markup.\n\n3. Choose EPUB… below, then select the downloaded .epub file.\n\n4. " + desktop.appName + " validates the file and imports the Bible into its own local SQLite database, then activates that version."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { objectName: "importDataPath"; text: bible.dataDirectory(); textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
                     Label { objectName: "importOffline"; text: "After a successful import, you can move or delete the source EPUB. No internet connection is needed for normal use."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
@@ -2946,6 +3069,16 @@ ApplicationWindow {
     Timer { id: toastTimer; interval: 3000 }
     Timer { id: countTimer; interval: 2000; onTriggered: app.clearCount() }
     Timer { id: positionSaveTimer; interval: 350; onTriggered: app.savePosition() }
+    Timer { id: readingModeRestoreTimer; interval: 0; onTriggered: app.restorePosition(app.hasSelection) }
+    Timer {
+        id: deleteFocusTimer
+        interval: 0
+        onTriggered: {
+            if (deleteConfirmation.visible) return
+            if (savedDrawer.opened) app.moveSaved(0)
+            else app.restorePanelFocus()
+        }
+    }
     Timer {
         id: positionTimer
         interval: 80
@@ -2957,6 +3090,10 @@ ApplicationWindow {
     }
     Connections {
         target: bible
+        function onVersionChanged() { app.invalidateDeleteSaved() }
+        function onCollectionChanged() {
+            if (deleteConfirmation.visible && !app.deleteScopeValid()) app.invalidateDeleteSaved()
+        }
         function onErrorChanged() { Qt.callLater(app.showFocusedError) }
         function onBusyChanged() { if (!bible.busy) Qt.callLater(app.showFocusedError) }
         function onVersesChanged() {
@@ -2984,10 +3121,12 @@ ApplicationWindow {
         model: app.actions.filter(function(action) { return !!action.sequences })
         delegate: Shortcut {
             required property var modelData
+            // Application context reaches the notes drawer's popup focus scope;
+            // only the active reader window may register its catalog shortcuts.
             context: Qt.ApplicationShortcut
             sequences: modelData.id === "books" && !app.readerKeys ? ["Ctrl+K"]
                 : modelData.id === "first" ? ["G"] : modelData.id === "last" ? ["Shift+G"] : modelData.sequences
-            enabled: app.shortcutEnabled(modelData)
+            enabled: app.active && app.shortcutEnabled(modelData)
             onActivated: app.runCommand(modelData.id)
         }
     }
