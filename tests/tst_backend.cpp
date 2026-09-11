@@ -211,10 +211,11 @@ private slots:
     }
     void incompleteAndUnsafeEpub() {
         const auto target = file("untouched.sqlite");
+        QVERIFY(write(target,"original target"));
         QMap<QString,QByteArray> entries = {
             {"mimetype","application/epub+zip"},
             {"META-INF/container.xml","<container><rootfiles><rootfile full-path=\"OEBPS/content.opf\"/></rootfiles></container>"},
-            {"OEBPS/content.opf","<package><metadata><title>NET Bible 2.1</title><identifier>NETBIBLE21</identifier></metadata><manifest><item id=\"chapter\" href=\"chapter.xhtml\"/></manifest><spine><itemref idref=\"chapter\"/></spine></package>"},
+            {"OEBPS/content.opf","<package><metadata><title>NET Bible 2.1</title><identifier>urn:uuid:NETBIBLE21</identifier></metadata><manifest><item id=\"chapter\" href=\"chapter.xhtml\"/></manifest><spine><itemref idref=\"chapter\"/></spine></package>"},
             {"OEBPS/chapter.xhtml","<html><head><title>NET Bible 2.1 Genesis 1</title></head><body><p class=\"bodytext\"><span class=\"verse\">1:1</span>Synthetic fixture only.</p></body></html>"}
         };
         QVERIFY(zip(file("incomplete.epub"),entries));
@@ -308,7 +309,7 @@ private slots:
             manifest += "<item id=\"" + name + "\" href=\"" + name + "\"/>";
             spine += "<itemref idref=\"" + name + "\"/>";
         }
-        entries["content.opf"] = "<package><metadata><title>NET Bible 2.1</title><identifier>NETBIBLE21</identifier></metadata><manifest>"
+        entries["content.opf"] = "<package><metadata><title>NET Bible 2.1</title><identifier>urn:uuid:NETBIBLE21</identifier></metadata><manifest>"
             + manifest + "</manifest><spine>" + spine + "</spine></package>";
         QVERIFY(zip(file("bounded.epub"),entries));
         QVERIFY(write(file("bounded.sqlite"),"unchanged"));
