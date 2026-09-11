@@ -8,7 +8,10 @@ Source root src/, QML qml/. Build, packaging, and desktop integration live along
 QObject class BibleBackend, exposed as context property `bible`. Constructor QObject* parent=nullptr.
 Properties (NOTIFY as appropriate):
 - bool ready, busy; double importProgress (0..1); QString error (user-readable), status
-- QString passage (e.g. John 3), selectionReference (e.g. John 3:16–18), edition
+- QString passage (e.g. John 3), selectionReference (e.g. John 3:16–18)
+- QString edition, versionId, versionAbbreviation, versionCopyright use
+  versionChanged; edition is dynamic, not CONSTANT. QVariantList versions uses
+  versionsChanged, with maps {id, abbreviation, name, active}.
 - int book (1..66), chapter, selectedStart (0 means none), selectedEnd, chapterCount
 - int cursorVerse; bool crossChapterSelection. Visible selection endpoints are the current chapter intersection; selectionReference describes the full span.
 - QVariantList verses: maps {number:int, text:QString plain, html:QString safe inline/body markup, heading:QString, poetry:bool, highlighted:bool, bookmarked:bool, hasNote:bool}
@@ -19,11 +22,12 @@ Properties (NOTIFY as appropriate):
 - READ/WRITE preferences with preferencesChanged: bool showVerseNumbers=true,
   showHeadings=true, versePicker=true, focusMode=false, blockMode=false; double lineHeight=1.5
   (1.0..3.0 in 0.1 steps). Persist synchronously in personal.sqlite's additive
-  preferences table; schema and annotation backup version remain 2. Annotation
+  global preferences table; personal schema and annotation backup version are 3. Annotation
   backups exclude preferences, and restore preserves local preferences.
 
 Invokables:
 - void importEpub(QUrl file), clearError()
+- bool switchVersion(QString id), removeVersion(QString id, bool removeAnnotations)
 - bool navigate(QString reference) [validate/aliases, sets error on failure]
 - QVariantMap resolveReference(QString reference) [pure canonical preview: valid, reference, error]
 - void openChapter(int book,int chapter), previousChapter(), nextChapter()
@@ -47,9 +51,50 @@ Invokables:
 - void refreshCollection()
 - QString dataDirectory()
 Signals: navigationChanged() (new chapter or requested verse jump), annotationChanged().
-Persist synchronously for reliable saves, debounce may live in UI. Imports background thread, atomic validated DB replacement. Import only explicitly selected local NET Bible 2.1 .epub file (CLI main supports `omaword --import <file>`, also through the compatibility `omabible` symlink).
-Personal schema and exported backups are version 2 with canonical range endpoints;
-version-1 data migrates transactionally and version-1 backups remain importable.
+Persist synchronously for reliable saves; debounce may live in UI. Imports run on
+a background thread and identify explicitly selected local official NET 2.1 or
+structured Haiola/eBible KJV 2006 EPUBs. `omaword --import <file>` (also through
+the compatibility `omabible` symlink) invokes the same importer; src/main.cpp help
+explicitly names NET 2.1 and Haiola/eBible KJV 2006 support.
+
+Root personal.sqlite uses schema 3: annotations and reading are keyed by
+version_id; preferences are global; installed(version_id,path,abbreviation,name,
+copyright) records root-relative text filenames, and library(id=1,active) records
+the active ID. New imports create immutable `bible-<UUID>.sqlite` generations in
+the data root. Registration, active ID, and personal state commit in one root
+transaction after validation and read-back; obsolete files are removed afterward.
+A crash before registration or during cleanup can leave an unreferenced file,
+not a partially installed edition. Legacy root bible.sqlite is validated and
+registered in place as net-2.1; v1/v2 personal annotations and reading state migrate
+transactionally to that ID, preserving preferences and cross-chapter references.
+Corrupt or unsafe legacy text stays unregistered without blocking personal-data
+migration: NET annotations remain archived and supported NET reimport reconnects
+them. Ownership checks restrict text paths to root `bible-<UUID>.sqlite` generations
+or `bible.sqlite` for NET. Existing files and sidecars must be regular, owned by
+the current user, and singly linked; symlinks, hardlinks, personal-store aliases,
+wrong-edition targets, and ambiguous registry targets are rejected. Cleanup
+rechecks ownership after commit before unlinking.
+
+Switching and successful imports retain the current canonical passage/selection,
+using the destination's actual SQL verse keys. A missing selection endpoint clears
+the selection and resets position to the chapter start, with fallback feedback.
+Startup restores the active version's persisted reading state. All navigation,
+copy, annotation, Saved, and export operations use active-version keys; offsets
+are instance-local and never persisted in place of references. Removing an active
+version selects another installed version, or publishes ready=false and empty
+models if none remain. removeAnnotations=false retains that ID's annotations and
+reading state invisibly until same-ID reimport; true deletes both. Global
+preferences survive either choice and removal of the last version. Failed
+validation, SQL writes, read-back, or commit preserve the previous library/models.
+
+New JSON backups have format omabible-backup, version 3, edition, versionId,
+created (UTC), reading, and annotations. They contain only active-version personal
+data and canonical endpoints, excluding preferences and Bible text. Restore
+requires an installed, active matching versionId and edition name; v1/v2 backups
+are NET-scoped and require active net-2.1 with the NET Bible 2.1 edition name.
+Validation precedes transactional replacement of only that version's annotations
+and reading state. Other versions and global preferences survive. Markdown export
+likewise contains only active-version annotations and identifies its edition/ID.
 Verse maps include bookmark range start/end/continuation flags and overlapping
 bookmarkRanges and highlightRanges metadata. Logical highlight ranges carry their
 identity and continuation endpoints for continuous paint without merging adjacent
@@ -60,19 +105,37 @@ spaces in canonical order, skipping omissions. Default quotation format is
 blank line, em-dash reference, and no edition/version suffix. plainText=true omits
 numbers, quotation wrapper, and reference. Formatting is independent of display
 preferences; copyText preserves free selected text verbatim.
-NET 2.1 EPUB is supplied by the user through a browser download. No bundled EPUB,
+Supported EPUBs are supplied by the user through browser downloads. No bundled EPUB,
 Bible text, or generated Bible database; no Bible download server or automatic
-Bible.org fetch. After successful validation/import, reading uses local SQLite
+Bible.org/eBible.org fetch. After successful validation/import, reading uses local SQLite
 and the source EPUB may be moved or deleted. Optional real-EPUB UI coverage
 imports a temporary copy, removes it, navigates, and reopens the reader to verify
 source independence. Do not copy Bible content into the repository.
+
+EpubImporter::Edition contains QString id, abbreviation, name, copyright;
+inspectFile(path,error) identifies supported structure without opening or writing
+a database and returns an empty ID on failure. Result includes Edition edition.
+Stable IDs are net-2.1 and kjv-2006. Text DB metadata stores version_id,
+abbreviation, edition, copyright, and schema=1. Legacy NET metadata with edition
+only (plus schema) remains valid. Existing canon/chapterMaximum/chapterVerseCount/
+omittedVerse helpers retain NET semantics; validateDatabase uses edition-specific
+counts. NET validates 31,087 verses; KJV validates 31,102, both over 66 books and
+1,189 chapters. The KJV adapter preserves supplied words/italics, Psalm headings,
+and poetry while stripping explicit note subtrees. See tests/README.md for exact
+metadata identification and validation coverage.
+
+Only those two structured EPUB layouts are supported. The original and exact
+replacement local NKJV study EPUBs were assessed as unsupported OCR layouts;
+neither is a native Scripture import. Reliable edition metadata and semantic
+verse anchors are required, not merely an EPUB extension. NIV remains unimported
+and unsupported. See VERSIONS.md for the current support contract.
 
 ## UI (qml/)
 
 Main.qml ApplicationWindow; context `bible` above and `desktop` below. Restrained
 keyboard-first reader, floating footer, Search for a passage (s / Ctrl k),
 Open commands (Ctrl Space / Ctrl Shift P), Saved panel (Ctrl l), and animated
-Notes panel (Ctrl n) at every width without reader reflow. Setup NET 2.1 EPUB import, keyboard help, and
+Notes panel (Ctrl n) at every width without reader reflow. Setup supported-EPUB import, keyboard help, and
 backup/export dialogs. All bindings robust on empty data. QML embedded /qml/Main.qml.
 System fonts, good margins, theme-aware responsive layout. Standard and Vim
 controls are context-safe. Clicking the reading surface restores reader keyboard
@@ -91,17 +154,40 @@ panel, and outside clicking also dismisses it. Clipboard via backend.
 Opening/closing Notes produces no Notes on/off toast. Larger/smaller/reset reader
 text commands show `Text size N` feedback only on an actual size change, including
 in focus mode; no new toast at a size limit or when already at the reset size.
+readerSize defaults/resets to 18 and clamps to 8..40 in steps of 1, before desktop
+scaling. It is session-local, separate from persisted backend preferences.
 
-Setup and the unbound **Add a version** command open an instructional import guide,
-not a generic translation picker. It states that only the official NET Bible 2.1
-EPUB (`.epub`) is supported and links to `https://bible.org/downloads` via
+Setup and the unbound **Add version** command open an instructional import guide.
+It describes official NET 2.1 and structured Haiola/eBible KJV 2006 EPUB layouts,
+required metadata/verse anchors, and OCR rejection. Links to
+`https://bible.org/downloads` and `https://ebible.org/eng-kjv2006/` use
 `desktop.openExternal`; downloading is the user's browser action. The guide shows
-the local data path, SQLite import/offline behavior, and same-edition replacement
+the local data path, SQLite import/offline behavior, and same-ID replacement
 semantics (preserving personal annotations and settings). **Choose EPUB…** closes
-the guide before opening the NET 2.1-only local file picker; acceptance invokes
-the existing async importer. Draft notes flush before transitions, and
+the guide before opening the local EPUB picker; acceptance invokes the async
+importer, activating the imported edition and preserving other editions.
+The guide confirms both assessed NKJV study EPUBs, including the replacement,
+are unsupported OCR layouts that cannot be imported as native Scripture.
+Draft notes flush before transitions, and
 Cancel/Esc returns focus to the reader or Notes. The guide scrolls at small/scaled
 sizes while keeping its action buttons accessible.
+
+The footer abbreviation immediately follows the location; the combined controls
+are centered, responsive, and use elision/full-reference tooltips. Click the
+abbreviation, press Shift V, or execute **Switch version** to open the searchable
+installed-version picker. Arrow/Home/End/Page keys navigate; unmodified
+Enter/Return selects and closes, while Shift Enter/Return does nothing. **Remove
+version** is an unbound command opening three steps: version → Remove annotations
+too? (Keep annotations by default) → final confirmation (Cancel initially focused).
+Cancel/Esc cancels removal at every step. Empty/busy states and failed note flushes
+are guarded. The reader edition label and About name/rights use the active
+metadata; About hides empty rights and shows the NET permissions link only for NET.
+
+Save annotation backup opens an active-edition scope panel before the file dialog.
+It names the edition, lists exclusions, explains separate backups per version and
+same-ID reimport before backing up retained annotations. Choose file… closes the
+panel, rechecks availability/flushes notes, then opens the save dialog. Restore
+confirmation likewise names the active edition and its replacement scope.
 
 blockMode=false uses separate verse delegates. blockMode=true loads BlockReader.qml:
 one rich TextEdit built by src/blockdocument.h/.cpp (BlockDocument, registered as
@@ -150,7 +236,8 @@ results and Enter executes available actions. Home/End selects first/last result
 PageUp/PageDown moves the list one page while preserving a sensible selected row.
 Only actions with bound sequences and non-executable context/gesture guidance
 appear in Keybindings: Shift R for Reading settings, p for Verse picker, and
-`Ctrl \` for Reset line height are included; unbound commands such as Add a version
+`Ctrl \` for Reset line height and Shift V for Switch version are included;
+unbound commands such as Add version and Remove version
 are command-palette-only. Keybinding hints show only keys, without On/Off status;
 command-palette hints still show current setting state. One action
 catalog supplies bindings, command entries, setting controls, and dynamic hints.
@@ -160,7 +247,8 @@ Qt sequences retain syntax such as `Ctrl+K`, which does not imply Shift. UI uses
 square corners and system fonts.
 Floating bottom icon controls overlay the full-height reader. Saved overlays on
 the right with its own keyboard context; Notes overlays at all widths. The center
-footer shows the current selected range, or the chapter when no range is selected.
+footer shows the current selected range, or the chapter when no range is selected,
+with the active version abbreviation immediately to its right.
 Reader Left/Right and [ / ] change chapters; Ctrl d / Ctrl u moves five verses;
 Ctrl f / Ctrl b and PageDown / PageUp move ten. Bulk moves stop at chapter edges,
 then cross one verse on the next press. Counts compose with directional motions
@@ -208,15 +296,22 @@ Keep the legacy checkout path `~/Projects/omabible` and project `omabible.pro`.
 Qt applicationName remains `Brand::storageId()` with an empty organization name,
 so application data stays at `~/.local/share/omabible` or
 `$XDG_DATA_HOME/omabible`. Shared instance/import locks retain their identity;
-renaming public branding must not fork data or locking. `bible.sqlite` and
-`personal.sqlite`, schemas, JSON format `omabible-backup`, Markdown filename
+renaming public branding must not fork data or locking. Legacy `bible.sqlite` and
+root `personal.sqlite`, JSON format `omabible-backup`, Markdown filename
 `omabible-notes.md`, legacy QML registration, and `OMABIBLE_*` test environment
 variables remain compatible. Branding alone requires no data migration.
 
+`bin/test` runs backend, UI, block-annotation, then importer-version suites. It
+normalizes OMABIBLE_TEST_EPUB and OMABIBLE_TEST_KJV and exports the latter as
+OMABIBLE_TEST_KJV_EPUB when that variable is unset/empty. Optional NKJV rejection
+fixtures still require explicit environment variables; see tests/README.md.
+
 ## Scope
 
-Offline NET 2.1 EPUB only, personal annotations + export/restore. Add a version is
-the NET-only import guide, not support for other translations or formats. No ESV,
+Offline multi-version library for official NET 2.1 and structured Haiola/eBible
+KJV 2006 EPUBs, version-specific personal annotations + export/restore. Add version
+is the supported-layout import guide. NKJV OCR sources are assessed unsupported;
+NIV is unimported and unsupported. No ESV,
 parallel, fulltext search, plans, cloud. Code MIT, Bible separate copyright.
 Public-ready build scripts/Arch package, .desktop icon. Validation results and
 test totals come from current runs, not fixed counts in this contract.

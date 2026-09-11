@@ -31,7 +31,7 @@ int main(int argc, char *argv[]) {
     // Qt's automatic version output uses the intentionally legacy storage name.
     const QCommandLineOption versionOption({QStringLiteral("v"), QStringLiteral("version")}, QStringLiteral("Displays version information."));
     parser.addOption(versionOption);
-    QCommandLineOption importOption(QStringLiteral("import"), QStringLiteral("Import an official NET Bible 2.1 EPUB."), QStringLiteral("epub"));
+    QCommandLineOption importOption(QStringLiteral("import"), QStringLiteral("Import a supported structured Bible EPUB (NET 2.1 or Haiola/eBible KJV 2006)."), QStringLiteral("epub"));
     parser.addOption(importOption);
     parser.addPositionalArgument(QStringLiteral("reference"), QStringLiteral("Passage to open, e.g. \"John 3:16\"."), QStringLiteral("[reference]"));
     parser.process(app);

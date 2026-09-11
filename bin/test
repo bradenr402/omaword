@@ -7,6 +7,16 @@ if [[ ! $jobs =~ ^[1-9][0-9]*$ ]]; then
     printf 'JOBS must be a positive integer.\n' >&2
     exit 1
 fi
+
+if [[ -n ${OMABIBLE_TEST_KJV:-} ]]; then
+    if [[ ! -f $OMABIBLE_TEST_KJV || ! -r $OMABIBLE_TEST_KJV ]]; then
+        printf 'OMABIBLE_TEST_KJV must name a readable EPUB file.\n' >&2
+        exit 1
+    fi
+    export OMABIBLE_TEST_KJV
+    OMABIBLE_TEST_KJV=$(realpath -- "$OMABIBLE_TEST_KJV")
+    export OMABIBLE_TEST_KJV_EPUB=${OMABIBLE_TEST_KJV_EPUB:-$OMABIBLE_TEST_KJV}
+fi
 # Resolve a caller-relative EPUB path before changing to the build directory.
 if [[ -n ${OMABIBLE_TEST_EPUB:-} ]]; then
     if [[ ! -f $OMABIBLE_TEST_EPUB || ! -r $OMABIBLE_TEST_EPUB ]]; then
@@ -34,3 +44,9 @@ cd -- "$root/build/blockannotations"
 qmake6 "$root/tests/blockannotations.pro"
 make -j"$jobs"
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./tst_blockannotations "$@"
+
+mkdir -p -- "$root/build/importer-versions"
+cd -- "$root/build/importer-versions"
+qmake6 "$root/tests/importer_versions.pro"
+make -j"$jobs"
+./tst_importer_versions "$@"

@@ -1,26 +1,86 @@
 # OmaWord tests
 
-From the repository root, build and run backend, integrated UI, and dedicated
-block-annotation tests offscreen in `build/tests/`, `build/ui-tests/`, and
-`build/blockannotations/`:
+From the repository root, build and run backend, integrated UI, block-annotation,
+then importer-version tests in `build/tests/`, `build/ui-tests/`,
+`build/blockannotations/`, and `build/importer-versions/`. GUI suites run offscreen:
 
 ```sh
 bin/test
-# Optional integration cases using your own downloaded edition:
+# Optional integration cases using your own downloaded editions:
 OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" bin/test
+OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
+  OMABIBLE_TEST_KJV="$HOME/Downloads/eng-kjv2006.epub" bin/test
 ```
 
-`OMABIBLE_TEST_EPUB` is optional. Without it, real-edition integration cases are
-skipped. Tests isolate application data in a temporary directory and read the
-user-supplied NET Bible 2.1 EPUB without modifying it. The source-independence UI
-case imports and deletes a temporary copy, not the supplied original. No Bible
-content is included in the test sources. Other translations and formats are not
-supported by the importer or the optional integration input.
+`OMABIBLE_TEST_EPUB` enables real NET integration. `OMABIBLE_TEST_KJV` enables
+structured Haiola/eBible KJV 2006 backend/UI cases; backend multi-version cases
+require both files, while UI KJV cases can use the synthetic NET fixture. Missing
+optional inputs skip their dependent cases. `bin/test` normalizes NET and KJV
+paths before changing build directories and exports `OMABIBLE_TEST_KJV_EPUB`
+from `OMABIBLE_TEST_KJV` when unset or empty. Explicit importer/NKJV fixture
+overrides should use absolute paths; those variables are not normalized.
+Tests isolate application data in temporary directories
+and do not modify the supplied EPUBs. Source-independence UI cases import and
+delete temporary copies. No Bible content is included in the test sources.
 Block-annotation tests cover logical marker geometry, overlapping-range choosers,
 note navigation, layout changes, and focus-mode suppression using original fixtures.
 
 Use current test output for pass/fail/skip totals; validation counts are not fixed
 in this document. `bin/test -functions` lists the available test functions.
+
+## Importer-version suite
+
+`tests/importer_versions.pro` builds `tst_importer_versions` from
+`tests/tst_importer_versions.cpp` and the importer. It uses Qt Core, SQL, XML,
+Test, and libarchive (no GUI); the independent KJV DOM whitespace oracle requires
+Qt 6.5+ in a Qt 6 build. `bin/test` runs this project automatically after the
+other three suites. To build/run it independently from the repository root:
+
+```sh
+mkdir -p build/importer-versions
+(
+  cd build/importer-versions
+  qmake6 ../../tests/importer_versions.pro
+  make -j"${JOBS:-$(getconf _NPROCESSORS_ONLN)}"
+)
+OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
+  OMABIBLE_TEST_KJV_EPUB="$HOME/Downloads/eng-kjv2006.epub" \
+  ./build/importer-versions/tst_importer_versions
+./build/importer-versions/tst_importer_versions -functions
+```
+
+The KJV variable here is **`OMABIBLE_TEST_KJV_EPUB`**, distinct from
+`OMABIBLE_TEST_KJV` used by backend/UI tests; `bin/test` supplies the fallback
+described above. Optional rejection-only fixtures must be supplied explicitly and
+use `OMABIBLE_TEST_NKJV_ORIGINAL_EPUB` and `OMABIBLE_TEST_NKJV_EPUB` (the exact
+replacement). For example, with each variable set to its absolute local path:
+
+```sh
+OMABIBLE_TEST_NKJV_ORIGINAL_EPUB="/absolute/path/to/original-nkjv.epub" \
+  OMABIBLE_TEST_NKJV_EPUB="/absolute/path/to/replacement-nkjv.epub" \
+  ./build/importer-versions/tst_importer_versions unsupportedOcr
+```
+
+Both assessed NKJV files are unsupported OCR layouts. `unsupportedOcr` verifies
+rejection, no new database, unchanged existing destination bytes, and no leaked
+SQL connection; it does not import NKJV Scripture. NIV is not imported or used as
+an import fixture. `boundedMetadataAndUnsafeArchive` uses generated non-Scripture
+fixtures and runs without any local EPUB variables. Other cases skip if their
+fixture variable is absent.
+
+Importer coverage includes:
+
+- `editions`: inspect without DB writes/connections; import/reimport, progress,
+  stable identity, metadata, 66 books/1,189 chapters, edition-specific counts and
+  omissions; missing verses/unsupported IDs fail validation, and legacy NET
+  edition-only identity metadata remains valid.
+- `kjvAllWordsAndFormatting`: independent DOM comparison of all 31,102 verses,
+  including inline tails, supplied-word italics, Psalm headings, and poetry.
+- `kjvNotesAndHtml`: explicit note subtrees are stripped without losing adjacent
+  words; safe inline HTML and `.html` spine paths work; duplicate markers leave the
+  installed database unchanged and wrong marker prefixes fail inspection.
+- `boundedMetadataAndUnsafeArchive`: OCR metadata rejection before inflating an
+  oversized body, and unsafe archive-path rejection.
 
 ## Branding and compatibility
 
@@ -46,13 +106,25 @@ customized files and symlinks are preserved.
 
 ## Backend behavior
 
-- Data lives under Qt's `QStandardPaths::AppDataLocation`: `bible.sqlite` is the
-  replaceable, validated edition; `personal.sqlite` holds annotations and reading
-  state and reading preferences with synchronous SQLite commits. Existing valid
-  data opens without import.
+- Data lives under Qt's `QStandardPaths::AppDataLocation`. Root `personal.sqlite`
+  uses schema 3, with version-specific `annotations`/`reading`, global
+  `preferences`, an `installed` table (stable IDs, root-relative paths and edition
+  metadata), and `library` (active ID). New text is installed as
+  `bible-<UUID>.sqlite` generations in the root; legacy NET `bible.sqlite` is
+  validated and registered in place during transactional v1/v2 migration. Legacy
+  annotations and reading state migrate to `net-2.1`. Existing valid data opens
+  without import.
+- `corruptLegacyRecovery` checks that damaged legacy text does not block personal
+  migration: text remains unregistered, NET annotations are retained, and supported
+  NET reimport restores reading and reconnects annotations.
+- Text removal/replacement accepts only owned root generation filenames (or NET's
+  legacy filename), with matching edition identity and no registry ambiguity.
+  Coverage rejects personal-store/sidecar targets, unrelated filenames, wrong
+  editions, symlinks, hardlinks, and aliased text/sidecars; cleanup rechecks ownership.
 - Preferences default to `showVerseNumbers=true`, `showHeadings=true`,
   `versePicker=true`, `lineHeight=1.5`, `focusMode=false`, and `blockMode=false`.
-  Coverage includes restart persistence, additive schema-2 initialization, invalid stored values,
+  Coverage includes restart persistence, additive preference-table initialization
+  alongside schema-3 migration, invalid stored values,
   line-height rounding/clamping to `1.0`–`3.0` in `0.1` steps, non-finite input
   rejection, and write/commit failures preserving published and persisted state.
 - References support full names, standard aliases, ordinal/roman numbered books,
@@ -74,7 +146,8 @@ customized files and symlinks are preserved.
 - No-selection `selectionReference` is the chapter reference; `copySelection()`
   copies that chapter as a quotation, `copySelection(true)` as plain text, preserving
   selection. Annotation commands require an explicit verse selection.
-- The verse picker returns actual chapter verse numbers, skipping NET omissions.
+- The verse picker returns actual active-edition chapter verse numbers, skipping
+  its omissions (KJV includes verses intentionally omitted in NET).
   `copyVerse(number, plainText=false)` copies the full canonical selection for an
   inside hit, otherwise only that verse, then persists the clicked verse as the
   single selection. The UI uses `copySelection` for inside hits to preserve its range.
@@ -86,17 +159,30 @@ customized files and symlinks are preserved.
   preserving clipboard and selection. Free text copying preserves the supplied text.
 - Five- and ten-verse movement stops at chapter edges; a subsequent move from the
   edge crosses by one verse. Coverage includes direction reversal and omissions.
-- Backups contain personal data only, with format `omabible-backup`, version `2`,
-  edition, UTC creation time, reading state, and annotation records. Restore
-  replaces annotations and reading state in one transaction after strict
-  field/type/range validation. Restore requires the imported edition to validate
-  verse endpoints.
-  Version-1 backups remain importable; schema-v1 personal databases migrate
-  transactionally. Directional anchor/cursor endpoints survive restart and restore.
-  Reading preferences are excluded from annotation backups and retained on restore.
+- Backups contain active-version personal data only, with format
+  `omabible-backup`, version `3`, `versionId`, edition, UTC creation time, reading
+  state, and annotation records. Restore replaces only that version's annotations
+  and reading state in one transaction after strict field/type/range validation.
+  The matching version must be installed and active; both stable ID and edition
+  name must match. Version-1/version-2 backups remain importable as NET-scoped
+  data, requiring active NET 2.1. Directional anchor/cursor endpoints survive
+  restart and restore. Other versions' data and global preferences are preserved;
+  preferences and Bible text are excluded from annotation backups.
 - Markdown export writes `omabible-notes.md` atomically in the chosen existing
-  directory, containing references, flags, and unchanged Markdown notes.
-- Import derives references from embedded verse markers, including cross-file
+  directory, containing the active edition name/ID, references, flags, and unchanged
+  Markdown notes for that version only.
+- `multiVersionLibrary` covers schema-2 NET migration/rollback, dynamic version
+  properties and metadata, KJV import/activation and all verse keys, same-reference
+  switching, missing-endpoint chapter fallback, version-specific notes/flags,
+  scoped v3 and legacy backup acceptance/rejection, restart persistence, export
+  destination protection across installed text generations, instance-local keys,
+  inactive/active/last-version removal, hidden retained annotations and same-ID
+  reimport, explicit annotation deletion, and global preference survival.
+- `versionOperationRollback` exercises install, switch, and removal failures in
+  SQL writes/read-back/commit, missing targets, malformed target annotations, and
+  empty-library transitions. Failed operations preserve models, current selection,
+  installed files, annotations, and persisted library state.
+- NET import derives references from embedded verse markers, including cross-file
   chapter endings. It validates 66 book totals, all 1,189 chapters, 31,087 verses,
   and the NET's 16 intentionally omitted verse numbers (including the empty
   publisher marker for Acts 24:7). Translator superscripts
@@ -141,7 +227,8 @@ UI tests use original synthetic text and temporary application data. Coverage in
   Dynamic command hints show current state. Reset line height is an executable entry.
 - Searchable Keybindings includes only bound actions plus disabled context/gesture
   guidance: p finds Verse picker, Reset line height and Shift R Reading settings
-  are present. Unbound Add a version remains command-palette-only. Keybinding
+  and Shift V Switch version are present. Unbound Add version and Remove version
+  remain command-palette-only. Keybinding
   hints show shortcut keys without On/Off prefixes; command-palette hints retain
   setting state. Arrow keys select and Enter executes; Home/End selects the
   first/last result, PageUp/PageDown one page at a time.
@@ -153,7 +240,8 @@ UI tests use original synthetic text and temporary application data. Coverage in
   autosave, and save-failure handling. Toggling Notes produces no Notes on/off toast.
 - Text-size feedback for larger/smaller/reset commands, including in focus mode:
   `Text size N` appears only when the value changes, with no new toast at size
-  limits or a redundant reset.
+  limits or a redundant reset. Default/reset is 18; limits are 8 and 40, with
+  steps of 1 before desktop scaling. Size is session-local.
 - Current-range footer, bookmark markers, Saved filtering and keyboard navigation,
   stacked bookmark/note glyphs and highlight accent stripe. Delete/Backspace opens
   exact-entry deletion confirmation; Cancel initially has focus, Esc cancels back to
@@ -164,16 +252,38 @@ UI tests use original synthetic text and temporary application data. Coverage in
   scrollbars across app-owned scrollable surfaces, with full-width content, a broad
   hit area, hover widening, and activity fade. Reader scrollbar is hidden in focus mode.
   Restore confirmation, saved scroll positions, and narrow/system-scaled layouts.
-- Add a version opens the NET 2.1-only instruction guide before the file picker.
-  Coverage checks the official `https://bible.org/downloads` link, `.epub`-only
-  support wording, local SQLite/data-path and offline instructions, and
+- The version abbreviation is immediately right of the location; the pair stays
+  centered, avoids side controls, and elides long references with a full tooltip.
+  `versionPickerKeyboardAndGeometry` covers small/scaled layouts, search and empty
+  results, keyboard navigation, footer/Shift V/command/Keybindings entry points,
+  unmodified Enter acceptance, Shift Enter/Return doing nothing, and focus mode.
+- `removalWizardCancellationAndLastVersion` covers version → annotations choice
+  (keep by default) → final confirmation, initial Cancel focus, cancellation at
+  every step, Back, scaled layout, last-version setup/empty state, and optional
+  same-ID NET reimport reconnecting retained annotations.
+- `versionCallbacksGuardUnsavedNotes` checks failed draft saves and failed backend
+  switches leave the picker open and preserve notes/library state.
+- `realKjvSwitchAndRemoveAnnotations` uses `OMABIBLE_TEST_KJV` for async import,
+  busy guards, source-copy deletion, active footer/reader/About name and copyright,
+  same-passage switching and annotation isolation, removal with annotation deletion,
+  reimport, and active-version removal selecting the remaining edition.
+- Add version opens the supported-layout instruction guide before the file picker.
+  Coverage checks the official `https://bible.org/downloads` link, required
+  metadata/verse anchors and unsupported-layout wording, local SQLite/data-path
+  and offline instructions, and
   same-edition replacement preserving notes, bookmarks, highlights, and settings.
   It also checks note-draft flushing, modal isolation, guide-to-picker handoff,
   Cancel/Esc focus restoration, and small/scaled scrolling with accessible buttons.
   This is a local-file import flow: the user downloads the text in a browser;
   OmaWord bundles no EPUB/text/database, runs no Bible download server, and does
-  not automatically fetch from Bible.org. The existing direct
-  `omaword --import <local-NET-2.1.epub>` CLI remains available.
+  not automatically fetch from Bible.org or eBible.org. The guide confirms both
+  assessed NKJV files are unsupported OCR; importer tests verify rejection.
+  The direct `omaword --import <supported-local.epub>` CLI calls the same importer,
+  and its help names NET 2.1 and Haiola/eBible KJV 2006 support.
+- `backupScopeAndExport` covers the active-edition scope panel before the save
+  file dialog, exclusions, separate per-edition backups, reimport for retained
+  annotations, cancellation, and export. Restore confirmation also names the
+  active edition and explains version-scoped replacement.
 - Optional `asyncFirstImportLayout` uses `OMABIBLE_TEST_EPUB` to import a temporary
   EPUB copy through the existing file-acceptance handler, verify async completion,
   remove that copy, navigate/read at different sizes, and reopen the reader with
@@ -181,6 +291,20 @@ UI tests use original synthetic text and temporary application data. Coverage in
   import: normal use reads SQLite and permits moving or deleting the source EPUB.
 
 ## Import limits and chapter metadata provenance
+
+Supported identity metadata is layout-specific:
+
+| Input | OPF identity | Stable ID / abbreviation | Verses |
+| --- | --- | --- | --- |
+| Official NET Bible 2.1 | Title `NET Bible 2.1`, identifier containing `NETBIBLE21` | `net-2.1` / `NET` | 31,087 |
+| Haiola/eBible KJV 2006 | Title `King James (Authorized) Version`, identifier `urn:uuid:51004fba-2cea-50c8-8e37-fcebe15c315a` | `kjv-2006` / `KJV` | 31,102 |
+
+Package recognition also requires supported structure. KJV uses 66 book spine
+documents and Haiola chapter/verse markers; arbitrary KJV EPUBs are not accepted.
+New text databases store `schema=1`, `version_id`, `abbreviation`, `edition`, and
+`copyright` (from OPF rights). The personal database's schema 3 and backup format
+version 3 are separate from this text-database schema. Both edition imports are
+validated across all 66 books and 1,189 chapters.
 
 XML is preflighted token-by-token, including discarded subtrees: maximum depth
 64, formatting (`b`/`i`) depth 16, 100,000 elements per document, and entity
@@ -208,6 +332,10 @@ and was therefore not used as the NET 2.1 authority. No downloaded Scripture tex
 is embedded in the sources. Tests additionally check each book's independent
 total, all chapter counts, and a compensating Genesis 1:31 → Genesis 2:26
 corruption that preserves the book total.
+The public numeric helpers remain NET-specific. KJV validation uses the three
+KJV maxima above and includes the 16 verse numbers omitted by NET, for 31,102
+verses. Runtime navigation uses the active database's ordered verse keys rather
+than applying NET omission rules to KJV.
 
 Navigation reads and validates the entire destination chapter before saving or
 publishing state. Restore stages that chapter plus an annotation read-back within
