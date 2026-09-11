@@ -23,6 +23,8 @@ class BibleBackend : public QObject
     Q_PROPERTY(int chapter READ chapter NOTIFY passageChanged)
     Q_PROPERTY(int selectedStart READ selectedStart NOTIFY selectionChanged)
     Q_PROPERTY(int selectedEnd READ selectedEnd NOTIFY selectionChanged)
+    Q_PROPERTY(int cursorVerse READ cursorVerse NOTIFY selectionChanged)
+    Q_PROPERTY(bool crossChapterSelection READ crossChapterSelection NOTIFY selectionChanged)
     Q_PROPERTY(int chapterCount READ chapterCount NOTIFY passageChanged)
     Q_PROPERTY(QVariantList verses READ verses NOTIFY versesChanged)
     Q_PROPERTY(QVariantList books READ books CONSTANT)
@@ -47,6 +49,8 @@ public:
     int chapter() const { return m_chapter; }
     int selectedStart() const { return m_start; }
     int selectedEnd() const { return m_end; }
+    int cursorVerse() const;
+    bool crossChapterSelection() const;
     int chapterCount() const;
     QVariantList verses() const { return m_verses; }
     QVariantList books() const;
@@ -60,6 +64,8 @@ public:
     Q_INVOKABLE void importEpub(QUrl file);
     Q_INVOKABLE void clearError();
     Q_INVOKABLE bool navigate(QString reference);
+    // Pure preview: {valid, reference, error}; uses the current book for relative input.
+    Q_INVOKABLE QVariantMap resolveReference(QString reference) const;
     Q_INVOKABLE void openChapter(int book, int chapter);
     Q_INVOKABLE void previousChapter();
     Q_INVOKABLE void nextChapter();
@@ -93,7 +99,8 @@ signals:
 
 private:
     struct Annotation {
-        int book = 0, chapter = 0, start = 0, end = 0;
+        // Inclusive canonical indices, excluding omitted NET verses; persisted as endpoints.
+        int start = 0, end = 0;
         bool bookmark = false, highlight = false;
         QString note;
     };
@@ -105,6 +112,12 @@ private:
     QVariantList collectionRows(const QVector<Annotation> &annotations) const;
     bool protectDestination(const QString &path);
     bool goTo(int book, int chapter, int start, int end);
+    bool goToSelection(int book, int chapter, int anchor, int cursor, double position);
+    bool parseReference(QString input, int *book, int *chapter, int *start, int *end, QString *error) const;
+    void intersectSelection();
+    bool commitAnnotations(const QVector<Annotation> &annotations);
+    bool flagCovered(const QVector<Annotation> &annotations, bool highlight) const;
+    static QString rangeReference(int start, int end);
     bool validRange(int book, int chapter, int start, int end) const;
     bool verseExists(int book, int chapter, int verse) const;
     bool persistState(int book, int chapter, int start, int end, double position);
@@ -123,7 +136,8 @@ private:
     QString m_bibleConnection, m_storeConnection;
     QSqlDatabase m_bible, m_store;
     bool m_ready = false, m_busy = false, m_bookmarked = false, m_highlighted = false;
-    int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0, m_anchor = 0, m_cursor = 0;
+    int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0;
+    int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
     QVariantList m_verses, m_collection;
     QVector<Annotation> m_annotations;
