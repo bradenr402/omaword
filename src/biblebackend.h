@@ -33,6 +33,11 @@ class BibleBackend : public QObject
     Q_PROPERTY(bool selectionBookmarked READ selectionBookmarked NOTIFY annotationChanged)
     Q_PROPERTY(bool selectionHighlighted READ selectionHighlighted NOTIFY annotationChanged)
     Q_PROPERTY(double readingPosition READ readingPosition WRITE setReadingPosition NOTIFY readingPositionChanged)
+    Q_PROPERTY(bool showVerseNumbers READ showVerseNumbers WRITE setShowVerseNumbers NOTIFY preferencesChanged)
+    Q_PROPERTY(bool showHeadings READ showHeadings WRITE setShowHeadings NOTIFY preferencesChanged)
+    Q_PROPERTY(bool versePicker READ versePicker WRITE setVersePicker NOTIFY preferencesChanged)
+    Q_PROPERTY(double lineHeight READ lineHeight WRITE setLineHeight NOTIFY preferencesChanged)
+    Q_PROPERTY(bool focusMode READ focusMode WRITE setFocusMode NOTIFY preferencesChanged)
 
 public:
     explicit BibleBackend(QObject *parent = nullptr);
@@ -60,22 +65,38 @@ public:
     bool selectionHighlighted() const { return m_highlighted; }
     double readingPosition() const { return m_position; }
     void setReadingPosition(double position);
+    bool showVerseNumbers() const { return m_showVerseNumbers; }
+    bool showHeadings() const { return m_showHeadings; }
+    bool versePicker() const { return m_versePicker; }
+    double lineHeight() const { return m_lineHeight; }
+    bool focusMode() const { return m_focusMode; }
+    Q_INVOKABLE void setShowVerseNumbers(bool value);
+    Q_INVOKABLE void setShowHeadings(bool value);
+    Q_INVOKABLE void setVersePicker(bool value);
+    Q_INVOKABLE void setLineHeight(double value);
+    Q_INVOKABLE void setFocusMode(bool value);
 
     Q_INVOKABLE void importEpub(QUrl file);
     Q_INVOKABLE void clearError();
     Q_INVOKABLE bool navigate(QString reference);
     // Pure preview: {valid, reference, error}; uses the current book for relative input.
     Q_INVOKABLE QVariantMap resolveReference(QString reference) const;
+    Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
     Q_INVOKABLE void openChapter(int book, int chapter);
     Q_INVOKABLE void previousChapter();
     Q_INVOKABLE void nextChapter();
     Q_INVOKABLE void selectVerses(int start, int end);
     Q_INVOKABLE void clearSelection();
     Q_INVOKABLE void moveSelection(int delta, bool extend = false);
+    // With no selection, start at the first verse and apply delta within this chapter.
+    // Multi-verse steps stop at its edge; a subsequent step crosses by one verse.
+    Q_INVOKABLE void moveByVerses(int delta, bool extend = false);
     Q_INVOKABLE void toggleBookmark();
     Q_INVOKABLE void toggleHighlight();
     Q_INVOKABLE void setNoteText(QString text);
     Q_INVOKABLE QString copySelection();
+    Q_INVOKABLE QString copyVerse(int number, bool quotation = false);
+    Q_INVOKABLE void copyText(QString text);
     Q_INVOKABLE bool exportNotes(QUrl directory);
     Q_INVOKABLE bool exportBackup(QUrl file);
     Q_INVOKABLE bool importBackup(QUrl file);
@@ -96,6 +117,7 @@ signals:
     void readingPositionChanged();
     void navigationChanged();
     void annotationChanged();
+    void preferencesChanged();
 
 private:
     struct Annotation {
@@ -105,6 +127,9 @@ private:
         QString note;
     };
     bool initializeStore();
+    bool loadPreferences();
+    bool savePreference(const QString &key, const QVariant &value);
+    QString copyRange(int first, int last, const QString &reference, bool quotation);
     bool openBible();
     void closeBible();
     bool loadChapter();
@@ -139,6 +164,8 @@ private:
     int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0;
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
+    bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false;
+    double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection;
     QVector<Annotation> m_annotations;
     std::shared_ptr<std::atomic<double>> m_importProgress;

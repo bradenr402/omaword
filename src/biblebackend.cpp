@@ -118,7 +118,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 {
     m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (!QDir().mkpath(m_directory)) {
-        setError("Cannot create Omabible data directory: " + m_directory);
+        setError("Cannot create OmaBible data directory: " + m_directory);
         return;
     }
     if (!initializeStore()) return;
@@ -250,7 +250,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 2) { m_store.close(); return setError("Your notes database was created by a newer Omabible version."); }
+    if (version > 2) { m_store.close(); return setError("Your notes database was created by a newer OmaBible version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -270,6 +270,9 @@ bool BibleBackend::initializeStore()
         "UPDATE reading SET anchorBook=book,anchorChapter=chapter,cursorBook=book,cursorChapter=chapter",
         "PRAGMA user_version=2"
     };
+    // Additive to schema 2: annotation backups intentionally exclude preferences.
+    schema << "CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY,value NOT NULL) WITHOUT ROWID"
+           << "INSERT OR IGNORE INTO preferences(key,value) VALUES('showVerseNumbers',1),('showHeadings',1),('versePicker',1),('lineHeight',1.5),('focusMode',0)";
     for (const auto &sql : schema) {
         if (!q.exec(sql)) { m_store.rollback(); return setError("Cannot initialize notes: " + q.lastError().text()); }
     }
@@ -287,7 +290,77 @@ bool BibleBackend::initializeStore()
         m_book = 1; m_chapter = 1; m_start = m_end = m_anchor = m_cursor = 0; m_position = 0;
     }
     intersectSelection();
-    return loadAnnotations(&m_annotations);
+    return loadPreferences() && loadAnnotations(&m_annotations);
+}
+
+bool BibleBackend::loadPreferences()
+{
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT key,value FROM preferences")) return setError("Cannot read your preferences: " + q.lastError().text());
+    QVariantMap values;
+    while (q.next()) values.insert(q.value(0).toString(),q.value(1));
+    if (q.lastError().isValid()) return setError("Cannot read your preferences: " + q.lastError().text());
+    auto numeric = [](const QVariant &value) {
+        return value.metaType().id() == QMetaType::LongLong || value.metaType().id() == QMetaType::Int
+            || value.metaType().id() == QMetaType::Double;
+    };
+    auto boolean = [&](const QString &key, bool fallback) {
+        const auto value = values.value(key);
+        return numeric(value) && (value.toDouble() == 0 || value.toDouble() == 1) ? value.toBool() : fallback;
+    };
+    m_showVerseNumbers = boolean("showVerseNumbers",true);
+    m_showHeadings = boolean("showHeadings",true);
+    m_versePicker = boolean("versePicker",true);
+    m_focusMode = boolean("focusMode",false);
+    const auto value = values.value("lineHeight");
+    const double height = value.toDouble();
+    m_lineHeight = numeric(value) && std::isfinite(height) && height >= 1 && height <= 3
+        && std::abs(height * 10 - std::round(height * 10)) < 1e-9 ? std::round(height * 10) / 10 : 1.5;
+    return true;
+}
+
+bool BibleBackend::savePreference(const QString &key, const QVariant &value)
+{
+    if (!m_store.transaction()) return setError("Cannot start preference save: " + m_store.lastError().text());
+    QSqlQuery q(m_store);
+    q.prepare("INSERT INTO preferences(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    q.addBindValue(key); q.addBindValue(value);
+    if (!q.exec()) { m_store.rollback(); return setError("Cannot save your preferences: " + q.lastError().text()); }
+    q.prepare("SELECT value FROM preferences WHERE key=?"); q.addBindValue(key);
+    if (!q.exec() || !q.next() || q.value(0) != value) {
+        m_store.rollback(); return setError("Cannot verify saved preferences: " + q.lastError().text());
+    }
+    q.finish();
+    if (!m_store.commit()) { m_store.rollback(); return setError("Cannot commit your preferences: " + m_store.lastError().text()); }
+    clearError(); return true;
+}
+
+void BibleBackend::setShowVerseNumbers(bool value)
+{
+    if (value == m_showVerseNumbers || !savePreference("showVerseNumbers",int(value))) return;
+    m_showVerseNumbers = value; emit preferencesChanged();
+}
+void BibleBackend::setShowHeadings(bool value)
+{
+    if (value == m_showHeadings || !savePreference("showHeadings",int(value))) return;
+    m_showHeadings = value; emit preferencesChanged();
+}
+void BibleBackend::setVersePicker(bool value)
+{
+    if (value == m_versePicker || !savePreference("versePicker",int(value))) return;
+    m_versePicker = value; emit preferencesChanged();
+}
+void BibleBackend::setFocusMode(bool value)
+{
+    if (value == m_focusMode || !savePreference("focusMode",int(value))) return;
+    m_focusMode = value; emit preferencesChanged();
+}
+void BibleBackend::setLineHeight(double value)
+{
+    if (!std::isfinite(value)) { setError("Line height must be a finite number."); return; }
+    value = std::round(std::clamp(value,1.0,3.0) * 10) / 10;
+    if (value == m_lineHeight || !savePreference("lineHeight",value)) return;
+    m_lineHeight = value; emit preferencesChanged();
 }
 
 bool BibleBackend::openBible()
@@ -350,6 +423,17 @@ bool BibleBackend::validRange(int b, int c, int start, int end) const
     if (!start && !end) return true;
     if (start < 1 || end < start || end > 176) return false;
     return verseExists(b,c,start) && verseExists(b,c,end);
+}
+QVariantList BibleBackend::chapterVerses(int book, int chapter) const
+{
+    if (!m_ready || book < 1 || book > 66 || chapter < 1 || chapter > EpubImporter::canon()[book-1].chapters) return {};
+    QSqlQuery q(m_bible);
+    q.prepare("SELECT number,text FROM verses WHERE book=? AND chapter=? ORDER BY number");
+    q.addBindValue(book); q.addBindValue(chapter);
+    if (!q.exec()) return {};
+    QVariantList rows;
+    while (q.next()) rows.append(QVariantMap{{"number",q.value(0)},{"text",q.value(1)}});
+    return q.lastError().isValid() ? QVariantList() : rows;
 }
 bool BibleBackend::persistState(int b, int c, int start, int end, double position)
 {
@@ -546,6 +630,24 @@ void BibleBackend::setReadingPosition(double position)
     m_position = position; emit readingPositionChanged();
 }
 
+void BibleBackend::moveByVerses(int delta, bool extend)
+{
+    if (!requireReady() || m_verses.isEmpty() || !delta) return;
+    const int first = absoluteVerse(m_book,m_chapter,m_verses.first().toMap().value("number").toInt());
+    const int last = absoluteVerse(m_book,m_chapter,m_verses.last().toMap().value("number").toInt());
+    const int start = m_cursor ? m_cursor : first;
+    qint64 target = qint64(start) + delta;
+    if (delta > 1 || delta < -1) {
+        if (m_cursor && ((delta > 0 && start == last) || (delta < 0 && start == first)))
+            target = qint64(start) + (delta > 0 ? 1 : -1);
+        else target = std::clamp(target,qint64(first),qint64(last));
+    }
+    const int cursor = int(std::clamp(target,qint64(1),qint64(canonVerses().size()-1)));
+    const auto v = endpoint(cursor);
+    goToSelection(v.book,v.chapter,extend ? (m_anchor ? m_anchor : first) : cursor,cursor,
+                  v.book != m_book || v.chapter != m_chapter ? 0 : m_position);
+}
+
 bool BibleBackend::loadAnnotations(QVector<Annotation> *result)
 {
     QSqlQuery q(m_store);
@@ -720,10 +822,28 @@ void BibleBackend::setNoteText(QString text)
 QString BibleBackend::copySelection()
 {
     if (!requireReady()) return {};
-    QStringList lines;
-    lines << selectionReference() + " (NET 2.1)";
     const int first = m_anchor ? std::min(m_anchor,m_cursor) : absoluteVerse(m_book,m_chapter,m_verses.first().toMap().value("number").toInt());
     const int last = m_anchor ? std::max(m_anchor,m_cursor) : absoluteVerse(m_book,m_chapter,m_verses.last().toMap().value("number").toInt());
+    return copyRange(first,last,selectionReference(),false);
+}
+
+QString BibleBackend::copyVerse(int number, bool quotation)
+{
+    if (!requireReady()) return {};
+    const int index = absoluteVerse(m_book,m_chapter,number);
+    if (!index) { setError("Choose an existing verse within this chapter."); return {}; }
+    const bool selected = m_anchor && number >= m_start && number <= m_end;
+    const int first = selected ? std::min(m_anchor,m_cursor) : index;
+    const int last = selected ? std::max(m_anchor,m_cursor) : index;
+    return copyRange(first,last,rangeReference(first,last),quotation);
+}
+
+QString BibleBackend::copyRange(int first, int last, const QString &label, bool quotation)
+{
+    QStringList lines;
+    if (!quotation) lines << label + " (NET 2.1)";
+    const auto a = endpoint(first), z = endpoint(last);
+    const bool crossChapter = a.book != z.book || a.chapter != z.chapter;
     int b = 0, c = 0;
     QVariantList rows;
     for (int i = first; i <= last; ++i) {
@@ -734,14 +854,22 @@ QString BibleBackend::copySelection()
             for (const auto &row : rows) {
                 const auto map = row.toMap(); const int number = map.value("number").toInt();
                 const int index = absoluteVerse(b,c,number);
-                if (index >= first && index <= last)
-                    lines << (crossChapterSelection() ? reference(b,c,number) : QString::number(number)) + ' ' + map.value("text").toString();
+                if (index >= first && index <= last) {
+                    const QString text = map.value("text").toString();
+                    lines << (quotation ? text.simplified()
+                        : (crossChapter ? reference(b,c,number) : QString::number(number)) + ' ' + text);
+                }
             }
         }
     }
-    const QString text = lines.join('\n');
-    if (qobject_cast<QGuiApplication *>(QCoreApplication::instance())) QGuiApplication::clipboard()->setText(text);
+    const QString text = quotation ? QStringLiteral("“") + lines.join(' ') + QStringLiteral("”\n\n—") + label + " NET" : lines.join('\n');
+    copyText(text);
     clearError(); return text;
+}
+
+void BibleBackend::copyText(QString text)
+{
+    if (qobject_cast<QGuiApplication *>(QCoreApplication::instance())) QGuiApplication::clipboard()->setText(text);
 }
 
 bool BibleBackend::exportNotes(QUrl directory)
@@ -753,7 +881,7 @@ bool BibleBackend::exportNotes(QUrl directory)
     if (!protectDestination(QDir(path).filePath("omabible-notes.md"))) return false;
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) return false;
-    QString markdown = "# Omabible notes\n\nEdition: NET Bible 2.1\n\n";
+    QString markdown = "# OmaBible notes\n\nEdition: NET Bible 2.1\n\n";
     for (const auto &a : rows) {
         markdown += "## " + rangeReference(a.start,a.end) + "\n\n";
         QStringList flags;
@@ -844,7 +972,7 @@ bool BibleBackend::importBackup(QUrl file)
         || root.value("edition") != edition() || !root.value("created").isString()
         || !QDateTime::fromString(root.value("created").toString(),Qt::ISODateWithMs).isValid()
         || !root.value("reading").isObject() || !root.value("annotations").isArray())
-        return setError("Unsupported or invalid Omabible backup format.");
+        return setError("Unsupported or invalid OmaBible backup format.");
     const auto reading = root.value("reading").toObject();
     const bool v2 = root.value("version").toInt() == 2;
     auto verse = [this](const QJsonObject &object, const QString &b, const QString &c, const QString &v) {
