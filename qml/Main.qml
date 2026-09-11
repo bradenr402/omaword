@@ -14,7 +14,7 @@ ApplicationWindow {
     minimumWidth: 640
     minimumHeight: 480
     visible: true
-    title: bible.ready ? bible.passage + " — OmaBible" : "OmaBible"
+    title: bible.ready ? bible.passage + " — " + desktop.appName : desktop.appName
     color: desktop.background
     font.family: desktop.fontFamily
     font.pixelSize: Math.round(14 * desktop.textScale)
@@ -81,7 +81,7 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
+    readonly property bool modalOpen: passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -455,8 +455,8 @@ ApplicationWindow {
         return true
     }
     function toggleNotes() {
-        if (notesOpen) { if (closeNotes()) notify("Notes off", true) }
-        else { openNotes(true); if (notesOpen) notify("Notes on", true) }
+        if (notesOpen) closeNotes()
+        else openNotes(true)
     }
     function requestRestore(file) {
         if (!flushNote()) return
@@ -570,30 +570,37 @@ ApplicationWindow {
     // One action catalog supplies shortcuts, searchable keybindings, and commands.
     // Context-only gestures are explanatory rows, never executable guesses.
     readonly property var actions: [
-        { id: "books", title: "Open a passage", keys: "s · Ctrl k", sequences: ["S", "Ctrl+K"], scope: "palette", command: true },
-        { id: "commands", title: "Open commands", keys: "Ctrl Space", sequences: ["Ctrl+Space"], scope: "palette" },
-        { id: "resume", title: "Resume last palette", keys: "Space", sequences: ["Space"] },
-        { id: "saved", title: "Saved passages", keys: "Ctrl l", sequences: ["Ctrl+L"], command: true },
+        { id: "books", title: "Search for a passage", keys: "s · Ctrl k", sequences: ["S", "Ctrl+K"], scope: "palette", command: true },
+        { id: "commands", title: "Open commands", keys: "Ctrl Space · Ctrl Shift P", sequences: ["Ctrl+Space", "Ctrl+Shift+P"], scope: "palette" },
+        { id: "saved", title: "Saved panel", keys: "Ctrl l", sequences: ["Ctrl+L"], command: true },
+        { id: "toggleNotes", title: "Notes panel", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
+        { id: "notes", title: "Write a note", keys: "n", sequences: ["N"], scope: "notes", command: true },
+        { id: "copy", title: "Copy passage as quotation", keys: "y · Ctrl c", sequences: ["Y"], command: true },
+        { id: "copyPlain", title: "Copy passage as plain text", keys: "Shift Y · Ctrl Shift C", sequences: ["Shift+Y", "Ctrl+Shift+C"], command: true },
+        { id: "copyText", title: "Copy selected text", keys: "Ctrl c", sequences: ["Ctrl+C"] },
+        { id: "clickCopy", title: "Copy passage as quotation", keys: "Right Click", explanation: true },
+        { id: "middleCopy", title: "Copy passage as plain text", keys: "Middle Click", explanation: true },
         { id: "previousChapter", title: "Previous chapter", keys: "h · Left · [", sequences: ["H", "Left", "["] },
         { id: "nextChapter", title: "Next chapter", keys: "l · Right · ]", sequences: ["L", "Right", "]"] },
         { id: "previousVerse", title: "Previous verse", keys: "k · Up", sequences: ["K", "Up"] },
         { id: "nextVerse", title: "Next verse", keys: "j · Down", sequences: ["J", "Down"] },
+        { id: "previousFive", title: "Previous 5 verses", keys: "Ctrl u", sequences: ["Ctrl+U"] },
+        { id: "nextFive", title: "Next 5 verses", keys: "Ctrl d", sequences: ["Ctrl+D"] },
+        { id: "previousTen", title: "Previous 10 verses", keys: "Ctrl b · PageUp", sequences: ["Ctrl+B", "PgUp"] },
+        { id: "nextTen", title: "Next 10 verses", keys: "Ctrl f · PageDown", sequences: ["Ctrl+F", "PgDown"] },
+        { id: "selectVerse", title: "Select verse", keys: "Click", explanation: true },
+        { id: "selectRange", title: "Select a range", keys: "Shift Click", explanation: true },
         { id: "visual", title: "Toggle visual selection", keys: "v", sequences: ["V"] },
         { id: "extendPrevious", title: "Extend to previous verse", keys: "Shift K · Shift Up", sequences: ["Shift+K", "Shift+Up"] },
         { id: "extendNext", title: "Extend to next verse", keys: "Shift J · Shift Down", sequences: ["Shift+J", "Shift+Down"] },
         { id: "first", title: "Select chapter beginning", keys: "g · Home", sequences: ["G", "Home"] },
         { id: "last", title: "Select chapter end", keys: "Shift G · End", sequences: ["Shift+G", "End"] },
-        { id: "previousFive", title: "Previous 5 verses", keys: "Ctrl u", sequences: ["Ctrl+U"] },
-        { id: "nextFive", title: "Next 5 verses", keys: "Ctrl d", sequences: ["Ctrl+D"] },
-        { id: "previousTen", title: "Previous 10 verses", keys: "Ctrl b · PageUp", sequences: ["Ctrl+B", "PgUp"] },
-        { id: "nextTen", title: "Next 10 verses", keys: "Ctrl f · PageDown", sequences: ["Ctrl+F", "PgDown"] },
         { id: "bookmark", title: "Bookmark selection", keys: "m · Ctrl m", sequences: ["M", "Ctrl+M"], command: true },
         { id: "highlight", title: "Highlight selection", keys: "x · Ctrl h", sequences: ["X", "Ctrl+H"], command: true },
-        { id: "notes", title: "Write a note", keys: "n", sequences: ["N"], scope: "notes", command: true },
-        { id: "toggleNotes", title: "Toggle notes", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
-        { id: "copy", title: "Copy passage as quotation", keys: "y · Ctrl c", sequences: ["Y"], command: true },
-        { id: "copyPlain", title: "Copy passage as plain text", keys: "Shift Y · Ctrl Shift C", sequences: ["Shift+Y", "Ctrl+Shift+C"], command: true },
-        { id: "copyText", title: "Copy selected text", keys: "Ctrl c", sequences: ["Ctrl+C"] },
+        { id: "export", title: "Export notes as Markdown", keys: "", command: true },
+        { id: "backup", title: "Save annotation backup", keys: "", command: true },
+        { id: "restore", title: "Restore annotation backup", keys: "", command: true },
+        { id: "settings", title: "Reading settings", keys: "Shift R", sequences: ["Shift+R"], command: true },
         { id: "larger", title: "Larger text", keys: "Ctrl + · Ctrl =", sequences: ["Ctrl++", "Ctrl+="] },
         { id: "smaller", title: "Smaller text", keys: "Ctrl −", sequences: ["Ctrl+-"] },
         { id: "resetText", title: "Reset text size", keys: "Ctrl 0", sequences: ["Ctrl+0"] },
@@ -606,21 +613,12 @@ ApplicationWindow {
         { id: "lineLess", title: "Decrease line height", keys: "Ctrl [", sequences: ["Ctrl+["] },
         { id: "lineMore", title: "Increase line height", keys: "Ctrl ]", sequences: ["Ctrl+]"] },
         { id: "lineReset", title: "Reset line height", keys: "Ctrl \\", sequences: ["Ctrl+\\"], command: true },
-        { id: "settings", title: "Reading settings", keys: "", command: true },
-        { id: "export", title: "Export notes as Markdown", keys: "", command: true },
-        { id: "backup", title: "Save annotation backup", keys: "", command: true },
-        { id: "restore", title: "Restore annotation backup", keys: "", command: true },
-        { id: "import", title: "Import NET 2.1 EPUB", keys: "", scope: "global", command: true },
+        { id: "import", title: "Add a version", keys: "", scope: "global", command: true },
+        { id: "resume", title: "Resume last palette", keys: "Space", sequences: ["Space"] },
         { id: "help", title: "Keybindings", keys: "? · F1", sequences: ["?", "F1"], scope: "global", command: true },
         { id: "about", title: "About & attribution", keys: "", scope: "global", command: true },
-        { title: "Select a verse", keys: "Click number", explanation: true },
-        { title: "Select a range", keys: "Shift Click", explanation: true },
-        { title: "Select text across verses", keys: "Drag text", explanation: true },
-        { title: "Copy clicked quotation", keys: "Right Click", explanation: true },
-        { title: "Copy clicked plain text", keys: "Middle Click", explanation: true },
-        { title: "Go to verse number", keys: "number then g (e.g. 20g)", explanation: true },
-        { title: "Repeat a motion", keys: "Count without spaces: 4k, 3Down, 2Ctrl d", explanation: true },
-        { title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
+        { id: "goToVerse", title: "Go to verse number", keys: "number then g (e.g. 20g)", explanation: true },
+        { id: "dismiss", title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
     ]
     function actionHint(action) {
         if (action.setting) return (bible[action.setting] ? "On" : "Off") + (action.keys ? " · " + action.keys : "")
@@ -754,6 +752,7 @@ ApplicationWindow {
         const catalogAction = actions.find(function(entry) { return entry.id === action })
         const previousSetting = catalogAction.setting ? bible[catalogAction.setting] : null
         const previousLineHeight = bible.lineHeight
+        const previousReaderSize = readerSize
         switch (action) {
         case "books": openPalette(false); break
         case "commands": openPalette(true); break
@@ -793,7 +792,7 @@ ApplicationWindow {
         case "export": exportDialog.open(); break
         case "backup": backupDialog.open(); break
         case "restore": restoreDialog.open(); break
-        case "import": importDialog.open(); break
+        case "import": importGuide.open(); break
         case "help": helpDialog.open(); break
         case "about": aboutDialog.open(); break
         }
@@ -801,6 +800,8 @@ ApplicationWindow {
             notify(catalogAction.title + " " + (bible[catalogAction.setting] ? "on" : "off"), true)
         if (["lineLess", "lineMore", "lineReset"].includes(action) && bible.lineHeight !== previousLineHeight)
             notify("Line height " + bible.lineHeight.toFixed(1), true)
+        if (["larger", "smaller", "resetText"].includes(action) && readerSize !== previousReaderSize)
+            notify("Text size " + readerSize, true)
     }
     function moveKeybinding(delta) {
         keybindingResults.currentIndex = Math.max(0, Math.min(keybindingResults.count - 1, keybindingResults.currentIndex + delta))
@@ -1049,18 +1050,18 @@ ApplicationWindow {
                     ctx.strokeStyle = ink
                     ctx.fillStyle = ink
                     ctx.lineWidth = 1.6
-                    ctx.lineCap = "round"
-                    ctx.lineJoin = "round"
+                    ctx.lineCap = "square"
+                    ctx.lineJoin = "miter"
                     ctx.beginPath()
                     if (glyph === "saved") {
                         ctx.moveTo(6, 3); ctx.lineTo(18, 3); ctx.lineTo(18, 21)
                         ctx.lineTo(12, 17); ctx.lineTo(6, 21); ctx.closePath()
                     } else if (glyph === "notes") {
-                        ctx.moveTo(15, 3); ctx.lineTo(5, 3); ctx.lineTo(5, 21)
-                        ctx.lineTo(19, 21); ctx.lineTo(19, 7); ctx.lineTo(15, 3)
-                        ctx.lineTo(15, 7); ctx.lineTo(19, 7)
-                        ctx.moveTo(9, 11); ctx.lineTo(15, 11)
-                        ctx.moveTo(9, 15); ctx.lineTo(15, 15)
+                        ctx.moveTo(11, 4); ctx.lineTo(3, 4); ctx.lineTo(3, 21)
+                        ctx.lineTo(20, 21); ctx.lineTo(20, 13)
+                        ctx.moveTo(10, 11); ctx.lineTo(18, 3); ctx.lineTo(21, 6)
+                        ctx.lineTo(13, 14); ctx.lineTo(9, 15); ctx.closePath()
+                        ctx.moveTo(16, 5); ctx.lineTo(19, 8)
                     } else if (glyph === "help") {
                         ctx.moveTo(8, 7); ctx.bezierCurveTo(8, 1, 19, 2, 16, 9)
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
@@ -1071,9 +1072,13 @@ ApplicationWindow {
                         ctx.moveTo(8, 13); ctx.lineTo(16, 13)
                         ctx.moveTo(8, 17); ctx.lineTo(13, 17)
                     } else {
-                        ctx.moveTo(9, 3); ctx.lineTo(15, 3)
-                        ctx.moveTo(12, 3); ctx.lineTo(12, 21)
-                        ctx.moveTo(9, 21); ctx.lineTo(15, 21)
+                        ctx.moveTo(12, 6); ctx.lineTo(8, 4); ctx.lineTo(2, 4)
+                        ctx.lineTo(2, 19); ctx.lineTo(8, 19); ctx.lineTo(12, 21)
+                        ctx.lineTo(16, 19); ctx.lineTo(22, 19); ctx.lineTo(22, 4)
+                        ctx.lineTo(16, 4); ctx.closePath()
+                        ctx.moveTo(12, 6); ctx.lineTo(12, 21)
+                        ctx.moveTo(5, 8); ctx.lineTo(8, 8)
+                        ctx.moveTo(16, 8); ctx.lineTo(19, 8)
                     }
                     ctx.stroke()
                 }
@@ -1543,7 +1548,7 @@ ApplicationWindow {
                     lineHeight: 1.4
                     Layout.fillWidth: true
                 }
-                QuietButton { text: "Choose NET EPUB…"; emphasized: true; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 6; onClicked: importDialog.open() }
+                QuietButton { objectName: "setupImport"; text: "Add a version"; emphasized: true; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 6; onClicked: app.runCommand("import") }
                 Label { text: "Your Bible and annotations stay on this device."; color: desktop.muted; font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 QuietButton { text: "About the NET Bible ↗"; compact: true; Layout.alignment: Qt.AlignHCenter; onClicked: aboutDialog.open() }
             }
@@ -2187,7 +2192,8 @@ ApplicationWindow {
                         Layout.preferredWidth: keybindingRow.width * 0.48; wrapMode: Text.Wrap
                     }
                     Label {
-                        text: app.actionHint(keybindingRow.modelData); color: desktop.muted
+                        objectName: "keybindingHint" + keybindingRow.modelData.id
+                        text: keybindingRow.modelData.keys; color: desktop.muted
                         font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignRight
                         Layout.fillWidth: true; Layout.preferredWidth: keybindingRow.width * 0.48; wrapMode: Text.Wrap
                     }
@@ -2273,25 +2279,99 @@ ApplicationWindow {
             width: aboutScroll.availableWidth
             spacing: 16
             RowLayout {
-                Label { text: "OmaBible"; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
+                Label { text: desktop.appName; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
             }
             SectionLabel { text: "READ SLOWLY. KEEP WHAT MATTERS." }
             Label { text: "An offline NET Bible reader with local bookmarks, highlights, and Markdown notes. Built with Qt, at home on your desktop."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
             FineRule { Layout.fillWidth: true }
-            Label { text: "New English Translation (NET Bible)\nNET Bible® copyright © 1996–2019 by Biblical Studies Press, L.L.C. All rights reserved. The Bible text is separately copyrighted and is imported from your own NET 2.1 EPUB; it is not distributed with OmaBible."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
+            Label { text: "New English Translation (NET Bible)\nNET Bible® copyright © 1996–2019 by Biblical Studies Press, L.L.C. All rights reserved. The Bible text is separately copyrighted and is imported from your own NET 2.1 EPUB; it is not distributed with " + desktop.appName + "."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
             QuietButton { text: "NET Bible & permissions ↗"; compact: true; onClicked: desktop.openExternal("https://netbible.com/copyright/") }
-            Label { text: "OmaBible " + desktop.version + " · Application code licensed under MIT\n" + (bible.edition || "NET 2.1") + " · No account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { text: desktop.appName + " " + desktop.version + " · Application code licensed under MIT\n" + (bible.edition || "NET 2.1") + " · No account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             QuietButton { text: "Open local data folder ↗"; compact: true; onClicked: desktop.openExternal("file://" + bible.dataDirectory()) }
         }
         }
     }
 
+    ModalCard {
+        id: importGuide
+        objectName: "importGuide"
+        property bool choosePending: false
+        height: Math.min(650 * app.scale, app.height - 48)
+        onOpened: { importGuideScroll.contentItem.contentY = 0; importChoose.forceActiveFocus() }
+        onClosed: {
+            const choose = choosePending
+            choosePending = false
+            if (choose) Qt.callLater(function() {
+                if (app.flushNote()) importDialog.open()
+                else app.restorePanelFocus()
+            })
+            else app.restorePanelFocus()
+        }
+        contentItem: ColumnLayout {
+            spacing: 16 * app.scale
+            Label { text: "Add a version"; color: desktop.foreground; font.pixelSize: 24 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            OverlayScrollView {
+                id: importGuideScroll
+                objectName: "importGuideScroll"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    width: importGuideScroll.availableWidth
+                    spacing: 16 * app.scale
+                    Label {
+                        objectName: "importSupported"
+                        text: "Only the official NET Bible 2.1 EPUB (.epub) is currently supported. Other Bible versions and file formats are not yet supported."
+                        color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
+                    }
+                    Label {
+                        objectName: "importReplacement"
+                        visible: bible.ready
+                        text: "NET Bible 2.1 is already imported. Importing the same edition replaces the Bible data and preserves your notes, bookmarks, highlights, and settings."
+                        color: desktop.accent; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
+                    }
+                    FineRule { Layout.fillWidth: true }
+                    Label { text: "1. Visit the official Bible.org downloads page."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    QuietButton {
+                        objectName: "importDownloadLink"
+                        property url downloadUrl: "https://bible.org/downloads"
+                        text: "Bible.org/downloads ↗"
+                        compact: true
+                        Layout.fillWidth: true
+                        onClicked: desktop.openExternal(downloadUrl)
+                    }
+                    Label { objectName: "importSteps"; text: "2. Download the NET Bible 2.1 EPUB file.\n\n3. Choose EPUB… below, then select the downloaded .epub file.\n\n4. " + desktop.appName + " validates the file and imports the Bible into its own local SQLite database."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { objectName: "importDataPath"; text: bible.dataDirectory(); textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                    Label { objectName: "importOffline"; text: "After a successful import, you can move or delete the source EPUB. No internet connection is needed for normal use."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                }
+            }
+            FineRule { Layout.fillWidth: true }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton { objectName: "importCancel"; text: "Cancel"; onClicked: importGuide.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton {
+                    id: importChoose
+                    objectName: "importChoose"
+                    text: "Choose EPUB…"
+                    emphasized: true
+                    onClicked: { if (!app.flushNote()) return; importGuide.choosePending = true; importGuide.close() }
+                    Keys.onReturnPressed: clicked()
+                    Keys.onEnterPressed: clicked()
+                }
+            }
+        }
+    }
+
     FileDialog {
         id: importDialog
+        objectName: "importDialog"
         title: "Import NET Bible 2.1 EPUB"
         fileMode: FileDialog.OpenFile
-        nameFilters: ["EPUB books (*.epub)"]
+        nameFilters: ["NET Bible 2.1 EPUB (*.epub)"]
         onAccepted: { if (!app.flushNote()) return; bible.clearError(); bible.importEpub(selectedFile) }
+        onVisibleChanged: { if (!visible) app.restorePanelFocus() }
     }
     FolderDialog {
         id: exportDialog
