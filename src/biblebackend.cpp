@@ -23,6 +23,9 @@
 #include <algorithm>
 #include <cmath>
 #include <tuple>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cerrno>
 
 namespace {
 constexpr qsizetype MaximumNoteSize = 1024 * 1024;
@@ -91,6 +94,27 @@ bool writeAtomic(const QString &path, const QByteArray &bytes, QString *error)
     }
     return true;
 }
+bool bibleIdentity(const QString &path, const QString &id)
+{
+    const QString name = connectionName();
+    bool matches = false;
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE",name);
+        db.setDatabaseName(path); db.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
+        if (db.open()) {
+            QSqlQuery q(db);
+            if (q.exec("SELECT key,value FROM metadata")) {
+                QVariantMap metadata;
+                while (q.next()) metadata.insert(q.value(0).toString(),q.value(1));
+                QString actual = metadata["version_id"].toString();
+                if (actual.isEmpty() && metadata["edition"] == "NET Bible 2.1") actual = "net-2.1";
+                matches = !q.lastError().isValid() && metadata["schema"] == "1" && actual == id;
+            }
+        }
+    }
+    QSqlDatabase::removeDatabase(name);
+    return matches;
+}
 }
 
 int BibleBackend::absoluteVerse(int b, int c, int v) const
@@ -103,20 +127,7 @@ int BibleBackend::absoluteVerse(int b, int c, int v) const
 
 BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 {
-    m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    if (!QDir().mkpath(m_directory)) {
-        setError("Cannot create " + Brand::name() + " data directory: " + m_directory);
-        return;
-    }
-    if (!initializeStore()) return;
-    if (!readVersions(&m_versions)) return;
-    QSqlQuery active(m_store);
-    if (!active.exec("SELECT active FROM library WHERE id=1") || !active.next()) {
-        setError("Cannot read the active Bible version."); return;
-    }
-    const QString id = active.value(0).toString(); active.finish();
-    if (!id.isEmpty()) changeVersion(id,{}, {},false,true);
-    if (!m_ready) setStatus("Import a supported Bible EPUB to begin.");
+    // Completion wiring must exist even when startup text or storage is damaged.
     m_progressTimer.setInterval(100);
     connect(&m_progressTimer, &QTimer::timeout, this, [this] {
         const double value = m_importProgress ? m_importProgress->load() : 0;
@@ -127,9 +138,9 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         const auto result = m_importWatcher.result();
         if (result.ok) {
             if (changeVersion(result.edition.id,m_importTarget)) m_progress = 1;
-            else QFile::remove(m_importTarget);
+            else removeOwnedBibleFiles(m_importTarget);
         } else {
-            QFile::remove(m_importTarget);
+            removeOwnedBibleFiles(m_importTarget);
             setError(result.error);
             setStatus(m_ready ? "Import failed. Your existing Bible is available." : "Import failed. Choose a supported complete EPUB.");
         }
@@ -137,6 +148,21 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         m_busy = false;
         emit importProgressChanged(); emit busyChanged();
     });
+    m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    if (!QDir().mkpath(m_directory)) {
+        setError("Cannot create " + Brand::name() + " data directory: " + m_directory);
+        return;
+    }
+    if (!initializeStore()) { m_store.close(); return; }
+    m_storeReady = true;
+    if (!readVersions(&m_versions)) return;
+    QSqlQuery active(m_store);
+    if (!active.exec("SELECT active FROM library WHERE id=1") || !active.next()) {
+        setError("Cannot read the active Bible version."); return;
+    }
+    const QString id = active.value(0).toString(); active.finish();
+    if (!id.isEmpty()) changeVersion(id,{}, {},false,true);
+    if (!m_ready) setStatus("Import a supported Bible EPUB to begin.");
 }
 
 BibleBackend::~BibleBackend()
@@ -145,7 +171,7 @@ BibleBackend::~BibleBackend()
     // Waiting ensures a normal application exit cannot leave a half-finished import.
     m_importWatcher.waitForFinished();
     // A completed worker whose finished signal was never delivered is uninstalled.
-    if (!m_importTarget.isEmpty()) QFile::remove(m_importTarget);
+    if (!m_importTarget.isEmpty()) removeOwnedBibleFiles(m_importTarget);
     closeBible();
     m_store.close(); m_store = QSqlDatabase();
     if (!m_storeConnection.isEmpty()) QSqlDatabase::removeDatabase(m_storeConnection);
@@ -274,10 +300,13 @@ bool BibleBackend::initializeStore()
     }
     if (version < 3 && QFileInfo::exists(m_directory + "/bible.sqlite")) {
         QString error;
-        if (!EpubImporter::validateDatabase(m_directory + "/bible.sqlite",&error)) {
-            m_store.rollback(); return setError(error);
-        }
-        if (!q.exec("INSERT INTO installed VALUES('net-2.1','bible.sqlite','NET','NET Bible 2.1','')")
+        if (!ownedBiblePath(m_directory + "/bible.sqlite","net-2.1")
+            || !bibleIdentity(m_directory + "/bible.sqlite","net-2.1")
+            || !EpubImporter::validateDatabase(m_directory + "/bible.sqlite",&error)) {
+            // Personal data can migrate independently of replaceable Scripture.
+            // Leave damaged legacy text unregistered and its NET notes archived.
+            setError("The legacy Bible text is unavailable. Re-import NET to repair it. " + error);
+        } else if (!q.exec("INSERT INTO installed VALUES('net-2.1','bible.sqlite','NET','NET Bible 2.1','')")
             || !q.exec("UPDATE library SET active='net-2.1' WHERE id=1")) {
             m_store.rollback(); return setError("Cannot migrate the Bible library: " + q.lastError().text());
         }
@@ -368,8 +397,44 @@ QString BibleBackend::installedPath(const QString &id) const
     q.prepare("SELECT path FROM installed WHERE version_id=?"); q.addBindValue(id);
     if (!q.exec() || !q.next()) return {};
     const QString name = q.value(0).toString();
-    if (name != QFileInfo(name).fileName() || !name.endsWith(".sqlite")) return {};
-    return m_directory + '/' + name;
+    const QString path = m_directory + '/' + name;
+    return ownedBiblePath(path,id) ? path : QString();
+}
+
+bool BibleBackend::ownedBiblePath(const QString &path, const QString &id) const
+{
+    // Registry contents are untrusted. Only our exact generation namespace (or
+    // NET's legacy root filename) can own text files. Inspect with lstat before
+    // SQLite opens anything: reject symlinks, hardlinks and non-regular files,
+    // including sidecars, and physical aliases of the personal store.
+    static const QRegularExpression generation("^bible-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.sqlite$");
+    const QFileInfo file(path);
+    if (file.absolutePath() != m_directory || path != m_directory + '/' + file.fileName()
+        || !(generation.match(file.fileName()).hasMatch() || (id == "net-2.1" && file.fileName() == "bible.sqlite"))) return false;
+    const QStringList suffixes{"","-wal","-shm","-journal"};
+    for (const auto &suffix : suffixes) {
+        struct stat candidate;
+        if (::lstat(QFile::encodeName(path+suffix).constData(),&candidate) != 0) {
+            if (errno == ENOENT) continue;
+            return false;
+        }
+        if (!S_ISREG(candidate.st_mode) || candidate.st_nlink != 1 || candidate.st_uid != ::geteuid()) return false;
+        for (const auto &reserved : suffixes) {
+            struct stat personal;
+            if (::stat(QFile::encodeName(m_directory+"/personal.sqlite"+reserved).constData(),&personal) == 0
+                && candidate.st_dev == personal.st_dev && candidate.st_ino == personal.st_ino) return false;
+        }
+    }
+    return true;
+}
+
+void BibleBackend::removeOwnedBibleFiles(const QString &path, const QString &id)
+{
+    // Recheck after commit too. If ownership has changed, leave an orphan rather
+    // than unlinking an unrelated database. Never follow aliases during cleanup.
+    if (!ownedBiblePath(path,id)) return;
+    for (const QString &suffix : {QString(""),QString("-wal"),QString("-shm"),QString("-journal")})
+        QFile::remove(path+suffix);
 }
 
 bool BibleBackend::readVersions(QVariantList *result)
@@ -408,12 +473,31 @@ bool BibleBackend::removeVersion(QString id, bool removeAnnotations)
 bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
                                 const QString &removedId, bool deleteAnnotations, bool startup)
 {
+    if (!m_storeReady) return setError("Your notes database is unavailable.");
     const QString path = importPath.isEmpty() ? installedPath(id) : importPath;
     if (!id.isEmpty() && path.isEmpty()) return setError("That Bible version is not installed.");
+    if (!id.isEmpty() && !ownedBiblePath(path,id)) return setError("Unsafe Bible database path.");
+    QString obsolete;
+    const QString obsoleteId = !removedId.isEmpty() ? removedId : !importPath.isEmpty() ? id : QString();
+    if (!obsoleteId.isEmpty()) {
+        QSqlQuery candidate(m_store);
+        candidate.prepare("SELECT path FROM installed WHERE version_id=?"); candidate.addBindValue(obsoleteId);
+        if (!candidate.exec()) return setError("Cannot inspect the Bible removal target: " + candidate.lastError().text());
+        if (candidate.next()) {
+            obsolete = m_directory + '/' + candidate.value(0).toString();
+            if (!ownedBiblePath(obsolete,obsoleteId)) return setError("Unsafe Bible removal target.");
+            if (QFileInfo::exists(obsolete) && !bibleIdentity(obsolete,obsoleteId))
+                return setError("The Bible removal target does not belong to this edition.");
+            // A valid generation belonging to another installed edition is also
+            // not ours to delete, even if a corrupt registry points at it.
+            candidate.finish();
+            candidate.prepare("SELECT COUNT(*) FROM installed WHERE path=? AND version_id<>?");
+            candidate.addBindValue(QFileInfo(obsolete).fileName()); candidate.addBindValue(obsoleteId);
+            if (!candidate.exec() || !candidate.next() || candidate.value(0).toInt()) return setError("Ambiguous Bible removal target.");
+        } else if (candidate.lastError().isValid() || !removedId.isEmpty()) return setError("Cannot find the Bible removal target.");
+    }
     QString validationError;
     if (!id.isEmpty() && !EpubImporter::validateDatabase(path,&validationError)) return setError(validationError);
-    const QString obsolete = !removedId.isEmpty() ? installedPath(removedId)
-        : !importPath.isEmpty() ? installedPath(id) : QString();
     const auto oldAnchor = endpoint(m_anchor), oldCursor = endpoint(m_cursor);
     // Stage using the ordinary SQL/reference readers with signals blocked. Keep
     // the old read-only connection open until commit; rollback restores every
@@ -527,10 +611,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     updateAnnotations();
     emit versionChanged(); emit versionsChanged(); emit readyChanged(); emit collectionChanged();
     emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
-    if (!obsolete.isEmpty() && obsolete != path) {
-        QFile::remove(obsolete);
-        for (const QString &suffix : {QString("-wal"),QString("-shm"),QString("-journal")}) QFile::remove(obsolete+suffix);
-    }
+    if (!obsolete.isEmpty() && obsolete != path) removeOwnedBibleFiles(obsolete,obsoleteId);
     return true;
 }
 void BibleBackend::closeBible()
@@ -556,7 +637,7 @@ QString BibleBackend::localPath(const QUrl &url)
 void BibleBackend::importEpub(QUrl file)
 {
     if (m_busy) { setError("An EPUB import is already running."); return; }
-    if (!m_store.isOpen()) { setError("Your notes database is unavailable. Check the data directory permissions."); return; }
+    if (!m_storeReady || !m_store.isOpen()) { setError("Your notes database is unavailable. Check the data directory permissions."); return; }
     const QString path = localPath(file);
     if (path.isEmpty()) return;
     if (!QFileInfo(path).isFile() || !QFileInfo(path).isReadable()) { setError("Cannot read the selected EPUB file."); return; }

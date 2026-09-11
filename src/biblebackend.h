@@ -153,6 +153,8 @@ private:
     bool changeVersion(const QString &id, const QString &importPath = {},
                        const QString &removedId = {}, bool deleteAnnotations = false, bool startup = false);
     QString installedPath(const QString &id) const;
+    bool ownedBiblePath(const QString &path, const QString &id = {}) const;
+    void removeOwnedBibleFiles(const QString &path, const QString &id = {});
     bool readVersions(QVariantList *versions);
     void closeBible();
     bool loadChapter();
@@ -186,6 +188,7 @@ private:
     QVector<Verse> m_keys{{0,0,0}};
     QString m_bibleConnection, m_storeConnection;
     QSqlDatabase m_bible, m_store;
+    bool m_storeReady = false;
     bool m_ready = false, m_busy = false, m_bookmarked = false, m_highlighted = false;
     int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0;
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
