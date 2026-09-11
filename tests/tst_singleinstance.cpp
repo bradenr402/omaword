@@ -254,6 +254,7 @@ private slots:
         QTest::addColumn<QByteArray>("mode");
         QTest::addColumn<bool>("success");
         QTest::newRow("own-pid-only") << QByteArray("ok") << true;
+        QTest::newRow("wayland-display-name-suffix") << QByteArray("suffix") << true;
         QTest::newRow("window-still-mapping") << QByteArray("mapping") << true;
         QTest::newRow("other-pid-only") << QByteArray("other") << false;
         QTest::newRow("malformed-clients") << QByteArray("malformed") << false;
@@ -272,6 +273,7 @@ private slots:
         Environment fake("SINGLEINSTANCE_FAKE_HYPRCTL", mode);
         Environment pid("SINGLEINSTANCE_TEST_PID", QByteArray::number(QCoreApplication::applicationPid()));
         Environment marker("SINGLEINSTANCE_TEST_MARKER", (dir.path() + "/mapped").toUtf8());
+        Environment display("SINGLEINSTANCE_TEST_DISPLAY", QGuiApplication::applicationDisplayName().toUtf8());
         QWindow window;
         window.setTitle("OmaWord · Window 2");
         window.showMinimized();
@@ -384,7 +386,8 @@ int main(int argc, char **argv)
             const qint64 pid = qEnvironmentVariable("SINGLEINSTANCE_TEST_PID").toLongLong();
             QJsonArray clients{QJsonObject{{"pid", pid + 1}, {"address", "0xbeef"}}};
             clients.append(QJsonObject{{"pid", pid}, {"title", "OmaWord · Window 1"}, {"address", "0xdef"}});
-            if (mode != "other") clients.append(QJsonObject{{"pid", pid}, {"title", "OmaWord · Window 2"}, {"address", mode == "injection" ? "0xabc\" }); malicious()" : "0xabc"}});
+            const QString title = QString("OmaWord · Window 2") + (mode == "suffix" ? QString(" — ") + qEnvironmentVariable("SINGLEINSTANCE_TEST_DISPLAY") : QString());
+            if (mode != "other") clients.append(QJsonObject{{"pid", pid}, {"title", title}, {"address", mode == "injection" ? "0xabc\" }); malicious()" : "0xabc"}});
             QTextStream(stdout) << QJsonDocument(clients).toJson(QJsonDocument::Compact) << Qt::endl;
             return 0;
         }

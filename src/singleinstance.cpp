@@ -1,5 +1,6 @@
 #include "singleinstance.h"
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFileInfo>
@@ -96,7 +97,11 @@ void focusHyprland(QObject *context, qint64 pid, QPointer<QWindow> window, Singl
             for (const auto &value : document.array()) {
                 const auto client = value.toObject();
                 if (client.value("pid").toInteger(-1) != pid) continue;
-                if (client.value("title").toString() != window->title()) continue;
+                const auto title = client.value("title").toString();
+                // Qt's Wayland platform can append the display name to the
+                // compositor title. The unique window suffix still scopes it.
+                if (title != window->title()
+                    && title != window->title() + QStringLiteral(" — ") + QGuiApplication::applicationDisplayName()) continue;
                 const auto candidate = client.value("address").toString();
                 if (QRegularExpression(QStringLiteral("^0x[0-9a-fA-F]+$")).match(candidate).hasMatch()) {
                     address = candidate; break;
