@@ -307,6 +307,7 @@ private slots:
         QVERIFY2(qmlWarnings.isEmpty(),qPrintable(qmlWarnings.join('\n')));
     }
     void referenceAliasesAndBrowsing() {
+        bible->setVersePicker(false); // Explicit legacy chapter-only browsing.
         reference("John3:16");
         QCOMPARE(bible->book(),43); QCOMPARE(bible->chapter(),3); QCOMPARE(bible->selectedStart(),16);
         QVERIFY(prop("reading", "contentY").toDouble() > 0);
@@ -336,6 +337,260 @@ private slots:
         key(Qt::Key_A, Qt::ControlModifier); type("Jn 4:2"); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette", "visible").toBool());
         QVERIFY(bible->error().isEmpty()); QCOMPARE(bible->chapter(),4);
+    }
+    void defaultVersePickerAndResume() {
+        QVERIFY(bible->versePicker());
+        reference("John 3:16-18");
+        bible->setNoteText("Browsing must preserve this range note");
+        bible->toggleBookmark();
+        QTest::qWait(450);
+        const auto collection = bible->collection();
+        const auto position = bible->readingPosition();
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("Matthew"); key(Qt::Key_Right);
+        type("17");
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Browse verses in Matthew 17"));
+        key(Qt::Key_Right);
+        QCOMPARE(window->property("paletteChapter").toInt(),17);
+        QCOMPARE(prop("referenceInput","placeholderText").toString(),QString::fromUtf8("Matthew 17 — verse number"));
+        QCOMPARE(prop("paletteResults","count").toInt(),26);
+        type("2");
+        QCOMPARE(prop("paletteResults","count").toInt(),8); // 2,20,22..27, never 21.
+        key(Qt::Key_Down); key(Qt::Key_Down);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 17:22"));
+        const int index = prop("paletteResults","currentIndex").toInt();
+        capture("phase-b-verse-picker");
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        key(Qt::Key_Space,Qt::ShiftModifier);
+        QVERIFY(!prop("passagePalette","visible").toBool());
+        key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QCOMPARE(window->property("paletteChapter").toInt(),17);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("2"));
+        QCOMPARE(prop("paletteResults","currentIndex").toInt(),index);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 17:22"));
+        key(Qt::Key_Left);
+        QCOMPARE(window->property("paletteChapter").toInt(),0);
+        QCOMPARE(window->property("paletteBook").toInt(),40);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Browse verses in Matthew 17"));
+        key(Qt::Key_Right);
+        key(Qt::Key_Up);
+        QVERIFY(item("paletteBack")->hasActiveFocus());
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Browse chapters in Matthew"));
+        key(Qt::Key_Return); key(Qt::Key_Left);
+        QCOMPARE(window->property("paletteBook").toInt(),0);
+        QCOMPARE(navigation.count(),0); QCOMPARE(selection.count(),0);
+        QCOMPARE(bible->readingPosition(),position);
+        QCOMPARE(bible->collection(),collection);
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
+        type("Matthew"); key(Qt::Key_Return); type("17"); key(Qt::Key_Return);
+        type("21"); key(Qt::Key_Return);
+        QVERIFY(prop("passagePalette","visible").toBool());
+        QCOMPARE(navigation.count(),0);
+        key(Qt::Key_A,Qt::ControlModifier); type("22"); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("Matthew 17:22"));
+        reference("John 4"); QCOMPARE(bible->selectedStart(),0);
+        reference("John 3:16-18"); QCOMPARE(bible->selectedEnd(),18);
+        // Explicit entry shortcuts reset mode and all picker context.
+        key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("headings"); key(Qt::Key_Escape);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
+        key(Qt::Key_K,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString());
+        QCOMPARE(window->property("paletteBook").toInt(),0);
+        QCOMPARE(window->property("paletteChapter").toInt(),0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("verse picker"); key(Qt::Key_Return);
+        QTRY_VERIFY(!bible->versePicker());
+        unloadUi(); loadUi();
+        QVERIFY(!bible->versePicker());
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John"); key(Qt::Key_Return); type("3"); key(Qt::Key_Right);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->passage(),QString("John 3")); QCOMPARE(bible->selectedStart(),0);
+        QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
+    }
+    void notesOverlayDismissalAndSaveFailure() {
+        reference("John 3:16-18");
+        const auto width = item("reading")->width();
+        const auto height = item("verseBody16")->height();
+        const auto position = prop("reading","contentY");
+        key(Qt::Key_N,Qt::ControlModifier);
+        QVERIFY(prop("notesDrawer","visible").toBool());
+        QVERIFY(prop("notesDrawer","position").toDouble() < 1);
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        QCOMPARE(prop("notesDrawer","edge").toInt(),int(Qt::RightEdge));
+        QCOMPARE(item("reading")->width(),width);
+        QCOMPARE(item("verseBody16")->height(),height);
+        QCOMPARE(prop("reading","contentY"),position);
+        type("A guarded draft");
+        capture("phase-b-notes-editor");
+        key(Qt::Key_N,Qt::ControlModifier);
+        QVERIFY(prop("notesDrawer","visible").toBool()); // Exit animates too.
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QCOMPARE(bible->noteText(),QString("A guarded draft"));
+        key(Qt::Key_N); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        click(item("previewButton"));
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        QVERIFY(!window->property("notePreview").toBool());
+        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        key(Qt::Key_Left,Qt::AltModifier); key(Qt::Key_Right,Qt::AltModifier);
+        QCOMPARE(bible->chapter(),3);
+        QVERIFY(prop("notesDrawer","opened").toBool());
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-note-failure");
+            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QVERIFY(query.exec("CREATE TRIGGER reject_note BEFORE INSERT ON annotations BEGIN SELECT RAISE(FAIL,'test note failure'); END"));
+            type(" unsaved");
+            const auto draft = prop("noteEditor","text").toString();
+            QVERIFY(draft != bible->noteText());
+            for (int dismissal = 0; dismissal < 5; ++dismissal) {
+                if (dismissal == 0) key(Qt::Key_Escape);
+                if (dismissal == 1) key(Qt::Key_N,Qt::ControlModifier);
+                if (dismissal == 2) QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,QPoint(30,200));
+                if (dismissal == 3) click(item("notesClose"));
+                if (dismissal == 4) { key(Qt::Key_F1); QVERIFY(!prop("helpDialog","visible").toBool()); }
+                QTest::qWait(250);
+                QVERIFY(prop("notesDrawer","opened").toBool());
+                QCOMPARE(prop("noteEditor","text").toString(),draft);
+                QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
+            }
+            QVERIFY(query.exec("DROP TRIGGER reject_note"));
+            QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,QPoint(30,200));
+            QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+            QCOMPARE(bible->noteText(),draft);
+        }
+        QSqlDatabase::removeDatabase("ui-note-failure");
+        key(Qt::Key_N); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QCOMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),18);
+    }
+    void actionableKeybindingsAndPreferences() {
+        reference("John 3:16");
+        const auto action = [this](const QString &query) {
+            key(Qt::Key_F1);
+            QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+            type(query);
+            QTRY_COMPARE(prop("keybindingResults","count").toInt(),1);
+            key(Qt::Key_Return);
+            QTRY_VERIFY(!prop("helpDialog","visible").toBool());
+        };
+        action("write a note");
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("Saved before dispatch");
+        action("open a passage");
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John 4:2"); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(saved(16).value("note").toString(),QString("Saved before dispatch"));
+        key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        action("previous chapter"); QCOMPARE(bible->chapter(),3);
+        action("next chapter"); QCOMPARE(bible->chapter(),4);
+        action("open commands");
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
+        type("line height"); key(Qt::Key_Return);
+        QTRY_VERIFY(prop("settingsDialog","opened").toBool());
+        QTRY_VERIFY(item("lineHeightSlider")->hasActiveFocus());
+        QCOMPARE(bible->lineHeight(),1.5);
+        QCOMPARE(prop("lineHeightSlider","from").toDouble(),1.0);
+        QCOMPARE(prop("lineHeightSlider","to").toDouble(),3.0);
+        QCOMPARE(prop("lineHeightSlider","stepSize").toDouble(),0.1);
+        key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),1.6);
+        capture("phase-b-line-height");
+        for (int i = 0; i < 30; ++i) key(Qt::Key_BracketRight,Qt::ControlModifier);
+        QCOMPARE(bible->lineHeight(),3.0);
+        for (int i = 0; i < 30; ++i) key(Qt::Key_BracketLeft,Qt::ControlModifier);
+        QCOMPARE(bible->lineHeight(),1.0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
+        key(Qt::Key_BracketRight,Qt::ControlModifier); QCOMPARE(bible->lineHeight(),1.1);
+        key(Qt::Key_R); QVERIFY(!bible->showVerseNumbers());
+        key(Qt::Key_T); QVERIFY(!bible->showHeadings());
+        action("reading settings");
+        QTRY_VERIFY(prop("settingsDialog","opened").toBool());
+        QTest::qWait(100); // Polish the newly visible settings layout before mouse input.
+        QVERIFY(prop("settingnumbers","text").toString().contains("Off"));
+        QVERIFY(prop("settingheadings","text").toString().contains("Off"));
+        QVERIFY(prop("settingversePicker","text").toString().contains("On"));
+        capture("phase-b-settings");
+        click(item("settingversePicker")); QVERIFY(!bible->versePicker());
+        click(item("settingfocus"));
+        QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
+        QVERIFY(bible->focusMode());
+        reference("John 4:2");
+        key(Qt::Key_N); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        QVERIFY(bible->focusMode());
+        capture("phase-b-focused-notes");
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QVERIFY(bible->focusMode());
+        key(Qt::Key_F); QVERIFY(!bible->focusMode());
+        key(Qt::Key_N); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        action("focus mode");
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QVERIFY(bible->focusMode());
+        key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
+        const auto search = item("keybindingSearch");
+        const auto close = item("keybindingsClose");
+        QCOMPARE(search->height(),close->height());
+        QCOMPARE(search->mapToScene(QPointF()).y(),close->mapToScene(QPointF()).y());
+        type("chapter");
+        QCOMPARE(prop("keybindingResults","count").toInt(),4);
+        key(Qt::Key_Down); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),1);
+        key(Qt::Key_Up); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
+        capture("phase-b-keybindings-focused");
+        key(Qt::Key_A,Qt::ControlModifier); type("Shift Click");
+        QCOMPARE(prop("keybindingResults","count").toInt(),1);
+        QVERIFY(!item("keybindingSelect a range")->isEnabled());
+        const auto selected = bible->selectionReference();
+        key(Qt::Key_Return);
+        QVERIFY(prop("helpDialog","opened").toBool());
+        QCOMPARE(bible->selectionReference(),selected);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
+        unloadUi(); loadUi();
+        QVERIFY(bible->focusMode()); QVERIFY(!window->property("notesOpen").toBool());
+        QVERIFY(!bible->showVerseNumbers()); QVERIFY(!bible->showHeadings());
+        QVERIFY(!bible->versePicker()); QCOMPARE(bible->lineHeight(),1.1);
+        key(Qt::Key_F); QVERIFY(!bible->focusMode());
+        key(Qt::Key_R); key(Qt::Key_T);
+        QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings());
+    }
+    void settingsSmallAndDynamicCommandHints() {
+        window->resize(640,480);
+        QVERIFY(desktop->setProperty("textScale",1.8));
+        key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        type("verse picker");
+        QTRY_VERIFY(item("paletteHintversePicker"));
+        QCOMPARE(prop("paletteHintversePicker","text").toString(),QString("On"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QVERIFY(!bible->versePicker());
+        key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> verse picker"));
+        QTRY_COMPARE(prop("paletteHintversePicker","text").toString(),QString("Off"));
+        key(Qt::Key_A,Qt::ControlModifier); type("> reading settings"); key(Qt::Key_Return);
+        QTRY_VERIFY(prop("settingsDialog","opened").toBool());
+        QVERIFY(prop("settingsDialog","height").toDouble() <= 432);
+        capture("phase-b-settings-scaled");
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
+        key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        type("show verse numbers");
+        QTRY_COMPARE(prop("paletteHintnumbers","text").toString(),QString("On · r"));
+        key(Qt::Key_Return); QTRY_VERIFY(!bible->showVerseNumbers());
+        key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QTRY_COMPARE(prop("paletteHintnumbers","text").toString(),QString("Off · r"));
     }
     void referencePreviewIsPure() {
         reference("John 3:16");
@@ -372,6 +627,7 @@ private slots:
         QCOMPARE(bible->passage(),QString("Revelation 4"));
     }
     void rightArrowBrowsingAndEditing() {
+        bible->setVersePicker(false);
         reference("John 3:16");
         key(Qt::Key_K,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
@@ -483,11 +739,11 @@ private slots:
             QVERIFY(QRectF(16,16,608,448).contains(hints->mapRectToScene(hints->boundingRect())));
             const auto text = hints->property("text").toString();
             if (mode == "commands") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    ↵ run command    Esc close"));
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    → / ↵ select    Esc close"));
                 QVERIFY(!item("paletteBack")->isVisible());
             } else if (mode == "chapters") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose · ↑ first row to back    ← all books    ↵ open / back    Esc close"));
-            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    → enter book    ↵ open    Esc close"));
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    → / ↵ select    ← back    Esc close"));
+            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    → / ↵ select    Esc close"));
         }
     }
     void normalVisualAndShiftedSelection() {
@@ -532,6 +788,7 @@ private slots:
         QCOMPARE(bible->selectedStart(),1); QCOMPARE(bible->selectedEnd(),2);
     }
     void palettePreviewMatchesAcceptance() {
+        bible->setVersePicker(false);
         reference("Genesis 1:1");
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
         key(Qt::Key_K,Qt::ControlModifier);
@@ -655,10 +912,11 @@ private slots:
         type(note);
         QCOMPARE(bible->noteText(),note);
         key(Qt::Key_Escape);
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(window->property("verseMode").toBool());
         key(Qt::Key_Escape);
         QVERIFY(!window->property("verseMode").toBool());
-        QVERIFY(window->property("notesOpen").toBool());
+        QVERIFY(!window->property("notesOpen").toBool());
         QVERIFY(!bible->crossChapterSelection());
         QCOMPARE(bible->selectedStart(),bible->cursorVerse());
         QCOMPARE(bible->selectedEnd(),bible->cursorVerse());
@@ -678,6 +936,8 @@ private slots:
         QVERIFY(bible->crossChapterSelection());
         QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->selectionBookmarked());
         QCOMPARE(prop("noteEditor","text").toString(),note);
+        key(Qt::Key_N,Qt::ControlModifier);
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),copied);
         reference("John 3:36"); QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->noteText().isEmpty());
         reference("John 4:1"); QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->noteText().isEmpty());
@@ -714,7 +974,7 @@ private slots:
         QVERIFY(!bible->noteText().endsWith('!'));
         key(Qt::Key_A, Qt::ControlModifier); type(first);
         key(Qt::Key_Escape);
-        QTRY_VERIFY(!item("noteEditor")->hasActiveFocus());
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_J); QCOMPARE(bible->selectedStart(),17);
         QCOMPARE(prop("noteEditor", "text").toString(),QString());
         key(Qt::Key_N, Qt::ControlModifier);
@@ -923,6 +1183,7 @@ private slots:
         key(Qt::Key_N,Qt::ControlModifier);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         bible->setFocusMode(true);
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         for (const auto name : {"editionLabel","readingBottomFade","readerScrollbar","notesPanel","modeControl","passageControl","floatingActions","bookmarkMarker1","toast"})
             QVERIFY2(!item(name)->isVisible(),name);
@@ -962,7 +1223,7 @@ private slots:
         QTRY_VERIFY(bar->property("hovered").toBool());
         QTRY_COMPARE(thumb->width(),6.0);
         QTest::mouseMove(window,QPoint(2,2));
-        key(Qt::Key_Space);
+        key(Qt::Key_PageDown);
         QTRY_VERIFY(thumb->opacity() >= 0.49);
         QTest::qWait(1400);
         QTRY_VERIFY(thumb->opacity() <= 0.21);
@@ -1026,14 +1287,11 @@ private slots:
         key(Qt::Key_L,Qt::ControlModifier);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         click(item("notesControl"));
-        QTRY_VERIFY(item("notesPanel")->isVisible());
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(prop("notesPanel","color"),desktop->property("background"));
         QVERIFY(prop("noteEditor","placeholderText").toString().isEmpty());
-        if (size.width() >= 1080) {
-            QCOMPARE(item("reading")->width(),size.width() - prop("notesPanel","width").toDouble());
-            QCOMPARE(passage->x() + passage->width() / 2,item("reading")->width() / 2);
-        }
-        key(Qt::Key_N,Qt::ControlModifier);
+        QCOMPARE(item("reading")->width(),double(size.width()));
+        QCOMPARE(passage->x() + passage->width() / 2,size.width() / 2.0);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("20g 12345 remains note text");
         QCOMPARE(bible->noteText(),QString("20g 12345 remains note text"));
@@ -1048,50 +1306,37 @@ private slots:
         const auto background = qvariant_cast<QQuickItem *>(close->property("background"));
         QVERIFY(background->property("color").value<QColor>().alpha() > 0);
         click(close);
-        QVERIFY(!window->property("notesOpen").toBool());
+        QTRY_VERIFY(!window->property("notesOpen").toBool());
         QCOMPARE(bible->noteText(),QString("20g 12345 remains note text"));
     }
     void scaledNotesLayout_data() {
         QTest::addColumn<int>("width");
         QTest::addColumn<double>("scale");
-        QTest::addColumn<bool>("alongside");
-        QTest::newRow("1080-scaled") << 1080 << 1.8 << false;
-        QTest::newRow("1120-scaled") << 1120 << 1.8 << false;
-        QTest::newRow("1120-triple") << 1120 << 3.0 << false;
-        QTest::newRow("1600-scaled") << 1600 << 1.8 << true;
-        QTest::newRow("1920-triple") << 1920 << 3.0 << true;
+        QTest::newRow("1080-scaled") << 1080 << 1.8;
+        QTest::newRow("1120-scaled") << 1120 << 1.8;
+        QTest::newRow("1120-triple") << 1120 << 3.0;
+        QTest::newRow("1600-scaled") << 1600 << 1.8;
+        QTest::newRow("1920-triple") << 1920 << 3.0;
     }
     void scaledNotesLayout() {
-        QFETCH(int,width); QFETCH(double,scale); QFETCH(bool,alongside);
+        QFETCH(int,width); QFETCH(double,scale);
         reference("John 3:16");
         window->resize(width,900);
         QVERIFY(desktop->setProperty("textScale",scale));
         key(Qt::Key_N,Qt::ControlModifier);
-        QTRY_VERIFY(item("notesPanel")->isVisible());
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QTest::qWait(100);
-        QCOMPARE(window->property("wideLayout").toBool(),alongside);
         auto passage = item("passageControl");
         QVERIFY(passage->width() > 0);
-        QCOMPARE(passage->isVisible(),alongside);
-        QCOMPARE(item("floatingActions")->isVisible(),alongside);
-        QCOMPARE(item("modeControl")->isVisible(),alongside);
-        QCOMPARE(item("reading")->width(),alongside ? width - item("notesPanel")->width() : width);
-        if (alongside) {
-            const auto bounds = passage->mapRectToScene(QRectF(0,0,passage->width(),passage->height()));
-            auto mode = item("modeControl");
-            QVERIFY(bounds.left() > mode->x() + mode->width());
-            QVERIFY(bounds.right() < item("floatingActions")->x());
-            QVERIFY(item("floatingActions")->x() + item("floatingActions")->width() < item("notesPanel")->x());
-        }
-        // Switching scale live must restore the full reader and hide controls
-        // behind overlay notes, rather than squeeze them into a negative width.
+        QCOMPARE(item("reading")->width(),double(width));
+        QCOMPARE(item("notesPanel")->mapToScene(QPointF()).x(),width - item("notesPanel")->width());
+        // Switching scale live keeps the reader's geometry intact.
         window->resize(1120,900);
         QVERIFY(desktop->setProperty("textScale",1.0));
-        QTRY_VERIFY(window->property("wideLayout").toBool());
+        QTRY_COMPARE(item("reading")->width(),1120.0);
         QVERIFY(desktop->setProperty("textScale",3.0));
-        QTRY_VERIFY(!window->property("wideLayout").toBool());
+        QTRY_COMPARE(item("reading")->width(),1120.0);
         QVERIFY(passage->width() >= 0);
-        QVERIFY(!passage->isVisible());
     }
     void countedVerseAndCancellation() {
         reference("John 3:16");
@@ -1112,6 +1357,7 @@ private slots:
             type("20"); QCOMPARE(window->property("verseCount").toString(),QString("20"));
             key(action);
             QVERIFY(window->property("verseCount").toString().isEmpty());
+            if (action == Qt::Key_Space) { key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool()); }
         }
         type("20"); key(Qt::Key_Escape);
         QVERIFY(window->property("verseMode").toBool());
@@ -1130,6 +1376,7 @@ private slots:
         QVERIFY(window->property("verseCount").toString().isEmpty());
         type("20g 123"); QCOMPARE(bible->noteText(),QString("20g 123"));
         key(Qt::Key_Escape);
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         type("20"); item("passageControl")->forceActiveFocus(Qt::TabFocusReason);
         QVERIFY(window->property("verseCount").toString().isEmpty());
         item("readerSurface")->forceActiveFocus();
@@ -1138,21 +1385,34 @@ private slots:
         key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
     }
     void fiveAndTenVerseMovement() {
-        reference("John 3:34");
-        key(Qt::Key_D,Qt::ControlModifier);
-        QCOMPARE(bible->selectionReference(),QString("John 4:3"));
-        QVERIFY(!bible->selectionBookmarked());
-        key(Qt::Key_U,Qt::ControlModifier);
-        QCOMPARE(bible->selectionReference(),QString("John 3:34"));
-        key(Qt::Key_PageDown); QCOMPARE(bible->selectionReference(),QString("John 4:8"));
-        key(Qt::Key_PageUp); QCOMPARE(bible->selectionReference(),QString("John 3:34"));
-        key(Qt::Key_V); key(Qt::Key_D,Qt::ControlModifier);
-        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:34–4:3"));
-        QVERIFY(window->property("verseMode").toBool());
-        key(Qt::Key_PageDown); QCOMPARE(bible->cursorVerse(),13);
-        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:34–4:13"));
-        key(Qt::Key_PageUp); key(Qt::Key_U,Qt::ControlModifier);
-        QCOMPARE(bible->selectionReference(),QString("John 3:34"));
+        for (bool visual : {false,true}) {
+            for (auto forward : {Qt::Key_D,Qt::Key_F,Qt::Key_PageDown}) {
+                const auto backward = forward == Qt::Key_D ? Qt::Key_U : forward == Qt::Key_F ? Qt::Key_B : Qt::Key_PageUp;
+                const auto modifiers = forward == Qt::Key_PageDown ? Qt::NoModifier : Qt::ControlModifier;
+                const int step = forward == Qt::Key_D ? 5 : 10;
+                reference("John 3:34");
+                if (visual) key(Qt::Key_V);
+                key(forward,modifiers);
+                QCOMPARE(bible->chapter(),3); QCOMPARE(bible->cursorVerse(),36);
+                key(forward,modifiers);
+                QCOMPARE(bible->chapter(),4); QCOMPARE(bible->cursorVerse(),1);
+                QCOMPARE(bible->crossChapterSelection(),visual);
+                QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
+                QVERIFY(item("chapterTitle")->mapToScene(QPointF()).y() >= 0);
+                key(forward,modifiers); QCOMPARE(bible->cursorVerse(),1 + step);
+                key(backward,modifiers); QCOMPARE(bible->cursorVerse(),1);
+                key(backward,modifiers);
+                QCOMPARE(bible->chapter(),3); QCOMPARE(bible->cursorVerse(),36);
+                key(backward,modifiers); QCOMPARE(bible->cursorVerse(),36 - step);
+                QCOMPARE(window->property("verseMode").toBool(),visual);
+            }
+        }
+        reference("Matthew 17:20");
+        key(Qt::Key_D,Qt::ControlModifier); QCOMPARE(bible->cursorVerse(),26);
+        key(Qt::Key_U,Qt::ControlModifier); QCOMPARE(bible->cursorVerse(),20);
+        reference("John 3");
+        key(Qt::Key_F,Qt::ControlModifier); QCOMPARE(bible->cursorVerse(),11);
+        key(Qt::Key_B,Qt::ControlModifier); QCOMPARE(bible->cursorVerse(),1);
         key(Qt::Key_M,Qt::ControlModifier); QVERIFY(bible->selectionBookmarked());
         key(Qt::Key_Home); QCOMPARE(bible->cursorVerse(),1);
         key(Qt::Key_End); QCOMPARE(bible->cursorVerse(),36);
@@ -1196,15 +1456,16 @@ private slots:
     void normalScrollingAndChapterNavigation() {
         reference("John 3");
         const double before = prop("reading","contentY").toDouble();
-        key(Qt::Key_Space);
-        QVERIFY(prop("reading","contentY").toDouble() > before);
+        key(Qt::Key_Space,Qt::ShiftModifier);
+        QCOMPARE(prop("reading","contentY").toDouble(),before);
+        QVERIFY(!prop("passagePalette","visible").toBool());
         QCOMPARE(bible->selectedStart(),0);
         key(Qt::Key_F,Qt::ControlModifier);
         const double paged = prop("reading","contentY").toDouble();
         key(Qt::Key_B,Qt::ControlModifier);
         QVERIFY(prop("reading","contentY").toDouble() < paged);
         key(Qt::Key_Right,Qt::AltModifier);
-        QTRY_COMPARE(bible->chapter(),4);
+        QCOMPARE(bible->chapter(),3);
         key(Qt::Key_Left,Qt::AltModifier);
         QTRY_COMPARE(bible->chapter(),3);
         key(Qt::Key_BracketRight); QCOMPARE(bible->chapter(),4);
@@ -1217,7 +1478,7 @@ private slots:
     }
     void positionSurvivesRestart() {
         reference("Psalm 119");
-        key(Qt::Key_Space); key(Qt::Key_Space);
+        QVERIFY(QMetaObject::invokeMethod(window,"scrollBy",Q_ARG(QVariant,900)));
         QTRY_VERIFY(bible->readingPosition() > 0);
         const double position = bible->readingPosition();
         unloadUi(); loadUi();
@@ -1228,7 +1489,7 @@ private slots:
     }
     void positionWithSelectionSurvivesRestart() {
         reference("Psalm 119:16");
-        key(Qt::Key_Space); key(Qt::Key_Space);
+        QVERIFY(QMetaObject::invokeMethod(window,"scrollBy",Q_ARG(QVariant,900)));
         QTest::qWait(450);
         const double position = bible->readingPosition();
         QVERIFY(position > 0);
@@ -1263,11 +1524,11 @@ private slots:
         const int total = prop("keybindingResults","count").toInt();
         QVERIFY(total > 10);
         capture("help");
-        for (const auto &query : {QString("m"),QString("x"),QString("bookmark"),QString("Ctrl+H"),QString("Shift+Down")}) {
+        for (const auto &query : {QString("m"),QString("x"),QString("bookmark"),QString("Ctrl H"),QString("Shift Down")}) {
             key(Qt::Key_A,Qt::ControlModifier); type(query);
             QTRY_COMPARE(prop("keybindingResults","count").toInt(),1);
             const QString action = query == "m" || query == "bookmark" ? "Bookmark selection"
-                : query == "Shift+Down" ? "Enter visual mode and extend" : "Highlight selection";
+                : query == "Shift Down" ? "Extend to next verse" : "Highlight selection";
             QTRY_VERIFY(item(qPrintable("keybinding" + action)));
             QCOMPARE(bible->selectionReference(),QString("John 3:16"));
             QVERIFY(!bible->selectionBookmarked()); QVERIFY(!bible->selectionHighlighted());
@@ -1637,7 +1898,7 @@ private slots:
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QTRY_VERIFY(item("verseNumber16")->mapToItem(item("reading"),QPointF()).y() >= 0);
         QTRY_VERIFY(item("verseNumber16")->mapToItem(item("reading"),QPointF()).y() <= window->property("readerLineHeight").toDouble() * 3 + 1);
-        QVERIFY(!window->property("wideLayout").toBool());
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         auto panel = item("notesPanel");
         QVERIFY(panel->isVisible());
         const QRectF panelBounds(panel->mapToScene(QPointF()),QSizeF(panel->width(),panel->height()));

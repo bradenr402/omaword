@@ -32,7 +32,7 @@ ApplicationWindow {
     palette.toolTipBase: desktop.surface
     palette.toolTipText: desktop.foreground
 
-    property bool notesOpen: false
+    readonly property bool notesOpen: notesDrawer.visible
     onNotesOpenChanged: clearCount()
     property bool notePreview: false
     property bool syncingNote: true
@@ -47,36 +47,40 @@ ApplicationWindow {
     onActiveFocusItemChanged: clearCount()
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
-    property bool wideLayout: width >= 1080 && width - notesWidth >= Math.max(640, 480 * controlScale)
     property real readerSize: 19
     property int selectionAnchor: 0
     property bool movingSelection: false
     property int collectionTab: 0
     property int paletteBook: 0
+    property int paletteChapter: 0
     property string paletteBookName: ""
     property bool paletteArrowUsed: false
     readonly property var paletteDestination: {
         let query = referenceInput.text.trim()
         let entry = paletteResults.model[paletteResults.currentIndex]
         if (entry && (paletteArrowUsed || !query || query.startsWith(">")
+                || (paletteBook > 0 && /^\d+$/.test(query))
                 || (paletteBook === 0 && !/\d/.test(query)))) {
             return { entry: entry, reference: entry.chapter ? entry.title : "" }
         }
-        return { entry: null, reference: paletteBook > 0 ? paletteBookName + " " + query : query }
+        return { entry: null, reference: paletteBook > 0 && /^[\d:\s–-]+$/.test(query)
+            ? paletteBookName + " " + (paletteChapter > 0 && !query.includes(":") ? paletteChapter + ":" : "") + query : query }
     }
     readonly property var paletteResolution: {
         // Relative references depend on the current book, even though the resolver is pure.
         let currentBook = bible.book
         let ready = bible.ready
         let destination = paletteDestination
+        if (destination.entry && destination.entry.chapter && !destination.entry.verse && bible.versePicker)
+            return { valid: true, reference: "Browse verses in " + destination.entry.title }
         if (destination.entry && !destination.reference)
             return { valid: true, reference: destination.entry.book ? "Browse " + destination.entry.title : destination.entry.title }
         return bible.resolveReference(destination.reference)
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: passagePalette.opened || savedDrawer.opened || helpDialog.opened || aboutDialog.opened || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
-    readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !textInputActive()
+    readonly property bool modalOpen: passagePalette.visible || savedDrawer.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
@@ -84,7 +88,11 @@ ApplicationWindow {
     readonly property real verseGutter: 40 * scale
     readonly property bool observedFocusMode: bible.focusMode
     onObservedFocusModeChanged: {
-        if (observedFocusMode) { flushNote(); readerFocus() }
+        if (observedFocusMode) {
+            if (!closeNotes()) { bible.setFocusMode(false); return }
+            passagePalette.close(); savedDrawer.close(); helpDialog.close(); settingsDialog.close(); aboutDialog.close()
+            readerFocus()
+        }
     }
     readonly property real controlScale: Math.min(scale, 1.4)
     FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.scale }
@@ -266,7 +274,8 @@ ApplicationWindow {
         positionTimer.stop()
         restoringPosition = true
         movingSelection = true
-        bible.moveSelection(delta, extend)
+        if (Math.abs(delta) > 1) bible.moveByVerses(delta, extend)
+        else bible.moveSelection(delta, extend)
         movingSelection = false
         syncNote()
         selectionAnchor = bible.crossChapterSelection ? 0
@@ -319,28 +328,41 @@ ApplicationWindow {
         if (!flushNote()) return
         savePosition()
         bible.openChapter(book, chapter)
+        positionTimer.stop()
+        reading.contentY = 0
+        restoringPosition = false
+        savePosition()
         passagePalette.close()
         readerFocus()
     }
-    function openPalette(commands) {
+    function openPalette(commands, resume) {
         clearCount()
         if (!flushNote()) return
-        paletteBook = 0
-        paletteBookName = ""
-        referenceInput.text = commands || !bible.ready ? "> " : ""
-        paletteArrowUsed = false
+        if (!resume) {
+            resetBooks()
+            referenceInput.text = commands || !bible.ready ? "> " : ""
+        }
         passagePalette.open()
         referenceInput.forceActiveFocus()
     }
     function openNotes(focusEditor) {
         clearCount()
-        if (bible.focusMode) bible.setFocusMode(false)
-        notesOpen = true
+        notesDrawer.focusEditor = focusEditor
+        notesDrawer.open()
         if (loadedNoteReference !== bible.selectionReference) syncNote()
         if (focusEditor && hasSelection) {
             notePreview = false
-            Qt.callLater(function() { noteEditor.forceActiveFocus() })
+            if (notesDrawer.opened) noteEditor.forceActiveFocus()
         }
+    }
+    function closeNotes() {
+        if (!flushNote()) return false
+        notesDrawer.close()
+        return true
+    }
+    function toggleNotes() {
+        if (notesOpen) closeNotes()
+        else openNotes(true)
     }
     function requestRestore(file) {
         if (!flushNote()) return
@@ -426,57 +448,94 @@ ApplicationWindow {
         savePosition()
         if (bible.navigate(reference)) { syncNote(); readerFocus() }
     }
-    readonly property var keybindings: [
-        { action: "Open a passage", keys: "Ctrl+K" },
-        { action: "Open commands", keys: "Ctrl+Shift+P" },
-        { action: "Saved passages", keys: "Ctrl+L" },
-        { action: "Previous / next chapter", keys: "h / l · Left / Right · [ / ] · Alt+Left / Alt+Right" },
-        { action: "Move verse (extend in visual mode)", keys: "j / k · Down / Up" },
-        { action: "Toggle visual selection (anchor / collapse)", keys: "v" },
-        { action: "Enter visual mode and extend", keys: "J / K · Shift+Down / Shift+Up" },
-        { action: "Select verse / extend range", keys: "Click number / Shift-click" },
-        { action: "Select chapter beginning / end", keys: "g / G · Home / End" },
-        { action: "Go to verse number", keys: "number then g (e.g. 20g)" },
-        { action: "Move five verses (extend in visual mode)", keys: "Ctrl+D / Ctrl+U" },
-        { action: "Move ten verses (extend in visual mode)", keys: "PageDown / PageUp" },
-        { action: "Page down / up", keys: "Space / Shift+Space · Ctrl+F / Ctrl+B" },
-        { action: "Bookmark selection", keys: "m · Ctrl+M" },
-        { action: "Highlight selection", keys: "x · Ctrl+H" },
-        { action: "Write a note", keys: "n · Ctrl+N" },
-        { action: "Toggle notes", keys: "Ctrl+Shift+N" },
-        { action: "Copy passage (or chapter)", keys: "y · Ctrl+Shift+C" },
-        { action: "Larger / smaller / reset text", keys: "Ctrl++ / Ctrl+− / Ctrl+0" },
-        { action: "Leave editor / exit visual / close notes / collapse range", keys: "Esc" },
-        { action: "Keybindings", keys: "? · F1" }
+    // One action catalog supplies shortcuts, searchable keybindings, and commands.
+    // Context-only gestures are explanatory rows, never executable guesses.
+    readonly property var actions: [
+        { id: "books", title: "Open a passage", keys: "Ctrl K", sequences: ["Ctrl+K"], scope: "palette", command: true },
+        { id: "commands", title: "Open commands", keys: "Ctrl Shift P", sequences: ["Ctrl+Shift+P"], scope: "palette" },
+        { id: "resume", title: "Resume last palette", keys: "Space", sequences: ["Space"] },
+        { id: "saved", title: "Saved passages", keys: "Ctrl L", sequences: ["Ctrl+L"], command: true },
+        { id: "previousChapter", title: "Previous chapter", keys: "h · Left · [", sequences: ["H", "Left", "["] },
+        { id: "nextChapter", title: "Next chapter", keys: "l · Right · ]", sequences: ["L", "Right", "]"] },
+        { id: "previousVerse", title: "Previous verse", keys: "k · Up", sequences: ["K", "Up"] },
+        { id: "nextVerse", title: "Next verse", keys: "j · Down", sequences: ["J", "Down"] },
+        { id: "visual", title: "Toggle visual selection", keys: "v", sequences: ["V"] },
+        { id: "extendPrevious", title: "Extend to previous verse", keys: "Shift K · Shift Up", sequences: ["Shift+K", "Shift+Up"] },
+        { id: "extendNext", title: "Extend to next verse", keys: "Shift J · Shift Down", sequences: ["Shift+J", "Shift+Down"] },
+        { id: "first", title: "Select chapter beginning", keys: "g · Home", sequences: ["G", "Home"] },
+        { id: "last", title: "Select chapter end", keys: "Shift G · End", sequences: ["Shift+G", "End"] },
+        { id: "previousFive", title: "Previous five verses", keys: "Ctrl U", sequences: ["Ctrl+U"] },
+        { id: "nextFive", title: "Next five verses", keys: "Ctrl D", sequences: ["Ctrl+D"] },
+        { id: "previousTen", title: "Previous ten verses", keys: "Ctrl B · PageUp", sequences: ["Ctrl+B", "PgUp"] },
+        { id: "nextTen", title: "Next ten verses", keys: "Ctrl F · PageDown", sequences: ["Ctrl+F", "PgDown"] },
+        { id: "bookmark", title: "Bookmark selection", keys: "m · Ctrl M", sequences: ["M", "Ctrl+M"], command: true },
+        { id: "highlight", title: "Highlight selection", keys: "x · Ctrl H", sequences: ["X", "Ctrl+H"], command: true },
+        { id: "notes", title: "Write a note", keys: "n", sequences: ["N"], scope: "notes", command: true },
+        { id: "toggleNotes", title: "Toggle notes", keys: "Ctrl N", sequences: ["Ctrl+N"], scope: "global", command: true },
+        { id: "copy", title: "Copy passage", keys: "y · Ctrl Shift C", sequences: ["Y", "Ctrl+Shift+C"], command: true },
+        { id: "copyText", title: "Copy selected text", keys: "Ctrl C", sequences: ["Ctrl+C"] },
+        { id: "larger", title: "Larger text", keys: "Ctrl Plus · Ctrl =", sequences: ["Ctrl++", "Ctrl+="] },
+        { id: "smaller", title: "Smaller text", keys: "Ctrl −", sequences: ["Ctrl+-"] },
+        { id: "resetText", title: "Reset text size", keys: "Ctrl 0", sequences: ["Ctrl+0"] },
+        { id: "numbers", title: "Show verse numbers", keys: "r", sequences: ["R"], setting: "showVerseNumbers", command: true },
+        { id: "headings", title: "Show headings", keys: "t", sequences: ["T"], setting: "showHeadings", command: true },
+        { id: "versePicker", title: "Verse picker", keys: "", setting: "versePicker", command: true },
+        { id: "focus", title: "Focus mode", keys: "f", sequences: ["F"], setting: "focusMode", command: true },
+        { id: "lineHeight", title: "Line height", keys: "", command: true },
+        { id: "lineLess", title: "Decrease line height", keys: "Ctrl [", sequences: ["Ctrl+["] },
+        { id: "lineMore", title: "Increase line height", keys: "Ctrl ]", sequences: ["Ctrl+]"] },
+        { id: "settings", title: "Reading settings", keys: "", command: true },
+        { id: "export", title: "Export notes as Markdown", keys: "", command: true },
+        { id: "backup", title: "Save annotation backup", keys: "", command: true },
+        { id: "restore", title: "Restore annotation backup", keys: "", command: true },
+        { id: "import", title: "Import NET 2.1 EPUB", keys: "", scope: "global", command: true },
+        { id: "help", title: "Keybindings", keys: "? · F1", sequences: ["?", "F1"], scope: "global", command: true },
+        { id: "about", title: "About & attribution", keys: "", scope: "global", command: true },
+        { title: "Select a verse", keys: "Click number", explanation: true },
+        { title: "Select a range", keys: "Shift Click", explanation: true },
+        { title: "Select text across verses", keys: "Drag text", explanation: true },
+        { title: "Copy clicked passage", keys: "Right Click", explanation: true },
+        { title: "Copy clicked quotation", keys: "Middle Click", explanation: true },
+        { title: "Go to verse number", keys: "number then g (e.g. 20g)", explanation: true },
+        { title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
     ]
+    function actionHint(action) {
+        if (action.setting) return (bible[action.setting] ? "On" : "Off") + (action.keys ? " · " + action.keys : "")
+        if (action.id === "lineHeight") return bible.lineHeight.toFixed(1)
+        return action.keys
+    }
+    function shortcutEnabled(action) {
+        if (bible.busy) return false
+        if (action.scope === "palette") return !modalOpen || passagePalette.opened
+        if (action.scope === "global") return !modalOpen && (bible.ready || action.id === "help" || action.id === "about" || action.id === "import")
+        if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
+        return readerKeys && (action.id !== "copyText" || freeSelectedText.length > 0)
+    }
+    function actionAvailable(action) {
+        return action && !action.explanation && !bible.busy
+            && (bible.ready || ["commands", "help", "about", "import", "settings", "lineHeight"].includes(action.id))
+    }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
-        return keybindings.filter(function(binding) {
+        return actions.filter(function(binding) {
             // Single-letter searches match a key, rather than every action containing it.
             return !query || (query.length === 1
                 ? binding.keys.split(/\s*[·/]\s*/).some(function(key) { return key.toLowerCase() === query })
-                : (binding.action + " " + binding.keys).toLowerCase().indexOf(query) >= 0)
+                : (binding.title + " " + binding.keys).toLowerCase().indexOf(query) >= 0)
         })
     }
-    readonly property var commands: [
-        { title: "Open saved passages", hint: "Ctrl+L", action: "saved" },
-        { title: "Write a note", hint: "n · Ctrl+N", action: "notes" },
-        { title: "Toggle bookmark", hint: "m · Ctrl+M", action: "bookmark" },
-        { title: "Toggle highlight", hint: "x · Ctrl+H", action: "highlight" },
-        { title: "Copy passage", hint: "y · Ctrl+Shift+C", action: "copy" },
-        { title: "Export notes as Markdown", hint: "Choose a folder", action: "export" },
-        { title: "Save annotation backup", hint: "JSON file", action: "backup" },
-        { title: "Restore annotation backup", hint: "Choose a file", action: "restore" },
-        { title: "Import NET 2.1 EPUB", hint: "Local file", action: "import" },
-        { title: "Keybindings", hint: "? · F1", action: "help" },
-        { title: "About & attribution", hint: "OmaBible", action: "about" }
-    ]
     function paletteEntries() {
         let query = referenceInput.text.trim().toLowerCase()
         if (query.startsWith(">")) {
             query = query.substring(1).trim()
-            return commands.filter(function(c) { return c.title.toLowerCase().indexOf(query) >= 0 })
-                .map(function(c) { return { title: c.title, hint: c.hint, action: c.action } })
+            return actions.filter(function(c) { return c.command && c.title.toLowerCase().indexOf(query) >= 0 })
+                .map(function(c) { return { title: c.title, hint: actionHint(c), action: c.id } })
+        }
+        if (paletteChapter > 0) {
+            return Array.from(bible.chapterVerses(paletteBook, paletteChapter))
+                .filter(function(v) { return !query || String(v.number).startsWith(query) })
+                .map(function(v) { return { title: paletteBookName + " " + paletteChapter + ":" + v.number,
+                    hint: "Verse " + v.number, book: paletteBook, chapter: paletteChapter, verse: v.number } })
         }
         if (paletteBook > 0) {
             let book = Array.from(bible.books).find(function(b) { return b.id === paletteBook })
@@ -493,9 +552,17 @@ ApplicationWindow {
     function activatePaletteEntry(entry) {
         if (!entry) return
         if (entry.action) {
+            passagePalette.pendingAction = entry.action
             passagePalette.close()
-            runCommand(entry.action)
-        } else if (entry.chapter) openChapter(entry.book, entry.chapter)
+        } else if (entry.verse) jump(entry.title)
+        else if (entry.chapter) {
+            if (!bible.versePicker) { openChapter(entry.book, entry.chapter); return }
+            paletteChapter = entry.chapter
+            referenceInput.text = ""
+            paletteArrowUsed = false
+            paletteResults.currentIndex = 0
+            referenceInput.forceActiveFocus()
+        }
         else {
             // Changing the book rebuilds the results model; snapshot the entry first.
             let book = entry.book
@@ -514,6 +581,21 @@ ApplicationWindow {
         else if (paletteResolution.valid) jump(destination.reference)
     }
     function backToBooks() {
+        if (paletteChapter > 0) {
+            let chapter = paletteChapter
+            paletteChapter = 0
+            referenceInput.text = ""
+            paletteArrowUsed = true
+            paletteResults.currentIndex = chapter - 1
+            paletteResults.positionViewAtIndex(chapter - 1, ListView.Contain)
+            referenceInput.forceActiveFocus()
+            return
+        }
+        resetBooks()
+        referenceInput.forceActiveFocus()
+    }
+    function resetBooks() {
+        paletteChapter = 0
         paletteBook = 0
         paletteBookName = ""
         referenceInput.text = ""
@@ -533,9 +615,37 @@ ApplicationWindow {
         referenceInput.forceActiveFocus()
     }
     function runCommand(action) {
+        if (action === "first" || action === "last") { countedVerse(action === "last"); return }
         clearCount()
         if (!flushNote()) return
         switch (action) {
+        case "books": openPalette(false); break
+        case "commands": openPalette(true); break
+        case "resume": openPalette(false, true); break
+        case "previousChapter": chapterStep(-1); break
+        case "nextChapter": chapterStep(1); break
+        case "previousVerse": moveVerse(-1, verseMode); break
+        case "nextVerse": moveVerse(1, verseMode); break
+        case "previousFive": moveVerse(-5, verseMode); break
+        case "nextFive": moveVerse(5, verseMode); break
+        case "previousTen": moveVerse(-10, verseMode); break
+        case "nextTen": moveVerse(10, verseMode); break
+        case "visual": setVisualMode(!verseMode); break
+        case "extendPrevious": extendVerse(-1); break
+        case "extendNext": extendVerse(1); break
+        case "toggleNotes": toggleNotes(); break
+        case "copyText": copyFreeText(); break
+        case "larger": readerSize = Math.min(28, readerSize + 1); break
+        case "smaller": readerSize = Math.max(15, readerSize - 1); break
+        case "resetText": readerSize = 19; break
+        case "numbers": bible.setShowVerseNumbers(!bible.showVerseNumbers); break
+        case "headings": bible.setShowHeadings(!bible.showHeadings); break
+        case "versePicker": bible.setVersePicker(!bible.versePicker); break
+        case "focus": bible.setFocusMode(!bible.focusMode); break
+        case "lineLess": bible.setLineHeight(Math.round((bible.lineHeight - 0.1) * 10) / 10); break
+        case "lineMore": bible.setLineHeight(Math.round((bible.lineHeight + 0.1) * 10) / 10); break
+        case "lineHeight": settingsDialog.lineOnly = true; settingsDialog.open(); break
+        case "settings": settingsDialog.lineOnly = false; settingsDialog.open(); break
         case "saved": bible.refreshCollection(); savedDrawer.open(); break
         case "notes": openNotes(true); break
         case "bookmark": if (hasSelection) bible.toggleBookmark(); else notify("Select a verse number to bookmark a passage"); break
@@ -548,6 +658,15 @@ ApplicationWindow {
         case "help": helpDialog.open(); break
         case "about": aboutDialog.open(); break
         }
+    }
+    function moveKeybinding(delta) {
+        keybindingResults.currentIndex = Math.max(0, Math.min(keybindingResults.count - 1, keybindingResults.currentIndex + delta))
+        keybindingResults.positionViewAtIndex(keybindingResults.currentIndex, ListView.Contain)
+    }
+    function activateKeybinding(action) {
+        if (!actionAvailable(action) || !flushNote()) return
+        helpDialog.pendingAction = action.id
+        helpDialog.close()
     }
 
     component QuietButton: Button {
@@ -737,7 +856,6 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.rightMargin: app.notesOpen && app.wideLayout && bible.ready && !bible.focusMode ? app.notesWidth : 0
                 focus: true
                 visible: bible.ready
                 Keys.onPressed: function(event) {
@@ -848,7 +966,7 @@ ApplicationWindow {
                                         return (starting.length ? starting : ranges)[0]?.reference || ""
                                     }
                                     readonly property string hint: ranges.map(function(range) { return range.reference }).join("\n")
-                                        + "\nOpen " + openReference + " · m · Ctrl+M toggles bookmark"
+                                        + "\nOpen " + openReference + " · m · Ctrl M toggles bookmark"
                                     // Adjacent row segments meet exactly, including headings and
                                     // chapter continuation. Caps retain logical overlapping endpoints.
                                     Rectangle {
@@ -998,7 +1116,7 @@ ApplicationWindow {
                                     }
                                     ToolTip.visible: numberMouse.containsMouse && !bible.focusMode
                                     ToolTip.delay: 700
-                                    ToolTip.text: "Select verse " + verseRow.modelData.number + " · Shift-click for a range" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "")
+                                    ToolTip.text: "Select verse " + verseRow.modelData.number + " · Shift Click for a range" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "")
                                 }
                                 TextEdit {
                                     id: verseBody
@@ -1114,21 +1232,37 @@ ApplicationWindow {
             }
             }
 
-            Rectangle {
-                anchors.fill: parent
-                visible: app.notesOpen && !app.wideLayout && bible.ready && !bible.focusMode
-                color: app.tint(desktop.background, 0.55)
-                MouseArea { anchors.fill: parent; onClicked: { app.flushNote(); app.notesOpen = false; app.readerFocus() } }
-            }
-            Rectangle {
+        }
+    }
+
+    Drawer {
+        id: notesDrawer
+        objectName: "notesDrawer"
+        property bool focusEditor: false
+        width: app.notesWidth
+        height: app.height
+        edge: Qt.RightEdge
+        modal: true
+        focus: true
+        interactive: false
+        padding: 0
+        // Auto-close cannot veto a failed save. All dismissals use closeNotes().
+        closePolicy: Popup.NoAutoClose
+        background: Rectangle { color: desktop.background; border.color: desktop.border }
+        Overlay.modal: Rectangle {
+            color: app.tint(desktop.background, 0.65)
+        }
+        onOpened: {
+            if (app.modalOpen) return
+            if (focusEditor && app.hasSelection) noteEditor.forceActiveFocus()
+            else notesClose.forceActiveFocus()
+        }
+        onClosed: { if (!app.modalOpen) app.readerFocus() }
+        contentItem: Rectangle {
                 id: notesPanel
                 objectName: "notesPanel"
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: app.notesWidth
-                visible: app.notesOpen && bible.ready && !bible.focusMode
                 color: desktop.background
+                Keys.onEscapePressed: function(event) { app.closeNotes(); event.accepted = true }
                 Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
                 ScrollView {
                     id: notesScroll
@@ -1159,7 +1293,7 @@ ApplicationWindow {
                                 border.width: notesClose.activeFocus ? 1 : 0
                                 border.color: desktop.accent
                             }
-                            onClicked: { if (app.flushNote()) { app.notesOpen = false; app.readerFocus() } }
+                            onClicked: app.closeNotes()
                         }
                     }
                     Label {
@@ -1173,17 +1307,17 @@ ApplicationWindow {
                     RowLayout {
                         visible: app.hasSelection
                         spacing: 4
-                        QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: bible.toggleBookmark(); tip: "m · Ctrl+M" }
-                        QuietButton { text: bible.selectionHighlighted ? "Highlighted" : "Highlight"; emphasized: bible.selectionHighlighted; compact: true; onClicked: bible.toggleHighlight(); tip: "x · Ctrl+H" }
+                        QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: app.runCommand("bookmark"); tip: "m · Ctrl M" }
+                        QuietButton { text: bible.selectionHighlighted ? "Highlighted" : "Highlight"; emphasized: bible.selectionHighlighted; compact: true; onClicked: app.runCommand("highlight"); tip: "x · Ctrl H" }
                         Item { Layout.fillWidth: true }
-                        QuietButton { text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy selected passage · y · Ctrl+Shift+C" }
+                        QuietButton { text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy selected passage · y · Ctrl Shift C" }
                     }
                     FineRule { Layout.fillWidth: true }
                     RowLayout {
                         visible: app.hasSelection
                         spacing: 4
                         QuietButton { text: "Write"; compact: true; emphasized: !app.notePreview; onClicked: { app.notePreview = false; noteEditor.forceActiveFocus() } }
-                        QuietButton { objectName: "previewButton"; text: "Preview"; compact: true; emphasized: app.notePreview; onClicked: { app.flushNote(); app.notePreview = true } }
+                        QuietButton { objectName: "previewButton"; text: "Preview"; compact: true; emphasized: app.notePreview; onClicked: { if (app.flushNote()) app.notePreview = true } }
                         Item { Layout.fillWidth: true }
                         Label { text: "Markdown"; color: desktop.muted; font.pixelSize: 11 * app.scale }
                     }
@@ -1221,7 +1355,7 @@ ApplicationWindow {
                                     if (!app.syncingNote && app.hasSelection && app.loadedNoteReference === bible.selectionReference && text !== bible.noteText)
                                         bible.setNoteText(text)
                                 }
-                                Keys.onEscapePressed: function(event) { app.flushNote(); app.readerFocus(); event.accepted = true }
+                                Keys.onEscapePressed: function(event) { app.closeNotes(); event.accepted = true }
                                 Accessible.name: "Markdown note for " + bible.selectionReference
                             }
                         }
@@ -1250,7 +1384,7 @@ ApplicationWindow {
                             anchors.top: parent.top
                             width: parent.width
                             visible: !app.hasSelection
-                            text: "Select a verse number to start a note.\n\nShift-click another number to gather a range. Your notes are saved automatically as you write."
+                            text: "Select a verse number to start a note.\n\nShift Click another number to gather a range. Your notes are saved automatically as you write."
                             color: desktop.muted
                             font.pixelSize: 14 * app.scale
                             lineHeight: 1.5
@@ -1260,8 +1394,20 @@ ApplicationWindow {
                     Label { text: app.hasSelection ? (noteEditor.text === bible.noteText ? "Saved on this device · changes save as you type" : "Not saved · your draft is still in the editor") : "A page icon beside a verse marks a note."; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
                 }
-            }
         }
+    }
+
+    MouseArea {
+        parent: Overlay.overlay
+        // Cover only the dimmed outside region. Drawer consumes its own outside
+        // events before the dimmer, so guard dismissal here without auto-close.
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: app.width - notesDrawer.width * notesDrawer.position
+        z: notesDrawer.z + 0.1
+        visible: app.notesOpen && !app.modalOpen
+        onClicked: app.closeNotes()
     }
 
     FloatingButton {
@@ -1272,7 +1418,7 @@ ApplicationWindow {
         anchors.margins: 16 * app.controlScale
         glyph: app.verseMode ? "visual" : "normal"
         selected: app.verseMode
-        visible: bible.ready && !bible.focusMode && !(app.notesOpen && !app.wideLayout)
+        visible: bible.ready && !bible.focusMode
         enabled: !bible.busy && !app.modalOpen
         tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · v"
         onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
@@ -1282,11 +1428,11 @@ ApplicationWindow {
         objectName: "passageControl"
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 16 * app.controlScale
-        x: (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) / 2 - width / 2
-        width: Math.max(0, Math.min(implicitWidth, (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) - 2 * (floatingActions.width + 24 * app.controlScale)))
+        x: app.width / 2 - width / 2
+        width: Math.max(0, Math.min(implicitWidth, app.width - 2 * (floatingActions.width + 24 * app.controlScale)))
         text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
-        tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl+K"
-        visible: !bible.focusMode && !(app.notesOpen && !app.wideLayout)
+        tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl K"
+        visible: !bible.focusMode
         enabled: !bible.busy && !app.modalOpen
         onClicked: app.openPalette(false)
     }
@@ -1296,13 +1442,12 @@ ApplicationWindow {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: 16 * app.controlScale
-        anchors.rightMargin: (app.notesOpen && app.wideLayout ? app.notesWidth : 0) + 16 * app.controlScale
         spacing: 4 * app.controlScale
-        visible: !bible.focusMode && !(app.notesOpen && !app.wideLayout)
+        visible: !bible.focusMode
         FloatingButton {
             objectName: "savedControl"
             glyph: "saved"
-            tip: "Saved · Ctrl+L"
+            tip: "Saved · Ctrl L"
             enabled: bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("saved")
         }
@@ -1310,9 +1455,9 @@ ApplicationWindow {
             objectName: "notesControl"
             glyph: "notes"
             selected: app.notesOpen
-            tip: "Notes · Ctrl+Shift+N"
+            tip: "Notes · Ctrl N"
             enabled: bible.ready && !bible.busy && !app.modalOpen
-            onClicked: { if (app.flushNote()) { app.notesOpen = !app.notesOpen; app.readerFocus() } }
+            onClicked: app.toggleNotes()
         }
         FloatingButton {
             objectName: "helpControl"
@@ -1326,11 +1471,17 @@ ApplicationWindow {
     ModalCard {
         id: passagePalette
         objectName: "passagePalette"
+        property string pendingAction: ""
         width: Math.min(650 * app.scale, app.width - 48)
         height: Math.min(560 * app.scale, app.height - 48)
         padding: 16
         onOpened: referenceInput.forceActiveFocus()
-        onClosed: app.readerFocus()
+        onClosed: {
+            let action = pendingAction
+            pendingAction = ""
+            app.readerFocus()
+            if (action) Qt.callLater(function() { app.runCommand(action) })
+        }
         contentItem: ColumnLayout {
             spacing: 12
             Keys.onLeftPressed: function(event) {
@@ -1349,7 +1500,8 @@ ApplicationWindow {
                     Layout.preferredHeight: implicitHeight
                     font.pixelSize: 15 * app.scale
                     color: desktop.foreground
-                    placeholderText: app.paletteBook ? app.paletteBookName + " — chapter number" : "John 3:16–18, a book, or > command"
+                    placeholderText: app.paletteChapter ? app.paletteBookName + " " + app.paletteChapter + " — verse number"
+                        : app.paletteBook ? app.paletteBookName + " — chapter number" : "John 3:16–18, a book, or > command"
                     placeholderTextColor: desktop.muted
                     selectByMouse: true
                     leftPadding: 14
@@ -1366,21 +1518,21 @@ ApplicationWindow {
                     }
                     Keys.onRightPressed: function(event) {
                         let entry = paletteResults.model[paletteResults.currentIndex]
-                        let browsing = (!text.trim() || /^[1-3]?\s*[A-Za-z ]+$/.test(text.trim()))
+                        let browsing = (!text.trim() || /^[1-3]?\s*[A-Za-z ]+$/.test(text.trim()) || (app.paletteBook > 0 && /^\d+$/.test(text.trim())) || text.trim().startsWith(">"))
                             && (app.paletteArrowUsed || (cursorPosition === text.length && selectedText.length === 0))
-                        event.accepted = event.modifiers === Qt.NoModifier && browsing && !!entry && !!entry.book && !entry.chapter
+                        event.accepted = event.modifiers === Qt.NoModifier && browsing && !!entry
                         if (event.accepted) app.activatePaletteEntry(entry)
                     }
                     Keys.onEscapePressed: passagePalette.close()
                     Accessible.name: "Passage reference or command"
                 }
-                QuietButton { objectName: "paletteBooks"; text: "Books"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.backToBooks() }
-                QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: referenceInput.text.startsWith(">"); onClicked: { app.backToBooks(); referenceInput.text = "> " } }
+                QuietButton { objectName: "paletteBooks"; text: "Books"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.resetBooks() }
+                QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: referenceInput.text.startsWith(">"); onClicked: { app.resetBooks(); referenceInput.text = "> " } }
             }
             Label {
                 objectName: "referencePreview"
                 visible: !referenceInput.text.trim().startsWith(">") && (referenceInput.text.trim().length > 0 || app.paletteBook > 0)
-                text: paletteBack.activeFocus ? "Browse all books" : app.paletteResolution.valid ? app.paletteResolution.reference : app.paletteResolution.error
+                text: paletteBack.activeFocus ? (app.paletteChapter ? "Browse chapters in " + app.paletteBookName : "Browse all books") : app.paletteResolution.valid ? app.paletteResolution.reference : app.paletteResolution.error
                 color: app.paletteResolution.valid ? desktop.accent : desktop.muted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -1389,7 +1541,7 @@ ApplicationWindow {
             QuietButton {
                 id: paletteBack
                 objectName: "paletteBack"
-                text: "← All books"
+                text: app.paletteChapter ? "← " + app.paletteBookName + " chapters" : "← All books"
                 compact: true
                 visible: app.paletteBook > 0
                 emphasized: activeFocus
@@ -1426,7 +1578,7 @@ ApplicationWindow {
                     onClicked: app.activatePaletteEntry(modelData)
                     contentItem: RowLayout {
                         Label { text: paletteEntry.modelData.title; color: desktop.foreground; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 14 * app.scale }
-                        Label { text: paletteEntry.modelData.hint; color: desktop.muted; font.pixelSize: 11 * app.scale }
+                        Label { objectName: "paletteHint" + (paletteEntry.modelData.action || ""); text: paletteEntry.modelData.hint; color: desktop.muted; font.pixelSize: 11 * app.scale }
                         Label { text: paletteEntry.modelData.action || paletteEntry.modelData.chapter ? "↵" : "›"; color: desktop.muted; Layout.leftMargin: 8 }
                     }
                     background: Rectangle { radius: 0; color: paletteEntry.highlighted ? app.tint(desktop.accent, 0.11) : paletteEntry.hovered ? desktop.surface : "transparent" }
@@ -1447,9 +1599,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Label {
                     objectName: "paletteHints"
-                    text: referenceInput.text.trim().startsWith(">") ? "↑ ↓ choose    ↵ run command    Esc close"
-                        : app.paletteBook > 0 ? "↑ ↓ choose · ↑ first row to back    ← all books    ↵ open / back    Esc close"
-                        : "↑ ↓ choose    → enter book    ↵ open    Esc close"
+                    text: "↑ ↓ choose    → / ↵ select" + (app.paletteBook > 0 ? "    ← back" : "") + "    Esc close"
                     color: desktop.muted
                     font.pixelSize: 11 * app.scale
                     Layout.fillWidth: true
@@ -1583,15 +1733,18 @@ ApplicationWindow {
     ModalCard {
         id: helpDialog
         objectName: "helpDialog"
+        property string pendingAction: ""
         height: Math.min(660 * app.scale, app.height - 48)
         onOpened: { keybindingSearch.text = ""; keybindingSearch.forceActiveFocus() }
-        onClosed: app.readerFocus()
+        onClosed: {
+            let action = pendingAction
+            pendingAction = ""
+            app.readerFocus()
+            if (action) Qt.callLater(function() { app.runCommand(action) })
+        }
         contentItem: ColumnLayout {
-            spacing: 16 * app.scale
+            spacing: 12 * app.scale
             RowLayout {
-                Label { text: "Keybindings"; color: desktop.foreground; font.pixelSize: 23 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                QuietButton { text: "×"; compact: true; Accessible.name: "Close keybindings"; onClicked: helpDialog.close() }
-            }
             TextField {
                 id: keybindingSearch
                 objectName: "keybindingSearch"
@@ -1602,9 +1755,14 @@ ApplicationWindow {
                 selectByMouse: true
                 padding: 10 * app.scale
                 background: Rectangle { color: desktop.surface; border.color: keybindingSearch.activeFocus ? desktop.accent : desktop.border }
-                onTextChanged: keybindingResults.positionViewAtBeginning()
+                onTextChanged: { keybindingResults.currentIndex = 0; keybindingResults.positionViewAtBeginning() }
+                Keys.onUpPressed: app.moveKeybinding(-1)
+                Keys.onDownPressed: app.moveKeybinding(1)
+                onAccepted: app.activateKeybinding(keybindingResults.model[keybindingResults.currentIndex])
                 Keys.onEscapePressed: helpDialog.close()
                 Accessible.name: "Search keybindings by action or key"
+            }
+                QuietButton { objectName: "keybindingsClose"; text: "×"; Layout.preferredHeight: keybindingSearch.implicitHeight; Accessible.name: "Close keybindings"; onClicked: helpDialog.close() }
             }
             ListView {
                 id: keybindingResults
@@ -1612,24 +1770,39 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                spacing: 12 * app.scale
+                spacing: 3 * app.scale
                 model: app.filteredKeybindings()
+                currentIndex: 0
+                Keys.onUpPressed: app.moveKeybinding(-1)
+                Keys.onDownPressed: app.moveKeybinding(1)
+                Keys.onReturnPressed: app.activateKeybinding(model[currentIndex])
+                Keys.onEnterPressed: app.activateKeybinding(model[currentIndex])
                 ScrollBar.vertical: ScrollBar { id: keybindingScrollbar }
-                delegate: RowLayout {
+                delegate: ItemDelegate {
                     id: keybindingRow
                     required property var modelData
-                    objectName: "keybinding" + modelData.action
+                    objectName: "keybinding" + modelData.title
                     width: keybindingResults.width - keybindingScrollbar.width - 8 * app.scale
-                    spacing: 16 * app.scale
+                    height: keybindingContent.implicitHeight + 20 * app.scale
+                    enabled: app.actionAvailable(modelData)
+                    highlighted: ListView.isCurrentItem
+                    onClicked: app.activateKeybinding(modelData)
+                    Keys.onReturnPressed: clicked()
+                    Keys.onEnterPressed: clicked()
+                    background: Rectangle { color: keybindingRow.highlighted ? app.tint(desktop.accent, 0.11) : keybindingRow.hovered ? desktop.surface : "transparent" }
+                    contentItem: RowLayout {
+                    id: keybindingContent
+                    spacing: 12 * app.scale
                     Label {
-                        text: keybindingRow.modelData.action; color: desktop.foreground
+                        text: keybindingRow.modelData.title; color: keybindingRow.enabled ? desktop.foreground : desktop.muted
                         font.pixelSize: 13 * app.scale; Layout.fillWidth: true
                         Layout.preferredWidth: keybindingRow.width * 0.48; wrapMode: Text.Wrap
                     }
                     Label {
-                        text: keybindingRow.modelData.keys; color: desktop.muted
+                        text: app.actionHint(keybindingRow.modelData); color: desktop.muted
                         font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignRight
                         Layout.fillWidth: true; Layout.preferredWidth: keybindingRow.width * 0.48; wrapMode: Text.Wrap
+                    }
                     }
                 }
                 Label {
@@ -1642,8 +1815,62 @@ ApplicationWindow {
                     color: desktop.muted; font.pixelSize: 14 * app.scale
                 }
             }
-            Label { text: "Reading keys pause while you type. Bookmark ribbons mark range starts; margin lines continue through the range. A page icon marks a note."; visible: helpDialog.height > 500 * app.scale; color: desktop.muted; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: "↑ ↓ choose    ↵ select    Esc close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
         }
+    }
+
+    ModalCard {
+        id: settingsDialog
+        objectName: "settingsDialog"
+        property bool lineOnly: false
+        width: Math.min(480 * app.scale, app.width - 48)
+        height: Math.min(settingsContent.implicitHeight + 48, app.height - 48)
+        onOpened: lineHeightSlider.forceActiveFocus()
+        onClosed: app.readerFocus()
+        contentItem: ScrollView {
+            id: settingsScroll
+            contentWidth: availableWidth
+            clip: true
+        ColumnLayout {
+            id: settingsContent
+            width: settingsScroll.availableWidth
+            spacing: 12 * app.scale
+            RowLayout {
+                Label { text: settingsDialog.lineOnly ? "Line height" : "Reading settings"; color: desktop.foreground; font.pixelSize: 20 * app.scale; Layout.fillWidth: true }
+                QuietButton { text: "×"; Accessible.name: "Close settings"; onClicked: settingsDialog.close() }
+            }
+            Repeater {
+                model: app.actions.filter(function(action) { return !!action.setting })
+                delegate: QuietButton {
+                    required property var modelData
+                    objectName: "setting" + modelData.id
+                    visible: !settingsDialog.lineOnly
+                    Layout.fillWidth: true
+                    text: modelData.title + " · " + app.actionHint(modelData)
+                    onClicked: app.runCommand(modelData.id)
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "Line height"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
+                Item { Layout.fillWidth: true }
+                Label { objectName: "lineHeightValue"; text: bible.lineHeight.toFixed(1); color: desktop.accent; font.pixelSize: 14 * app.scale }
+            }
+            Slider {
+                id: lineHeightSlider
+                objectName: "lineHeightSlider"
+                Layout.fillWidth: true
+                from: 1; to: 3; stepSize: 0.1
+                snapMode: Slider.SnapAlways
+                value: bible.lineHeight
+                onMoved: bible.setLineHeight(Math.round(value * 10) / 10)
+                Accessible.name: "Line height"
+            }
+            Label { text: "Ctrl [ decrease    Ctrl ] increase"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+        }
+        }
+        Shortcut { sequence: "Ctrl+["; enabled: settingsDialog.opened; onActivated: app.runCommand("lineLess") }
+        Shortcut { sequence: "Ctrl+]"; enabled: settingsDialog.opened; onActivated: app.runCommand("lineMore") }
     }
 
     ModalCard {
@@ -1845,35 +2072,16 @@ ApplicationWindow {
     Component.onCompleted: { syncNote(); restorePosition() }
     onClosing: function(close) { close.accepted = flushNote(); savePosition() }
 
-    Shortcut { sequence: "Ctrl+K"; enabled: !bible.busy && (!app.modalOpen || passagePalette.opened); onActivated: app.openPalette(false) }
-    Shortcut { sequence: "Ctrl+Shift+P"; enabled: !bible.busy && (!app.modalOpen || passagePalette.opened); onActivated: app.openPalette(true) }
-    Shortcut { sequence: "Ctrl+L"; enabled: app.readerKeys; onActivated: app.runCommand("saved") }
-    Shortcut { sequence: "Ctrl+N"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: app.openNotes(true) }
-    Shortcut { sequence: "N"; enabled: app.readerKeys; onActivated: app.openNotes(true) }
-    Shortcut { sequence: "Ctrl+Shift+N"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: { app.flushNote(); app.notesOpen = !app.notesOpen; app.readerFocus() } }
-    Shortcut { sequence: "Ctrl+M"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleBookmark() } }
-    Shortcut { sequence: "Ctrl+H"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleHighlight() } }
-    Shortcut { sequence: "Ctrl+Shift+C"; enabled: app.readerKeys; onActivated: app.copyPassage() }
-    Shortcut { sequence: "Ctrl+C"; enabled: app.readerKeys && app.freeSelectedText.length > 0; onActivated: app.copyFreeText() }
-    Shortcut { sequence: "Alt+Left"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: app.chapterStep(-1) }
-    Shortcut { sequence: "Alt+Right"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: app.chapterStep(1) }
-    Shortcut { sequence: "F1"; enabled: !bible.busy && !app.modalOpen; onActivated: helpDialog.open() }
-    Shortcut { sequence: "?"; enabled: app.readerKeys; onActivated: helpDialog.open() }
-    Shortcut { sequence: "V"; enabled: app.readerKeys; onActivated: app.setVisualMode(!app.verseMode) }
-    Shortcut { sequences: ["J", "Down"]; enabled: app.readerKeys; onActivated: app.moveVerse(1, app.verseMode) }
-    Shortcut { sequences: ["K", "Up"]; enabled: app.readerKeys; onActivated: app.moveVerse(-1, app.verseMode) }
-    Shortcut { sequences: ["Shift+J", "Shift+Down"]; enabled: app.readerKeys; onActivated: app.extendVerse(1) }
-    Shortcut { sequences: ["Shift+K", "Shift+Up"]; enabled: app.readerKeys; onActivated: app.extendVerse(-1) }
-    Shortcut { sequences: ["Space", "Ctrl+F"]; enabled: app.readerKeys; onActivated: app.scrollBy(reading.height * 0.85) }
-    Shortcut { sequences: ["Shift+Space", "Ctrl+B"]; enabled: app.readerKeys; onActivated: app.scrollBy(-reading.height * 0.85) }
-    Shortcut { sequence: "Ctrl+D"; enabled: app.readerKeys; onActivated: app.moveVerse(5, app.verseMode) }
-    Shortcut { sequence: "Ctrl+U"; enabled: app.readerKeys; onActivated: app.moveVerse(-5, app.verseMode) }
-    Shortcut { sequence: "PgDown"; enabled: app.readerKeys; onActivated: app.moveVerse(10, app.verseMode) }
-    Shortcut { sequence: "PgUp"; enabled: app.readerKeys; onActivated: app.moveVerse(-10, app.verseMode) }
-    Shortcut { sequence: "G"; enabled: app.readerKeys; onActivated: app.countedVerse(false) }
-    Shortcut { sequence: "Shift+G"; enabled: app.readerKeys; onActivated: app.countedVerse(true) }
-    Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
-    Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
+    Instantiator {
+        model: app.actions.filter(function(action) { return !!action.sequences })
+        delegate: Shortcut {
+            required property var modelData
+            context: Qt.ApplicationShortcut
+            sequences: modelData.sequences
+            enabled: app.shortcutEnabled(modelData)
+            onActivated: app.runCommand(modelData.id)
+        }
+    }
     Instantiator {
         model: 10
         delegate: Shortcut {
@@ -1883,14 +2091,6 @@ ApplicationWindow {
             onActivated: app.countDigit(String(index))
         }
     }
-    Shortcut { sequences: ["H", "[", "Left"]; enabled: app.readerKeys; onActivated: app.chapterStep(-1) }
-    Shortcut { sequences: ["L", "]", "Right"]; enabled: app.readerKeys; onActivated: app.chapterStep(1) }
-    Shortcut { sequence: "M"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleBookmark() } }
-    Shortcut { sequence: "X"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleHighlight() } }
-    Shortcut { sequence: "Y"; enabled: app.readerKeys; onActivated: app.copyPassage() }
-    Shortcut { sequences: ["Ctrl++", "Ctrl+="]; enabled: app.readerKeys; onActivated: { app.clearCount(); app.readerSize = Math.min(28, app.readerSize + 1) } }
-    Shortcut { sequence: "Ctrl+-"; enabled: app.readerKeys; onActivated: { app.clearCount(); app.readerSize = Math.max(15, app.readerSize - 1) } }
-    Shortcut { sequence: "Ctrl+0"; enabled: app.readerKeys; onActivated: { app.clearCount(); app.readerSize = 19 } }
     Shortcut {
         sequence: "Escape"
         enabled: app.readerKeys
@@ -1900,7 +2100,6 @@ ApplicationWindow {
             if (app.verseCount.length) { app.clearCount(); return }
             if (!app.flushNote()) return
             if (app.verseMode) app.setVisualMode(false)
-            else if (app.notesOpen) app.notesOpen = false
             else if (app.hasSelection) app.setVisualMode(false)
             app.readerFocus()
         }
