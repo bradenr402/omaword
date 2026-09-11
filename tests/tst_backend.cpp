@@ -637,6 +637,29 @@ private slots:
         QCOMPARE(bible->selectionReference(),QString("John 4"));
         bible->clearSelection(); QCOMPARE(changed.count(),1);
     }
+    void countedMovementWithoutSelection() {
+        if (!bible->ready()) QSKIP("Requires real EPUB");
+        const auto check = [this](const QString &chapter, int delta, const QString &expected, bool extend = false) {
+            QVERIFY(bible->navigate(chapter));
+            QCOMPARE(bible->cursorVerse(),0);
+            bible->moveSelection(delta,extend);
+            QCOMPARE(bible->selectionReference(),expected);
+            QCOMPARE(bible->selectedStart(),bible->selectedEnd());
+            QVERIFY(!bible->crossChapterSelection());
+        };
+        check("John 3",1,"John 3:1");
+        check("John 3",-1,"John 3:36");
+        check("John 3",4,"John 3:4");
+        check("John 3",-4,"John 3:33");
+        check("John 3",38,"John 4:2");
+        check("John 3",-38,"John 2:24");
+        check("Matthew 17",21,"Matthew 17:22"); // Omitted verse 21.
+        check("Matthew 17",-7,"Matthew 17:20");
+        check("John 3",4,"John 3:4",true);
+        check("John 3",0,"John 3");
+        check("John 3",std::numeric_limits<int>::min(),"Genesis 1:1");
+        check("John 3",std::numeric_limits<int>::max(),"Revelation 22:21");
+    }
     void pickerAndContextCopy() {
         if (!bible->ready()) QSKIP("Requires real EPUB");
         QVERIFY(bible->navigate("John 3:16-18")); bible->setReadingPosition(0.38);

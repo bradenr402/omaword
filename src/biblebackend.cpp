@@ -621,8 +621,13 @@ void BibleBackend::clearSelection()
 void BibleBackend::moveSelection(int delta, bool extend)
 {
     if (!requireReady() || m_verses.isEmpty() || !delta) return;
-    const int cursor = m_cursor ? int(std::clamp(qint64(m_cursor)+delta,qint64(1),qint64(canonVerses().size()-1)))
-        : absoluteVerse(m_book,m_chapter,(delta < 0 ? m_verses.last() : m_verses.first()).toMap().value("number").toInt());
+    // Without a cursor, the first step selects the chapter edge; remaining
+    // steps count existing canonical verses, crossing chapters as usual.
+    const int edge = absoluteVerse(m_book,m_chapter,
+        (delta < 0 ? m_verses.last() : m_verses.first()).toMap().value("number").toInt());
+    const qint64 target = m_cursor ? qint64(m_cursor) + delta
+        : qint64(edge) + delta - (delta > 0 ? 1 : -1);
+    const int cursor = int(std::clamp(target,qint64(1),qint64(canonVerses().size()-1)));
     const auto v = endpoint(cursor);
     goToSelection(v.book,v.chapter,extend && m_anchor ? m_anchor : cursor,cursor,
                   v.book != m_book || v.chapter != m_chapter ? 0 : m_position);

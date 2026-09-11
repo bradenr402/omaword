@@ -104,7 +104,7 @@ ApplicationWindow {
         property string calls: ""
         property bool canFlush: true
         function tint(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
-        function clearTextSelection() { calls += "clear;" }
+        function clearTextSelection() { calls += "clear;"; freeSelectedText = ""; reader.clearSelection() }
         function flushNote() { calls += "flush;"; return canFlush }
         function syncNote() { calls += "sync;" }
         function openNotes(edit) { calls += edit ? "edit;" : "preview;" }
@@ -176,7 +176,7 @@ ApplicationWindow {
         controller->setProperty("calls","");
         click(item("blockAnnotationAction:note:Genesis 1:4–5"));
         QCOMPARE(backend->property("navigated").toString(),QString("Genesis 1:4–5"));
-        QCOMPARE(controller->property("calls").toString(),QString("flush;clear;navigate;sync;edit;"));
+        QCOMPARE(controller->property("calls").toString(),QString("flush;navigate;clear;sync;edit;"));
     }
     void continuationAndSelectionGuard() {
         populate();
@@ -196,20 +196,30 @@ ApplicationWindow {
             QVERIFY(!entry.toMap().value("continuesAfter").toBool());
         }
         auto icon = item("blockAnnotationMarker:note:Genesis 1:30–2:3");
+        QVERIFY(QMetaObject::invokeMethod(item("blockBody"),"select",Q_ARG(int,0),Q_ARG(int,8)));
+        const auto selection = item("blockBody")->property("selectedText").toString();
+        QVERIFY(!selection.isEmpty());
+        controller->setProperty("freeSelectedText",selection);
         controller->setProperty("canFlush",false);
         controller->setProperty("calls","");
         click(icon);
         QCOMPARE(controller->property("calls").toString(),QString("flush;"));
         QVERIFY(backend->property("navigated").toString().isEmpty());
+        QCOMPARE(controller->property("freeSelectedText").toString(),selection);
+        QCOMPARE(item("blockBody")->property("selectedText").toString(),selection);
         controller->setProperty("canFlush",true);
         backend->setProperty("navigationSucceeds",false);
         controller->setProperty("calls","");
         click(icon);
-        QCOMPARE(controller->property("calls").toString(),QString("flush;clear;navigate;"));
+        QCOMPARE(controller->property("calls").toString(),QString("flush;navigate;"));
+        QCOMPARE(controller->property("freeSelectedText").toString(),selection);
+        QCOMPARE(item("blockBody")->property("selectedText").toString(),selection);
         backend->setProperty("navigationSucceeds",true);
         controller->setProperty("calls","");
         click(icon);
-        QCOMPARE(controller->property("calls").toString(),QString("flush;clear;navigate;sync;edit;"));
+        QCOMPARE(controller->property("calls").toString(),QString("flush;navigate;clear;sync;edit;"));
+        QVERIFY(controller->property("freeSelectedText").toString().isEmpty());
+        QVERIFY(item("blockBody")->property("selectedText").toString().isEmpty());
         QCOMPARE(backend->property("navigated").toString(),QString("Genesis 1:30–2:3"));
     }
     void relayoutAndFocus() {

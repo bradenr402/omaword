@@ -14,6 +14,7 @@ Item {
     required property Flickable viewport
     property alias body: body
     property alias mapping: document
+    readonly property bool annotationMenuOpen: annotationMenu.visible
     readonly property real railWidth: 40 * controller.scale
     onRailWidthChanged: Qt.callLater(updateAnnotations)
     property var annotationRanges: []
@@ -45,8 +46,8 @@ Item {
         if (entry.kind === "bookmark") controller.openBookmark(entry.reference)
         else {
             if (!controller.flushNote()) return
-            controller.clearTextSelection()
             if (backend.navigate(entry.reference)) {
+                controller.clearTextSelection()
                 controller.syncNote()
                 controller.openNotes(true)
             }
@@ -274,7 +275,7 @@ Item {
                             }
                         }
                         background: Rectangle {
-                            radius: 3 * root.controller.scale
+                            radius: 0
                             color: root.controller.tint(root.theme.accent, marker.down ? 0.25 : 0.12)
                             visible: marker.hovered || marker.activeFocus
                         }
@@ -355,6 +356,12 @@ Item {
         id: annotationMenu
         objectName: "blockAnnotationMenu"
         popupType: Popup.Item
+        modal: true
+        focus: true
+        onOpened: {
+            currentIndex = 0
+            if (itemAt(0)) itemAt(0).forceActiveFocus()
+        }
         property var entries: []
         palette.window: root.theme.background
         palette.base: root.theme.background
@@ -367,6 +374,10 @@ Item {
             model: annotationMenu.entries
             delegate: MenuItem {
                 required property var modelData
+                // Menu buttons otherwise treat Ctrl+Space like Space and
+                // activate a reference, exposing the reader to subsequent keys.
+                Keys.onPressed: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
+                Keys.onReleased: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
                 objectName: "blockAnnotationAction:" + modelData.kind + ":" + modelData.reference
                 text: modelData.reference + (modelData.continuesBefore ? " (continued)" : "")
                 onTriggered: root.openAnnotation(modelData)

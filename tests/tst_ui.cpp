@@ -2154,6 +2154,88 @@ private slots:
         QTRY_COMPARE(item("reading")->width(),1120.0);
         QVERIFY(passage->width() >= 0);
     }
+    void blockAnnotationChooserKeyboardIsolation() {
+        // Real backend/Main shortcuts, with adjacent ranges starting on the
+        // same rendered line, each carrying both a bookmark and a note.
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-annotation-fixture");
+            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("UPDATE verses SET text='Short verse.',html='Short verse.',heading='',poetry=0 WHERE book=43 AND chapter=3 AND number<=4"));
+        }
+        QSqlDatabase::removeDatabase("ui-annotation-fixture");
+        reference("John 4:1");
+        reference("John 3:1-2");
+        bible->toggleBookmark(); bible->setNoteText("First range note");
+        reference("John 3:3-4");
+        bible->toggleBookmark(); bible->setNoteText("Second range note");
+        reference("John 3:1-2");
+        bible->setBlockMode(true);
+        QTRY_VERIFY(item("blockAnnotationMarker:bookmark:John 3:1–2"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        const auto annotations = bible->collection();
+        const auto open = [this](const QString &kind) {
+            click(item(qPrintable("blockAnnotationMarker:" + kind + ":John 3:1–2")));
+            QTRY_VERIFY(prop("blockReader","annotationMenuOpen").toBool());
+            QVERIFY(window->property("modalOpen").toBool());
+            QVERIFY(!window->property("readerKeys").toBool());
+            QTRY_COMPARE(prop("blockAnnotationMenu","currentIndex").toInt(),0);
+        };
+        for (const auto &kind : {QString("bookmark"),QString("note")}) {
+            open(kind);
+            const auto selected = bible->selectionReference();
+            const auto isolatedKey = [this,&selected,&annotations](Qt::Key code, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+                key(code,modifiers);
+                QVERIFY2(prop("blockReader","annotationMenuOpen").toBool(),qPrintable(QString("Menu closed on key %1 modifiers %2").arg(code).arg(int(modifiers))));
+                QCOMPARE(bible->selectionReference(),selected);
+                QCOMPARE(bible->collection(),annotations);
+            };
+            for (auto code : {Qt::Key_J,Qt::Key_M,Qt::Key_X,Qt::Key_F}) isolatedKey(code);
+            for (auto code : {Qt::Key_M,Qt::Key_X,Qt::Key_K,Qt::Key_Space,Qt::Key_D}) isolatedKey(code,Qt::ControlModifier);
+            QCOMPARE(bible->selectionReference(),selected);
+            QCOMPARE(bible->collection(),annotations);
+            QVERIFY(!bible->focusMode());
+            QVERIFY(!prop("passagePalette","visible").toBool());
+            QVERIFY(prop("blockReader","annotationMenuOpen").toBool());
+            key(Qt::Key_Down);
+            QCOMPARE(prop("blockAnnotationMenu","currentIndex").toInt(),1);
+            QCOMPARE(bible->selectionReference(),selected);
+            key(Qt::Key_Up);
+            QCOMPARE(prop("blockAnnotationMenu","currentIndex").toInt(),0);
+            key(Qt::Key_Down);
+            key(Qt::Key_Return);
+            QTRY_VERIFY(!prop("blockReader","annotationMenuOpen").toBool());
+            QCOMPARE(bible->selectionReference(),QString("John 3:3–4"));
+            QCOMPARE(bible->collection(),annotations);
+            if (kind == "note") {
+                QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+                QCOMPARE(prop("noteEditor","text").toString(),QString("Second range note"));
+                key(Qt::Key_Escape);
+                QTRY_VERIFY(!window->property("notesOpen").toBool());
+            }
+            reference("John 3:1-2");
+        }
+        open("bookmark");
+        key(Qt::Key_Escape);
+        QTRY_VERIFY(!window->property("modalOpen").toBool());
+        QCOMPARE(bible->selectionReference(),QString("John 3:1–2"));
+    }
+    void countedMotionsWithoutSelection() {
+        for (bool block : {false,true}) {
+            bible->setBlockMode(block);
+            reference("John 3"); type("4j"); QCOMPARE(bible->selectionReference(),QString("John 3:4"));
+            reference("John 3"); type("4k"); QCOMPARE(bible->selectionReference(),QString("John 3:33"));
+            reference("John 3"); type("38"); key(Qt::Key_Down); QCOMPARE(bible->selectionReference(),QString("John 4:2"));
+            reference("John 3"); type("38"); key(Qt::Key_Up); QCOMPARE(bible->selectionReference(),QString("John 2:24"));
+            reference("Matthew 17"); type("21j"); QCOMPARE(bible->selectionReference(),QString("Matthew 17:22"));
+            reference("Matthew 17"); type("7k"); QCOMPARE(bible->selectionReference(),QString("Matthew 17:20"));
+            reference("John 3"); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(),1);
+            reference("John 3"); key(Qt::Key_K); QCOMPARE(bible->cursorVerse(),36);
+            reference("John 3"); type("999999j"); QCOMPARE(bible->selectionReference(),QString("Revelation 22:21"));
+            reference("John 3"); type("999999k"); QCOMPARE(bible->selectionReference(),QString("Genesis 1:1"));
+        }
+    }
     void composableMotions() {
         reference("John 3:16");
         type("4k"); QCOMPARE(bible->cursorVerse(),12);
