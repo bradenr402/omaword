@@ -1,0 +1,8 @@
+QT += core gui widgets qml quick quickcontrols2 sql concurrent dbus
+CONFIG += c++17 link_pkgconfig
+PKGCONFIG += libarchive fontconfig
+TARGET = omabible
+TEMPLATE = app
+SOURCES += src/main.cpp src/desktop.cpp src/biblebackend.cpp src/epubimporter.cpp
+HEADERS += src/desktop.h src/biblebackend.h src/epubimporter.h
+RESOURCES += resources.qrc
