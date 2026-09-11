@@ -2,63 +2,133 @@
 set -euo pipefail
 
 root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN)}
-if [[ ! $jobs =~ ^[1-9][0-9]*$ ]]; then
-    printf 'JOBS must be a positive integer.\n' >&2
+usage() {
+    printf 'Usage: bin/test [--suite backend|ui|importer|annotations|instance|windows|all] [Qt test arguments]\n'
+    printf 'Repeat --suite to select multiple suites; Qt arguments require one suite.\n'
+    printf 'JOBS caps total build jobs; TEST_JOBS caps concurrent suites (default 2).\n'
+}
+suites=()
+while (( $# )); do
+    case $1 in
+        --suite)
+            if (( $# < 2 )); then usage >&2; exit 1; fi
+            suites+=("$2")
+            shift 2
+            ;;
+        --help|-h) usage; exit 0 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
+(( ${#suites[@]} )) || suites=(all)
+available=(backend ui importer annotations instance)
+[[ ! -f $root/tests/windows.pro ]] || available+=(windows)
+selected=()
+declare -A seen=()
+for suite in "${suites[@]}"; do
+    case $suite in
+        all) expanded=("${available[@]}") ;;
+        backend|ui|importer|annotations|instance|windows) expanded=("$suite") ;;
+        *) printf 'Unknown suite: %s\n' "$suite" >&2; usage >&2; exit 1 ;;
+    esac
+    for name in "${expanded[@]}"; do
+        if [[ ! ${seen[$name]:-} ]]; then selected+=("$name"); seen[$name]=1; fi
+    done
+done
+if (( $# && ${#selected[@]} != 1 )); then
+    printf 'Qt test arguments require a single --suite target.\n' >&2
     exit 1
 fi
-
-if [[ -n ${OMAWORD_TEST_KJV:-} ]]; then
-    if [[ ! -f $OMAWORD_TEST_KJV || ! -r $OMAWORD_TEST_KJV ]]; then
-        printf 'OMAWORD_TEST_KJV must name a readable EPUB file.\n' >&2
+declare -A projects=([backend]=backend [ui]=ui [importer]=importer_versions
+    [annotations]=blockannotations [instance]=singleinstance [windows]=windows)
+declare -A directories=([backend]=tests [ui]=ui-tests [importer]=importer-versions
+    [annotations]=blockannotations [instance]=singleinstance-tests [windows]=windows-tests)
+for suite in "${selected[@]}"; do
+    if [[ ! -f $root/tests/${projects[$suite]}.pro ]]; then
+        printf 'Suite project is unavailable: %s\n' "$root/tests/${projects[$suite]}.pro" >&2
         exit 1
     fi
-    export OMAWORD_TEST_KJV
-    OMAWORD_TEST_KJV=$(realpath -- "$OMAWORD_TEST_KJV")
+done
+jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN)}
+test_jobs=${TEST_JOBS:-2}
+for value in "$jobs" "$test_jobs"; do
+    if [[ ! $value =~ ^[1-9][0-9]*$ ]]; then
+        printf 'JOBS and TEST_JOBS must be positive integers.\n' >&2
+        exit 1
+    fi
+done
+(( test_jobs <= jobs )) || test_jobs=$jobs
+(( test_jobs <= ${#selected[@]} )) || test_jobs=${#selected[@]}
+build_jobs=$((jobs / test_jobs))
+build_dir=$(realpath -m -- "${BUILD_DIR:-$root/build}")
+log_dir="$build_dir/test-logs"
+
+# Normalize caller-relative fixture paths before any worker changes directory.
+for variable in OMAWORD_TEST_KJV OMAWORD_TEST_KJV_EPUB OMAWORD_TEST_EPUB; do
+    if [[ -n ${!variable:-} ]]; then
+        if [[ ! -f ${!variable} || ! -r ${!variable} ]]; then
+            printf '%s must name a readable EPUB file.\n' "$variable" >&2
+            exit 1
+        fi
+        printf -v "$variable" '%s' "$(realpath -- "${!variable}")"
+        export "$variable"
+    fi
+done
+if [[ -n ${OMAWORD_TEST_KJV:-} ]]; then
     export OMAWORD_TEST_KJV_EPUB=${OMAWORD_TEST_KJV_EPUB:-$OMAWORD_TEST_KJV}
 fi
-# Resolve a caller-relative EPUB path before changing to the build directory.
-if [[ -n ${OMAWORD_TEST_EPUB:-} ]]; then
-    if [[ ! -f $OMAWORD_TEST_EPUB || ! -r $OMAWORD_TEST_EPUB ]]; then
-        printf 'OMAWORD_TEST_EPUB must name a readable EPUB file.\n' >&2
-        exit 1
+mkdir -p -- "$log_dir"
+run_suite() {
+    local suite=$1
+    shift
+    mkdir -p -- "$build_dir/${directories[$suite]}"
+    cd -- "$build_dir/${directories[$suite]}"
+    qmake6 "$root/tests/${projects[$suite]}.pro"
+    make -j"$build_jobs"
+    QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software "./tst_${projects[$suite]}" "$@"
+}
+
+# Each worker gets a process group so interruption also stops its compiler/test.
+set -m
+declare -A active=() started=()
+cleanup() {
+    local pid
+    for pid in "${!active[@]}"; do kill -TERM -- "-$pid" 2>/dev/null || true; done
+    for pid in "${!active[@]}"; do wait "$pid" 2>/dev/null || true; done
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+next=0
+result=0
+while (( next < ${#selected[@]} || ${#active[@]} )); do
+    while (( next < ${#selected[@]} && ${#active[@]} < test_jobs )); do
+        suite=${selected[next]}
+        printf '[%s] START (build jobs=%s; log=%s/%s.log)\n' "$suite" "$build_jobs" "$log_dir" "$suite"
+        run_suite "$suite" "$@" >"$log_dir/$suite.log" 2>&1 &
+        pid=$!
+        active[$pid]=$suite
+        started[$pid]=$SECONDS
+        next=$((next + 1))
+    done
+    # Reap any finished worker, including workers that exited between launches.
+    # Unlike wait -n, wait PID retains the status of an already-finished job.
+    finished=
+    for pid in "${!active[@]}"; do
+        if ! kill -0 "$pid" 2>/dev/null; then finished=$pid; break; fi
+    done
+    if [[ -z $finished ]]; then sleep 0.05; continue; fi
+    status=0
+    wait "$finished" || status=$?
+    suite=${active[$finished]}
+    elapsed=$((SECONDS - started[$finished]))
+    unset 'active[$finished]' 'started[$finished]'
+    if (( status == 0 )); then
+        printf '[%s] PASS (%ss)\n' "$suite" "$elapsed"
+    else
+        printf '[%s] FAIL (exit=%s, %ss) — %s/%s.log\n' "$suite" "$status" "$elapsed" "$log_dir" "$suite" >&2
+        while IFS= read -r line || [[ -n $line ]]; do printf '  %s\n' "$line" >&2; done <"$log_dir/$suite.log"
+        (( result != 0 )) || result=$status
     fi
-    export OMAWORD_TEST_EPUB
-    OMAWORD_TEST_EPUB=$(realpath -- "$OMAWORD_TEST_EPUB")
-fi
-
-mkdir -p -- "$root/build/migration-tests"
-cd -- "$root/build/migration-tests"
-qmake6 "$root/tests/migration.pro"
-make -j"$jobs"
-./tst_migration "$@"
-
-mkdir -p -- "$root/build/singleinstance-tests"
-cd -- "$root/build/singleinstance-tests"
-qmake6 "$root/tests/singleinstance.pro"
-make -j"$jobs"
-QT_QPA_PLATFORM=offscreen ./tst_singleinstance "$@"
-
-mkdir -p -- "$root/build/tests"
-cd -- "$root/build/tests"
-qmake6 "$root/tests/backend.pro"
-make -j"$jobs"
-QT_QPA_PLATFORM=offscreen ./tst_backend "$@"
-
-mkdir -p -- "$root/build/ui-tests"
-cd -- "$root/build/ui-tests"
-qmake6 "$root/tests/ui.pro"
-make -j"$jobs"
-QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./tst_ui "$@"
-
-mkdir -p -- "$root/build/blockannotations"
-cd -- "$root/build/blockannotations"
-qmake6 "$root/tests/blockannotations.pro"
-make -j"$jobs"
-QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./tst_blockannotations "$@"
-
-mkdir -p -- "$root/build/importer-versions"
-cd -- "$root/build/importer-versions"
-qmake6 "$root/tests/importer_versions.pro"
-make -j"$jobs"
-./tst_importer_versions "$@"
+done
+exit "$result"

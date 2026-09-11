@@ -9,9 +9,6 @@ license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'libarchive' 'fontconfig')
 makedepends=('gcc' 'make' 'pkgconf')
 optdepends=('qt6-wayland: native Wayland support')
-# Historical package identity, solely for upgrades.
-conflicts=('omabible')
-replaces=('omabible')
 # Sources are the enclosing checkout, including uncommitted changes. No remote
 # archive or pre-generated tarball is needed; this recipe is not standalone.
 source=()

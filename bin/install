@@ -4,14 +4,14 @@ set -euo pipefail
 root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/branding.env"
 build_dir=${BUILD_DIR:-$root/build}
+build_dir=$(realpath -m -- "$build_dir")
 if [[ ! -x $build_dir/$BRAND_ID || ! -f $build_dir/$BRAND_ID.desktop ]]; then
     printf 'Build %s first: %s/bin/build\n' "$BRAND_NAME" "$root" >&2
     exit 1
 fi
 
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
-# Historical identity is recognition-only; never install an old command alias.
-legacy_id=omabible
+data_home=$(realpath -m -- "$data_home")
 sources=("$build_dir/$BRAND_ID" "$build_dir/$BRAND_ID.desktop"
     "$root/assets/app.svg" "$root/assets/app-symbolic.svg")
 destinations=("$HOME/.local/bin/$BRAND_ID" "$data_home/applications/$BRAND_ID.desktop"
@@ -22,8 +22,7 @@ backup_names=("bin/$BRAND_ID" "applications/$BRAND_ID.desktop"
 modes=(755 644 644 644)
 
 # Check every input and destination before backing up or installing anything.
-for source_file in "${sources[@]}" "$root/assets/legacy/$legacy_id.desktop" \
-    "$root/assets/legacy/$legacy_id.svg" "$root/assets/legacy/$legacy_id-symbolic.svg"; do
+for source_file in "${sources[@]}"; do
     if [[ ! -f $source_file || ! -r $source_file ]]; then
         printf 'Missing or unreadable installation source: %s\n' "$source_file" >&2
         exit 1
@@ -42,29 +41,8 @@ preflight_destination() {
         exit 1
     fi
 }
-# Only remove the byte-for-byte launcher shipped by the previous local installer.
-# A customized file or symlink belongs to its user and must be preserved.
-legacy_launcher="$data_home/applications/$legacy_id.desktop"
-legacy_binary="$HOME/.local/bin/$legacy_id"
-remove_legacy=false
-if [[ -f $legacy_launcher && ! -L $legacy_launcher ]] &&
-    cmp -s -- "$root/assets/legacy/$legacy_id.desktop" "$legacy_launcher"; then
-    remove_legacy=true
-fi
-for destination in "${destinations[@]}" "$legacy_launcher" "$legacy_binary"; do
+for destination in "${destinations[@]}"; do
     preflight_destination "$destination"
-done
-legacy_icons=("$data_home/icons/hicolor/scalable/apps/$legacy_id.svg"
-    "$data_home/icons/hicolor/symbolic/apps/$legacy_id-symbolic.svg")
-legacy_icon_sources=("$root/assets/legacy/$legacy_id.svg" "$root/assets/legacy/$legacy_id-symbolic.svg")
-legacy_icon_backups=("icons/scalable/$legacy_id.svg" "icons/symbolic/$legacy_id-symbolic.svg")
-remove_icons=()
-for i in "${!legacy_icons[@]}"; do
-    preflight_destination "${legacy_icons[i]}"
-    if [[ -f ${legacy_icons[i]} && ! -L ${legacy_icons[i]} ]] &&
-        cmp -s -- "${legacy_icon_sources[i]}" "${legacy_icons[i]}"; then
-        remove_icons+=("$i")
-    fi
 done
 backup_root="$data_home/$BRAND_ID/install-backups"
 preflight_destination "$backup_root/.preflight"
@@ -72,12 +50,10 @@ preflight_destination "$backup_root/.preflight"
 changed=()
 for i in "${!destinations[@]}"; do
     destination=${destinations[i]}
-    if (( i < ${#sources[@]} )); then
-        if [[ -f $destination && ! -L $destination ]] &&
-            cmp -s -- "${sources[i]}" "$destination" &&
-            [[ $(stat -c '%a' -- "$destination") == "${modes[i]}" ]]; then
-            continue
-        fi
+    if [[ -f $destination && ! -L $destination ]] &&
+        cmp -s -- "${sources[i]}" "$destination" &&
+        [[ $(stat -c '%a' -- "$destination") == "${modes[i]}" ]]; then
+        continue
     fi
     changed+=("$i")
 done
@@ -99,13 +75,6 @@ backup_existing() {
 for i in "${changed[@]}"; do
     backup_existing "${destinations[i]}" "${backup_names[i]}"
 done
-if $remove_legacy; then
-    backup_existing "$legacy_launcher" "applications/$legacy_id.desktop"
-fi
-backup_existing "$legacy_binary" "bin/$legacy_id"
-for i in "${remove_icons[@]}"; do
-    backup_existing "${legacy_icons[i]}" "${legacy_icon_backups[i]}"
-done
 
 # Same-directory rename replaces files and symlinks without following them and
 # allows an already-running executable to keep using its original inode.
@@ -119,15 +88,6 @@ for i in "${changed[@]}"; do
     install -m "${modes[i]}" -- "${sources[i]}" "$temporary"
     mv -fT -- "$temporary" "$destination"
     temporary=
-done
-if $remove_legacy; then
-    rm -- "$legacy_launcher"
-fi
-if [[ -e $legacy_binary || -L $legacy_binary ]]; then
-    rm -- "$legacy_binary"
-fi
-for i in "${remove_icons[@]}"; do
-    rm -- "${legacy_icons[i]}"
 done
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$data_home/applications"
