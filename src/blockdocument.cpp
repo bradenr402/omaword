@@ -1,4 +1,5 @@
 #include "blockdocument.h"
+#include "brand.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QCoreApplication>
@@ -12,6 +13,9 @@
 
 static void registerBlockDocument()
 {
+    static const auto module = (Brand::name() + QStringLiteral(".Reader")).toUtf8();
+    qmlRegisterType<BlockDocument>(module.constData(), 1, 0, "BlockDocument");
+    // Compatibility for existing QML consumers and test fixtures.
     qmlRegisterType<BlockDocument>("OmaBible.Reader", 1, 0, "BlockDocument");
 }
 Q_COREAPP_STARTUP_FUNCTION(registerBlockDocument)

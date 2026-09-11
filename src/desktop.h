@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QDBusVariant>
+#include "brand.h"
 
 class Desktop : public QObject {
     Q_OBJECT
@@ -18,10 +19,14 @@ class Desktop : public QObject {
     Q_PROPERTY(QString fontFamily MEMBER m_fontFamily NOTIFY changed)
     Q_PROPERTY(double textScale MEMBER m_textScale NOTIFY changed)
     Q_PROPERTY(bool dark MEMBER m_dark NOTIFY changed)
+    Q_PROPERTY(QString appName READ appName CONSTANT)
+    Q_PROPERTY(QString appId READ appId CONSTANT)
     Q_PROPERTY(QString version READ version CONSTANT)
 public:
     explicit Desktop(QObject *parent = nullptr);
-    QString version() const { return QStringLiteral("0.1.0"); }
+    QString appName() const { return Brand::appName(); }
+    QString appId() const { return Brand::appId(); }
+    QString version() const { return Brand::version(); }
     Q_INVOKABLE void openExternal(const QUrl &url);
 signals:
     void changed();

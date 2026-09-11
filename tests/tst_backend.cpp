@@ -46,7 +46,7 @@ private slots:
     void initTestCase() {
         QVERIFY(root.isValid());
         qputenv("XDG_DATA_HOME",root.path().toUtf8());
-        QCoreApplication::setOrganizationName("OmaBibleTests");
+        QCoreApplication::setOrganizationName("OmaWordTests");
         QCoreApplication::setApplicationName("omabible-test");
         epub = qEnvironmentVariable("OMABIBLE_TEST_EPUB");
         bible = std::make_unique<BibleBackend>();
@@ -416,7 +416,7 @@ private slots:
         QVERIFY(bible->exportNotes(QUrl::fromLocalFile(root.path())));
         QFile markdown(file("omabible-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
         const auto text = QString::fromUtf8(markdown.readAll()); QVERIFY(text.contains(note)); QVERIFY(text.contains("John 3:16–18"));
-        QVERIFY(text.startsWith("# OmaBible notes\n"));
+        QVERIFY(text.startsWith("# OmaWord notes\n"));
         QVERIFY(!bible->exportBackup(QUrl::fromLocalFile(bible->dataDirectory()+"/personal.sqlite")));
         QVERIFY(QFile::link(bible->dataDirectory()+"/personal.sqlite",file("database-alias.json")));
         QVERIFY(!bible->exportBackup(QUrl::fromLocalFile(file("database-alias.json"))));

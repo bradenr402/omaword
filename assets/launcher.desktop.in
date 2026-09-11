@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=$$BRAND_NAME
+GenericName=Bible Reader
+Comment=Read the NET Bible offline with bookmarks, highlights, and notes
+Exec=$$BRAND_ID
+Icon=$$BRAND_ID
+Terminal=false
+Categories=Education;Literature;
+Keywords=$$BRAND_KEYWORDS
+StartupNotify=true

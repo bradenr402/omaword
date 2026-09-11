@@ -1,4 +1,5 @@
 #include "biblebackend.h"
+#include "brand.h"
 
 #include <QClipboard>
 #include <QDateTime>
@@ -118,7 +119,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 {
     m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (!QDir().mkpath(m_directory)) {
-        setError("Cannot create OmaBible data directory: " + m_directory);
+        setError("Cannot create " + Brand::name() + " data directory: " + m_directory);
         return;
     }
     if (!initializeStore()) return;
@@ -250,7 +251,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 2) { m_store.close(); return setError("Your notes database was created by a newer OmaBible version."); }
+    if (version > 2) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -935,7 +936,8 @@ bool BibleBackend::exportNotes(QUrl directory)
     if (!protectDestination(QDir(path).filePath("omabible-notes.md"))) return false;
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) return false;
-    QString markdown = "# OmaBible notes\n\nEdition: NET Bible 2.1\n\n";
+    // The export filename remains stable for existing scripts and consumers.
+    QString markdown = "# " + Brand::name() + " notes\n\nEdition: NET Bible 2.1\n\n";
     for (const auto &a : rows) {
         markdown += "## " + rangeReference(a.start,a.end) + "\n\n";
         QStringList flags;
@@ -1026,7 +1028,7 @@ bool BibleBackend::importBackup(QUrl file)
         || root.value("edition") != edition() || !root.value("created").isString()
         || !QDateTime::fromString(root.value("created").toString(),Qt::ISODateWithMs).isValid()
         || !root.value("reading").isObject() || !root.value("annotations").isArray())
-        return setError("Unsupported or invalid OmaBible backup format.");
+        return setError("Unsupported or invalid " + Brand::name() + " backup format.");
     const auto reading = root.value("reading").toObject();
     const bool v2 = root.value("version").toInt() == 2;
     auto verse = [this](const QJsonObject &object, const QString &b, const QString &c, const QString &v) {

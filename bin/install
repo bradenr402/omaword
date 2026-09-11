@@ -2,20 +2,30 @@
 set -euo pipefail
 
 root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-if [[ ! -x $root/build/omabible ]]; then
-    printf 'Build OmaBible first: %s/bin/build\n' "$root" >&2
+source "$root/branding.env"
+build_dir=${BUILD_DIR:-$root/build}
+if [[ ! -x $build_dir/$BRAND_ID || ! -f $build_dir/$BRAND_ID.desktop ]]; then
+    printf 'Build %s first: %s/bin/build\n' "$BRAND_NAME" "$root" >&2
     exit 1
 fi
 
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
-install -Dm755 -- "$root/build/omabible" "$HOME/.local/bin/omabible"
-install -Dm644 -- "$root/assets/omabible.desktop" "$data_home/applications/omabible.desktop"
-install -Dm644 -- "$root/assets/omabible.svg" "$data_home/icons/hicolor/scalable/apps/omabible.svg"
-install -Dm644 -- "$root/assets/omabible-symbolic.svg" "$data_home/icons/hicolor/symbolic/apps/omabible-symbolic.svg"
+install -Dm755 -- "$build_dir/$BRAND_ID" "$HOME/.local/bin/$BRAND_ID"
+ln -sfn -- "$BRAND_ID" "$HOME/.local/bin/$BRAND_STORAGE_ID"
+install -Dm644 -- "$build_dir/$BRAND_ID.desktop" "$data_home/applications/$BRAND_ID.desktop"
+install -Dm644 -- "$root/assets/$BRAND_ID.svg" "$data_home/icons/hicolor/scalable/apps/$BRAND_ID.svg"
+install -Dm644 -- "$root/assets/$BRAND_ID-symbolic.svg" "$data_home/icons/hicolor/symbolic/apps/$BRAND_ID-symbolic.svg"
+# Only remove the byte-for-byte launcher shipped by the previous local installer.
+# A customized file or symlink belongs to its user and must be preserved.
+legacy_launcher="$data_home/applications/$BRAND_STORAGE_ID.desktop"
+if [[ -f $legacy_launcher && ! -L $legacy_launcher ]] &&
+    cmp -s -- "$root/assets/legacy/$BRAND_STORAGE_ID.desktop" "$legacy_launcher"; then
+    rm -- "$legacy_launcher"
+fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$data_home/applications"
 fi
 if [[ -f $data_home/icons/hicolor/index.theme ]] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f "$data_home/icons/hicolor"
 fi
-printf 'Installed OmaBible to %s/.local/bin/omabible\nEnsure %s/.local/bin is on PATH for the desktop launcher.\n' "$HOME" "$HOME"
+printf 'Installed %s to %s/.local/bin/%s\nEnsure %s/.local/bin is on PATH for the desktop launcher.\n' "$BRAND_NAME" "$HOME" "$BRAND_ID" "$HOME"

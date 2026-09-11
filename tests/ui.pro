@@ -2,6 +2,7 @@ QT += core gui widgets qml quick quickcontrols2 sql concurrent dbus testlib
 CONFIG += c++17 testcase link_pkgconfig
 PKGCONFIG += libarchive fontconfig
 TEMPLATE = app
+include(../branding.pri)
 TARGET = tst_ui
 INCLUDEPATH += ../src
 SOURCES += tst_ui.cpp ../src/biblebackend.cpp ../src/epubimporter.cpp ../src/desktop.cpp

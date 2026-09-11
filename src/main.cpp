@@ -1,4 +1,5 @@
 #include "biblebackend.h"
+#include "brand.h"
 #include "desktop.h"
 #include <QApplication>
 #include <QCommandLineParser>
@@ -12,34 +13,42 @@
 #include <QStandardPaths>
 #include <QMessageBox>
 #include <QTimer>
+#include <QTextStream>
 
 int main(int argc, char *argv[]) {
-    QCoreApplication::setApplicationName(QStringLiteral("omabible"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
-    QGuiApplication::setDesktopFileName(QStringLiteral("omabible"));
+    // Keep QStandardPaths (and the instance lock) compatible with existing data.
+    QCoreApplication::setApplicationName(Brand::storageId());
+    QCoreApplication::setApplicationVersion(Brand::version());
+    QGuiApplication::setDesktopFileName(Brand::appId());
     QApplication app(argc, argv);
-    QGuiApplication::setApplicationDisplayName(QStringLiteral("OmaBible"));
-    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/assets/omabible.svg")));
+    QGuiApplication::setApplicationDisplayName(Brand::name());
+    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/branding/icon.svg")));
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("A quiet, offline Bible reader for Omarchy."));
+    parser.setApplicationDescription(Brand::name() + QStringLiteral(" — a quiet, offline Bible reader for Omarchy."));
     parser.addHelpOption();
-    parser.addVersionOption();
+    // Qt's automatic version output uses the intentionally legacy storage name.
+    const QCommandLineOption versionOption({QStringLiteral("v"), QStringLiteral("version")}, QStringLiteral("Displays version information."));
+    parser.addOption(versionOption);
     QCommandLineOption importOption(QStringLiteral("import"), QStringLiteral("Import an official NET Bible 2.1 EPUB."), QStringLiteral("epub"));
     parser.addOption(importOption);
     parser.addPositionalArgument(QStringLiteral("reference"), QStringLiteral("Passage to open, e.g. \"John 3:16\"."), QStringLiteral("[reference]"));
     parser.process(app);
+    if (parser.isSet(versionOption)) {
+        QTextStream(stdout) << Brand::name() << ' ' << Brand::version() << Qt::endl;
+        return 0;
+    }
 
     const QString data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (!QDir().mkpath(data)) {
-        QMessageBox::critical(nullptr, QStringLiteral("OmaBible"), QStringLiteral("Cannot create the application data folder: ") + data);
+        QMessageBox::critical(nullptr, Brand::name(), QStringLiteral("Cannot create the application data folder: ") + data);
         return 1;
     }
-    QLockFile lock(data + QStringLiteral("/omabible.lock"));
+    QLockFile lock(data + '/' + Brand::storageId() + QStringLiteral(".lock"));
     lock.setStaleLockTime(0);
     if (!lock.tryLock()) {
-        QMessageBox::information(nullptr, QStringLiteral("OmaBible"), QStringLiteral("OmaBible is already open, or its data folder is locked. Switch to the existing window to continue reading."));
+        QMessageBox::information(nullptr, Brand::name(), Brand::name() + QStringLiteral(" is already open, or its data folder is locked. Switch to the existing window to continue reading."));
         return 1;
     }
     Desktop desktop;
