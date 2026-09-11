@@ -1,7 +1,8 @@
 # OmaBible tests
 
-From the repository root, build and run backend and integrated UI tests offscreen
-in `build/tests/` and `build/ui-tests/`:
+From the repository root, build and run backend, integrated UI, and dedicated
+block-annotation tests offscreen in `build/tests/`, `build/ui-tests/`, and
+`build/blockannotations/`:
 
 ```sh
 bin/test
@@ -12,6 +13,8 @@ OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" bin/test
 `OMABIBLE_TEST_EPUB` is optional. Without it, real-edition integration cases are
 skipped. Tests isolate application data in a temporary directory and read the
 user-supplied EPUB in place. No Bible content is included in the test sources.
+Block-annotation tests cover logical marker geometry, overlapping-range choosers,
+note navigation, layout changes, and focus-mode suppression using original fixtures.
 
 ## Backend behavior
 
@@ -107,7 +110,7 @@ UI tests use original synthetic text and temporary application data. Coverage in
 - Searchable Keybindings includes only bound actions plus disabled context/gesture
   guidance: p finds Verse picker, Reset line height is present, and unbound Reading
   settings is absent. Arrow keys select and Enter executes; Home/End selects the
-  first/last result, PageUp/PageDown the top/bottom visible result without scrolling.
+  first/last result, PageUp/PageDown one page at a time.
   Shortcut display convention is lowercase without Shift (Ctrl k, Ctrl c, Ctrl n),
   uppercase with Shift (Ctrl Shift C, Y meaning Shift Y); Qt key enums/sequences in
   test code use their required syntax.

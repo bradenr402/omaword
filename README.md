@@ -157,7 +157,7 @@ Floating bottom controls leave the reading surface full-height: visual mode on
 the left, the reference in the center, and Saved, Notes, and Keybindings icons on
 the right.
 
-The palette previews the canonical destination before you press Enter. When
+The palette's **Search** tab previews the canonical destination before you press Enter. When
 browsing, Right Arrow or Enter advances from books to chapters and, when enabled,
 from chapters to verses. Left Arrow goes back one level when the input is empty
 or its caret is at the beginning. Up from the first result selects the back
@@ -172,6 +172,13 @@ Type `20g` to select verse 20 of the current chapter. Invalid or omitted verse
 numbers leave your location unchanged. A numeric prefix expires after two seconds
 and clears when you change focus or use another command. Verse movement keeps
 three lines of context around the selected verse where space permits.
+
+Counts also compose with motions: `4k` moves up 4 verses, `3` then Down moves down
+3, and `2J` extends visual selection by 2 verses. Chapter motions accept counts
+too (`3l` advances 3 chapters). Counted ordinary verse motions can cross chapters;
+counts on bulk motions multiply their step while retaining the chapter-edge stop.
+With no verse selected, `4j` selects the 4th existing verse and `4k` the 4th from
+the chapter's end. Enter counts without an intervening Space, which opens the palette.
 
 Bulk movement uses **Ctrl d** / **Ctrl u** for five verses and **Ctrl f** /
 **Ctrl b** or **PageDown** / **PageUp** for ten. These moves stop at the current
@@ -198,13 +205,14 @@ Preferences save synchronously in `personal.sqlite` and survive restarts:
 Reading settings places each label on the left, its shortcut hint beside a
 right-aligned square switch. The toggle shortcuts and line-height adjustment/reset
 shortcuts work while the settings dialog is open, including when its slider has focus.
+Toggles show brief on/off feedback, including when switching focus mode.
 
 Block mode flows verses inline through one text document, with optional superscript
 verse numbers. Visible section headings start paragraphs; poetry and within-verse
 breaks remain. Toggle **b** to return to the default separate verse rows.
 
-Focus mode temporarily hides verse numbers, section headings, chapter and edition
-titles, floating controls, the reader scrollbar, and annotation markers/accents.
+Focus mode keeps the chapter header visible while temporarily hiding verse numbers,
+section headings, the edition label, floating controls, the reader scrollbar, and annotation markers/accents.
 Highlight fills and selection remain visible. It preserves the stored verse-number
 and heading preferences, so leaving focus mode restores their chosen visibility.
 Click the reader to focus its keyboard controls; press **f** again or **Esc**
@@ -230,14 +238,17 @@ In the default verse-row layout, one bookmark ribbon marks the start of a saved
 range; its margin line continues through the range, including across chapter
 boundaries. Hover for the full
 reference, or click the ribbon/line to reopen that range. Page icons mark notes.
+Block mode uses a left-margin annotation rail with bookmark ribbons, continuous
+range brackets, and stacked note icons. If several annotations share a line,
+their marker shows a count and opens an exact-reference chooser.
 
 ### Keyboard shortcuts
 
 Reader keys apply while reading, with no editable text field or modal dialog
 active. **?** or **F1** opens **Keybindings**. Search by action or shortcut, move
 through the results with Up / Down, and press Enter to execute an available action.
-Home / End selects the first / last result; PageUp / PageDown selects the top /
-bottom currently visible result without scrolling the list. Only actions with bound
+Home / End selects the first / last result; PageUp / PageDown moves the list one
+page at a time. Only actions with bound
 keys appear, including **p** for Verse picker and `Ctrl \` for Reset line height.
 Mouse gestures and other context-only rows are non-executable guidance. Commands
 without bound keys, such as Reading settings, remain in the command palette.
@@ -271,7 +282,7 @@ and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**
 | Toggle verse picker / block mode | `p` / `b` |
 | Decrease / increase line height | Ctrl [ / Ctrl ] |
 | Reset line height to `1.5` | `Ctrl \` |
-| Larger / smaller reader text | Ctrl Plus (also Ctrl =) / Ctrl − |
+| Larger / smaller reader text | Ctrl + (also Ctrl =) / Ctrl − |
 | Reset reader text size | Ctrl 0 |
 | Dismiss panel / leave focus mode / clear text selection or count / collapse visual range | Esc (context-dependent) |
 | Search and execute keybindings | `?`, F1 |
@@ -285,7 +296,8 @@ the selected entry; Ctrl l or Esc closes the panel. **Delete** or **Backspace**
 opens confirmation for the selected entry. Confirming removes the **exact annotation
 entry**, including both bookmark/highlight flags and its note, even in a filtered
 tab. Other entries, including overlapping ranges, are preserved. Cancel is focused
-initially; Esc cancels and returns to Saved. Bookmark and note glyphs can appear
+initially; arrow keys move between Cancel and Delete, Enter activates the focused
+button, and Esc cancels and returns to Saved. Bookmark and note glyphs can appear
 together (stacked), and a left accent stripe marks a highlighted entry. Entry
 navigation and filter keys operate on Saved while it is open, without moving the
 underlying reader.

@@ -108,8 +108,8 @@ label, shortcut hint, and right-aligned square switch. Line height opens the
 slider-only view; Reading settings opens the full set of controls.
 
 Focus mode temporarily suppresses numbers/headings using showVerseNumbers &&
-!focusMode and showHeadings && !focusMode in both layouts; it also hides chapter
-and edition titles, floating controls, reader scrollbar, and annotation markers/
+!focusMode and showHeadings && !focusMode in both layouts; the chapter header stays
+visible, while it hides the edition label, floating controls, reader scrollbar, and annotation markers/
 accents, retaining highlight fills and selection. Stored number/heading preferences
 are preserved. f or reader Esc exits focus mode; panel Esc dismisses the panel first.
 App-owned panels/dialogs have no close-X controls. Palette Esc is clear-then-close;
@@ -126,7 +126,7 @@ Normal j/k moves the verse cursor; v anchors visual selection; visual j/k and
 shifted J/K extend it across chapters. h/l navigates chapters, x highlights, m
 bookmarks. Keybindings are searchable by action or shortcut; Up/Down selects
 results and Enter executes available actions. Home/End selects first/last result;
-PageUp/PageDown selects the top/bottom currently visible result without scrolling.
+PageUp/PageDown moves the list one page while preserving a sensible selected row.
 Only actions with bound sequences and non-executable context/gesture guidance
 appear in Keybindings: p for Verse picker and `Ctrl \` for Reset line height are included;
 unbound commands such as Reading settings are command-palette-only. One action
@@ -140,13 +140,15 @@ the right with its own keyboard context; Notes overlays at all widths. The cente
 footer shows the current selected range, or the chapter when no range is selected.
 Reader Left/Right and [ / ] change chapters; Ctrl d / Ctrl u moves five verses;
 Ctrl f / Ctrl b and PageDown / PageUp move ten. Bulk moves stop at chapter edges,
-then cross one verse on the next press. Numeric prefixes such as 20g select a
-verse; g/Home and G (Shift G)/End select chapter beginning/end. Bookmark modifiers
+then cross one verse on the next press. Counts compose with directional motions
+(4k, 3 Down, 2J, 3l); ordinary counted verse motions traverse chapter boundaries.
+Numeric prefixes such as 20g select a verse; g/Home and G (Shift G)/End select chapter beginning/end. Bookmark modifiers
 use Ctrl m.
 
 Saved owns j/k and Up/Down entry navigation, h/l and Left/Right tab filtering,
 Enter opening, and Ctrl l/Esc dismissal. Delete/Backspace captures the current
 entry's exact reference and opens confirmation with Cancel initially focused.
+Arrow keys move button focus between Cancel and Delete without activating either.
 Confirmation deletes that entire annotation (both flags and note), regardless of
 active filter; other/overlapping entries survive. Esc cancels back to Saved.
 Success syncs the note editor and clamps the list index (empty list: -1); failure
