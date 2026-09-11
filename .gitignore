@@ -1,0 +1,28 @@
+# Out-of-tree builds and accidental qmake output
+/build/
+/Makefile*
+/.qmake.stash
+/.qmake.cache
+*.o
+moc_*.cpp
+qrc_*.cpp
+
+# Arch packaging output (packaging/src is makepkg's work directory)
+/packaging/src/
+/packaging/pkg/
+/pkgbuild/src/
+/pkgbuild/pkg/
+*.pkg.tar.*
+*.src.tar.*
+*.log
+
+# User-provided Bible content and local data
+*.[eE][pP][uU][bB]
+*.sqlite*
+*.db
+*.db-*
+/data/
+/user-data/
+/backups/
+omabible-notes.md
+*backup*.json
