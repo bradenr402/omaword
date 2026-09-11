@@ -117,6 +117,10 @@ ApplicationWindow {
         property real textHeight: 0
         property TextEdit body
     }
+    component SavedEntry: ItemDelegate {
+        required property var modelData
+        required property int index
+    }
 
     // Positions are TextEdit document offsets (UTF-16), never verse numbers or
     // HTML offsets. Each delegate keeps its own rich layout and selection paint.
@@ -129,7 +133,8 @@ ApplicationWindow {
     property string freeSelectedText: ""
     function clearTextSelection() {
         freeSelectedText = ""
-        if (blockLoader.item) blockLoader.item.clearSelection()
+        let block = blockLoader.item as BlockReader
+        if (block) block.clearSelection()
         for (let i = 0; i < verseRepeater.count; ++i) {
             let row = verseRepeater.itemAt(i) as VerseItem
             if (row && row.body) row.body.deselect()
@@ -470,9 +475,10 @@ ApplicationWindow {
     function scrollToVerse(number, alignTop) {
         let index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
         let row = verseRepeater.itemAt(index) as VerseItem
-        if (!row && !blockLoader.item) return
+        let block = blockLoader.item as BlockReader
+        if (!row && !block) return
         if (index === 0) { reading.contentY = 0; return }
-        let rect = blockLoader.item ? blockLoader.item.verseRect(number) : null
+        let rect = block ? block.verseRect(number) : null
         let y = rect ? blockLoader.mapToItem(readerColumn, 0, rect.y).y : row.mapToItem(readerColumn, 0, 0).y + row.textOffset
         let textHeight = rect ? rect.height : row.textHeight
         let available = Math.max(1, reading.height - floatingSafety)
@@ -521,10 +527,17 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
     }
     function requestDeleteSaved() {
-        let entry = collectionList.model[collectionList.currentIndex]
+        let row = collectionList.currentIndex
+        let focused = activeFocusItem
+        while (focused && focused !== collectionList) {
+            let delegate = focused as SavedEntry
+            if (delegate) { row = delegate.index; break }
+            focused = focused.parent
+        }
+        let entry = focused instanceof SavedEntry ? (focused as SavedEntry).modelData : collectionList.model[row]
         if (!entry || !flushNote() || bible.busy) return
         deleteConfirmation.reference = entry.reference
-        deleteConfirmation.row = collectionList.currentIndex
+        deleteConfirmation.row = row
         deleteConfirmation.open()
     }
     function confirmDeleteSaved() {
@@ -610,7 +623,7 @@ ApplicationWindow {
     function actionAvailable(action) {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action || action.explanation || bible.busy) return false
-        if (action.id === "copyText") return bible.ready && (freeSelectedText.length > 0 || hasSelection)
+        if (action.id === "copyText") return bible.ready
         if (action.id === "bookmark" || action.id === "highlight") return hasSelection
         return bible.ready || !!action.setting
             || ["books", "commands", "help", "about", "import", "settings", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
@@ -1953,11 +1966,10 @@ ApplicationWindow {
                 model: app.filteredCollection()
                 onModelChanged: currentIndex = count > 0 ? Math.max(0, Math.min(currentIndex, count - 1)) : -1
                 ScrollBar.vertical: OverlayScrollbar { id: savedScrollbar; objectName: "savedScrollbar" }
-                delegate: ItemDelegate {
+                delegate: SavedEntry {
                     id: savedEntry
                     objectName: "savedEntry" + modelData.reference
                     focusPolicy: Qt.StrongFocus
-                    required property var modelData
                     width: collectionList.width
                     padding: 12 * app.scale
                     height: savedContent.implicitHeight + topPadding + bottomPadding

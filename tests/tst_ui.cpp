@@ -15,6 +15,7 @@
 #include <QTemporaryDir>
 #include <QTextBlock>
 #include <QTextDocument>
+#include <QTextLayout>
 #include <QQuickTextDocument>
 #include "blockdocument.h"
 #include "biblebackend.h"
@@ -1424,6 +1425,110 @@ private slots:
         QTest::newRow("forward-no-numbers") << false << false;
         QTest::newRow("reverse-no-numbers") << true << false;
     }
+    void blockPointerGlyphBoundaries_data() {
+        QTest::addColumn<bool>("numbers");
+        QTest::newRow("numbers") << true;
+        QTest::newRow("no-numbers") << false;
+    }
+    void blockPointerGlyphBoundaries() {
+        QFETCH(bool,numbers);
+        installDragFixture();
+        // End verse 2 with RTL text, with no LTR punctuation after it.
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-hit-fixture");
+            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec(QString::fromUtf8("UPDATE verses SET text='Second שלום',html='Second שלום',poetry=0 WHERE book=43 AND chapter=3 AND number=2")));
+        }
+        QSqlDatabase::removeDatabase("ui-hit-fixture");
+        reference("John 4:1"); reference("John 3:1");
+        bible->setShowVerseNumbers(numbers);
+        bible->setBlockMode(true);
+        QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() > 3);
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        QTest::qWait(100);
+        QStringList quoted, plain;
+        for (int v = 1; v <= 3; ++v) {
+            bible->selectVerses(v,v);
+            quoted.append(bible->copySelection()); plain.append(bible->copySelection(true));
+        }
+        const auto glyphPoint = [this](int position, double fraction) {
+            const auto block = blockTextDocument()->findBlock(position);
+            const auto relative = position - block.position();
+            const auto line = block.layout()->lineForTextPosition(relative);
+            const auto caret = blockRect(position);
+            const double a = line.cursorToX(relative,QTextLine::Leading);
+            const double b = line.cursorToX(relative,QTextLine::Trailing);
+            // Include the QTextDocument block's horizontal origin.
+            const double origin = caret.x() - line.cursorToX(relative);
+            return QPointF(origin + a + fraction * (b-a),caret.center().y());
+        };
+        const auto checkClick = [this,&quoted,&plain](QPointF point, int verse) {
+            const auto scene = item("blockBody")->mapToScene(point).toPoint();
+            // Use the rounded event coordinate for direct hit assertions too.
+            point = item("blockBody")->mapFromScene(scene);
+            QCOMPARE(blockMapping()->verseAtPoint(point.x(),point.y()),verse);
+            for (auto button : {Qt::RightButton,Qt::MiddleButton}) {
+                bible->clearSelection();
+                QTest::mouseClick(window,button,Qt::NoModifier,scene);
+                QCOMPARE(bible->cursorVerse(),verse);
+                QCOMPARE(QApplication::clipboard()->text(),button == Qt::RightButton ? quoted[verse-1] : plain[verse-1]);
+                QCOMPARE(prop("toast","text").toString(),QString("John 3:%1 copied").arg(verse)
+                    + (button == Qt::MiddleButton ? " as plain text" : ""));
+            }
+        };
+        for (int v = 1; v <= 2; ++v) {
+            const auto span = blockMapping()->spans()[v-1].toMap();
+            const int end = span.value("end").toInt();
+            // Position mapping still treats the end caret as the next verse.
+            QCOMPARE(blockMapping()->verseAt(end),v+1);
+            const auto trailing = glyphPoint(end-1,0.85);
+            if (v == 1) {
+                int nearest = -1;
+                QVERIFY(QMetaObject::invokeMethod(object("blockBody"),"positionAt",Q_RETURN_ARG(int,nearest),
+                    Q_ARG(qreal,trailing.x()),Q_ARG(qreal,trailing.y())));
+                QCOMPARE(nearest,end); // Reproduces the original caret/glyph mismatch.
+            }
+            checkClick(trailing,v);
+            checkClick(glyphPoint(end-1,0.15),v); // Both edges, including RTL.
+            // Every part of the inter-verse space belongs to the following verse.
+            checkClick(glyphPoint(end,0.15),v+1);
+            checkClick(glyphPoint(end,0.85),v+1);
+            checkClick(glyphPoint(blockMapping()->positionFor(v+1),0.15),v+1);
+            checkClick(glyphPoint(blockOffset(v+1),0.85),v+1);
+        }
+    }
+    void chapterCopyFallbackAndEditorIsolation_data() {
+        QTest::addColumn<bool>("block");
+        QTest::newRow("rows") << false;
+        QTest::newRow("block") << true;
+    }
+    void chapterCopyFallbackAndEditorIsolation() {
+        QFETCH(bool,block);
+        bible->setBlockMode(block);
+        reference("John 3");
+        QCOMPARE(bible->selectedStart(),0);
+        const auto quoted = bible->copySelection();
+        QVERIFY(quoted.endsWith(QString::fromUtf8("”\n\n—John 3")));
+        QApplication::clipboard()->setText("replace chapter");
+        key(Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(QApplication::clipboard()->text(),quoted);
+        QCOMPARE(prop("toast","text").toString(),QString("John 3 copied"));
+        QCOMPARE(bible->selectedStart(),0);
+        QApplication::clipboard()->setText("replace y");
+        key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),quoted);
+        reference("John 3:1");
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("Only the editor selection");
+        key(Qt::Key_A,Qt::ControlModifier); key(Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(QApplication::clipboard()->text(),QString("Only the editor selection"));
+        key(Qt::Key_End);
+        QApplication::clipboard()->setText("no editor selection");
+        key(Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(QApplication::clipboard()->text(),QString("no editor selection"));
+        QCOMPARE(bible->selectionReference(),QString("John 3:1"));
+    }
     void blockFreeTextAndContextCopy() {
         QFETCH(bool,reverse); QFETCH(bool,numbers);
         installDragFixture();
@@ -2325,6 +2430,41 @@ private slots:
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         QCOMPARE(bible->selectionReference(),QString("John 3:2"));
+    }
+    void savedDeleteUsesTabFocusedEntry_data() {
+        QTest::addColumn<int>("deleteKey");
+        QTest::newRow("delete") << int(Qt::Key_Delete);
+        QTest::newRow("backspace") << int(Qt::Key_Backspace);
+    }
+    void savedDeleteUsesTabFocusedEntry() {
+        QFETCH(int,deleteKey);
+        reference("John 3:1"); bible->toggleBookmark();
+        reference("John 3:2"); bible->toggleBookmark();
+        reference("John 3:3"); bible->toggleBookmark();
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        for (int i = 0; i < 40 && window->activeFocusItem() != item("savedEntryJohn 3:2"); ++i)
+            key(Qt::Key_Tab);
+        QCOMPARE(window->activeFocusItem(),item("savedEntryJohn 3:2"));
+        object("collectionList")->setProperty("currentIndex",0);
+        QCOMPARE(window->activeFocusItem(),item("savedEntryJohn 3:2"));
+        QVERIFY(prop("savedEntryJohn 3:1","highlighted").toBool());
+        key(Qt::Key(deleteKey));
+        QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
+        QCOMPARE(prop("deleteReference","text").toString(),QString("John 3:2"));
+        QCOMPARE(prop("deleteConfirmation","row").toInt(),1);
+        click(item("deleteConfirm"));
+        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        QVERIFY(!saved(1).isEmpty()); QVERIFY(saved(2).isEmpty()); QVERIFY(!saved(3).isEmpty());
+        QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
+        // With focus back on the list, deletion falls back to its current row.
+        item("collectionList")->forceActiveFocus();
+        key(Qt::Key(deleteKey));
+        QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
+        QCOMPARE(prop("deleteReference","text").toString(),QString("John 3:3"));
+        key(Qt::Key_Escape);
+        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        QVERIFY(!saved(3).isEmpty());
     }
     void savedKeyboardIsolationAndToggle() {
         for (int verse = 1; verse <= 12; ++verse) {

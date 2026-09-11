@@ -87,6 +87,29 @@ int BlockDocument::positionFor(int verse) const
     return 0;
 }
 
+int BlockDocument::verseAtPoint(double x, double y) const
+{
+    if (!m_document) return 0;
+    const auto documentLayout = m_document->documentLayout();
+    const int nearest = documentLayout->hitTest(QPointF(x,y), Qt::FuzzyHit);
+    const auto block = m_document->findBlock(nearest);
+    if (!block.isValid()) return verseAt(nearest);
+    const auto origin = documentLayout->blockBoundingRect(block).topLeft();
+    const auto layout = block.layout();
+    for (int i = 0; i < layout->lineCount(); ++i) {
+        const auto line = layout->lineAt(i);
+        if (y < origin.y() + line.y() || y >= origin.y() + line.y() + line.height()) continue;
+        // Pointer actions target the character under the pointer, not the
+        // nearest insertion caret (which can be past the final glyph). Qt's
+        // visual-run hit testing also handles RTL and grapheme boundaries.
+        const int character = line.xToCursor(x - origin.x(), QTextLine::CursorOnCharacter);
+        // Inter-verse separators belong to the following verse, as in verseAt.
+        return verseAt(block.position() + character);
+    }
+    // Heading margins and other blank space keep the existing nearest policy.
+    return verseAt(nearest);
+}
+
 QVariantList BlockDocument::rectangles(int start, int end) const
 {
     QVariantList result;

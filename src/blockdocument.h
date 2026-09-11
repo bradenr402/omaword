@@ -17,6 +17,7 @@ public:
     Q_INVOKABLE void build(QQuickTextDocument *target, const QVariantList &verses,
                           bool numbers, bool headings, double lineHeight);
     Q_INVOKABLE int verseAt(int position) const;
+    Q_INVOKABLE int verseAtPoint(double x, double y) const;
     Q_INVOKABLE int positionFor(int verse) const;
     Q_INVOKABLE QVariantList rectangles(int start, int end) const;
 signals:

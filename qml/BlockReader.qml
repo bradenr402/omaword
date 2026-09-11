@@ -1,6 +1,8 @@
 import QtQuick
-import QtQuick.Controls
+// Registered by blockdocument.cpp at application startup, without a QML plugin.
+// qmllint disable import
 import OmaBible.Reader 1.0
+// qmllint enable import
 
 Item {
     id: root
@@ -26,7 +28,7 @@ Item {
     function cancelDrag() { dragging = false; pressed = false; autoscroll.stop() }
     function clearSelection() { body.deselect() }
     function verseRect(number) { return body.positionToRectangle(document.positionFor(number)) }
-    function hit(x, y) { return document.verseAt(body.positionAt(x, y)) }
+    function hit(x, y) { return document.verseAtPoint(x, y) }
     property bool pressed: false
     property bool dragging: false
     property point origin
@@ -38,7 +40,9 @@ Item {
         body.select(anchor, body.positionAt(p.x, p.y))
         controller.freeSelectedText = body.selectedText
     }
+    // qmllint disable import
     BlockDocument { id: document }
+    // qmllint enable import
     // Paint logical ranges behind the single text layout. A range joins through
     // spaces and wrapped lines; adjacent independent highlights keep their gap.
     Canvas {
@@ -132,7 +136,10 @@ Item {
             onPositionChanged: function(mouse) {
                 if (!root.pressed) return
                 root.pointer = mapToItem(root.viewport, mouse.x, mouse.y)
+                // Qt exposes this runtime style hint without QML property metadata.
+                // qmllint disable missing-property
                 if (!root.dragging && Math.hypot(root.pointer.x - root.origin.x, root.pointer.y - root.origin.y) < Qt.styleHints.startDragDistance) return
+                // qmllint enable missing-property
                 if (!root.dragging) { root.controller.clearTextSelection(); body.forceActiveFocus(); root.dragging = true; autoscroll.start() }
                 root.updateDrag()
             }
