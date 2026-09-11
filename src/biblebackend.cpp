@@ -272,7 +272,7 @@ bool BibleBackend::initializeStore()
     };
     // Additive to schema 2: annotation backups intentionally exclude preferences.
     schema << "CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY,value NOT NULL) WITHOUT ROWID"
-           << "INSERT OR IGNORE INTO preferences(key,value) VALUES('showVerseNumbers',1),('showHeadings',1),('versePicker',1),('lineHeight',1.5),('focusMode',0)";
+           << "INSERT OR IGNORE INTO preferences(key,value) VALUES('showVerseNumbers',1),('showHeadings',1),('versePicker',1),('lineHeight',1.5),('focusMode',0),('blockMode',0)";
     for (const auto &sql : schema) {
         if (!q.exec(sql)) { m_store.rollback(); return setError("Cannot initialize notes: " + q.lastError().text()); }
     }
@@ -312,6 +312,7 @@ bool BibleBackend::loadPreferences()
     m_showHeadings = boolean("showHeadings",true);
     m_versePicker = boolean("versePicker",true);
     m_focusMode = boolean("focusMode",false);
+    m_blockMode = boolean("blockMode",false);
     const auto value = values.value("lineHeight");
     const double height = value.toDouble();
     m_lineHeight = numeric(value) && std::isfinite(height) && height >= 1 && height <= 3
@@ -354,6 +355,11 @@ void BibleBackend::setFocusMode(bool value)
 {
     if (value == m_focusMode || !savePreference("focusMode",int(value))) return;
     m_focusMode = value; emit preferencesChanged();
+}
+void BibleBackend::setBlockMode(bool value)
+{
+    if (value == m_blockMode || !savePreference("blockMode",int(value))) return;
+    m_blockMode = value; emit preferencesChanged();
 }
 void BibleBackend::setLineHeight(double value)
 {
@@ -697,7 +703,8 @@ void BibleBackend::updateAnnotations()
         const int v = absoluteVerse(m_book,m_chapter,map.value("number").toInt());
         bool bookmark = false, highlight = false, note = false;
         bool start = false, end = false, before = false, after = false;
-        QVariantList ranges;
+        bool highlightStart = false, highlightEnd = false, highlightBefore = false, highlightAfter = false;
+        QVariantList ranges, highlightRanges;
         for (const auto &a : m_annotations) {
             if (v >= a.start && v <= a.end) {
                 bookmark |= a.bookmark; highlight |= a.highlight; note |= !a.note.isEmpty();
@@ -707,12 +714,22 @@ void BibleBackend::updateAnnotations()
                         {"bookmarkStart",v == a.start},{"bookmarkEnd",v == a.end},
                         {"bookmarkContinuesBefore",v > a.start},{"bookmarkContinuesAfter",v < a.end}});
                 }
+                if (a.highlight) {
+                    highlightStart |= v == a.start; highlightEnd |= v == a.end;
+                    highlightBefore |= v > a.start; highlightAfter |= v < a.end;
+                    highlightRanges.append(QVariantMap{{"reference",rangeReference(a.start,a.end)},
+                        {"highlightStart",v == a.start},{"highlightEnd",v == a.end},
+                        {"highlightContinuesBefore",v > a.start},{"highlightContinuesAfter",v < a.end}});
+                }
             }
         }
         map["bookmarked"] = bookmark; map["highlighted"] = highlight; map["hasNote"] = note;
         map["bookmarkStart"] = start; map["bookmarkEnd"] = end;
         map["bookmarkContinuesBefore"] = before; map["bookmarkContinuesAfter"] = after;
         map["bookmarkRanges"] = ranges;
+        map["highlightStart"] = highlightStart; map["highlightEnd"] = highlightEnd;
+        map["highlightContinuesBefore"] = highlightBefore; map["highlightContinuesAfter"] = highlightAfter;
+        map["highlightRanges"] = highlightRanges;
         row = map;
     }
     emit versesChanged(); updateSelection();
@@ -819,31 +836,64 @@ void BibleBackend::setNoteText(QString text)
     commitAnnotations(rows);
 }
 
-QString BibleBackend::copySelection()
+bool BibleBackend::deleteAnnotation(QString input)
+{
+    int b, c, first, last;
+    QString error;
+    if (!parseReference(input,&b,&c,&first,&last,&error)) return setError(error);
+    if (!first) return setError("Choose an exact saved verse range to delete.");
+    if (!m_store.transaction()) return setError("Cannot start annotation deletion: " + m_store.lastError().text());
+    const auto a = endpoint(first), z = endpoint(last);
+    QSqlQuery q(m_store);
+    q.prepare("DELETE FROM annotations WHERE book=? AND chapter=? AND start=? AND endBook=? AND endChapter=? AND end=?");
+    q.addBindValue(a.book); q.addBindValue(a.chapter); q.addBindValue(a.verse);
+    q.addBindValue(z.book); q.addBindValue(z.chapter); q.addBindValue(z.verse);
+    if (!q.exec()) { m_store.rollback(); return setError("Cannot delete annotation: " + q.lastError().text()); }
+    if (q.numRowsAffected() != 1) { m_store.rollback(); return setError("No saved annotation exists for that exact range."); }
+    q.finish();
+    QVector<Annotation> saved;
+    if (!loadAnnotations(&saved)) { m_store.rollback(); return false; }
+    for (const auto &row : saved) {
+        if (row.start == first && row.end == last) {
+            m_store.rollback(); return setError("Cannot verify annotation deletion.");
+        }
+    }
+    if (!m_store.commit()) { m_store.rollback(); return setError("Cannot commit annotation deletion: " + m_store.lastError().text()); }
+    m_annotations = saved; m_collection = collectionRows(saved);
+    clearError(); emit collectionChanged(); updateAnnotations(); return true;
+}
+
+QString BibleBackend::copySelection(bool plainText)
 {
     if (!requireReady()) return {};
     const int first = m_anchor ? std::min(m_anchor,m_cursor) : absoluteVerse(m_book,m_chapter,m_verses.first().toMap().value("number").toInt());
     const int last = m_anchor ? std::max(m_anchor,m_cursor) : absoluteVerse(m_book,m_chapter,m_verses.last().toMap().value("number").toInt());
-    return copyRange(first,last,selectionReference(),false);
+    const QString text = copyRange(first,last,selectionReference(),plainText);
+    if (text.isEmpty()) return {};
+    copyText(text); clearError(); return text;
 }
 
-QString BibleBackend::copyVerse(int number, bool quotation)
+QString BibleBackend::copyVerse(int number, bool plainText)
 {
     if (!requireReady()) return {};
     const int index = absoluteVerse(m_book,m_chapter,number);
     if (!index) { setError("Choose an existing verse within this chapter."); return {}; }
-    const bool selected = m_anchor && number >= m_start && number <= m_end;
+    const bool selected = m_anchor && index >= std::min(m_anchor,m_cursor) && index <= std::max(m_anchor,m_cursor);
     const int first = selected ? std::min(m_anchor,m_cursor) : index;
     const int last = selected ? std::max(m_anchor,m_cursor) : index;
-    return copyRange(first,last,rangeReference(first,last),quotation);
+    const QString text = copyRange(first,last,rangeReference(first,last),plainText);
+    if (text.isEmpty()) return {};
+    // Read the entire old range before changing focus, and save focus before publishing the copy.
+    if (!persistState(m_book,m_chapter,index,index,m_position)) return {};
+    m_anchor = m_cursor = index; m_start = m_end = number;
+    updateSelection(); emit selectionChanged();
+    copyText(text); clearError(); return text;
 }
 
-QString BibleBackend::copyRange(int first, int last, const QString &label, bool quotation)
+QString BibleBackend::copyRange(int first, int last, const QString &label, bool plainText)
 {
     QStringList lines;
-    if (!quotation) lines << label + " (NET 2.1)";
-    const auto a = endpoint(first), z = endpoint(last);
-    const bool crossChapter = a.book != z.book || a.chapter != z.chapter;
+    const QString digits = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
     int b = 0, c = 0;
     QVariantList rows;
     for (int i = first; i <= last; ++i) {
@@ -855,16 +905,15 @@ QString BibleBackend::copyRange(int first, int last, const QString &label, bool 
                 const auto map = row.toMap(); const int number = map.value("number").toInt();
                 const int index = absoluteVerse(b,c,number);
                 if (index >= first && index <= last) {
-                    const QString text = map.value("text").toString();
-                    lines << (quotation ? text.simplified()
-                        : (crossChapter ? reference(b,c,number) : QString::number(number)) + ' ' + text);
+                    const QString text = map.value("text").toString().simplified();
+                    QString superscript;
+                    for (const QChar digit : QString::number(number)) superscript += digits[digit.digitValue()];
+                    lines << (plainText ? text : superscript + ' ' + text);
                 }
             }
         }
     }
-    const QString text = quotation ? QStringLiteral("“") + lines.join(' ') + QStringLiteral("”\n\n—") + label + " NET" : lines.join('\n');
-    copyText(text);
-    clearError(); return text;
+    return plainText ? lines.join(' ') : QStringLiteral("“") + lines.join(' ') + QStringLiteral("”\n\n—") + label;
 }
 
 void BibleBackend::copyText(QString text)

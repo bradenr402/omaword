@@ -38,6 +38,7 @@ class BibleBackend : public QObject
     Q_PROPERTY(bool versePicker READ versePicker WRITE setVersePicker NOTIFY preferencesChanged)
     Q_PROPERTY(double lineHeight READ lineHeight WRITE setLineHeight NOTIFY preferencesChanged)
     Q_PROPERTY(bool focusMode READ focusMode WRITE setFocusMode NOTIFY preferencesChanged)
+    Q_PROPERTY(bool blockMode READ blockMode WRITE setBlockMode NOTIFY preferencesChanged)
 
 public:
     explicit BibleBackend(QObject *parent = nullptr);
@@ -70,11 +71,13 @@ public:
     bool versePicker() const { return m_versePicker; }
     double lineHeight() const { return m_lineHeight; }
     bool focusMode() const { return m_focusMode; }
+    bool blockMode() const { return m_blockMode; }
     Q_INVOKABLE void setShowVerseNumbers(bool value);
     Q_INVOKABLE void setShowHeadings(bool value);
     Q_INVOKABLE void setVersePicker(bool value);
     Q_INVOKABLE void setLineHeight(double value);
     Q_INVOKABLE void setFocusMode(bool value);
+    Q_INVOKABLE void setBlockMode(bool value);
 
     Q_INVOKABLE void importEpub(QUrl file);
     Q_INVOKABLE void clearError();
@@ -94,8 +97,9 @@ public:
     Q_INVOKABLE void toggleBookmark();
     Q_INVOKABLE void toggleHighlight();
     Q_INVOKABLE void setNoteText(QString text);
-    Q_INVOKABLE QString copySelection();
-    Q_INVOKABLE QString copyVerse(int number, bool quotation = false);
+    Q_INVOKABLE bool deleteAnnotation(QString reference);
+    Q_INVOKABLE QString copySelection(bool plainText = false);
+    Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
     Q_INVOKABLE void copyText(QString text);
     Q_INVOKABLE bool exportNotes(QUrl directory);
     Q_INVOKABLE bool exportBackup(QUrl file);
@@ -129,7 +133,7 @@ private:
     bool initializeStore();
     bool loadPreferences();
     bool savePreference(const QString &key, const QVariant &value);
-    QString copyRange(int first, int last, const QString &reference, bool quotation);
+    QString copyRange(int first, int last, const QString &reference, bool plainText);
     bool openBible();
     void closeBible();
     bool loadChapter();
@@ -164,7 +168,7 @@ private:
     int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0;
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
-    bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false;
+    bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false, m_blockMode = false;
     double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection;
     QVector<Annotation> m_annotations;

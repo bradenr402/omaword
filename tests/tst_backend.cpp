@@ -76,11 +76,11 @@ private slots:
         auto prefs = std::make_unique<BibleBackend>();
         QVERIFY2(prefs->error().isEmpty(),qPrintable(prefs->error()));
         QVERIFY(prefs->showVerseNumbers()); QVERIFY(prefs->showHeadings()); QVERIFY(prefs->versePicker());
-        QCOMPARE(prefs->lineHeight(),1.5); QVERIFY(!prefs->focusMode());
+        QCOMPARE(prefs->lineHeight(),1.5); QVERIFY(!prefs->focusMode()); QVERIFY(!prefs->blockMode());
         QVERIFY(prefs->chapterVerses(1,1).isEmpty());
         const QString path = prefs->dataDirectory()+"/personal.sqlite";
         // QML can both assign the properties and invoke each setter.
-        for (const QString name : {"showVerseNumbers", "showHeadings", "versePicker", "lineHeight", "focusMode"}) {
+        for (const QString name : {"showVerseNumbers", "showHeadings", "versePicker", "lineHeight", "focusMode", "blockMode"}) {
             const auto property = prefs->metaObject()->property(prefs->metaObject()->indexOfProperty(qPrintable(name)));
             QVERIFY(property.isReadable()); QVERIFY(property.isWritable());
             QCOMPARE(property.notifySignal().name(),QByteArray("preferencesChanged"));
@@ -91,8 +91,9 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(prefs.get(),"setVersePicker",Q_ARG(bool,false)));
         QVERIFY(QMetaObject::invokeMethod(prefs.get(),"setFocusMode",Q_ARG(bool,true)));
         QVERIFY(QMetaObject::invokeMethod(prefs.get(),"setLineHeight",Q_ARG(double,2.26)));
-        QCOMPARE(prefs->lineHeight(),2.3); QCOMPARE(changed.count(),5);
-        prefs->setLineHeight(2.3); prefs->setShowHeadings(false); QCOMPARE(changed.count(),5);
+        QVERIFY(QMetaObject::invokeMethod(prefs.get(),"setBlockMode",Q_ARG(bool,true)));
+        QCOMPARE(prefs->lineHeight(),2.3); QCOMPARE(changed.count(),6);
+        prefs->setLineHeight(2.3); prefs->setShowHeadings(false); prefs->setBlockMode(true); QCOMPARE(changed.count(),6);
         prefs->setLineHeight(-100); QCOMPARE(prefs->lineHeight(),1.0);
         prefs->setLineHeight(100); QCOMPARE(prefs->lineHeight(),3.0);
         const int count = changed.count();
@@ -103,6 +104,7 @@ private slots:
         prefs.reset(); prefs = std::make_unique<BibleBackend>();
         QVERIFY(prefs->error().isEmpty()); QVERIFY(!prefs->showVerseNumbers()); QVERIFY(!prefs->showHeadings());
         QVERIFY(!prefs->versePicker()); QVERIFY(prefs->focusMode()); QCOMPARE(prefs->lineHeight(),3.0);
+        QVERIFY(prefs->blockMode());
         // Invalid stored types, booleans, bounds and off-step heights use defaults.
         prefs.reset();
         {
@@ -114,7 +116,7 @@ private slots:
                 BibleBackend invalid;
                 QVERIFY2(invalid.error().isEmpty(),qPrintable(invalid.error()));
                 QVERIFY(invalid.showVerseNumbers()); QVERIFY(invalid.showHeadings()); QVERIFY(invalid.versePicker());
-                QVERIFY(!invalid.focusMode()); QCOMPARE(invalid.lineHeight(),1.5);
+                QVERIFY(!invalid.focusMode()); QVERIFY(!invalid.blockMode()); QCOMPARE(invalid.lineHeight(),1.5);
             }
             // Existing schema-2 installs acquire the additive table on next open.
             QVERIFY(q.exec("DROP TABLE preferences"));
@@ -126,14 +128,14 @@ private slots:
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","preferences-test"); db.setDatabaseName(path); QVERIFY(db.open());
             QSqlQuery q(db);
-            QVERIFY(q.exec("SELECT COUNT(*) FROM preferences")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),5); q.finish();
+            QVERIFY(q.exec("SELECT COUNT(*) FROM preferences")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),6); q.finish();
             QVERIFY(q.exec("CREATE TRIGGER reject_preferences BEFORE UPDATE ON preferences BEGIN SELECT RAISE(ABORT,'preference disk failure'); END"));
             QSignalSpy changes(prefs.get(),&BibleBackend::preferencesChanged);
             prefs->setShowVerseNumbers(false); prefs->setShowHeadings(false); prefs->setVersePicker(false);
-            prefs->setFocusMode(true); prefs->setLineHeight(2);
+            prefs->setFocusMode(true); prefs->setLineHeight(2); prefs->setBlockMode(true);
             QVERIFY(prefs->error().contains("preference disk failure")); QCOMPARE(changes.count(),0);
             QVERIFY(prefs->showVerseNumbers()); QVERIFY(prefs->showHeadings()); QVERIFY(prefs->versePicker());
-            QVERIFY(!prefs->focusMode()); QCOMPARE(prefs->lineHeight(),1.5);
+            QVERIFY(!prefs->focusMode()); QVERIFY(!prefs->blockMode()); QCOMPARE(prefs->lineHeight(),1.5);
             QVERIFY(q.exec("DROP TRIGGER reject_preferences"));
             // A deferred constraint fails at COMMIT, after the write/readback succeed.
             for (const auto &name : QSqlDatabase::connectionNames()) {
@@ -144,16 +146,22 @@ private slots:
             QVERIFY(q.exec("CREATE TABLE preference_failure(id INTEGER REFERENCES preference_parent(id) DEFERRABLE INITIALLY DEFERRED)"));
             QVERIFY(q.exec("CREATE TRIGGER fail_preference_commit AFTER UPDATE ON preferences BEGIN INSERT INTO preference_failure VALUES(1); END"));
             prefs->setLineHeight(2.1);
+            prefs->setBlockMode(true);
             QVERIFY2(prefs->error().contains("Cannot commit your preferences"),qPrintable(prefs->error()));
             QCOMPARE(prefs->lineHeight(),1.5); QCOMPARE(changes.count(),0);
+            QVERIFY(!prefs->blockMode());
+            QVERIFY(q.exec("SELECT value FROM preferences WHERE key='blockMode'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
             QVERIFY(q.exec("SELECT value FROM preferences WHERE key='lineHeight'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toDouble(),1.5); q.finish();
             QVERIFY(q.exec("SELECT COUNT(*) FROM preference_failure")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
             QVERIFY(q.exec("DROP TRIGGER fail_preference_commit"));
             prefs->setLineHeight(2.1); QCOMPARE(prefs->lineHeight(),2.1); QCOMPARE(changes.count(),1);
+            QVERIFY(prefs->setProperty("blockMode",true)); QCOMPARE(changes.count(),2);
         }
         QSqlDatabase::removeDatabase("preferences-test");
         prefs.reset(); prefs = std::make_unique<BibleBackend>();
-        QCOMPARE(prefs->lineHeight(),2.1); QVERIFY(prefs->error().isEmpty());
+        QCOMPARE(prefs->lineHeight(),2.1); QVERIFY(prefs->blockMode()); QVERIFY(prefs->error().isEmpty());
+        prefs->setBlockMode(false);
+        prefs.reset(); prefs = std::make_unique<BibleBackend>(); QVERIFY(!prefs->blockMode());
     }
     void invalidArchivePreservesTarget() {
         const auto target = file("untouched.sqlite");
@@ -357,10 +365,11 @@ private slots:
         QCOMPARE(bible->readingPosition(),0.42); QCOMPARE(bible->noteText(),note); QVERIFY(bible->selectionBookmarked());
         const QString copied = bible->copySelection();
         QCOMPARE(QGuiApplication::clipboard()->text(),copied);
-        QVERIFY(copied.startsWith("John 3:16–18 (NET 2.1)\n16 "));
-        QVERIFY(!copied.contains("\n19 "));
+        QVERIFY(copied.startsWith("“¹⁶ ")); QVERIFY(copied.endsWith("”\n\n—John 3:16–18"));
+        QVERIFY(!copied.contains("¹⁹ "));
         bible->clearSelection(); QVERIFY(bible->noteText().isEmpty());
-        QVERIFY(bible->copySelection().contains("\n36 "));
+        const auto chapterCopy = bible->copySelection();
+        QVERIFY(chapterCopy.contains("³⁶ ")); QVERIFY(chapterCopy.endsWith("”\n\n—John 3"));
     }
     void backupRoundTripAndValidation() {
         if (!bible->ready()) QSKIP("Requires real EPUB");
@@ -368,7 +377,7 @@ private slots:
         const auto original = bible->collection(); const QString note = bible->noteText();
         QVERIFY(bible->exportBackup(QUrl::fromLocalFile(file("backup.json"))));
         bible->setShowVerseNumbers(false); bible->setShowHeadings(false); bible->setVersePicker(false);
-        bible->setLineHeight(1.9); bible->setFocusMode(true);
+        bible->setLineHeight(1.9); bible->setFocusMode(true); bible->setBlockMode(true);
         QSignalSpy preferences(bible.get(),&BibleBackend::preferencesChanged);
         QFile source(file("backup.json")); QVERIFY(source.open(QIODevice::ReadOnly));
         const auto document = QJsonDocument::fromJson(source.readAll());
@@ -402,7 +411,7 @@ private slots:
         bible->setNoteText("Changed after backup"); QVERIFY(bible->navigate("Genesis 1"));
         QVERIFY2(bible->importBackup(QUrl::fromLocalFile(file("backup.json"))),qPrintable(bible->error()));
         QVERIFY(!bible->showVerseNumbers()); QVERIFY(!bible->showHeadings()); QVERIFY(!bible->versePicker());
-        QCOMPARE(bible->lineHeight(),1.9); QVERIFY(bible->focusMode()); QCOMPARE(preferences.count(),0);
+        QCOMPARE(bible->lineHeight(),1.9); QVERIFY(bible->focusMode()); QVERIFY(bible->blockMode()); QCOMPARE(preferences.count(),0);
         QCOMPARE(bible->collection(),original); QCOMPARE(bible->noteText(),note); QCOMPARE(bible->readingPosition(),0.73);
         QVERIFY(bible->exportNotes(QUrl::fromLocalFile(root.path())));
         QFile markdown(file("omabible-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
@@ -652,31 +661,55 @@ private slots:
         for (const auto pair : {qMakePair(0,1),qMakePair(67,1),qMakePair(43,0),qMakePair(43,22)})
             QVERIFY(bible->chapterVerses(pair.first,pair.second).isEmpty());
         QCOMPARE(bible->error(),error); QCOMPARE(bible->status(),status); QCOMPARE(errors.count(),0);
+        QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->noteText(),note);
+        QCOMPARE(navigation.count(),0); QCOMPARE(changed.count(),0); QCOMPARE(annotations.count(),0);
         const QString normal = bible->copySelection();
+        QStringList texts, numbered;
+        const QStringList superscripts{"¹⁶", "¹⁷", "¹⁸"};
+        for (int i = 15; i < 18; ++i) {
+            texts << verses[i].toMap()["text"].toString().simplified();
+            numbered << superscripts[i-15]+' '+texts.last();
+        }
+        QCOMPARE(normal,QString("“")+numbered.join(' ')+"”\n\n—John 3:16–18");
+        QCOMPARE(bible->copySelection(true),texts.join(' ')); QCOMPARE(changed.count(),0);
+        // A clipboard observer must see both the new focus and its persisted state.
+        bool focusedBeforeClipboard = false, persistedBeforeClipboard = false;
+        const auto observer = connect(QGuiApplication::clipboard(),&QClipboard::dataChanged,this,[&] {
+            focusedBeforeClipboard = bible->cursorVerse() == 17 && bible->selectedStart() == 17 && bible->selectedEnd() == 17;
+            for (const auto &name : QSqlDatabase::connectionNames()) {
+                auto db = QSqlDatabase::database(name);
+                if (db.databaseName() != bible->dataDirectory()+"/personal.sqlite") continue;
+                QSqlQuery q(db);
+                persistedBeforeClipboard = q.exec("SELECT start,end FROM reading WHERE id=1") && q.next()
+                    && q.value(0).toInt() == 17 && q.value(1).toInt() == 17;
+            }
+        });
         QCOMPARE(bible->copyVerse(17),normal);
-        QStringList texts;
-        for (int i = 15; i < 18; ++i) texts << verses[i].toMap()["text"].toString().simplified();
-        QCOMPARE(bible->copyVerse(16,true),QString("“")+texts.join(' ')+"”\n\n—John 3:16–18 NET");
-        QCOMPARE(bible->copyVerse(20,true),QString("“")+verses[19].toMap()["text"].toString().simplified()+"”\n\n—John 3:20 NET");
-        QCOMPARE(bible->copyVerse(20),QString("John 3:20 (NET 2.1)\n20 ")+verses[19].toMap()["text"].toString());
+        disconnect(observer); QVERIFY(focusedBeforeClipboard); QVERIFY(persistedBeforeClipboard);
+        QCOMPARE(bible->selectionReference(),QString("John 3:17")); QCOMPARE(changed.count(),1);
+        QVERIFY(bible->navigate(selection)); bible->setReadingPosition(0.38);
+        QCOMPARE(bible->copyVerse(16,true),texts.join(' ')); QCOMPARE(bible->cursorVerse(),16);
+        QCOMPARE(bible->copyVerse(20,true),verses[19].toMap()["text"].toString().simplified());
+        QCOMPARE(bible->copyVerse(20),QString("“²⁰ ")+verses[19].toMap()["text"].toString().simplified()+"”\n\n—John 3:20");
         bible->copyText("<b>Plain selection</b>\nשלום");
         QCOMPARE(QGuiApplication::clipboard()->text(),QString("<b>Plain selection</b>\nשלום"));
         QVERIFY(bible->copyVerse(0).isEmpty()); QVERIFY(bible->copyVerse(37,true).isEmpty());
         QCOMPARE(QGuiApplication::clipboard()->text(),QString("<b>Plain selection</b>\nשלום"));
-        QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->noteText(),note);
+        QCOMPARE(bible->selectionReference(),QString("John 3:20"));
         QCOMPARE(bible->verses(),verses); QCOMPARE(bible->collection(),collection); QCOMPARE(bible->readingPosition(),0.38);
-        QCOMPARE(navigation.count(),0); QCOMPARE(changed.count(),0); QCOMPARE(annotations.count(),0);
         bible.reset(); bible = std::make_unique<BibleBackend>();
-        QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->readingPosition(),0.38); QCOMPARE(bible->noteText(),note);
+        QCOMPARE(bible->selectionReference(),QString("John 3:20")); QCOMPARE(bible->cursorVerse(),20); QCOMPARE(bible->readingPosition(),0.38);
         QVERIFY(bible->navigate("Genesis 1:27"));
         const QString poetry = bible->verses()[26].toMap()["text"].toString(); QVERIFY(poetry.contains('\n'));
-        QCOMPARE(bible->copyVerse(27,true),QString("“")+poetry.simplified()+"”\n\n—Genesis 1:27 NET");
+        QCOMPARE(bible->copyVerse(27),QString("“²⁷ ")+poetry.simplified()+"”\n\n—Genesis 1:27");
         bible->clearSelection();
-        QCOMPARE(bible->copyVerse(27,true),QString("“")+poetry.simplified()+"”\n\n—Genesis 1:27 NET");
-        QCOMPARE(bible->cursorVerse(),0);
+        QCOMPARE(bible->copyVerse(27,true),poetry.simplified());
+        QCOMPARE(bible->cursorVerse(),27);
         QVERIFY(bible->navigate("Mark 9:43-47"));
-        const QString copied = bible->copyVerse(45,true);
-        QVERIFY(copied.endsWith("”\n\n—Mark 9:43–47 NET"));
+        const QString copied = bible->copyVerse(45);
+        QVERIFY(copied.endsWith("”\n\n—Mark 9:43–47"));
+        QVERIFY(copied.contains("⁴³ ")); QVERIFY(copied.contains("⁴⁵ ")); QVERIFY(copied.contains("⁴⁷ "));
+        QVERIFY(!copied.contains("⁴⁴ ")); QVERIFY(!copied.contains("⁴⁶ ")); QCOMPARE(bible->cursorVerse(),45);
         QVERIFY(bible->copyVerse(44,true).isEmpty()); QCOMPARE(QGuiApplication::clipboard()->text(),copied);
         for (const QString ref : {"John 3:35-4:2", "Malachi 4:5-Matthew 1:3"}) {
             QVERIFY(bible->navigate(ref));
@@ -689,13 +722,24 @@ private slots:
             for (const auto &row : bible->chapterVerses(b,c))
                 if (row.toMap()["number"].toInt() <= end) expected << row.toMap()["text"].toString().simplified();
             const auto reference = bible->selectionReference();
-            QCOMPARE(bible->copyVerse(1,true),QString("“")+expected.join(' ')+"”\n\n—"+reference+" NET");
-            QCOMPARE(QGuiApplication::clipboard()->text(),bible->copyVerse(1,true));
-            QCOMPARE(bible->copyVerse(1),bible->copySelection());
+            const auto formatted = bible->copySelection();
+            QVERIFY(formatted.endsWith("”\n\n—"+reference)); QVERIFY(!formatted.contains("NET"));
+            QCOMPARE(bible->copySelection(true),expected.join(' '));
+            QCOMPARE(bible->copyVerse(1,true),expected.join(' '));
+            QCOMPARE(QGuiApplication::clipboard()->text(),expected.join(' ')); QCOMPARE(bible->cursorVerse(),1);
+            QVERIFY(!bible->crossChapterSelection());
+            QVERIFY(bible->navigate(ref)); QCOMPARE(bible->copyVerse(1),formatted);
+            QVERIFY(bible->navigate(ref));
             const auto outside = bible->copyVerse(end+1);
-            QVERIFY(outside.startsWith(bible->passage()+":"+QString::number(end+1)+" (NET 2.1)\n"));
-            QCOMPARE(bible->selectionReference(),reference);
+            QVERIFY(outside.endsWith("”\n\n—"+bible->passage()+":"+QString::number(end+1)));
+            QCOMPARE(bible->cursorVerse(),end+1);
         }
+        QVERIFY(bible->navigate("Psalm 119:108-109"));
+        const auto digits = bible->copySelection(); QVERIFY(digits.startsWith("“¹⁰⁸ ")); QVERIFY(digits.contains(" ¹⁰⁹ "));
+        // Backwards canonical ranges use the same old range before focusing a click.
+        QVERIFY(bible->navigate("Matthew 1:3")); bible->moveSelection(-4,true);
+        const auto reverse = bible->copySelection(); QCOMPARE(bible->copyVerse(6),reverse);
+        QCOMPARE(bible->selectionReference(),QString("Malachi 4:6"));
     }
     void boundedMovement_data() {
         QTest::addColumn<int>("delta");
@@ -746,10 +790,9 @@ private slots:
         map = bible->verses()[2].toMap(); QVERIFY(map["bookmarkEnd"].toBool()); QVERIFY(!map["bookmarkContinuesAfter"].toBool());
         const QString copied = bible->copySelection();
         QCOMPARE(QGuiApplication::clipboard()->text(),copied);
-        QVERIFY(copied.startsWith("Malachi 4:5–Matthew 1:3 (NET 2.1)\nMalachi 4:5 "));
-        for (const QString ref : {"Malachi 4:6", "Matthew 1:1", "Matthew 1:2", "Matthew 1:3"}) QVERIFY(copied.contains('\n'+ref+' '));
-        QVERIFY(!copied.contains("\nMatthew 1:4 ")); QVERIFY(!copied.contains("\nMalachi 4:4 "));
-        QCOMPARE(copied.count('\n'),5);
+        QVERIFY(copied.startsWith("“⁵ ")); QVERIFY(copied.endsWith("”\n\n—Malachi 4:5–Matthew 1:3"));
+        for (const QString number : {"⁶", "¹", "²", "³"}) QVERIFY(copied.contains(' '+number+' '));
+        QVERIFY(!copied.contains("⁴ ")); QCOMPARE(copied.count('\n'),2);
         QVERIFY(bible->exportNotes(QUrl::fromLocalFile(root.path())));
         QFile markdown(file("omabible-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
         const auto text = markdown.readAll(); QVERIFY(text.contains(QString("Malachi 4:5–Matthew 1:3").toUtf8()));
@@ -801,8 +844,8 @@ private slots:
         QVERIFY(omittedSplit);
         QVERIFY(bible->navigate("Mark 9:43-10:2"));
         const auto omittedCopy = bible->copySelection();
-        QVERIFY(omittedCopy.contains("\nMark 9:45 ")); QVERIFY(omittedCopy.contains("\nMark 10:2 "));
-        QVERIFY(!omittedCopy.contains("\nMark 9:44 ")); QVERIFY(!omittedCopy.contains("\nMark 9:46 "));
+        QVERIFY(omittedCopy.contains("⁴⁵ ")); QVERIFY(omittedCopy.contains("² "));
+        QVERIFY(!omittedCopy.contains("⁴⁴ ")); QVERIFY(!omittedCopy.contains("⁴⁶ "));
     }
     void crossRangeBackupAndAtomicFailure() {
         if (!bible->ready()) QSKIP("Requires real EPUB");
@@ -826,6 +869,11 @@ private slots:
             bible->moveSelection(5,true); QCOMPARE(bible->verses(),verses); QCOMPARE(bible->cursorVerse(),5);
             bible->moveByVerses(10,true); QCOMPARE(bible->verses(),verses); QCOMPARE(bible->cursorVerse(),5);
             bible->clearSelection(); QCOMPARE(bible->cursorVerse(),5);
+            bible->copyText("Keep clipboard on persistence failure");
+            QVERIFY(bible->copyVerse(6).isEmpty()); QVERIFY(bible->copyVerse(4,true).isEmpty());
+            QVERIFY(bible->error().contains("reading failure"));
+            QCOMPARE(QGuiApplication::clipboard()->text(),QString("Keep clipboard on persistence failure"));
+            QCOMPARE(bible->cursorVerse(),5); QCOMPARE(bible->readingPosition(),0.48);
             QVERIFY(!bible->importBackup(QUrl::fromLocalFile(file("cross-backup.json"))));
             QCOMPARE(bible->collection(),collection); QCOMPARE(bible->noteText(),note); QCOMPARE(changes.count(),0);
             QVERIFY(q.exec("DROP TRIGGER reject_reading"));
@@ -874,6 +922,114 @@ private slots:
             QVERIFY2(!bible->importBackup(QUrl::fromLocalFile(file("bad-cross.json"))),qPrintable(kind));
             QCOMPARE(bible->collection(),collection); QCOMPARE(bible->cursorVerse(),5);
         }
+    }
+    void logicalHighlightMetadataAndExactDeletion() {
+        if (!bible->ready()) QSKIP("Requires real EPUB");
+        const auto original = bible->collection();
+        QVERIFY(bible->navigate("Luke 1:2-4")); bible->toggleHighlight(); bible->toggleBookmark(); bible->setNoteText("Delete this entire row");
+        QVERIFY(bible->navigate("Luke 1:5-6")); bible->toggleHighlight();
+        auto left = bible->verses()[3].toMap(), right = bible->verses()[4].toMap();
+        QVERIFY(left["highlightEnd"].toBool()); QVERIFY(!left["highlightContinuesAfter"].toBool());
+        QVERIFY(right["highlightStart"].toBool()); QVERIFY(!right["highlightContinuesBefore"].toBool());
+        QCOMPARE(left["highlightRanges"].toList().size(),1); QCOMPARE(right["highlightRanges"].toList().size(),1);
+        QCOMPARE(left["highlightRanges"].toList().first().toMap()["reference"].toString(),QString("Luke 1:2–4"));
+        QCOMPARE(right["highlightRanges"].toList().first().toMap()["reference"].toString(),QString("Luke 1:5–6"));
+        QVERIFY(bible->navigate("Luke 1:3-7")); bible->toggleHighlight(); bible->setNoteText("Preserve overlapping note");
+        left = bible->verses()[3].toMap();
+        QCOMPARE(left["highlightRanges"].toList().size(),2);
+        QVERIFY(left["highlightEnd"].toBool()); QVERIFY(left["highlightContinuesAfter"].toBool());
+        for (const auto &range : left["highlightRanges"].toList()) {
+            const auto map = range.toMap();
+            QCOMPARE(map["highlightEnd"].toBool(),map["reference"] == "Luke 1:2–4");
+            QCOMPARE(map["highlightContinuesAfter"].toBool(),map["reference"] == "Luke 1:3–7");
+        }
+        QVERIFY(bible->navigate("Luke 1:80-2:2")); bible->toggleHighlight();
+        auto map = bible->verses().first().toMap();
+        QVERIFY(!map["highlightStart"].toBool()); QVERIFY(map["highlightContinuesBefore"].toBool());
+        QVERIFY(map["highlightContinuesAfter"].toBool());
+        map = bible->verses()[1].toMap(); QVERIFY(map["highlightEnd"].toBool());
+        QVERIFY(!map["highlightContinuesAfter"].toBool());
+        QVERIFY(bible->navigate("Luke 1:80")); map = bible->verses().last().toMap();
+        QVERIFY(map["highlightStart"].toBool()); QVERIFY(map["highlightContinuesAfter"].toBool());
+        QVERIFY(!map["highlightContinuesBefore"].toBool());
+        QVERIFY(bible->navigate("Luke 1:3-7")); bible->setReadingPosition(0.46);
+        const auto before = bible->collection(), verses = bible->verses();
+        const auto selection = bible->selectionReference(), note = bible->noteText();
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        QSignalSpy selected(bible.get(),&BibleBackend::selectionChanged);
+        QSignalSpy collection(bible.get(),&BibleBackend::collectionChanged);
+        // Confirmation/cancellation belongs to the UI: merely resolving a target is pure.
+        QVERIFY(bible->resolveReference("Luke 1:2-4")["valid"].toBool());
+        QCOMPARE(bible->collection(),before); QCOMPARE(bible->verses(),verses); QCOMPARE(collection.count(),0);
+        for (const QString missing : {"Luke 1:2-3", "Luke 1:1-7", "Luke 1", "invalid"}) {
+            QVERIFY(!bible->deleteAnnotation(missing)); QVERIFY(!bible->error().isEmpty());
+            QCOMPARE(bible->collection(),before); QCOMPARE(bible->verses(),verses);
+        }
+        QVERIFY(bible->deleteAnnotation("Lk1:2-1:4")); QVERIFY(bible->error().isEmpty());
+        auto expected = before;
+        expected.removeIf([](const QVariant &row) { return row.toMap()["reference"] == "Luke 1:2–4"; });
+        QCOMPARE(bible->collection(),expected); QCOMPARE(collection.count(),1);
+        QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->noteText(),note);
+        QCOMPARE(bible->readingPosition(),0.46); QCOMPARE(navigation.count(),0); QCOMPARE(selected.count(),0);
+        map = bible->verses()[1].toMap(); QVERIFY(!map["highlighted"].toBool()); QVERIFY(!map["bookmarked"].toBool());
+        QVERIFY(!map["hasNote"].toBool()); QVERIFY(map["highlightRanges"].toList().isEmpty());
+        map = bible->verses()[3].toMap(); QVERIFY(map["highlighted"].toBool()); QVERIFY(map["hasNote"].toBool());
+        QCOMPARE(map["highlightRanges"].toList().size(),1); QVERIFY(!map["highlightEnd"].toBool());
+        QVERIFY(!bible->deleteAnnotation("Luke 1:2-4"));
+        bible.reset(); bible = std::make_unique<BibleBackend>();
+        QVERIFY(bible->ready()); QCOMPARE(bible->collection(),expected); QCOMPARE(bible->noteText(),note);
+        QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->readingPosition(),0.46);
+        QVERIFY(bible->deleteAnnotation("Luke 1:3-7")); QVERIFY(bible->noteText().isEmpty());
+        QVERIFY(!bible->selectionHighlighted());
+        QVERIFY(bible->deleteAnnotation("Luke 1:5-6")); QVERIFY(bible->deleteAnnotation("Luke 1:80-2:2"));
+        QVERIFY(bible->navigate("Obadiah 1:21-Jonah 1:2")); bible->toggleBookmark(); bible->toggleHighlight(); bible->setNoteText("Cross-book deletion");
+        QVERIFY(bible->navigate("Luke 1:3-7"));
+        QVERIFY(bible->deleteAnnotation("Obadiah 1:21–Jonah 1:2"));
+        QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->collection(),original);
+    }
+    void deletionRollbackErrors() {
+        if (!bible->ready()) QSKIP("Requires real EPUB");
+        QVERIFY(bible->navigate("Luke 3:2-4")); bible->toggleBookmark(); bible->toggleHighlight(); bible->setNoteText("Survive deletion errors");
+        const auto before = bible->collection(), verses = bible->verses();
+        const auto selection = bible->selectionReference(), note = bible->noteText();
+        bible->setReadingPosition(0.57);
+        QSignalSpy changes(bible.get(),&BibleBackend::collectionChanged);
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        const QString path = bible->dataDirectory()+"/personal.sqlite";
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","delete-failure"); db.setDatabaseName(path); QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TRIGGER reject_deletion BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'delete disk failure'); END"));
+            QVERIFY(!bible->deleteAnnotation(selection)); QVERIFY(bible->error().contains("delete disk failure"));
+            QCOMPARE(bible->collection(),before); QCOMPARE(bible->verses(),verses);
+            QVERIFY(q.exec("DROP TRIGGER reject_deletion"));
+            // A late readback error must restore the deleted row and the trigger's changes.
+            QVERIFY(q.exec("CREATE TRIGGER fail_delete_readback AFTER DELETE ON annotations BEGIN UPDATE annotations SET endBook=66,endChapter=150; END"));
+            QVERIFY(!bible->deleteAnnotation(selection)); QVERIFY2(bible->error().contains("Cannot read your annotations"),qPrintable(bible->error()));
+            QCOMPARE(bible->collection(),before); QCOMPARE(bible->verses(),verses);
+            QVERIFY(q.exec("DROP TRIGGER fail_delete_readback"));
+            for (const auto &name : QSqlDatabase::connectionNames()) {
+                auto connection = QSqlDatabase::database(name);
+                if (connection.databaseName() == path) { QSqlQuery pragma(connection); QVERIFY(pragma.exec("PRAGMA foreign_keys=ON")); }
+            }
+            QVERIFY(q.exec("CREATE TABLE delete_parent(id INTEGER PRIMARY KEY)"));
+            QVERIFY(q.exec("CREATE TABLE delete_failure(id INTEGER REFERENCES delete_parent(id) DEFERRABLE INITIALLY DEFERRED)"));
+            QVERIFY(q.exec("CREATE TRIGGER fail_delete_commit AFTER DELETE ON annotations BEGIN INSERT INTO delete_failure VALUES(1); END"));
+            QVERIFY(!bible->deleteAnnotation(selection)); QVERIFY2(bible->error().contains("Cannot commit annotation deletion"),qPrintable(bible->error()));
+            QCOMPARE(bible->collection(),before); QCOMPARE(bible->verses(),verses);
+            QVERIFY(q.exec("SELECT COUNT(*) FROM delete_failure")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
+            QVERIFY(q.exec("DROP TRIGGER fail_delete_commit"));
+            QVERIFY(q.exec("SELECT bookmark,highlight,note FROM annotations WHERE book=42 AND chapter=3 AND start=2 AND end=4"));
+            QVERIFY(q.next()); QVERIFY(q.value(0).toBool()); QVERIFY(q.value(1).toBool()); QCOMPARE(q.value(2).toString(),note); q.finish();
+        }
+        QSqlDatabase::removeDatabase("delete-failure");
+        QCOMPARE(changes.count(),0); QCOMPARE(navigation.count(),0);
+        QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->noteText(),note); QCOMPARE(bible->readingPosition(),0.57);
+        bible.reset(); bible = std::make_unique<BibleBackend>();
+        QVERIFY(bible->ready()); QCOMPARE(bible->collection(),before); QCOMPARE(bible->verses(),verses);
+        QCOMPARE(bible->noteText(),note); QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->readingPosition(),0.57);
+        QVERIFY(bible->deleteAnnotation(selection)); QVERIFY(bible->noteText().isEmpty());
+        QVERIFY(!bible->selectionBookmarked()); QVERIFY(!bible->selectionHighlighted());
     }
     void v1MigrationAndBackupCompatibility() {
         const QString application = QCoreApplication::applicationName();
