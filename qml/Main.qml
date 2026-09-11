@@ -235,6 +235,27 @@ ApplicationWindow {
                 || (collectionTab === 2 && entry.highlight) || (collectionTab === 3 && entry.note.length > 0)
         })
     }
+    function moveSaved(delta) {
+        if (collectionList.count > 0) {
+            collectionList.currentIndex = Math.max(0, Math.min(collectionList.count - 1, collectionList.currentIndex + delta))
+            collectionList.positionViewAtIndex(collectionList.currentIndex, ListView.Contain)
+        }
+        collectionList.forceActiveFocus()
+    }
+    function filterSaved(delta) {
+        collectionTab = (collectionTab + delta + 4) % 4
+        collectionList.currentIndex = collectionList.count > 0 ? 0 : -1
+        moveSaved(0)
+    }
+    function openSaved(entry) {
+        if (!entry || !flushNote()) return
+        savePosition()
+        if (!bible.navigate(entry.reference)) return
+        syncNote()
+        savedDrawer.close()
+        if (entry.note.length > 0) openNotes(false)
+        Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
+    }
     function openBookmark(reference) {
         if (!flushNote()) return
         savePosition()
@@ -319,9 +340,29 @@ ApplicationWindow {
         }
     }
     function acceptPalette() {
+        if (paletteBack.activeFocus) { backToBooks(); return }
         let destination = paletteDestination
         if (destination.entry) activatePaletteEntry(destination.entry)
         else if (paletteResolution.valid) jump(destination.reference)
+    }
+    function backToBooks() {
+        paletteBook = 0
+        paletteBookName = ""
+        referenceInput.text = ""
+        paletteArrowUsed = false
+        paletteResults.currentIndex = 0
+        referenceInput.forceActiveFocus()
+    }
+    function movePalette(delta) {
+        paletteArrowUsed = true
+        if (delta < 0 && paletteResults.currentIndex <= 0 && paletteBack.visible) {
+            paletteResults.currentIndex = -1
+            paletteBack.forceActiveFocus()
+            return
+        }
+        paletteResults.currentIndex = Math.max(0, Math.min(paletteResults.count - 1, paletteResults.currentIndex + delta))
+        paletteResults.positionViewAtIndex(paletteResults.currentIndex, ListView.Contain)
+        referenceInput.forceActiveFocus()
     }
     function runCommand(action) {
         if (!flushNote()) return
@@ -937,56 +978,84 @@ ApplicationWindow {
         id: passagePalette
         objectName: "passagePalette"
         width: Math.min(650 * app.scale, app.width - 48)
+        height: Math.min(560 * app.scale, app.height - 48)
         padding: 16
         onOpened: referenceInput.forceActiveFocus()
         onClosed: app.readerFocus()
         contentItem: ColumnLayout {
             spacing: 12
-            RowLayout {
-                SectionLabel { text: app.paletteBook ? "CHOOSE A CHAPTER" : "GO TO A PASSAGE"; Layout.fillWidth: true }
-                QuietButton { text: "Books"; compact: true; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: { app.paletteBook = 0; referenceInput.text = ""; referenceInput.forceActiveFocus() } }
-                QuietButton { text: "Commands"; compact: true; emphasized: referenceInput.text.startsWith(">"); onClicked: { app.paletteBook = 0; referenceInput.text = "> "; referenceInput.forceActiveFocus() } }
+            Keys.onLeftPressed: function(event) {
+                event.accepted = app.paletteBook > 0 && event.modifiers === Qt.NoModifier
+                if (event.accepted) app.backToBooks()
             }
-            TextField {
-                id: referenceInput
-                objectName: "referenceInput"
+            RowLayout {
                 Layout.fillWidth: true
-                implicitHeight: 52 * app.scale
-                font.pixelSize: 19 * app.scale
-                color: desktop.foreground
-                placeholderText: app.paletteBook ? app.paletteBookName + " — chapter number" : "John 3:16–18, a book, or > command"
-                placeholderTextColor: desktop.muted
-                selectByMouse: true
-                leftPadding: 14
-                rightPadding: 14
-                background: Rectangle { color: desktop.surface; radius: 0; border.color: referenceInput.activeFocus ? app.tint(desktop.accent, 0.65) : desktop.border }
-                onTextChanged: { app.paletteArrowUsed = false; paletteResults.currentIndex = 0 }
-                onAccepted: app.acceptPalette()
-                Keys.onDownPressed: { app.paletteArrowUsed = true; paletteResults.currentIndex = Math.min(paletteResults.count - 1, paletteResults.currentIndex + 1); paletteResults.positionViewAtIndex(paletteResults.currentIndex, ListView.Contain) }
-                Keys.onUpPressed: { app.paletteArrowUsed = true; paletteResults.currentIndex = Math.max(0, paletteResults.currentIndex - 1); paletteResults.positionViewAtIndex(paletteResults.currentIndex, ListView.Contain) }
-                Keys.onRightPressed: function(event) {
-                    let entry = paletteResults.model[paletteResults.currentIndex]
-                    let browsing = (!text.trim() || /^[1-3]?\s*[A-Za-z ]+$/.test(text.trim()))
-                        && (app.paletteArrowUsed || (cursorPosition === text.length && selectedText.length === 0))
-                    event.accepted = event.modifiers === Qt.NoModifier && browsing && !!entry && !!entry.book && !entry.chapter
-                    if (event.accepted) app.activatePaletteEntry(entry)
+                spacing: 4 * app.scale
+                TextField {
+                    id: referenceInput
+                    objectName: "referenceInput"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    implicitHeight: 38 * app.scale
+                    Layout.preferredHeight: implicitHeight
+                    font.pixelSize: 15 * app.scale
+                    color: desktop.foreground
+                    placeholderText: app.paletteBook ? app.paletteBookName + " — chapter number" : "John 3:16–18, a book, or > command"
+                    placeholderTextColor: desktop.muted
+                    selectByMouse: true
+                    leftPadding: 14
+                    rightPadding: 14
+                    background: Rectangle { color: desktop.surface; radius: 0; border.color: referenceInput.activeFocus ? app.tint(desktop.accent, 0.65) : desktop.border }
+                    onTextChanged: { app.paletteArrowUsed = false; paletteResults.currentIndex = 0 }
+                    onAccepted: app.acceptPalette()
+                    Keys.onDownPressed: app.movePalette(1)
+                    Keys.onUpPressed: app.movePalette(-1)
+                    Keys.onLeftPressed: function(event) {
+                        event.accepted = event.modifiers === Qt.NoModifier && app.paletteBook > 0
+                            && selectedText.length === 0 && (!text.length || cursorPosition === 0 || app.paletteArrowUsed)
+                        if (event.accepted) app.backToBooks()
+                    }
+                    Keys.onRightPressed: function(event) {
+                        let entry = paletteResults.model[paletteResults.currentIndex]
+                        let browsing = (!text.trim() || /^[1-3]?\s*[A-Za-z ]+$/.test(text.trim()))
+                            && (app.paletteArrowUsed || (cursorPosition === text.length && selectedText.length === 0))
+                        event.accepted = event.modifiers === Qt.NoModifier && browsing && !!entry && !!entry.book && !entry.chapter
+                        if (event.accepted) app.activatePaletteEntry(entry)
+                    }
+                    Keys.onEscapePressed: passagePalette.close()
+                    Accessible.name: "Passage reference or command"
                 }
-                Keys.onEscapePressed: passagePalette.close()
-                Accessible.name: "Passage reference or command"
+                QuietButton { objectName: "paletteBooks"; text: "Books"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.backToBooks() }
+                QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: referenceInput.text.startsWith(">"); onClicked: { app.backToBooks(); referenceInput.text = "> " } }
             }
             Label {
                 objectName: "referencePreview"
                 visible: !referenceInput.text.trim().startsWith(">") && (referenceInput.text.trim().length > 0 || app.paletteBook > 0)
-                text: app.paletteResolution.valid ? app.paletteResolution.reference : "Invalid or incomplete reference · " + app.paletteResolution.error
+                text: paletteBack.activeFocus ? "Browse all books" : app.paletteResolution.valid ? app.paletteResolution.reference : app.paletteResolution.error
                 color: app.paletteResolution.valid ? desktop.accent : desktop.muted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
                 font.pixelSize: 12 * app.scale
             }
-            QuietButton { text: "← All books"; compact: true; visible: app.paletteBook > 0; onClicked: { app.paletteBook = 0; referenceInput.text = ""; referenceInput.forceActiveFocus() } }
+            QuietButton {
+                id: paletteBack
+                objectName: "paletteBack"
+                text: "← All books"
+                compact: true
+                visible: app.paletteBook > 0
+                emphasized: activeFocus
+                onClicked: app.backToBooks()
+                Keys.onReturnPressed: app.backToBooks()
+                Keys.onEnterPressed: app.backToBooks()
+                Keys.onDownPressed: { paletteResults.currentIndex = -1; app.movePalette(1) }
+                Keys.onUpPressed: {}
+            }
             ListView {
                 id: paletteResults
+                objectName: "paletteResults"
                 Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 40
                 Layout.preferredHeight: Math.min(340 * app.scale, app.height * 0.43)
                 clip: true
                 model: app.paletteEntries()
@@ -994,6 +1063,10 @@ ApplicationWindow {
                 spacing: 3
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar {}
+                Keys.onUpPressed: app.movePalette(-1)
+                Keys.onDownPressed: app.movePalette(1)
+                Keys.onReturnPressed: app.acceptPalette()
+                Keys.onEnterPressed: app.acceptPalette()
                 delegate: ItemDelegate {
                     id: paletteEntry
                     required property var modelData
@@ -1023,8 +1096,16 @@ ApplicationWindow {
             FineRule { Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "↑ ↓ choose    → enter book    ↵ open    Esc close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true }
-                Label { text: "Reference navigation · offline"; visible: app.width >= 760; color: desktop.muted; font.pixelSize: 11 * app.scale }
+                Label {
+                    objectName: "paletteHints"
+                    text: referenceInput.text.trim().startsWith(">") ? "↑ ↓ choose    ↵ run command    Esc close"
+                        : app.paletteBook > 0 ? "↑ ↓ choose · ↑ first row to back    ← all books    ↵ open / back    Esc close"
+                        : "↑ ↓ choose    → enter book    ↵ open    Esc close"
+                    color: desktop.muted
+                    font.pixelSize: 11 * app.scale
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                }
             }
         }
     }
@@ -1034,8 +1115,9 @@ ApplicationWindow {
         objectName: "savedDrawer"
         width: Math.min(430 * app.scale, app.width - 48)
         height: app.height
-        edge: Qt.LeftEdge
+        edge: Qt.RightEdge
         modal: true
+        focus: true
         padding: 24 * app.scale
         topPadding: padding
         bottomPadding: padding
@@ -1043,16 +1125,22 @@ ApplicationWindow {
         rightPadding: padding
         background: Rectangle { color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
+        onOpened: { collectionList.currentIndex = collectionList.count > 0 ? 0 : -1; app.moveSaved(0) }
         onClosed: app.readerFocus()
         contentItem: ColumnLayout {
             objectName: "savedContent"
+            Shortcut { sequence: "Ctrl+L"; enabled: savedDrawer.opened && !bible.busy; onActivated: savedDrawer.close() }
+            Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.opened; onActivated: app.moveSaved(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.opened; onActivated: app.moveSaved(-1) }
+            Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.opened; onActivated: app.filterSaved(-1) }
+            Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.opened; onActivated: app.filterSaved(1) }
+            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.opened; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
             spacing: (savedDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Saved passages"; font.pixelSize: 24 * app.scale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                Label { objectName: "savedTitle"; text: "Saved"; font.pixelSize: 24 * app.scale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
                 QuietButton { text: "×"; compact: true; Accessible.name: "Close saved passages"; onClicked: savedDrawer.close() }
             }
-            Label { text: "Return to what stayed with you."; visible: savedDrawer.height > 400 * app.scale; color: desktop.muted; font.pixelSize: 13 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             GridLayout {
                 id: savedTabs
                 objectName: "savedTabs"
@@ -1074,7 +1162,7 @@ ApplicationWindow {
                         Layout.preferredWidth: 1
                         padding: 6 * app.scale
                         font.pixelSize: 11 * app.scale
-                        onClicked: app.collectionTab = index
+                        onClicked: app.filterSaved(index - app.collectionTab)
                     }
                 }
             }
@@ -1087,6 +1175,7 @@ ApplicationWindow {
                 clip: true
                 spacing: 6 * app.scale
                 model: app.filteredCollection()
+                onModelChanged: currentIndex = count > 0 ? 0 : -1
                 ScrollBar.vertical: ScrollBar { id: savedScrollbar; objectName: "savedScrollbar" }
                 delegate: ItemDelegate {
                     id: savedEntry
@@ -1096,15 +1185,9 @@ ApplicationWindow {
                     padding: 12 * app.scale
                     height: savedContent.implicitHeight + topPadding + bottomPadding
                     clip: true
-                    onClicked: {
-                        if (!app.flushNote()) return
-                        app.savePosition()
-                        if (!bible.navigate(modelData.reference)) return
-                        app.syncNote()
-                        savedDrawer.close()
-                        if (modelData.note.length > 0) app.openNotes(false)
-                        Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
-                    }
+                    highlighted: ListView.isCurrentItem
+                    onClicked: app.openSaved(modelData)
+                    Keys.onSpacePressed: function(event) { event.accepted = true }
                     contentItem: ColumnLayout {
                         id: savedContent
                         objectName: "savedEntryContent" + savedEntry.modelData.reference
@@ -1119,17 +1202,18 @@ ApplicationWindow {
                         }
                         Label { text: savedEntry.modelData.note.replace(/\s+/g, " "); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     }
-                    background: Rectangle { color: savedEntry.hovered || savedEntry.activeFocus ? desktop.surface : "transparent"; radius: 0; border.width: savedEntry.activeFocus ? 1 : 0; border.color: desktop.accent }
+                    background: Rectangle { color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"; radius: 0; border.width: savedEntry.highlighted || savedEntry.activeFocus ? 1 : 0; border.color: desktop.accent }
                 }
                 Label {
+                    objectName: "savedEmpty"
                     anchors.centerIn: parent
                     width: parent.width - 24
-                    text: "Nothing here yet.\n\nSelect a verse, then add a bookmark, highlight, or note. Your saved passages will appear here."
+                    text: ["No saved passages yet.", "No bookmarks yet.", "No highlights yet.", "No notes yet."][app.collectionTab]
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     color: desktop.muted
-                    font.pixelSize: 14 * app.scale
-                    lineHeight: 1.4
+                    font.pixelSize: 12 * app.scale
+                    lineHeight: 1.2
                     visible: collectionList.count === 0
                 }
             }

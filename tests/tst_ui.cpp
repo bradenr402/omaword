@@ -278,7 +278,7 @@ private slots:
         QTRY_VERIFY(prop("passagePalette", "opened").toBool());
         type("John 300:999"); key(Qt::Key_Return);
         QVERIFY(bible->error().isEmpty());
-        QVERIFY(prop("referencePreview", "text").toString().startsWith("Invalid or incomplete reference"));
+        QCOMPARE(prop("referencePreview", "text").toString(),bible->resolveReference("John 300:999").value("error").toString());
         QVERIFY(prop("passagePalette", "visible").toBool());
         QCOMPARE(bible->chapter(),3); QCOMPARE(bible->selectedStart(),16);
         key(Qt::Key_A, Qt::ControlModifier); type("Jn 4:2"); key(Qt::Key_Return);
@@ -304,7 +304,7 @@ private slots:
             if (query == "rev4") QCOMPARE(preview,QString("Revelation 4"));
             else if (query == "4:2") QCOMPARE(preview,QString("John 4:2"));
             else {
-                QVERIFY(preview.startsWith("Invalid or incomplete reference"));
+                QCOMPARE(preview,bible->resolveReference(query).value("error").toString());
                 key(Qt::Key_Return);
                 QVERIFY(prop("passagePalette","visible").toBool());
             }
@@ -355,6 +355,88 @@ private slots:
         key(Qt::Key_A,Qt::ControlModifier); type("1 John");
         key(Qt::Key_Right);
         QCOMPARE(window->property("paletteBook").toInt(),62);
+    }
+    void paletteBackKeyboardAndEditing() {
+        reference("John 3:16");
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John"); key(Qt::Key_Return);
+        key(Qt::Key_Up);
+        QVERIFY(item("paletteBack")->hasActiveFocus());
+        QVERIFY(prop("paletteBack","emphasized").toBool());
+        QCOMPARE(prop("paletteResults","currentIndex").toInt(),-1);
+        key(Qt::Key_Down);
+        QVERIFY(item("referenceInput")->hasActiveFocus());
+        QCOMPARE(prop("paletteResults","currentIndex").toInt(),0);
+        key(Qt::Key_Up); key(Qt::Key_Return);
+        QCOMPARE(window->property("paletteBook").toInt(),0);
+        QVERIFY(item("referenceInput")->hasActiveFocus());
+        type("John"); key(Qt::Key_Right); key(Qt::Key_Left);
+        QCOMPARE(window->property("paletteBook").toInt(),0);
+        type("John"); key(Qt::Key_Return);
+        type("3:16"); key(Qt::Key_Left);
+        QCOMPARE(prop("referenceInput","cursorPosition").toInt(),3);
+        QCOMPARE(window->property("paletteBook").toInt(),43);
+        key(Qt::Key_A,Qt::ControlModifier); key(Qt::Key_Left);
+        QCOMPARE(window->property("paletteBook").toInt(),43);
+        QCOMPARE(prop("referenceInput","cursorPosition").toInt(),0);
+        key(Qt::Key_Left);
+        QCOMPARE(window->property("paletteBook").toInt(),0);
+        type("John"); key(Qt::Key_Return); type("1"); key(Qt::Key_Down);
+        // Once navigating results, Left backs out even with a query present.
+        key(Qt::Key_Left);
+        QCOMPARE(window->property("paletteBook").toInt(),0);
+        type("John"); key(Qt::Key_Return); key(Qt::Key_Up); key(Qt::Key_Left);
+        QCOMPARE(window->property("paletteBook").toInt(),0);
+        QCOMPARE(navigation.count(),0);
+        QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        key(Qt::Key_A,Qt::ControlModifier); type("not a reference 123");
+        QCOMPARE(prop("referencePreview","text").toString(),bible->resolveReference("not a reference 123").value("error").toString());
+        QVERIFY(prop("referencePreview","text").toString().startsWith("Reference not recognized"));
+    }
+    void paletteInlineGeometryAndHints_data() {
+        QTest::addColumn<double>("scale");
+        QTest::newRow("normal") << 1.0;
+        QTest::newRow("scaled") << 1.8;
+    }
+    void paletteInlineGeometryAndHints() {
+        QFETCH(double,scale);
+        window->resize(640,480);
+        QVERIFY(desktop->setProperty("textScale",scale));
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        for (const auto &mode : {QString("books"),QString("chapters"),QString("commands")}) {
+            if (mode == "chapters") { type("John"); key(Qt::Key_Return); }
+            if (mode == "commands") click(item("paletteCommands"));
+            QTest::qWait(100);
+            auto input = item("referenceInput");
+            const auto inputBounds = input->mapRectToScene(QRectF(0,0,input->width(),input->height()));
+            QVERIFY(input->width() > 100);
+            auto previous = inputBounds;
+            for (const auto name : {"paletteBooks","paletteCommands"}) {
+                const auto button = item(name);
+                const auto bounds = button->mapRectToScene(button->boundingRect());
+                QCOMPARE(bounds.height(),inputBounds.height());
+                QCOMPARE(bounds.top(),inputBounds.top());
+                QVERIFY(bounds.left() > previous.right());
+                QVERIFY(QRectF(16,16,608,448).contains(bounds));
+                const auto label = qvariant_cast<QQuickItem *>(button->property("contentItem"));
+                QVERIFY(label->width() >= label->implicitWidth());
+                previous = bounds;
+            }
+            QVERIFY(QRectF(16,16,608,448).contains(inputBounds));
+            QVERIFY(item("paletteResults")->height() >= 40);
+            const auto hints = item("paletteHints");
+            QVERIFY(QRectF(16,16,608,448).contains(hints->mapRectToScene(hints->boundingRect())));
+            const auto text = hints->property("text").toString();
+            if (mode == "commands") {
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    ↵ run command    Esc close"));
+                QVERIFY(!item("paletteBack")->isVisible());
+            } else if (mode == "chapters") {
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose · ↑ first row to back    ← all books    ↵ open / back    Esc close"));
+            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    → enter book    ↵ open    Esc close"));
+        }
     }
     void normalVisualAndShiftedSelection() {
         reference("John 3:16");
@@ -786,6 +868,106 @@ private slots:
         click(item("bookmarkMarker1"));
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:36–4:2"));
     }
+    void savedKeyboardIsolationAndToggle() {
+        for (int verse = 1; verse <= 12; ++verse) {
+            QVERIFY(bible->navigate(QString("John 3:%1").arg(verse)));
+            bible->toggleBookmark();
+            if (verse == 2) bible->toggleHighlight();
+            if (verse == 3) bible->setNoteText("Saved keyboard note");
+        }
+        reference("John 4:2");
+        QTest::qWait(450);
+        const auto collection = bible->collection();
+        const auto position = prop("reading","contentY").toDouble();
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
+        QApplication::clipboard()->setText("Saved isolation");
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QVERIFY(item("collectionList")->hasActiveFocus());
+        QCOMPARE(prop("savedTitle","text").toString(),QString("Saved"));
+        QCOMPARE(prop("savedDrawer","edge").toInt(),int(Qt::RightEdge));
+        key(Qt::Key_J); QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
+        key(Qt::Key_Down); QCOMPARE(prop("collectionList","currentIndex").toInt(),2);
+        key(Qt::Key_K); QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
+        key(Qt::Key_Up); QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
+        for (int i = 0; i < 20; ++i) key(Qt::Key_J);
+        QCOMPARE(prop("collectionList","currentIndex").toInt(),11);
+        auto current = qvariant_cast<QQuickItem *>(prop("collectionList","currentItem"));
+        QVERIFY(current);
+        QVERIFY(current->property("highlighted").toBool());
+        const auto rowBounds = current->mapRectToItem(item("collectionList"),current->boundingRect());
+        QVERIFY(item("collectionList")->boundingRect().adjusted(-1,-1,1,1).contains(rowBounds));
+        const auto background = qvariant_cast<QQuickItem *>(current->property("background"));
+        QVERIFY(background);
+        QVERIFY(background->property("color").value<QColor>().alpha() > 0);
+        key(Qt::Key_L); QCOMPARE(window->property("collectionTab").toInt(),1);
+        QCOMPARE(prop("collectionList","count").toInt(),12);
+        key(Qt::Key_Right); QCOMPARE(window->property("collectionTab").toInt(),2);
+        QCOMPARE(prop("collectionList","count").toInt(),1);
+        key(Qt::Key_Right); QCOMPARE(window->property("collectionTab").toInt(),3);
+        QCOMPARE(prop("collectionList","count").toInt(),1);
+        key(Qt::Key_H); QCOMPARE(window->property("collectionTab").toInt(),2);
+        key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(),1);
+        for (const auto k : {Qt::Key_M,Qt::Key_X,Qt::Key_N,Qt::Key_V,Qt::Key_Y,Qt::Key_G,
+                            Qt::Key_BracketLeft,Qt::Key_BracketRight,Qt::Key_PageDown,Qt::Key_Space}) {
+            key(k);
+            QVERIFY2(navigation.count() == 0,qPrintable(QString("Saved leaked key %1").arg(int(k))));
+        }
+        key(Qt::Key_J,Qt::ShiftModifier);
+        key(Qt::Key_Right,Qt::AltModifier);
+        key(Qt::Key_H,Qt::ControlModifier);
+        key(Qt::Key_D,Qt::ControlModifier);
+        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_K,Qt::ControlModifier);
+        QCOMPARE(navigation.count(),0); QCOMPARE(selection.count(),0);
+        QCOMPARE(bible->collection(),collection);
+        QCOMPARE(prop("reading","contentY").toDouble(),position);
+        QCOMPARE(QApplication::clipboard()->text(),QString("Saved isolation"));
+        QVERIFY(!window->property("verseMode").toBool());
+        QVERIFY(!window->property("notesOpen").toBool());
+        QVERIFY(!prop("passagePalette","visible").toBool());
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QVERIFY(item("readerSurface")->hasActiveFocus());
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_Right); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("John 3:2"));
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_Right); key(Qt::Key_Enter);
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("John 3:3"));
+        QCOMPARE(bible->noteText(),QString("Saved keyboard note"));
+        QVERIFY(window->property("notesOpen").toBool());
+    }
+    void savedEmptyStates() {
+        window->resize(640,480);
+        QVERIFY(desktop->setProperty("textScale",1.8));
+        const QStringList messages = {
+            "No saved passages yet.", "No bookmarks yet.", "No highlights yet.", "No notes yet."
+        };
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        for (int tab = 0; tab < 4; ++tab) {
+            QTest::qWait(100);
+            QCOMPARE(window->property("collectionTab").toInt(),tab);
+            QCOMPARE(prop("collectionList","count").toInt(),0);
+            QVERIFY(item("savedEmpty")->isVisible());
+            QCOMPARE(prop("savedEmpty","text").toString(),messages[tab]);
+            const auto bounds = item("savedEmpty")->mapRectToItem(item("collectionList"),item("savedEmpty")->boundingRect());
+            QVERIFY(item("collectionList")->boundingRect().contains(bounds));
+            key(Qt::Key_J); key(Qt::Key_K); key(Qt::Key_Return);
+            QVERIFY(prop("savedDrawer","opened").toBool());
+            key(Qt::Key_Right);
+        }
+        QCOMPARE(window->property("collectionTab").toInt(),0);
+        key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(),3);
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+    }
     void savedPanelGeometry_data() {
         QTest::addColumn<QSize>("size");
         QTest::addColumn<double>("scale");
@@ -811,9 +993,11 @@ private slots:
         QVERIFY(content);
         QCOMPARE(prop("savedDrawer","padding").toDouble(),24 * scale);
         const auto bounds = content->mapRectToScene(content->boundingRect());
-        QCOMPARE(bounds.left(),24 * scale);
+        QCOMPARE(prop("savedDrawer","edge").toInt(),int(Qt::RightEdge));
+        QCOMPARE(prop("savedTitle","text").toString(),QString("Saved"));
+        QCOMPARE(bounds.left(),size.width() - prop("savedDrawer","width").toDouble() + 24 * scale);
         QVERIFY(qAbs(bounds.top() - 24 * scale) < 0.1);
-        QCOMPARE(prop("savedDrawer","width").toDouble() - bounds.right(),24 * scale);
+        QCOMPARE(size.width() - bounds.right(),24 * scale);
         QVERIFY(qAbs(size.height() - bounds.bottom() - 24 * scale) < 0.1);
         auto tabs = item("savedTabs");
         for (int index = 0; index < 4; ++index) {
