@@ -7,3 +7,5 @@ INCLUDEPATH += ../src
 SOURCES += tst_ui.cpp ../src/biblebackend.cpp ../src/epubimporter.cpp ../src/desktop.cpp
 HEADERS += ../src/biblebackend.h ../src/epubimporter.h ../src/desktop.h
 RESOURCES += ../resources.qrc
+SOURCES += ../src/blockdocument.cpp
+HEADERS += ../src/blockdocument.h

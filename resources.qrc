@@ -1,6 +1,7 @@
 <RCC>
   <qresource prefix="/">
     <file>qml/Main.qml</file>
+    <file>qml/BlockReader.qml</file>
     <file>assets/omabible.svg</file>
   </qresource>
 </RCC>

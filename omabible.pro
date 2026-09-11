@@ -6,3 +6,5 @@ TEMPLATE = app
 SOURCES += src/main.cpp src/desktop.cpp src/biblebackend.cpp src/epubimporter.cpp
 HEADERS += src/desktop.h src/biblebackend.h src/epubimporter.h
 RESOURCES += resources.qrc
+SOURCES += src/blockdocument.cpp
+HEADERS += src/blockdocument.h

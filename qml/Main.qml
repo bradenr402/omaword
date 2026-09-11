@@ -96,6 +96,11 @@ ApplicationWindow {
     }
     readonly property real floatingSafety: bible.focusMode ? 0 : 72 * scale
     readonly property real verseGutter: 40 * scale
+    readonly property bool observedBlockMode: bible.blockMode
+    onObservedBlockModeChanged: {
+        clearTextSelection()
+        Qt.callLater(function() { app.restorePosition(app.hasSelection) })
+    }
     readonly property bool observedFocusMode: bible.focusMode
     onObservedFocusModeChanged: Qt.callLater(app.applyFocusMode)
     function applyFocusMode() {
@@ -124,6 +129,7 @@ ApplicationWindow {
     property string freeSelectedText: ""
     function clearTextSelection() {
         freeSelectedText = ""
+        if (blockLoader.item) blockLoader.item.clearSelection()
         for (let i = 0; i < verseRepeater.count; ++i) {
             let row = verseRepeater.itemAt(i) as VerseItem
             if (row && row.body) row.body.deselect()
@@ -204,9 +210,18 @@ ApplicationWindow {
     function copyFreeText() {
         if (freeSelectedText.length) bible.copyText(freeSelectedText)
     }
-    function copyClickedVerse(number, quotation) {
+    function copyClickedVerse(number, plainText) {
         if (!flushNote()) return
-        if (bible.copyVerse(number, quotation).length) { syncNote(); notify("Passage copied") }
+        const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
+        const reference = inside ? bible.selectionReference : bible.passage + ":" + number
+        // The selection API preserves an inside-hit range. copyVerse focuses an
+        // outside hit only after the backend has successfully read/copied it.
+        const copied = inside ? bible.copySelection(plainText) : bible.copyVerse(number, plainText)
+        if (copied.length) {
+            if (!inside) selectionAnchor = bible.cursorVerse
+            syncNote()
+            notify(reference + (plainText ? " copied as plain text" : " copied"))
+        }
     }
     Timer {
         interval: 16
@@ -436,10 +451,11 @@ ApplicationWindow {
             notify("Annotation backup restored")
         }
     }
-    function copyPassage() {
+    function copyPassage(plainText) {
         clearCount()
-        if (bible.copySelection().length > 0)
-            notify((hasSelection ? bible.selectionReference : bible.passage) + " copied")
+        const reference = hasSelection ? bible.selectionReference : bible.passage
+        if (bible.copySelection(!!plainText).length > 0)
+            notify(reference + (plainText ? " copied as plain text" : " copied"))
     }
     function savePosition() {
         if (!restoringPosition && bible.ready) {
@@ -454,16 +470,18 @@ ApplicationWindow {
     function scrollToVerse(number, alignTop) {
         let index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
         let row = verseRepeater.itemAt(index) as VerseItem
-        if (!row) return
+        if (!row && !blockLoader.item) return
         if (index === 0) { reading.contentY = 0; return }
-        let y = row.mapToItem(readerColumn, 0, 0).y + row.textOffset
+        let rect = blockLoader.item ? blockLoader.item.verseRect(number) : null
+        let y = rect ? blockLoader.mapToItem(readerColumn, 0, rect.y).y : row.mapToItem(readerColumn, 0, 0).y + row.textOffset
+        let textHeight = rect ? rect.height : row.textHeight
         let available = Math.max(1, reading.height - floatingSafety)
-        let margin = Math.min(3 * readerLineHeight, Math.max(12 * scale, (available - row.textHeight) / 2))
+        let margin = Math.min(3 * readerLineHeight, Math.max(12 * scale, (available - textHeight) / 2))
         // A very long verse cannot fit. Keep its beginning and a useful context
         // margin visible rather than jumping to its end on every movement.
-        if (row.textHeight > available - 24 * scale)
+        if (textHeight > available - 24 * scale)
             margin = Math.min(3 * readerLineHeight, available * 0.2)
-        let extent = Math.min(row.textHeight, Math.max(1, available - 2 * margin))
+        let extent = Math.min(textHeight, Math.max(1, available - 2 * margin))
         let target = reading.contentY
         if (alignTop || y < target + margin) target = y - margin
         else if (y + extent > target + available - margin) target = y + extent - available + margin
@@ -545,7 +563,8 @@ ApplicationWindow {
         { id: "highlight", title: "Highlight selection", keys: "x · Ctrl h", sequences: ["X", "Ctrl+H"], command: true },
         { id: "notes", title: "Write a note", keys: "n", sequences: ["N"], scope: "notes", command: true },
         { id: "toggleNotes", title: "Toggle notes", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
-        { id: "copy", title: "Copy passage", keys: "y · Ctrl Shift C", sequences: ["Y", "Ctrl+Shift+C"], command: true },
+        { id: "copy", title: "Copy passage as quotation", keys: "y · Ctrl c", sequences: ["Y"], command: true },
+        { id: "copyPlain", title: "Copy passage as plain text", keys: "Shift Y · Ctrl Shift C", sequences: ["Shift+Y", "Ctrl+Shift+C"], command: true },
         { id: "copyText", title: "Copy selected text", keys: "Ctrl c", sequences: ["Ctrl+C"] },
         { id: "larger", title: "Larger text", keys: "Ctrl + · Ctrl =", sequences: ["Ctrl++", "Ctrl+="] },
         { id: "smaller", title: "Smaller text", keys: "Ctrl −", sequences: ["Ctrl+-"] },
@@ -569,8 +588,8 @@ ApplicationWindow {
         { title: "Select a verse", keys: "Click number", explanation: true },
         { title: "Select a range", keys: "Shift Click", explanation: true },
         { title: "Select text across verses", keys: "Drag text", explanation: true },
-        { title: "Copy clicked passage", keys: "Right Click", explanation: true },
-        { title: "Copy clicked quotation", keys: "Middle Click", explanation: true },
+        { title: "Copy clicked quotation", keys: "Right Click", explanation: true },
+        { title: "Copy clicked plain text", keys: "Middle Click", explanation: true },
         { title: "Go to verse number", keys: "number then g (e.g. 20g)", explanation: true },
         { title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
     ]
@@ -586,12 +605,12 @@ ApplicationWindow {
         if (action.scope === "palette") return !modalOpen || passagePalette.opened
         if (action.scope === "global") return !modalOpen && (bible.ready || action.id === "help" || action.id === "about" || action.id === "import")
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
-        return readerKeys && (action.id !== "copyText" || freeSelectedText.length > 0)
+        return readerKeys
     }
     function actionAvailable(action) {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action || action.explanation || bible.busy) return false
-        if (action.id === "copyText") return bible.ready && freeSelectedText.length > 0
+        if (action.id === "copyText") return bible.ready && (freeSelectedText.length > 0 || hasSelection)
         if (action.id === "bookmark" || action.id === "highlight") return hasSelection
         return bible.ready || !!action.setting
             || ["books", "commands", "help", "about", "import", "settings", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
@@ -718,7 +737,7 @@ ApplicationWindow {
         case "extendPrevious": extendVerse(-1); break
         case "extendNext": extendVerse(1); break
         case "toggleNotes": toggleNotes(); break
-        case "copyText": copyFreeText(); break
+        case "copyText": if (freeSelectedText.length) copyFreeText(); else copyPassage(false); break
         case "larger": readerSize = Math.min(28, readerSize + 1); break
         case "smaller": readerSize = Math.max(15, readerSize - 1); break
         case "resetText": readerSize = 19; break
@@ -737,6 +756,7 @@ ApplicationWindow {
         case "bookmark": if (hasSelection) bible.toggleBookmark(); else notify("Select a verse number to bookmark a passage"); break
         case "highlight": if (hasSelection) bible.toggleHighlight(); else notify("Select a verse number to highlight a passage"); break
         case "copy": if (bible.ready) copyPassage(); break
+        case "copyPlain": if (bible.ready) copyPassage(true); break
         case "export": exportDialog.open(); break
         case "backup": backupDialog.open(); break
         case "restore": restoreDialog.open(); break
@@ -1145,6 +1165,7 @@ ApplicationWindow {
                         SectionLabel { objectName: "editionLabel"; visible: !bible.focusMode; text: "NEW ENGLISH TRANSLATION"; leftPadding: app.verseGutter; bottomPadding: 12 }
                         Label {
                             objectName: "chapterTitle"
+                            visible: !bible.focusMode
                             text: bible.passage
                             color: desktop.foreground
                             font.pixelSize: 34 * app.scale
@@ -1157,7 +1178,7 @@ ApplicationWindow {
                         }
                         Repeater {
                             id: verseRepeater
-                            model: bible.verses
+                            model: bible.blockMode ? [] : bible.verses
                             delegate: VerseItem {
                                 id: verseRow
                                 required property var modelData
@@ -1229,7 +1250,7 @@ ApplicationWindow {
                                 Item {
                                     id: verseHeading
                                     objectName: "verseHeading" + verseRow.modelData.number
-                                    readonly property bool hasHeading: bible.showHeadings && (verseRow.modelData.heading || "").length > 0
+                                    readonly property bool hasHeading: bible.showHeadings && !bible.focusMode && (verseRow.modelData.heading || "").length > 0
                                     width: parent.width - verseRow.gutter - 6
                                     x: verseRow.gutter
                                     // Measure text at a fixed width, independent of effective
@@ -1259,25 +1280,34 @@ ApplicationWindow {
                                         color: desktop.foreground
                                     }
                                 }
-                                Rectangle {
-                                    x: verseRow.gutter - 9
-                                    y: verseHeading.height
-                                    width: parent.width - x
-                                    height: verseBody.height + 5
-                                    radius: 0
-                                    color: verseRow.selected ? app.tint(desktop.accent, 0.22) : verseRow.modelData.highlighted ? app.tint(desktop.accent, 0.16) : "transparent"
-                                    border.width: verseRow.selected ? 1 : 0
-                                    border.color: app.tint(desktop.accent, 0.3)
+                                Repeater {
+                                    model: verseRow.modelData.highlightRanges || []
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        objectName: "highlightSegment" + verseRow.modelData.number + ":" + modelData.reference
+                                        x: verseRow.gutter - 9
+                                        y: modelData.highlightContinuesBefore ? 0 : verseHeading.height
+                                        width: verseRow.width - x
+                                        height: (modelData.highlightContinuesAfter ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
+                                        radius: 0
+                                        color: app.tint(desktop.accent, 0.16)
+                                        Rectangle {
+                                            objectName: "highlightAccent" + verseRow.modelData.number + ":" + parent.modelData.reference
+                                            width: 2; height: parent.height
+                                            color: desktop.accent; opacity: 0.7
+                                            visible: !bible.focusMode
+                                        }
+                                    }
                                 }
                                 Rectangle {
+                                    objectName: "selectionSegment" + verseRow.modelData.number
                                     x: verseRow.gutter - 9
-                                    y: verseHeading.height + 4
-                                    height: Math.max(12, verseBody.height - 4)
-                                    width: 2
+                                    y: verseRow.index > 0 && (bible.verses[verseRow.index - 1]?.number || 0) >= bible.selectedStart ? 0 : verseHeading.height
+                                    width: parent.width - x
+                                    height: (verseRow.modelData.number < bible.selectedEnd ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
+                                    visible: verseRow.selected
                                     radius: 0
-                                    visible: verseRow.modelData.highlighted && !bible.focusMode
-                                    color: desktop.accent
-                                    opacity: 0.7
+                                    color: app.tint(desktop.accent, 0.22)
                                 }
                                 Item {
                                     id: verseNumber
@@ -1292,7 +1322,7 @@ ApplicationWindow {
                                     Label {
                                         id: numberLabel
                                         objectName: "verseNumberLabel" + verseRow.modelData.number
-                                        visible: bible.showVerseNumbers
+                                        visible: bible.showVerseNumbers && !bible.focusMode
                                         anchors.top: parent.top
                                         anchors.topMargin: Math.max(0, readerMetrics.ascent + readerMetrics.tightBoundingRect("H").y
                                             - numberMetrics.ascent - numberMetrics.tightBoundingRect("0").y)
@@ -1389,6 +1419,21 @@ ApplicationWindow {
                                         onCanceled: { app.draggingText = false; app.dragAnchorRow = -1 }
                                     }
                                 }
+                            }
+                        }
+                        Loader {
+                            id: blockLoader
+                            objectName: "blockLoader"
+                            active: bible.blockMode
+                            visible: active
+                            x: app.verseGutter
+                            width: parent.width - x - 9
+                            sourceComponent: BlockReader {
+                                objectName: "blockReader"
+                                controller: app
+                                backend: bible
+                                theme: desktop
+                                viewport: reading
                             }
                         }
                         Label {
@@ -1523,7 +1568,7 @@ ApplicationWindow {
                         QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: app.runCommand("bookmark"); tip: "m · Ctrl m" }
                         QuietButton { text: bible.selectionHighlighted ? "Highlighted" : "Highlight"; emphasized: bible.selectionHighlighted; compact: true; onClicked: app.runCommand("highlight"); tip: "x · Ctrl h" }
                         Item { Layout.fillWidth: true }
-                        QuietButton { text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy selected passage · y · Ctrl Shift C" }
+                        QuietButton { objectName: "notesCopy"; text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy passage as quotation · y · Ctrl c" }
                     }
                     FineRule { Layout.fillWidth: true }
                     RowLayout {
