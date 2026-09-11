@@ -18,10 +18,18 @@ bool omittedVerse(int book, int chapter, int verse);
 int chapterMaximum(int book, int chapter);
 int chapterVerseCount(int book, int chapter);
 
+struct Edition {
+    QString id, abbreviation, name, copyright;
+};
+// Identifies supported structured editions without opening or writing a database.
+// An empty id means failure; error explains unsupported/OCR layouts.
+Edition inspectFile(const QString &path, QString *error = nullptr);
+
 struct Result {
     bool ok = false;
     QString error;
     int verseCount = 0;
+    Edition edition;
 };
 
 // Reads ZIP entries in memory via libarchive; never extracts the user's EPUB.
