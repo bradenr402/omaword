@@ -26,9 +26,7 @@ Properties (NOTIFY as appropriate):
   double lineHeight=1.5 (1.0..3.0 in 0.1 steps). Persist synchronously in personal.sqlite's additive
   global preferences table; personal schema and annotation backup version are 3. Annotation
   backups exclude preferences, and restore preserves local preferences.
-- Migrate absent readingMode from legacy blockMode: true → "block", false →
-  "paragraph". The compatibility blockMode property reflects only "block";
-  three-state callers use readingMode. bool hasParagraphs uses versionChanged.
+- bool hasParagraphs uses versionChanged; readingMode selects the three layouts.
 
 Invokables:
 - void importEpub(QUrl file), clearError()
@@ -41,7 +39,9 @@ Invokables:
   the chapter edge; the next press crosses one verse into the adjacent chapter]
 - QVariantList chapterVerses(int book,int chapter) [verse picker, skips omitted numbers]
 - void toggleBookmark(), toggleHighlight(), setNoteText(QString)
-- bool deleteAnnotation(QString reference) [delete exactly one annotation matching
+- bool deleteAnnotation(QString reference, QString expectedVersionId={}) [reject a
+  supplied version ID that differs from the active version before deletion;
+  delete exactly one annotation matching
   canonical endpoints, including all its flags and note; preserve overlapping entries.
   Validate, DELETE, read back, and commit transactionally before publishing models;
   missing exact entries or SQL/read-back/commit errors roll back without state changes]
@@ -57,15 +57,15 @@ Invokables:
 - QString dataDirectory()
 Signals: navigationChanged() (new chapter or requested verse jump), annotationChanged().
 Persist synchronously for reliable saves; debounce may live in UI. Imports run on
-a background thread and identify explicitly selected local official NET 2.1 or
-structured Haiola/eBible KJV 2006 EPUBs. `omaword --import <file>`
-invokes the same importer; src/main.cpp help
-explicitly names NET 2.1 and Haiola/eBible KJV 2006 support.
+a background thread using a NET adapter and a generic structured Haiola/eBible
+adapter with OSIS/USFM-compatible anchors. `omaword --import <file>` invokes the
+same importer; CLI help names the verified NET 2.1 and KJV 2006 examples.
 
 Root personal.sqlite uses schema 3: annotations and reading are keyed by
 version_id; preferences are global; installed(version_id,path,abbreviation,name,
 copyright,last_used) records root-relative text filenames and usage ranks, and
-library(id=1,active,use_counter) records the active ID and monotonic MRU counter.
+library(id=1,active,use_counter) records the startup active ID and monotonic MRU
+counter. Each open window retains its own active version and live reading state.
 Successful activation/import updates ranks transactionally; startup, selecting the
 already-active version, and inactive removal do not count as new uses. Removal and
 reimport cannot reuse the deleted edition's latest rank. Failures roll back order
@@ -73,13 +73,8 @@ with the library state. New imports create immutable `bible-<UUID>.sqlite` gener
 the data root. Registration, active ID, and personal state commit in one root
 transaction after validation and read-back; obsolete files are removed afterward.
 A crash before registration or during cleanup can leave an unreferenced file,
-not a partially installed edition. Legacy root bible.sqlite is validated and
-registered in place as net-2.1; v1/v2 personal annotations and reading state migrate
-transactionally to that ID, preserving preferences and cross-chapter references.
-Corrupt or unsafe legacy text stays unregistered without blocking personal-data
-migration: NET annotations remain archived and supported NET reimport reconnects
-them. Ownership checks restrict text paths to root `bible-<UUID>.sqlite` generations
-or `bible.sqlite` for NET. Existing files and sidecars must be regular, owned by
+not a partially installed edition. Ownership checks protect root text generations.
+Existing files and sidecars must be regular, owned by
 the current user, and singly linked; symlinks, hardlinks, personal-store aliases,
 wrong-edition targets, and ambiguous registry targets are rejected. Cleanup
 rechecks ownership after commit before unlinking.
@@ -96,11 +91,10 @@ reading state invisibly until same-ID reimport; true deletes both. Global
 preferences survive either choice and removal of the last version. Failed
 validation, SQL writes, read-back, or commit preserve the previous library/models.
 
-New JSON backups have format omaword-backup, version 3, edition, versionId,
+JSON backups use only the omaword-backup signature, with version 3, edition, versionId,
 created (UTC), reading, and annotations. They contain only active-version personal
 data and canonical endpoints, excluding preferences and Bible text. Restore
-requires an installed, active matching versionId and edition name; v1/v2 backups
-are NET-scoped and require active net-2.1 with the NET Bible 2.1 edition name.
+requires an installed, active matching versionId and edition name.
 Validation precedes transactional replacement of only that version's annotations
 and reading state. Other versions and global preferences survive. Markdown export
 likewise contains only active-version annotations and identifies its edition/ID.
@@ -124,35 +118,84 @@ source independence. Do not copy Bible content into the repository.
 EpubImporter::Edition contains QString id, abbreviation, name, copyright;
 inspectFile(path,error) identifies supported structure without opening or writing
 a database and returns an empty ID on failure. Result includes Edition edition.
-Stable IDs are net-2.1 and kjv-2006. Text DB metadata stores version_id,
+The reserved `net-2.1` ID requires title `NET Bible 2.1` and identifier
+`urn:uuid:NETBIBLE21`; `kjv-2006` requires title `King James (Authorized) Version`
+and identifier `urn:uuid:51004fba-2cea-50c8-8e37-fcebe15c315a`. Exact pairs protect
+existing edition identity and annotations. Other KJV UUIDs and Modern King James
+Version take generic IDs and preserve their supplied titles. Other editions use
+`epub-` plus the first 32
+hex digits of SHA-256 over `identifier:<package identifier>`, or
+`title:<case-folded title>` if no identifier is supplied. Filenames and exact
+known-file UUIDs are not admission gates. Text DB metadata stores version_id,
 abbreviation, edition, copyright, schema=2, and paragraph_layout=1; verses store a
-validated boolean paragraphStart. Legacy schema-1 databases, including NET with edition
-only (plus schema) remains valid. Existing canon/chapterMaximum/chapterVerseCount/
-omittedVerse helpers retain NET semantics; validateDatabase uses edition-specific
-counts. NET validates 31,087 verses; KJV validates 31,102, both over 66 books and
-1,189 chapters. The KJV adapter preserves supplied words/italics, Psalm headings,
-and poetry while stripping explicit note subtrees. See tests/README.md for exact
-metadata identification and validation coverage.
+validated boolean paragraphStart. Existing canon/chapterMaximum/chapterVerseCount/
+omittedVerse helpers retain NET semantics. NET validates 31,087 verses; KJV
+validates 31,102, both over 66 books and 1,189 chapters. Generic imports must match
+one complete, independently defined NET 2.1 or KJV versification profile, selected
+by actual verse keys rather than title or abbreviation. Every chapter's exact
+maximum, count, and omissions and the complete Bible total must match that same
+profile. Missing final markers, extra verses, and mixed profiles fail inspection
+and import even when all prose remains or the total is preserved. Other numbering
+schemes are unsupported. Generic metadata records `net-2.1-v1` or `kjv-v1`;
+database validation repeats the independent profile check alongside source-key
+and metadata digest checks.
+The structured adapter preserves supplied words/italics, headings, poetry, and
+paragraphs while stripping explicitly marked note subtrees. Unsupported or
+ambiguous inline elements fail validation. See VERSIONS.md and tests/README.md.
 
 Paragraph metadata comes from source body paragraph boundaries (NET p elements,
 Haiola div.p) plus layout pilcrows, not pilcrows alone. KJV Genesis 1 groups are
 1–2 | 3–5 | 6–8 | 9–13 | 14–19 | 20–23 | 24–25 | 26–28 | 29–31; starts 3 and 20
 have no pilcrow. Strip layout ¶ from plain text and safe HTML while preserving
-literal non-layout occurrences. Legacy KJV reads/caches retained pilcrow boundaries
-edition-wide without rewriting the text generation; this cannot recover unmarked
-source paragraphs. Legacy NET has no recoverable inter-verse boundaries and uses
-verse rows for Paragraph until reimport. hasParagraphs controls this fallback;
-readingMode remains "paragraph". Reimport restores full source metadata.
+literal non-layout occurrences. Without paragraph metadata, hasParagraphs selects
+verse rows while readingMode remains "paragraph". Reimport supplies source metadata.
 
-Only those two structured EPUB layouts are supported. The original and exact
-replacement local NKJV study EPUBs were assessed as unsupported OCR layouts;
-neither is a native Scripture import. Reliable edition metadata and semantic
-verse anchors are required, not merely an EPUB extension. NIV remains unimported
-and unsupported. See VERSIONS.md for the current support contract.
+The generic adapter reads explicit `div.main` book containers, supported
+paragraph/poetry containers, and `span.verse` anchors in Haiola `GN1_1` or
+OSIS-style `Gen.1.1` form, with compatible OSIS/USFM book codes. This is a
+structured EPUB contract, not unrestricted OSIS XML or raw USFM ingestion.
+Page-based OCR without reliable markers is rejected on evidence about verse
+identity and reading order; OCR does not establish that study notes are present.
+OmaWord's verse-notebook standard requires dependable canonical targets for notes,
+copying, and navigation. No real NIV file is verified; synthetic NIV-title tests
+exercise metadata only. The chosen scope has no general ebook-reader fallback.
+
+## Process coordinator and reader windows (src/singleinstance.*, src/windowmanager.*)
+
+SingleInstance owns `omaword.lock` and bounded IPC for one primary process per data
+directory. Each launcher request creates a new reader in that process, with its
+own BibleBackend, QQmlApplicationEngine, and QWindow. Secondary launchers forward
+their own reference/import request and exit; ordinary launches do not replay an
+earlier import. WindowManager handles creation, request dispatch, activation,
+note flushing, and retirement; a title suffix distinguishes same-process windows.
+Closing one window keeps peers usable; the last close exits the application.
+
+All readers share the installed library, global preferences, and version-specific
+annotations. Successful commits notify peer backends; failed commits publish no
+shared changes. Each reader keeps independent active version, passage, directional
+selection, cursor, and scroll position. Shared MRU ranks do not switch peer readers.
+Library replacement, removal, and restore flush affected drafts before changing
+shared data; a failed flush vetoes the operation. Imports share a busy guard while
+reading stays available. Replacement reloads affected text connections before
+obsolete generation cleanup. Removal makes readers of that edition select another
+available edition, or become empty when none remain.
+
+Note saves use transactional compare-and-set (CAS): the exact-range note read from
+storage must equal that reader's last observed note before writing, including
+when the note was deleted. This also protects deferred peer delivery during
+multi-window draft flushing. A mismatch rolls back the save and reports a conflict;
+it does not silently merge or overwrite a newer note. Already committed peer saves
+remain saved if a later draft conflicts and vetoes the shared operation.
+QML preserves dirty drafts and their version/reference/baseline across peer updates.
+Conflict UI previews saved text and requires **Save my draft** (explicit replacement,
+only in the matching scope while not busy) or **Use saved text** (discard draft and
+load saved state). Unresolved conflicts make flushNote return false.
 
 ## UI (qml/)
 
-Main.qml ApplicationWindow; context `bible` above and `desktop` below. Restrained
+Main.qml ApplicationWindow per reader; context `bible` above, shared `desktop`
+below, and `windows` for WindowManager. **New window** is a global command bound
+to **Ctrl Shift N**, emitting `newWindowRequested`. Restrained
 keyboard-first reader, floating footer, Search for a passage (s / Ctrl k),
 Open commands (Ctrl Space / Ctrl Shift P), Saved panel (Ctrl l), and animated
 Notes panel (Ctrl n) at every width without reader reflow. Setup supported-EPUB import, keyboard help, and
@@ -177,17 +220,17 @@ in focus mode; no new toast at a size limit or when already at the reset size.
 readerSize binds to persisted bible.fontSize, default/reset 18 and range 8..40 in
 steps of 1 before desktop scaling. Reading settings exposes the same preference.
 
-Setup and the unbound **Add version** command open an instructional import guide.
-It describes official NET 2.1 and structured Haiola/eBible KJV 2006 EPUB layouts,
-required metadata/verse anchors, and OCR rejection. Links to
+Setup, the unbound **Add version** command, and the version picker's **+** button
+open an instructional import guide. The import contract covers the NET adapter
+and generic Haiola/eBible structure with compatible OSIS/USFM anchors; NET 2.1 and
+KJV 2006 are verified examples. Required metadata/verse anchors and markerless OCR
+rejection are detailed in VERSIONS.md. Links to
 `https://bible.org/downloads` and `https://ebible.org/eng-kjv2006/` use
 `desktop.openExternal`; downloading is the user's browser action. The guide shows
 the local data path, SQLite import/offline behavior, and same-ID replacement
 semantics (preserving personal annotations and settings). **Choose EPUB…** closes
 the guide before opening the local EPUB picker; acceptance invokes the async
 importer, activating the imported edition and preserving other editions.
-The guide confirms both assessed NKJV study EPUBs, including the replacement,
-are unsupported OCR layouts that cannot be imported as native Scripture.
 Draft notes flush before transitions, and
 Cancel/Esc returns focus to the reader or Notes. The guide scrolls at small/scaled
 sizes while keeping its action buttons accessible.
@@ -196,6 +239,9 @@ The footer abbreviation immediately follows the location; the combined controls
 are centered, responsive, and use elision/full-reference tooltips. Click the
 abbreviation, press Shift V, or execute **Switch version** to open the searchable
 installed-version picker, active first then other versions in persisted MRU order.
+The square **+** button beside Search versions has accessible name **Add version**,
+supports Tab focus and Enter activation, and closes the picker before opening the
+guide. It is hidden in the removal wizard and disabled while busy.
 Arrow/Home/End/Page keys navigate; unmodified
 Enter/Return selects and closes, while Shift Enter/Return does nothing. **Remove
 version** is an unbound command opening three steps: version → Remove annotations
@@ -263,7 +309,8 @@ results and Enter executes available actions. Home/End selects first/last result
 PageUp/PageDown moves the list one page while preserving a sensible selected row.
 Only actions with bound sequences and non-executable context/gesture guidance
 appear in Keybindings: Shift R for Reading settings, p for Verse picker, and
-`Ctrl \` for Reset line height and Shift V for Switch version are included;
+`Ctrl \` for Reset line height, Shift V for Switch version, and Ctrl Shift N for
+New window are included;
 unbound commands such as Add version and Remove version
 are command-palette-only. Keybinding hints show only keys, without On/Off status;
 command-palette hints still show current setting state. One action
@@ -285,17 +332,21 @@ use Ctrl m.
 
 Saved owns j/k and Up/Down entry navigation, h/l and Left/Right tab filtering,
 Enter opening, and Ctrl l/Esc dismissal. Delete/Backspace captures the current
-entry's exact reference and opens confirmation with Cancel initially focused.
+entry's exact reference and version ID and opens confirmation with Cancel initially
+focused. Scope and entry existence are checked before and after note flushing;
+version changes or disappearing entries invalidate and close the confirmation.
+The backend receives expectedVersionId as a final guard against cross-version deletion.
 Arrow keys move button focus between Cancel and Delete without activating either.
 Confirmation deletes that entire annotation (both flags and note), regardless of
 active filter; other/overlapping entries survive. Esc cancels back to Saved.
 Success syncs the note editor and clamps the list index (empty list: -1); failure
-keeps confirmation and models intact with an error. Saved rows stack bookmark and
+keeps a still-valid confirmation and models intact with an error. Saved rows stack bookmark and
 note glyphs when both apply, with a left accent stripe for highlights.
-Normal and symbolic application icons use an open book; the Notes panel control
-uses a pencil. Saved and block-annotation note markers retain their page glyphs.
+Normal and symbolic application icons use verse lines with a selection bracket
+and square handles; the Notes panel control uses a pencil. Saved and
+block-annotation note markers retain their page glyphs.
 
-## Branding, build, and compatibility
+## Branding, build, and tests
 
 `branding.env` is the single source shared by qmake and Bash:
 `BRAND_NAME=OmaWord`, `BRAND_ID=omaword`, version, launcher keywords
@@ -310,57 +361,52 @@ The executable is `build/omaword`; `omaword` is the primary installed command an
 desktop/icon ID. Local installation uses `~/.local/bin/omaword` and
 `$XDG_DATA_HOME/applications/omaword.desktop` (default data home
 `~/.local/share`), plus regular and symbolic hicolor icons.
-`packaging/PKGBUILD` builds package `omaword` from the enclosing checkout and
-conflicts with/replaces historical package `omabible`. Build and installation
-produce only the `omaword` command. `bin/build` removes the exact historical
-build alias if present; `bin/install` backs up and removes the old command entry.
-
-The local installer removes the old `omabible.desktop` only when it is a regular,
-non-symlink file byte-for-byte equal to `assets/legacy/omabible.desktop`.
-The same byte-for-byte rule applies to historical icons using snapshots in
-`assets/legacy/`. All removed entries are backed up first. Customized launchers,
-icons, and their symlinks are preserved.
+`packaging/PKGBUILD` builds package `omaword` from the enclosing checkout.
+`bin/install` preserves replaced installation entries in
+`$XDG_DATA_HOME/omaword/install-backups/` before publishing replacements.
 
 The active project path is `~/Projects/omaword/omaword.pro`; scripts derive paths
 from the checkout and support relocation.
 Qt applicationName is `Brand::storageId()` with an empty organization name:
 application data lives at `~/.local/share/omaword` or `$XDG_DATA_HOME/omaword`.
-The new lock is `omaword.lock` and runtime endpoints start with `omaword-`.
-After acquiring the primary lock and before constructing BibleBackend,
-StorageMigration acquires the sibling historical `omabible/omabible.lock` and
-holds it through backend destruction. A live historical instance blocks startup
-with an informative error. Only that scope's stale historical socket is removed.
+The coordinator lock is `omaword.lock` and runtime endpoints start with `omaword-`.
+The annotation backup signature is only `omaword-backup`, the Markdown filename
+is `omaword-notes.md`, and QML registration is `OmaWord.Reader`.
 
-StorageMigration merges recognized root databases and SQLite sidecars only;
-existing install-backups and unrelated entries are preserved. Both populated
-stores cause a conflict error. A private copy of the complete SQLite bundle feeds
-Qt SQL VACUUM INTO, incorporating committed WAL data without changing originals.
-The staged personal store passes integrity and library-path checks. Bible files
-publish first and personal.sqlite last, with fsync and a durable phase journal in
-`.storage-migration/journal.json`. Restart resumes copying/publishing/archival;
-hash checks reject source changes or unexpected destination files. After commit,
-original databases and sidecars are archived in `.storage-migration/originals/`.
-Historical data recreated after a completed migration is treated as a conflict.
-Source schemas and relative text paths are preserved; backend schema migration
-then runs normally. New export format is `omaword-backup`, Markdown filename is
-`omaword-notes.md`, and QML registration is `OmaWord.Reader`. Import accepts both
-new and historical `omabible-backup` signatures for versions 1–3.
-Historical identifiers are explicit exceptions for migration, backup compatibility,
-package upgrades, archived installer assets, and history; this is not a promise of
-100% literal elimination from code/history. No old command aliases are shipped.
+`bin/test --suite backend|ui|importer|annotations|instance|windows|all` selects
+suites; omitted selection means all. Repeat --suite for multiple targets. Qt
+arguments require one selected suite, for example:
 
-`bin/test` runs migration, single-instance, backend, UI, block-annotation, then importer-version suites. It
-normalizes OMAWORD_TEST_EPUB and OMAWORD_TEST_KJV and exports the latter as
-OMAWORD_TEST_KJV_EPUB when that variable is unset/empty. Optional NKJV rejection
-fixtures still require explicit environment variables; see tests/README.md.
+```sh
+bin/test --suite importer genericStructured
+bin/test --suite ui versionPickerKeyboardAndGeometry
+bin/test --suite windows independentReadersAndSharedCommits
+bin/test --suite instance -functions
+JOBS=8 bin/test --suite backend --suite annotations
+bin/test --suite all
+```
+
+Use targeted checks while iterating, then one full run for final validation.
+Incremental workers default to two concurrent suites (`TEST_JOBS=2`), clamped to
+the selected suite count and `JOBS`, the total build-job cap (default CPU count).
+Each worker gets floor(JOBS / concurrency) Make jobs. GUI suites use offscreen
+software rendering. Status and timing are printed per suite; full build/test logs
+and Qt totals are in `build/test-logs/<suite>.log`, relative to `BUILD_DIR` if set.
+Report pass/fail/skip totals from the final logs. Fixture paths
+OMAWORD_TEST_EPUB, OMAWORD_TEST_KJV, and OMAWORD_TEST_KJV_EPUB are normalized;
+the KJV backend/UI variable supplies the importer variable when unset/empty.
+See tests/README.md for optional rejection fixtures and runner checks.
 
 ## Scope
 
-Offline multi-version library for official NET 2.1 and structured Haiola/eBible
-KJV 2006 EPUBs, version-specific personal annotations + export/restore. Add version
-is the supported-layout import guide. NKJV OCR sources are assessed unsupported;
-NIV is unimported and unsupported. No ESV,
-parallel, fulltext search, plans, cloud. Code MIT, Bible separate copyright.
+Offline multi-window, multi-version verse notebook with a NET adapter and generic
+structured Haiola/eBible EPUB import, version-specific annotations, and scoped
+export/restore. NET 2.1 and KJV 2006 remain verified real-file examples; no generic
+NIV file is claimed verified. Generic editions must use a complete NET 2.1 or KJV
+numbering profile; other numbering is unsupported. Markerless OCR is rejected;
+no ebook-reader fallback.
+No side-by-side translation view, fulltext search, plans, or cloud sync.
+Code MIT, Bible separate copyright.
 Public-ready build scripts/Arch package, .desktop icon. Validation results and
 test totals come from current runs, not fixed counts in this contract.
 No git commits unless user requests.

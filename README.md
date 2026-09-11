@@ -1,14 +1,18 @@
 # OmaWord
 
-Launching OmaWord again brings its existing window forward, including from another
-Hyprland workspace. A supplied passage reference or `--import` file is forwarded
-to that instance after checking unsaved notes. An ordinary relaunch never repeats
-the import that originally started the app.
+Every launcher invocation opens a new reader window. One process owns the
+`omaword.lock` coordinator and hosts all readers; later launches forward their
+request to it. A supplied passage reference or `--import` file applies to the new
+window. An ordinary relaunch never repeats an earlier import. **New window** in
+Commands or **Ctrl Shift N** also opens a reader.
+
+Windows share reading preferences, version-specific annotations, and the installed
+library, while keeping independent passages, selections, scroll positions, and
+active versions. Closing one reader leaves the others open; closing the last exits.
 
 Public branding is defined in `branding.env`. The launcher also matches **bible**
 and **scripture**. The local installer preserves changed installation files in
-`~/.local/share/omaword/install-backups/` before replacing them; existing Bible
-and personal data migrate safely to `~/.local/share/omaword/` on first launch.
+`~/.local/share/omaword/install-backups/` before replacing them.
 
 A keyboard-first, offline multi-version Bible reader for Linux, built with C++17 and
 Qt 6 Quick. Read by chapter, keep bookmarks and highlights, and write Markdown
@@ -16,8 +20,11 @@ notes in an overlay for a selected passage.
 
 ## Features
 
-- Local NET 2.1 and structured Haiola/eBible KJV 2006 imports, with a version
-  picker and version-specific annotations.
+- Local structured EPUB imports through a NET adapter and a generic Haiola/eBible
+  adapter with OSIS/USFM-compatible anchors, a version picker, and version-specific
+  annotations. Complete NET 2.1 or KJV numbering is required; NET 2.1 and KJV 2006
+  are verified real-file examples.
+- Multiple reader windows in one process, with shared data and independent reading locations.
 - Passage palette with live reference previews, book/chapter/optional verse browsing,
   and Space to resume the last palette.
 - Free text selection across verses, verse-range selection, chapter navigation,
@@ -32,9 +39,11 @@ notes in an overlay for a selected passage.
 - System fonts and desktop text scaling, live Omarchy theme integration, and a
   standard Qt palette fallback on other desktops.
 
-OmaWord supports the official NET 2.1 EPUB and the structured Haiola/eBible KJV
-2006 EPUB (`eng-kjv2006.epub`). Full-text search, parallel translations, reading
-plans, and cloud sync are outside the current scope. The reader preserves headings,
+The official NET 2.1 EPUB and structured Haiola/eBible KJV 2006 EPUB
+(`eng-kjv2006.epub`) are verified examples of the import contract. Other editions
+must pass metadata and semantic structure validation. Full-text search, a
+side-by-side translation view, reading plans, and cloud sync are outside the
+current scope. The reader preserves headings,
 poetry, and within-verse breaks; publisher translator notes are not displayed.
 
 ## Build and install
@@ -78,13 +87,8 @@ icons under `~/.local/share/icons/hicolor/`. Desktop files and icons honor
 `XDG_DATA_HOME` when set. Ensure `~/.local/bin` is on your desktop session's
 `PATH`; then launch **OmaWord** from your application launcher or run `omaword`.
 The desktop ID and icon name are both `omaword`; launcher keywords include
-**bible** and **scripture**. The regular and symbolic app icons depict an open
-book, and the Notes panel control uses a pencil.
-
-The installer backs up and removes the historical `~/.local/bin/omabible` entry.
-It also archives and removes historical launchers and icons that match the shipped
-snapshots in `assets/legacy/`. Customized launchers/icons and their symlinks are
-preserved. Builds and installations supply only the `omaword` command.
+**bible** and **scripture**. The regular and symbolic app icons depict verse lines
+with a selection bracket and square handles; the Notes panel control uses a pencil.
 
 ### Arch package from the local checkout
 
@@ -101,10 +105,9 @@ the checkout: the recipe is for local builds, not a standalone source package.
 Make honors `MAKEFLAGS` from your makepkg configuration. The package installs to
 `/usr/bin`, `/usr/share/applications`, and `/usr/share/icons/hicolor`, with the
 license and README under `/usr/share/licenses/omaword` and `/usr/share/doc/omaword`.
-`packaging/PKGBUILD` names the package `omaword` and conflicts with/replaces
-the historical `omabible` package for upgrades.
+`packaging/PKGBUILD` names the package `omaword`.
 
-### Branding and compatibility
+### Branding
 
 `branding.env` is the central source for the public name, executable/package ID,
 version, launcher keywords, and active storage ID. qmake uses `branding.pri`
@@ -113,33 +116,17 @@ and `assets/launcher.desktop.in` to generate `build/omaword.desktop`. Install an
 packaging scripts read the same metadata. Visible titles, errors, About text,
 and export headings use **OmaWord**.
 
-The active storage ID, Qt application name, and instance lock are `omaword`.
-Before opening the backend, the primary instance acquires the historical
-`omabible.lock` too. Close the old app before upgrading; a running old instance
-causes an informative startup error rather than a second empty library.
-
-Migration recognizes `$XDG_DATA_HOME/omabible` (default `~/.local/share/omabible`)
-and merges only owned databases into the sibling `omaword` directory. Existing
-`install-backups` and unrelated files are preserved. A private SQLite snapshot
-incorporates committed WAL data, then Bible text is published before the personal
-store. Journaled steps resume after interruption; conflicting destination data
-is never overwritten. Originals, including SQLite sidecars, are archived under
-`omaword/.storage-migration/originals/` after commit. The journal stays alongside
-the archive. If both directories already contain application data, startup stops
-so both stores can be preserved and reconciled explicitly.
-
-New exports use `omaword-backup` (version 3) and `omaword-notes.md`. Restore accepts
-both `omaword-backup` and historical `omabible-backup` signatures for versions 1–3.
+The storage ID and Qt application name are `omaword`; the process coordinator owns
+`omaword.lock`. Annotation backups use only the `omaword-backup` signature;
+exports use version 3 and Markdown export writes `omaword-notes.md`.
 QML uses `OmaWord.Reader`; test environment variables use the `OMAWORD_` prefix.
-Historical names remain explicitly for migration, backup compatibility, package
-upgrades, archived installer assets, and history; the rename does not imply literal
-elimination from those records. No `omabible` command aliases are supplied.
 
 ## Bring your supported EPUB
 
-1. Start OmaWord and choose **Add version** in setup or the command palette.
+1. Start OmaWord and choose **Add version** in setup or the command palette,
+   or the **+** button beside Search versions in the version picker.
    The guide explains the supported structured EPUB layouts and local storage.
-2. Download one of these editions in your browser:
+2. Download a structured edition in your browser. Verified examples:
    - **NET Bible 2.1**: **Full Notes Version 2.1 ePub** (`NETBIBLE21.epub`) from
      the official [Bible.org downloads page](https://bible.org/downloads).
    - **King James (Authorized) Version, KJV 2006**: the structured
@@ -153,14 +140,31 @@ elimination from those records. No `omabible` command aliases are supplied.
    Reimporting the same supported edition replaces Bible data while preserving
    notes, bookmarks, highlights, and settings.
 
-Support depends on edition metadata and semantic chapter/verse anchors, not just
-the `.epub` extension. Scans and OCR study-Bible pages cannot reliably separate
-Scripture from study notes. Both the locally supplied original NKJV study EPUB
-and the exact replacement supplied for assessment are unsupported OCR layouts;
-NKJV import is not supported. A supported structured file is required. NIV has
-not been imported and is not a supported edition. See [VERSIONS.md](VERSIONS.md)
-for the edition contract. The import guide confirms both assessed NKJV OCR
-layouts are unsupported.
+Support depends on edition metadata and explicit book/chapter/verse anchors, not
+the filename, a known-file UUID allowlist, or the `.epub` extension. The generic
+adapter accepts supported Haiola/eBible structure with compatible OSIS/USFM book
+codes and verse anchors. Unknown editions receive stable `epub-<hash>` IDs derived
+from their package identifier, or their case-folded title when no identifier is
+present. Validation requires all 66 books and 1,189 chapters to match one complete,
+independently known NET 2.1 or KJV versification profile: exact verse keys, chapter
+maxima, counts, and omissions throughout. Marker formats and edition IDs support
+broader translations, but other numbering schemes are unsupported.
+
+The reserved `kjv-2006` ID requires the original exact title/identifier pair to
+protect the installed edition and its annotations. A KJV EPUB with another UUID
+can pass the generic importer with an `epub-<hash>` ID and its own title preserved;
+Modern King James Version also remains a separate edition. See
+[VERSIONS.md](VERSIONS.md) for the identity pairs and complete import contract.
+
+**Why does an NIV EPUB need this validation?** OmaWord is a verse notebook:
+notes, highlights, quotations, and cross-version navigation must refer to known
+verses. A readable page or an NIV title does not establish those boundaries.
+No real NIV file has been verified here; synthetic metadata tests establish only
+adapter behavior. Page-based OCR without reliable markers is rejected because
+verse identity and reading order cannot be established. OCR alone does not imply
+that a file contains study notes. The assessed NKJV OCR files are rejection
+examples, not a rule against the translation. Per the chosen product scope,
+there is no general ebook-reader fallback for unstructured files.
 
 The command-line import option is also available:
 
@@ -169,10 +173,9 @@ omaword --import "$HOME/Downloads/NETBIBLE21.epub"
 omaword --import "$HOME/Downloads/eng-kjv2006.epub"
 ```
 
-The direct `--import` CLI uses the same multi-version importer.
-CLI help names supported NET 2.1 and Haiola/eBible
-KJV 2006 EPUBs. Only your explicitly selected local file is
-imported. The EPUB, Bible text, and generated Bible database are not bundled with
+The direct `--import` CLI uses the same multi-version importer; its help names
+NET 2.1 and Haiola/eBible KJV 2006 examples. Only your explicitly selected local
+file is imported. The EPUB, Bible text, and generated Bible database are not bundled with
 the application or package. OmaWord runs no Bible download server and does not
 automatically fetch anything from Bible.org or eBible.org; you download the text
 yourself in your browser. The optional real-EPUB UI test verifies reading and
@@ -180,7 +183,7 @@ reopening after removing a temporary copy of the source EPUB.
 
 ### Switch or remove a version
 
-Click the **NET** or **KJV** abbreviation immediately to the right of the footer
+Click the active version abbreviation (such as **NET** or **KJV**) to the right of the footer
 location, press **Shift V**, or choose **Switch version** in Commands. Search or
 move through installed versions with the arrow keys; unmodified **Enter** selects
 and closes the picker. **Shift Enter** has no action. Switching keeps the same
@@ -188,6 +191,9 @@ canonical passage or selected range; if an endpoint is missing in the destinatio
 edition, it opens the current chapter without a selection and reports the fallback.
 The active version appears first, followed by other versions in most-recently-used
 (MRU) order. This order persists across restarts and updates on successful activation.
+The **+** button beside the picker's search field opens **Add version**. It is
+keyboard-focusable with Tab; Enter activates it. The picker closes before the
+import guide opens. Each window switches versions independently.
 
 **Remove version** in Commands opens a three-step wizard:
 
@@ -198,8 +204,9 @@ The active version appears first, followed by other versions in most-recently-us
 
 Removing the active version activates another installed version, or returns to
 setup if the library is empty. Kept annotations are hidden until the same stable
-version ID is reimported (`net-2.1` or `kjv-2006`). Choosing to remove annotations
-also deletes that version's reading state. Reading preferences remain global.
+version ID is reimported (`net-2.1`, `kjv-2006`, or its `epub-<hash>` ID). Choosing
+to remove annotations also deletes that version's reading state. Reading
+preferences remain global.
 
 ## Reading and references
 
@@ -298,7 +305,7 @@ choose **Reading settings**.
 The individual **Show verse numbers**, **Show headings**, **Verse picker**,
 **Reading mode**, **Focus mode**, **Line height**, and **Reset line height** commands
 also configure reading directly.
-These preferences are global across versions, save synchronously in
+These preferences are shared across windows and versions, save synchronously in
 `personal.sqlite`, and survive restarts:
 
 | Preference | Default | Control |
@@ -327,15 +334,12 @@ Reader font size starts at **18**, changes in steps of 1 from **8** to **40**, a
 separate verse rows; **Block** flows verses continuously, with visible section
 headings starting paragraphs. Flowing modes have optional superscript verse numbers;
 poetry and within-verse breaks remain. Press **b** to cycle Paragraph → Verse → Block.
-An existing `blockMode=true` preference migrates to Block; `false` becomes Paragraph.
 
 New imports store reliable paragraph metadata from source paragraph boundaries
 (`p` elements or Haiola `div.p`) and layout pilcrows (`¶`), stripping layout pilcrows
 from text and HTML. KJV Genesis 1 begins with verse groups **1–2 | 3–5 | 6–8**;
-source paragraphs without a pilcrow count too. Older KJV databases recover available
-boundaries from retained layout pilcrows without rewriting the database; reimport
-recovers the full source structure. Older NET databases lack recoverable boundaries,
-so Paragraph displays verse rows until reimport, preserving the chosen preference.
+source paragraphs without a pilcrow count too. When paragraph metadata is absent,
+Paragraph displays verse rows; reimport supplies the source structure.
 
 Focus mode keeps the chapter header visible while temporarily hiding verse numbers,
 section headings, the edition label, floating controls, the reader scrollbar, and annotation markers/accents.
@@ -358,6 +362,14 @@ Notes save as you type and belong to an **exact verse range**. A note for
 `John 3:16–18` is distinct from a note for `John 3:16`; selecting an overlapping
 range does not load or overwrite the other note. Verse note indicators include
 overlapping notes. Reopen the exact range from **Saved → Notes** to edit it.
+
+If another window changes or deletes the same note while this editor has an
+unsaved draft, the draft is preserved and saving pauses for explicit resolution.
+Review the saved-text preview, then choose **Save my draft** to replace that saved
+text or **Use saved text** to discard the draft and load the saved note. Saves use
+a transactional compare-and-set check against the reader's last observed note;
+a stale draft cannot silently overwrite a newer save. Transitions requiring a
+note flush wait for resolution, including shared removal and restore operations.
 
 Bookmarks and highlights cover verses. A selection is marked active when all its
 actual verses are covered. Toggling a partially covered selection covers all of
@@ -395,6 +407,7 @@ and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**
 | Search for a passage | `s`, Ctrl k |
 | Open commands | Ctrl Space, Ctrl Shift P |
 | Resume last palette | Space |
+| New window | Ctrl Shift N |
 | Switch version | Shift V |
 | Saved panel | Ctrl l |
 | Previous / next chapter | `h` / `l`, Left / Right, `[` / `]` |
@@ -425,7 +438,7 @@ and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**
 | Search and execute keybindings | `?`, F1 |
 
 Use Up/Down and Enter in the palette, or prefix its query with `>` to find
-commands such as Add version (the supported-EPUB guide), Switch version,
+commands such as New window, Add version (the supported-EPUB guide), Switch version,
 Remove version, export, backup, restore, and About.
 
 In the right-hand **Saved** panel, `j` / `k` or Down / Up moves between entries;
@@ -438,7 +451,9 @@ initially; arrow keys move between Cancel and Delete, Enter activates the focuse
 button, and Esc cancels and returns to Saved. Bookmark and note glyphs can appear
 together (stacked), and a left accent stripe marks a highlighted entry. Entry
 navigation and filter keys operate on Saved while it is open, without moving the
-underlying reader.
+underlying reader. Deletion confirmation is bound to the captured version and
+exact reference, rechecked after note flushing. If the version changes or the
+entry disappears, the confirmation is invalidated; choose the entry again.
 
 App-owned panels and dialogs have no close-X controls; use **Esc** to dismiss them
 (with the palette's clear-then-close behavior above). All app-owned scrollable
@@ -455,23 +470,17 @@ with an empty organization name and application name `omaword`.
 - `personal.sqlite`: the root schema-3 database, with version-specific annotations
   and reading state, global reading preferences, an `installed` table mapping
   stable version IDs to text database paths and metadata, and a `library` table
-  recording the active version and usage counter for persisted MRU ordering.
+  recording the startup active version and usage counter for persisted MRU ordering.
+  Open windows keep their own active versions and live reading locations.
 - `bible-<UUID>.sqlite`: validated text generations for new imports, in the same
   data directory. A successful reimport updates the installed path to its new
   generation before removing the obsolete text file.
-- `bible.sqlite`: the legacy NET text database, registered in place during
-  migration if present; it is not the fixed path for new imports.
 
-Existing version-1 and version-2 personal databases upgrade transactionally to
-schema 3, assigning legacy annotations and reading state to `net-2.1`. Legacy
-NET text stays in place during migration. Older binaries cannot read the upgraded
-personal database. Retained annotations survive removal of their text version,
-including removal of the last version, and reconnect on same-ID reimport.
-If legacy NET text is corrupt or unsafe, personal-data migration still completes;
-the text stays unregistered and NET annotations are retained. Reimport a supported
-NET EPUB to recover reading and reconnect those annotations. Text cleanup accepts
-only owned database generations (or valid legacy NET text), rejecting aliases to
-the personal store and unrelated files.
+Retained annotations survive removal of their text version, including removal of
+the last version, and reconnect on same-ID reimport. Text cleanup validates
+ownership and rejects aliases to the personal store and unrelated files. Shared
+library changes refresh all readers after commit. Readers using a removed version
+switch to an available edition, or return to setup when the library is empty.
 
 Use **About & attribution → Open local data folder** to find the actual location.
 
@@ -489,8 +498,8 @@ From the command palette or Saved panel:
   its retained annotations.
 - **Restore annotation backup** requires the matching edition to be installed
   **and active**. Version-3 backups must match both its `versionId` and edition
-  name; legacy version-1 and version-2 backups are NET-scoped and require active
-  NET 2.1. Verse endpoints are validated against that edition before restoring.
+  name. Only the `omaword-backup` signature is accepted. Verse endpoints are
+  validated against that edition before restoring.
   Restore **replaces only the active version's annotations and reading state**
   in one transaction; other versions and global preferences are preserved.
   Save a backup of the active version first if you want to retain its current data.
@@ -501,35 +510,31 @@ it is not needed for normal use after a successful import.
 ## Tests
 
 ```sh
-bin/test
-OMAWORD_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" bin/test
-OMAWORD_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
-  OMAWORD_TEST_KJV="$HOME/Downloads/eng-kjv2006.epub" bin/test
+bin/test --suite backend -functions
+bin/test --suite importer genericStructured
+bin/test --suite windows independentReadersAndSharedCommits
+JOBS=8 bin/test --suite backend --suite ui
+bin/test --suite all
 ```
 
-The script first runs storage-migration and single-instance tests, then backend, integrated UI, block-annotation, and
-importer-version tests in `build/tests/`, `build/ui-tests/`,
-`build/blockannotations/`, and `build/importer-versions/`. GUI suites run
-offscreen. The `OMAWORD_TEST_EPUB` environment variable is optional;
-real-NET backend and UI integration cases are skipped without it.
-`OMAWORD_TEST_KJV` enables KJV backend/UI integration (backend multi-version
-cases require both files). `bin/test` normalizes both NET and KJV paths and exports
-`OMAWORD_TEST_KJV_EPUB` from `OMAWORD_TEST_KJV` when unset or empty, enabling the
-importer suite with the same fixture. NKJV rejection fixtures require explicit
-optional environment variables. Other UI tests use original synthetic text;
-application data is isolated in temporary directories. See
-[tests/README.md](tests/README.md) for standalone importer commands and variables.
-`JOBS` controls build parallelism, and arguments are passed to the test executable
-(for example, `bin/test -functions`). See [tests/README.md](tests/README.md) for the
-backend and UI behavior covered. UI tests exercise palette browsing and resume,
-keyboard navigation, free text and verse selection in Verse/Paragraph/Block layouts, quoted
-and plain copying, reading preferences and settings shortcuts, actionable
-keybindings, exact Saved deletion, notes overlays, restore confirmation, overlay
-scrollbars, scroll restoration, the supported-EPUB guide and source-EPUB
-independence, version switching/removal and annotation isolation, persisted MRU order,
-paragraph metadata and legacy fallback, persisted font size, slider keyboard isolation,
-text-size feedback and limits, and narrow/scaled layouts. Use the current test
-output for validation results and totals rather than a fixed documented count.
+`--suite` selects `backend`, `ui`, `importer`, `annotations`, `instance`, `windows`,
+or `all`; no selector defaults to all. Repeat it to select several suites. Qt test
+arguments, including function names and `-functions`, require exactly one suite.
+Use targeted cases during iteration and run the full suite once for final validation.
+
+The runner builds incrementally and runs up to **two suites concurrently** by
+default (`TEST_JOBS=2`). `JOBS` is the **total build-job cap**, defaulting to the
+detected CPU count. Concurrency is clamped to that cap and the selected suite count;
+each worker gets `floor(JOBS / concurrent suites)` Make jobs. `TEST_JOBS=1` runs
+serially. Each suite reports status and elapsed time; complete build/test output
+and Qt pass/fail/skip totals are in `build/test-logs/<suite>.log` (under `BUILD_DIR`
+when overridden). GUI tests run offscreen with software rendering.
+
+Optional `OMAWORD_TEST_EPUB` and `OMAWORD_TEST_KJV` enable real NET/KJV cases;
+missing inputs skip dependent cases. Synthetic fixtures and temporary data support
+the ordinary run. See [tests/README.md](tests/README.md) for suite mappings,
+fixture variables, targeted examples, and coverage. Report totals from the final
+run's logs rather than a fixed documented count.
 
 ## License and Bible attribution
 
@@ -538,7 +543,7 @@ copyright OmaWord contributors.
 
 **About & attribution** displays the active edition's name and its imported
 copyright/rights metadata dynamically; the rights line is hidden if the metadata
-is empty, as it can be in a legacy NET database. NET Bible® copyright © 1996–2019
+is empty. NET Bible® copyright © 1996–2019
 by Biblical Studies Press, L.L.C. All rights reserved; see the
 [NET Bible permissions](https://netbible.com/copyright/). For KJV 2006, consult the
 rights supplied with the [eBible.org edition](https://ebible.org/eng-kjv2006/).
