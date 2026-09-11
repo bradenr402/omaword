@@ -1254,13 +1254,13 @@ ApplicationWindow {
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
                         ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
                     } else if (glyph === "visual") {
-                        // Three verses; the bracket and square handles select two.
+                        // The bracket and square handles span all three verse lines.
                         ctx.moveTo(8, 6); ctx.lineTo(21, 6)
                         ctx.moveTo(8, 12); ctx.lineTo(21, 12)
                         ctx.moveTo(8, 19); ctx.lineTo(17, 19)
-                        ctx.moveTo(5, 3); ctx.lineTo(3, 3); ctx.lineTo(3, 15); ctx.lineTo(5, 15)
+                        ctx.moveTo(5, 3); ctx.lineTo(3, 3); ctx.lineTo(3, 22); ctx.lineTo(5, 22)
                         ctx.fillRect(4, 2, 3, 3)
-                        ctx.fillRect(4, 14, 3, 3)
+                        ctx.fillRect(4, 21, 3, 3)
                     } else {
                         ctx.moveTo(12, 6); ctx.lineTo(8, 4); ctx.lineTo(2, 4)
                         ctx.lineTo(2, 19); ctx.lineTo(8, 19); ctx.lineTo(12, 21)
