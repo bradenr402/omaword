@@ -496,7 +496,7 @@ Result importFile(const QString &epubPath, const QString &databasePath,
     auto report = [&](double value) { if (progress) progress->store(value); };
     try {
         QLockFile lock(databasePath + ".import.lock");
-        if (!lock.tryLock(0)) fail("Another Omabible process is importing. Please try again when it finishes.");
+        if (!lock.tryLock(0)) fail("Another OmaBible process is importing. Please try again when it finishes.");
         report(0.01);
         const auto entries = readArchive(epubPath);
         const auto paths = spine(entries);

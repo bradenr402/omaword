@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
     QGuiApplication::setDesktopFileName(QStringLiteral("omabible"));
     QApplication app(argc, argv);
-    QGuiApplication::setApplicationDisplayName(QStringLiteral("Omabible"));
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("OmaBible"));
     QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/assets/omabible.svg")));
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
@@ -33,13 +33,13 @@ int main(int argc, char *argv[]) {
 
     const QString data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (!QDir().mkpath(data)) {
-        QMessageBox::critical(nullptr, QStringLiteral("Omabible"), QStringLiteral("Cannot create the application data folder: ") + data);
+        QMessageBox::critical(nullptr, QStringLiteral("OmaBible"), QStringLiteral("Cannot create the application data folder: ") + data);
         return 1;
     }
     QLockFile lock(data + QStringLiteral("/omabible.lock"));
     lock.setStaleLockTime(0);
     if (!lock.tryLock()) {
-        QMessageBox::information(nullptr, QStringLiteral("Omabible"), QStringLiteral("Omabible is already open, or its data folder is locked. Switch to the existing window to continue reading."));
+        QMessageBox::information(nullptr, QStringLiteral("OmaBible"), QStringLiteral("OmaBible is already open, or its data folder is locked. Switch to the existing window to continue reading."));
         return 1;
     }
     Desktop desktop;

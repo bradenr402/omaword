@@ -3,7 +3,7 @@ set -euo pipefail
 
 root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 if [[ ! -x $root/build/omabible ]]; then
-    printf 'Build Omabible first: %s/bin/build\n' "$root" >&2
+    printf 'Build OmaBible first: %s/bin/build\n' "$root" >&2
     exit 1
 fi
 
@@ -18,4 +18,4 @@ fi
 if [[ -f $data_home/icons/hicolor/index.theme ]] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f "$data_home/icons/hicolor"
 fi
-printf 'Installed Omabible to %s/.local/bin/omabible\nEnsure %s/.local/bin is on PATH for the desktop launcher.\n' "$HOME" "$HOME"
+printf 'Installed OmaBible to %s/.local/bin/omabible\nEnsure %s/.local/bin is on PATH for the desktop launcher.\n' "$HOME" "$HOME"

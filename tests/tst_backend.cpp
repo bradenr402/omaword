@@ -46,7 +46,7 @@ private slots:
     void initTestCase() {
         QVERIFY(root.isValid());
         qputenv("XDG_DATA_HOME",root.path().toUtf8());
-        QCoreApplication::setOrganizationName("OmabibleTests");
+        QCoreApplication::setOrganizationName("OmaBibleTests");
         QCoreApplication::setApplicationName("omabible-test");
         epub = qEnvironmentVariable("OMABIBLE_TEST_EPUB");
         bible = std::make_unique<BibleBackend>();
