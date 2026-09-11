@@ -6,6 +6,8 @@
 #include <QQmlContext>
 #include <QQmlError>
 #include <QJSValue>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMetaProperty>
 #include <QQuickItem>
 #include <QQuickStyle>
@@ -1574,12 +1576,15 @@ private slots:
             return QPointF(origin + a + fraction * (b-a),caret.center().y());
         };
         const auto checkClick = [this,&quoted,&plain](QPointF point, int verse) {
-            const auto scene = item("blockBody")->mapToScene(point).toPoint();
-            // Use the rounded event coordinate for direct hit assertions too.
-            point = item("blockBody")->mapFromScene(scene);
-            QCOMPARE(blockMapping()->verseAtPoint(point.x(),point.y()),verse);
             for (auto button : {Qt::RightButton,Qt::MiddleButton}) {
                 bible->clearSelection();
+                // Selection/focus changes can queue viewport positioning. Settle
+                // them before mapping this document point for each mouse event.
+                QCoreApplication::processEvents();
+                QTRY_VERIFY(!window->property("restoringPosition").toBool());
+                const auto scene = item("blockBody")->mapToScene(point).toPoint();
+                const auto rounded = item("blockBody")->mapFromScene(scene);
+                QCOMPARE(blockMapping()->verseAtPoint(rounded.x(),rounded.y()),verse);
                 QTest::mouseClick(window,button,Qt::NoModifier,scene);
                 QVERIFY2(bible->cursorVerse() == verse,qPrintable(QString("Expected %1, got %2 at %3,%4; local %5,%6; hit now %7; scroll %8")
                     .arg(verse).arg(bible->cursorVerse()).arg(scene.x()).arg(scene.y()).arg(point.x()).arg(point.y())
@@ -2638,6 +2643,33 @@ private slots:
         QCOMPARE(prop("keybindingSearch","text").toString(),QString("settingsr"));
         QVERIFY(!prop("settingsDialog","visible").toBool());
     }
+    void uppercaseVersionShortcutTypingGuard() {
+        reference("John 3:16");
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        // Supply the actual shifted text: QTest::keyClick(Qt::Key_V, Shift)
+        // otherwise synthesizes lowercase text even with the Shift modifier.
+        QTest::sendKeyEvent(QTest::Click,window,Qt::Key_V,QString("V"),Qt::ShiftModifier);
+        QTest::sendKeyEvent(QTest::Click,window,Qt::Key_R,QString("R"),Qt::ShiftModifier);
+        QCOMPARE(prop("noteEditor","text").toString(),QString("VR"));
+        QCOMPARE(bible->noteText(),QString("VR"));
+        QVERIFY(item("noteEditor")->hasActiveFocus());
+        QVERIFY(!window->property("modalOpen").toBool());
+        QVERIFY(!prop("versionDialog","visible").toBool());
+        QVERIFY(!prop("settingsDialog","visible").toBool());
+        // The command remains available while writing notes.
+        key(Qt::Key_Space,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("switch version"); key(Qt::Key_Return);
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        click(item("previewButton"));
+        key(Qt::Key_V,Qt::ShiftModifier);
+        QVERIFY(!prop("versionDialog","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_V,Qt::ShiftModifier);
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+    }
     void revisedKeybindingRecords() {
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         QVERIFY(!records.isEmpty());
@@ -2955,6 +2987,94 @@ private slots:
         QCOMPARE(bible->versionId(),QString("net-2.1"));
         QCOMPARE(bible->noteText(),QString("NET annotation"));
     }
+    void versionSwitchFallbackFeedback() {
+        const auto kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        if (kjv.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV to the structured eng-kjv2006.epub.");
+        bible->importEpub(QUrl::fromLocalFile(kjv));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        reference("Matthew 17:21");
+        key(Qt::Key_F); QVERIFY(bible->focusMode());
+        key(Qt::Key_V,Qt::ShiftModifier);
+        QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+        type("NET"); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QCOMPARE(bible->versionId(),QString("net-2.1"));
+        QVERIFY(bible->error().isEmpty());
+        QCOMPARE(bible->passage(),QString("Matthew 17"));
+        QCOMPARE(bible->selectedStart(),0);
+        QCOMPARE(prop("toast","text").toString(),bible->status());
+        QVERIFY(prop("toast","text").toString().contains("absent"));
+        QVERIFY(prop("toast","text").toString().contains("Matthew 17"));
+        QVERIFY(prop("toast","text").toString().contains(bible->edition()));
+        QVERIFY(item("toast")->isVisible());
+        QVERIFY(bible->focusMode());
+    }
+    void backupScopeAndExport_data() {
+        QTest::addColumn<double>("scale");
+        QTest::newRow("normal") << 1.0;
+        QTest::newRow("small-scaled") << 1.8;
+    }
+    void backupScopeAndExport() {
+        QFETCH(double,scale);
+        reference("John 3:16");
+        bible->setNoteText("Only the active edition");
+        const auto collection = bible->collection();
+        window->resize(640,480); QVERIFY(desktop->setProperty("textScale",scale));
+        const auto openScope = [this] {
+            key(Qt::Key_Space,Qt::ControlModifier);
+            QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+            type("save annotation backup"); key(Qt::Key_Return);
+            QTRY_VERIFY(prop("backupScope","opened").toBool());
+            QTRY_VERIFY(item("backupChoose")->hasActiveFocus());
+        };
+        openScope();
+        QVERIFY(window->property("modalOpen").toBool());
+        QVERIFY(!prop("backupDialog","visible").toBool());
+        const auto explanation = prop("backupScopeExplanation","text").toString();
+        QVERIFY(explanation.contains(bible->edition()));
+        QVERIFY(explanation.contains("(NET)"));
+        QVERIFY(explanation.contains("reading location"));
+        QVERIFY(explanation.contains("Other editions are excluded"));
+        QVERIFY(explanation.contains("reimport that edition first"));
+        QTest::qWait(100);
+        for (const auto name : {"backupScopeScroll","backupCancel","backupChoose"}) {
+            const auto target = item(name);
+            QVERIFY(QRectF(QPointF(),window->size()).contains(target->mapRectToScene(target->boundingRect())));
+        }
+        key(Qt::Key_V,Qt::ShiftModifier); QVERIFY(!prop("versionDialog","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("backupScope","visible").toBool());
+        QVERIFY(!prop("backupDialog","visible").toBool()); QCOMPARE(bible->collection(),collection);
+        openScope(); click(item("backupCancel"));
+        QTRY_VERIFY(!prop("backupScope","visible").toBool());
+        QVERIFY(!prop("backupDialog","visible").toBool());
+        openScope();
+        bool overlapped = false;
+        auto observe = connect(window,&QQuickWindow::activeFocusItemChanged,this,[&] {
+            overlapped |= prop("backupScope","visible").toBool() && prop("backupDialog","visible").toBool();
+        });
+        key(Qt::Key_Return);
+        QTRY_VERIFY(prop("backupDialog","visible").toBool());
+        QVERIFY(!prop("backupScope","visible").toBool()); QVERIFY(!overlapped);
+        disconnect(observe);
+        QVERIFY(prop("backupDialog","title").toString().contains("NET"));
+        QVERIFY(prop("backupDialog","title").toString().contains("active edition only"));
+        // Cancel the platform picker, then exercise its acceptance callback directly.
+        QVERIFY(QMetaObject::invokeMethod(object("backupDialog"),"reject"));
+        QTRY_VERIFY(!prop("backupDialog","visible").toBool());
+        window->requestActivate(); QTRY_VERIFY(window->isActive());
+        const auto path = session->filePath("active-backup.json");
+        QVERIFY(object("backupDialog")->setProperty("selectedFile",QUrl::fromLocalFile(path)));
+        QVERIFY(QMetaObject::invokeMethod(object("backupDialog"),"accepted"));
+        QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto backup = QJsonDocument::fromJson(file.readAll()).object();
+        QCOMPARE(backup.value("version").toInt(),3);
+        QCOMPARE(backup.value("versionId").toString(),QString("net-2.1"));
+        QCOMPARE(prop("toast","text").toString(),QString("Saved NET annotation backup"));
+        QVERIFY(prop("exportDialog","title").toString().contains("NET notes only"));
+        QVERIFY(prop("restoreDialog","title").toString().contains("NET"));
+        QCOMPARE(bible->collection(),collection);
+    }
     void importGuideAndPicker_data() {
         QTest::addColumn<bool>("notes");
         QTest::addColumn<double>("scale");
@@ -2988,7 +3108,8 @@ private slots:
         QVERIFY(prop("importReplacement","text").toString().contains("preserves your notes, bookmarks, highlights, and settings"));
         QVERIFY(prop("importSupported","text").toString().contains("Other Bible EPUB layouts are not automatically supported"));
         QVERIFY(prop("importOcr","text").toString().contains("metadata and verse anchors"));
-        QVERIFY(prop("importOcr","text").toString().contains("NKJV support is not confirmed"));
+        QVERIFY(prop("importOcr","text").toString().contains("including the replacement, use unsupported OCR layouts"));
+        QVERIFY(!prop("importOcr","text").toString().contains("pending"));
         QCOMPARE(prop("importDownloadLink","downloadUrl").toUrl(),QUrl("https://bible.org/downloads"));
         QVERIFY(prop("importSteps","text").toString().contains("NET Bible 2.1 EPUB"));
         QVERIFY(prop("importSteps","text").toString().contains("OmaWord validates"));
@@ -3195,6 +3316,12 @@ private slots:
             QVERIFY(dialog);
             // Inspect opening and cancel; never choose a path or write a file.
             key(Qt::Key_Return);
+            if (QByteArray(name) == "savedBackup") {
+                QTRY_VERIFY(prop("backupScope","opened").toBool());
+                QVERIFY(!dialog->property("visible").toBool());
+                click(item("backupChoose"));
+                QTRY_VERIFY(!prop("backupScope","visible").toBool());
+            }
             QTRY_VERIFY(dialog->property("visible").toBool());
             QCOMPARE(navigation.count(),0);
             QVERIFY(QMetaObject::invokeMethod(dialog,"reject"));
@@ -3448,6 +3575,10 @@ private slots:
         QTRY_VERIFY(prop("restoreConfirmation","opened").toBool());
         QTRY_VERIFY(item("restoreCancel")->hasActiveFocus());
         QCOMPARE(prop("restoreBackupPath","text").toString(),backup.toString());
+        const auto scope = prop("restoreScopeExplanation","text").toString();
+        QVERIFY(scope.contains(bible->edition()));
+        QVERIFY(scope.contains("(NET)"));
+        QVERIFY(scope.contains("Other editions and global preferences are untouched"));
         QVERIFY(window->property("modalOpen").toBool());
         key(Qt::Key_N); key(Qt::Key_H); key(Qt::Key_J);
         key(Qt::Key_Right,Qt::AltModifier);
@@ -3474,6 +3605,7 @@ private slots:
         QCOMPARE(bible->noteText(),QString("Original backup note n j k h m"));
         QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->selectionBookmarked());
         QCOMPARE(saved(16).value("note").toString(),bible->noteText());
+        QCOMPARE(prop("toast","text").toString(),QString("Restored NET annotation backup"));
     }
     void narrowLayoutAndSystemScale() {
         reference("John 3:16");

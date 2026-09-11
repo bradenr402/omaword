@@ -81,7 +81,7 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: versionDialog.visible || passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
+    readonly property bool modalOpen: backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -468,7 +468,7 @@ ApplicationWindow {
         if (bible.importBackup(restoreConfirmation.backupFile)) {
             syncNote()
             restoreConfirmation.close()
-            notify("Annotation backup restored")
+            notify("Restored " + bible.versionAbbreviation + " annotation backup", true)
         }
     }
     function copyPassage(plainText) {
@@ -636,6 +636,7 @@ ApplicationWindow {
     }
     function switchVersion(id) {
         if (bible.busy || !flushNote()) return
+        const selected = hasSelection
         savePosition()
         if (!bible.switchVersion(id)) return
         clearTextSelection()
@@ -643,6 +644,7 @@ ApplicationWindow {
         syncNote()
         restorePosition(hasSelection)
         versionDialog.close()
+        notify(selected && !hasSelection ? bible.status : "Switched to " + bible.versionAbbreviation, true)
     }
     function confirmRemoveVersion() {
         if (!versionDialog.removing || versionDialog.step !== 2 || !versionDialog.chosen || bible.busy || !flushNote()) return
@@ -716,6 +718,8 @@ ApplicationWindow {
     }
     function shortcutEnabled(action) {
         if (!actionAvailable(action)) return false
+        // Keep the command globally available, but never consume a typed uppercase V.
+        if (action.id === "switchVersion") return !modalOpen && !notesOpen && !textInputActive()
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
                 && (action.setting || ["lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         if (action.scope === "palette") return !modalOpen || passagePalette.opened
@@ -879,7 +883,7 @@ ApplicationWindow {
         case "copy": if (bible.ready) copyPassage(); break
         case "copyPlain": if (bible.ready) copyPassage(true); break
         case "export": exportDialog.open(); break
-        case "backup": backupDialog.open(); break
+        case "backup": backupScope.open(); break
         case "restore": restoreDialog.open(); break
         case "import": importGuide.open(); break
         case "switchVersion": openVersions(false); break
@@ -2617,7 +2621,7 @@ ApplicationWindow {
                         color: desktop.accent; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     FineRule { Layout.fillWidth: true }
-                    Label { objectName: "importOcr"; text: "Scans and OCR study-Bible pages cannot be imported as native Scripture: reliable structured edition metadata and verse anchors are required. The replacement NKJV EPUB has been received but appears OCR-based; parser assessment is pending and NKJV support is not confirmed."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { objectName: "importOcr"; text: "Scanned/OCR study-Bible EPUBs are unsupported: reliable structured edition metadata and verse anchors are required. Both assessed NKJV study-Bible EPUBs, including the replacement, use unsupported OCR layouts and cannot be imported as native Scripture. Supported structured editions are NET Bible 2.1 and Haiola/eBible KJV 2006."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { text: "1. Obtain one of the supported EPUB editions. NET downloads are available from Bible.org; the supported KJV 2006 file is available from eBible.org."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     QuietButton {
                         objectName: "importDownloadLink"
@@ -2663,21 +2667,87 @@ ApplicationWindow {
     FolderDialog {
         id: exportDialog
         objectName: "exportDialog"
-        title: "Choose a folder for Markdown notes"
-        onAccepted: { if (!app.flushNote()) return; if (bible.exportNotes(selectedFolder)) app.notify("Notes exported as Markdown") }
+        title: "Export " + bible.versionAbbreviation + " notes only — choose a folder"
+        onAccepted: { if (!app.flushNote()) return; if (bible.exportNotes(selectedFolder)) app.notify("Exported " + bible.versionAbbreviation + " notes as Markdown", true) }
+        onVisibleChanged: { if (!visible) app.restorePanelFocus() }
+    }
+    ModalCard {
+        id: backupScope
+        objectName: "backupScope"
+        property bool choosePending: false
+        height: Math.min(470 * app.scale, app.height - 48)
+        onOpened: { backupScopeScroll.contentItem.contentY = 0; backupChoose.forceActiveFocus() }
+        onClosed: {
+            const choose = choosePending
+            choosePending = false
+            if (choose) Qt.callLater(function() {
+                if (app.actionAvailable("backup") && app.flushNote()) backupDialog.open()
+                else app.restorePanelFocus()
+            })
+            else app.restorePanelFocus()
+        }
+        contentItem: ColumnLayout {
+            spacing: 12 * app.scale
+            Label {
+                text: "Save " + bible.versionAbbreviation + " annotation backup"
+                color: desktop.foreground; font.pixelSize: 20 * app.scale
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            OverlayScrollView {
+                id: backupScopeScroll
+                objectName: "backupScopeScroll"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                Label {
+                    objectName: "backupScopeExplanation"
+                    width: backupScopeScroll.availableWidth
+                    text: "This backup includes only " + bible.edition + " (" + bible.versionAbbreviation + ") bookmarks, highlights, notes, and reading location.\n\n"
+                        + "Other editions are excluded. Switch to each edition to back it up separately. To back up retained annotations from a removed edition, reimport that edition first.\n\n"
+                        + "Bible text, source EPUBs, and global preferences are not included."
+                    textFormat: Text.PlainText; color: desktop.foreground
+                    font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap
+                }
+            }
+            FineRule { Layout.fillWidth: true }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton {
+                    objectName: "backupCancel"
+                    text: "Cancel"
+                    onClicked: backupScope.close()
+                    Keys.onReturnPressed: clicked()
+                    Keys.onEnterPressed: clicked()
+                }
+                QuietButton {
+                    id: backupChoose
+                    objectName: "backupChoose"
+                    text: "Choose file…"
+                    emphasized: true
+                    enabled: app.actionAvailable("backup")
+                    onClicked: { if (!app.flushNote()) return; backupScope.choosePending = true; backupScope.close() }
+                    Keys.onReturnPressed: clicked()
+                    Keys.onEnterPressed: clicked()
+                }
+            }
+        }
     }
     FileDialog {
         id: backupDialog
         objectName: "backupDialog"
-        title: "Save annotation backup"
+        title: "Save " + bible.versionAbbreviation + " annotation backup — active edition only"
         fileMode: FileDialog.SaveFile
         defaultSuffix: "json"
         nameFilters: ["JSON backup (*.json)"]
-        onAccepted: { if (!app.flushNote()) return; if (bible.exportBackup(selectedFile)) app.notify("Annotation backup saved") }
+        onAccepted: { if (!app.flushNote()) return; if (bible.exportBackup(selectedFile)) app.notify("Saved " + bible.versionAbbreviation + " annotation backup", true) }
+        onVisibleChanged: { if (!visible) app.restorePanelFocus() }
     }
     FileDialog {
         id: restoreDialog
-        title: "Restore annotation backup"
+        objectName: "restoreDialog"
+        title: "Restore " + bible.versionAbbreviation + " annotation backup"
         fileMode: FileDialog.OpenFile
         nameFilters: ["JSON backup (*.json)"]
         onAccepted: app.requestRestore(selectedFile)
@@ -2710,7 +2780,8 @@ ApplicationWindow {
                 wrapMode: Text.WrapAnywhere
             }
             Label {
-                text: "This replaces all current bookmarks, highlights, notes, and your reading location with the contents of this backup. Your imported Bible stays in place."
+                objectName: "restoreScopeExplanation"
+                text: "This replaces only the active edition's bookmarks, highlights, notes, and reading location: " + bible.edition + " (" + bible.versionAbbreviation + "). The backup must match this edition. Other editions and global preferences are untouched. Your imported Bible stays in place."
                 color: desktop.foreground
                 font.pixelSize: 14 * app.scale
                 Layout.fillWidth: true
