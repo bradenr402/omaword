@@ -14,7 +14,7 @@ ApplicationWindow {
     minimumWidth: 640
     minimumHeight: 480
     visible: true
-    title: bible.ready ? bible.passage + " — Omabible" : "Omabible"
+    title: bible.ready ? bible.passage + " — OmaBible" : "OmaBible"
     color: desktop.background
     font.family: desktop.fontFamily
     font.pixelSize: Math.round(14 * desktop.textScale)
@@ -29,6 +29,8 @@ ApplicationWindow {
     palette.highlightedText: desktop.background
     palette.placeholderText: desktop.muted
     palette.mid: desktop.border
+    palette.toolTipBase: desktop.surface
+    palette.toolTipText: desktop.foreground
 
     property bool notesOpen: false
     onNotesOpenChanged: clearCount()
@@ -77,13 +79,123 @@ ApplicationWindow {
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
-    readonly property real readerLineHeight: readerMetrics.lineSpacing * 1.45
-    readonly property real floatingSafety: 72 * scale
+    readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
+    readonly property real floatingSafety: bible.focusMode ? 0 : 72 * scale
+    readonly property real verseGutter: 40 * scale
+    readonly property bool observedFocusMode: bible.focusMode
+    onObservedFocusModeChanged: {
+        if (observedFocusMode) { flushNote(); readerFocus() }
+    }
     readonly property real controlScale: Math.min(scale, 1.4)
     FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.scale }
     component VerseItem: Item {
         property real textOffset: 0
         property real textHeight: 0
+        property TextEdit body
+    }
+
+    // Positions are TextEdit document offsets (UTF-16), never verse numbers or
+    // HTML offsets. Each delegate keeps its own rich layout and selection paint.
+    property int dragAnchorRow: -1
+    property int dragAnchorPosition: 0
+    property bool draggingText: false
+    property bool gutterDrag: false
+    property point dragOrigin
+    property point dragPoint
+    property string freeSelectedText: ""
+    function clearTextSelection() {
+        freeSelectedText = ""
+        for (let i = 0; i < verseRepeater.count; ++i) {
+            let row = verseRepeater.itemAt(i)
+            if (row && row.body) row.body.deselect()
+        }
+    }
+    function textHit(point) {
+        for (let i = 0; i < verseRepeater.count; ++i) {
+            let row = verseRepeater.itemAt(i)
+            let p = row.body.mapFromItem(reading, point.x, point.y)
+            if (p.y <= row.body.height || i === verseRepeater.count - 1) {
+                let position = p.y < 0 ? 0 : p.y > row.body.height ? row.body.length
+                    : row.body.positionAt(p.x, p.y)
+                return { row: i, position: position }
+            }
+        }
+        return { row: -1, position: 0 }
+    }
+    function beginTextDrag(index, source, mouse, gutter) {
+        dragOrigin = source.mapToItem(reading, mouse.x, mouse.y)
+        dragPoint = dragOrigin
+        dragAnchorRow = index
+        let body = verseRepeater.itemAt(index).body
+        let p = body.mapFromItem(reading, dragPoint.x, dragPoint.y)
+        dragAnchorPosition = body.positionAt(p.x, p.y)
+        gutterDrag = gutter
+        draggingText = false
+    }
+    function updateTextDrag(source, mouse) {
+        dragPoint = source.mapToItem(reading, mouse.x, mouse.y)
+        if (!draggingText && Math.hypot(dragPoint.x - dragOrigin.x, dragPoint.y - dragOrigin.y) < Qt.styleHints.startDragDistance) return
+        if (!draggingText) {
+            clearTextSelection()
+            draggingText = true
+            if (!gutterDrag) verseRepeater.itemAt(dragAnchorRow).body.forceActiveFocus()
+        }
+        applyTextDrag()
+    }
+    function applyTextDrag() {
+        let hit = textHit(dragPoint)
+        if (hit.row < 0 || dragAnchorRow < 0) return
+        if (gutterDrag) {
+            // The anchor is a real row, so omitted verse numbers are harmless.
+            let start = bible.verses[dragAnchorRow].number
+            let end = bible.verses[hit.row].number
+            if (bible.selectedStart !== Math.min(start, end) || bible.selectedEnd !== Math.max(start, end) || bible.cursorVerse !== end) {
+                if (!flushNote()) return
+                selectionAnchor = start
+                bible.selectVerses(start, end)
+                syncNote()
+                readerFocus()
+            }
+            return
+        }
+        let forward = hit.row > dragAnchorRow || (hit.row === dragAnchorRow && hit.position >= dragAnchorPosition)
+        let first = forward ? dragAnchorRow : hit.row
+        let last = forward ? hit.row : dragAnchorRow
+        let start = forward ? dragAnchorPosition : hit.position
+        let end = forward ? hit.position : dragAnchorPosition
+        let pieces = []
+        for (let i = 0; i < verseRepeater.count; ++i) {
+            let body = verseRepeater.itemAt(i).body
+            if (i < first || i > last) body.deselect()
+            else {
+                body.select(i === first ? start : 0, i === last ? end : body.length)
+                pieces.push(body.selectedText)
+            }
+        }
+        freeSelectedText = pieces.join("\n")
+    }
+    function finishTextDrag(number, mouse) {
+        if (!draggingText) { clearTextSelection(); selectVerse(number, !!(mouse.modifiers & Qt.ShiftModifier)) }
+        draggingText = false
+        dragAnchorRow = -1
+    }
+    function copyFreeText() {
+        if (freeSelectedText.length) bible.copyText(freeSelectedText)
+    }
+    function copyClickedVerse(number, quotation) {
+        if (bible.copyVerse(number, quotation).length) notify("Passage copied")
+    }
+    Timer {
+        interval: 16
+        repeat: true
+        running: app.draggingText
+        onTriggered: {
+            let edge = 48 * app.scale
+            let bottom = reading.height - app.floatingSafety
+            let speed = app.dragPoint.y < edge ? -Math.min(edge, edge - app.dragPoint.y)
+                : app.dragPoint.y > bottom - edge ? Math.min(edge, app.dragPoint.y - bottom + edge) : 0
+            if (speed) { app.scrollBy(speed * 0.35); app.applyTextDrag() }
+        }
     }
 
     function clearCount() { verseCount = ""; if (countTimer) countTimer.stop() }
@@ -135,6 +247,7 @@ ApplicationWindow {
     function selectVerse(number, extend) {
         clearCount()
         if (!flushNote()) return
+        clearTextSelection()
         if (extend && bible.selectedStart > 0) {
             // Mouse ranges are chapter-local; never reuse an anchor from another chapter.
             if (bible.crossChapterSelection || !selectionAnchor) selectionAnchor = bible.cursorVerse
@@ -149,6 +262,7 @@ ApplicationWindow {
     function moveVerse(delta, extend) {
         clearCount()
         if (!flushNote()) return
+        clearTextSelection()
         positionTimer.stop()
         restoringPosition = true
         movingSelection = true
@@ -220,6 +334,7 @@ ApplicationWindow {
     }
     function openNotes(focusEditor) {
         clearCount()
+        if (bible.focusMode) bible.setFocusMode(false)
         notesOpen = true
         if (loadedNoteReference !== bible.selectionReference) syncNote()
         if (focusEditor && hasSelection) {
@@ -259,6 +374,7 @@ ApplicationWindow {
         let index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
         let row = verseRepeater.itemAt(index) as VerseItem
         if (!row) return
+        if (index === 0) { reading.contentY = 0; return }
         let y = row.mapToItem(readerColumn, 0, 0).y + row.textOffset
         let available = Math.max(1, reading.height - floatingSafety)
         let margin = Math.min(3 * readerLineHeight, Math.max(12 * scale, (available - row.textHeight) / 2))
@@ -353,7 +469,7 @@ ApplicationWindow {
         { title: "Restore annotation backup", hint: "Choose a file", action: "restore" },
         { title: "Import NET 2.1 EPUB", hint: "Local file", action: "import" },
         { title: "Keybindings", hint: "? · F1", action: "help" },
-        { title: "About & attribution", hint: "Omabible", action: "about" }
+        { title: "About & attribution", hint: "OmaBible", action: "about" }
     ]
     function paletteEntries() {
         let query = referenceInput.text.trim().toLowerCase()
@@ -491,7 +607,7 @@ ApplicationWindow {
         background: Rectangle {
             color: floatingButton.down ? app.tint(desktop.accent, 0.18)
                 : floatingButton.hovered ? app.tint(desktop.accent, 0.09) : "transparent"
-            radius: 6 * app.scale
+            radius: 0
             border.width: floatingButton.activeFocus ? 1 : 0
             border.color: desktop.accent
         }
@@ -597,7 +713,7 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: errorRow.implicitHeight + 20
-            visible: bible.error.length > 0
+            visible: bible.error.length > 0 && !bible.focusMode
             color: app.tint(desktop.accent, 0.08)
             RowLayout {
                 id: errorRow
@@ -621,7 +737,7 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.rightMargin: app.notesOpen && app.wideLayout && bible.ready ? app.notesWidth : 0
+                anchors.rightMargin: app.notesOpen && app.wideLayout && bible.ready && !bible.focusMode ? app.notesWidth : 0
                 focus: true
                 visible: bible.ready
                 Keys.onPressed: function(event) {
@@ -643,8 +759,39 @@ ApplicationWindow {
                         if (app.hasSelection)
                             Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
                     }
-                    onContentYChanged: positionSaveTimer.restart()
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                    onContentYChanged: { positionSaveTimer.restart(); scrollLinger.restart() }
+                    ScrollBar.vertical: ScrollBar {
+                        id: readerScrollbar
+                        objectName: "readerScrollbar"
+                        parent: readerSurface
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.topMargin: 12 * app.scale
+                        anchors.bottomMargin: app.floatingSafety + 12 * app.scale
+                        width: 14 * app.scale
+                        policy: ScrollBar.AlwaysOn
+                        visible: !bible.focusMode && size < 1
+                        enabled: visible
+                        hoverEnabled: true
+                        padding: 0
+                        minimumSize: 0.035
+                        contentItem: Item {
+                            Rectangle {
+                                objectName: "readerScrollThumb"
+                                anchors.right: parent.right
+                                anchors.rightMargin: 4 * app.scale
+                                height: parent.height
+                                width: (readerScrollbar.hovered || readerScrollbar.pressed ? 6 : 2) * app.scale
+                                color: desktop.muted
+                                opacity: readerScrollbar.hovered || readerScrollbar.pressed ? 0.8 : scrollLinger.running ? 0.5 : 0.2
+                                Behavior on width { NumberAnimation { duration: 120 } }
+                                Behavior on opacity { NumberAnimation { duration: 200 } }
+                            }
+                        }
+                        background: Item {}
+                    }
+                    Timer { id: scrollLinger; interval: 1100 }
 
                     Column {
                         id: readerColumn
@@ -654,24 +801,16 @@ ApplicationWindow {
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
 
-                        SectionLabel { text: "NEW ENGLISH TRANSLATION"; leftPadding: 36; bottomPadding: 12 }
+                        SectionLabel { objectName: "editionLabel"; visible: !bible.focusMode; text: "NEW ENGLISH TRANSLATION"; leftPadding: app.verseGutter; bottomPadding: 12 }
                         Label {
+                            objectName: "chapterTitle"
                             text: bible.passage
                             color: desktop.foreground
                             font.pixelSize: 34 * app.scale
                             font.weight: Font.Medium
                             font.letterSpacing: -0.9
-                            leftPadding: 36
-                            bottomPadding: 12
-                            width: parent.width
-                            wrapMode: Text.Wrap
-                        }
-                        Label {
-                            text: app.verseMode ? "VISUAL  ·  j / k extends  ·  v collapses to cursor" : "j / k moves  ·  v selects a range  ·  click a verse number to annotate"
-                            color: desktop.muted
-                            font.pixelSize: 12 * app.scale
-                            leftPadding: 36
-                            bottomPadding: 32 * app.scale
+                            leftPadding: app.verseGutter
+                            bottomPadding: 24 * app.scale
                             width: parent.width
                             wrapMode: Text.Wrap
                         }
@@ -683,7 +822,8 @@ ApplicationWindow {
                                 required property var modelData
                                 required property int index
                                 readonly property bool selected: modelData.number >= bible.selectedStart && modelData.number <= bible.selectedEnd && bible.selectedStart > 0
-                                readonly property real gutter: 40 * app.scale
+                                readonly property real gutter: app.verseGutter
+                                body: verseBody
                                 textOffset: verseHeading.height
                                 textHeight: verseBody.height
                                 width: readerColumn.width
@@ -694,7 +834,7 @@ ApplicationWindow {
                                     x: 0
                                     width: 14 * app.scale
                                     height: parent.height
-                                    visible: verseRow.modelData.bookmarked
+                                    visible: verseRow.modelData.bookmarked && !bible.focusMode
                                     readonly property bool starts: !!verseRow.modelData.bookmarkStart
                                     readonly property bool ends: !!verseRow.modelData.bookmarkEnd
                                     readonly property bool continuesBefore: !!verseRow.modelData.bookmarkContinuesBefore
@@ -748,7 +888,7 @@ ApplicationWindow {
                                 Item {
                                     id: verseHeading
                                     objectName: "verseHeading" + verseRow.modelData.number
-                                    readonly property bool hasHeading: (verseRow.modelData.heading || "").length > 0
+                                    readonly property bool hasHeading: bible.showHeadings && (verseRow.modelData.heading || "").length > 0
                                     width: parent.width - verseRow.gutter - 6
                                     x: verseRow.gutter
                                     // Measure text at a fixed width, independent of effective
@@ -757,6 +897,14 @@ ApplicationWindow {
                                     // otherwise re-enters when that ancestor becomes visible.
                                     height: hasHeading ? headingText.implicitHeight + 36 * app.scale : 0
                                     visible: hasHeading
+                                    Text {
+                                        objectName: "headingPrefix" + verseRow.modelData.number
+                                        x: -26 * app.scale
+                                        y: headingText.y
+                                        text: "#"
+                                        font: headingText.font
+                                        color: app.tint(desktop.accent, 0.6)
+                                    }
                                     Text {
                                         id: headingText
                                         width: parent.width
@@ -776,7 +924,7 @@ ApplicationWindow {
                                     width: parent.width - x
                                     height: verseBody.height + 5
                                     radius: 0
-                                    color: verseRow.selected ? app.tint(desktop.accent, 0.13) : verseRow.modelData.highlighted ? app.tint(desktop.accent, 0.085) : "transparent"
+                                    color: verseRow.selected ? app.tint(desktop.accent, 0.22) : verseRow.modelData.highlighted ? app.tint(desktop.accent, 0.16) : "transparent"
                                     border.width: verseRow.selected ? 1 : 0
                                     border.color: app.tint(desktop.accent, 0.3)
                                 }
@@ -786,7 +934,7 @@ ApplicationWindow {
                                     height: Math.max(12, verseBody.height - 4)
                                     width: 2
                                     radius: 0
-                                    visible: verseRow.modelData.highlighted
+                                    visible: verseRow.modelData.highlighted && !bible.focusMode
                                     color: desktop.accent
                                     opacity: 0.7
                                 }
@@ -801,19 +949,24 @@ ApplicationWindow {
                                     Accessible.name: "Verse " + verseRow.modelData.number + (verseRow.modelData.hasNote ? ", has note" : "") + (verseRow.modelData.bookmarked ? ", bookmarked" : "")
                                     Accessible.onPressAction: app.selectVerse(verseRow.modelData.number, false)
                                     Label {
+                                        id: numberLabel
+                                        objectName: "verseNumberLabel" + verseRow.modelData.number
+                                        visible: bible.showVerseNumbers
                                         anchors.top: parent.top
-                                        anchors.topMargin: 7 * app.scale
+                                        anchors.topMargin: Math.max(0, readerMetrics.ascent + readerMetrics.tightBoundingRect("H").y
+                                            - numberMetrics.ascent - numberMetrics.tightBoundingRect("0").y)
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         text: verseRow.modelData.number
                                         font.pixelSize: 10 * app.scale
                                         font.weight: verseRow.selected ? Font.Bold : Font.Normal
                                         color: verseRow.selected ? desktop.accent : desktop.muted
+                                        FontMetrics { id: numberMetrics; font: numberLabel.font }
                                     }
                                     Canvas {
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         y: 24 * app.scale
                                         width: 8 * app.scale; height: 10 * app.scale
-                                        visible: verseRow.modelData.hasNote
+                                        visible: verseRow.modelData.hasNote && !bible.focusMode
                                         property color ink: desktop.muted
                                         onInkChanged: requestPaint()
                                         onPaint: {
@@ -832,10 +985,18 @@ ApplicationWindow {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
                                         hoverEnabled: true
-                                        onClicked: function(mouse) { app.selectVerse(verseRow.modelData.number, !!(mouse.modifiers & Qt.ShiftModifier)) }
+                                        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                                        preventStealing: true
+                                        onPressed: function(mouse) { if (mouse.button === Qt.LeftButton) app.beginTextDrag(verseRow.index, numberMouse, mouse, true) }
+                                        onPositionChanged: function(mouse) { if (pressedButtons & Qt.LeftButton) app.updateTextDrag(numberMouse, mouse) }
+                                        onReleased: function(mouse) {
+                                            if (mouse.button === Qt.LeftButton) app.finishTextDrag(verseRow.modelData.number, mouse)
+                                            else app.copyClickedVerse(verseRow.modelData.number, mouse.button === Qt.MiddleButton)
+                                        }
+                                        onCanceled: { app.draggingText = false; app.dragAnchorRow = -1 }
                                         onDoubleClicked: { app.selectVerse(verseRow.modelData.number, false); app.openNotes(true) }
                                     }
-                                    ToolTip.visible: numberMouse.containsMouse
+                                    ToolTip.visible: numberMouse.containsMouse && !bible.focusMode
                                     ToolTip.delay: 700
                                     ToolTip.text: "Select verse " + verseRow.modelData.number + " · Shift-click for a range" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "")
                                 }
@@ -846,8 +1007,9 @@ ApplicationWindow {
                                     y: verseHeading.height
                                     width: parent.width - x - 9
                                     height: contentHeight
-                                    text: verseRow.modelData.html ? '<div style="line-height:145%">' + verseRow.modelData.html + '</div>' : verseRow.modelData.text
-                                    textFormat: verseRow.modelData.html ? Text.RichText : Text.PlainText
+                                    text: '<div style="line-height:' + (bible.lineHeight * 100) + '%">'
+                                        + (verseRow.modelData.html || verseRow.modelData.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
+                                    textFormat: Text.RichText
                                     font.family: desktop.fontFamily
                                     font.pixelSize: app.readerSize * app.scale
                                     color: desktop.foreground
@@ -856,11 +1018,31 @@ ApplicationWindow {
                                     readOnly: true
                                     selectByMouse: true
                                     wrapMode: TextEdit.Wrap
-                                    persistentSelection: false
+                                    persistentSelection: true
                                     activeFocusOnTab: false
                                     padding: 0
                                     onLinkActivated: function(link) { desktop.openExternal(link) }
                                     Accessible.name: "Verse " + verseRow.modelData.number + ": " + verseRow.modelData.text
+                                    Keys.onShortcutOverride: function(event) {
+                                        if (event.key === Qt.Key_C && event.modifiers === Qt.ControlModifier && app.freeSelectedText.length) event.accepted = true
+                                    }
+                                    Keys.onPressed: function(event) {
+                                        if (event.key === Qt.Key_C && event.modifiers === Qt.ControlModifier && app.freeSelectedText.length) { app.copyFreeText(); event.accepted = true }
+                                    }
+                                    MouseArea {
+                                        id: bodyMouse
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                                        cursorShape: Qt.IBeamCursor
+                                        preventStealing: true
+                                        onPressed: function(mouse) { if (mouse.button === Qt.LeftButton) app.beginTextDrag(verseRow.index, bodyMouse, mouse, false) }
+                                        onPositionChanged: function(mouse) { if (pressedButtons & Qt.LeftButton) app.updateTextDrag(bodyMouse, mouse) }
+                                        onReleased: function(mouse) {
+                                            if (mouse.button === Qt.LeftButton) app.finishTextDrag(verseRow.modelData.number, mouse)
+                                            else app.copyClickedVerse(verseRow.modelData.number, mouse.button === Qt.MiddleButton)
+                                        }
+                                        onCanceled: { app.draggingText = false; app.dragAnchorRow = -1 }
+                                    }
                                 }
                             }
                         }
@@ -878,6 +1060,7 @@ ApplicationWindow {
                 // footer surface, divider, or shortening the reading viewport.
                 Rectangle {
                     objectName: "readingBottomFade"
+                    visible: !bible.focusMode
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
@@ -933,7 +1116,7 @@ ApplicationWindow {
 
             Rectangle {
                 anchors.fill: parent
-                visible: app.notesOpen && !app.wideLayout && bible.ready
+                visible: app.notesOpen && !app.wideLayout && bible.ready && !bible.focusMode
                 color: app.tint(desktop.background, 0.55)
                 MouseArea { anchors.fill: parent; onClicked: { app.flushNote(); app.notesOpen = false; app.readerFocus() } }
             }
@@ -944,7 +1127,7 @@ ApplicationWindow {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 width: app.notesWidth
-                visible: app.notesOpen && bible.ready
+                visible: app.notesOpen && bible.ready && !bible.focusMode
                 color: desktop.background
                 Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
                 ScrollView {
@@ -1089,7 +1272,7 @@ ApplicationWindow {
         anchors.margins: 16 * app.controlScale
         glyph: app.verseMode ? "visual" : "normal"
         selected: app.verseMode
-        visible: bible.ready && !(app.notesOpen && !app.wideLayout)
+        visible: bible.ready && !bible.focusMode && !(app.notesOpen && !app.wideLayout)
         enabled: !bible.busy && !app.modalOpen
         tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · v"
         onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
@@ -1101,9 +1284,9 @@ ApplicationWindow {
         anchors.bottomMargin: 16 * app.controlScale
         x: (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) / 2 - width / 2
         width: Math.max(0, Math.min(implicitWidth, (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) - 2 * (floatingActions.width + 24 * app.controlScale)))
-        text: bible.ready ? bible.passage : "Open a passage"
+        text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
         tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl+K"
-        visible: !(app.notesOpen && !app.wideLayout)
+        visible: !bible.focusMode && !(app.notesOpen && !app.wideLayout)
         enabled: !bible.busy && !app.modalOpen
         onClicked: app.openPalette(false)
     }
@@ -1115,7 +1298,7 @@ ApplicationWindow {
         anchors.margins: 16 * app.controlScale
         anchors.rightMargin: (app.notesOpen && app.wideLayout ? app.notesWidth : 0) + 16 * app.controlScale
         spacing: 4 * app.controlScale
-        visible: !(app.notesOpen && !app.wideLayout)
+        visible: !bible.focusMode && !(app.notesOpen && !app.wideLayout)
         FloatingButton {
             objectName: "savedControl"
             glyph: "saved"
@@ -1476,15 +1659,15 @@ ApplicationWindow {
             width: aboutScroll.availableWidth
             spacing: 16
             RowLayout {
-                Label { text: "Omabible"; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
+                Label { text: "OmaBible"; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
                 QuietButton { text: "×"; compact: true; Accessible.name: "Close about"; onClicked: aboutDialog.close() }
             }
             SectionLabel { text: "READ SLOWLY. KEEP WHAT MATTERS." }
             Label { text: "An offline NET Bible reader with local bookmarks, highlights, and Markdown notes. Built with Qt, at home on your desktop."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
             FineRule { Layout.fillWidth: true }
-            Label { text: "New English Translation (NET Bible)\nNET Bible® copyright © 1996–2019 by Biblical Studies Press, L.L.C. All rights reserved. The Bible text is separately copyrighted and is imported from your own NET 2.1 EPUB; it is not distributed with Omabible."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
+            Label { text: "New English Translation (NET Bible)\nNET Bible® copyright © 1996–2019 by Biblical Studies Press, L.L.C. All rights reserved. The Bible text is separately copyrighted and is imported from your own NET 2.1 EPUB; it is not distributed with OmaBible."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
             QuietButton { text: "NET Bible & permissions ↗"; compact: true; onClicked: desktop.openExternal("https://netbible.com/copyright/") }
-            Label { text: "Omabible " + desktop.version + " · Application code licensed under MIT\n" + (bible.edition || "NET 2.1") + " · No account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { text: "OmaBible " + desktop.version + " · Application code licensed under MIT\n" + (bible.edition || "NET 2.1") + " · No account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             QuietButton { text: "Open local data folder ↗"; compact: true; onClicked: desktop.openExternal("file://" + bible.dataDirectory()) }
         }
         }
@@ -1624,7 +1807,7 @@ ApplicationWindow {
         radius: 0
         color: desktop.surface
         border.color: desktop.border
-        visible: toastTimer.running
+        visible: toastTimer.running && !bible.focusMode
         Label { id: toast; objectName: "toast"; anchors.centerIn: parent; width: parent.width - 36; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: desktop.foreground; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
     }
     Timer { id: toastTimer; interval: 3000 }
@@ -1641,7 +1824,15 @@ ApplicationWindow {
     }
     Connections {
         target: bible
+        function onVersesChanged() {
+            app.clearTextSelection()
+            app.draggingText = false
+            app.dragAnchorRow = -1
+        }
         function onNavigationChanged() {
+            app.clearTextSelection()
+            app.draggingText = false
+            app.dragAnchorRow = -1
             app.clearCount()
             if (!app.movingSelection) {
                 app.verseMode = false
@@ -1663,6 +1854,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+M"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleBookmark() } }
     Shortcut { sequence: "Ctrl+H"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleHighlight() } }
     Shortcut { sequence: "Ctrl+Shift+C"; enabled: app.readerKeys; onActivated: app.copyPassage() }
+    Shortcut { sequence: "Ctrl+C"; enabled: app.readerKeys && app.freeSelectedText.length > 0; onActivated: app.copyFreeText() }
     Shortcut { sequence: "Alt+Left"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: app.chapterStep(-1) }
     Shortcut { sequence: "Alt+Right"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: app.chapterStep(1) }
     Shortcut { sequence: "F1"; enabled: !bible.busy && !app.modalOpen; onActivated: helpDialog.open() }
@@ -1703,6 +1895,8 @@ ApplicationWindow {
         sequence: "Escape"
         enabled: app.readerKeys
         onActivated: {
+            if (bible.focusMode) { bible.setFocusMode(false); app.readerFocus(); return }
+            if (app.freeSelectedText.length) { app.clearTextSelection(); app.readerFocus(); return }
             if (app.verseCount.length) { app.clearCount(); return }
             if (!app.flushNote()) return
             if (app.verseMode) app.setVisualMode(false)

@@ -69,6 +69,58 @@ class UiTest : public QObject
         QTest::mouseClick(window, Qt::LeftButton, modifiers, point);
         QCoreApplication::processEvents();
     }
+    QString bodyText(int verse) const {
+        auto body = object(qPrintable("verseBody" + QString::number(verse)));
+        QString text;
+        if (body) QMetaObject::invokeMethod(body,"getText",Q_RETURN_ARG(QString,text),
+            Q_ARG(int,0),Q_ARG(int,body->property("length").toInt()));
+        return text;
+    }
+    QPoint textPoint(int verse, int position) const {
+        auto body = item(qPrintable("verseBody" + QString::number(verse)));
+        QRectF rect;
+        if (!body || !QMetaObject::invokeMethod(body,"positionToRectangle",Q_RETURN_ARG(QRectF,rect),Q_ARG(int,position))) return {};
+        return body->mapToScene(QPointF(rect.x(),rect.y() + rect.height()/2)).toPoint();
+    }
+    void drag(const QPoint &from, const QPoint &to) {
+        QVERIFY(QRect(QPoint(),window->size()).contains(from));
+        QVERIFY(QRect(QPoint(),window->size()).contains(to));
+        QTest::mousePress(window,Qt::LeftButton,Qt::NoModifier,from);
+        for (int step = 1; step <= 12; ++step)
+            QTest::mouseMove(window,from + (to - from) * step / 12,10);
+        QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,to);
+        QCoreApplication::processEvents();
+    }
+    void mouseCopy(int verse, Qt::MouseButton button) {
+        const auto point = textPoint(verse,4);
+        QVERIFY2(QRect(QPoint(),window->size()).contains(point),qPrintable(QString("Copy outside window: %1,%2").arg(point.x()).arg(point.y())));
+        QTest::mouseClick(window,button,Qt::NoModifier,point);
+        QCoreApplication::processEvents();
+    }
+    void installDragFixture() {
+        // Distinct rich paragraphs exercise document offsets, Unicode, poetry,
+        // and the join between delegates independently of the source EPUB.
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-drag-fixture");
+            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            query.prepare("UPDATE verses SET text=?,html=?,poetry=?,heading=? WHERE book=43 AND chapter=3 AND number=?");
+            const QStringList texts = {QString::fromUtf8("Start café — λόγος 🌿 and finish."),
+                QString::fromUtf8("Poetry sings softly.\nA second line — שלום."),
+                QString::fromUtf8("Final naïve résumé ends here.")};
+            for (int i = 0; i < texts.size(); ++i) {
+                query.bindValue(0,texts[i]);
+                query.bindValue(1,QString("<span%1>%2</span>").arg(i == 1 ? " style=\"font-style:italic\"" : "",texts[i].toHtmlEscaped().replace('\n',"<br>")));
+                query.bindValue(2,i == 1);
+                query.bindValue(3,i == 0 ? "A section title" : "");
+                query.bindValue(4,i+1);
+                QVERIFY(query.exec());
+            }
+        }
+        QSqlDatabase::removeDatabase("ui-drag-fixture");
+        reference("John 3:1");
+    }
     void reference(const QString &text) {
         key(Qt::Key_K, Qt::ControlModifier);
         QTRY_VERIFY(prop("passagePalette", "opened").toBool());
@@ -713,6 +765,212 @@ private slots:
         QTRY_VERIFY(!prop("savedDrawer", "visible").toBool());
         QCOMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),17);
     }
+    void freeTextAcrossVerses_data() {
+        QTest::addColumn<bool>("reverse");
+        QTest::addColumn<bool>("numbers");
+        QTest::newRow("forward") << false << true;
+        QTest::newRow("reverse") << true << true;
+        QTest::newRow("forward-hidden-numbers") << false << false;
+        QTest::newRow("reverse-hidden-numbers") << true << false;
+    }
+    void freeTextAcrossVerses() {
+        QFETCH(bool,reverse); QFETCH(bool,numbers);
+        installDragFixture();
+        bible->setShowVerseNumbers(numbers);
+        bible->setNoteText("Canonical note must survive free selection");
+        QCoreApplication::processEvents();
+        const auto canonical = bible->selectionReference();
+        const auto note = bible->noteText();
+        QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
+        const int start = 6, end = 18;
+        const auto expected = bodyText(1).mid(start) + '\n' + bodyText(2) + '\n' + bodyText(3).left(end);
+        QVERIFY(expected.contains(QString::fromUtf8("café — λόγος 🌿")));
+        QVERIFY(expected.contains(QString::fromUtf8("שלום")));
+        const auto first = textPoint(1,start), last = textPoint(3,end);
+        drag(reverse ? last : first,reverse ? first : last);
+        QCOMPARE(window->property("freeSelectedText").toString(),expected);
+        QCOMPARE(prop("verseBody1","selectedText").toString(),bodyText(1).mid(start));
+        QCOMPARE(prop("verseBody2","selectedText").toString(),bodyText(2));
+        QCOMPARE(prop("verseBody3","selectedText").toString(),bodyText(3).left(end));
+        QCOMPARE(bible->selectionReference(),canonical);
+        QCOMPARE(bible->noteText(),note);
+        QCOMPARE(selection.count(),0);
+        QVERIFY(window->activeFocusItem()->objectName().startsWith("verseBody"));
+        QApplication::clipboard()->setText("replace me");
+        key(Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(QApplication::clipboard()->text(),expected);
+        // Ctrl+C also works after moving focus out of the TextEdit.
+        item("readerSurface")->forceActiveFocus();
+        QApplication::clipboard()->setText("replace again");
+        key(Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(QApplication::clipboard()->text(),expected);
+        // Right/middle clicks must not consume the free selection or alter the
+        // canonical selection before deciding which passage to copy.
+        mouseCopy(2,Qt::RightButton);
+        QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(2));
+        QCOMPARE(window->property("freeSelectedText").toString(),expected);
+        QCOMPARE(bible->noteText(),note);
+        QCOMPARE(selection.count(),0);
+        mouseCopy(3,Qt::MiddleButton);
+        QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(3,true));
+        QCOMPARE(selection.count(),0);
+        QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,textPoint(2,4));
+        QCOMPARE(bible->cursorVerse(),2);
+        QVERIFY(window->property("freeSelectedText").toString().isEmpty());
+    }
+    void mouseCopySingleAndCanonicalRange() {
+        installDragFixture();
+        bible->selectVerses(1,2);
+        bible->setNoteText("Range note");
+        QTest::qWait(100);
+        const auto range = bible->selectionReference();
+        const auto text = bible->copySelection();
+        QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
+        for (auto button : {Qt::RightButton,Qt::MiddleButton}) {
+            mouseCopy(1,button);
+            const auto copied = QApplication::clipboard()->text();
+            QCOMPARE(copied,bible->copyVerse(1,button == Qt::MiddleButton));
+            if (button == Qt::RightButton) QCOMPARE(copied,text);
+            else QVERIFY(copied.contains(QChar(0x201c)) && copied.contains(QChar(0x201d)));
+            mouseCopy(3,button);
+            const auto single = QApplication::clipboard()->text();
+            QCOMPARE(single,bible->copyVerse(3,button == Qt::MiddleButton));
+            QVERIFY(single.contains("John 3:3"));
+            QVERIFY(!single.contains("John 3:1"));
+            QCOMPARE(bible->selectionReference(),range);
+            QCOMPARE(bible->noteText(),QString("Range note"));
+        }
+        QCOMPARE(selection.count(),0);
+        // A visible intersection still copies the whole canonical cross-chapter
+        // range, including the hidden chapter, without moving its endpoints.
+        reference("John 3:36-4:2");
+        const auto cross = bible->selectionReference();
+        const auto all = bible->copySelection();
+        QCOMPARE(bible->chapter(),4);
+        QVERIFY(QMetaObject::invokeMethod(window,"scrollToVerse",Q_ARG(QVariant,2),Q_ARG(QVariant,true)));
+        QTest::qWait(100);
+        selection.clear();
+        mouseCopy(2,Qt::RightButton);
+        QCOMPARE(QApplication::clipboard()->text(),all);
+        mouseCopy(2,Qt::MiddleButton);
+        QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(2,true));
+        QCOMPARE(bible->selectionReference(),cross);
+        QCOMPARE(selection.count(),0);
+    }
+    void dragAutoscrollAndOmittedNumbers() {
+        reference("Matthew 17:20");
+        bible->setShowVerseNumbers(false);
+        QVERIFY(!item("verseBody21"));
+        const int start = 10, end = 15;
+        drag(textPoint(20,start),textPoint(22,end));
+        QCOMPARE(window->property("freeSelectedText").toString(),bodyText(20).mid(start) + '\n' + bodyText(22).left(end));
+        // The number gutter remains a canonical range target when labels hide.
+        click(item("verseNumber20"));
+        click(item("verseNumber22"),Qt::ShiftModifier);
+        QCOMPARE(bible->selectedStart(),20); QCOMPARE(bible->selectedEnd(),22);
+        const auto gutterPoint = [this](int verse) {
+            return item(qPrintable("verseNumber" + QString::number(verse)))->mapToScene(QPointF(8,12)).toPoint();
+        };
+        drag(gutterPoint(22),gutterPoint(20));
+        QCOMPARE(bible->selectedStart(),20); QCOMPARE(bible->selectedEnd(),22);
+        QCOMPARE(bible->cursorVerse(),20);
+        reference("John 3:10");
+        const auto before = prop("reading","contentY").toDouble();
+        const QPoint origin = textPoint(10,8);
+        const QPoint bottom(origin.x(),window->height() - 80);
+        QTest::mousePress(window,Qt::LeftButton,Qt::NoModifier,origin);
+        QTest::mouseMove(window,bottom,30);
+        QTRY_VERIFY(prop("reading","contentY").toDouble() > before + 100);
+        const auto selected = window->property("freeSelectedText").toString();
+        QVERIFY(selected.count('\n') >= 2);
+        // Reverse the same live gesture and let it scroll back upward.
+        const double down = prop("reading","contentY").toDouble();
+        const QPoint top(origin.x(),5);
+        QTest::mouseMove(window,top,30);
+        QTRY_VERIFY(prop("reading","contentY").toDouble() < down - 100);
+        QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,top);
+        QVERIFY(!window->property("draggingText").toBool());
+        QCOMPARE(bible->cursorVerse(),10);
+        key(Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(QApplication::clipboard()->text(),window->property("freeSelectedText").toString());
+    }
+    void runtimeReadingPreferences() {
+        installDragFixture();
+        bible->toggleBookmark(); bible->setNoteText("Marker");
+        QCoreApplication::processEvents();
+        const auto x = item("verseBody1")->x();
+        const auto height = item("verseBody2")->height();
+        const auto heading = item("verseHeading1")->height();
+        QVERIFY(heading > 0);
+        QVERIFY(item("headingPrefix1")->isVisible());
+        QCOMPARE(prop("headingPrefix1","text").toString(),QString("#"));
+        QCOMPARE(prop("chapterTitle","leftPadding").toDouble(),x);
+        bible->setShowVerseNumbers(false);
+        QVERIFY(!item("verseNumberLabel1")->isVisible());
+        QCOMPARE(item("verseBody1")->x(),x);
+        QVERIFY(item("bookmarkMarker1")->isVisible());
+        bible->setShowHeadings(false);
+        QTRY_COMPARE(item("verseHeading1")->height(),0.0);
+        QVERIFY(!item("headingPrefix1")->isVisible());
+        bible->setLineHeight(2.5);
+        QTRY_VERIFY(item("verseBody2")->height() > height * 1.4);
+        bible->setShowHeadings(true);
+        QTRY_COMPARE(item("verseHeading1")->height(),heading);
+        bible->setShowVerseNumbers(true);
+        QVERIFY(item("verseNumberLabel1")->isVisible());
+        bible->setLineHeight(1.5);
+        QTRY_COMPARE(item("verseBody2")->height(),height);
+        key(Qt::Key_N,Qt::ControlModifier);
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        bible->setFocusMode(true);
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        for (const auto name : {"editionLabel","readingBottomFade","readerScrollbar","notesPanel","modeControl","passageControl","floatingActions","bookmarkMarker1","toast"})
+            QVERIFY2(!item(name)->isVisible(),name);
+        QCOMPARE(item("reading")->width(),double(window->width()));
+        QVERIFY(item("verseBody1")->isVisible());
+        QVERIFY(item("chapterTitle")->isVisible());
+        QVERIFY(item("verseHeading1")->isVisible());
+        for (int i = 0; i < 12; ++i) {
+            key(Qt::Key_Tab);
+            QVERIFY(!window->activeFocusItem() || window->activeFocusItem()->isVisible());
+        }
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        key(Qt::Key_Escape);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QVERIFY(bible->focusMode());
+        key(Qt::Key_Escape);
+        QVERIFY(!bible->focusMode());
+        QVERIFY(item("readingBottomFade")->isVisible());
+        QVERIFY(item("bookmarkMarker1")->isVisible());
+    }
+    void readerScrollbarAndHeader() {
+        reference("John 3:36");
+        key(Qt::Key_J);
+        QTRY_COMPARE(bible->chapter(),4);
+        QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
+        QVERIFY(item("chapterTitle")->mapToScene(QPointF()).y() >= 0);
+        reference("John 3:1");
+        QCOMPARE(prop("reading","contentY").toDouble(),0.0);
+        auto bar = item("readerScrollbar");
+        auto thumb = item("readerScrollThumb");
+        QVERIFY(bar->isVisible());
+        QVERIFY(bar->y() + bar->height() < item("modeControl")->y());
+        QTest::mouseMove(window,QPoint(2,2));
+        QTRY_COMPARE(thumb->width(),2.0);
+        QTest::mouseMove(window,bar->mapToScene(QPointF(bar->width()/2,20)).toPoint());
+        QTRY_VERIFY(bar->property("hovered").toBool());
+        QTRY_COMPARE(thumb->width(),6.0);
+        QTest::mouseMove(window,QPoint(2,2));
+        key(Qt::Key_Space);
+        QTRY_VERIFY(thumb->opacity() >= 0.49);
+        QTest::qWait(1400);
+        QTRY_VERIFY(thumb->opacity() <= 0.21);
+        const auto buttonBackground = qvariant_cast<QQuickItem *>(prop("passageControl","background"));
+        QCOMPARE(buttonBackground->property("radius").toDouble(),0.0);
+        reference("John 3:36-4:2");
+        QCOMPARE(prop("passageControl","text").toString(),bible->selectionReference());
+    }
     void floatingControlsAndNotes_data() {
         QTest::addColumn<QSize>("size");
         QTest::addColumn<double>("scale");
@@ -731,7 +989,7 @@ private slots:
         QCOMPARE(item("reading")->height(),double(size.height()));
         QCOMPARE(item("reading")->mapToScene(QPointF()).y(),0.0);
         auto passage = item("passageControl");
-        QCOMPARE(prop("passageControl","text").toString(),QString("John 3"));
+        QCOMPARE(prop("passageControl","text").toString(),bible->selectionReference());
         QVERIFY(prop("passageControl","tip").toString().contains(bible->selectionReference()));
         QCOMPARE(passage->x() + passage->width() / 2,size.width() / 2.0);
         QVERIFY(passage->width() >= passage->implicitWidth());
