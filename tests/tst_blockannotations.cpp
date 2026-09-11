@@ -8,6 +8,9 @@
 #include <QQuickWindow>
 #include <QQuickTextDocument>
 #include <QTextDocument>
+#include <QTextDocumentFragment>
+#include <QTextBlock>
+#include <QTextCursor>
 #include <QJSValue>
 #include "blockdocument.h"
 
@@ -246,6 +249,66 @@ ApplicationWindow {
         QVERIFY(!item("blockAnnotationMarker:bookmark:Genesis 1:1–3")->isVisible());
         backend->setProperty("focusMode",false);
         QTRY_VERIFY(item("blockAnnotationRail")->isVisible());
+    }
+    void paragraphBoundariesAndAnnotations() {
+        populate(true);
+        auto verses = backend->property("verses").toList();
+        for (int i = 0; i < verses.size(); ++i) {
+            auto verse = verses[i].toMap();
+            verse["paragraphStart"] = i == 0 || i == 3;
+            if (i == 4) verse["html"] = "Poetry sings.<br>A second line.";
+            verses[i] = verse;
+        }
+        backend->setProperty("verses",verses);
+        item("reader")->setProperty("mode","paragraph");
+        auto quick = item("blockBody")->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(quick);
+        auto doc = quick->textDocument();
+        QTRY_COMPARE(doc->blockCount(),3); // Heading, verses 1–3, verses 4–6.
+        QCOMPARE(doc->findBlock(mapping->positionFor(1)),doc->findBlock(mapping->positionFor(3)));
+        QVERIFY(doc->findBlock(mapping->positionFor(3)) != doc->findBlock(mapping->positionFor(4)));
+        for (auto block = doc->begin(); block.isValid(); block = block.next()) QVERIFY(!block.text().isEmpty());
+        QVERIFY(doc->toRawText().contains(QChar::LineSeparator));
+        QVERIFY(!doc->toPlainText().contains(QChar(0x00b6)));
+        QTRY_COMPARE(list("annotationRanges").size(),4);
+        QTRY_VERIFY(list("annotationRanges")[2].toMap().value("y").toDouble()
+                    > list("annotationRanges")[0].toMap().value("y").toDouble());
+        const auto span = mapping->spans()[3].toMap();
+        const auto rect = mapping->rectangles(span.value("start").toInt(),span.value("end").toInt()).first().toMap();
+        QCOMPARE(mapping->verseAtPoint(rect.value("x").toDouble() + 2,rect.value("y").toDouble() + 5),4);
+        click(item("blockAnnotationMarker:note:Genesis 1:1–3"));
+        QTRY_VERIFY(item("blockAnnotationAction:note:Genesis 1:4–5"));
+        click(item("blockAnnotationAction:note:Genesis 1:4–5"));
+        QCOMPARE(backend->property("navigated").toString(),QString("Genesis 1:4–5"));
+        backend->setProperty("focusMode",true);
+        QTRY_COMPARE(doc->blockCount(),2);
+        QVERIFY(doc->toPlainText().startsWith("Verse 1 is here. Verse 2 is here. Verse 3 is here.\nVerse 4 is here."));
+        QVERIFY(!item("blockAnnotationRail")->isVisible());
+        QTextCursor selection(doc);
+        selection.setPosition(mapping->positionFor(3));
+        selection.setPosition(mapping->spans()[3].toMap().value("end").toInt(),QTextCursor::KeepAnchor);
+        QCOMPARE(selection.selection().toPlainText(),QString("Verse 3 is here.\nVerse 4 is here."));
+        item("reader")->setProperty("mode","block");
+        QTRY_COMPARE(doc->blockCount(),1);
+        QVERIFY(doc->toPlainText().contains("Verse 3 is here. Verse 4 is here."));
+        // The old five-argument API retains block behavior.
+        mapping->build(quick,verses,false,false,1.5);
+        QCOMPARE(doc->blockCount(),1);
+    }
+    void paragraphHeadingDoesNotCreateEmptyBlocks() {
+        backend->setProperty("verses",QVariantList{
+            QVariantMap{{"number",1},{"text","First."},{"heading","First section"},{"paragraphStart",true}},
+            QVariantMap{{"number",2},{"text","Second."},{"heading","Second section"},{"paragraphStart",true}},
+            QVariantMap{{"number",3},{"text","Third."},{"paragraphStart",true}}});
+        item("reader")->setProperty("mode","paragraph");
+        auto doc = item("blockBody")->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTRY_COMPARE(doc->blockCount(),5);
+        for (auto block = doc->begin(); block.isValid(); block = block.next()) QVERIFY(!block.text().isEmpty());
+        backend->setProperty("showHeadings",false);
+        QTRY_COMPARE(doc->blockCount(),3);
+        backend->setProperty("verses",QVariantList{});
+        QTRY_VERIFY(doc->isEmpty());
+        QCOMPARE(doc->blockCount(),1);
     }
     void screenshot() {
         populate(true);

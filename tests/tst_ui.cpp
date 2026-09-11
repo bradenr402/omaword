@@ -204,8 +204,13 @@ class UiTest : public QObject
         QString error;
         return ok && EpubImporter::validateDatabase(fixture, &error);
     }
-    void loadUi() {
+    void loadUi(bool verseFixture = false) {
         bible = std::make_unique<BibleBackend>();
+        // Existing interaction fixtures exercise verse rows explicitly. New
+        // preference/default tests opt into the backend's initial paragraph mode.
+        const QString testName = QString::fromLatin1(QTest::currentTestFunction());
+        if (verseFixture && !testName.startsWith("defaultParagraph") && testName != "fontControlsBeforeImport")
+            bible->setReadingMode("verse");
         desktop = std::make_unique<Desktop>();
         engine = std::make_unique<QQmlApplicationEngine>();
         connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
@@ -256,15 +261,151 @@ private slots:
         const auto data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QVERIFY(QDir().mkpath(data));
         const QString testName = QString::fromLatin1(QTest::currentTestFunction());
-        if (testName != "emptyAndImportError" && testName != "asyncFirstImportLayout")
+        if (testName != "emptyAndImportError" && testName != "asyncFirstImportLayout" && testName != "fontControlsBeforeImport")
             QVERIFY(QFile::copy(fixture, data + "/bible.sqlite"));
         qmlWarnings.clear();
-        loadUi();
+        loadUi(true);
     }
     void cleanup() {
         unloadUi();
         QVERIFY2(qmlWarnings.isEmpty(), qPrintable(qmlWarnings.join('\n')));
         session.reset();
+    }
+    void fontControlsBeforeImport() {
+        QVERIFY(!bible->ready());
+        QCOMPARE(bible->readingMode(),QString("paragraph"));
+        QCOMPARE(bible->fontSize(),18);
+        QCOMPARE(window->property("readerSize").toInt(),18);
+        key(Qt::Key_Space,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("reading settings"); key(Qt::Key_Return);
+        QTRY_VERIFY(prop("settingsDialog","opened").toBool());
+        QTRY_VERIFY(item("lineHeightSlider")->hasActiveFocus());
+        QCOMPARE(prop("fontSizeValue","text").toString(),QString("18"));
+        QCOMPARE(prop("fontSizeSlider","from").toInt(),8);
+        QCOMPARE(prop("fontSizeSlider","to").toInt(),40);
+        QCOMPARE(prop("fontSizeSlider","stepSize").toInt(),1);
+        for (const auto name : {"lineHeightSlider","fontSizeSlider","settingnumbers","readingMode:paragraph"}) {
+            item(name)->forceActiveFocus();
+            for (int i = 0; i < 4; ++i) { key(Qt::Key_Left); key(Qt::Key_Right); }
+            QCOMPARE(bible->lineHeight(),1.5);
+            QCOMPARE(bible->fontSize(),18);
+        }
+        for (int i = 0; i < 16; ++i) {
+            key(Qt::Key_Tab); key(Qt::Key_Left); key(Qt::Key_Right);
+            QCOMPARE(bible->lineHeight(),1.5);
+            QCOMPARE(bible->fontSize(),18);
+        }
+        item("fontSizeSlider")->forceActiveFocus();
+        key(Qt::Key_Up); QCOMPARE(bible->fontSize(),19);
+        QCOMPARE(prop("fontSizeValue","text").toString(),QString("19"));
+        QCOMPARE(window->property("readerSize").toInt(),19);
+        key(Qt::Key_Equal,Qt::ControlModifier); QCOMPARE(bible->fontSize(),20);
+        key(Qt::Key_Minus,Qt::ControlModifier); QCOMPARE(bible->fontSize(),19);
+        key(Qt::Key_0,Qt::ControlModifier); QCOMPARE(bible->fontSize(),18);
+        key(Qt::Key_BracketRight,Qt::ControlModifier); QCOMPARE(bible->lineHeight(),1.6);
+        key(Qt::Key_Backslash,Qt::ControlModifier); QCOMPARE(bible->lineHeight(),1.5);
+        key(Qt::Key_B); QCOMPARE(bible->readingMode(),QString("verse"));
+        key(Qt::Key_B); QCOMPARE(bible->readingMode(),QString("block"));
+        key(Qt::Key_B); QCOMPARE(bible->readingMode(),QString("paragraph"));
+        bible->setFontSize(27); // UI binding must survive keyboard and slider actions.
+        QCOMPARE(window->property("readerSize").toInt(),27);
+        QCOMPARE(prop("fontSizeSlider","value").toInt(),27);
+        QCOMPARE(prop("fontSizeValue","text").toString(),QString("27"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
+        unloadUi(); loadUi();
+        QCOMPARE(bible->fontSize(),27);
+        QCOMPARE(window->property("readerSize").toInt(),27);
+        QCOMPARE(bible->readingMode(),QString("paragraph"));
+    }
+    void defaultParagraphCycleAndFallback() {
+        QCOMPARE(bible->readingMode(),QString("paragraph"));
+        QCOMPARE(window->property("continuousReader").toBool(),bible->hasParagraphs());
+        if (bible->hasParagraphs()) QTRY_VERIFY(blockTextDocument());
+        else QTRY_VERIFY(item("verseBody1"));
+        key(Qt::Key_B); QCOMPARE(bible->readingMode(),QString("verse"));
+        QTRY_VERIFY(item("verseBody1"));
+        key(Qt::Key_B); QCOMPARE(bible->readingMode(),QString("block"));
+        QTRY_VERIFY(blockTextDocument());
+        key(Qt::Key_B); QCOMPARE(bible->readingMode(),QString("paragraph"));
+        key(Qt::Key_Space,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("reading mode");
+        QTRY_COMPARE(prop("paletteHintreadingMode","text").toString(),QString("Paragraph · b"));
+        key(Qt::Key_Return); QTRY_COMPARE(bible->readingMode(),QString("verse"));
+        key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        type("reading mode");
+        QTRY_VERIFY(item("keybindingReading mode"));
+        key(Qt::Key_Return); QTRY_COMPARE(bible->readingMode(),QString("block"));
+        key(Qt::Key_R,Qt::ShiftModifier); QTRY_VERIFY(prop("settingsDialog","opened").toBool());
+        QTest::qWait(100);
+        click(item("readingMode:paragraph"));
+        QCOMPARE(bible->readingMode(),QString("paragraph"));
+        QVERIFY(prop("readingMode:paragraph","checked").toBool());
+        QVERIFY(!prop("readingMode:block","checked").toBool());
+        click(item("readingMode:paragraph"));
+        QVERIFY(prop("readingMode:paragraph","checked").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
+        unloadUi(); loadUi();
+        QCOMPARE(bible->readingMode(),QString("paragraph"));
+        QCOMPARE(window->property("continuousReader").toBool(),bible->hasParagraphs());
+    }
+    void defaultParagraphKjvFlowAndCopy() {
+        const auto kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        if (kjv.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV to the structured eng-kjv2006.epub.");
+        bible->importEpub(QUrl::fromLocalFile(kjv));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        QVERIFY(bible->hasParagraphs());
+        QCOMPARE(bible->readingMode(),QString("paragraph"));
+        reference("Genesis 1:1");
+        QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() == bible->verses().size());
+        auto doc = blockTextDocument();
+        QVERIFY(doc);
+        QVERIFY(!doc->toPlainText().contains(QChar(0x00b6)));
+        for (auto block = doc->begin(); block.isValid(); block = block.next()) QVERIFY(!block.text().isEmpty());
+        bible->setFontSize(12);
+        bible->setShowVerseNumbers(false);
+        QTRY_COMPARE(blockMapping()->spans().first().toMap().value("textStart"),blockMapping()->spans().first().toMap().value("start"));
+        drag(blockPoint(1,3),blockPoint(2,12));
+        const auto selected = window->property("freeSelectedText").toString();
+        QVERIFY(!selected.isEmpty());
+        key(Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(QGuiApplication::clipboard()->text(),selected);
+        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,blockPoint(2,8));
+        QVERIFY(QGuiApplication::clipboard()->text().contains("Genesis 1:2"));
+        reference("Genesis 1:1");
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("Paragraph note");
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(item("blockAnnotationMarker:note:Genesis 1:1"));
+        click(item("blockAnnotationMarker:note:Genesis 1:1"));
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        QCOMPARE(prop("noteEditor","text").toString(),QString("Paragraph note"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
+        QTRY_VERIFY(!item("blockAnnotationRail")->isVisible());
+        QVERIFY(item("chapterTitle")->isVisible());
+        QVERIFY(doc->findBlock(blockOffset(6)) != doc->findBlock(blockOffset(5)));
+        QVERIFY(doc->toPlainText().startsWith("In the beginning"));
+        bible->setReadingMode("block");
+        QTRY_COMPARE(doc->blockCount(),1);
+        bible->setReadingMode("paragraph");
+        QTRY_VERIFY(doc->blockCount() > 1);
+        const auto first = doc->findBlock(blockOffset(1));
+        // OEBPS/GEN.xhtml has separate div.p containers for 1:1–2,
+        // 1:3–5 (no pilcrow), and 1:6–8 (leading layout pilcrow).
+        QCOMPARE(doc->findBlock(blockOffset(2)),first);
+        const auto second = doc->findBlock(blockOffset(3));
+        QVERIFY(second != first);
+        for (int verse = 4; verse <= 5; ++verse)
+            QVERIFY2(doc->findBlock(blockOffset(verse)) == second,
+                      qPrintable(QString("Verse %1 starts a separate block: %2").arg(verse).arg(doc->toPlainText().left(1600))));
+        const auto third = doc->findBlock(blockOffset(6));
+        QVERIFY(third != second);
+        QVERIFY(third != first);
+        QCOMPARE(doc->findBlock(blockOffset(7)),third);
+        QCOMPARE(doc->findBlock(blockOffset(8)),third);
     }
     void emptyAndImportError() {
         QVERIFY(!bible->ready());
@@ -609,7 +750,8 @@ private slots:
         QCOMPARE(prop("lineHeightSlider","from").toDouble(),1.0);
         QCOMPARE(prop("lineHeightSlider","to").toDouble(),3.0);
         QCOMPARE(prop("lineHeightSlider","stepSize").toDouble(),0.1);
-        key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),1.6);
+        key(Qt::Key_Right); QCOMPARE(bible->lineHeight(),1.5);
+        key(Qt::Key_Up); QTRY_COMPARE(bible->lineHeight(),1.6);
         capture("phase-b-line-height");
         for (int i = 0; i < 30; ++i) key(Qt::Key_BracketRight,Qt::ControlModifier);
         QCOMPARE(bible->lineHeight(),3.0);
@@ -715,7 +857,7 @@ private slots:
         type("reading settings"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         QTest::qWait(100);
-        for (const auto id : {"numbers","headings","versePicker","block","focus"}) {
+        for (const auto id : {"numbers","headings","versePicker","focus"}) {
             const QByteArray name = QByteArray("setting") + id;
             auto control = item(name);
             auto label = item(name + "Label");
@@ -1518,6 +1660,8 @@ private slots:
         QTRY_VERIFY(blockTextDocument()->toPlainText().contains("A section title"));
         QVERIFY(item("chapterTitle")->isVisible());
         key(Qt::Key_B);
+        QCOMPARE(bible->readingMode(),QString("paragraph"));
+        key(Qt::Key_B);
         QTRY_VERIFY(item("verseBody1"));
         QVERIFY(item("verseNumberLabel1")->isVisible()); QVERIFY(item("verseHeading1")->isVisible());
         key(Qt::Key_F);
@@ -1895,7 +2039,8 @@ private slots:
             QCOMPARE(track->property("color"),desktop->property("accent"));
             QCOMPARE(handle->property("color"),desktop->property("surface"));
             const auto old = bible->lineHeight();
-            key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
+            key(Qt::Key_Right); QCOMPARE(bible->lineHeight(),old);
+            key(Qt::Key_Up); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
             QVERIFY(desktop->setProperty("accent",QColor("#b454ea")));
             QCOMPARE(track->property("color").value<QColor>(),QColor("#b454ea"));
             capture(QString("review-square-slider-") + query);
@@ -2386,11 +2531,15 @@ private slots:
         QVERIFY(!item("verseHeading1")->isVisible());
         QVERIFY(!item("verseNumberLabel1")->isVisible());
         for (const auto &toggle : QList<QPair<Qt::Key,QString>>{{Qt::Key_R,"Show verse numbers"},
-                {Qt::Key_T,"Show headings"},{Qt::Key_P,"Verse picker"},{Qt::Key_B,"Block mode"},
+                {Qt::Key_T,"Show headings"},{Qt::Key_P,"Verse picker"},
                 {Qt::Key_V,"Visual selection"}}) {
             const bool initiallyOn = toggle.first == Qt::Key_R || toggle.first == Qt::Key_T || toggle.first == Qt::Key_P;
             key(toggle.first); checkToast(toggle.second + (initiallyOn ? " off" : " on"));
             key(toggle.first); checkToast(toggle.second + (initiallyOn ? " on" : " off"));
+        }
+        for (const auto mode : {"Block","Paragraph","Verse"}) {
+            key(Qt::Key_B); checkToast(QString("Reading mode ") + mode);
+            QTRY_VERIFY(!window->property("restoringPosition").toBool());
         }
         const auto previousToast = prop("toast","text");
         key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(prop("notesDrawer","opened").toBool()); QCOMPARE(prop("toast","text"),previousToast);

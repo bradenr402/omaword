@@ -47,7 +47,7 @@ ApplicationWindow {
     onActiveFocusItemChanged: clearCount()
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
-    property real readerSize: 18
+    readonly property int readerSize: bible.fontSize
     property int selectionAnchor: 0
     property bool movingSelection: false
     property int collectionTab: 0
@@ -96,8 +96,11 @@ ApplicationWindow {
     }
     readonly property real floatingSafety: bible.focusMode ? 0 : 72 * scale
     readonly property real verseGutter: 40 * scale
-    readonly property bool observedBlockMode: bible.blockMode
-    onObservedBlockModeChanged: {
+    readonly property bool continuousReader: bible.readingMode === "block" || (bible.readingMode === "paragraph" && bible.hasParagraphs)
+    property bool readerInitialized: false
+    readonly property string observedReadingMode: bible.readingMode
+    onObservedReadingModeChanged: {
+        if (!readerInitialized) return
         clearTextSelection()
         Qt.callLater(function() { app.restorePosition(app.hasSelection) })
     }
@@ -696,7 +699,7 @@ ApplicationWindow {
         { id: "numbers", title: "Show verse numbers", keys: "r", sequences: ["R"], setting: "showVerseNumbers", command: true },
         { id: "headings", title: "Show headings", keys: "t", sequences: ["T"], setting: "showHeadings", command: true },
         { id: "versePicker", title: "Verse picker", keys: "p", sequences: ["P"], setting: "versePicker", command: true },
-        { id: "block", title: "Block mode", keys: "b", sequences: ["B"], setting: "blockMode", command: true },
+        { id: "readingMode", title: "Reading mode", keys: "b", sequences: ["B"], command: true },
         { id: "focus", title: "Focus mode", keys: "f", sequences: ["F"], setting: "focusMode", command: true },
         { id: "lineHeight", title: "Line height", keys: "", command: true },
         { id: "lineLess", title: "Decrease line height", keys: "Ctrl [", sequences: ["Ctrl+["] },
@@ -712,16 +715,18 @@ ApplicationWindow {
         { id: "dismiss", title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
     ]
     function actionHint(action) {
+        if (action.id === "readingMode") return readingModeName(bible.readingMode) + " · b"
         if (action.setting) return (bible[action.setting] ? "On" : "Off") + (action.keys ? " · " + action.keys : "")
         if (action.id === "lineHeight") return bible.lineHeight.toFixed(1)
         return action.keys
     }
+    function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
     function shortcutEnabled(action) {
         if (!actionAvailable(action)) return false
         // Keep the command globally available, but never consume a typed uppercase V.
         if (action.id === "switchVersion") return !modalOpen && !notesOpen && !textInputActive()
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
-                && (action.setting || ["lineLess", "lineMore", "lineReset"].includes(action.id))) return true
+                && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         if (action.scope === "palette") return !modalOpen || passagePalette.opened
         if (action.scope === "global") return !modalOpen && (bible.ready || ["help", "about", "import", "switchVersion", "removeVersion"].includes(action.id))
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
@@ -733,7 +738,7 @@ ApplicationWindow {
         if (action.id === "copyText") return bible.ready
         if (action.id === "bookmark" || action.id === "highlight") return hasSelection
         return bible.ready || !!action.setting
-            || ["books", "commands", "help", "about", "import", "switchVersion", "removeVersion", "settings", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
+            || ["books", "commands", "help", "about", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
@@ -863,13 +868,19 @@ ApplicationWindow {
         case "extendNext": extendVerse(count); break
         case "toggleNotes": toggleNotes(); break
         case "copyText": if (freeSelectedText.length) copyFreeText(); else copyPassage(false); break
-        case "larger": readerSize = Math.min(40, readerSize + 1); break
-        case "smaller": readerSize = Math.max(8, readerSize - 1); break
-        case "resetText": readerSize = 18; break
+        case "larger": bible.setFontSize(readerSize + 1); break
+        case "smaller": bible.setFontSize(readerSize - 1); break
+        case "resetText": bible.setFontSize(18); break
         case "numbers": bible.setShowVerseNumbers(!bible.showVerseNumbers); break
         case "headings": bible.setShowHeadings(!bible.showHeadings); break
         case "versePicker": bible.setVersePicker(!bible.versePicker); break
-        case "block": bible.setBlockMode(!bible.blockMode); break
+        case "readingMode": {
+            const modes = ["paragraph", "verse", "block"]
+            const previousMode = bible.readingMode
+            bible.setReadingMode(modes[(modes.indexOf(bible.readingMode) + 1) % modes.length])
+            if (bible.readingMode !== previousMode) notify("Reading mode " + readingModeName(bible.readingMode), true)
+            break
+        }
         case "focus": bible.setFocusMode(!bible.focusMode); break
         case "lineLess": bible.setLineHeight(Math.round((bible.lineHeight - 0.1) * 10) / 10); break
         case "lineMore": bible.setLineHeight(Math.round((bible.lineHeight + 0.1) * 10) / 10); break
@@ -1062,6 +1073,16 @@ ApplicationWindow {
         implicitHeight: 32 * app.scale
         implicitWidth: 200 * app.scale
         padding: 9 * app.scale
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+            if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) event.accepted = true
+            else if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
+                if (event.key === Qt.Key_Up) increase()
+                else decrease()
+                moved()
+                event.accepted = true
+            }
+        }
         background: Rectangle {
             x: slider.leftPadding
             y: slider.topPadding + (slider.availableHeight - height) / 2
@@ -1162,10 +1183,13 @@ ApplicationWindow {
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
                         ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
                     } else if (glyph === "visual") {
-                        ctx.rect(4, 4, 16, 16)
-                        ctx.moveTo(8, 9); ctx.lineTo(16, 9)
-                        ctx.moveTo(8, 13); ctx.lineTo(16, 13)
-                        ctx.moveTo(8, 17); ctx.lineTo(13, 17)
+                        ctx.rect(3, 3, 18, 18)
+                        ctx.globalAlpha = 0.25
+                        ctx.fillRect(6, 6, 12, 9)
+                        ctx.globalAlpha = 1
+                        ctx.moveTo(7, 8); ctx.lineTo(17, 8)
+                        ctx.moveTo(7, 12); ctx.lineTo(17, 12)
+                        ctx.moveTo(7, 17); ctx.lineTo(13, 17)
                     } else {
                         ctx.moveTo(12, 6); ctx.lineTo(8, 4); ctx.lineTo(2, 4)
                         ctx.lineTo(2, 19); ctx.lineTo(8, 19); ctx.lineTo(12, 21)
@@ -1323,7 +1347,7 @@ ApplicationWindow {
                         }
                         Repeater {
                             id: verseRepeater
-                            model: bible.blockMode ? [] : bible.verses
+                            model: app.continuousReader ? [] : bible.verses
                             delegate: VerseItem {
                                 id: verseRow
                                 required property var modelData
@@ -1569,11 +1593,12 @@ ApplicationWindow {
                         Loader {
                             id: blockLoader
                             objectName: "blockLoader"
-                            active: bible.blockMode
+                            active: app.continuousReader
                             visible: active
                             x: app.verseGutter
                             width: parent.width - x - 9
                             sourceComponent: BlockReader {
+                                mode: bible.readingMode
                                 objectName: "blockReader"
                                 controller: app
                                 backend: bible
@@ -2531,6 +2556,49 @@ ApplicationWindow {
                 }
             }
             RowLayout {
+                visible: !settingsDialog.lineOnly
+                Layout.fillWidth: true
+                Label { text: "Reading mode"; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true }
+                Label { text: "b"; color: desktop.muted; font.pixelSize: 12 * app.scale }
+            }
+            RowLayout {
+                visible: !settingsDialog.lineOnly
+                Layout.fillWidth: true
+                spacing: 4 * app.scale
+                Repeater {
+                    model: ["paragraph", "verse", "block"]
+                    delegate: Button {
+                        required property string modelData
+                        objectName: "readingMode:" + modelData
+                        text: app.readingModeName(modelData)
+                        checkable: true
+                        autoExclusive: true
+                        checked: bible.readingMode === modelData
+                        Layout.fillWidth: true
+                        onClicked: bible.setReadingMode(modelData)
+                        Accessible.name: text + " reading mode"
+                    }
+                }
+            }
+            RowLayout {
+                visible: !settingsDialog.lineOnly
+                Layout.fillWidth: true
+                Label { text: "Font size"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
+                Item { Layout.fillWidth: true }
+                Label { objectName: "fontSizeValue"; text: bible.fontSize; color: desktop.accent; font.pixelSize: 14 * app.scale }
+            }
+            SquareSlider {
+                objectName: "fontSizeSlider"
+                visible: !settingsDialog.lineOnly
+                Layout.fillWidth: true
+                from: 8; to: 40; stepSize: 1
+                snapMode: Slider.SnapAlways
+                value: bible.fontSize
+                onMoved: bible.setFontSize(Math.round(value))
+                Accessible.name: "Font size"
+            }
+            Label { visible: !settingsDialog.lineOnly; text: "Ctrl − decrease    Ctrl + increase    Ctrl 0 reset"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            RowLayout {
                 Layout.fillWidth: true
                 Label { text: "Line height"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
                 Item { Layout.fillWidth: true }
@@ -2909,7 +2977,7 @@ ApplicationWindow {
             app.syncNote()
         }
     }
-    Component.onCompleted: { syncNote(); restorePosition() }
+    Component.onCompleted: { readerInitialized = true; syncNote(); restorePosition() }
     onClosing: function(close) { close.accepted = flushNote(); savePosition() }
 
     Instantiator {

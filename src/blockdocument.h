@@ -15,7 +15,8 @@ public:
     using QObject::QObject;
     QVariantList spans() const { return m_spans; }
     Q_INVOKABLE void build(QQuickTextDocument *target, const QVariantList &verses,
-                          bool numbers, bool headings, double lineHeight);
+                          bool numbers, bool headings, double lineHeight,
+                          const QString &mode = QStringLiteral("block"));
     Q_INVOKABLE int verseAt(int position) const;
     Q_INVOKABLE int verseAtPoint(double x, double y) const;
     Q_INVOKABLE int positionFor(int verse) const;

@@ -21,7 +21,7 @@ static void registerBlockDocument()
 Q_COREAPP_STARTUP_FUNCTION(registerBlockDocument)
 
 void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses,
-                          bool numbers, bool headings, double lineHeight)
+                          bool numbers, bool headings, double lineHeight, const QString &mode)
 {
     if (!target || !target->textDocument()) return;
     if (m_document != target->textDocument()) {
@@ -58,7 +58,11 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
             title.setFontWeight(QFont::DemiBold);
             cursor.insertText(heading, title);
             cursor.insertBlock(paragraph, normal);
-        } else if (cursor.position()) cursor.insertText(" ", normal);
+        } else if (cursor.position()) {
+            if (mode == QStringLiteral("paragraph") && verse.value("paragraphStart").toBool())
+                cursor.insertBlock(paragraph, normal);
+            else cursor.insertText(" ", normal);
+        }
         const int start = cursor.position();
         if (numbers) {
             QTextCharFormat number;
@@ -72,7 +76,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         if (html.isEmpty()) source.setPlainText(verse.value("text").toString());
         else source.setHtml(html); // Already sanitized by the EPUB importer.
         // Flatten source paragraph wrappers, preserving internal poetry breaks
-        // and inline formats. Only visible section headings start paragraphs.
+        // and inline formats. Source verse-boundary paragraphs are handled above.
         for (auto block = source.begin(); block.isValid(); block = block.next()) {
             if (block != source.begin()) cursor.insertText(QString(QChar::LineSeparator), normal);
             for (auto it = block.begin(); !it.atEnd(); ++it) {

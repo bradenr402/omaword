@@ -12,6 +12,7 @@ Item {
     required property var backend
     required property var theme
     required property Flickable viewport
+    property string mode: "block"
     property alias body: body
     property alias mapping: document
     readonly property bool annotationMenuOpen: annotationMenu.visible
@@ -56,14 +57,14 @@ Item {
     readonly property bool numbers: backend.showVerseNumbers && !backend.focusMode
     readonly property bool headings: backend.showHeadings && !backend.focusMode
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
-        return { number: v.number, html: v.html, text: v.text, heading: v.heading }
-    })) + numbers + headings + backend.lineHeight
+        return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart }
+    })) + numbers + headings + backend.lineHeight + mode
     height: body.height
     onContentKeyChanged: Qt.callLater(rebuild)
     function rebuild() {
         controller.clearTextSelection()
         cancelDrag()
-        document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight)
+        document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight, mode)
         Qt.callLater(refreshGeometry)
     }
     function refreshGeometry() { paint.requestPaint(); updateAnnotations() }
