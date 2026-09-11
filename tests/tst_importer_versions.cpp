@@ -68,12 +68,12 @@ private slots:
         QTest::addColumn<QString>("path"); QTest::addColumn<QString>("id");
         QTest::addColumn<QString>("abbr"); QTest::addColumn<QString>("name");
         QTest::addColumn<int>("count");
-        QTest::newRow("NET") << source("OMABIBLE_TEST_EPUB") << "net-2.1" << "NET" << "NET Bible 2.1" << 31087;
-        QTest::newRow("KJV") << source("OMABIBLE_TEST_KJV_EPUB") << "kjv-2006" << "KJV" << "King James (Authorized) Version" << 31102;
+        QTest::newRow("NET") << source("OMAWORD_TEST_EPUB") << "net-2.1" << "NET" << "NET Bible 2.1" << 31087;
+        QTest::newRow("KJV") << source("OMAWORD_TEST_KJV_EPUB") << "kjv-2006" << "KJV" << "King James (Authorized) Version" << 31102;
     }
     void editions() {
         QFETCH(QString,path); QFETCH(QString,id); QFETCH(QString,abbr); QFETCH(QString,name); QFETCH(int,count);
-        if (path.isEmpty()) QSKIP("Set OMABIBLE_TEST_EPUB / OMABIBLE_TEST_KJV_EPUB to a local EPUB.");
+        if (path.isEmpty()) QSKIP("Set OMAWORD_TEST_EPUB / OMAWORD_TEST_KJV_EPUB to a local EPUB.");
         QVERIFY(root.isValid());
         const auto connections = QSqlDatabase::connectionNames();
         const auto before = QDir(root.path()).entryList(QDir::AllEntries | QDir::Hidden);
@@ -151,8 +151,8 @@ private slots:
         }
     }
     void kjvAllWordsAndFormatting() {
-        const auto path = source("OMABIBLE_TEST_KJV_EPUB");
-        if (path.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV_EPUB.");
+        const auto path = source("OMAWORD_TEST_KJV_EPUB");
+        if (path.isEmpty()) QSKIP("Set OMAWORD_TEST_KJV_EPUB.");
         const auto target = root.filePath("kjv-2006.sqlite");
         if (!QFile::exists(target)) {
             const auto result = EpubImporter::importFile(path,target);
@@ -226,8 +226,8 @@ QT_WARNING_POP
         QCOMPARE(checked,31102); QVERIFY(supplied > 10000); QVERIFY(headings >= 116); QCOMPARE(poetry,2461);
     }
     void netInternalParagraphs() {
-        const auto path = source("OMABIBLE_TEST_EPUB");
-        if (path.isEmpty()) QSKIP("Set OMABIBLE_TEST_EPUB.");
+        const auto path = source("OMAWORD_TEST_EPUB");
+        if (path.isEmpty()) QSKIP("Set OMAWORD_TEST_EPUB.");
         auto entries = unzip(path);
         QString chapter;
         for (auto it = entries.cbegin(); it != entries.cend(); ++it)
@@ -253,9 +253,58 @@ QT_WARNING_POP
         for (int verse : {1,3,5,6}) QVERIFY(db.scalar(QString("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=%1").arg(verse)).toBool());
         for (int verse : {2,4,7}) QVERIFY(!db.scalar(QString("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=%1").arg(verse)).toBool());
     }
+    void netOmittedVerseLayout_data() {
+        QTest::addColumn<bool>("boundary");
+        QTest::addColumn<bool>("interveningHeading");
+        QTest::newRow("paragraph-start") << true << false;
+        QTest::newRow("ordered-headings") << true << true;
+        QTest::newRow("paragraph-continuation") << false << false;
+    }
+    void netOmittedVerseLayout() {
+        QFETCH(bool,boundary); QFETCH(bool,interveningHeading);
+        const auto path = source("OMAWORD_TEST_EPUB");
+        if (path.isEmpty()) QSKIP("Set OMAWORD_TEST_EPUB.");
+        auto entries = unzip(path);
+        QString chapter;
+        for (auto it = entries.cbegin(); it != entries.cend(); ++it)
+            if (it.value().contains("NET Bible 2.1 Acts 24</title>")) { chapter = it.key(); break; }
+        QVERIFY(!chapter.isEmpty());
+        QByteArray body = "<html><head><title>NET Bible 2.1 Acts 24</title></head><body><p class='bodytext'>";
+        for (int verse = 1; verse <= 6; ++verse)
+            body += "<span class='verse'>24:" + QByteArray::number(verse) + "</span>Before " + QByteArray::number(verse) + ". ";
+        if (boundary) body += "</p><p class='paragraphtitle'>Carried heading</p><p class='bodytext'>";
+        // Whitespace, formatting and translator notes are not retained Scripture.
+        body += "<span class='verse'>24:7</span> \n<i> </i><sup>OMITTED NOTE POISON</sup>";
+        if (interveningHeading)
+            body += "</p><p class='paragraphtitle'>Later heading</p><p class='bodytext'>";
+        for (int verse = 8; verse <= 27; ++verse)
+            body += "<span class='verse'>24:" + QByteArray::number(verse) + "</span>After " + QByteArray::number(verse) + ". ";
+        body += "</p></body></html>";
+        entries[chapter] = body;
+        const auto fixture = root.filePath("net-omitted-layout.epub"), target = root.filePath("net-omitted-layout.sqlite");
+        QVERIFY(zip(fixture,entries));
+        const auto result = EpubImporter::importFile(fixture,target);
+        QVERIFY2(result.ok,qPrintable(result.error)); QCOMPARE(result.verseCount,31087);
+        Database db(target);
+        QCOMPARE(db.scalar("SELECT COUNT(*) FROM verses WHERE book=44 AND chapter=24").toInt(),26);
+        QCOMPARE(db.scalar("SELECT COUNT(*) FROM verses WHERE book=44 AND chapter=24 AND number=7").toInt(),0);
+        QSqlQuery q(db.db);
+        QVERIFY(q.exec("SELECT number,text,html,heading,paragraphStart FROM verses WHERE book=44 AND chapter=24 ORDER BY number"));
+        int retained = 0;
+        while (q.next()) {
+            ++retained;
+            const int verse = q.value(0).toInt();
+            const QString expected = QString(verse <= 6 ? "Before %1." : "After %1.").arg(verse);
+            QCOMPARE(q.value(1).toString(),expected); QCOMPARE(q.value(2).toString(),expected);
+            QCOMPARE(q.value(3).toString(),verse == 8 && boundary
+                ? (interveningHeading ? QString("Carried heading\nLater heading") : QString("Carried heading")) : QString());
+            QCOMPARE(q.value(4).toBool(),verse == 1 || (verse == 8 && boundary));
+        }
+        QCOMPARE(retained,26);
+    }
     void kjvNotesAndHtml() {
-        const auto path = source("OMABIBLE_TEST_KJV_EPUB");
-        if (path.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV_EPUB.");
+        const auto path = source("OMAWORD_TEST_KJV_EPUB");
+        if (path.isEmpty()) QSKIP("Set OMAWORD_TEST_KJV_EPUB.");
         auto entries = unzip(path); QVERIFY(entries.contains("OEBPS/GEN.xhtml"));
         auto &gen = entries["OEBPS/GEN.xhtml"];
         int start = gen.indexOf("id=\"GN1_1\""); QVERIFY(start > 0);
@@ -283,12 +332,12 @@ QT_WARNING_POP
     }
     void unsupportedOcr_data() {
         QTest::addColumn<QString>("path");
-        QTest::newRow("original-NKJV") << source("OMABIBLE_TEST_NKJV_ORIGINAL_EPUB");
-        QTest::newRow("replacement-NKJV") << source("OMABIBLE_TEST_NKJV_EPUB");
+        QTest::newRow("original-NKJV") << source("OMAWORD_TEST_NKJV_ORIGINAL_EPUB");
+        QTest::newRow("replacement-NKJV") << source("OMAWORD_TEST_NKJV_EPUB");
     }
     void unsupportedOcr() {
         QFETCH(QString,path);
-        if (path.isEmpty()) QSKIP("Set OMABIBLE_TEST_NKJV_ORIGINAL_EPUB / OMABIBLE_TEST_NKJV_EPUB.");
+        if (path.isEmpty()) QSKIP("Set OMAWORD_TEST_NKJV_ORIGINAL_EPUB / OMAWORD_TEST_NKJV_EPUB.");
         QTemporaryDir dir; QVERIFY(dir.isValid());
         const auto before = QSqlDatabase::connectionNames();
         QString error;

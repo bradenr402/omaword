@@ -387,6 +387,15 @@ void parseDocument(QByteArray data, const QString &path, QSqlQuery &insert, QSet
         // Acts 24:7 has an empty verse marker in the publisher's EPUB.
         // Omitted text must not become an invented or blank Scripture row.
         if (verse.text.isEmpty() && omittedVerse(verse.book, verse.chapter, verse.number)) {
+            // An empty marker cannot consume layout intended for retained text.
+            // Later headings may already be pending: keep their source order.
+            paragraphStart = paragraphStart || verse.paragraphStart;
+            if (!verse.heading.isEmpty()) {
+                const int separator = pendingHeading.isEmpty() ? 0 : 1;
+                if (verse.heading.size() + pendingHeading.size() + separator > MaximumVerseOutput)
+                    fail("EPUB heading output limit exceeded: " + path);
+                pendingHeading = verse.heading + (separator ? "\n" + pendingHeading : QString());
+            }
             verse = Verse();
             verseOutput = 0;
             return;
