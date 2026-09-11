@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Controls
+import QtQuick.Shapes
 // Registered by blockdocument.cpp at application startup, without a QML plugin.
 // qmllint disable import
 import OmaBible.Reader 1.0
@@ -12,6 +14,44 @@ Item {
     required property Flickable viewport
     property alias body: body
     property alias mapping: document
+    readonly property real railWidth: 40 * controller.scale
+    onRailWidthChanged: Qt.callLater(updateAnnotations)
+    property var annotationRanges: []
+    property var annotationGroups: []
+    property real annotationScale: 0
+    readonly property string annotationKey: JSON.stringify(backend.verses) + JSON.stringify(backend.collection)
+        + backend.book + ":" + backend.chapter
+    onAnnotationKeyChanged: Qt.callLater(updateAnnotations)
+    function updateAnnotations() {
+        const ranges = document.annotations(backend.verses, backend.collection, backend.book, backend.chapter)
+        if (JSON.stringify(ranges) === JSON.stringify(annotationRanges) && annotationScale === controller.scale) return
+        annotationScale = controller.scale
+        annotationMenu.close()
+        // Pack nearby line anchors into one stack, keeping each reference an
+        // independent action in the chooser. No icon drifts onto another line.
+        const groups = []
+        for (const range of ranges) {
+            let group = groups.length ? groups[groups.length - 1] : null
+            if (!group || range.y >= group.y + 36 * controller.scale) {
+                group = { y: range.y, bookmark: [], note: [] }
+                groups.push(group)
+            }
+            group[range.kind].push(range)
+        }
+        annotationRanges = ranges
+        annotationGroups = groups
+    }
+    function openAnnotation(entry) {
+        if (entry.kind === "bookmark") controller.openBookmark(entry.reference)
+        else {
+            if (!controller.flushNote()) return
+            controller.clearTextSelection()
+            if (backend.navigate(entry.reference)) {
+                controller.syncNote()
+                controller.openNotes(true)
+            }
+        }
+    }
     readonly property bool numbers: backend.showVerseNumbers && !backend.focusMode
     readonly property bool headings: backend.showHeadings && !backend.focusMode
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
@@ -23,8 +63,9 @@ Item {
         controller.clearTextSelection()
         cancelDrag()
         document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight)
-        Qt.callLater(paint.requestPaint)
+        Qt.callLater(refreshGeometry)
     }
+    function refreshGeometry() { paint.requestPaint(); updateAnnotations() }
     function cancelDrag() { dragging = false; pressed = false; autoscroll.stop() }
     function clearSelection() { body.deselect() }
     function verseRect(number) { return body.positionToRectangle(document.positionFor(number)) }
@@ -41,7 +82,10 @@ Item {
         controller.freeSelectedText = body.selectedText
     }
     // qmllint disable import
-    BlockDocument { id: document }
+    BlockDocument {
+        id: document
+        onGeometryChanged: Qt.callLater(root.refreshGeometry)
+    }
     // qmllint enable import
     // Paint logical ranges behind the single text layout. A range joins through
     // spaces and wrapped lines; adjacent independent highlights keep their gap.
@@ -72,11 +116,6 @@ Item {
                     if (!ranges[range.reference]) ranges[range.reference] = { start: span.start, end: span.end }
                     else ranges[range.reference].end = span.end
                 }
-                if (!focused && (verse.bookmarked || verse.hasNote)) {
-                    const r = body.positionToRectangle(span.start)
-                    ctx.fillStyle = accent
-                    ctx.fillRect(r.x, r.y + r.height - 2, verse.bookmarked ? 10 : 4, 2)
-                }
             }
             function draw(start, end, selected) {
                 for (const r of document.rectangles(start, end)) {
@@ -101,7 +140,8 @@ Item {
         textFormat: TextEdit.RichText
         font.family: root.theme.fontFamily
         font.pixelSize: root.controller.readerSize * root.controller.scale
-        onFontChanged: Qt.callLater(paint.requestPaint)
+        onFontChanged: Qt.callLater(root.refreshGeometry)
+        onWidthChanged: Qt.callLater(root.refreshGeometry)
         color: root.theme.foreground
         selectionColor: root.controller.tint(root.theme.accent, 0.35)
         selectedTextColor: root.theme.foreground
@@ -155,6 +195,184 @@ Item {
                 root.controller.selectVerse(root.hit(mouse.x, mouse.y), false)
                 root.controller.openNotes(true)
             }
+        }
+    }
+    // Outside the text's bounds, above both the highlight canvas and TextEdit.
+    // Main reserves this gutter at the BlockReader loader's left edge.
+    Item {
+        id: rail
+        objectName: "blockAnnotationRail"
+        x: -root.railWidth
+        width: root.railWidth
+        height: root.height
+        z: 2
+        visible: !root.backend.focusMode
+        onVisibleChanged: if (!visible) annotationMenu.close()
+        Repeater {
+            model: root.annotationRanges.filter(function(r) { return r.kind === "bookmark" })
+            delegate: Item {
+                id: bracket
+                required property var modelData
+                required property int index
+                objectName: "blockBookmarkExtent:" + modelData.reference
+                // Separate overlapping and adjacent ranges, even if their
+                // endpoints are mid-line. Brackets cover the whole line box.
+                x: (2 + (index % 3) * 3) * root.controller.scale
+                y: modelData.y
+                width: 4 * root.controller.scale
+                height: modelData.height
+                Rectangle {
+                    width: root.controller.scale
+                    height: parent.height
+                    color: root.theme.accent
+                    opacity: 0.5
+                }
+                Rectangle {
+                    width: parent.width; height: root.controller.scale
+                    color: root.theme.accent
+                    visible: !bracket.modelData.continuesBefore
+                }
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width; height: root.controller.scale
+                    color: root.theme.accent
+                    visible: !bracket.modelData.continuesAfter
+                }
+            }
+        }
+        Repeater {
+            model: root.annotationGroups
+            delegate: Column {
+                id: group
+                required property var modelData
+                objectName: "blockAnnotationGroup:" + index
+                required property int index
+                x: 13 * root.controller.scale
+                y: modelData.y
+                width: 23 * root.controller.scale
+                Repeater {
+                    model: ["bookmark", "note"].filter(function(kind) { return group.modelData[kind].length > 0 })
+                    delegate: ToolButton {
+                        id: marker
+                        required property string modelData
+                        readonly property var entries: group.modelData[modelData]
+                        readonly property string hint: (modelData === "bookmark" ? "Bookmark" : "Note")
+                            + (entries.length > 1 ? "s" : "") + "\n"
+                            + entries.map(function(e) { return e.reference + (e.continuesBefore ? " (continued)" : "") }).join("\n")
+                        objectName: "blockAnnotationMarker:" + modelData + ":" + entries[0].reference
+                        width: group.width
+                        height: 18 * root.controller.scale
+                        padding: 0
+                        hoverEnabled: true
+                        Accessible.name: hint
+                        onClicked: {
+                            if (entries.length === 1) root.openAnnotation(entries[0])
+                            else {
+                                annotationMenu.entries = entries
+                                const p = mapToItem(root, width, 0)
+                                annotationMenu.popup(p.x, p.y)
+                            }
+                        }
+                        background: Rectangle {
+                            radius: 3 * root.controller.scale
+                            color: root.controller.tint(root.theme.accent, marker.down ? 0.25 : 0.12)
+                            visible: marker.hovered || marker.activeFocus
+                        }
+                        contentItem: Item {
+                            Item {
+                                width: 10 * root.controller.scale
+                                height: 13 * root.controller.scale
+                                anchors.centerIn: parent
+                                anchors.horizontalCenterOffset: marker.entries.length > 1 ? -3 * root.controller.scale : 0
+                                Shape {
+                                    anchors.fill: parent
+                                    visible: marker.modelData === "bookmark"
+                                    ShapePath {
+                                        strokeColor: "transparent"
+                                        fillColor: root.theme.accent
+                                        startX: 0; startY: 0
+                                        PathLine { x: 10 * root.controller.scale; y: 0 }
+                                        PathLine { x: 10 * root.controller.scale; y: 13 * root.controller.scale }
+                                        PathLine { x: 5 * root.controller.scale; y: 9 * root.controller.scale }
+                                        PathLine { x: 0; y: 13 * root.controller.scale }
+                                        PathLine { x: 0; y: 0 }
+                                    }
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    visible: marker.modelData === "note"
+                                    color: "transparent"
+                                    border.color: root.theme.accent
+                                    border.width: root.controller.scale
+                                    radius: root.controller.scale
+                                    Repeater {
+                                        model: 3
+                                        Rectangle {
+                                            required property int index
+                                            x: 3 * root.controller.scale
+                                            y: (3 + index * 3) * root.controller.scale
+                                            width: (index === 2 ? 3 : 4) * root.controller.scale
+                                            height: root.controller.scale
+                                            color: root.theme.accent
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: marker.entries.length > 1
+                                text: marker.entries.length
+                                font.pixelSize: 8 * root.controller.scale
+                                color: root.theme.accent
+                            }
+                        }
+                        ToolTip {
+                            id: markerTip
+                            visible: rail.visible && (marker.hovered || marker.activeFocus) && !annotationMenu.visible
+                            delay: 500
+                            text: marker.hint
+                            palette.window: root.theme.background
+                            palette.windowText: root.theme.foreground
+                            contentItem: Text {
+                                text: markerTip.text
+                                color: root.theme.foreground
+                                font.family: root.theme.fontFamily
+                                font.pixelSize: 12 * root.controller.scale
+                            }
+                            background: Rectangle {
+                                color: root.theme.background
+                                border.color: root.theme.accent
+                                radius: 4 * root.controller.scale
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Menu {
+        id: annotationMenu
+        objectName: "blockAnnotationMenu"
+        popupType: Popup.Item
+        property var entries: []
+        palette.window: root.theme.background
+        palette.base: root.theme.background
+        palette.text: root.theme.foreground
+        palette.windowText: root.theme.foreground
+        palette.buttonText: root.theme.foreground
+        palette.highlight: root.theme.accent
+        palette.highlightedText: root.theme.background
+        Instantiator {
+            model: annotationMenu.entries
+            delegate: MenuItem {
+                required property var modelData
+                objectName: "blockAnnotationAction:" + modelData.kind + ":" + modelData.reference
+                text: modelData.reference + (modelData.continuesBefore ? " (continued)" : "")
+                onTriggered: root.openAnnotation(modelData)
+            }
+            onObjectAdded: function(index, object) { annotationMenu.insertItem(index, object) }
+            onObjectRemoved: function(index, object) { annotationMenu.removeItem(object) }
         }
     }
     Timer {

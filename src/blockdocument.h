@@ -20,8 +20,13 @@ public:
     Q_INVOKABLE int verseAtPoint(double x, double y) const;
     Q_INVOKABLE int positionFor(int verse) const;
     Q_INVOKABLE QVariantList rectangles(int start, int end) const;
+    // One entry per logical annotation intersecting this chapter. Geometry is
+    // in document coordinates; the rail never inserts characters into the text.
+    Q_INVOKABLE QVariantList annotations(const QVariantList &verses, const QVariantList &collection,
+                                         int book, int chapter) const;
 signals:
     void spansChanged();
+    void geometryChanged();
 private:
     QPointer<QTextDocument> m_document;
     QVariantList m_spans;

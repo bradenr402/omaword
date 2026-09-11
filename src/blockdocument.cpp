@@ -8,6 +8,7 @@
 #include <QTextFragment>
 #include <QTextLayout>
 #include <algorithm>
+#include <tuple>
 
 static void registerBlockDocument()
 {
@@ -19,7 +20,19 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
                           bool numbers, bool headings, double lineHeight)
 {
     if (!target || !target->textDocument()) return;
-    m_document = target->textDocument();
+    if (m_document != target->textDocument()) {
+        if (m_document) {
+            disconnect(m_document, nullptr, this, nullptr);
+            disconnect(m_document->documentLayout(), nullptr, this, nullptr);
+        }
+        m_document = target->textDocument();
+        connect(m_document, &QTextDocument::contentsChanged, this, &BlockDocument::geometryChanged);
+        connect(m_document->documentLayout(), &QAbstractTextDocumentLayout::documentSizeChanged,
+                this, &BlockDocument::geometryChanged);
+        // TextEdit also requests geometry on font/width changes, including
+        // reflows that keep the same size. Do not use layout::update here: it
+        // fires for caret/selection repaints as well as actual layout changes.
+    }
     m_document->clear();
     m_document->setDocumentMargin(0);
     m_spans.clear();
@@ -67,6 +80,62 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
                                   {"textStart",textStart}, {"end",cursor.position()}});
     }
     emit spansChanged();
+    emit geometryChanged();
+}
+
+QVariantList BlockDocument::annotations(const QVariantList &verses, const QVariantList &collection,
+                                       int book, int chapter) const
+{
+    QMap<QString, QVariantMap> ranges;
+    auto include = [&ranges](const QString &kind, const QString &reference, const QVariantMap &span,
+                             bool before, bool after) {
+        const QString key = kind + ':' + reference;
+        if (!ranges.contains(key))
+            ranges[key] = {{"kind",kind}, {"reference",reference}, {"start",span.value("start")},
+                           {"continuesBefore",before}};
+        ranges[key]["end"] = span.value("end");
+        ranges[key]["continuesAfter"] = after;
+    };
+    for (const auto &value : m_spans) {
+        const auto span = value.toMap();
+        const int number = span.value("number").toInt();
+        for (const auto &row : verses) {
+            const auto verse = row.toMap();
+            if (verse.value("number").toInt() != number) continue;
+            for (const auto &entry : verse.value("bookmarkRanges").toList()) {
+                const auto range = entry.toMap();
+                include("bookmark",range.value("reference").toString(),span,
+                        range.value("bookmarkContinuesBefore").toBool(),
+                        range.value("bookmarkContinuesAfter").toBool());
+            }
+            break;
+        }
+        // Canonical endpoint tuples also handle omitted verses and cross-book
+        // notes, without parsing localized display references or using hasNote.
+        const auto here = std::make_tuple(book,chapter,number);
+        for (const auto &entry : collection) {
+            const auto note = entry.toMap();
+            if (note.value("note").toString().isEmpty()) continue;
+            const auto first = std::make_tuple(note.value("book").toInt(),note.value("chapter").toInt(),note.value("start").toInt());
+            const auto last = std::make_tuple(note.value("endBook").toInt(),note.value("endChapter").toInt(),note.value("end").toInt());
+            if (here >= first && here <= last)
+                include("note",note.value("reference").toString(),span,here > first,here < last);
+        }
+    }
+    QVariantList result;
+    for (auto range : ranges) {
+        const auto rects = rectangles(range.value("start").toInt(),range.value("end").toInt());
+        if (rects.isEmpty()) continue;
+        const auto first = rects.first().toMap(), last = rects.last().toMap();
+        range["rects"] = rects;
+        range["y"] = first.value("y");
+        range["height"] = last.value("y").toDouble() + last.value("height").toDouble() - first.value("y").toDouble();
+        result.append(range);
+    }
+    std::stable_sort(result.begin(),result.end(),[](const QVariant &a, const QVariant &b) {
+        return a.toMap().value("start").toInt() < b.toMap().value("start").toInt();
+    });
+    return result;
 }
 
 int BlockDocument::verseAt(int position) const
