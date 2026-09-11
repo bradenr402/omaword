@@ -48,6 +48,10 @@ QObject context `desktop`: QColor background, foreground, surface, muted, accent
 Normal j/k moves the verse cursor; v anchors visual selection; visual j/k and
 shifted J/K extend it across chapters. h/l navigates chapters, x highlights, m
 bookmarks. Keybindings are searchable. UI uses square corners and system fonts.
+Floating bottom icon controls overlay the full-height reader. Saved overlays on
+the right with its own keyboard context; Notes reflows the reader on wide windows.
+Reader Left/Right changes chapters; Ctrl+D/U moves five verses; PageDown/Up ten;
+numeric prefixes such as 20g select a verse. Bookmark modifiers use Ctrl+M.
 
 ## Scope
 

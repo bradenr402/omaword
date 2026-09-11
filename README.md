@@ -127,10 +127,21 @@ visual mode and extends immediately. At chapter boundaries, `j` continues to the
 next chapter and `k` to the previous one, skipping omitted NET verse numbers.
 Press `x` to highlight the entire range, including its off-screen chapters.
 Press `v` again to collapse the range to its cursor. Saved ranges reopen at their
-active ending chapter; the full reference remains visible in the footer and notes.
+active ending chapter; the full reference appears in the passage control's tooltip
+and in notes. Floating bottom controls leave the reading surface full-height:
+visual mode on the left, book and chapter in the center, and Saved, Notes, and
+Keybindings icons on the right.
 
 The palette previews the canonical destination before you press Enter. When
-browsing books, Right Arrow also opens the selected book's chapter list.
+browsing books, Right Arrow also opens the selected book's chapter list. Left
+Arrow returns to books from the chapter list when the input is empty or its caret
+is at the beginning. Up from the first chapter selects **All books**; Enter goes
+back. The palette's keyboard hints change with its current mode.
+
+Type `20g` to select verse 20 of the current chapter. Invalid or omitted verse
+numbers leave your location unchanged. A numeric prefix expires after two seconds
+and clears when you change focus or use another command. Verse movement keeps
+three lines of context around the selected verse where space permits.
 
 ### Notes, bookmarks, and highlights
 
@@ -155,16 +166,18 @@ active. **?** or **F1** opens the searchable **Keybindings** panel.
 | Action | Shortcut |
 | --- | --- |
 | Passage palette / command palette | Ctrl+K / Ctrl+Shift+P |
-| Saved passages | Ctrl+L |
-| Previous / next chapter | `h` / `l`, `[` / `]`, Alt+Left / Alt+Right |
+| Toggle Saved | Ctrl+L |
+| Previous / next chapter | `h` / `l`, Left / Right, `[` / `]`, Alt+Left / Alt+Right |
 | Previous / next verse | `k` / `j`, Up / Down |
-| Page down | Space, PageDown, Ctrl+F |
-| Page up | Shift+Space, PageUp, Ctrl+B |
+| Move forward / backward 5 verses | Ctrl+D / Ctrl+U |
+| Move forward / backward 10 verses | PageDown / PageUp |
+| Scroll a page down / up | Space / Shift+Space, Ctrl+F / Ctrl+B |
+| Select numbered verse | Number then `g`, e.g. `20g` |
 | Select chapter beginning / end | `g` / `G`, Home / End |
 | Toggle visual selection / collapse to cursor | `v` |
 | Extend or shrink visual selection | `j` / `k`, Down / Up |
 | Enter visual mode and extend | `J` / `K`, Shift+Down / Shift+Up |
-| Bookmark selected verses | `m`, Ctrl+D |
+| Bookmark selected verses | `m`, Ctrl+M |
 | Highlight selected verses | `x`, Ctrl+H |
 | Write a note | `n`, Ctrl+N |
 | Toggle notes panel | Ctrl+Shift+N |
@@ -176,6 +189,11 @@ active. **?** or **F1** opens the searchable **Keybindings** panel.
 
 Use Up/Down and Enter in the palette, or prefix its query with `>` to find
 commands such as import, export, backup, restore, and About.
+
+In the right-hand **Saved** panel, `j` / `k` or Down / Up moves between entries;
+`h` / `l` or Left / Right selects All, Bookmarks, Highlights, or Notes. Enter opens
+the selected entry; Ctrl+L or Escape closes the panel. These keys operate on Saved
+while it is open, without moving the underlying reader.
 
 ## Data, export, and backup
 
