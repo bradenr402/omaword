@@ -259,7 +259,7 @@ and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**
 
 | Action | Shortcut |
 | --- | --- |
-| Passage palette / command palette | Ctrl k / Ctrl Space |
+| Passage palette / command palette | `s` or Ctrl k / Ctrl Space |
 | Resume last palette | Space |
 | Toggle Saved | Ctrl l |
 | Previous / next chapter | `h` / `l`, Left / Right, `[` / `]` |

@@ -570,7 +570,7 @@ ApplicationWindow {
     // One action catalog supplies shortcuts, searchable keybindings, and commands.
     // Context-only gestures are explanatory rows, never executable guesses.
     readonly property var actions: [
-        { id: "books", title: "Open a passage", keys: "Ctrl k", sequences: ["Ctrl+K"], scope: "palette", command: true },
+        { id: "books", title: "Open a passage", keys: "s · Ctrl k", sequences: ["S", "Ctrl+K"], scope: "palette", command: true },
         { id: "commands", title: "Open commands", keys: "Ctrl Space", sequences: ["Ctrl+Space"], scope: "palette" },
         { id: "resume", title: "Resume last palette", keys: "Space", sequences: ["Space"] },
         { id: "saved", title: "Saved passages", keys: "Ctrl l", sequences: ["Ctrl+L"], command: true },
@@ -2479,7 +2479,8 @@ ApplicationWindow {
         delegate: Shortcut {
             required property var modelData
             context: Qt.ApplicationShortcut
-            sequences: modelData.id === "first" ? ["G"] : modelData.id === "last" ? ["Shift+G"] : modelData.sequences
+            sequences: modelData.id === "books" && !app.readerKeys ? ["Ctrl+K"]
+                : modelData.id === "first" ? ["G"] : modelData.id === "last" ? ["Shift+G"] : modelData.sequences
             enabled: app.shortcutEnabled(modelData)
             onActivated: app.runCommand(modelData.id)
         }
