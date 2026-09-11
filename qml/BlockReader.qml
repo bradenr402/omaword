@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Shapes
 // Registered by blockdocument.cpp at application startup, without a QML plugin.
 // qmllint disable import
-import OmaBible.Reader 1.0
+import OmaWord.Reader 1.0
 // qmllint enable import
 
 Item {

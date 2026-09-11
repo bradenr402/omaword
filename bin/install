@@ -10,16 +10,105 @@ if [[ ! -x $build_dir/$BRAND_ID || ! -f $build_dir/$BRAND_ID.desktop ]]; then
 fi
 
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
-install -Dm755 -- "$build_dir/$BRAND_ID" "$HOME/.local/bin/$BRAND_ID"
-ln -sfn -- "$BRAND_ID" "$HOME/.local/bin/$BRAND_STORAGE_ID"
-install -Dm644 -- "$build_dir/$BRAND_ID.desktop" "$data_home/applications/$BRAND_ID.desktop"
-install -Dm644 -- "$root/assets/$BRAND_ID.svg" "$data_home/icons/hicolor/scalable/apps/$BRAND_ID.svg"
-install -Dm644 -- "$root/assets/$BRAND_ID-symbolic.svg" "$data_home/icons/hicolor/symbolic/apps/$BRAND_ID-symbolic.svg"
+sources=("$build_dir/$BRAND_ID" "$build_dir/$BRAND_ID.desktop"
+    "$root/assets/app.svg" "$root/assets/app-symbolic.svg")
+destinations=("$HOME/.local/bin/$BRAND_ID" "$data_home/applications/$BRAND_ID.desktop"
+    "$data_home/icons/hicolor/scalable/apps/$BRAND_ID.svg"
+    "$data_home/icons/hicolor/symbolic/apps/$BRAND_ID-symbolic.svg"
+    "$HOME/.local/bin/$BRAND_STORAGE_ID")
+backup_names=("bin/$BRAND_ID" "applications/$BRAND_ID.desktop"
+    "icons/scalable/$BRAND_ID.svg" "icons/symbolic/$BRAND_ID-symbolic.svg"
+    "bin/$BRAND_STORAGE_ID")
+modes=(755 644 644 644)
+
+# Check every input and destination before backing up or installing anything.
+for source_file in "${sources[@]}" "$root/assets/legacy/$BRAND_STORAGE_ID.desktop"; do
+    if [[ ! -f $source_file || ! -r $source_file ]]; then
+        printf 'Missing or unreadable installation source: %s\n' "$source_file" >&2
+        exit 1
+    fi
+done
+preflight_destination() {
+    local destination=$1 parent
+    if [[ -e $destination && ! -f $destination && ! -L $destination ]]; then
+        printf 'Installation destination is not a file: %s\n' "$destination" >&2
+        exit 1
+    fi
+    parent=$(dirname -- "$destination")
+    while [[ ! -e $parent && ! -L $parent ]]; do parent=$(dirname -- "$parent"); done
+    if [[ ! -d $parent || ! -w $parent || ! -x $parent ]]; then
+        printf 'Installation parent is not a writable directory: %s\n' "$parent" >&2
+        exit 1
+    fi
+}
 # Only remove the byte-for-byte launcher shipped by the previous local installer.
 # A customized file or symlink belongs to its user and must be preserved.
 legacy_launcher="$data_home/applications/$BRAND_STORAGE_ID.desktop"
+remove_legacy=false
 if [[ -f $legacy_launcher && ! -L $legacy_launcher ]] &&
     cmp -s -- "$root/assets/legacy/$BRAND_STORAGE_ID.desktop" "$legacy_launcher"; then
+    remove_legacy=true
+fi
+for destination in "${destinations[@]}" "$legacy_launcher"; do
+    preflight_destination "$destination"
+done
+backup_root="$data_home/$BRAND_ID/install-backups"
+preflight_destination "$backup_root/.preflight"
+
+changed=()
+for i in "${!destinations[@]}"; do
+    destination=${destinations[i]}
+    if (( i < ${#sources[@]} )); then
+        if [[ -f $destination && ! -L $destination ]] &&
+            cmp -s -- "${sources[i]}" "$destination" &&
+            [[ $(stat -c '%a' -- "$destination") == "${modes[i]}" ]]; then
+            continue
+        fi
+    elif [[ -L $destination && $(readlink -- "$destination") == "$BRAND_ID" ]]; then
+        continue
+    fi
+    changed+=("$i")
+done
+
+# Preserve every replaced entry, including custom wrappers and dangling symlinks.
+# Complete all backups before modifying any installed file.
+backup_dir=
+backup_existing() {
+    local destination=$1 name=$2
+    [[ -e $destination || -L $destination ]] || return 0
+    if [[ -z $backup_dir ]]; then
+        mkdir -p -- "$backup_root"
+        backup_dir=$(mktemp -d "$backup_root/$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")
+        printf 'Backing up changed installation files to %s\n' "$backup_dir"
+    fi
+    mkdir -p -- "$(dirname -- "$backup_dir/$name")"
+    cp -a -- "$destination" "$backup_dir/$name"
+}
+for i in "${changed[@]}"; do
+    backup_existing "${destinations[i]}" "${backup_names[i]}"
+done
+if $remove_legacy; then
+    backup_existing "$legacy_launcher" "applications/$BRAND_STORAGE_ID.desktop"
+fi
+
+# Same-directory rename replaces files and symlinks without following them and
+# allows an already-running executable to keep using its original inode.
+temporary=
+trap 'if [[ -n $temporary ]]; then rm -f -- "$temporary"; fi' EXIT
+for i in "${changed[@]}"; do
+    destination=${destinations[i]}
+    parent=$(dirname -- "$destination")
+    mkdir -p -- "$parent"
+    temporary=$(mktemp "$parent/.install-$BRAND_ID.XXXXXX")
+    if (( i < ${#sources[@]} )); then
+        install -m "${modes[i]}" -- "${sources[i]}" "$temporary"
+    else
+        ln -sfT -- "$BRAND_ID" "$temporary"
+    fi
+    mv -fT -- "$temporary" "$destination"
+    temporary=
+done
+if $remove_legacy; then
     rm -- "$legacy_launcher"
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then

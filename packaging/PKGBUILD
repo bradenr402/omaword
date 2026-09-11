@@ -33,8 +33,8 @@ package() {
     install -Dm755 "$srcdir/build/$BRAND_ID" "$pkgdir/usr/bin/$BRAND_ID"
     ln -s "$BRAND_ID" "$pkgdir/usr/bin/$BRAND_STORAGE_ID"
     install -Dm644 "$srcdir/build/$BRAND_ID.desktop" "$pkgdir/usr/share/applications/$BRAND_ID.desktop"
-    install -Dm644 "$root/assets/$BRAND_ID.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$BRAND_ID.svg"
-    install -Dm644 "$root/assets/$BRAND_ID-symbolic.svg" "$pkgdir/usr/share/icons/hicolor/symbolic/apps/$BRAND_ID-symbolic.svg"
+    install -Dm644 "$root/assets/app.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$BRAND_ID.svg"
+    install -Dm644 "$root/assets/app-symbolic.svg" "$pkgdir/usr/share/icons/hicolor/symbolic/apps/$BRAND_ID-symbolic.svg"
     install -Dm644 "$root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 "$root/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
 }
