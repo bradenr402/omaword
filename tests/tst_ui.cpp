@@ -709,6 +709,7 @@ private slots:
         key(Qt::Key_K,Qt::ControlModifier);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QTRY_VERIFY(item("paletteChevron0")->isVisible());
+        QCOMPARE(prop("paletteBooks","text").toString(),QString("Search"));
         type("John"); key(Qt::Key_Return);
         QTRY_VERIFY(item("paletteChevron0")->isVisible());
         type("3"); key(Qt::Key_Return);
@@ -760,8 +761,10 @@ private slots:
         key(Qt::Key_PageDown);
         const int bottomRow = prop("keybindingResults","currentIndex").toInt();
         QVERIFY(bottomRow > 0 && bottomRow < count - 1);
+        QCOMPARE(prop("keybindingResults","contentY").toDouble(),top + list->height());
+        key(Qt::Key_PageUp);
         QCOMPARE(prop("keybindingResults","contentY").toDouble(),top);
-        key(Qt::Key_PageUp); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
+        QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
         const QPoint hover = bar->mapToScene(QPointF(bar->width()/2,bar->height()/2)).toPoint();
         QTest::mouseMove(window,hover);
         QTRY_VERIFY(bar->property("hovered").toBool());
@@ -779,6 +782,56 @@ private slots:
         QCOMPARE(prop("keybindingResults","count").toInt(),1);
         bible->setLineHeight(2.0);
         key(Qt::Key_Return); QTRY_COMPARE(bible->lineHeight(),1.5);
+    }
+    void keybindingGeometricPages() {
+        window->resize(640,480);
+        QVERIFY(desktop->setProperty("textScale",1.8));
+        key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        QTest::qWait(150);
+        auto list = item("keybindingResults");
+        auto current = [&]() { return qvariant_cast<QQuickItem *>(prop("keybindingResults","currentItem")); };
+        const double first = prop("keybindingResults","contentY").toDouble();
+        const int count = prop("keybindingResults","count").toInt();
+        QVERIFY(item("keybindingGo to verse number"));
+        QVERIFY(item("keybindingGo to verse number")->height() > item("keybindingNext verse")->height());
+        for (int i = 0; i < 40; ++i) {
+            const double top = prop("keybindingResults","contentY").toDouble();
+            const double end = prop("keybindingResults","originY").toDouble()
+                + qMax(0.0,prop("keybindingResults","contentHeight").toDouble() - list->height());
+            const int row = prop("keybindingResults","currentIndex").toInt();
+            key(Qt::Key_PageDown);
+            QVERIFY(qAbs(prop("keybindingResults","contentY").toDouble() - qMin(end,top + list->height())) < 1);
+            QVERIFY(prop("keybindingResults","currentIndex").toInt() >= row);
+            QVERIFY(current());
+            const auto rect = current()->mapRectToItem(list,current()->boundingRect());
+            QVERIFY2(rect.top() >= -1 && rect.bottom() <= list->height() + 1,qPrintable(QString("Row outside page: %1..%2 / %3").arg(rect.top()).arg(rect.bottom()).arg(list->height())));
+            if (top >= end - 1) break;
+        }
+        key(Qt::Key_End); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),count - 1);
+        for (int i = 0; i < 40; ++i) {
+            const double top = prop("keybindingResults","contentY").toDouble();
+            key(Qt::Key_PageUp);
+            QVERIFY(qAbs(prop("keybindingResults","contentY").toDouble() - qMax(first,top - list->height())) < 1);
+            QVERIFY(current());
+            const auto rect = current()->mapRectToItem(list,current()->boundingRect());
+            QVERIFY(rect.top() >= -1 && rect.bottom() <= list->height() + 1);
+            if (top <= first + 1) break;
+        }
+        key(Qt::Key_Home); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
+        key(Qt::Key_PageDown);
+        QVERIFY(current()->isEnabled());
+        const auto selectedAction = current()->property("modelData").toMap().value("id").toString();
+        QCOMPARE(selectedAction,QString("saved"));
+        // The paged row is also the executable choice when focus stays in search.
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("helpDialog","visible").toBool());
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        type("verse picker");
+        key(Qt::Key_PageDown); key(Qt::Key_PageUp);
+        QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
+        key(Qt::Key_Return); QTRY_VERIFY(!bible->versePicker());
     }
     void savedDeleteConfirmationAndIcons() {
         reference("John 3:16-18");
@@ -803,6 +856,13 @@ private slots:
         QCOMPARE(prop("deleteReference","text").toString(),QString("John 3:16"));
         key(Qt::Key_J); key(Qt::Key_L); key(Qt::Key_Delete);
         QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
+        for (auto arrow : {Qt::Key_Left,Qt::Key_Up,Qt::Key_Right,Qt::Key_Down}) {
+            key(arrow); QTRY_VERIFY(item("deleteConfirm")->hasActiveFocus());
+            QCOMPARE(bible->collection(),before);
+            QVERIFY(prop("deleteConfirmation","opened").toBool());
+            key(arrow); QTRY_VERIFY(item("deleteCancel")->hasActiveFocus());
+            QCOMPARE(bible->collection(),before);
+        }
         key(Qt::Key_Return); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
         QCOMPARE(bible->collection(),before);
         key(Qt::Key_Backspace); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
@@ -811,6 +871,8 @@ private slots:
         QCOMPARE(bible->collection(),before);
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
         key(Qt::Key_Tab); QTRY_VERIFY(item("deleteConfirm")->hasActiveFocus());
+        key(Qt::Key_Up); QTRY_VERIFY(item("deleteCancel")->hasActiveFocus());
+        key(Qt::Key_Down); QTRY_VERIFY(item("deleteConfirm")->hasActiveFocus());
         key(Qt::Key_Return); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
         QCOMPARE(bible->collection().size(),1);
         QCOMPARE(bible->selectionReference(),selection);
@@ -1398,7 +1460,7 @@ private slots:
         QTRY_VERIFY(!doc->toPlainText().contains("A section title"));
         QVERIFY(doc->toPlainText().startsWith("Start café"));
         QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings());
-        QVERIFY(!item("chapterTitle")->isVisible()); QVERIFY(!item("editionLabel")->isVisible());
+        QVERIFY(item("chapterTitle")->isVisible()); QVERIFY(!item("editionLabel")->isVisible());
         unloadUi(); loadUi();
         QVERIFY(bible->blockMode()); QVERIFY(bible->focusMode());
         QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings());
@@ -1411,7 +1473,7 @@ private slots:
         QVERIFY(item("verseNumberLabel1")->isVisible()); QVERIFY(item("verseHeading1")->isVisible());
         key(Qt::Key_F);
         QTRY_VERIFY(!item("verseNumberLabel1")->isVisible());
-        QVERIFY(!item("verseHeading1")->isVisible()); QVERIFY(!item("chapterTitle")->isVisible());
+        QVERIFY(!item("verseHeading1")->isVisible()); QVERIFY(item("chapterTitle")->isVisible());
         QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings());
         key(Qt::Key_F);
         QTRY_VERIFY(item("verseHeading1")->isVisible());
@@ -1945,7 +2007,7 @@ private slots:
             QVERIFY2(!item(name)->isVisible(),name);
         QCOMPARE(item("reading")->width(),double(window->width()));
         QVERIFY(item("verseBody1")->isVisible());
-        QVERIFY(!item("chapterTitle")->isVisible());
+        QVERIFY(item("chapterTitle")->isVisible());
         QVERIFY(!item("verseHeading1")->isVisible());
         QVERIFY(!item("verseNumberLabel1")->isVisible());
         QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings());
@@ -2091,6 +2153,144 @@ private slots:
         QVERIFY(desktop->setProperty("textScale",3.0));
         QTRY_COMPARE(item("reading")->width(),1120.0);
         QVERIFY(passage->width() >= 0);
+    }
+    void composableMotions() {
+        reference("John 3:16");
+        type("4k"); QCOMPARE(bible->cursorVerse(),12);
+        QVERIFY(window->property("verseCount").toString().isEmpty());
+        key(Qt::Key_J); QCOMPARE(bible->cursorVerse(),13);
+        type("3"); key(Qt::Key_Down); QCOMPARE(bible->cursorVerse(),16);
+        type("2"); key(Qt::Key_Up); QCOMPARE(bible->cursorVerse(),14);
+        type("4"); key(Qt::Key_J,Qt::ShiftModifier);
+        QVERIFY(window->property("verseMode").toBool());
+        QCOMPARE(bible->selectedStart(),14); QCOMPARE(bible->cursorVerse(),18);
+        type("2"); key(Qt::Key_K,Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(),16); QCOMPARE(bible->selectedStart(),14);
+        type("3"); key(Qt::Key_Down,Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(),19);
+        type("2"); key(Qt::Key_Up,Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(),17);
+        type("2j"); QCOMPARE(bible->cursorVerse(),19); QCOMPARE(bible->selectedStart(),14);
+        type("3k"); QCOMPARE(bible->cursorVerse(),16); QCOMPARE(bible->selectedStart(),14);
+        QVERIFY(window->property("verseCount").toString().isEmpty());
+
+        for (bool visual : {false,true}) {
+            reference("John 3:34");
+            if (visual) key(Qt::Key_V);
+            type("4j");
+            QCOMPARE(bible->chapter(),4); QCOMPARE(bible->cursorVerse(),2);
+            QCOMPARE(bible->crossChapterSelection(),visual);
+            if (visual) QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:34–4:2"));
+            type("4k");
+            QCOMPARE(bible->chapter(),3); QCOMPARE(bible->cursorVerse(),34);
+            QCOMPARE(bible->selectedStart(),34); QCOMPARE(bible->selectedEnd(),34);
+        }
+        reference("John 3:35");
+        type("4"); key(Qt::Key_J,Qt::ShiftModifier); QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:35–4:3"));
+        type("6"); key(Qt::Key_K,Qt::ShiftModifier); QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:33–35"));
+        QCOMPARE(bible->cursorVerse(),33);
+        reference("Matthew 17:20");
+        type("3j"); QCOMPARE(bible->cursorVerse(),24); // Omitted verse 21 is not a row.
+        type("3k"); QCOMPARE(bible->cursorVerse(),20);
+
+        for (auto forward : {Qt::Key_D,Qt::Key_F,Qt::Key_PageDown}) {
+            const auto backward = forward == Qt::Key_D ? Qt::Key_U : forward == Qt::Key_F ? Qt::Key_B : Qt::Key_PageUp;
+            const auto modifiers = forward == Qt::Key_PageDown ? Qt::NoModifier : Qt::ControlModifier;
+            const int step = forward == Qt::Key_D ? 5 : 10;
+            reference("John 3:1");
+            type("2"); key(forward,modifiers); QCOMPARE(bible->cursorVerse(),1 + 2 * step);
+            type("2"); key(backward,modifiers); QCOMPARE(bible->cursorVerse(),1);
+            reference("John 3:34"); key(Qt::Key_V);
+            type("2"); key(forward,modifiers); QCOMPARE(bible->cursorVerse(),36);
+            type("2"); key(forward,modifiers);
+            QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:34–4:1"));
+        }
+
+        reference("John 3:16");
+        type("4"); key(Qt::Key_Home); QCOMPARE(bible->cursorVerse(),1);
+        QVERIFY(window->property("verseCount").toString().isEmpty());
+        type("4"); key(Qt::Key_End); QCOMPARE(bible->cursorVerse(),36);
+        QVERIFY(window->property("verseCount").toString().isEmpty());
+        type("20g"); QCOMPARE(bible->cursorVerse(),20);
+        type("12"); key(Qt::Key_G,Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(),12);
+        type("2l"); QCOMPARE(bible->chapter(),5);
+        type("3h"); QCOMPARE(bible->chapter(),2);
+        type("2"); key(Qt::Key_Right); QCOMPARE(bible->chapter(),4);
+        type("2"); key(Qt::Key_Left); QCOMPARE(bible->chapter(),2);
+        type("3]"); QCOMPARE(bible->chapter(),5);
+        type("2["); QCOMPARE(bible->chapter(),3);
+        reference("John 21:1");
+        type("2l"); QCOMPARE(bible->passage(),QString("Acts 2"));
+        type("2h"); QCOMPARE(bible->passage(),QString("John 21"));
+        type("999999l"); QCOMPARE(bible->passage(),QString("Revelation 22"));
+        type("999999h"); QCOMPARE(bible->passage(),QString("Genesis 1"));
+        reference("John 3:16");
+        type("999999j"); QCOMPARE(bible->selectionReference(),QString("Revelation 22:21"));
+        type("999999k"); QCOMPARE(bible->selectionReference(),QString("Genesis 1:1"));
+
+        type("4"); key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        type("3j"); QCOMPARE(prop("keybindingSearch","text").toString(),QString("3j"));
+        QVERIFY(window->property("verseCount").toString().isEmpty());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("4k 3J"); QCOMPARE(prop("noteEditor","text").toString(),QString("4k 3J"));
+        QVERIFY(window->property("verseCount").toString().isEmpty());
+    }
+    void toggleFeedbackAndFailures() {
+        reference("John 3:16");
+        const auto checkToast = [this](const QString &text) {
+            QCOMPARE(prop("toast","text").toString(),text);
+            QVERIFY(item("toast")->isVisible());
+        };
+        key(Qt::Key_F); QVERIFY(bible->focusMode()); checkToast("Focus mode on");
+        QVERIFY(item("chapterTitle")->isVisible());
+        QVERIFY(!item("editionLabel")->isVisible());
+        QVERIFY(!item("floatingActions")->isVisible());
+        QVERIFY(!item("verseHeading1")->isVisible());
+        QVERIFY(!item("verseNumberLabel1")->isVisible());
+        for (const auto &toggle : QList<QPair<Qt::Key,QString>>{{Qt::Key_R,"Show verse numbers"},
+                {Qt::Key_T,"Show headings"},{Qt::Key_P,"Verse picker"},{Qt::Key_B,"Block mode"},
+                {Qt::Key_V,"Visual selection"}}) {
+            const bool initiallyOn = toggle.first == Qt::Key_R || toggle.first == Qt::Key_T || toggle.first == Qt::Key_P;
+            key(toggle.first); checkToast(toggle.second + (initiallyOn ? " off" : " on"));
+            key(toggle.first); checkToast(toggle.second + (initiallyOn ? " on" : " off"));
+        }
+        key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(prop("notesDrawer","opened").toBool()); checkToast("Notes on");
+        key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(!prop("notesDrawer","visible").toBool()); checkToast("Notes off");
+        key(Qt::Key_BracketRight,Qt::ControlModifier); checkToast("Line height 1.6");
+        key(Qt::Key_Backslash,Qt::ControlModifier); checkToast("Line height 1.5");
+        QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
+        QVERIFY(!item("floatingActions")->isVisible());
+        key(Qt::Key_F); QVERIFY(!bible->focusMode()); checkToast("Focus mode off");
+        QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-toggle-failure");
+            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QVERIFY(query.exec("CREATE TRIGGER reject_preferences BEFORE UPDATE ON preferences BEGIN SELECT RAISE(ABORT,'preference disk failure'); END"));
+            const auto toast = prop("toast","text");
+            for (auto toggle : {Qt::Key_R,Qt::Key_T,Qt::Key_P,Qt::Key_B,Qt::Key_F}) {
+                key(toggle);
+                QVERIFY(bible->error().contains("preference disk failure"));
+                QCOMPARE(prop("toast","text"),toast);
+                QVERIFY(!item("toast")->isVisible());
+            }
+            QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings()); QVERIFY(bible->versePicker());
+            QVERIFY(!bible->blockMode()); QVERIFY(!bible->focusMode());
+            QVERIFY(query.exec("DROP TRIGGER reject_preferences"));
+            key(Qt::Key_R); checkToast("Show verse numbers off");
+            key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+            QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+            checkToast("Notes on");
+            QVERIFY(query.exec("CREATE TRIGGER reject_note BEFORE INSERT ON annotations BEGIN SELECT RAISE(FAIL,'test note failure'); END"));
+            type("An unsaved draft");
+            key(Qt::Key_N,Qt::ControlModifier);
+            QVERIFY(prop("notesDrawer","opened").toBool());
+            QCOMPARE(prop("toast","text").toString(),QString("Notes on"));
+            QVERIFY(query.exec("DROP TRIGGER reject_note"));
+            key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+            checkToast("Notes off");
+            QCOMPARE(bible->noteText(),QString("An unsaved draft"));
+        }
+        QSqlDatabase::removeDatabase("ui-toggle-failure");
     }
     void countedVerseAndCancellation() {
         reference("John 3:16");

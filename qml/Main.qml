@@ -102,7 +102,7 @@ ApplicationWindow {
         Qt.callLater(function() { app.restorePosition(app.hasSelection) })
     }
     readonly property bool observedFocusMode: bible.focusMode
-    onObservedFocusModeChanged: Qt.callLater(app.applyFocusMode)
+    onObservedFocusModeChanged: { toastTimer.stop(); Qt.callLater(app.applyFocusMode) }
     function applyFocusMode() {
         if (observedFocusMode) {
             if (!closeNotes()) { bible.setFocusMode(false); return }
@@ -303,7 +303,8 @@ ApplicationWindow {
             errorDialog.open()
         }
     }
-    function notify(message) { toast.text = message; toastTimer.restart() }
+    property bool toastInFocus: false
+    function notify(message, inFocus) { toastInFocus = !!inFocus; toast.text = message; toastTimer.restart() }
     function selectVerse(number, extend) {
         clearCount()
         if (!flushNote()) return
@@ -319,14 +320,14 @@ ApplicationWindow {
         syncNote()
         readerFocus()
     }
-    function moveVerse(delta, extend) {
+    function moveVerse(delta, extend, bulk) {
         clearCount()
         if (!flushNote()) return
         clearTextSelection()
         positionTimer.stop()
         restoringPosition = true
         movingSelection = true
-        if (Math.abs(delta) > 1) bible.moveByVerses(delta, extend)
+        if (bulk) bible.moveByVerses(delta, extend)
         else bible.moveSelection(delta, extend)
         movingSelection = false
         syncNote()
@@ -344,9 +345,12 @@ ApplicationWindow {
         if (!flushNote() || !bible.ready || bible.verses.length === 0) return false
         if (hasSelection) bible.selectVerses(bible.cursorVerse, bible.cursorVerse)
         else if (enabled) bible.selectVerses(bible.verses[0].number, bible.verses[0].number)
+        if (bible.error.length) return false
         selectionAnchor = bible.cursorVerse
+        let changed = verseMode !== enabled
         verseMode = enabled
         syncNote()
+        if (changed) notify("Visual selection " + (verseMode ? "on" : "off"), true)
         return true
     }
     function extendVerse(delta) {
@@ -364,8 +368,19 @@ ApplicationWindow {
         clearCount()
         if (!flushNote()) return
         savePosition()
-        if (delta < 0) bible.previousChapter()
-        else bible.nextChapter()
+        // Map once over the books, rather than opening every intervening chapter.
+        let books = Array.from(bible.books)
+        let current = bible.chapter - 1
+        let total = 0
+        for (let book of books) {
+            if (book.id < bible.book) current += book.chapters
+            total += book.chapters
+        }
+        let target = Math.max(0, Math.min(total - 1, current + delta))
+        if (target !== current) for (let book of books) {
+            if (target < book.chapters) { bible.openChapter(book.id, target + 1); break }
+            target -= book.chapters
+        }
         readerFocus()
     }
     function jump(reference) {
@@ -440,8 +455,8 @@ ApplicationWindow {
         return true
     }
     function toggleNotes() {
-        if (notesOpen) closeNotes()
-        else openNotes(true)
+        if (notesOpen) { if (closeNotes()) notify("Notes off", true) }
+        else { openNotes(true); if (notesOpen) notify("Notes on", true) }
     }
     function requestRestore(file) {
         if (!flushNote()) return
@@ -604,6 +619,7 @@ ApplicationWindow {
         { title: "Copy clicked quotation", keys: "Right Click", explanation: true },
         { title: "Copy clicked plain text", keys: "Middle Click", explanation: true },
         { title: "Go to verse number", keys: "number then g (e.g. 20g)", explanation: true },
+        { title: "Repeat a motion", keys: "Count without spaces: 4k, 3Down, 2Ctrl d", explanation: true },
         { title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
     ]
     function actionHint(action) {
@@ -732,23 +748,27 @@ ApplicationWindow {
     function runCommand(action) {
         if (!actionAvailable(action)) return
         if (action === "first" || action === "last") { countedVerse(action === "last"); return }
+        const count = Math.max(1, Math.min(999999, Number(verseCount) || 1))
         clearCount()
         if (!flushNote()) return
+        const catalogAction = actions.find(function(entry) { return entry.id === action })
+        const previousSetting = catalogAction.setting ? bible[catalogAction.setting] : null
+        const previousLineHeight = bible.lineHeight
         switch (action) {
         case "books": openPalette(false); break
         case "commands": openPalette(true); break
         case "resume": openPalette(false, true); break
-        case "previousChapter": chapterStep(-1); break
-        case "nextChapter": chapterStep(1); break
-        case "previousVerse": moveVerse(-1, verseMode); break
-        case "nextVerse": moveVerse(1, verseMode); break
-        case "previousFive": moveVerse(-5, verseMode); break
-        case "nextFive": moveVerse(5, verseMode); break
-        case "previousTen": moveVerse(-10, verseMode); break
-        case "nextTen": moveVerse(10, verseMode); break
+        case "previousChapter": chapterStep(-count); break
+        case "nextChapter": chapterStep(count); break
+        case "previousVerse": moveVerse(-count, verseMode); break
+        case "nextVerse": moveVerse(count, verseMode); break
+        case "previousFive": moveVerse(-5 * count, verseMode, true); break
+        case "nextFive": moveVerse(5 * count, verseMode, true); break
+        case "previousTen": moveVerse(-10 * count, verseMode, true); break
+        case "nextTen": moveVerse(10 * count, verseMode, true); break
         case "visual": setVisualMode(!verseMode); break
-        case "extendPrevious": extendVerse(-1); break
-        case "extendNext": extendVerse(1); break
+        case "extendPrevious": extendVerse(-count); break
+        case "extendNext": extendVerse(count); break
         case "toggleNotes": toggleNotes(); break
         case "copyText": if (freeSelectedText.length) copyFreeText(); else copyPassage(false); break
         case "larger": readerSize = Math.min(28, readerSize + 1); break
@@ -777,26 +797,39 @@ ApplicationWindow {
         case "help": helpDialog.open(); break
         case "about": aboutDialog.open(); break
         }
+        if (catalogAction.setting && bible[catalogAction.setting] !== previousSetting)
+            notify(catalogAction.title + " " + (bible[catalogAction.setting] ? "on" : "off"), true)
+        if (["lineLess", "lineMore", "lineReset"].includes(action) && bible.lineHeight !== previousLineHeight)
+            notify("Line height " + bible.lineHeight.toFixed(1), true)
     }
     function moveKeybinding(delta) {
         keybindingResults.currentIndex = Math.max(0, Math.min(keybindingResults.count - 1, keybindingResults.currentIndex + delta))
         keybindingResults.positionViewAtIndex(keybindingResults.currentIndex, ListView.Contain)
     }
-    function keybindingEdge(last, visibleOnly) {
+    function keybindingEdge(last) {
         let row = last ? keybindingResults.count - 1 : 0
-        if (visibleOnly) {
-            let top = keybindingResults.contentY
-            let bottom = top + keybindingResults.height
-            for (let i = 0; i < keybindingResults.count; ++i) {
-                let item = keybindingResults.itemAtIndex(i)
-                if (item && item.y + item.height > top && item.y < bottom) {
-                    row = i
-                    if (!last) break
-                }
-            }
-        }
         keybindingResults.currentIndex = keybindingResults.count ? row : -1
-        if (!visibleOnly) keybindingResults.positionViewAtIndex(row, ListView.Contain)
+        if (keybindingResults.count) keybindingResults.positionViewAtIndex(row, ListView.Contain)
+    }
+    function pageKeybindings(direction) {
+        if (!keybindingResults.count) return
+        keybindingResults.forceLayout()
+        const view = keybindingResults
+        const current = view.currentItem
+        const offset = current ? Math.max(0, Math.min(view.height, current.y + current.height / 2 - view.contentY)) : 0
+        const top = Math.max(view.originY, Math.min(view.originY + Math.max(0, view.contentHeight - view.height),
+            view.contentY + direction * view.height))
+        const target = top + offset
+        let row = view.currentIndex
+        let distance = Infinity
+        for (let i = 0; i < view.count; ++i) {
+            const item = view.itemAtIndex(i)
+            if (!item || item.y < top || item.y + item.height > top + view.height) continue
+            const gap = Math.abs(item.y + item.height / 2 - target)
+            if (gap < distance) { distance = gap; row = i }
+        }
+        view.currentIndex = row
+        view.contentY = top
     }
     function activateKeybinding(action) {
         if (!actionAvailable(action) || !flushNote()) return
@@ -1178,7 +1211,6 @@ ApplicationWindow {
                         SectionLabel { objectName: "editionLabel"; visible: !bible.focusMode; text: "NEW ENGLISH TRANSLATION"; leftPadding: app.verseGutter; bottomPadding: 12 }
                         Label {
                             objectName: "chapterTitle"
-                            visible: !bible.focusMode
                             text: bible.passage
                             color: desktop.foreground
                             font.pixelSize: 34 * app.scale
@@ -1805,7 +1837,7 @@ ApplicationWindow {
                     Keys.onEscapePressed: app.escapePalette()
                     Accessible.name: "Passage reference or command"
                 }
-                QuietButton { objectName: "paletteBooks"; text: "Books"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.openPalette(false) }
+                QuietButton { objectName: "paletteBooks"; text: "Search"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.openPalette(false) }
                 QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: referenceInput.text.startsWith(">"); onClicked: app.openPalette(true) }
             }
             Label {
@@ -2040,6 +2072,14 @@ ApplicationWindow {
         property int row: -1
         closePolicy: Popup.CloseOnEscape
         onOpened: deleteCancel.forceActiveFocus()
+        Shortcut {
+            sequences: ["Left", "Up", "Right", "Down"]
+            enabled: deleteConfirmation.opened && !errorDialog.visible
+            onActivated: {
+                if (deleteCancel.activeFocus) deleteConfirm.forceActiveFocus()
+                else deleteCancel.forceActiveFocus()
+            }
+        }
         onClosed: {
             reference = ""
             Qt.callLater(function() { if (savedDrawer.opened) app.moveSaved(0); else app.restorePanelFocus() })
@@ -2054,7 +2094,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 QuietButton { id: deleteCancel; objectName: "deleteCancel"; text: "Cancel"; onClicked: deleteConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
-                QuietButton { objectName: "deleteConfirm"; text: "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { id: deleteConfirm; objectName: "deleteConfirm"; text: "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
             }
         }
     }
@@ -2076,8 +2116,9 @@ ApplicationWindow {
             Keys.onPressed: function(event) {
                 if (event.modifiers !== Qt.NoModifier) return
                 if ([Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)) {
-                    app.keybindingEdge(event.key === Qt.Key_End || event.key === Qt.Key_PageDown,
-                        event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown)
+                    if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown)
+                        app.pageKeybindings(event.key === Qt.Key_PageDown ? 1 : -1)
+                    else app.keybindingEdge(event.key === Qt.Key_End)
                     event.accepted = true
                 }
             }
@@ -2098,8 +2139,9 @@ ApplicationWindow {
                 Keys.onPressed: function(event) {
                     if (event.modifiers !== Qt.NoModifier) return
                     if ([Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)) {
-                        app.keybindingEdge(event.key === Qt.Key_End || event.key === Qt.Key_PageDown,
-                            event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown)
+                        if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown)
+                            app.pageKeybindings(event.key === Qt.Key_PageDown ? 1 : -1)
+                        else app.keybindingEdge(event.key === Qt.Key_End)
                         event.accepted = true
                     }
                 }
@@ -2111,6 +2153,8 @@ ApplicationWindow {
             ListView {
                 id: keybindingResults
                 objectName: "keybindingResults"
+                // This small catalog is fully laid out for geometric paging of wrapped rows.
+                cacheBuffer: Math.max(0, contentHeight)
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
@@ -2390,7 +2434,7 @@ ApplicationWindow {
         radius: 0
         color: desktop.surface
         border.color: desktop.border
-        visible: toastTimer.running && !bible.focusMode
+        visible: toastTimer.running && (!bible.focusMode || app.toastInFocus)
         Label { id: toast; objectName: "toast"; anchors.centerIn: parent; width: parent.width - 36; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: desktop.foreground; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
     }
     Timer { id: toastTimer; interval: 3000 }
@@ -2435,7 +2479,7 @@ ApplicationWindow {
         delegate: Shortcut {
             required property var modelData
             context: Qt.ApplicationShortcut
-            sequences: modelData.sequences
+            sequences: modelData.id === "first" ? ["G"] : modelData.id === "last" ? ["Shift+G"] : modelData.sequences
             enabled: app.shortcutEnabled(modelData)
             onActivated: app.runCommand(modelData.id)
         }
@@ -2449,11 +2493,13 @@ ApplicationWindow {
             onActivated: app.countDigit(String(index))
         }
     }
+    Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
+    Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
     Shortcut {
         sequence: "Escape"
         enabled: app.readerKeys
         onActivated: {
-            if (bible.focusMode) { bible.setFocusMode(false); app.readerFocus(); return }
+            if (bible.focusMode) { app.runCommand("focus"); app.readerFocus(); return }
             if (app.freeSelectedText.length) { app.clearTextSelection(); app.readerFocus(); return }
             if (app.verseCount.length) { app.clearCount(); return }
             if (!app.flushNote()) return
