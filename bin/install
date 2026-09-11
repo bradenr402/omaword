@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+if [[ ! -x $root/build/omabible ]]; then
+    printf 'Build Omabible first: %s/bin/build\n' "$root" >&2
+    exit 1
+fi
+
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+install -Dm755 -- "$root/build/omabible" "$HOME/.local/bin/omabible"
+install -Dm644 -- "$root/assets/omabible.desktop" "$data_home/applications/omabible.desktop"
+install -Dm644 -- "$root/assets/omabible.svg" "$data_home/icons/hicolor/scalable/apps/omabible.svg"
+install -Dm644 -- "$root/assets/omabible-symbolic.svg" "$data_home/icons/hicolor/symbolic/apps/omabible-symbolic.svg"
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$data_home/applications"
+fi
+if [[ -f $data_home/icons/hicolor/index.theme ]] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f "$data_home/icons/hicolor"
+fi
+printf 'Installed Omabible to %s/.local/bin/omabible\nEnsure %s/.local/bin is on PATH for the desktop launcher.\n' "$HOME" "$HOME"

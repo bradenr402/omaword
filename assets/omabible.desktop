@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Omabible
+GenericName=Bible Reader
+Comment=Read the NET Bible offline with bookmarks, highlights, and notes
+Exec=omabible
+Icon=omabible
+Terminal=false
+Categories=Education;Literature;
+Keywords=Bible;NET;Scripture;Notes;Reading;
+StartupNotify=true
