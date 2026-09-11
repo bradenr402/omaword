@@ -731,7 +731,7 @@ private slots:
         QCOMPARE(item("reading")->height(),double(size.height()));
         QCOMPARE(item("reading")->mapToScene(QPointF()).y(),0.0);
         auto passage = item("passageControl");
-        QCOMPARE(prop("passageControl","text").toString(),QString("John 3:18"));
+        QCOMPARE(prop("passageControl","text").toString(),QString("John 3"));
         QVERIFY(prop("passageControl","tip").toString().contains(bible->selectionReference()));
         QCOMPARE(passage->x() + passage->width() / 2,size.width() / 2.0);
         QVERIFY(passage->width() >= passage->implicitWidth());
@@ -792,6 +792,48 @@ private slots:
         click(close);
         QVERIFY(!window->property("notesOpen").toBool());
         QCOMPARE(bible->noteText(),QString("20g 12345 remains note text"));
+    }
+    void scaledNotesLayout_data() {
+        QTest::addColumn<int>("width");
+        QTest::addColumn<double>("scale");
+        QTest::addColumn<bool>("alongside");
+        QTest::newRow("1080-scaled") << 1080 << 1.8 << false;
+        QTest::newRow("1120-scaled") << 1120 << 1.8 << false;
+        QTest::newRow("1120-triple") << 1120 << 3.0 << false;
+        QTest::newRow("1600-scaled") << 1600 << 1.8 << true;
+        QTest::newRow("1920-triple") << 1920 << 3.0 << true;
+    }
+    void scaledNotesLayout() {
+        QFETCH(int,width); QFETCH(double,scale); QFETCH(bool,alongside);
+        reference("John 3:16");
+        window->resize(width,900);
+        QVERIFY(desktop->setProperty("textScale",scale));
+        key(Qt::Key_N,Qt::ControlModifier);
+        QTRY_VERIFY(item("notesPanel")->isVisible());
+        QTest::qWait(100);
+        QCOMPARE(window->property("wideLayout").toBool(),alongside);
+        auto passage = item("passageControl");
+        QVERIFY(passage->width() > 0);
+        QCOMPARE(passage->isVisible(),alongside);
+        QCOMPARE(item("floatingActions")->isVisible(),alongside);
+        QCOMPARE(item("modeControl")->isVisible(),alongside);
+        QCOMPARE(item("reading")->width(),alongside ? width - item("notesPanel")->width() : width);
+        if (alongside) {
+            const auto bounds = passage->mapRectToScene(QRectF(0,0,passage->width(),passage->height()));
+            auto mode = item("modeControl");
+            QVERIFY(bounds.left() > mode->x() + mode->width());
+            QVERIFY(bounds.right() < item("floatingActions")->x());
+            QVERIFY(item("floatingActions")->x() + item("floatingActions")->width() < item("notesPanel")->x());
+        }
+        // Switching scale live must restore the full reader and hide controls
+        // behind overlay notes, rather than squeeze them into a negative width.
+        window->resize(1120,900);
+        QVERIFY(desktop->setProperty("textScale",1.0));
+        QTRY_VERIFY(window->property("wideLayout").toBool());
+        QVERIFY(desktop->setProperty("textScale",3.0));
+        QTRY_VERIFY(!window->property("wideLayout").toBool());
+        QVERIFY(passage->width() >= 0);
+        QVERIFY(!passage->isVisible());
     }
     void countedVerseAndCancellation() {
         reference("John 3:16");
@@ -1047,6 +1089,72 @@ private slots:
         capture("bookmark-continuation");
         click(item("bookmarkMarker1"));
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:36–4:2"));
+    }
+    void savedTabFocusActivation() {
+        reference("John 3:1"); bible->toggleBookmark();
+        reference("John 3:2"); bible->toggleBookmark(); bible->toggleHighlight();
+        reference("John 4:1");
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        const auto tabTo = [this](const char *name) {
+            QStringList visited;
+            for (int i = 0; i < 40; ++i) {
+                key(Qt::Key_Tab);
+                if (item(name) && window->activeFocusItem() == item(name)) return true;
+                visited << (window->activeFocusItem() ? window->activeFocusItem()->objectName() : "<none>");
+            }
+            qWarning() << "Tab target" << name << "visited" << visited;
+            return false;
+        };
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QVERIFY(tabTo("savedClose"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QCOMPARE(navigation.count(),0);
+
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QVERIFY(tabTo("savedTab2")); key(Qt::Key_Enter);
+        QCOMPARE(window->property("collectionTab").toInt(),2);
+        QCOMPARE(prop("collectionList","count").toInt(),1);
+        QCOMPARE(navigation.count(),0);
+        QVERIFY(tabTo("savedTab0")); key(Qt::Key_Space);
+        QCOMPARE(window->property("collectionTab").toInt(),0);
+        QCOMPARE(prop("collectionList","count").toInt(),2);
+
+        for (const auto name : {"savedExport","savedBackup"}) {
+            QVERIFY(tabTo(name));
+            auto dialog = object(QByteArray(name) == "savedExport" ? "exportDialog" : "backupDialog");
+            QVERIFY(dialog);
+            // Inspect opening and cancel; never choose a path or write a file.
+            key(Qt::Key_Return);
+            QTRY_VERIFY(dialog->property("visible").toBool());
+            QCOMPARE(navigation.count(),0);
+            QVERIFY(QMetaObject::invokeMethod(dialog,"reject"));
+            QTRY_VERIFY(!dialog->property("visible").toBool());
+            QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+            window->requestActivate();
+            QTRY_VERIFY(window->isActive());
+            item("readerSurface")->forceActiveFocus();
+            key(Qt::Key_L,Qt::ControlModifier);
+            QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        }
+        for (auto activation : {Qt::Key_Space,Qt::Key_Return,Qt::Key_Enter}) {
+            QVERIFY(tabTo("savedEntryJohn 3:2"));
+            // Tab focus and list selection are independent; activate the focused row.
+            object("collectionList")->setProperty("currentIndex",0);
+            QCOMPARE(window->activeFocusItem(),item("savedEntryJohn 3:2"));
+            key(activation);
+            QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+            QCOMPARE(bible->selectionReference(),QString("John 3:2"));
+            key(Qt::Key_L,Qt::ControlModifier);
+            QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        }
+        QVERIFY(tabTo("savedClose")); key(Qt::Key_J);
+        QCOMPARE(window->activeFocusItem(),item("collectionList"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("John 3:2"));
     }
     void savedKeyboardIsolationAndToggle() {
         for (int verse = 1; verse <= 12; ++verse) {
@@ -1334,6 +1442,7 @@ int main(int argc,char **argv)
     qputenv("QT_QPA_PLATFORM","offscreen");
     qputenv("QT_QUICK_BACKEND","software");
     qputenv("QT_FORCE_STDERR_LOGGING","1");
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc,argv);
     app.setOrganizationName("OmabibleUiTests");
     app.setApplicationName("omabible-ui-test");

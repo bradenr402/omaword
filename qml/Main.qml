@@ -45,7 +45,7 @@ ApplicationWindow {
     onActiveFocusItemChanged: clearCount()
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
-    property bool wideLayout: width >= 1080
+    property bool wideLayout: width >= 1080 && width - notesWidth >= Math.max(640, 480 * controlScale)
     property real readerSize: 19
     property int selectionAnchor: 0
     property bool movingSelection: false
@@ -284,6 +284,7 @@ ApplicationWindow {
             collectionList.currentIndex = Math.max(0, Math.min(collectionList.count - 1, collectionList.currentIndex + delta))
             collectionList.positionViewAtIndex(collectionList.currentIndex, ListView.Contain)
         }
+        if (collectionList.currentItem) collectionList.currentItem.focus = false
         collectionList.forceActiveFocus()
     }
     function filterSaved(delta) {
@@ -1095,8 +1096,8 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 16 * app.controlScale
         x: (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) / 2 - width / 2
-        width: Math.min(implicitWidth, (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) - 2 * (floatingActions.width + 24 * app.controlScale))
-        text: bible.ready ? bible.passage + (app.hasSelection ? ":" + bible.cursorVerse : "") : "Open a passage"
+        width: Math.max(0, Math.min(implicitWidth, (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) - 2 * (floatingActions.width + 24 * app.controlScale)))
+        text: bible.ready ? bible.passage : "Open a passage"
         tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl+K"
         visible: !(app.notesOpen && !app.wideLayout)
         enabled: !bible.busy && !app.modalOpen
@@ -1295,12 +1296,12 @@ ApplicationWindow {
             Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.opened; onActivated: app.moveSaved(-1) }
             Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.opened; onActivated: app.filterSaved(-1) }
             Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.opened; onActivated: app.filterSaved(1) }
-            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.opened; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
+            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.opened && app.activeFocusItem === collectionList; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
             spacing: (savedDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
             RowLayout {
                 Layout.fillWidth: true
                 Label { objectName: "savedTitle"; text: "Saved"; font.pixelSize: 24 * app.scale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                QuietButton { text: "×"; compact: true; Accessible.name: "Close saved passages"; onClicked: savedDrawer.close() }
+                QuietButton { objectName: "savedClose"; text: "×"; compact: true; Accessible.name: "Close saved passages"; onClicked: savedDrawer.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
             }
             GridLayout {
                 id: savedTabs
@@ -1324,6 +1325,8 @@ ApplicationWindow {
                         padding: 6 * app.scale
                         font.pixelSize: 11 * app.scale
                         onClicked: app.filterSaved(index - app.collectionTab)
+                        Keys.onReturnPressed: clicked()
+                        Keys.onEnterPressed: clicked()
                     }
                 }
             }
@@ -1341,6 +1344,7 @@ ApplicationWindow {
                 delegate: ItemDelegate {
                     id: savedEntry
                     objectName: "savedEntry" + modelData.reference
+                    focusPolicy: Qt.StrongFocus
                     required property var modelData
                     width: collectionList.width - savedScrollbar.width - 8 * app.scale
                     padding: 12 * app.scale
@@ -1348,7 +1352,8 @@ ApplicationWindow {
                     clip: true
                     highlighted: ListView.isCurrentItem
                     onClicked: app.openSaved(modelData)
-                    Keys.onSpacePressed: function(event) { event.accepted = true }
+                    Keys.onReturnPressed: clicked()
+                    Keys.onEnterPressed: clicked()
                     contentItem: ColumnLayout {
                         id: savedContent
                         objectName: "savedEntryContent" + savedEntry.modelData.reference
@@ -1381,9 +1386,9 @@ ApplicationWindow {
             FineRule { Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                QuietButton { text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: { savedDrawer.close(); app.runCommand("export") } }
+                QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked(); onClicked: { savedDrawer.close(); app.runCommand("export") } }
                 Item { Layout.fillWidth: true }
-                QuietButton { text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: { savedDrawer.close(); app.runCommand("backup") } }
+                QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked(); onClicked: { savedDrawer.close(); app.runCommand("backup") } }
             }
         }
     }
@@ -1490,11 +1495,13 @@ ApplicationWindow {
     }
     FolderDialog {
         id: exportDialog
+        objectName: "exportDialog"
         title: "Choose a folder for Markdown notes"
         onAccepted: { if (!app.flushNote()) return; if (bible.exportNotes(selectedFolder)) app.notify("Notes exported as Markdown") }
     }
     FileDialog {
         id: backupDialog
+        objectName: "backupDialog"
         title: "Save annotation backup"
         fileMode: FileDialog.SaveFile
         defaultSuffix: "json"
