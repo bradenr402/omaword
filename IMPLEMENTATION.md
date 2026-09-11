@@ -17,7 +17,7 @@ Properties (NOTIFY as appropriate):
 - QString noteText (READ/WRITE via setNoteText, autosave), bool selectionBookmarked, selectionHighlighted
 - double readingPosition (READ/WRITE; fraction through chapter 0..1, persisted)
 - READ/WRITE preferences with preferencesChanged: bool showVerseNumbers=true,
-  showHeadings=true, versePicker=true, focusMode=false; double lineHeight=1.5
+  showHeadings=true, versePicker=true, focusMode=false, blockMode=false; double lineHeight=1.5
   (1.0..3.0 in 0.1 steps). Persist synchronously in personal.sqlite's additive
   preferences table; schema and annotation backup version remain 2. Annotation
   backups exclude preferences, and restore preserves local preferences.
@@ -32,9 +32,16 @@ Invokables:
   the chapter edge; the next press crosses one verse into the adjacent chapter]
 - QVariantList chapterVerses(int book,int chapter) [verse picker, skips omitted numbers]
 - void toggleBookmark(), toggleHighlight(), setNoteText(QString)
-- QString copySelection() [also copy to clipboard, use chapter if no selection]
-- QString copyVerse(int number,bool quotation=false) [copy full canonical selection
-  if number is inside it, otherwise just that verse; preserve selection]
+- bool deleteAnnotation(QString reference) [delete exactly one annotation matching
+  canonical endpoints, including all its flags and note; preserve overlapping entries.
+  Validate, DELETE, read back, and commit transactionally before publishing models;
+  missing exact entries or SQL/read-back/commit errors roll back without state changes]
+- QString copySelection(bool plainText=false) [copy full canonical range, or chapter
+  if no selection, to clipboard; preserve selection]
+- QString copyVerse(int number,bool plainText=false) [copy full canonical selection
+  if number is inside it, otherwise just that verse; after reading succeeds, persist
+  and publish the clicked verse as the single selection before publishing clipboard.
+  UI inside-range copying uses copySelection instead to preserve range and cursor]
 - void copyText(QString text) [free text clipboard copy]
 - bool exportNotes(QUrl directory), exportBackup(QUrl file), importBackup(QUrl file)
 - void refreshCollection()
@@ -44,34 +51,72 @@ Persist synchronously for reliable saves, debounce may live in UI. Imports backg
 Personal schema and exported backups are version 2 with canonical range endpoints;
 version-1 data migrates transactionally and version-1 backups remain importable.
 Verse maps include bookmark range start/end/continuation flags and overlapping
-bookmarkRanges metadata. Collection references reopen cross-chapter/book spans.
+bookmarkRanges and highlightRanges metadata. Logical highlight ranges carry their
+identity and continuation endpoints for continuous paint without merging adjacent
+independent annotations. Collection references reopen cross-chapter/book spans.
+Both passage-copy formats simplify each verse's whitespace and join verses with
+spaces in canonical order, skipping omissions. Default quotation format is
+`“¹⁶ … ¹⁷ …”\n\n—John 3:16–17`: Unicode superscript verse numbers, typographic quotes,
+blank line, em-dash reference, and no edition/version suffix. plainText=true omits
+numbers, quotation wrapper, and reference. Formatting is independent of display
+preferences; copyText preserves free selected text verbatim.
 NET EPUB is supplied by the user. Do not copy Bible content into the repository.
 
 ## UI (qml/)
 
 Main.qml ApplicationWindow; context `bible` above and `desktop` below. Restrained
-keyboard-first reader, floating footer, passage palette Ctrl K, command palette
-Ctrl Shift P, on-demand collections drawer, and animated Markdown notes overlay
-at every width without reader reflow. Setup EPUB import, keyboard help, and
+keyboard-first reader, floating footer, passage palette Ctrl k, command palette
+Ctrl Space (no Ctrl Shift P binding), on-demand collections drawer, and animated
+Markdown notes overlay at every width without reader reflow. Setup EPUB import, keyboard help, and
 backup/export dialogs. All bindings robust on empty data. QML embedded /qml/Main.qml.
 System fonts, good margins, theme-aware responsive layout. Standard and Vim
 controls are context-safe. Clicking the reading surface restores reader keyboard
 focus. Verse number click selects; Shift Click selects a range. Free text dragging
-spans verses, with Ctrl C copying the selected text. Right Click copies the clicked
-verse or full selected range when clicked inside it; Middle Click copies that same
-scope as a typographic quotation followed by a blank line and —reference NET.
+spans verses, with Ctrl c copying the selected text normally. y copies a quotation;
+Y (Shift Y) or Ctrl Shift C copies plain text. With a verse selection and no free
+text selection, Ctrl c copies the quotation; editable fields retain normal copying.
+Right Click copies a quotation, Middle Click plain text. Inside-range hits use
+copySelection to preserve the full canonical range and cursor; outside hits use
+copyVerse to focus the clicked verse only after a successful read and state save.
 Navigate verse scroll on bible.navigationChanged. Single highlight color. Backend
 produces one row per verse with safe html preserving poetry/within-verse breaks.
 Notes editor uses plain Markdown plus Text.MarkdownText preview; n writes a note,
-Ctrl N toggles the overlay even from the editor. Clipboard via backend.
+Ctrl n toggles the overlay even from the editor; Esc closes it from the editor or
+panel, and outside clicking also dismisses it. Clipboard via backend.
+
+blockMode=false uses separate verse delegates. blockMode=true loads BlockReader.qml:
+one rich TextEdit built by src/blockdocument.h/.cpp (BlockDocument, registered as
+OmaBible.Reader 1.0). Verses flow inline, optional numbers are superscript, and only
+visible section headings start new paragraphs. Safe inline formatting and internal
+poetry/verse breaks survive flattening of source paragraph wrappers. UTF-16 document
+spans map hit testing, free-text drag/autoscroll, verse navigation, and range paint
+back to canonical verse numbers. Highlight/selection paint follows wrapped lines,
+leading, headings, and bidi runs; distinct adjacent highlights retain a gap.
 
 Passage browsing progresses book → chapter → verse by default; disabling
 versePicker opens chapters directly. Direct references remain available in either
-mode. Space resumes the last palette query and browsing location; Ctrl K starts
-fresh. Shift Space has no reader action. Reading settings and individual command
-palette toggles configure the persisted preferences. r toggles verse numbers, t
-headings, f focus mode, and Ctrl [ / Ctrl ] adjusts line height. Focus mode hides
-reader controls and annotation decorations; f or Escape exits it.
+mode. Space resumes the last palette query, browsing location, selected row, and
+arrow-navigation state. Esc snapshots then clears nonempty query text (retaining
+the command prefix); the next Esc closes without replacing that snapshot. Ctrl k
+starts a fresh passage snapshot; Ctrl Space starts a fresh command snapshot.
+Shift Space has no reader action. Reading settings and individual command palette
+toggles configure persisted preferences: r verse numbers, t headings, p verse
+picker, b block mode, f focus mode. Ctrl [ / Ctrl ] adjusts line height; `Ctrl \`
+and the Reset line height command restore 1.5. These settings shortcuts remain
+enabled within Reading settings, including slider focus. Setting rows have a left
+label, shortcut hint, and right-aligned square switch. Line height opens the
+slider-only view; Reading settings opens the full set of controls.
+
+Focus mode temporarily suppresses numbers/headings using showVerseNumbers &&
+!focusMode and showHeadings && !focusMode in both layouts; it also hides chapter
+and edition titles, floating controls, reader scrollbar, and annotation markers/
+accents, retaining highlight fills and selection. Stored number/heading preferences
+are preserved. f or reader Esc exits focus mode; panel Esc dismisses the panel first.
+App-owned panels/dialogs have no close-X controls. Palette Esc is clear-then-close;
+the import busy overlay remains non-dismissible. All app-owned scrollable surfaces
+share OverlayScrollbar/OverlayScrollView: overlay-only, no reserved gutter,
+18-scaled-pixel hit width, thumb widening from 4 to 10 on hover/press, fading after
+activity; reader scrollbar is suppressed in focus mode.
 
 ## Desktop (src/desktop.h/.cpp)
 
@@ -80,16 +125,33 @@ QObject context `desktop`: QColor background, foreground, surface, muted, accent
 Normal j/k moves the verse cursor; v anchors visual selection; visual j/k and
 shifted J/K extend it across chapters. h/l navigates chapters, x highlights, m
 bookmarks. Keybindings are searchable by action or shortcut; Up/Down selects
-results and Enter executes available actions. Context-only gestures are explanatory
-rows. Display shortcut labels with spaces (Ctrl K), while Qt shortcut sequences
-retain their required syntax. UI uses square corners and system fonts.
+results and Enter executes available actions. Home/End selects first/last result;
+PageUp/PageDown selects the top/bottom currently visible result without scrolling.
+Only actions with bound sequences and non-executable context/gesture guidance
+appear in Keybindings: p for Verse picker and `Ctrl \` for Reset line height are included;
+unbound commands such as Reading settings are command-palette-only. One action
+catalog supplies bindings, command entries, setting controls, and dynamic hints.
+Display shortcut labels with spaces and lowercase letters without Shift (Ctrl k,
+Ctrl c, Ctrl n); uppercase with Shift (Ctrl Shift C, Shift Y, or Y meaning Shift Y).
+Qt sequences retain syntax such as `Ctrl+K`, which does not imply Shift. UI uses
+square corners and system fonts.
 Floating bottom icon controls overlay the full-height reader. Saved overlays on
 the right with its own keyboard context; Notes overlays at all widths. The center
 footer shows the current selected range, or the chapter when no range is selected.
-Reader Left/Right and [ / ] change chapters; Ctrl D / Ctrl U moves five verses;
-Ctrl F / Ctrl B and PageDown / PageUp move ten. Bulk moves stop at chapter edges,
+Reader Left/Right and [ / ] change chapters; Ctrl d / Ctrl u moves five verses;
+Ctrl f / Ctrl b and PageDown / PageUp move ten. Bulk moves stop at chapter edges,
 then cross one verse on the next press. Numeric prefixes such as 20g select a
-verse. Bookmark modifiers use Ctrl M.
+verse; g/Home and G (Shift G)/End select chapter beginning/end. Bookmark modifiers
+use Ctrl m.
+
+Saved owns j/k and Up/Down entry navigation, h/l and Left/Right tab filtering,
+Enter opening, and Ctrl l/Esc dismissal. Delete/Backspace captures the current
+entry's exact reference and opens confirmation with Cancel initially focused.
+Confirmation deletes that entire annotation (both flags and note), regardless of
+active filter; other/overlapping entries survive. Esc cancels back to Saved.
+Success syncs the note editor and clamps the list index (empty list: -1); failure
+keeps confirmation and models intact with an error. Saved rows stack bookmark and
+note glyphs when both apply, with a left accent stripe for highlights.
 
 Visible application branding is OmaBible, including titles, errors, documentation,
 launcher/icon metadata, and installer output. Binary, applicationName, desktop/icon

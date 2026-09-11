@@ -20,8 +20,8 @@ user-supplied EPUB in place. No Bible content is included in the test sources.
   state and reading preferences with synchronous SQLite commits. Existing valid
   data opens without import.
 - Preferences default to `showVerseNumbers=true`, `showHeadings=true`,
-  `versePicker=true`, `lineHeight=1.5`, and `focusMode=false`. Coverage includes
-  restart persistence, additive schema-2 initialization, invalid stored values,
+  `versePicker=true`, `lineHeight=1.5`, `focusMode=false`, and `blockMode=false`.
+  Coverage includes restart persistence, additive schema-2 initialization, invalid stored values,
   line-height rounding/clamping to `1.0`–`3.0` in `0.1` steps, non-finite input
   rejection, and write/commit failures preserving published and persisted state.
 - References support full names, standard aliases, ordinal/roman numbered books,
@@ -35,12 +35,24 @@ user-supplied EPUB in place. No Bible content is included in the test sources.
 - Notes belong to an **exact range**. Selecting an overlapping range does not
   expose or overwrite that note. `hasNote` on each verse includes overlapping
   notes. Empty notes remove their entry unless a flag remains.
+- Exact Saved deletion removes one annotation's bookmark, highlight, and note by
+  canonical endpoints, preserving overlapping and other entries. Coverage includes
+  aliases, cross-chapter/book ranges, missing exact entries, restart persistence,
+  and rollback on DELETE, read-back, and deferred commit failures with no published
+  model/selection changes.
 - No-selection `selectionReference` is the chapter reference; `copySelection()`
-  copies that chapter. Annotation commands require an explicit verse selection.
+  copies that chapter as a quotation, `copySelection(true)` as plain text, preserving
+  selection. Annotation commands require an explicit verse selection.
 - The verse picker returns actual chapter verse numbers, skipping NET omissions.
-  Context copy uses the full canonical selection when the clicked verse is inside
-  it, otherwise only that verse, without moving the selection. Quotation copy uses
-  typographic quotation marks and an appended —reference NET attribution.
+  `copyVerse(number, plainText=false)` copies the full canonical selection for an
+  inside hit, otherwise only that verse, then persists the clicked verse as the
+  single selection. The UI uses `copySelection` for inside hits to preserve its range.
+  Quotation copy uses Unicode superscript verse numbers and the exact wrapper
+  `“¹⁶ … ¹⁷ …”\n\n—John 3:16–17`, with no version suffix. Plain copy omits numbers,
+  quotes, and reference. Both simplify whitespace and join verses with spaces,
+  independent of display preferences. Coverage includes multi-digit numbers,
+  poetry, reversed/cross-chapter/book ranges, omissions, and read/state-save failures
+  preserving clipboard and selection. Free text copying preserves the supplied text.
 - Five- and ten-verse movement stops at chapter edges; a subsequent move from the
   edge crosses by one verse. Coverage includes direction reversal and omissions.
 - Backups contain personal data only, with format `omabible-backup`, version `2`,
@@ -66,19 +78,52 @@ user-supplied EPUB in place. No Bible content is included in the test sources.
 UI tests use original synthetic text and temporary application data. Coverage includes:
 
 - Book → chapter → optional verse browsing, direct reference previews, keyboard
-  back navigation, omitted verse numbers, and Space resuming the last palette.
+  back navigation, omitted verse numbers, and browsing chevrons. Space resumes query,
+  browsing location, and selected result, including the snapshot before Esc clears
+  nonempty text; a second Esc closes. Command clearing retains `>`. Ctrl k and
+  Ctrl Space establish fresh passage/command snapshots; Ctrl Shift P is unbound.
 - Normal/visual verse selection across chapters, counted verse jumps, bounded
   five-/ten-verse moves, and reader focus and keyboard-context isolation.
-- Free text selection across verses with Ctrl C, drag autoscroll, and right-click
-  passage / middle-click quotation copying for single verses and canonical ranges.
-- Runtime verse-number, heading, focus-mode, and line-height preferences; Reading
-  settings at small sizes; dynamic command hints; searchable keybindings with
-  arrow-key selection and Enter execution.
+- Free text selection across verses with Ctrl c and drag autoscroll in row and block
+  layouts, including forward/reverse Unicode selection and hidden verse numbers.
+  Quotation copy via y, Ctrl c without free text but with a verse selection, right-click,
+  command entry, and the Notes Copy button; plain copy via Y (Shift Y), Ctrl Shift C,
+  middle-click, and command entry. Inside mouse hits preserve the full canonical range
+  and cursor; outside hits focus only the copied verse. Failed copies preserve the
+  clipboard/selection and do not report success.
+- Flowing block layout (`b`, default off): inline verse starts, optional superscript
+  numbers and section paragraphs, retained poetry breaks, verse hit mapping/navigation,
+  autoscroll, notes/annotations, and continuous highlight geometry including wrapped
+  lines, headings, bidi runs, and gaps between independent adjacent highlights.
+- Runtime verse-number, heading, verse-picker (`p`), block (`b`), focus-mode, and
+  line-height preferences, including persistence across UI reload. Focus temporarily
+  hides numbers, headings, chapter/edition titles, and controls in both layouts while
+  preserving number/heading preferences and restoring their visibility on exit.
+  Line-height changes clear free selection coherently.
+- Reading settings at small/scaled sizes: left labels, shortcut hints before
+  right-aligned square switches; toggle keys and Ctrl [ / Ctrl ] work while the dialog
+  and slider have focus; `Ctrl \` resets line height to 1.5 in settings and the reader.
+  Dynamic command hints show current state. Reset line height is an executable entry.
+- Searchable Keybindings includes only bound actions plus disabled context/gesture
+  guidance: p finds Verse picker, Reset line height is present, and unbound Reading
+  settings is absent. Arrow keys select and Enter executes; Home/End selects the
+  first/last result, PageUp/PageDown the top/bottom visible result without scrolling.
+  Shortcut display convention is lowercase without Shift (Ctrl k, Ctrl c, Ctrl n),
+  uppercase with Shift (Ctrl Shift C, Y meaning Shift Y); Qt key enums/sequences in
+  test code use their required syntax.
 - Animated notes overlays at wide, narrow, and scaled layouts without reader
-  reflow; n to write, Ctrl N to toggle; dismissal, exact-range note isolation,
+  reflow; n to write, Ctrl n to toggle; Esc/outside dismissal, exact-range note isolation,
   autosave, and save-failure handling.
 - Current-range footer, bookmark markers, Saved filtering and keyboard navigation,
-  restore confirmation, saved scroll positions, and narrow/system-scaled layouts.
+  stacked bookmark/note glyphs and highlight accent stripe. Delete/Backspace opens
+  exact-entry deletion confirmation; Cancel initially has focus, Esc cancels back to
+  Saved, confirmation removes all flags/note for that entry while overlapping entries
+  survive. Coverage includes editor synchronization, failure/retry, index clamping,
+  empty-list behavior, and keyboard isolation during confirmation.
+- Close-X removal and Esc dismissal in app-owned panels/dialogs; shared custom overlay
+  scrollbars across app-owned scrollable surfaces, with full-width content, a broad
+  hit area, hover widening, and activity fade. Reader scrollbar is hidden in focus mode.
+  Restore confirmation, saved scroll positions, and narrow/system-scaled layouts.
 
 ## Import limits and chapter metadata provenance
 

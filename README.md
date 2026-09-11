@@ -13,8 +13,8 @@ notes in an overlay for a selected passage.
 - Cross-chapter bookmarks, a single highlight color, and autosaved Markdown notes
   with preview in an animated overlay at every window width.
 - Verse-based Vim navigation, visual range selection, and searchable, executable keybindings.
-- Persisted reading preferences for verse numbers, headings, verse picking, line
-  height, and distraction-free focus mode.
+- Persisted reading preferences for verse numbers, headings, verse picking, flowing
+  block mode, line height, and distraction-free focus mode.
 - Saved-passages drawer filtered by bookmarks, highlights, or notes.
 - Markdown annotation export and JSON personal-data backup/restore.
 - System fonts and desktop text scaling, live Omarchy theme integration, and a
@@ -101,9 +101,9 @@ and generated Bible database are not bundled with the application or package.
 
 ## Reading and references
 
-Press **Ctrl K**, enter a reference, and press Enter; or browse a book, chapter,
-and verse in the palette. Turn off **Verse picker** in Reading settings to open
-chapters directly when browsing. Direct references work with either setting:
+Press **Ctrl k**, enter a reference, and press Enter; or browse a book, chapter,
+and verse in the palette. Turn off **Verse picker** with **p** or in Reading settings
+to open chapters directly when browsing. Direct references work with either setting:
 
 | Reference | Opens |
 | --- | --- |
@@ -124,15 +124,26 @@ a range may span verse numbers intentionally omitted by this edition.
 
 Click the reading surface to give it keyboard focus. Click a **verse number** to
 select a verse; Shift-click another number to select a range. Drag over text for
-free text selection, including across verse boundaries, and press **Ctrl C** to
+free text selection, including across verse boundaries, and press **Ctrl c** to
 copy exactly that text. Annotation commands use the numbered verse selection.
-**Copy passage** copies that range, or the entire chapter when no range is selected.
+The two **Copy passage** commands copy that range, or the entire chapter when no
+range is selected:
 
-Right-click a verse's text or number to copy the full selected range if the clicked
-verse is inside it, or just the clicked verse otherwise. Middle-click uses the same
-scope and copies a quotation with typographic quotation marks and an appended
-attribution, formatted as `“passage text”` followed by a blank line and
-`—John 3:16–18 NET`. Mouse copying preserves your current verse selection.
+- **Copy passage as quotation** (**y**) includes superscript verse numbers,
+  typographic quotation marks, a blank line, and an em-dash reference, with no
+  translation/version suffix: `“¹⁶ … ¹⁷ … ¹⁸ …”\n\n—John 3:16–18`.
+  **Ctrl c** also copies this quotation when a verse range is selected and there
+  is no free text selection. With free text selected, **Ctrl c** keeps its normal
+  selected-text behavior; editable fields also retain normal text copying.
+- **Copy passage as plain text** (**Y**, meaning **Shift Y**, or **Ctrl Shift C**)
+  omits quotation marks, reference, and verse numbers. Both passage formats
+  normalize whitespace and join verses with spaces, independently of display settings.
+
+Right-click a verse's text or number for a quotation; middle-click for plain text.
+Either gesture copies the full canonical range, including off-screen chapters,
+when the clicked verse is inside it, preserving that range and its cursor. An
+outside click copies only the clicked verse and makes it the focused verse
+selection after a successful copy.
 
 Normal mode moves the verse cursor with `j` / `k`. Press `v` to anchor a visual
 selection, then continue with `j` / `k` to extend or shrink it. `J` / `K` enters
@@ -151,44 +162,60 @@ browsing, Right Arrow or Enter advances from books to chapters and, when enabled
 from chapters to verses. Left Arrow goes back one level when the input is empty
 or its caret is at the beginning. Up from the first result selects the back
 control; Enter goes back. The palette's keyboard hints change with its current
-mode. **Space** reopens the last palette with its query and browsing location;
-**Ctrl K** starts fresh. **Shift Space** has no reader action.
+mode. **Space** reopens the last palette with its query, browsing location, and
+selected result. **Esc** first clears nonempty query text (keeping the `>` command
+prefix); another **Esc** closes the palette. The snapshot taken before clearing
+is retained for **Space** to resume. **Ctrl k** starts a fresh passage palette;
+**Ctrl Space** starts fresh in commands. **Shift Space** has no reader action.
 
 Type `20g` to select verse 20 of the current chapter. Invalid or omitted verse
 numbers leave your location unchanged. A numeric prefix expires after two seconds
 and clears when you change focus or use another command. Verse movement keeps
 three lines of context around the selected verse where space permits.
 
-Bulk movement uses **Ctrl D** / **Ctrl U** for five verses and **Ctrl F** /
-**Ctrl B** or **PageDown** / **PageUp** for ten. These moves stop at the current
+Bulk movement uses **Ctrl d** / **Ctrl u** for five verses and **Ctrl f** /
+**Ctrl b** or **PageDown** / **PageUp** for ten. These moves stop at the current
 chapter's edge; another press at the edge crosses to the adjacent chapter by one
 verse. Omitted NET verse numbers are skipped.
 
 ### Reading settings
 
-Open the command palette with **Ctrl Shift P** and choose **Reading settings**.
+Open the command palette with **Ctrl Space** and choose **Reading settings**.
 The individual **Show verse numbers**, **Show headings**, **Verse picker**,
-**Focus mode**, and **Line height** commands also configure reading directly.
+**Block mode**, **Focus mode**, **Line height**, and **Reset line height** commands
+also configure reading directly. **Ctrl Shift P** is not bound.
 Preferences save synchronously in `personal.sqlite` and survive restarts:
 
 | Preference | Default | Control |
 | --- | --- | --- |
 | Verse numbers (`showVerseNumbers`) | On (`true`) | `r` |
 | Headings (`showHeadings`) | On (`true`) | `t` |
-| Verse picker (`versePicker`) | On (`true`) | Reading settings or command toggle |
-| Line height (`lineHeight`) | `1.5` | Ctrl [ / Ctrl ]; range `1.0`–`3.0`, steps of `0.1` |
+| Verse picker (`versePicker`) | On (`true`) | `p` |
+| Block mode (`blockMode`) | Off (`false`) | `b` |
+| Line height (`lineHeight`) | `1.5` | Ctrl [ / Ctrl ]; `Ctrl \` resets to `1.5`; range `1.0`–`3.0`, steps of `0.1` |
 | Focus mode (`focusMode`) | Off (`false`) | `f` |
 
-Focus mode hides reading controls and annotation decorations for a quieter page.
-Click the reader to focus its keyboard controls; press **f** again or **Escape**
-to leave focus mode.
+Reading settings places each label on the left, its shortcut hint beside a
+right-aligned square switch. The toggle shortcuts and line-height adjustment/reset
+shortcuts work while the settings dialog is open, including when its slider has focus.
+
+Block mode flows verses inline through one text document, with optional superscript
+verse numbers. Visible section headings start paragraphs; poetry and within-verse
+breaks remain. Toggle **b** to return to the default separate verse rows.
+
+Focus mode temporarily hides verse numbers, section headings, chapter and edition
+titles, floating controls, the reader scrollbar, and annotation markers/accents.
+Highlight fills and selection remain visible. It preserves the stored verse-number
+and heading preferences, so leaving focus mode restores their chosen visibility.
+Click the reader to focus its keyboard controls; press **f** again or **Esc**
+to leave focus mode. **Esc** in an open panel dismisses that panel first.
 
 ### Notes, bookmarks, and highlights
 
-Press **n** to write a note, or **Ctrl N** to toggle Notes, including while the
+Press **n** to write a note, or **Ctrl n** to toggle Notes, including while the
 editor has focus. Notes slide in as an animated overlay at every window width;
 opening them does not reflow the passage. The overlay includes Markdown editing
-and preview, and can be dismissed with its close control or an outside click.
+and preview, and can be dismissed with **Esc** (also from the editor) or an outside click.
 
 Notes save as you type and belong to an **exact verse range**. A note for
 `John 3:16–18` is distinct from a note for `John 3:16`; selecting an overlapping
@@ -199,8 +226,9 @@ Bookmarks and highlights cover verses. A selection is marked active when all its
 actual verses are covered. Toggling a partially covered selection covers all of
 it; toggling a fully covered selection removes that flag within the selection,
 splitting existing ranges when necessary and preserving other flags and notes.
-One bookmark ribbon marks the start of a saved range; its margin line continues
-through the range, including across chapter boundaries. Hover for the full
+In the default verse-row layout, one bookmark ribbon marks the start of a saved
+range; its margin line continues through the range, including across chapter
+boundaries. Hover for the full
 reference, or click the ribbon/line to reopen that range. Page icons mark notes.
 
 ### Keyboard shortcuts
@@ -208,33 +236,44 @@ reference, or click the ribbon/line to reopen that range. Page icons mark notes.
 Reader keys apply while reading, with no editable text field or modal dialog
 active. **?** or **F1** opens **Keybindings**. Search by action or shortcut, move
 through the results with Up / Down, and press Enter to execute an available action.
-Mouse gestures and other explanatory rows are shown as guidance.
+Home / End selects the first / last result; PageUp / PageDown selects the top /
+bottom currently visible result without scrolling the list. Only actions with bound
+keys appear, including **p** for Verse picker and `Ctrl \` for Reset line height.
+Mouse gestures and other context-only rows are non-executable guidance. Commands
+without bound keys, such as Reading settings, remain in the command palette.
+
+Shortcut labels use lowercase letters when Shift is not required (**Ctrl k**,
+**Ctrl c**, **Ctrl n**). Uppercase letters indicate Shift: **Y** means **Shift Y**,
+and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**, and **G**.
 
 | Action | Shortcut |
 | --- | --- |
-| Passage palette / command palette | Ctrl K / Ctrl Shift P |
+| Passage palette / command palette | Ctrl k / Ctrl Space |
 | Resume last palette | Space |
-| Toggle Saved | Ctrl L |
+| Toggle Saved | Ctrl l |
 | Previous / next chapter | `h` / `l`, Left / Right, `[` / `]` |
 | Previous / next verse | `k` / `j`, Up / Down |
-| Move forward / backward 5 verses | Ctrl D / Ctrl U |
-| Move forward / backward 10 verses | Ctrl F / Ctrl B, PageDown / PageUp |
+| Move forward / backward 5 verses | Ctrl d / Ctrl u |
+| Move forward / backward 10 verses | Ctrl f / Ctrl b, PageDown / PageUp |
 | Select numbered verse | Number then `g`, e.g. `20g` |
 | Select chapter beginning / end | `g` / `G`, Home / End |
 | Toggle visual selection / collapse to cursor | `v` |
 | Extend or shrink visual selection | `j` / `k`, Down / Up |
 | Enter visual mode and extend | `J` / `K`, Shift Down / Shift Up |
-| Bookmark selected verses | `m`, Ctrl M |
-| Highlight selected verses | `x`, Ctrl H |
+| Bookmark selected verses | `m`, Ctrl m |
+| Highlight selected verses | `x`, Ctrl h |
 | Write a note | `n` |
-| Toggle notes overlay | Ctrl N |
-| Copy passage (or chapter) | `y`, Ctrl Shift C |
-| Copy free text selection | Ctrl C |
+| Toggle notes overlay | Ctrl n |
+| Copy passage (or chapter) as quotation | `y`; Ctrl c with a verse selection and no free text selection |
+| Copy passage (or chapter) as plain text | `Y` (Shift Y), Ctrl Shift C |
+| Copy free text selection | Ctrl c |
 | Toggle verse numbers / headings / focus mode | `r` / `t` / `f` |
+| Toggle verse picker / block mode | `p` / `b` |
 | Decrease / increase line height | Ctrl [ / Ctrl ] |
+| Reset line height to `1.5` | `Ctrl \` |
 | Larger / smaller reader text | Ctrl Plus (also Ctrl =) / Ctrl − |
 | Reset reader text size | Ctrl 0 |
-| Leave editor / exit visual / close notes / collapse range / leave focus mode | Escape |
+| Dismiss panel / leave focus mode / clear text selection or count / collapse visual range | Esc (context-dependent) |
 | Search and execute keybindings | `?`, F1 |
 
 Use Up/Down and Enter in the palette, or prefix its query with `>` to find
@@ -242,8 +281,20 @@ commands such as import, export, backup, restore, and About.
 
 In the right-hand **Saved** panel, `j` / `k` or Down / Up moves between entries;
 `h` / `l` or Left / Right selects All, Bookmarks, Highlights, or Notes. Enter opens
-the selected entry; Ctrl L or Escape closes the panel. These keys operate on Saved
-while it is open, without moving the underlying reader.
+the selected entry; Ctrl l or Esc closes the panel. **Delete** or **Backspace**
+opens confirmation for the selected entry. Confirming removes the **exact annotation
+entry**, including both bookmark/highlight flags and its note, even in a filtered
+tab. Other entries, including overlapping ranges, are preserved. Cancel is focused
+initially; Esc cancels and returns to Saved. Bookmark and note glyphs can appear
+together (stacked), and a left accent stripe marks a highlighted entry. Entry
+navigation and filter keys operate on Saved while it is open, without moving the
+underlying reader.
+
+App-owned panels and dialogs have no close-X controls; use **Esc** to dismiss them
+(with the palette's clear-then-close behavior above). All app-owned scrollable
+surfaces use the same custom overlay scrollbar, including the reader, palettes,
+Saved, Notes editing/preview, Reading settings, setup, and About. It reserves no
+content gutter, widens on hover/drag, and fades after activity.
 
 ## Data, export, and backup
 
@@ -291,9 +342,10 @@ tests use original synthetic text. Tests isolate application data in temporary d
 `JOBS` controls build parallelism, and arguments are passed to the test executable
 (for example, `bin/test -functions`). See [tests/README.md](tests/README.md) for the
 backend and UI behavior covered. UI tests exercise palette browsing and resume,
-keyboard navigation, free text and verse selection, mouse copying, reading
-preferences, actionable keybindings, notes overlays, restore confirmation,
-scroll restoration, and narrow/scaled layouts.
+keyboard navigation, free text and verse selection in row/block layouts, quoted
+and plain copying, reading preferences and settings shortcuts, actionable
+keybindings, exact Saved deletion, notes overlays, restore confirmation, overlay
+scrollbars, scroll restoration, and narrow/scaled layouts.
 
 ## License and Bible attribution
 
