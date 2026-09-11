@@ -57,8 +57,8 @@ private slots:
         QVERIFY(root.isValid());
         qputenv("XDG_DATA_HOME",root.path().toUtf8());
         QCoreApplication::setOrganizationName("OmaWordTests");
-        QCoreApplication::setApplicationName("omabible-test");
-        epub = qEnvironmentVariable("OMABIBLE_TEST_EPUB");
+        QCoreApplication::setApplicationName("omaword-test");
+        epub = qEnvironmentVariable("OMAWORD_TEST_EPUB");
         bible = std::make_unique<BibleBackend>();
         QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
         QVERIFY(!bible->ready());
@@ -231,7 +231,7 @@ private slots:
         QVERIFY(!QFileInfo::exists(file("escape.xhtml")));
     }
     void importRealEpub() {
-        if (epub.isEmpty()) QSKIP("Set OMABIBLE_TEST_EPUB to the user's NETBIBLE21.epub to run integration tests.");
+        if (epub.isEmpty()) QSKIP("Set OMAWORD_TEST_EPUB to the user's NETBIBLE21.epub to run integration tests.");
         QSignalSpy ready(bible.get(),&BibleBackend::readyChanged);
         bible->importEpub(QUrl::fromLocalFile(epub));
         QVERIFY(bible->busy());
@@ -423,16 +423,39 @@ private slots:
         const auto document = QJsonDocument::fromJson(source.readAll());
         QVERIFY(document.isObject());
         const auto rootObject = document.object();
+        QCOMPARE(rootObject.value("format").toString(), QString("omaword-backup"));
+        // Both brand signatures accept all supported historical schema versions.
+        for (const QString format : {"omaword-backup", "omabible-backup"}) {
+            for (int version = 1; version <= 3; ++version) {
+                auto legacy = rootObject;
+                legacy["format"] = format;
+                legacy["version"] = version;
+                if (version < 3) legacy.remove("versionId");
+                if (version == 1) {
+                    auto reading = legacy["reading"].toObject();
+                    for (const QString key : {"anchorBook", "anchorChapter", "cursorBook", "cursorChapter", "cursorVerse"}) reading.remove(key);
+                    legacy["reading"] = reading;
+                    auto rows = legacy["annotations"].toArray();
+                    for (int i = 0; i < rows.size(); ++i) {
+                        auto row = rows[i].toObject(); row.remove("endBook"); row.remove("endChapter"); rows[i] = row;
+                    }
+                    legacy["annotations"] = rows;
+                }
+                QVERIFY(write(file("brand-legacy.json"), QJsonDocument(legacy).toJson()));
+                QVERIFY2(bible->importBackup(QUrl::fromLocalFile(file("brand-legacy.json"))), qPrintable(bible->error()));
+            }
+        }
         QByteArray duplicateFields = document.toJson();
         duplicateFields.replace("\"version\": 3", "\"version\": 1, \"ver\\u0073ion\": 3");
         QVERIFY(write(file("duplicate-fields.json"),duplicateFields));
         QVERIFY(!bible->importBackup(QUrl::fromLocalFile(file("duplicate-fields.json"))));
         QVERIFY(bible->error().contains("duplicate JSON"));
-        const QStringList corruptions = {"version", "fractional", "wrong-type", "duplicate", "unknown-key", "out-of-range", "omitted", "empty", "reading", "note-type"};
+        const QStringList corruptions = {"format", "version", "fractional", "wrong-type", "duplicate", "unknown-key", "out-of-range", "omitted", "empty", "reading", "note-type"};
         for (const auto &kind : corruptions) {
             auto object = rootObject;
             auto rows = object["annotations"].toArray(); auto a = rows.first().toObject();
             if (kind == "version") object["version"] = 4;
+            if (kind == "format") object["format"] = "unknown-backup";
             if (kind == "fractional") a["start"] = 16.5;
             if (kind == "wrong-type") a["bookmark"] = 1;
             if (kind == "unknown-key") a["extra"] = "unexpected";
@@ -454,7 +477,7 @@ private slots:
         QCOMPARE(bible->lineHeight(),1.9); QVERIFY(bible->focusMode()); QVERIFY(bible->blockMode()); QCOMPARE(preferences.count(),0);
         QCOMPARE(bible->collection(),original); QCOMPARE(bible->noteText(),note); QCOMPARE(bible->readingPosition(),0.73);
         QVERIFY(bible->exportNotes(QUrl::fromLocalFile(root.path())));
-        QFile markdown(file("omabible-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
+        QFile markdown(file("omaword-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
         const auto text = QString::fromUtf8(markdown.readAll()); QVERIFY(text.contains(note)); QVERIFY(text.contains("John 3:16–18"));
         QVERIFY(text.startsWith("# OmaWord notes\n"));
         QVERIFY(!bible->exportBackup(QUrl::fromLocalFile(bible->dataDirectory()+"/personal.sqlite")));
@@ -484,7 +507,7 @@ private slots:
     void exportMarkdownProtectsDatabases() {
         if (!bible->ready()) QSKIP("Requires real EPUB");
         QTemporaryDir directory;
-        const QString destination = directory.filePath("omabible-notes.md");
+        const QString destination = directory.filePath("omaword-notes.md");
         const auto before = bible->collection();
         for (const QString suffix : {"personal.sqlite","bible.sqlite","personal.sqlite-wal","personal.sqlite-shm","bible.sqlite-journal"}) {
             const QString path = bible->dataDirectory()+'/'+suffix;
@@ -857,7 +880,7 @@ private slots:
         for (const QString number : {"⁶", "¹", "²", "³"}) QVERIFY(copied.contains(' '+number+' '));
         QVERIFY(!copied.contains("⁴ ")); QCOMPARE(copied.count('\n'),2);
         QVERIFY(bible->exportNotes(QUrl::fromLocalFile(root.path())));
-        QFile markdown(file("omabible-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
+        QFile markdown(file("omaword-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
         const auto text = markdown.readAll(); QVERIFY(text.contains(QString("Malachi 4:5–Matthew 1:3").toUtf8()));
         QVERIFY(text.contains("A note spanning the testament boundary"));
         // Subtract only the bookmark flag; the original note and highlight stay logical.
@@ -1100,7 +1123,7 @@ private slots:
         QTest::newRow("v2") << 2;
     }
     void corruptLegacyRecovery() {
-        if (epub.isEmpty()) QSKIP("Requires OMABIBLE_TEST_EPUB.");
+        if (epub.isEmpty()) QSKIP("Requires OMAWORD_TEST_EPUB.");
         QFETCH(int,schema);
         const QString application = QCoreApplication::applicationName();
         const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });
@@ -1148,7 +1171,7 @@ private slots:
         QVERIFY(backend->ready()); QCOMPARE(backend->noteText(),QString("Preserved legacy NET note"));
     }
     void unsafeRemovalTargets() {
-        const QString kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        const QString kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
         if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires both EPUB fixtures.");
         const QString application = QCoreApplication::applicationName();
         const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });
@@ -1218,8 +1241,8 @@ private slots:
         QVERIFY(backend.removeVersion("kjv-2006",true)); QVERIFY(backend.ready()); QVERIFY(QFileInfo::exists(personal));
     }
     void multiVersionLibrary() {
-        const QString kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
-        if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires OMABIBLE_TEST_EPUB and OMABIBLE_TEST_KJV.");
+        const QString kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
+        if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires OMAWORD_TEST_EPUB and OMAWORD_TEST_KJV.");
         const QString application = QCoreApplication::applicationName();
         const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });
         QCoreApplication::setApplicationName("multi-version-test");
@@ -1333,7 +1356,7 @@ private slots:
         QVERIFY(library->navigate("Matthew 17:21"));
         QVERIFY(library->exportBackup(QUrl::fromLocalFile(file("kjv-scoped.json"))));
         QVERIFY(library->exportNotes(QUrl::fromLocalFile(root.path())));
-        QFile markdown(file("omabible-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
+        QFile markdown(file("omaword-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
         const auto exported = markdown.readAll(); QVERIFY(exported.contains("kjv-2006"));
         QVERIFY(exported.contains("KJV-only range")); QVERIFY(!exported.contains("NET-only legacy range"));
         // All installed text generations, root DBs, dangling sidecars and aliases.
@@ -1345,7 +1368,7 @@ private slots:
             for (const QString &suffix : {QString(""),QString("-wal"),QString("-shm"),QString("-journal")}) {
                 const QString target = database+suffix;
                 QVERIFY(!library->exportBackup(QUrl::fromLocalFile(target)));
-                const QString alias = aliases.filePath("omabible-notes.md");
+                const QString alias = aliases.filePath("omaword-notes.md");
                 QVERIFY(QFile::link(target,alias));
                 QVERIFY(!library->exportBackup(QUrl::fromLocalFile(alias)));
                 QVERIFY(!library->exportNotes(QUrl::fromLocalFile(aliases.path())));
@@ -1399,7 +1422,7 @@ private slots:
         QCOMPARE(library->lineHeight(),2.4);
     }
     void legacyParagraphsAndMru() {
-        const QString kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        const QString kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
         if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires both EPUB fixtures.");
         const QString application = QCoreApplication::applicationName();
         const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });
@@ -1487,7 +1510,7 @@ private slots:
         QSqlDatabase::removeDatabase("mru-check");
     }
     void versionOperationRollback() {
-        const QString kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        const QString kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
         if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires both EPUB fixtures.");
         const QString application = QCoreApplication::applicationName();
         const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });

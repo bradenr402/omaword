@@ -13,9 +13,9 @@ fi
 
 mkdir -p -- "$build_dir"
 cd -- "$build_dir"
-qmake6 "$root/omabible.pro"
+qmake6 "$root/omaword.pro"
 make -j"$jobs" "$@"
-# Also refresh the compatibility link when make found the binary up to date.
-if [[ -x $build_dir/$BRAND_ID ]]; then
-    ln -sfn -- "$BRAND_ID" "$build_dir/$BRAND_STORAGE_ID"
+# Retire only the exact compatibility alias created by previous builds.
+if [[ -L $build_dir/omabible && $(readlink -- "$build_dir/omabible") == "$BRAND_ID" ]]; then
+    rm -- "$build_dir/omabible"
 fi

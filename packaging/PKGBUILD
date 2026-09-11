@@ -9,9 +9,9 @@ license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'libarchive' 'fontconfig')
 makedepends=('gcc' 'make' 'pkgconf')
 optdepends=('qt6-wayland: native Wayland support')
-provides=("$BRAND_STORAGE_ID=$pkgver")
-conflicts=("$BRAND_STORAGE_ID")
-replaces=("$BRAND_STORAGE_ID")
+# Historical package identity, solely for upgrades.
+conflicts=('omabible')
+replaces=('omabible')
 # Sources are the enclosing checkout, including uncommitted changes. No remote
 # archive or pre-generated tarball is needed; this recipe is not standalone.
 source=()
@@ -20,10 +20,10 @@ sha256sums=()
 build() {
     local root
     root=$(realpath "$startdir/..")
-    [[ -f "$root/omabible.pro" ]] || return 1
+    [[ -f "$root/omaword.pro" ]] || return 1
     mkdir -p "$srcdir/build"
     cd "$srcdir/build"
-    qmake6 "$root/omabible.pro" CONFIG+=release
+    qmake6 "$root/omaword.pro" CONFIG+=release
     make
 }
 
@@ -31,7 +31,6 @@ package() {
     local root
     root=$(realpath "$startdir/..")
     install -Dm755 "$srcdir/build/$BRAND_ID" "$pkgdir/usr/bin/$BRAND_ID"
-    ln -s "$BRAND_ID" "$pkgdir/usr/bin/$BRAND_STORAGE_ID"
     install -Dm644 "$srcdir/build/$BRAND_ID.desktop" "$pkgdir/usr/share/applications/$BRAND_ID.desktop"
     install -Dm644 "$root/assets/app.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$BRAND_ID.svg"
     install -Dm644 "$root/assets/app-symbolic.svg" "$pkgdir/usr/share/icons/hicolor/symbolic/apps/$BRAND_ID-symbolic.svg"

@@ -133,7 +133,7 @@ SingleInstance::SingleInstance(const QString &dataDirectory, const QString &stor
 {
     const auto canonical = QFileInfo(dataDirectory).canonicalFilePath();
     const auto hash = QCryptographicHash::hash((canonical + '/' + storageId).toUtf8(), QCryptographicHash::Sha256).toHex().left(32);
-    m_endpoint = QDir(runtimeDirectory).filePath("omabible-" + QString::fromLatin1(hash) + ".socket");
+    m_endpoint = QDir(runtimeDirectory).filePath("omaword-" + QString::fromLatin1(hash) + ".socket");
     if (canonical.isEmpty() || runtimeDirectory.isEmpty()) m_error = QStringLiteral("Application data or user runtime directory is unavailable.");
     m_lock.setStaleLockTime(0);
     m_server.setSocketOptions(QLocalServer::UserAccessOption);

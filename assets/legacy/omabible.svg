@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <title>OmaBible</title>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#253e3b"/>
+  <path d="M27 32c14-4 26-1 37 6 11-7 23-10 37-6v61c-14-4-26-1-37 6-11-7-23-10-37-6z" fill="#f3ead8"/>
+  <path d="M64 38v61" fill="none" stroke="#b7ac94" stroke-width="3"/>
+  <path d="M37 46c6-1 12 1 18 4m-18 9c6-1 12 1 18 4m-18 9c6-1 12 1 18 4m18-26c6-3 12-5 18-4m-18 17c6-3 12-5 18-4m-18 17c6-3 12-5 18-4" fill="none" stroke="#9f947e" stroke-width="3" stroke-linecap="round"/>
+  <path d="M82 30v24l6-4 6 4V29z" fill="#c67e50"/>
+</svg>

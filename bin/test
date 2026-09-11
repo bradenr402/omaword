@@ -8,24 +8,30 @@ if [[ ! $jobs =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
-if [[ -n ${OMABIBLE_TEST_KJV:-} ]]; then
-    if [[ ! -f $OMABIBLE_TEST_KJV || ! -r $OMABIBLE_TEST_KJV ]]; then
-        printf 'OMABIBLE_TEST_KJV must name a readable EPUB file.\n' >&2
+if [[ -n ${OMAWORD_TEST_KJV:-} ]]; then
+    if [[ ! -f $OMAWORD_TEST_KJV || ! -r $OMAWORD_TEST_KJV ]]; then
+        printf 'OMAWORD_TEST_KJV must name a readable EPUB file.\n' >&2
         exit 1
     fi
-    export OMABIBLE_TEST_KJV
-    OMABIBLE_TEST_KJV=$(realpath -- "$OMABIBLE_TEST_KJV")
-    export OMABIBLE_TEST_KJV_EPUB=${OMABIBLE_TEST_KJV_EPUB:-$OMABIBLE_TEST_KJV}
+    export OMAWORD_TEST_KJV
+    OMAWORD_TEST_KJV=$(realpath -- "$OMAWORD_TEST_KJV")
+    export OMAWORD_TEST_KJV_EPUB=${OMAWORD_TEST_KJV_EPUB:-$OMAWORD_TEST_KJV}
 fi
 # Resolve a caller-relative EPUB path before changing to the build directory.
-if [[ -n ${OMABIBLE_TEST_EPUB:-} ]]; then
-    if [[ ! -f $OMABIBLE_TEST_EPUB || ! -r $OMABIBLE_TEST_EPUB ]]; then
-        printf 'OMABIBLE_TEST_EPUB must name a readable EPUB file.\n' >&2
+if [[ -n ${OMAWORD_TEST_EPUB:-} ]]; then
+    if [[ ! -f $OMAWORD_TEST_EPUB || ! -r $OMAWORD_TEST_EPUB ]]; then
+        printf 'OMAWORD_TEST_EPUB must name a readable EPUB file.\n' >&2
         exit 1
     fi
-    export OMABIBLE_TEST_EPUB
-    OMABIBLE_TEST_EPUB=$(realpath -- "$OMABIBLE_TEST_EPUB")
+    export OMAWORD_TEST_EPUB
+    OMAWORD_TEST_EPUB=$(realpath -- "$OMAWORD_TEST_EPUB")
 fi
+
+mkdir -p -- "$root/build/migration-tests"
+cd -- "$root/build/migration-tests"
+qmake6 "$root/tests/migration.pro"
+make -j"$jobs"
+./tst_migration "$@"
 
 mkdir -p -- "$root/build/singleinstance-tests"
 cd -- "$root/build/singleinstance-tests"

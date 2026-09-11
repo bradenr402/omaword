@@ -15,7 +15,7 @@
 #include "blockdocument.h"
 
 // Standalone, loads the real BlockReader and QTextDocument without Main or a
-// resource rebuild. Optional OMABIBLE_ANNOTATION_SCREENSHOT=/tmp/...png.
+// resource rebuild. Optional OMAWORD_ANNOTATION_SCREENSHOT=/tmp/...png.
 class BlockAnnotationsTest : public QObject
 {
     Q_OBJECT
@@ -313,11 +313,11 @@ ApplicationWindow {
     void screenshot() {
         populate(true);
         QTRY_COMPARE(list("annotationRanges").size(),4);
-        if (qEnvironmentVariableIsEmpty("OMABIBLE_ANNOTATION_SCREENSHOT")) QSKIP("Optional visual artifact");
+        if (qEnvironmentVariableIsEmpty("OMAWORD_ANNOTATION_SCREENSHOT")) QSKIP("Optional visual artifact");
         QTest::qWait(150);
         const auto image = window->grabWindow();
         QVERIFY(!image.isNull());
-        const auto path = qEnvironmentVariable("OMABIBLE_ANNOTATION_SCREENSHOT");
+        const auto path = qEnvironmentVariable("OMAWORD_ANNOTATION_SCREENSHOT");
         QVERIFY(image.save(path));
         click(item("blockAnnotationMarker:bookmark:Genesis 1:1–3"));
         QTest::qWait(150);

@@ -27,8 +27,8 @@
 #include "epubimporter.h"
 
 // Run: QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./tst_ui
-// Optional: OMABIBLE_TEST_EPUB=/path/to/NETBIBLE21.epub and
-// OMABIBLE_TEST_KJV=/path/to/eng-kjv2006.epub for multi-version integration. Without NET a full,
+// Optional: OMAWORD_TEST_EPUB=/path/to/NETBIBLE21.epub and
+// OMAWORD_TEST_KJV=/path/to/eng-kjv2006.epub for multi-version integration. Without NET a full,
 // canonically numbered synthetic database is generated; no Bible text is bundled.
 class UiTest : public QObject
 {
@@ -163,7 +163,7 @@ class UiTest : public QObject
         QTRY_VERIFY(!window->property("restoringPosition").toBool());
     }
     void capture(const QString &name) {
-        const QString directory = qEnvironmentVariable("OMABIBLE_UI_SCREENSHOTS");
+        const QString directory = qEnvironmentVariable("OMAWORD_UI_SCREENSHOTS");
         if (directory.isEmpty()) return;
         QVERIFY(QDir(directory).exists());
         QSignalSpy frames(window,&QQuickWindow::frameSwapped);
@@ -246,7 +246,7 @@ private slots:
     void initTestCase() {
         QVERIFY(fixtures.isValid());
         fixture = fixtures.filePath("bible.sqlite");
-        const QString epub = qEnvironmentVariable("OMABIBLE_TEST_EPUB");
+        const QString epub = qEnvironmentVariable("OMAWORD_TEST_EPUB");
         if (epub.isEmpty()) {
             QVERIFY(makeSyntheticBible());
         } else {
@@ -351,8 +351,8 @@ private slots:
         QCOMPARE(window->property("continuousReader").toBool(),bible->hasParagraphs());
     }
     void defaultParagraphKjvFlowAndCopy() {
-        const auto kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
-        if (kjv.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV to the structured eng-kjv2006.epub.");
+        const auto kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
+        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_KJV to the structured eng-kjv2006.epub.");
         bible->importEpub(QUrl::fromLocalFile(kjv));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
         QCOMPARE(bible->versionId(),QString("kjv-2006"));
@@ -467,8 +467,8 @@ private slots:
         QVERIFY(item("setupScroll")->isVisible());
     }
     void asyncFirstImportLayout() {
-        const QString epub = qEnvironmentVariable("OMABIBLE_TEST_EPUB");
-        if (epub.isEmpty()) QSKIP("Set OMABIBLE_TEST_EPUB to exercise asynchronous first import into the loaded UI.");
+        const QString epub = qEnvironmentVariable("OMAWORD_TEST_EPUB");
+        if (epub.isEmpty()) QSKIP("Set OMAWORD_TEST_EPUB to exercise asynchronous first import into the loaded UI.");
         QVERIFY(!bible->ready());
         QVERIFY(item("setupScroll")->isVisible());
         QVERIFY(!item("readerSurface")->isVisible());
@@ -2297,16 +2297,16 @@ private slots:
         QTRY_VERIFY(!prop("helpDialog","visible").toBool());
         click(item("modeControl")); QVERIFY(window->property("verseMode").toBool());
         click(item("modeControl")); QVERIFY(!window->property("verseMode").toBool());
-        capture("omabible-refined-controls-" + QString::fromLatin1(QTest::currentDataTag()));
+        capture("omaword-refined-controls-" + QString::fromLatin1(QTest::currentDataTag()));
         click(passage);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
-        capture("omabible-refined-palette-" + QString::fromLatin1(QTest::currentDataTag()));
+        capture("omaword-refined-palette-" + QString::fromLatin1(QTest::currentDataTag()));
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         click(item("savedControl"));
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QVERIFY(!item("notesControl")->isEnabled());
-        capture("omabible-refined-saved-" + QString::fromLatin1(QTest::currentDataTag()));
+        capture("omaword-refined-saved-" + QString::fromLatin1(QTest::currentDataTag()));
         key(Qt::Key_L,Qt::ControlModifier);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         click(item("notesControl"));
@@ -2318,7 +2318,7 @@ private slots:
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("20g 12345 remains note text");
         QCOMPARE(bible->noteText(),QString("20g 12345 remains note text"));
-        capture("omabible-refined-notes-" + QString::fromLatin1(QTest::currentDataTag()));
+        capture("omaword-refined-notes-" + QString::fromLatin1(QTest::currentDataTag()));
         // The outer notes scroller can place its heading above the viewport.
         auto viewport = qvariant_cast<QQuickItem *>(prop("notesScroll","contentItem"));
         QVERIFY(viewport); viewport->setProperty("contentY",0);
@@ -3026,7 +3026,7 @@ private slots:
         QVERIFY(item("versionEmpty")->isVisible()); QVERIFY(!item("versionNext")->isEnabled());
         click(item("versionAdd")); QTRY_VERIFY(prop("importGuide","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
-        const QString epub = qEnvironmentVariable("OMABIBLE_TEST_EPUB");
+        const QString epub = qEnvironmentVariable("OMAWORD_TEST_EPUB");
         if (!epub.isEmpty()) {
             bible->importEpub(QUrl::fromLocalFile(epub));
             QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
@@ -3074,8 +3074,8 @@ private slots:
         key(Qt::Key_Return); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
     }
     void realKjvSwitchAndRemoveAnnotations() {
-        const auto kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
-        if (kjv.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV to the structured eng-kjv2006.epub.");
+        const auto kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
+        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_KJV to the structured eng-kjv2006.epub.");
         reference("John 3:16-18");
         bible->setNoteText("NET annotation"); bible->toggleBookmark();
         const auto netText = bodyText(16);
@@ -3137,8 +3137,8 @@ private slots:
         QCOMPARE(bible->noteText(),QString("NET annotation"));
     }
     void versionSwitchFallbackFeedback() {
-        const auto kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
-        if (kjv.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV to the structured eng-kjv2006.epub.");
+        const auto kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
+        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_KJV to the structured eng-kjv2006.epub.");
         bible->importEpub(QUrl::fromLocalFile(kjv));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
         QCOMPARE(bible->versionId(),QString("kjv-2006"));
@@ -3788,7 +3788,7 @@ private slots:
         type("Large-scale editing remains usable.");
         QCOMPARE(bible->noteText(),QString("Large-scale editing remains usable."));
         window->update(); QTest::qWait(250);
-        QVERIFY(window->grabWindow().save(fixtures.filePath("omabible-reader-scaled.png")));
+        QVERIFY(window->grabWindow().save(fixtures.filePath("omaword-reader-scaled.png")));
     }
     void screenshot() {
         reference("John 3:16-18");
@@ -3805,10 +3805,10 @@ private slots:
         const auto image = window->grabWindow();
         QVERIFY(!image.isNull());
         QCOMPARE(image.size(),window->size() * window->devicePixelRatio());
-        QVERIFY(image.save(fixtures.filePath("omabible-reader.png")));
+        QVERIFY(image.save(fixtures.filePath("omaword-reader.png")));
         window->resize(640,480);
         window->update(); QTest::qWait(250);
-        QVERIFY(window->grabWindow().save(fixtures.filePath("omabible-reader-narrow.png")));
+        QVERIFY(window->grabWindow().save(fixtures.filePath("omaword-reader-narrow.png")));
     }
 };
 
@@ -3829,7 +3829,7 @@ int main(int argc,char **argv)
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc,argv);
     app.setOrganizationName("OmaWordUiTests");
-    app.setApplicationName("omabible-ui-test");
+    app.setApplicationName("omaword-ui-test");
     QQuickStyle::setStyle("Basic");
     UiTest test;
     return QTest::qExec(&test,argc,argv);

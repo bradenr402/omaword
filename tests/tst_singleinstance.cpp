@@ -53,6 +53,7 @@ private slots:
         SingleInstance primary(dir.path(), "test", dir.path());
         SingleInstance secondary(alias, "test", dir.path());
         QCOMPARE(primary.endpoint(), secondary.endpoint());
+        QVERIFY(QFileInfo(primary.endpoint()).fileName().startsWith("omaword-"));
         QCOMPARE(primary.start(), SingleInstance::Role::Primary);
         QCOMPARE(secondary.start(), SingleInstance::Role::Secondary);
         QLockFile legacy(dir.path() + "/test.lock");
@@ -322,8 +323,8 @@ private slots:
 
     void actualApplicationHandoff()
     {
-        const auto executable = qEnvironmentVariable("OMABIBLE_TEST_APP");
-        if (executable.isEmpty()) QSKIP("Set OMABIBLE_TEST_APP to test the freshly built application.");
+        const auto executable = qEnvironmentVariable("OMAWORD_TEST_APP");
+        if (executable.isEmpty()) QSKIP("Set OMAWORD_TEST_APP to test the freshly built application.");
         QTemporaryDir dir;
         Child primary;
         primary.setProcessEnvironment(isolatedEnvironment(dir.path()));
@@ -347,6 +348,27 @@ private slots:
         QCOMPARE(secondary.exitCode(), 1); // No Bible installed: cannot claim navigation succeeded.
         QVERIFY(!secondary.readAllStandardError().isEmpty());
         QCOMPARE(primary.state(), QProcess::Running);
+    }
+
+    void actualApplicationRefusesLiveHistoricalStore()
+    {
+        const auto executable = qEnvironmentVariable("OMAWORD_TEST_APP");
+        if (executable.isEmpty()) QSKIP("Set OMAWORD_TEST_APP to test the freshly built application.");
+        QTemporaryDir dir;
+        const auto old = dir.filePath("omabible");
+        QVERIFY(QDir().mkpath(old));
+        QLockFile lock(old + "/omabible.lock"); QVERIFY(lock.tryLock());
+        QFile personal(old + "/personal.sqlite"); QVERIFY(personal.open(QIODevice::WriteOnly));
+        QCOMPARE(personal.write("historical notes"), 16); personal.close();
+        Child app;
+        app.setProcessEnvironment(isolatedEnvironment(dir.path()));
+        app.start(executable, QStringList{}); QVERIFY(app.waitForStarted());
+        QByteArray errors;
+        QTRY_VERIFY_WITH_TIMEOUT((errors += app.readAllStandardError()).contains("Please close OmaBible"), 5000);
+        QVERIFY(lock.isLocked());
+        QVERIFY(!QFile::exists(dir.filePath("omaword/personal.sqlite")));
+        QVERIFY(personal.open(QIODevice::ReadOnly)); QCOMPARE(personal.readAll(), QByteArray("historical notes"));
+        // The modal error awaits dismissal; Child only terminates this test app.
     }
 };
 

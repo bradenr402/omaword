@@ -2,6 +2,7 @@
 #include "brand.h"
 #include "desktop.h"
 #include "singleinstance.h"
+#include "storagemigration.h"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QQmlApplicationEngine>
@@ -17,7 +18,7 @@
 #include <memory>
 
 int main(int argc, char *argv[]) {
-    // Keep QStandardPaths (and the instance lock) compatible with existing data.
+    // Use the new identity from the outset; migrate only as the primary instance.
     QCoreApplication::setApplicationName(Brand::storageId());
     QCoreApplication::setApplicationVersion(Brand::version());
     QGuiApplication::setDesktopFileName(Brand::appId());
@@ -29,7 +30,7 @@ int main(int argc, char *argv[]) {
     QCommandLineParser parser;
     parser.setApplicationDescription(Brand::name() + QStringLiteral(" — a quiet, offline Bible reader for Omarchy."));
     parser.addHelpOption();
-    // Qt's automatic version output uses the intentionally legacy storage name.
+    // Display the public name rather than the lowercase storage identity.
     const QCommandLineOption versionOption({QStringLiteral("v"), QStringLiteral("version")}, QStringLiteral("Displays version information."));
     parser.addOption(versionOption);
     QCommandLineOption importOption(QStringLiteral("import"), QStringLiteral("Import a supported structured Bible EPUB (NET 2.1 or Haiola/eBible KJV 2006)."), QStringLiteral("epub"));
@@ -63,6 +64,14 @@ int main(int argc, char *argv[]) {
             });
         });
         return app.exec();
+    }
+    // Keep the historical lock alive until after the backend is destroyed, so
+    // an old executable cannot recreate a second writable store during this run.
+    StorageMigration migration(data, QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation));
+    if (!migration.run()) {
+        QTextStream(stderr) << Brand::name() << ": " << migration.errorString() << Qt::endl;
+        QMessageBox::critical(nullptr, Brand::name(), migration.errorString());
+        return 1;
     }
     Desktop desktop;
     BibleBackend bible;

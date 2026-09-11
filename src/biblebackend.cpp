@@ -1260,7 +1260,7 @@ bool BibleBackend::exportNotes(QUrl directory)
     const QString path = localPath(directory);
     if (path.isEmpty()) return false;
     if (!QFileInfo(path).isDir()) return setError("Choose an existing directory for the Markdown export.");
-    if (!protectDestination(QDir(path).filePath("omabible-notes.md"))) return false;
+    if (!protectDestination(QDir(path).filePath("omaword-notes.md"))) return false;
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) return false;
     // The export filename remains stable for existing scripts and consumers.
@@ -1274,9 +1274,9 @@ bool BibleBackend::exportNotes(QUrl directory)
         if (!a.note.isEmpty()) markdown += a.note + "\n\n";
     }
     QString error;
-    if (!writeAtomic(QDir(path).filePath("omabible-notes.md"),markdown.toUtf8(),&error))
+    if (!writeAtomic(QDir(path).filePath("omaword-notes.md"),markdown.toUtf8(),&error))
         return setError("Cannot export Markdown notes: " + error);
-    clearError(); setStatus("Notes exported to " + QDir(path).filePath("omabible-notes.md")); return true;
+    clearError(); setStatus("Notes exported to " + QDir(path).filePath("omaword-notes.md")); return true;
 }
 
 bool BibleBackend::protectDestination(const QString &path)
@@ -1351,7 +1351,7 @@ bool BibleBackend::exportBackup(QUrl file)
             {"start",start.verse},{"end",end.verse},{"endBook",end.book},{"endChapter",end.chapter},
             {"bookmark",a.bookmark},{"highlight",a.highlight},{"note",a.note}});
     }
-    const QJsonObject root{{"format","omabible-backup"},{"version",3},{"edition",edition()},{"versionId",versionId()},
+    const QJsonObject root{{"format","omaword-backup"},{"version",3},{"edition",edition()},{"versionId",versionId()},
         {"created",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}, {"reading",reading},{"annotations",annotations}};
     const QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (bytes.size() > MaximumBackupSize) return setError("This backup exceeds the supported 32 MiB size. Export Markdown notes instead.");
@@ -1380,7 +1380,8 @@ bool BibleBackend::importBackup(QUrl file)
     const bool scoped = root.value("version").toInt() == 3;
     if (scoped) rootKeys << "versionId";
     if (!exactKeys(root,rootKeys)
-        || root.value("format") != "omabible-backup" || !integer(root.value("version"),1,3)
+        || (root.value("format") != "omaword-backup" && root.value("format") != "omabible-backup")
+        || !integer(root.value("version"),1,3)
         || !root.value("edition").isString() || !root.value("created").isString()
         || !QDateTime::fromString(root.value("created").toString(),Qt::ISODateWithMs).isValid()
         || !root.value("reading").isObject() || !root.value("annotations").isArray())
