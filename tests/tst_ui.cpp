@@ -25,7 +25,8 @@
 #include "epubimporter.h"
 
 // Run: QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./tst_ui
-// Optional: OMABIBLE_TEST_EPUB=/path/to/NETBIBLE21.epub. Without it a full,
+// Optional: OMABIBLE_TEST_EPUB=/path/to/NETBIBLE21.epub and
+// OMABIBLE_TEST_KJV=/path/to/eng-kjv2006.epub for multi-version integration. Without NET a full,
 // canonically numbered synthetic database is generated; no Bible text is bundled.
 class UiTest : public QObject
 {
@@ -270,7 +271,8 @@ private slots:
         click(item("setupImport"));
         QTRY_VERIFY(prop("importGuide","opened").toBool());
         QVERIFY(!item("importReplacement")->isVisible());
-        QVERIFY(prop("importSupported","text").toString().contains("Only the official NET Bible 2.1 EPUB (.epub)"));
+        QVERIFY(prop("importSupported","text").toString().contains("official NET Bible 2.1 EPUB"));
+        QVERIFY(prop("importSupported","text").toString().contains("KJV 2006 Haiola/eBible EPUB"));
         capture("revision-import-guide-setup");
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("importGuide","visible").toBool());
@@ -290,7 +292,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
-        type("add a version"); key(Qt::Key_Return);
+        type("add version"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("importGuide","opened").toBool());
         QVERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
@@ -313,8 +315,7 @@ private slots:
         invalid.write("Invalid EPUB test fixture"); invalid.close();
         QVERIFY(object("importDialog")->setProperty("selectedFile",QUrl::fromLocalFile(invalidPath)));
         QVERIFY(QMetaObject::invokeMethod(object("importDialog"),"accepted"));
-        QVERIFY(bible->busy());
-        QVERIFY(prop("busyPopup","visible").toBool());
+        // Metadata inspection can reject invalid archives before async import starts.
         QTRY_VERIFY(!bible->busy());
         QVERIFY(!bible->error().isEmpty());
         QVERIFY(item("errorMessage")->isVisible());
@@ -1580,7 +1581,10 @@ private slots:
             for (auto button : {Qt::RightButton,Qt::MiddleButton}) {
                 bible->clearSelection();
                 QTest::mouseClick(window,button,Qt::NoModifier,scene);
-                QCOMPARE(bible->cursorVerse(),verse);
+                QVERIFY2(bible->cursorVerse() == verse,qPrintable(QString("Expected %1, got %2 at %3,%4; local %5,%6; hit now %7; scroll %8")
+                    .arg(verse).arg(bible->cursorVerse()).arg(scene.x()).arg(scene.y()).arg(point.x()).arg(point.y())
+                    .arg(blockMapping()->verseAtPoint(item("blockBody")->mapFromScene(scene).x(),item("blockBody")->mapFromScene(scene).y()))
+                    .arg(prop("reading","contentY").toDouble())));
                 QCOMPARE(QApplication::clipboard()->text(),button == Qt::RightButton ? quoted[verse-1] : plain[verse-1]);
                 QCOMPARE(prop("toast","text").toString(),QString("John 3:%1 copied").arg(verse)
                     + (button == Qt::MiddleButton ? " as plain text" : ""));
@@ -2118,19 +2122,22 @@ private slots:
         auto passage = item("passageControl");
         QCOMPARE(prop("passageControl","text").toString(),bible->selectionReference());
         QVERIFY(prop("passageControl","tip").toString().contains(bible->selectionReference()));
-        QCOMPARE(passage->x() + passage->width() / 2,size.width() / 2.0);
-        QVERIFY(passage->width() >= passage->implicitWidth());
-        QVERIFY(item("passageControlLabel")->width() >= item("passageControlLabel")->implicitWidth());
+        const auto location = item("locationControls");
+        const auto version = item("versionControl");
+        QCOMPARE(location->x() + location->width() / 2,size.width() / 2.0);
+        QCOMPARE(version->x(),passage->width());
+        QCOMPARE(prop("versionControl","text").toString(),bible->versionAbbreviation());
+        QVERIFY(passage->width() > 0);
         const auto actions = item("floatingActions");
-        QVERIFY(passage->x() + passage->width() < actions->x());
-        for (const auto name : {"modeControl","passageControl","savedControl","notesControl","helpControl"}) {
+        QVERIFY(location->x() + location->width() < actions->x());
+        for (const auto name : {"modeControl","passageControl","versionControl","savedControl","notesControl","helpControl"}) {
             auto control = item(name);
             QVERIFY(control->isVisible());
             QVERIFY(QRectF(QPointF(),size).contains(control->mapRectToScene(QRectF(0,0,control->width(),control->height()))));
             const auto background = qvariant_cast<QQuickItem *>(control->property("background"));
             QVERIFY(background);
             QCOMPARE(background->property("color").value<QColor>().alpha(),0);
-            if (control != passage) QVERIFY(control->property("text").toString().isEmpty());
+            if (control != passage && control != version) QVERIFY(control->property("text").toString().isEmpty());
             control->forceActiveFocus(Qt::TabFocusReason);
             QVERIFY(control->hasActiveFocus());
         }
@@ -2157,7 +2164,7 @@ private slots:
         QCOMPARE(prop("notesPanel","color"),desktop->property("background"));
         QVERIFY(prop("noteEditor","placeholderText").toString().isEmpty());
         QCOMPARE(item("reading")->width(),double(size.width()));
-        QCOMPARE(passage->x() + passage->width() / 2,size.width() / 2.0);
+        QCOMPARE(location->x() + location->width() / 2,size.width() / 2.0);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("20g 12345 remains note text");
         QCOMPARE(bible->noteText(),QString("20g 12345 remains note text"));
@@ -2652,7 +2659,9 @@ private slots:
             {"middleCopy","Copy passage as plain text","Middle Click"},
             {"settings","Reading settings","Shift R"},
             {"commands","Open commands","Ctrl Space · Ctrl Shift P"},
-            {"import","Add a version",""}
+            {"switchVersion","Switch version","Shift V"},
+            {"removeVersion","Remove version",""},
+            {"import","Add version",""}
         };
         for (const auto &record : expected) {
             QCOMPARE(byId[record[0]].value("title").toString(),record[1]);
@@ -2689,22 +2698,262 @@ private slots:
                 QVERIFY(item("toast")->isVisible());
             }
         };
-        change("resetText",19); QVERIFY(!item("toast")->isVisible());
-        for (int size = 20; size <= 28; ++size) change("larger",size);
+        QCOMPARE(window->property("readerSize").toInt(),18);
+        change("resetText",18); QVERIFY(!item("toast")->isVisible());
+        for (int size = 19; size <= 40; ++size) change("larger",size);
         QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
-        change("larger",28); QVERIFY(!item("toast")->isVisible());
-        for (int size = 27; size >= 15; --size) change("smaller",size);
+        change("larger",40); QVERIFY(!item("toast")->isVisible());
+        for (int size = 39; size >= 8; --size) change("smaller",size);
         QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
-        change("smaller",15); QVERIFY(!item("toast")->isVisible());
-        change("resetText",19);
+        change("smaller",8); QVERIFY(!item("toast")->isVisible());
+        change("resetText",18);
         QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
-        change("resetText",19); QVERIFY(!item("toast")->isVisible());
+        change("resetText",18); QVERIFY(!item("toast")->isVisible());
         key(Qt::Key_F); QVERIFY(bible->focusMode());
         key(Qt::Key_Equal,Qt::ControlModifier);
-        QCOMPARE(prop("toast","text").toString(),QString("Text size 20"));
+        QCOMPARE(prop("toast","text").toString(),QString("Text size 19"));
         QVERIFY(item("toast")->isVisible());
         key(Qt::Key_Minus,Qt::ControlModifier);
-        QCOMPARE(prop("toast","text").toString(),QString("Text size 19"));
+        QCOMPARE(prop("toast","text").toString(),QString("Text size 18"));
+        key(Qt::Key_0,Qt::ControlModifier);
+        QCOMPARE(window->property("readerSize").toInt(),18);
+    }
+    void versionPickerKeyboardAndGeometry_data() {
+        QTest::addColumn<double>("scale");
+        QTest::newRow("normal") << 1.0;
+        QTest::newRow("scaled") << 1.8;
+        QTest::newRow("triple") << 3.0;
+    }
+    void versionPickerKeyboardAndGeometry() {
+        QFETCH(double,scale);
+        QCOMPARE(bible->versionId(),QString("net-2.1")); // Includes legacy synthetic startup migration.
+        QCOMPARE(bible->versions().size(),1);
+        reference("1 Thessalonians 1:1-2 Thessalonians 3:18");
+        const auto selected = bible->selectionReference();
+        window->resize(640,480);
+        QVERIFY(desktop->setProperty("textScale",scale));
+        QTest::qWait(100);
+        auto location = item("locationControls");
+        auto passage = item("passageControl");
+        auto version = item("versionControl");
+        QCOMPARE(location->x() + location->width()/2,320.0);
+        QCOMPARE(version->x(),passage->width());
+        QVERIFY(passage->width() > 0 && version->width() > 0);
+        QVERIFY(location->x() > item("modeControl")->x() + item("modeControl")->width());
+        QVERIFY(location->x() + location->width() < item("floatingActions")->x());
+        QVERIFY(prop("passageControlLabel","truncated").toBool());
+        QCOMPARE(prop("passageControl","tip").toString(),selected + " · Open passage · Ctrl k");
+        click(version);
+        QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+        QVERIFY(!item("versionClose"));
+        QCOMPARE(item("versionSearch")->width(),item("versionResults")->width());
+        type("no such version");
+        QCOMPARE(prop("versionResults","count").toInt(),0);
+        QVERIFY(item("versionEmpty")->isVisible());
+        key(Qt::Key_Home); key(Qt::Key_End); key(Qt::Key_Return);
+        QVERIFY(prop("versionDialog","opened").toBool());
+        QCOMPARE(bible->selectionReference(),selected);
+        key(Qt::Key_A,Qt::ControlModifier); type("net");
+        QCOMPARE(prop("versionResults","count").toInt(),1);
+        for (auto arrow : {Qt::Key_Down,Qt::Key_Up,Qt::Key_Home,Qt::Key_End,Qt::Key_PageDown,Qt::Key_PageUp}) {
+            key(arrow);
+            QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
+        }
+        key(Qt::Key_Return,Qt::ShiftModifier);
+        key(Qt::Key_Enter,Qt::ShiftModifier);
+        QVERIFY(prop("versionDialog","opened").toBool());
+        QVERIFY(!window->property("verseMode").toBool());
+        QTest::qWait(100);
+        for (auto name : {"versionSearch","versionResults","versionCancel","versionNext"}) {
+            auto target = item(name);
+            QVERIFY(QRectF(QPointF(),window->size()).contains(target->mapRectToScene(target->boundingRect())));
+        }
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QCOMPARE(bible->selectionReference(),selected);
+        key(Qt::Key_V,Qt::ShiftModifier);
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        key(Qt::Key_F); QVERIFY(bible->focusMode());
+        QVERIFY(!version->isVisible()); QVERIFY(!passage->isVisible());
+        key(Qt::Key_V,Qt::ShiftModifier);
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        type("switch version");
+        QCOMPARE(prop("keybindingResults","count").toInt(),1);
+        key(Qt::Key_Return); QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        key(Qt::Key_Space,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("switch version"); key(Qt::Key_Return);
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+    }
+    void removalWizardCancellationAndLastVersion() {
+        reference("John 3:16");
+        bible->setNoteText("Retain this edition's note");
+        bible->toggleBookmark(); bible->toggleHighlight();
+        const auto annotations = bible->collection();
+        const auto versions = bible->versions();
+        const auto start = [this] {
+            key(Qt::Key_Space,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+            type("remove version"); key(Qt::Key_Return);
+            QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+            QCOMPARE(prop("versionDialog","step").toInt(),0);
+        };
+        // Every step supports Escape and Cancel, including after opting to delete annotations.
+        for (int step = 0; step <= 2; ++step) for (bool escape : {false,true}) {
+            start();
+            if (step > 0) {
+                key(Qt::Key_Return);
+                QCOMPARE(prop("versionDialog","step").toInt(),1);
+                QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
+                QVERIFY(!prop("versionDialog","removeAnnotations").toBool());
+            }
+            if (step > 1) {
+                key(Qt::Key_Down); key(Qt::Key_Return);
+                QCOMPARE(prop("versionDialog","step").toInt(),2);
+                QVERIFY(prop("versionSummary","text").toString().contains("Delete its notes"));
+                QTRY_VERIFY(item("versionCancel")->hasActiveFocus());
+            }
+            QCOMPARE(bible->versions(),versions); QCOMPARE(bible->collection(),annotations);
+            if (escape) key(Qt::Key_Escape); else click(item("versionCancel"));
+            QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+            QCOMPARE(bible->versions(),versions); QCOMPARE(bible->collection(),annotations);
+        }
+        window->resize(640,480); QVERIFY(desktop->setProperty("textScale",1.8));
+        start(); key(Qt::Key_Return); key(Qt::Key_Return);
+        QCOMPARE(prop("versionDialog","step").toInt(),2);
+        QVERIFY(prop("versionSummary","text").toString().contains("Keep its notes"));
+        QVERIFY(prop("versionSummary","text").toString().contains("library will be empty"));
+        click(item("versionBack")); QCOMPARE(prop("versionDialog","step").toInt(),1);
+        QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
+        key(Qt::Key_Return);
+        QTRY_VERIFY(item("versionCancel")->hasActiveFocus());
+        key(Qt::Key_Right); QTRY_VERIFY(item("versionNext")->hasActiveFocus());
+        key(Qt::Key_Return,Qt::ShiftModifier);
+        QVERIFY(bible->ready()); QCOMPARE(bible->collection(),annotations);
+        QTest::qWait(100);
+        for (auto name : {"versionSummaryScroll","versionBack","versionCancel","versionNext"}) {
+            auto target = item(name);
+            QVERIFY(QRectF(QPointF(),window->size()).contains(target->mapRectToScene(target->boundingRect())));
+        }
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QVERIFY(!bible->ready()); QVERIFY(bible->versions().isEmpty());
+        QVERIFY(item("setupImport")->isVisible());
+        key(Qt::Key_V,Qt::ShiftModifier); QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        QVERIFY(item("versionEmpty")->isVisible()); QVERIFY(!item("versionNext")->isEnabled());
+        click(item("versionAdd")); QTRY_VERIFY(prop("importGuide","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
+        const QString epub = qEnvironmentVariable("OMABIBLE_TEST_EPUB");
+        if (!epub.isEmpty()) {
+            bible->importEpub(QUrl::fromLocalFile(epub));
+            QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+            QVERIFY2(bible->ready(),qPrintable(bible->error()));
+            QVERIFY(bible->navigate("John 3:16"));
+            QCOMPARE(bible->noteText(),QString("Retain this edition's note"));
+            QVERIFY(bible->selectionBookmarked()); QVERIFY(bible->selectionHighlighted());
+        }
+    }
+    void versionCallbacksGuardUnsavedNotes() {
+        reference("John 3:16");
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        QVERIFY(QMetaObject::invokeMethod(window,"openVersions",Q_ARG(QVariant,true)));
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        key(Qt::Key_Return); key(Qt::Key_Return);
+        QCOMPARE(prop("versionDialog","step").toInt(),2);
+        const auto versions = bible->versions();
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-version-note-failure");
+            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+            QVERIFY(db.open()); QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TRIGGER reject_version_note BEFORE INSERT ON annotations BEGIN SELECT RAISE(FAIL,'version draft failure'); END"));
+            QVERIFY(window->setProperty("syncingNote",true));
+            QVERIFY(object("noteEditor")->setProperty("text","Unsaved version draft"));
+            QVERIFY(window->setProperty("syncingNote",false));
+            QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"net-2.1")));
+            QVERIFY(prop("versionDialog","opened").toBool());
+            QVERIFY(bible->error().contains("version draft failure"));
+            QVERIFY(QMetaObject::invokeMethod(window,"confirmRemoveVersion"));
+            QCOMPARE(bible->versions(),versions);
+            QCOMPARE(prop("noteEditor","text").toString(),QString("Unsaved version draft"));
+            QVERIFY(bible->noteText().isEmpty());
+            QVERIFY(prop("versionDialog","opened").toBool());
+            QVERIFY(q.exec("DROP TRIGGER reject_version_note"));
+        }
+        QSqlDatabase::removeDatabase("ui-version-note-failure");
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window,"openVersions",Q_ARG(QVariant,false)));
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        QCOMPARE(bible->noteText(),QString("Unsaved version draft"));
+        // Backend rejection must leave the picker open too.
+        QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"missing-version")));
+        QVERIFY(prop("versionDialog","opened").toBool());
+        QCOMPARE(bible->versions(),versions);
+        key(Qt::Key_Return); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+    }
+    void realKjvSwitchAndRemoveAnnotations() {
+        const auto kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        if (kjv.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV to the structured eng-kjv2006.epub.");
+        reference("John 3:16-18");
+        bible->setNoteText("NET annotation"); bible->toggleBookmark();
+        const auto netText = bodyText(16);
+        const auto selected = bible->selectionReference();
+        const auto source = session->filePath("kjv.epub");
+        QVERIFY(QFile::copy(kjv,source));
+        QVERIFY(object("importDialog")->setProperty("selectedFile",QUrl::fromLocalFile(source)));
+        QVERIFY(QMetaObject::invokeMethod(object("importDialog"),"accepted"));
+        QVERIFY(bible->busy());
+        QVERIFY(!item("versionControl")->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(window,"openVersions",Q_ARG(QVariant,false)));
+        QVERIFY(!prop("versionDialog","visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"net-2.1")));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        QCOMPARE(bible->versions().size(),2);
+        QCOMPARE(bible->selectionReference(),selected);
+        QVERIFY(bible->noteText().isEmpty()); QVERIFY(!bible->selectionBookmarked());
+        QVERIFY(bodyText(16) != netText);
+        QCOMPARE(prop("versionControl","text").toString(),QString("KJV"));
+        QCOMPARE(prop("editionLabel","text").toString(),bible->edition().toUpper());
+        QVERIFY(QFile::remove(source));
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"about")));
+        QTRY_VERIFY(prop("aboutDialog","opened").toBool());
+        QCOMPARE(prop("aboutEdition","text").toString(),bible->edition());
+        QCOMPARE(prop("aboutCopyright","text").toString(),bible->versionCopyright());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("aboutDialog","visible").toBool());
+        bible->setNoteText("KJV annotation to delete");
+        key(Qt::Key_V,Qt::ShiftModifier); QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+        key(Qt::Key_End); QCOMPARE(prop("versionResults","currentIndex").toInt(),1);
+        key(Qt::Key_Home); QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
+        type("NET"); key(Qt::Key_Return,Qt::ShiftModifier);
+        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        key(Qt::Key_Return); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QCOMPARE(bible->versionId(),QString("net-2.1"));
+        QCOMPARE(bible->selectionReference(),selected);
+        QCOMPARE(bible->noteText(),QString("NET annotation")); QVERIFY(bible->selectionBookmarked());
+        QCOMPARE(bodyText(16),netText);
+        QVERIFY(QMetaObject::invokeMethod(window,"openVersions",Q_ARG(QVariant,true)));
+        QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+        type("KJV"); key(Qt::Key_Return); key(Qt::Key_Down); key(Qt::Key_Return);
+        QCOMPARE(prop("versionDialog","step").toInt(),2);
+        key(Qt::Key_Right); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QCOMPARE(bible->versions().size(),1); QCOMPARE(bible->versionId(),QString("net-2.1"));
+        QCOMPARE(bible->noteText(),QString("NET annotation"));
+        bible->importEpub(QUrl::fromLocalFile(kjv));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        QCOMPARE(bible->selectionReference(),selected);
+        QVERIFY(bible->noteText().isEmpty());
+        // Removing the active version chooses the remaining edition.
+        QVERIFY(QMetaObject::invokeMethod(window,"openVersions",Q_ARG(QVariant,true)));
+        QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+        type("KJV"); key(Qt::Key_Return); key(Qt::Key_Return);
+        key(Qt::Key_Right); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QCOMPARE(bible->versionId(),QString("net-2.1"));
+        QCOMPARE(bible->noteText(),QString("NET annotation"));
     }
     void importGuideAndPicker_data() {
         QTest::addColumn<bool>("notes");
@@ -2729,7 +2978,7 @@ private slots:
         if (scale > 1) window->resize(640,480);
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
-        type("add a version"); key(Qt::Key_Return);
+        type("add version"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("importGuide","opened").toBool());
         QVERIFY(!prop("passagePalette","visible").toBool());
         QVERIFY(!prop("importDialog","visible").toBool());
@@ -2737,7 +2986,9 @@ private slots:
         if (notes) QCOMPARE(bible->noteText(),QString("A draft before adding a version"));
         QVERIFY(item("importReplacement")->isVisible());
         QVERIFY(prop("importReplacement","text").toString().contains("preserves your notes, bookmarks, highlights, and settings"));
-        QVERIFY(prop("importSupported","text").toString().contains("Other Bible versions and file formats are not yet supported"));
+        QVERIFY(prop("importSupported","text").toString().contains("Other Bible EPUB layouts are not automatically supported"));
+        QVERIFY(prop("importOcr","text").toString().contains("metadata and verse anchors"));
+        QVERIFY(prop("importOcr","text").toString().contains("NKJV support is not confirmed"));
         QCOMPARE(prop("importDownloadLink","downloadUrl").toUrl(),QUrl("https://bible.org/downloads"));
         QVERIFY(prop("importSteps","text").toString().contains("NET Bible 2.1 EPUB"));
         QVERIFY(prop("importSteps","text").toString().contains("OmaWord validates"));

@@ -47,7 +47,7 @@ ApplicationWindow {
     onActiveFocusItemChanged: clearCount()
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
-    property real readerSize: 19
+    property real readerSize: 18
     property int selectionAnchor: 0
     property bool movingSelection: false
     property int collectionTab: 0
@@ -81,7 +81,7 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
+    readonly property bool modalOpen: versionDialog.visible || passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -567,6 +567,93 @@ ApplicationWindow {
         savePosition()
         if (bible.navigate(reference)) { syncNote(); readerFocus() }
     }
+    function openVersions(removing) {
+        if (bible.busy || !flushNote()) return
+        clearCount()
+        versionDialog.removing = !!removing
+        versionDialog.step = 0
+        versionDialog.chosen = null
+        versionDialog.removeAnnotations = false
+        versionSearch.text = ""
+        versionResults.currentIndex = 0
+        versionDialog.open()
+    }
+    function versionEntries() {
+        if (versionDialog.step === 1) return [
+            { name: "Keep annotations", hint: "Reconnect when this version is reimported", remove: false },
+            { name: "Remove annotations too", hint: "Delete this version's notes, bookmarks, and highlights", remove: true }
+        ]
+        const query = versionSearch.text.trim().toLowerCase()
+        return Array.from(bible.versions).filter(function(entry) {
+            return !query || (entry.abbreviation + " " + entry.name).toLowerCase().includes(query)
+        })
+    }
+    function moveVersion(delta) {
+        versionResults.currentIndex = versionResults.count ? Math.max(0, Math.min(versionResults.count - 1, versionResults.currentIndex + delta)) : -1
+        if (versionResults.count) versionResults.positionViewAtIndex(versionResults.currentIndex, ListView.Contain)
+    }
+    function versionKey(event) {
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            event.accepted = true
+            if (event.modifiers === Qt.NoModifier) acceptVersion()
+            return
+        }
+        if (event.modifiers !== Qt.NoModifier) return
+        const keys = [Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown]
+        if (versionDialog.step === 2) keys.push(Qt.Key_Left, Qt.Key_Right)
+        if (!keys.includes(event.key)) return
+        event.accepted = true
+        if (versionDialog.step === 2) {
+            if (versionCancel.activeFocus) versionNext.forceActiveFocus()
+            else versionCancel.forceActiveFocus()
+            return
+        }
+        const page = Math.max(1, Math.floor(versionResults.height / (64 * scale)))
+        moveVersion(event.key === Qt.Key_Home ? -versionResults.count : event.key === Qt.Key_End ? versionResults.count
+            : event.key === Qt.Key_PageUp ? -page : event.key === Qt.Key_PageDown ? page : event.key === Qt.Key_Up ? -1 : 1)
+    }
+    function acceptVersion() {
+        if (bible.busy) return
+        if (versionCancel.activeFocus) { versionDialog.close(); return }
+        if (versionBack.activeFocus) { backVersion(); return }
+        if (versionDialog.step === 2) { confirmRemoveVersion(); return }
+        const entry = versionResults.model[versionResults.currentIndex]
+        if (!entry) return
+        if (!versionDialog.removing) { switchVersion(entry.id); return }
+        if (versionDialog.step === 0) versionDialog.chosen = entry
+        else versionDialog.removeAnnotations = !!entry.remove
+        versionDialog.step++
+        versionResults.currentIndex = 0
+        if (versionDialog.step === 2) versionCancel.forceActiveFocus()
+        else versionResults.forceActiveFocus()
+    }
+    function backVersion() {
+        if (bible.busy || versionDialog.step === 0) return
+        versionDialog.step--
+        versionResults.currentIndex = versionDialog.step === 1 && versionDialog.removeAnnotations ? 1 : 0
+        if (versionDialog.step === 0) versionSearch.forceActiveFocus()
+        else versionResults.forceActiveFocus()
+    }
+    function switchVersion(id) {
+        if (bible.busy || !flushNote()) return
+        savePosition()
+        if (!bible.switchVersion(id)) return
+        clearTextSelection()
+        selectionAnchor = 0
+        syncNote()
+        restorePosition(hasSelection)
+        versionDialog.close()
+    }
+    function confirmRemoveVersion() {
+        if (!versionDialog.removing || versionDialog.step !== 2 || !versionDialog.chosen || bible.busy || !flushNote()) return
+        if (!bible.removeVersion(versionDialog.chosen.id, versionDialog.removeAnnotations)) return
+        clearTextSelection()
+        selectionAnchor = 0
+        syncNote()
+        if (bible.ready) restorePosition(hasSelection)
+        else notesDrawer.close()
+        versionDialog.close()
+    }
     // One action catalog supplies shortcuts, searchable keybindings, and commands.
     // Context-only gestures are explanatory rows, never executable guesses.
     readonly property var actions: [
@@ -613,7 +700,9 @@ ApplicationWindow {
         { id: "lineLess", title: "Decrease line height", keys: "Ctrl [", sequences: ["Ctrl+["] },
         { id: "lineMore", title: "Increase line height", keys: "Ctrl ]", sequences: ["Ctrl+]"] },
         { id: "lineReset", title: "Reset line height", keys: "Ctrl \\", sequences: ["Ctrl+\\"], command: true },
-        { id: "import", title: "Add a version", keys: "", scope: "global", command: true },
+        { id: "switchVersion", title: "Switch version", keys: "Shift V", sequences: ["Shift+V"], scope: "global", command: true },
+        { id: "removeVersion", title: "Remove version", keys: "", scope: "global", command: true },
+        { id: "import", title: "Add version", keys: "", scope: "global", command: true },
         { id: "resume", title: "Resume last palette", keys: "Space", sequences: ["Space"] },
         { id: "help", title: "Keybindings", keys: "? · F1", sequences: ["?", "F1"], scope: "global", command: true },
         { id: "about", title: "About & attribution", keys: "", scope: "global", command: true },
@@ -630,7 +719,7 @@ ApplicationWindow {
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
                 && (action.setting || ["lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         if (action.scope === "palette") return !modalOpen || passagePalette.opened
-        if (action.scope === "global") return !modalOpen && (bible.ready || action.id === "help" || action.id === "about" || action.id === "import")
+        if (action.scope === "global") return !modalOpen && (bible.ready || ["help", "about", "import", "switchVersion", "removeVersion"].includes(action.id))
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
         return readerKeys
     }
@@ -640,7 +729,7 @@ ApplicationWindow {
         if (action.id === "copyText") return bible.ready
         if (action.id === "bookmark" || action.id === "highlight") return hasSelection
         return bible.ready || !!action.setting
-            || ["books", "commands", "help", "about", "import", "settings", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
+            || ["books", "commands", "help", "about", "import", "switchVersion", "removeVersion", "settings", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
@@ -770,9 +859,9 @@ ApplicationWindow {
         case "extendNext": extendVerse(count); break
         case "toggleNotes": toggleNotes(); break
         case "copyText": if (freeSelectedText.length) copyFreeText(); else copyPassage(false); break
-        case "larger": readerSize = Math.min(28, readerSize + 1); break
-        case "smaller": readerSize = Math.max(15, readerSize - 1); break
-        case "resetText": readerSize = 19; break
+        case "larger": readerSize = Math.min(40, readerSize + 1); break
+        case "smaller": readerSize = Math.max(8, readerSize - 1); break
+        case "resetText": readerSize = 18; break
         case "numbers": bible.setShowVerseNumbers(!bible.showVerseNumbers); break
         case "headings": bible.setShowHeadings(!bible.showHeadings); break
         case "versePicker": bible.setVersePicker(!bible.versePicker); break
@@ -793,6 +882,8 @@ ApplicationWindow {
         case "backup": backupDialog.open(); break
         case "restore": restoreDialog.open(); break
         case "import": importGuide.open(); break
+        case "switchVersion": openVersions(false); break
+        case "removeVersion": openVersions(true); break
         case "help": helpDialog.open(); break
         case "about": aboutDialog.open(); break
         }
@@ -1213,7 +1304,7 @@ ApplicationWindow {
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
 
-                        SectionLabel { objectName: "editionLabel"; visible: !bible.focusMode; text: "NEW ENGLISH TRANSLATION"; leftPadding: app.verseGutter; bottomPadding: 12 }
+                        SectionLabel { objectName: "editionLabel"; visible: !bible.focusMode; text: bible.edition.toUpperCase(); width: parent.width; wrapMode: Text.Wrap; leftPadding: app.verseGutter; bottomPadding: 12 }
                         Label {
                             objectName: "chapterTitle"
                             text: bible.passage
@@ -1488,7 +1579,7 @@ ApplicationWindow {
                         }
                         Label {
                             visible: bible.verses.length === 0 && !bible.busy
-                            text: "This chapter has no text. Open another passage or import your NET EPUB again."
+                            text: "This chapter has no text. Open another passage or add this version again."
                             color: desktop.muted
                             width: parent.width
                             wrapMode: Text.Wrap
@@ -1540,7 +1631,7 @@ ApplicationWindow {
                 SectionLabel { text: "A QUIET PLACE TO READ"; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 10 }
                 Label { text: "Make room for the Word."; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -0.8; color: desktop.foreground; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label {
-                    text: "Bring your NET Bible 2.1 EPUB to begin. Read offline, mark passages, and keep your thoughts alongside the text."
+                    text: "Add a supported NET Bible 2.1 or KJV 2006 EPUB to begin. Read offline, mark passages, and keep your thoughts alongside the text."
                     color: desktop.muted
                     font.pixelSize: 15 * app.scale
                     horizontalAlignment: Text.AlignHCenter
@@ -1548,9 +1639,9 @@ ApplicationWindow {
                     lineHeight: 1.4
                     Layout.fillWidth: true
                 }
-                QuietButton { objectName: "setupImport"; text: "Add a version"; emphasized: true; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 6; onClicked: app.runCommand("import") }
+                QuietButton { objectName: "setupImport"; text: "Add version"; emphasized: true; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 6; onClicked: app.runCommand("import") }
                 Label { text: "Your Bible and annotations stay on this device."; color: desktop.muted; font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                QuietButton { text: "About the NET Bible ↗"; compact: true; Layout.alignment: Qt.AlignHCenter; onClicked: aboutDialog.open() }
+                QuietButton { text: "About & attribution"; compact: true; Layout.alignment: Qt.AlignHCenter; onClicked: aboutDialog.open() }
             }
             }
 
@@ -1733,18 +1824,34 @@ ApplicationWindow {
         tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · v"
         onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
     }
-    FloatingButton {
-        id: passageControl
-        objectName: "passageControl"
+    Row {
+        id: locationControls
+        objectName: "locationControls"
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 16 * app.controlScale
         x: app.width / 2 - width / 2
-        width: Math.max(0, Math.min(implicitWidth, app.width - 2 * (floatingActions.width + 24 * app.controlScale)))
-        text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
-        tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl k"
+        readonly property real availableWidth: Math.max(0, app.width - 2 * (floatingActions.width + 24 * app.controlScale))
+        width: Math.min(passageControl.implicitWidth + (versionControl.visible ? versionControl.width : 0), availableWidth)
         visible: !bible.focusMode
-        enabled: !bible.busy && !app.modalOpen
-        onClicked: app.openPalette(false)
+        FloatingButton {
+            id: passageControl
+            objectName: "passageControl"
+            width: Math.max(0, locationControls.width - (versionControl.visible ? versionControl.width : 0))
+            text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
+            tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl k"
+            enabled: !bible.busy && !app.modalOpen
+            onClicked: app.openPalette(false)
+        }
+        FloatingButton {
+            id: versionControl
+            objectName: "versionControl"
+            width: Math.min(implicitWidth, locationControls.availableWidth * 0.4)
+            text: bible.versionAbbreviation
+            tip: bible.edition + " · Switch version · Shift V"
+            visible: bible.ready
+            enabled: !bible.busy && !app.modalOpen
+            onClicked: app.openVersions(false)
+        }
     }
     Row {
         id: floatingActions
@@ -1775,6 +1882,182 @@ ApplicationWindow {
             tip: "Keybindings · ? · F1"
             enabled: !bible.busy && !app.modalOpen
             onClicked: helpDialog.open()
+        }
+    }
+
+    ModalCard {
+        id: versionDialog
+        objectName: "versionDialog"
+        property bool removing: false
+        property int step: 0
+        property var chosen: null
+        property bool removeAnnotations: false
+        property bool addPending: false
+        readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 240))
+        height: Math.min(540 * app.scale, app.height - 48)
+        onOpened: versionSearch.forceActiveFocus()
+        onClosed: {
+            const add = addPending
+            addPending = false
+            chosen = null
+            if (add) Qt.callLater(function() { app.runCommand("import") })
+            else app.restorePanelFocus()
+        }
+        contentItem: ColumnLayout {
+            spacing: 12 * versionDialog.uiScale
+            Keys.onPressed: function(event) { app.versionKey(event) }
+            Label {
+                objectName: "versionTitle"
+                text: !versionDialog.removing ? "Switch version" : versionDialog.step === 0 ? "Remove version"
+                    : versionDialog.step === 1 ? "Remove annotations too?" : "Confirm removal"
+                color: desktop.foreground; font.pixelSize: 20 * versionDialog.uiScale
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            TextField {
+                id: versionSearch
+                objectName: "versionSearch"
+                visible: versionDialog.step === 0
+                enabled: !bible.busy
+                Layout.fillWidth: true
+                implicitHeight: 42 * versionDialog.uiScale
+                placeholderText: "Search versions…"
+                font.pixelSize: 15 * versionDialog.uiScale
+                selectByMouse: true
+                padding: 10 * versionDialog.uiScale
+                background: Rectangle { color: desktop.surface; border.color: versionSearch.activeFocus ? desktop.accent : desktop.border }
+                onTextChanged: { versionResults.currentIndex = 0; versionResults.positionViewAtBeginning() }
+                Keys.onPressed: function(event) { app.versionKey(event) }
+                Accessible.name: "Search installed versions"
+            }
+            ListView {
+                id: versionResults
+                objectName: "versionResults"
+                visible: versionDialog.step < 2
+                enabled: !bible.busy
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 3 * versionDialog.uiScale
+                model: app.versionEntries()
+                onModelChanged: currentIndex = count ? Math.max(0, Math.min(currentIndex, count - 1)) : -1
+                Keys.onPressed: function(event) { app.versionKey(event) }
+                ScrollBar.vertical: OverlayScrollbar { objectName: "versionScrollbar" }
+                delegate: ItemDelegate {
+                    id: versionEntry
+                    required property var modelData
+                    required property int index
+                    objectName: "versionEntry" + index
+                    width: versionResults.width
+                    height: versionEntryContent.implicitHeight + 20 * versionDialog.uiScale
+                    highlighted: ListView.isCurrentItem
+                    onClicked: { versionResults.currentIndex = index; versionResults.forceActiveFocus(); app.acceptVersion() }
+                    Keys.onPressed: function(event) { app.versionKey(event) }
+                    background: Rectangle { color: versionEntry.highlighted ? app.tint(desktop.accent, 0.11) : versionEntry.hovered ? desktop.surface : "transparent" }
+                    contentItem: ColumnLayout {
+                        id: versionEntryContent
+                        spacing: 4 * versionDialog.uiScale
+                        Label {
+                            text: (versionEntry.modelData.abbreviation ? versionEntry.modelData.abbreviation + " · " : "") + versionEntry.modelData.name
+                            color: desktop.foreground; font.pixelSize: 14 * versionDialog.uiScale
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                        }
+                        Label {
+                            text: versionEntry.modelData.hint || (versionEntry.modelData.active ? "Current version" : "Installed locally")
+                            color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                        }
+                    }
+                }
+                Label {
+                    objectName: "versionEmpty"
+                    anchors.centerIn: parent
+                    width: parent.width
+                    text: bible.busy ? "Please wait…" : bible.versions.length ? "No matching versions" : "No versions installed. Add version to begin."
+                    visible: versionResults.count === 0 || bible.busy
+                    color: desktop.muted; font.pixelSize: 14 * versionDialog.uiScale
+                    horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                }
+            }
+            OverlayScrollView {
+                id: versionSummaryScroll
+                objectName: "versionSummaryScroll"
+                visible: versionDialog.step === 2
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                Label {
+                    objectName: "versionSummary"
+                    width: versionSummaryScroll.availableWidth
+                    text: versionDialog.chosen ? "Remove " + versionDialog.chosen.name + " (" + versionDialog.chosen.abbreviation + ") from this library?\n\n"
+                        + (versionDialog.removeAnnotations ? "Delete its notes, bookmarks, and highlights. This cannot be undone."
+                            : "Keep its notes, bookmarks, and highlights. They will reconnect when the same version is reimported.")
+                        + "\n\n" + (bible.versions.length === 1 ? "The library will be empty. You can add a version again at any time." : "Other installed versions remain available.")
+                        + " Your settings and source EPUB are kept." : ""
+                    textFormat: Text.PlainText
+                    color: desktop.foreground; font.pixelSize: 14 * versionDialog.uiScale; wrapMode: Text.Wrap
+                }
+            }
+            Label {
+                objectName: "versionError"
+                text: bible.error
+                visible: text.length > 0
+                color: desktop.accent; font.pixelSize: 12 * versionDialog.uiScale
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            FineRule { Layout.fillWidth: true }
+            Label {
+                text: versionDialog.step === 2 ? "← → choose    Enter select    Esc cancel" : "↑ ↓ choose    Home / End    Enter select    Esc cancel"
+                color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 4 * versionDialog.uiScale
+                QuietButton {
+                    id: versionBack
+                    objectName: "versionBack"
+                    font.pixelSize: 13 * versionDialog.uiScale
+                    implicitHeight: 38 * versionDialog.uiScale
+                    text: "Back"
+                    visible: versionDialog.step > 0
+                    enabled: !bible.busy
+                    onClicked: app.backVersion()
+                    Keys.onPressed: function(event) { app.versionKey(event) }
+                }
+                QuietButton {
+                    objectName: "versionAdd"
+                    font.pixelSize: 13 * versionDialog.uiScale
+                    implicitHeight: 38 * versionDialog.uiScale
+                    text: "Add version"
+                    visible: versionDialog.step === 0 && !bible.versions.length
+                    enabled: !bible.busy
+                    onClicked: { versionDialog.addPending = true; versionDialog.close() }
+                    Keys.onReturnPressed: function(event) { if (event.modifiers === Qt.NoModifier) clicked() }
+                    Keys.onEnterPressed: function(event) { if (event.modifiers === Qt.NoModifier) clicked() }
+                }
+                Item { Layout.fillWidth: true }
+                QuietButton {
+                    id: versionCancel
+                    objectName: "versionCancel"
+                    font.pixelSize: 13 * versionDialog.uiScale
+                    implicitHeight: 38 * versionDialog.uiScale
+                    text: "Cancel"
+                    onClicked: versionDialog.close()
+                    Keys.onPressed: function(event) { app.versionKey(event) }
+                }
+                QuietButton {
+                    id: versionNext
+                    objectName: "versionNext"
+                    font.pixelSize: 13 * versionDialog.uiScale
+                    implicitHeight: 38 * versionDialog.uiScale
+                    text: versionDialog.step === 2 ? "Confirm" : versionDialog.removing ? "Next" : "Switch"
+                    emphasized: true
+                    enabled: !bible.busy && (versionDialog.step === 2 || versionResults.count > 0)
+                    onClicked: { versionNext.forceActiveFocus(); app.acceptVersion() }
+                    Keys.onPressed: function(event) { app.versionKey(event) }
+                }
+            }
         }
     }
 
@@ -1912,7 +2195,7 @@ ApplicationWindow {
                     width: parent.width - 32
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
-                    text: referenceInput.text.startsWith(">") ? "No matching commands" : "Import your NET EPUB to browse passages."
+                    text: referenceInput.text.startsWith(">") ? "No matching commands" : "Add version to browse passages."
                     visible: paletteResults.count === 0 && (referenceInput.text.startsWith(">") || !bible.ready)
                     color: desktop.muted
                     font.pixelSize: 13 * app.scale
@@ -2282,11 +2565,13 @@ ApplicationWindow {
                 Label { text: desktop.appName; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
             }
             SectionLabel { text: "READ SLOWLY. KEEP WHAT MATTERS." }
-            Label { text: "An offline NET Bible reader with local bookmarks, highlights, and Markdown notes. Built with Qt, at home on your desktop."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
+            Label { text: "An offline Bible reader with local bookmarks, highlights, and Markdown notes. Built with Qt, at home on your desktop."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
             FineRule { Layout.fillWidth: true }
-            Label { text: "New English Translation (NET Bible)\nNET Bible® copyright © 1996–2019 by Biblical Studies Press, L.L.C. All rights reserved. The Bible text is separately copyrighted and is imported from your own NET 2.1 EPUB; it is not distributed with " + desktop.appName + "."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
-            QuietButton { text: "NET Bible & permissions ↗"; compact: true; onClicked: desktop.openExternal("https://netbible.com/copyright/") }
-            Label { text: desktop.appName + " " + desktop.version + " · Application code licensed under MIT\n" + (bible.edition || "NET 2.1") + " · No account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { objectName: "aboutEdition"; text: bible.ready ? bible.edition : "No version installed"; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale }
+            Label { objectName: "aboutCopyright"; text: bible.versionCopyright; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
+            Label { text: "Bible text is imported from your own supported EPUB and is not distributed with " + desktop.appName + "."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
+            QuietButton { text: "NET Bible & permissions ↗"; visible: bible.versionId === "net-2.1"; compact: true; onClicked: desktop.openExternal("https://netbible.com/copyright/") }
+            Label { text: desktop.appName + " " + desktop.version + " · Application code licensed under MIT\nNo account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             QuietButton { text: "Open local data folder ↗"; compact: true; onClicked: desktop.openExternal("file://" + bible.dataDirectory()) }
         }
         }
@@ -2309,7 +2594,7 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 16 * app.scale
-            Label { text: "Add a version"; color: desktop.foreground; font.pixelSize: 24 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: "Add version"; color: desktop.foreground; font.pixelSize: 24 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             OverlayScrollView {
                 id: importGuideScroll
                 objectName: "importGuideScroll"
@@ -2322,17 +2607,18 @@ ApplicationWindow {
                     spacing: 16 * app.scale
                     Label {
                         objectName: "importSupported"
-                        text: "Only the official NET Bible 2.1 EPUB (.epub) is currently supported. Other Bible versions and file formats are not yet supported."
+                        text: "Supported layouts: the official NET Bible 2.1 EPUB, and the structured KJV 2006 Haiola/eBible EPUB (eng-kjv2006.epub). These specific layouts include edition metadata and chapter/verse anchors. Other Bible EPUB layouts are not automatically supported."
                         color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     Label {
                         objectName: "importReplacement"
                         visible: bible.ready
-                        text: "NET Bible 2.1 is already imported. Importing the same edition replaces the Bible data and preserves your notes, bookmarks, highlights, and settings."
+                        text: "Importing the same edition replaces its Bible data and preserves your notes, bookmarks, highlights, and settings. Adding another supported version keeps the installed editions. Annotations belong to their own version."
                         color: desktop.accent; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     FineRule { Layout.fillWidth: true }
-                    Label { text: "1. Visit the official Bible.org downloads page."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { objectName: "importOcr"; text: "Scans and OCR study-Bible pages cannot be imported as native Scripture: reliable structured edition metadata and verse anchors are required. The replacement NKJV EPUB has been received but appears OCR-based; parser assessment is pending and NKJV support is not confirmed."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { text: "1. Obtain one of the supported EPUB editions. NET downloads are available from Bible.org; the supported KJV 2006 file is available from eBible.org."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     QuietButton {
                         objectName: "importDownloadLink"
                         property url downloadUrl: "https://bible.org/downloads"
@@ -2341,7 +2627,8 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         onClicked: desktop.openExternal(downloadUrl)
                     }
-                    Label { objectName: "importSteps"; text: "2. Download the NET Bible 2.1 EPUB file.\n\n3. Choose EPUB… below, then select the downloaded .epub file.\n\n4. " + desktop.appName + " validates the file and imports the Bible into its own local SQLite database."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    QuietButton { objectName: "importKjvLink"; text: "eBible.org KJV 2006 ↗"; compact: true; Layout.fillWidth: true; onClicked: desktop.openExternal("https://ebible.org/eng-kjv2006/") }
+                    Label { objectName: "importSteps"; text: "2. Download the official NET Bible 2.1 EPUB or structured KJV 2006 EPUB.\n\n3. Choose EPUB… below, then select the downloaded .epub file.\n\n4. " + desktop.appName + " validates the file and imports the Bible into its own local SQLite database, then activates that version."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { objectName: "importDataPath"; text: bible.dataDirectory(); textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
                     Label { objectName: "importOffline"; text: "After a successful import, you can move or delete the source EPUB. No internet connection is needed for normal use."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
@@ -2367,9 +2654,9 @@ ApplicationWindow {
     FileDialog {
         id: importDialog
         objectName: "importDialog"
-        title: "Import NET Bible 2.1 EPUB"
+        title: "Add version"
         fileMode: FileDialog.OpenFile
-        nameFilters: ["NET Bible 2.1 EPUB (*.epub)"]
+        nameFilters: ["Supported Bible EPUB (*.epub)"]
         onAccepted: { if (!app.flushNote()) return; bible.clearError(); bible.importEpub(selectedFile) }
         onVisibleChanged: { if (!visible) app.restorePanelFocus() }
     }
@@ -2489,7 +2776,7 @@ ApplicationWindow {
             spacing: 20
             BusyIndicator { running: bible.busy; Layout.alignment: Qt.AlignHCenter; implicitWidth: 36; implicitHeight: 36 }
             Label { text: "Preparing your library"; color: desktop.foreground; font.pixelSize: 21 * app.scale; font.weight: Font.Medium; Layout.alignment: Qt.AlignHCenter }
-            Label { text: bible.status || "Reading and validating your NET EPUB…"; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
+            Label { text: bible.status || "Reading and validating your EPUB…"; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
             ProgressBar {
                 id: importProgressBar
                 Layout.fillWidth: true
