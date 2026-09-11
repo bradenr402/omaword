@@ -81,6 +81,10 @@ ApplicationWindow {
     readonly property real floatingSafety: 72 * scale
     readonly property real controlScale: Math.min(scale, 1.4)
     FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.scale }
+    component VerseItem: Item {
+        property real textOffset: 0
+        property real textHeight: 0
+    }
 
     function clearCount() { verseCount = ""; if (countTimer) countTimer.stop() }
     function countDigit(digit) {
@@ -253,7 +257,7 @@ ApplicationWindow {
     }
     function scrollToVerse(number, alignTop) {
         let index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
-        let row = verseRepeater.itemAt(index)
+        let row = verseRepeater.itemAt(index) as VerseItem
         if (!row) return
         let y = row.mapToItem(readerColumn, 0, 0).y + row.textOffset
         let available = Math.max(1, reading.height - floatingSafety)
@@ -674,14 +678,14 @@ ApplicationWindow {
                         Repeater {
                             id: verseRepeater
                             model: bible.verses
-                            delegate: Item {
+                            delegate: VerseItem {
                                 id: verseRow
                                 required property var modelData
                                 required property int index
                                 readonly property bool selected: modelData.number >= bible.selectedStart && modelData.number <= bible.selectedEnd && bible.selectedStart > 0
                                 readonly property real gutter: 40 * app.scale
-                                readonly property real textOffset: verseHeading.height
-                                readonly property real textHeight: verseBody.height
+                                textOffset: verseHeading.height
+                                textHeight: verseBody.height
                                 width: readerColumn.width
                                 height: verseHeading.height + verseBody.height + 7 * app.scale
                                 Item {
