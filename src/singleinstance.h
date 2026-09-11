@@ -9,7 +9,7 @@
 class QWindow;
 class QLocalSocket;
 
-// The legacy data lock is authoritative; the socket is only a handoff channel.
+// One process owns the data lock; the socket hands launcher requests to it.
 class SingleInstance : public QObject
 {
     Q_OBJECT
@@ -19,6 +19,7 @@ public:
         QString importPath;
         QString activationToken;
         QString startupId;
+        bool newWindow = true;
         static Request fromArguments(const QStringList &references, const QString &importArgument,
                                      bool importProvided);
     };

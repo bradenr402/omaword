@@ -8,6 +8,6 @@ inline QString appName() { return QStringLiteral(\"$$BRAND_NAME\"); }
 inline QString name() { return appName(); }
 inline QString appId() { return QStringLiteral(\"$$BRAND_ID\"); }
 inline QString version() { return QStringLiteral(\"$$BRAND_VERSION\"); }
-// QStandardPaths and the shared instance lock must retain the legacy identity.
+// QStandardPaths and the process coordinator lock use the configured storage ID.
 inline QString storageId() { return QStringLiteral(\"$$BRAND_STORAGE_ID\"); }
 }

@@ -15,6 +15,7 @@
 #include <QSet>
 #include <QScopeGuard>
 #include <QSignalBlocker>
+#include <QPointer>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -28,6 +29,8 @@
 #include <cerrno>
 
 namespace {
+// All readers and commits live on the GUI thread, under the primary's process lock.
+QList<BibleBackend *> readers;
 constexpr qsizetype MaximumNoteSize = 1024 * 1024;
 constexpr qint64 MaximumBackupSize = 32 * 1024 * 1024;
 QString connectionName() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
@@ -127,6 +130,13 @@ int BibleBackend::absoluteVerse(int b, int c, int v) const
 
 BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 {
+    m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    for (auto *peer : readers) {
+        if (peer->m_directory != m_directory) continue;
+        connect(this, &BibleBackend::sharedCommitted, peer, &BibleBackend::refreshShared, Qt::DirectConnection);
+        connect(peer, &BibleBackend::sharedCommitted, this, &BibleBackend::refreshShared, Qt::DirectConnection);
+    }
+    readers.append(this);
     // Completion wiring must exist even when startup text or storage is damaged.
     m_progressTimer.setInterval(100);
     connect(&m_progressTimer, &QTimer::timeout, this, [this] {
@@ -137,7 +147,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         m_progressTimer.stop();
         const auto result = m_importWatcher.result();
         if (result.ok) {
-            if (changeVersion(result.edition.id,m_importTarget)) m_progress = 1;
+            if (flushDrafts() && changeVersion(result.edition.id,m_importTarget)) m_progress = 1;
             else removeOwnedBibleFiles(m_importTarget);
         } else {
             removeOwnedBibleFiles(m_importTarget);
@@ -146,7 +156,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         }
         m_importTarget.clear();
         m_busy = false;
-        emit importProgressChanged(); emit busyChanged();
+        emit importProgressChanged(); notifyBusy();
     });
     m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if (!QDir().mkpath(m_directory)) {
@@ -167,6 +177,8 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 
 BibleBackend::~BibleBackend()
 {
+    readers.removeAll(this);
+    disconnect(this, nullptr, nullptr, nullptr);
     // The worker captures only paths and shared progress, never this QObject.
     // Waiting ensures a normal application exit cannot leave a half-finished import.
     m_importWatcher.waitForFinished();
@@ -175,6 +187,85 @@ BibleBackend::~BibleBackend()
     closeBible();
     m_store.close(); m_store = QSqlDatabase();
     if (!m_storeConnection.isEmpty()) QSqlDatabase::removeDatabase(m_storeConnection);
+    if (m_busy) notifyBusy();
+}
+
+bool BibleBackend::busy() const
+{
+    for (auto *peer : readers)
+        if (peer->m_directory == m_directory && peer->m_busy) return true;
+    return false;
+}
+
+void BibleBackend::notifyBusy()
+{
+    for (auto *peer : readers)
+        if (peer->m_directory == m_directory) emit peer->busyChanged();
+}
+
+bool BibleBackend::sharedMutationBusy() const
+{
+    for (auto *peer : readers)
+        if (peer->m_directory == m_directory && (peer->m_busy || peer->m_mutating || peer->m_flushing)) return true;
+    return false;
+}
+
+bool BibleBackend::flushDrafts()
+{
+    m_flushing = true;
+    const auto guard = qScopeGuard([this] {
+        m_flushing = false;
+        const auto pending = std::exchange(m_pendingAnnotations, {});
+        for (const auto &id : pending) {
+            refreshShared(id, false, false);
+            emit sharedCommitted(id, false, false);
+        }
+    });
+    QList<QPointer<BibleBackend>> snapshot;
+    for (auto *peer : readers) if (peer->m_directory == m_directory) snapshot.append(peer);
+    for (const auto &peer : snapshot) {
+        if (peer && peer->m_flush && !peer->m_flush())
+            return setError("An unsaved note in a reader window could not be saved. The operation was cancelled.");
+    }
+    return true;
+}
+
+void BibleBackend::publishAnnotations()
+{
+    // Flushing A must not replace B's editor contents before B gets its turn.
+    // Writes still read the latest rows inside their own transaction.
+    for (auto *peer : readers) {
+        if (peer->m_directory == m_directory && peer->m_flushing) {
+            peer->m_pendingAnnotations.insert(m_versionId);
+            return;
+        }
+    }
+    emit sharedCommitted(m_versionId, false, false);
+}
+
+void BibleBackend::refreshShared(const QString &id, bool library, bool preferences)
+{
+    if (!m_storeReady) return;
+    if (preferences && loadPreferences()) emit preferencesChanged();
+    if (library) {
+        if (!readVersions(&m_versions)) return;
+        QString next = m_versionId;
+        if (next.isEmpty() || installedPath(next).isEmpty()) {
+            next = m_versions.isEmpty() ? QString() : m_versions.first().toMap()["id"].toString();
+        }
+        if (next != m_versionId || (!id.isEmpty() && id == m_versionId)) {
+            if (!changeVersion(next, {}, {}, false, false, true)) {
+                // Never retain an obsolete generation or writable annotation scope.
+                closeBible(); m_ready = false; m_versionId.clear();
+                m_edition.clear(); m_abbreviation.clear(); m_copyright.clear();
+                m_keys = {{0,0,0}}; m_anchor = m_cursor = m_start = m_end = 0;
+                m_verses.clear(); m_annotations.clear(); m_collection.clear();
+                updateAnnotations(); emit readyChanged(); emit versionChanged();
+                emit collectionChanged(); emit selectionChanged();
+            }
+        }
+        emit versionsChanged();
+    } else if (!id.isEmpty() && id == m_versionId) refreshCollection();
 }
 
 bool BibleBackend::setError(const QString &error)
@@ -364,6 +455,7 @@ bool BibleBackend::savePreference(const QString &key, const QVariant &value)
     }
     q.finish();
     if (!m_store.commit()) { m_store.rollback(); return setError("Cannot commit your preferences: " + m_store.lastError().text()); }
+    emit sharedCommitted({}, false, true);
     clearError(); return true;
 }
 
@@ -462,7 +554,9 @@ void BibleBackend::removeOwnedBibleFiles(const QString &path, const QString &id)
 bool BibleBackend::readVersions(QVariantList *result)
 {
     QSqlQuery q(m_store);
-    if (!q.exec("SELECT version_id,abbreviation,name,version_id=(SELECT active FROM library WHERE id=1) FROM installed ORDER BY 4 DESC,last_used DESC,version_id"))
+    q.prepare("SELECT version_id,abbreviation,name,version_id=? FROM installed ORDER BY 4 DESC,last_used DESC,version_id");
+    q.addBindValue(m_versionId.isNull() ? QString("") : m_versionId);
+    if (!q.exec())
         return setError("Cannot read installed versions: " + q.lastError().text());
     QVariantList rows;
     while (q.next()) rows.append(QVariantMap{{"id",q.value(0)},{"abbreviation",q.value(1)},
@@ -481,8 +575,11 @@ bool BibleBackend::switchVersion(QString id)
 
 bool BibleBackend::removeVersion(QString id, bool removeAnnotations)
 {
-    if (m_busy) return setError("Wait for the EPUB import to finish before removing versions.");
+    if (sharedMutationBusy()) return setError("Wait for the shared library operation to finish before removing versions.");
     if (id.isEmpty() || installedPath(id).isEmpty()) return setError("That Bible version is not installed.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_mutating = false; });
+    if (!flushDrafts()) return false;
     QString next = m_versionId;
     if (next == id) {
         next.clear();
@@ -493,7 +590,7 @@ bool BibleBackend::removeVersion(QString id, bool removeAnnotations)
 }
 
 bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
-                                const QString &removedId, bool deleteAnnotations, bool startup)
+                                const QString &removedId, bool deleteAnnotations, bool startup, bool peerReload)
 {
     if (!m_storeReady) return setError("Your notes database is unavailable.");
     const QString path = importPath.isEmpty() ? installedPath(id) : importPath;
@@ -600,15 +697,17 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
             }
         }
     }
-    q.prepare("UPDATE library SET active=? WHERE id=1"); q.addBindValue(id.isNull() ? QString("") : id);
-    if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot save active version: " + q.lastError().text());
-    q.prepare("SELECT active FROM library WHERE id=1");
-    if (!q.exec() || !q.next() || q.value(0).toString() != id) return setError("Cannot verify active version.");
-    q.finish();
+    if (!peerReload) {
+        q.prepare("UPDATE library SET active=? WHERE id=1"); q.addBindValue(id.isNull() ? QString("") : id);
+        if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot save active version: " + q.lastError().text());
+        q.prepare("SELECT active FROM library WHERE id=1");
+        if (!q.exec() || !q.next() || q.value(0).toString() != id) return setError("Cannot verify active version.");
+        q.finish();
+    }
     // Rank is a library-owned monotonic counter, never a wall-clock timestamp
     // or MAX(installed): deleting/readding the newest edition gets a fresh rank.
     // Startup and removal of an inactive edition are not new uses.
-    if (!id.isEmpty() && !startup && (id != oldId || !importPath.isEmpty())) {
+    if (!peerReload && !id.isEmpty() && !startup && (id != oldId || !importPath.isEmpty())) {
         if (!q.exec("SELECT use_counter FROM library WHERE id=1") || !q.next()) return setError("Cannot read version usage counter.");
         const qint64 previous = q.value(0).toLongLong(); q.finish();
         if (!q.exec("UPDATE library SET use_counter=use_counter+1 WHERE id=1")) return setError("Cannot advance version usage counter: " + q.lastError().text());
@@ -641,7 +740,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         if (fallback || !std::isfinite(m_position) || m_position < 0 || m_position > 1) m_position = 0;
         intersectSelection();
         if (!readChapter(m_book,m_chapter,&rows) || !loadAnnotations(&annotations)
-            || !persistState(m_book,m_chapter,m_anchor,m_cursor,m_position)) return false;
+            || (!peerReload && !persistState(m_book,m_chapter,m_anchor,m_cursor,m_position))) return false;
     } else { m_book = m_chapter = 1; m_start = m_end = m_anchor = m_cursor = 0; m_position = 0; }
     if (!readVersions(&versions)) return false;
     if ((!id.isEmpty() && installedPath(id) != path) || (!removedId.isEmpty() && !installedPath(removedId).isEmpty()))
@@ -659,6 +758,8 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     m_ready = !id.isEmpty(); m_verses = rows; m_annotations = annotations;
     m_collection = collectionRows(annotations); m_versions = versions;
     blocker.unblock();
+    // Direct delivery closes/reloads every peer before obsolete files are unlinked.
+    if (!peerReload) emit sharedCommitted(obsoleteId, true, false);
     clearError();
     setStatus(fallback ? "The selected endpoint is absent in " + edition() + "; opened " + passage() + " instead."
         : m_ready ? "Ready · " + edition() : "Import a supported Bible EPUB to begin.");
@@ -690,7 +791,7 @@ QString BibleBackend::localPath(const QUrl &url)
 }
 void BibleBackend::importEpub(QUrl file)
 {
-    if (m_busy) { setError("An EPUB import is already running."); return; }
+    if (sharedMutationBusy()) { setError("A shared library operation is already running."); return; }
     if (!m_storeReady || !m_store.isOpen()) { setError("Your notes database is unavailable. Check the data directory permissions."); return; }
     const QString path = localPath(file);
     if (path.isEmpty()) return;
@@ -698,11 +799,12 @@ void BibleBackend::importEpub(QUrl file)
     QString error;
     const auto edition = EpubImporter::inspectFile(path,&error);
     if (edition.id.isEmpty()) { setError(error); return; }
+    if (!flushDrafts()) return;
     clearError();
     m_busy = true; m_progress = 0;
     m_importProgress = std::make_shared<std::atomic<double>>(0);
     setStatus("Importing and validating " + edition.name + "…");
-    emit busyChanged(); emit importProgressChanged();
+    notifyBusy(); emit importProgressChanged();
     const QString target = m_directory + "/bible-" + connectionName() + ".sqlite";
     m_importTarget = target;
     const auto progress = m_importProgress;
@@ -1143,6 +1245,7 @@ bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows)
     const auto collection = collectionRows(saved);
     if (!m_store.commit()) { m_store.rollback(); return setError("Cannot commit annotations: " + m_store.lastError().text()); }
     m_annotations = saved; m_collection = collection;
+    publishAnnotations();
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
 }
 void BibleBackend::toggleBookmark() { toggleFlag(false); }
@@ -1157,18 +1260,29 @@ void BibleBackend::setNoteText(QString text)
     if (!m_store.transaction()) { setError("Cannot start note save: " + m_store.lastError().text()); return; }
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) { m_store.rollback(); return; }
-    bool found = false;
-    for (auto &a : rows) {
-        if (a.start == std::min(m_anchor,m_cursor) && a.end == std::max(m_anchor,m_cursor)) {
-            a.note = text; found = true; break;
-        }
+    const int start = std::min(m_anchor,m_cursor), end = std::max(m_anchor,m_cursor);
+    const auto found = std::find_if(rows.begin(),rows.end(),[&](const Annotation &a) {
+        return a.start == start && a.end == end;
+    });
+    const QString savedNote = found == rows.end() ? QString() : found->note;
+    // Peer delivery is deferred while all windows flush drafts. Compare against
+    // this reader's last observed note inside the same transaction as the write,
+    // including a missing/deleted note; reading fresh rows alone is not a merge.
+    if (savedNote != m_note) {
+        m_store.rollback();
+        setError("This note changed in another window. Your draft was not saved. Review the saved text before replacing it.");
+        return;
     }
-    if (!found && !text.isEmpty()) rows.append({std::min(m_anchor,m_cursor),std::max(m_anchor,m_cursor),false,false,text});
+    if (found != rows.end()) found->note = text;
+    else if (!text.isEmpty()) rows.append({start,end,false,false,text});
     commitAnnotations(rows);
 }
 
-bool BibleBackend::deleteAnnotation(QString input)
+bool BibleBackend::deleteAnnotation(QString input, QString expectedVersionId)
 {
+    if (!expectedVersionId.isEmpty() && expectedVersionId != m_versionId)
+        return setError("The Bible version changed. Choose the annotation again before deleting it.");
+    if (!requireReady()) return false;
     int b, c, first, last;
     QString error;
     if (!parseReference(input,&b,&c,&first,&last,&error)) return setError(error);
@@ -1192,6 +1306,7 @@ bool BibleBackend::deleteAnnotation(QString input)
     }
     if (!m_store.commit()) { m_store.rollback(); return setError("Cannot commit annotation deletion: " + m_store.lastError().text()); }
     m_annotations = saved; m_collection = collectionRows(saved);
+    publishAnnotations();
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
 }
 
@@ -1363,7 +1478,7 @@ bool BibleBackend::exportBackup(QUrl file)
 bool BibleBackend::importBackup(QUrl file)
 {
     if (!requireReady()) return false;
-    if (m_busy) return setError("Wait for the EPUB import to finish before restoring annotations.");
+    if (sharedMutationBusy()) return setError("Wait for the shared library operation to finish before restoring annotations.");
     const QString path = localPath(file);
     if (path.isEmpty()) return false;
     QFile source(path);
@@ -1380,7 +1495,7 @@ bool BibleBackend::importBackup(QUrl file)
     const bool scoped = root.value("version").toInt() == 3;
     if (scoped) rootKeys << "versionId";
     if (!exactKeys(root,rootKeys)
-        || (root.value("format") != "omaword-backup" && root.value("format") != "omabible-backup")
+        || root.value("format") != "omaword-backup"
         || !integer(root.value("version"),1,3)
         || !root.value("edition").isString() || !root.value("created").isString()
         || !QDateTime::fromString(root.value("created").toString(),Qt::ISODateWithMs).isValid()
@@ -1436,6 +1551,9 @@ bool BibleBackend::importBackup(QUrl file)
     }
     // Restore is replacement, not a lossy merge. Validation precedes all writes;
     // notes, flags and reading state commit together or not at all.
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_mutating = false; });
+    if (!flushDrafts()) return false;
     if (!m_store.transaction()) return setError("Cannot start backup restore: " + m_store.lastError().text());
     const double position = reading.value("position").toDouble();
     QVariantList chapterRows;
@@ -1449,6 +1567,7 @@ bool BibleBackend::importBackup(QUrl file)
     m_book = b; m_chapter = c; m_anchor = anchor; m_cursor = cursor; m_position = position;
     intersectSelection();
     m_verses = chapterRows; m_annotations = savedRows; m_collection = savedCollection;
+    publishAnnotations();
     updateAnnotations(); emit collectionChanged();
     emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
     clearError(); setStatus(QString("Restored %1 annotations from backup.").arg(rows.size())); return true;

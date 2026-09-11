@@ -16,7 +16,7 @@
 namespace {
 QJsonObject encode(const SingleInstance::Request &request)
 {
-    QJsonObject object{{"version", 1}, {"activate", true}};
+    QJsonObject object{{"version", 1}, {"activate", true}, {"newWindow", request.newWindow}};
     if (!request.reference.isEmpty()) object.insert("reference", request.reference);
     if (!request.importPath.isEmpty()) object.insert("import", request.importPath);
     if (!request.activationToken.isEmpty()) object.insert("token", request.activationToken);
@@ -31,10 +31,11 @@ bool decode(const QByteArray &frame, SingleInstance::Request *request)
     if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
     const auto object = document.object();
     if (object.value("version") != QJsonValue(1) || object.value("activate") != QJsonValue(true)) return false;
-    const QStringList keys{"version", "activate", "reference", "import", "token", "startupId"};
+    const QStringList keys{"version", "activate", "reference", "import", "token", "startupId", "newWindow"};
     for (auto it = object.begin(); it != object.end(); ++it) {
         if (!keys.contains(it.key())) return false;
         if (it.key() == "version" || it.key() == "activate") continue;
+        if (it.key() == "newWindow") { if (!it.value().isBool()) return false; else continue; }
         if (!it.value().isString()) return false;
         const auto text = it.value().toString();
         const int limit = it.key() == "reference" ? 1024 : 4096;
@@ -44,6 +45,7 @@ bool decode(const QByteArray &frame, SingleInstance::Request *request)
     request->importPath = object.value("import").toString();
     request->activationToken = object.value("token").toString();
     request->startupId = object.value("startupId").toString();
+    request->newWindow = object.value("newWindow").toBool(true);
     return request->importPath.isEmpty() || QFileInfo(request->importPath).isAbsolute();
 }
 
@@ -82,9 +84,10 @@ void hyprctl(QObject *context, const QStringList &arguments,
     timer->start(600);
 }
 
-void focusHyprland(QObject *context, qint64 pid, SingleInstance::Reply reply, int retries = 2)
+void focusHyprland(QObject *context, qint64 pid, QPointer<QWindow> window, SingleInstance::Reply reply, int retries = 2)
 {
-    hyprctl(context, {"clients", "-j"}, [context, pid, reply, retries](bool ok, const QByteArray &output) {
+    hyprctl(context, {"clients", "-j"}, [context, pid, window, reply, retries](bool ok, const QByteArray &output) {
+        if (!window) { reply({false, "The requested window was closed."}); return; }
         QJsonParseError error;
         const auto document = QJsonDocument::fromJson(output, &error);
         const bool validClients = ok && error.error == QJsonParseError::NoError && document.isArray();
@@ -93,6 +96,7 @@ void focusHyprland(QObject *context, qint64 pid, SingleInstance::Reply reply, in
             for (const auto &value : document.array()) {
                 const auto client = value.toObject();
                 if (client.value("pid").toInteger(-1) != pid) continue;
+                if (client.value("title").toString() != window->title()) continue;
                 const auto candidate = client.value("address").toString();
                 if (QRegularExpression(QStringLiteral("^0x[0-9a-fA-F]+$")).match(candidate).hasMatch()) {
                     address = candidate; break;
@@ -101,7 +105,7 @@ void focusHyprland(QObject *context, qint64 pid, SingleInstance::Reply reply, in
         }
         // QML can be ready just before the compositor has mapped its surface.
         if (address.isEmpty() && validClients && retries > 0) {
-            QTimer::singleShot(75, context, [context, pid, reply, retries] { focusHyprland(context, pid, reply, retries - 1); });
+            QTimer::singleShot(75, context, [context, pid, window, reply, retries] { focusHyprland(context, pid, window, reply, retries - 1); });
             return;
         }
         if (address.isEmpty()) { reply({false, "Native activation requested, but Hyprland could not locate this process's window."}); return; }
@@ -315,5 +319,5 @@ void SingleInstance::activateWindow(QWindow *window, const Request &request, QOb
     Q_UNUSED(request);
     window->requestActivate();
     if (qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) { reply({true, {}}); return; }
-    focusHyprland(context, QCoreApplication::applicationPid(), reply);
+    focusHyprland(context, QCoreApplication::applicationPid(), window, reply);
 }

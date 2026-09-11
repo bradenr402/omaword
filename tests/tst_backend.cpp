@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #include <QSignalSpy>
+#include <QSignalBlocker>
 #include <QScopeGuard>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -414,6 +415,7 @@ private slots:
     void backupRoundTripAndValidation() {
         if (!bible->ready()) QSKIP("Requires real EPUB");
         QVERIFY(bible->navigate("John 3:16-18")); bible->setReadingPosition(0.73);
+        if (bible->collection().isEmpty()) bible->setNoteText("Backup validation fixture");
         const auto original = bible->collection(); const QString note = bible->noteText();
         QVERIFY(bible->exportBackup(QUrl::fromLocalFile(file("backup.json"))));
         bible->setShowVerseNumbers(false); bible->setShowHeadings(false); bible->setVersePicker(false);
@@ -424,11 +426,11 @@ private slots:
         QVERIFY(document.isObject());
         const auto rootObject = document.object();
         QCOMPARE(rootObject.value("format").toString(), QString("omaword-backup"));
-        // Both brand signatures accept all supported historical schema versions.
-        for (const QString format : {"omaword-backup", "omabible-backup"}) {
+        // The current signature accepts the supported annotation schemas.
+        {
             for (int version = 1; version <= 3; ++version) {
                 auto legacy = rootObject;
-                legacy["format"] = format;
+                legacy["format"] = "omaword-backup";
                 legacy["version"] = version;
                 if (version < 3) legacy.remove("versionId");
                 if (version == 1) {
@@ -1073,6 +1075,66 @@ private slots:
         QVERIFY(bible->deleteAnnotation("Obadiah 1:21–Jonah 1:2"));
         QCOMPARE(bible->selectionReference(),selection); QCOMPARE(bible->collection(),original);
     }
+    void noteSaveRejectsStaleBaseline_data() {
+        QTest::addColumn<QString>("original");
+        QTest::addColumn<QString>("replacement");
+        QTest::newRow("changed-note") << QString("Original") << QString("Peer revision");
+        QTest::newRow("deleted-note") << QString("Original") << QString("");
+        QTest::newRow("created-note") << QString("") << QString("Peer revision");
+    }
+    void noteSaveRejectsStaleBaseline() {
+        if (!bible->ready()) QSKIP("Requires real EPUB");
+        QFETCH(QString,original); QFETCH(QString,replacement);
+        QVERIFY(bible->navigate("John 3:16")); bible->setNoteText(original);
+        QCOMPARE(bible->noteText(),original);
+        BibleBackend peer;
+        QVERIFY(peer.navigate("John 3:16"));
+        {
+            // Simulate the notification delay used by the shared draft flush.
+            QSignalBlocker deferred(&peer);
+            peer.setNoteText(replacement);
+        }
+        QCOMPARE(peer.noteText(),replacement); QCOMPARE(bible->noteText(),original);
+        const auto before = bible->collection();
+        QSignalSpy commits(bible.get(),&BibleBackend::sharedCommitted);
+        bible->setNoteText("Local draft");
+        QVERIFY(bible->error().contains("changed in another window"));
+        QCOMPARE(commits.count(),0); QCOMPARE(bible->noteText(),original);
+        QCOMPARE(bible->collection(),before);
+        peer.refreshCollection(); QCOMPARE(peer.noteText(),replacement);
+        // Refresh plus explicit retry is allowed; annotation flags still merge.
+        bible->refreshCollection(); QCOMPARE(bible->noteText(),replacement);
+        peer.toggleHighlight(); const bool highlighted = peer.selectionHighlighted();
+        bible->setNoteText("Local draft");
+        QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        QCOMPARE(commits.count(),1); QCOMPARE(peer.noteText(),QString("Local draft"));
+        QCOMPARE(bible->selectionHighlighted(),highlighted);
+    }
+    void deletionExpectedVersionGuard() {
+        if (!bible->ready()) QSKIP("Requires real EPUB");
+        QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Keep the active edition's note");
+        const auto before = bible->collection();
+        QSignalSpy commits(bible.get(),&BibleBackend::sharedCommitted);
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","delete-version-guard");
+            db.setDatabaseName(bible->dataDirectory()+"/personal.sqlite"); QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TRIGGER reject_version_delete BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'unexpected delete'); END"));
+            QVERIFY(!bible->deleteAnnotation("John 3:16","another-edition"));
+            QVERIFY(bible->error().contains("version changed"));
+            QCOMPARE(bible->collection(),before); QCOMPARE(commits.count(),0);
+            QVERIFY(!bible->deleteAnnotation("invalid reference","another-edition"));
+            QVERIFY(bible->error().contains("version changed"));
+            QVERIFY(q.exec("SELECT note FROM annotations WHERE book=43 AND chapter=3 AND start=16 AND end=16"));
+            QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("Keep the active edition's note")); q.finish();
+            QVERIFY(q.exec("DROP TRIGGER reject_version_delete"));
+        }
+        QSqlDatabase::removeDatabase("delete-version-guard");
+        QVERIFY(bible->deleteAnnotation("John 3:16",bible->versionId()));
+        QCOMPARE(commits.count(),1); QVERIFY(bible->noteText().isEmpty());
+        bible->setNoteText("One-argument callers still work");
+        QVERIFY(bible->deleteAnnotation("John 3:16")); QVERIFY(bible->noteText().isEmpty());
+    }
     void deletionRollbackErrors() {
         if (!bible->ready()) QSKIP("Requires real EPUB");
         QVERIFY(bible->navigate("Luke 3:2-4")); bible->toggleBookmark(); bible->toggleHighlight(); bible->setNoteText("Survive deletion errors");
@@ -1673,7 +1735,7 @@ private slots:
         const auto collection = migrated->collection();
         migrated.reset(); migrated = std::make_unique<BibleBackend>(); // v2 startup is idempotent.
         QCOMPARE(migrated->collection(),collection); QCOMPARE(migrated->readingPosition(),0.63);
-        QJsonObject backup{{"format","omabible-backup"},{"version",1},{"edition","NET Bible 2.1"},
+        QJsonObject backup{{"format","omaword-backup"},{"version",1},{"edition","NET Bible 2.1"},
             {"created","2026-09-10T12:00:00.000Z"},
             {"reading",QJsonObject{{"book",43},{"chapter",3},{"start",16},{"end",18},{"position",0.63}}},
             {"annotations",QJsonArray{

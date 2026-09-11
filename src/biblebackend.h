@@ -7,6 +7,8 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
+#include <QSet>
+#include <functional>
 
 class BibleBackend : public QObject
 {
@@ -51,7 +53,9 @@ public:
     explicit BibleBackend(QObject *parent = nullptr);
     ~BibleBackend() override;
     bool ready() const { return m_ready; }
-    bool busy() const { return m_busy; }
+    bool busy() const;
+    // Window roots register synchronous draft saves; false vetoes shared replacement.
+    void setFlushCallback(std::function<bool()> callback) { m_flush = std::move(callback); }
     double importProgress() const { return m_progress; }
     QString error() const { return m_error; }
     QString status() const { return m_status; }
@@ -117,7 +121,7 @@ public:
     Q_INVOKABLE void toggleBookmark();
     Q_INVOKABLE void toggleHighlight();
     Q_INVOKABLE void setNoteText(QString text);
-    Q_INVOKABLE bool deleteAnnotation(QString reference);
+    Q_INVOKABLE bool deleteAnnotation(QString reference, QString expectedVersionId = QString());
     Q_INVOKABLE QString copySelection(bool plainText = false);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
     Q_INVOKABLE void copyText(QString text);
@@ -144,6 +148,7 @@ signals:
     void navigationChanged();
     void annotationChanged();
     void preferencesChanged();
+    void sharedCommitted(QString versionId, bool library, bool preferences);
 
 private:
     struct Annotation {
@@ -161,7 +166,16 @@ private:
     int absoluteVerse(int book, int chapter, int verse) const;
     Verse endpoint(int index) const { return m_keys.value(index); }
     bool changeVersion(const QString &id, const QString &importPath = {},
-                       const QString &removedId = {}, bool deleteAnnotations = false, bool startup = false);
+                       const QString &removedId = {}, bool deleteAnnotations = false, bool startup = false,
+                       bool peerReload = false);
+    void refreshShared(const QString &versionId, bool library, bool preferences);
+    bool flushDrafts();
+    void publishAnnotations();
+    bool sharedMutationBusy() const;
+    void notifyBusy();
+    std::function<bool()> m_flush;
+    bool m_mutating = false, m_flushing = false;
+    QSet<QString> m_pendingAnnotations;
     QString installedPath(const QString &id) const;
     bool ownedBiblePath(const QString &path, const QString &id = {}) const;
     void removeOwnedBibleFiles(const QString &path, const QString &id = {});

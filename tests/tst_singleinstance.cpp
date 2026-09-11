@@ -90,6 +90,7 @@ private slots:
         QCOMPARE(requests.first().importPath, first.importPath);
         QCOMPARE(requests.first().activationToken, QString("test-token"));
         QCOMPARE(requests.first().startupId, QString("test-startup"));
+        QVERIFY(requests.first().newWindow);
         done = false;
         secondary.forward(SingleInstance::Request::fromArguments({}, first.importPath, false),
                           [&](auto value) { result = value; done = true; });
@@ -98,6 +99,14 @@ private slots:
         QCOMPARE(requests.size(), 2);
         QVERIFY(requests.last().importPath.isEmpty());
         QVERIFY(requests.last().reference.isEmpty());
+        QVERIFY(requests.last().newWindow);
+        auto reuse = first;
+        reuse.newWindow = false;
+        done = false;
+        secondary.forward(reuse, [&](auto value) { result = value; done = true; });
+        QTRY_VERIFY(done);
+        QVERIFY(result.ok);
+        QVERIFY(!requests.last().newWindow);
     }
 
     void startupQueueAndSerializedDispatch()
@@ -148,6 +157,7 @@ private slots:
         QTest::newRow("version") << QByteArray("{\"version\":2,\"activate\":true}\n");
         QTest::newRow("activate") << QByteArray("{\"version\":1,\"activate\":false}\n");
         QTest::newRow("reference-type") << QByteArray("{\"version\":1,\"activate\":true,\"reference\":8}\n");
+        QTest::newRow("newWindow-type") << QByteArray("{\"version\":1,\"activate\":true,\"newWindow\":8}\n");
         QTest::newRow("unknown-field") << QByteArray("{\"version\":1,\"activate\":true,\"path\":\"/tmp/x\"}\n");
         QTest::newRow("relative-import") << QByteArray("{\"version\":1,\"activate\":true,\"import\":\"x.epub\"}\n");
         QTest::newRow("long-reference") << QByteArray("{\"version\":1,\"activate\":true,\"reference\":\"") + QByteArray(1025, 'x') + "\"}\n";
@@ -263,6 +273,7 @@ private slots:
         Environment pid("SINGLEINSTANCE_TEST_PID", QByteArray::number(QCoreApplication::applicationPid()));
         Environment marker("SINGLEINSTANCE_TEST_MARKER", (dir.path() + "/mapped").toUtf8());
         QWindow window;
+        window.setTitle("OmaWord · Window 2");
         window.showMinimized();
         bool done = false;
         int ticks = 0;
@@ -350,26 +361,6 @@ private slots:
         QCOMPARE(primary.state(), QProcess::Running);
     }
 
-    void actualApplicationRefusesLiveHistoricalStore()
-    {
-        const auto executable = qEnvironmentVariable("OMAWORD_TEST_APP");
-        if (executable.isEmpty()) QSKIP("Set OMAWORD_TEST_APP to test the freshly built application.");
-        QTemporaryDir dir;
-        const auto old = dir.filePath("omabible");
-        QVERIFY(QDir().mkpath(old));
-        QLockFile lock(old + "/omabible.lock"); QVERIFY(lock.tryLock());
-        QFile personal(old + "/personal.sqlite"); QVERIFY(personal.open(QIODevice::WriteOnly));
-        QCOMPARE(personal.write("historical notes"), 16); personal.close();
-        Child app;
-        app.setProcessEnvironment(isolatedEnvironment(dir.path()));
-        app.start(executable, QStringList{}); QVERIFY(app.waitForStarted());
-        QByteArray errors;
-        QTRY_VERIFY_WITH_TIMEOUT((errors += app.readAllStandardError()).contains("Please close OmaBible"), 5000);
-        QVERIFY(lock.isLocked());
-        QVERIFY(!QFile::exists(dir.filePath("omaword/personal.sqlite")));
-        QVERIFY(personal.open(QIODevice::ReadOnly)); QCOMPARE(personal.readAll(), QByteArray("historical notes"));
-        // The modal error awaits dismissal; Child only terminates this test app.
-    }
 };
 
 int main(int argc, char **argv)
@@ -392,7 +383,8 @@ int main(int argc, char **argv)
             }
             const qint64 pid = qEnvironmentVariable("SINGLEINSTANCE_TEST_PID").toLongLong();
             QJsonArray clients{QJsonObject{{"pid", pid + 1}, {"address", "0xbeef"}}};
-            if (mode != "other") clients.append(QJsonObject{{"pid", pid}, {"address", mode == "injection" ? "0xabc\" }); malicious()" : "0xabc"}});
+            clients.append(QJsonObject{{"pid", pid}, {"title", "OmaWord · Window 1"}, {"address", "0xdef"}});
+            if (mode != "other") clients.append(QJsonObject{{"pid", pid}, {"title", "OmaWord · Window 2"}, {"address", mode == "injection" ? "0xabc\" }); malicious()" : "0xabc"}});
             QTextStream(stdout) << QJsonDocument(clients).toJson(QJsonDocument::Compact) << Qt::endl;
             return 0;
         }
