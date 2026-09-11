@@ -27,6 +27,12 @@ if [[ -n ${OMABIBLE_TEST_EPUB:-} ]]; then
     OMABIBLE_TEST_EPUB=$(realpath -- "$OMABIBLE_TEST_EPUB")
 fi
 
+mkdir -p -- "$root/build/singleinstance-tests"
+cd -- "$root/build/singleinstance-tests"
+qmake6 "$root/tests/singleinstance.pro"
+make -j"$jobs"
+QT_QPA_PLATFORM=offscreen ./tst_singleinstance "$@"
+
 mkdir -p -- "$root/build/tests"
 cd -- "$root/build/tests"
 qmake6 "$root/tests/backend.pro"

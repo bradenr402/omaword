@@ -1,5 +1,10 @@
 # OmaWord tests
 
+The single-instance suite (`tests/singleinstance.pro`, included in `bin/test`)
+checks process handoff, argument forwarding, startup races, stale socket/lock
+recovery, and bounded IPC validation. Set `OMABIBLE_TEST_APP` to the built executable
+to include its actual-application launch checks.
+
 From the repository root, build and run backend, integrated UI, block-annotation,
 then importer-version tests in `build/tests/`, `build/ui-tests/`,
 `build/blockannotations/`, and `build/importer-versions/`. GUI suites run offscreen:

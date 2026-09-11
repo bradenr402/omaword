@@ -1,5 +1,10 @@
 # OmaWord
 
+Launching OmaWord again brings its existing window forward, including from another
+Hyprland workspace. A supplied passage reference or `--import` file is forwarded
+to that instance after checking unsaved notes. An ordinary relaunch never repeats
+the import that originally started the app.
+
 Public branding is defined in `branding.env`. The launcher also matches **bible**
 and **scripture**. The local installer preserves changed installation files in
 `~/.local/share/omaword/install-backups/` before replacing them; existing Bible

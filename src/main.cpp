@@ -1,19 +1,20 @@
 #include "biblebackend.h"
 #include "brand.h"
 #include "desktop.h"
+#include "singleinstance.h"
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QIcon>
-#include <QLockFile>
 #include <QDir>
-#include <QFileInfo>
 #include <QStandardPaths>
 #include <QMessageBox>
 #include <QTimer>
 #include <QTextStream>
+#include <QWindow>
+#include <memory>
 
 int main(int argc, char *argv[]) {
     // Keep QStandardPaths (and the instance lock) compatible with existing data.
@@ -45,11 +46,23 @@ int main(int argc, char *argv[]) {
         QMessageBox::critical(nullptr, Brand::name(), QStringLiteral("Cannot create the application data folder: ") + data);
         return 1;
     }
-    QLockFile lock(data + '/' + Brand::storageId() + QStringLiteral(".lock"));
-    lock.setStaleLockTime(0);
-    if (!lock.tryLock()) {
-        QMessageBox::information(nullptr, Brand::name(), Brand::name() + QStringLiteral(" is already open, or its data folder is locked. Switch to the existing window to continue reading."));
+    const auto initialRequest = SingleInstance::Request::fromArguments(
+        parser.positionalArguments(), parser.value(importOption), parser.isSet(importOption));
+    SingleInstance instance(data, Brand::storageId(), QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation));
+    const auto role = instance.start();
+    if (role == SingleInstance::Role::Error) {
+        QMessageBox::critical(nullptr, Brand::name(), instance.errorString());
         return 1;
+    }
+    if (role == SingleInstance::Role::Secondary) {
+        // Do not construct a backend or replay the primary's original CLI import.
+        QTimer::singleShot(0, &instance, [&] {
+            instance.forward(initialRequest, [&](SingleInstance::Result result) {
+                if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << result.error << Qt::endl;
+                app.exit(result.ok ? 0 : 1);
+            });
+        });
+        return app.exec();
     }
     Desktop desktop;
     BibleBackend bible;
@@ -59,12 +72,52 @@ int main(int argc, char *argv[]) {
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
     if (engine.rootObjects().isEmpty()) return 1;
-    const QString reference = parser.positionalArguments().join(QChar(' '));
-    if (parser.isSet(importOption)) {
-        if (!reference.isEmpty()) QObject::connect(&bible, &BibleBackend::readyChanged, &bible, [&bible, reference] { if (bible.ready()) bible.navigate(reference); });
-        QTimer::singleShot(0, &bible, [&bible, &parser, importOption] { bible.importEpub(QUrl::fromLocalFile(QFileInfo(parser.value(importOption)).absoluteFilePath())); });
-    } else if (!reference.isEmpty()) {
-        QTimer::singleShot(0, &bible, [&bible, reference] { bible.navigate(reference); });
-    }
+    QObject *root = engine.rootObjects().first();
+    auto flushNote = [root] {
+        QVariant saved;
+        return QMetaObject::invokeMethod(root, "flushNote", Q_RETURN_ARG(QVariant, saved)) && saved.toBool();
+    };
+    auto applyRequest = [root, &bible, flushNote](const SingleInstance::Request &request) -> SingleInstance::Result {
+        if (request.importPath.isEmpty() && request.reference.isEmpty()) return {true, {}};
+        if (bible.busy()) return {false, QStringLiteral("An EPUB import is already running. Wait for it to finish before opening another reference or import.")};
+        if (!flushNote()) return {false, QStringLiteral("The unsaved note could not be saved. The requested reference or import was not opened.")};
+        QMetaObject::invokeMethod(root, "savePosition");
+        if (!request.importPath.isEmpty()) {
+            bible.importEpub(QUrl::fromLocalFile(request.importPath));
+            if (!bible.busy()) return {false, bible.error().isEmpty() ? QStringLiteral("The EPUB import could not be started.") : bible.error()};
+            if (!request.reference.isEmpty()) {
+                // One import, one follow-up. readyChanged also fires on later
+                // version switches, so it must not retain a CLI reference.
+                auto connection = std::make_shared<QMetaObject::Connection>();
+                *connection = QObject::connect(&bible, &BibleBackend::busyChanged, &bible,
+                    [&bible, root, flushNote, reference = request.reference, connection] {
+                        if (bible.busy()) return;
+                        QObject::disconnect(*connection);
+                        if (bible.ready() && bible.error().isEmpty() && flushNote()) {
+                            QMetaObject::invokeMethod(root, "savePosition");
+                            bible.navigate(reference);
+                        }
+                    });
+            }
+            return {true, {}}; // Accepted, not a claim that the import has finished.
+        }
+        if (!bible.navigate(request.reference)) return {false, bible.error()};
+        return {true, {}};
+    };
+    QTimer::singleShot(0, &instance, [&, root, applyRequest] {
+        const auto result = applyRequest(initialRequest);
+        if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << result.error << Qt::endl;
+        // Startup requests wait behind the initial CLI action, including its
+        // synchronous import inspection and transition to busy.
+        instance.setHandler([&, root, applyRequest](const SingleInstance::Request &request, SingleInstance::Reply reply) {
+            const auto action = applyRequest(request);
+            SingleInstance::activateWindow(qobject_cast<QWindow *>(root), request, &instance,
+                [action, reply](SingleInstance::Result activation) {
+                    if (!action.ok) reply(action);
+                    else if (!activation.ok) reply({false, QStringLiteral("Request accepted, but window activation failed: ") + activation.error});
+                    else reply({true, {}});
+                });
+        });
+    });
     return app.exec();
 }
