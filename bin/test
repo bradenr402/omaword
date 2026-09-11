@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN)}
+if [[ ! $jobs =~ ^[1-9][0-9]*$ ]]; then
+    printf 'JOBS must be a positive integer.\n' >&2
+    exit 1
+fi
+# Resolve a caller-relative EPUB path before changing to the build directory.
+if [[ -n ${OMABIBLE_TEST_EPUB:-} ]]; then
+    if [[ ! -f $OMABIBLE_TEST_EPUB || ! -r $OMABIBLE_TEST_EPUB ]]; then
+        printf 'OMABIBLE_TEST_EPUB must name a readable EPUB file.\n' >&2
+        exit 1
+    fi
+    export OMABIBLE_TEST_EPUB
+    OMABIBLE_TEST_EPUB=$(realpath -- "$OMABIBLE_TEST_EPUB")
+fi
+
+mkdir -p -- "$root/build/tests"
+cd -- "$root/build/tests"
+qmake6 "$root/tests/backend.pro"
+make -j"$jobs"
+QT_QPA_PLATFORM=offscreen ./tst_backend "$@"
+
+mkdir -p -- "$root/build/ui-tests"
+cd -- "$root/build/ui-tests"
+qmake6 "$root/tests/ui.pro"
+make -j"$jobs"
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./tst_ui "$@"
