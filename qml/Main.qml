@@ -55,6 +55,8 @@ ApplicationWindow {
     property int paletteChapter: 0
     property string paletteBookName: ""
     property bool paletteArrowUsed: false
+    property var paletteSnapshot: null
+    property bool paletteCleared: false
     readonly property var paletteDestination: {
         let query = referenceInput.text.trim()
         let entry = paletteResults.model[paletteResults.currentIndex]
@@ -79,7 +81,7 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: passagePalette.visible || savedDrawer.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool modalOpen: passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -95,11 +97,12 @@ ApplicationWindow {
     readonly property real floatingSafety: bible.focusMode ? 0 : 72 * scale
     readonly property real verseGutter: 40 * scale
     readonly property bool observedFocusMode: bible.focusMode
-    onObservedFocusModeChanged: {
+    onObservedFocusModeChanged: Qt.callLater(app.applyFocusMode)
+    function applyFocusMode() {
         if (observedFocusMode) {
             if (!closeNotes()) { bible.setFocusMode(false); return }
-            passagePalette.close(); savedDrawer.close(); helpDialog.close(); settingsDialog.close(); aboutDialog.close()
-            readerFocus()
+            passagePalette.close(); savedDrawer.close(); helpDialog.close(); aboutDialog.close()
+            if (!settingsDialog.visible) readerFocus()
         }
     }
     readonly property real controlScale: Math.min(scale, 1.4)
@@ -202,7 +205,8 @@ ApplicationWindow {
         if (freeSelectedText.length) bible.copyText(freeSelectedText)
     }
     function copyClickedVerse(number, quotation) {
-        if (bible.copyVerse(number, quotation).length) notify("Passage copied")
+        if (!flushNote()) return
+        if (bible.copyVerse(number, quotation).length) { syncNote(); notify("Passage copied") }
     }
     Timer {
         interval: 16
@@ -269,7 +273,7 @@ ApplicationWindow {
             if (app.modalOpen || bible.busy) return
             if (notesDrawer.opened) {
                 if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
-                else notesClose.forceActiveFocus()
+                else notesPanel.forceActiveFocus()
             } else app.readerFocus()
         })
     }
@@ -371,9 +375,33 @@ ApplicationWindow {
         if (!resume) {
             resetBooks()
             referenceInput.text = commands || !bible.ready ? "> " : ""
+            paletteCleared = false
+            rememberPalette()
+        } else if (paletteSnapshot) {
+            paletteBookName = paletteSnapshot.name
+            paletteBook = paletteSnapshot.book
+            paletteChapter = paletteSnapshot.chapter
+            referenceInput.text = paletteSnapshot.query
+            paletteArrowUsed = paletteSnapshot.arrow
+            paletteResults.currentIndex = paletteSnapshot.row
+            paletteResults.positionViewAtIndex(paletteSnapshot.row, ListView.Contain)
         }
+        paletteCleared = false
         passagePalette.open()
         referenceInput.forceActiveFocus()
+    }
+    function rememberPalette() {
+        paletteSnapshot = { query: referenceInput.text, book: paletteBook, chapter: paletteChapter,
+            name: paletteBookName, row: paletteResults.currentIndex, arrow: paletteArrowUsed }
+    }
+    function escapePalette() {
+        let commands = referenceInput.text.trim().startsWith(">")
+        let query = commands ? referenceInput.text.trim().substring(1).trim() : referenceInput.text.trim()
+        if (query.length) {
+            rememberPalette()
+            referenceInput.text = commands ? "> " : ""
+            paletteCleared = true
+        } else passagePalette.close()
     }
     function openNotes(focusEditor) {
         if (!bible.ready || bible.busy) return
@@ -474,6 +502,20 @@ ApplicationWindow {
         if (entry.note.length > 0) openNotes(false)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
     }
+    function requestDeleteSaved() {
+        let entry = collectionList.model[collectionList.currentIndex]
+        if (!entry || !flushNote() || bible.busy) return
+        deleteConfirmation.reference = entry.reference
+        deleteConfirmation.row = collectionList.currentIndex
+        deleteConfirmation.open()
+    }
+    function confirmDeleteSaved() {
+        if (!flushNote() || bible.busy) return
+        if (!bible.deleteAnnotation(deleteConfirmation.reference)) return
+        syncNote()
+        collectionList.currentIndex = Math.min(deleteConfirmation.row, collectionList.count - 1)
+        deleteConfirmation.close()
+    }
     function openBookmark(reference) {
         if (!flushNote()) return
         savePosition()
@@ -482,10 +524,10 @@ ApplicationWindow {
     // One action catalog supplies shortcuts, searchable keybindings, and commands.
     // Context-only gestures are explanatory rows, never executable guesses.
     readonly property var actions: [
-        { id: "books", title: "Open a passage", keys: "Ctrl K", sequences: ["Ctrl+K"], scope: "palette", command: true },
-        { id: "commands", title: "Open commands", keys: "Ctrl Shift P", sequences: ["Ctrl+Shift+P"], scope: "palette" },
+        { id: "books", title: "Open a passage", keys: "Ctrl k", sequences: ["Ctrl+K"], scope: "palette", command: true },
+        { id: "commands", title: "Open commands", keys: "Ctrl Space", sequences: ["Ctrl+Space"], scope: "palette" },
         { id: "resume", title: "Resume last palette", keys: "Space", sequences: ["Space"] },
-        { id: "saved", title: "Saved passages", keys: "Ctrl L", sequences: ["Ctrl+L"], command: true },
+        { id: "saved", title: "Saved passages", keys: "Ctrl l", sequences: ["Ctrl+L"], command: true },
         { id: "previousChapter", title: "Previous chapter", keys: "h · Left · [", sequences: ["H", "Left", "["] },
         { id: "nextChapter", title: "Next chapter", keys: "l · Right · ]", sequences: ["L", "Right", "]"] },
         { id: "previousVerse", title: "Previous verse", keys: "k · Up", sequences: ["K", "Up"] },
@@ -495,26 +537,28 @@ ApplicationWindow {
         { id: "extendNext", title: "Extend to next verse", keys: "Shift J · Shift Down", sequences: ["Shift+J", "Shift+Down"] },
         { id: "first", title: "Select chapter beginning", keys: "g · Home", sequences: ["G", "Home"] },
         { id: "last", title: "Select chapter end", keys: "Shift G · End", sequences: ["Shift+G", "End"] },
-        { id: "previousFive", title: "Previous five verses", keys: "Ctrl U", sequences: ["Ctrl+U"] },
-        { id: "nextFive", title: "Next five verses", keys: "Ctrl D", sequences: ["Ctrl+D"] },
-        { id: "previousTen", title: "Previous ten verses", keys: "Ctrl B · PageUp", sequences: ["Ctrl+B", "PgUp"] },
-        { id: "nextTen", title: "Next ten verses", keys: "Ctrl F · PageDown", sequences: ["Ctrl+F", "PgDown"] },
-        { id: "bookmark", title: "Bookmark selection", keys: "m · Ctrl M", sequences: ["M", "Ctrl+M"], command: true },
-        { id: "highlight", title: "Highlight selection", keys: "x · Ctrl H", sequences: ["X", "Ctrl+H"], command: true },
+        { id: "previousFive", title: "Previous 5 verses", keys: "Ctrl u", sequences: ["Ctrl+U"] },
+        { id: "nextFive", title: "Next 5 verses", keys: "Ctrl d", sequences: ["Ctrl+D"] },
+        { id: "previousTen", title: "Previous 10 verses", keys: "Ctrl b · PageUp", sequences: ["Ctrl+B", "PgUp"] },
+        { id: "nextTen", title: "Next 10 verses", keys: "Ctrl f · PageDown", sequences: ["Ctrl+F", "PgDown"] },
+        { id: "bookmark", title: "Bookmark selection", keys: "m · Ctrl m", sequences: ["M", "Ctrl+M"], command: true },
+        { id: "highlight", title: "Highlight selection", keys: "x · Ctrl h", sequences: ["X", "Ctrl+H"], command: true },
         { id: "notes", title: "Write a note", keys: "n", sequences: ["N"], scope: "notes", command: true },
-        { id: "toggleNotes", title: "Toggle notes", keys: "Ctrl N", sequences: ["Ctrl+N"], scope: "global", command: true },
+        { id: "toggleNotes", title: "Toggle notes", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
         { id: "copy", title: "Copy passage", keys: "y · Ctrl Shift C", sequences: ["Y", "Ctrl+Shift+C"], command: true },
-        { id: "copyText", title: "Copy selected text", keys: "Ctrl C", sequences: ["Ctrl+C"] },
-        { id: "larger", title: "Larger text", keys: "Ctrl Plus · Ctrl =", sequences: ["Ctrl++", "Ctrl+="] },
+        { id: "copyText", title: "Copy selected text", keys: "Ctrl c", sequences: ["Ctrl+C"] },
+        { id: "larger", title: "Larger text", keys: "Ctrl + · Ctrl =", sequences: ["Ctrl++", "Ctrl+="] },
         { id: "smaller", title: "Smaller text", keys: "Ctrl −", sequences: ["Ctrl+-"] },
         { id: "resetText", title: "Reset text size", keys: "Ctrl 0", sequences: ["Ctrl+0"] },
         { id: "numbers", title: "Show verse numbers", keys: "r", sequences: ["R"], setting: "showVerseNumbers", command: true },
         { id: "headings", title: "Show headings", keys: "t", sequences: ["T"], setting: "showHeadings", command: true },
-        { id: "versePicker", title: "Verse picker", keys: "", setting: "versePicker", command: true },
+        { id: "versePicker", title: "Verse picker", keys: "p", sequences: ["P"], setting: "versePicker", command: true },
+        { id: "block", title: "Block mode", keys: "b", sequences: ["B"], setting: "blockMode", command: true },
         { id: "focus", title: "Focus mode", keys: "f", sequences: ["F"], setting: "focusMode", command: true },
         { id: "lineHeight", title: "Line height", keys: "", command: true },
         { id: "lineLess", title: "Decrease line height", keys: "Ctrl [", sequences: ["Ctrl+["] },
         { id: "lineMore", title: "Increase line height", keys: "Ctrl ]", sequences: ["Ctrl+]"] },
+        { id: "lineReset", title: "Reset line height", keys: "Ctrl \\", sequences: ["Ctrl+\\"], command: true },
         { id: "settings", title: "Reading settings", keys: "", command: true },
         { id: "export", title: "Export notes as Markdown", keys: "", command: true },
         { id: "backup", title: "Save annotation backup", keys: "", command: true },
@@ -537,6 +581,8 @@ ApplicationWindow {
     }
     function shortcutEnabled(action) {
         if (!actionAvailable(action)) return false
+        if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
+                && (action.setting || ["lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         if (action.scope === "palette") return !modalOpen || passagePalette.opened
         if (action.scope === "global") return !modalOpen && (bible.ready || action.id === "help" || action.id === "about" || action.id === "import")
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
@@ -548,11 +594,12 @@ ApplicationWindow {
         if (action.id === "copyText") return bible.ready && freeSelectedText.length > 0
         if (action.id === "bookmark" || action.id === "highlight") return hasSelection
         return bible.ready || !!action.setting
-            || ["books", "commands", "help", "about", "import", "settings", "lineHeight", "lineLess", "lineMore"].includes(action.id)
+            || ["books", "commands", "help", "about", "import", "settings", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
         return actions.filter(function(binding) {
+            if (!binding.sequences && !binding.explanation) return false
             // Single-letter searches match a key, rather than every action containing it.
             return !query || (query.length === 1
                 ? binding.keys.split(/\s*[·/]\s*/).some(function(key) { return key.toLowerCase() === query })
@@ -678,9 +725,11 @@ ApplicationWindow {
         case "numbers": bible.setShowVerseNumbers(!bible.showVerseNumbers); break
         case "headings": bible.setShowHeadings(!bible.showHeadings); break
         case "versePicker": bible.setVersePicker(!bible.versePicker); break
+        case "block": bible.setBlockMode(!bible.blockMode); break
         case "focus": bible.setFocusMode(!bible.focusMode); break
         case "lineLess": bible.setLineHeight(Math.round((bible.lineHeight - 0.1) * 10) / 10); break
         case "lineMore": bible.setLineHeight(Math.round((bible.lineHeight + 0.1) * 10) / 10); break
+        case "lineReset": bible.setLineHeight(1.5); break
         case "lineHeight": settingsDialog.lineOnly = true; settingsDialog.open(); break
         case "settings": settingsDialog.lineOnly = false; settingsDialog.open(); break
         case "saved": bible.refreshCollection(); savedDrawer.open(); break
@@ -699,6 +748,22 @@ ApplicationWindow {
     function moveKeybinding(delta) {
         keybindingResults.currentIndex = Math.max(0, Math.min(keybindingResults.count - 1, keybindingResults.currentIndex + delta))
         keybindingResults.positionViewAtIndex(keybindingResults.currentIndex, ListView.Contain)
+    }
+    function keybindingEdge(last, visibleOnly) {
+        let row = last ? keybindingResults.count - 1 : 0
+        if (visibleOnly) {
+            let top = keybindingResults.contentY
+            let bottom = top + keybindingResults.height
+            for (let i = 0; i < keybindingResults.count; ++i) {
+                let item = keybindingResults.itemAtIndex(i)
+                if (item && item.y + item.height > top && item.y < bottom) {
+                    row = i
+                    if (!last) break
+                }
+            }
+        }
+        keybindingResults.currentIndex = keybindingResults.count ? row : -1
+        if (!visibleOnly) keybindingResults.positionViewAtIndex(row, ListView.Contain)
     }
     function activateKeybinding(action) {
         if (!actionAvailable(action) || !flushNote()) return
@@ -741,6 +806,94 @@ ApplicationWindow {
         color: desktop.border
         implicitHeight: 1
         opacity: 0.65
+    }
+    component OverlayScrollbar: ScrollBar {
+        id: bar
+        implicitWidth: 18 * app.scale
+        width: implicitWidth
+        anchors.right: parent.right
+        z: 10
+        policy: ScrollBar.AlwaysOn
+        visible: size < 1
+        hoverEnabled: true
+        padding: 0
+        minimumSize: 0.035
+        onPositionChanged: linger.restart()
+        onHoveredChanged: linger.restart()
+        Timer { id: linger; interval: 1100 }
+        contentItem: Item {
+            Rectangle {
+                objectName: bar.objectName + "Thumb"
+                anchors.right: parent.right
+                anchors.rightMargin: 4 * app.scale
+                height: parent.height
+                width: (bar.hovered || bar.pressed ? 10 : 4) * app.scale
+                color: desktop.muted
+                opacity: bar.hovered || bar.pressed ? 0.8 : linger.running ? 0.5 : 0.2
+                Behavior on width { NumberAnimation { duration: 120 } }
+                Behavior on opacity { NumberAnimation { duration: 200 } }
+            }
+        }
+        background: Item {}
+    }
+    component OverlayScrollView: ScrollView {
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: OverlayScrollbar { objectName: parent.objectName + "Scrollbar" }
+        // Scrollbars paint over the viewport, including when a platform style
+        // would otherwise reserve their implicit width as a gutter.
+        leftPadding: 0
+        rightPadding: 0
+    }
+    component SettingSwitch: Switch {
+        id: settingSwitch
+        required property var catalogAction
+        objectName: "setting" + catalogAction.id
+        text: catalogAction.title
+        checked: !!bible[catalogAction.setting]
+        enabled: app.actionAvailable(catalogAction)
+        implicitHeight: Math.max(40 * app.scale, settingLabel.implicitHeight + 16 * app.scale)
+        padding: 0
+        spacing: 12 * app.scale
+        onClicked: app.runCommand(catalogAction.id)
+        indicator: Rectangle {
+            objectName: settingSwitch.objectName + "Track"
+            x: settingSwitch.width - width
+            y: (settingSwitch.height - height) / 2
+            width: 36 * app.scale
+            height: 20 * app.scale
+            radius: 0
+            color: settingSwitch.checked ? desktop.accent : desktop.surface
+            border.color: settingSwitch.activeFocus ? desktop.foreground : settingSwitch.checked ? desktop.accent : desktop.border
+            Rectangle {
+                objectName: settingSwitch.objectName + "Thumb"
+                x: (settingSwitch.checked ? 19 : 3) * app.scale
+                y: 3 * app.scale
+                width: 14 * app.scale
+                height: width
+                radius: 0
+                color: settingSwitch.checked ? desktop.background : desktop.muted
+            }
+        }
+        contentItem: RowLayout {
+            spacing: 12 * app.scale
+            Label {
+                id: settingLabel
+                objectName: settingSwitch.objectName + "Label"
+                text: settingSwitch.text
+                color: desktop.foreground
+                font.pixelSize: 13 * app.scale
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            Label {
+                objectName: settingSwitch.objectName + "Key"
+                text: settingSwitch.catalogAction.keys
+                color: desktop.muted
+                font.pixelSize: 12 * app.scale
+            }
+            Item { Layout.preferredWidth: 36 * app.scale; Layout.preferredHeight: 20 * app.scale }
+        }
+        background: Rectangle { color: settingSwitch.hovered ? desktop.surface : "transparent" }
     }
     component SquareSlider: Slider {
         id: slider
@@ -876,6 +1029,26 @@ ApplicationWindow {
             ctx.closePath(); ctx.fill()
         }
     }
+    component NoteGlyph: Canvas {
+        implicitWidth: 13 * app.scale
+        implicitHeight: 16 * app.scale
+        property color ink: desktop.accent
+        onInkChanged: requestPaint()
+        onPaint: {
+            let ctx = getContext("2d")
+            ctx.reset()
+            ctx.scale(width / 16, height / 20)
+            ctx.strokeStyle = ink
+            ctx.lineWidth = 1.4
+            ctx.beginPath()
+            ctx.moveTo(10, 1); ctx.lineTo(1, 1); ctx.lineTo(1, 19)
+            ctx.lineTo(15, 19); ctx.lineTo(15, 6); ctx.lineTo(10, 1)
+            ctx.lineTo(10, 6); ctx.lineTo(15, 6)
+            ctx.moveTo(4, 10); ctx.lineTo(12, 10)
+            ctx.moveTo(4, 14); ctx.lineTo(12, 14)
+            ctx.stroke()
+        }
+    }
     component SectionLabel: Label {
         color: desktop.muted
         font.pixelSize: 11 * app.scale
@@ -947,8 +1120,8 @@ ApplicationWindow {
                         if (app.hasSelection)
                             Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
                     }
-                    onContentYChanged: { positionSaveTimer.restart(); scrollLinger.restart() }
-                    ScrollBar.vertical: ScrollBar {
+                    onContentYChanged: positionSaveTimer.restart()
+                    ScrollBar.vertical: OverlayScrollbar {
                         id: readerScrollbar
                         objectName: "readerScrollbar"
                         parent: readerSurface
@@ -957,29 +1130,9 @@ ApplicationWindow {
                         anchors.bottom: parent.bottom
                         anchors.topMargin: 12 * app.scale
                         anchors.bottomMargin: app.floatingSafety + 12 * app.scale
-                        width: 14 * app.scale
-                        policy: ScrollBar.AlwaysOn
                         visible: !bible.focusMode && size < 1
                         enabled: visible
-                        hoverEnabled: true
-                        padding: 0
-                        minimumSize: 0.035
-                        contentItem: Item {
-                            Rectangle {
-                                objectName: "readerScrollThumb"
-                                anchors.right: parent.right
-                                anchors.rightMargin: 4 * app.scale
-                                height: parent.height
-                                width: (readerScrollbar.hovered || readerScrollbar.pressed ? 6 : 2) * app.scale
-                                color: desktop.muted
-                                opacity: readerScrollbar.hovered || readerScrollbar.pressed ? 0.8 : scrollLinger.running ? 0.5 : 0.2
-                                Behavior on width { NumberAnimation { duration: 120 } }
-                                Behavior on opacity { NumberAnimation { duration: 200 } }
-                            }
-                        }
-                        background: Item {}
                     }
-                    Timer { id: scrollLinger; interval: 1100 }
 
                     Column {
                         id: readerColumn
@@ -1036,7 +1189,7 @@ ApplicationWindow {
                                         return (starting.length ? starting : ranges)[0]?.reference || ""
                                     }
                                     readonly property string hint: ranges.map(function(range) { return range.reference }).join("\n")
-                                        + "\nOpen " + openReference + " · m · Ctrl M toggles bookmark"
+                                        + "\nOpen " + openReference + " · m · Ctrl m toggles bookmark"
                                     // Adjacent row segments meet exactly, including headings and
                                     // chapter continuation. Caps retain logical overlapping endpoints.
                                     Rectangle {
@@ -1265,7 +1418,7 @@ ApplicationWindow {
                 }
             }
 
-            ScrollView {
+            OverlayScrollView {
                 id: setupScroll
                 objectName: "setupScroll"
                 anchors.fill: parent
@@ -1329,7 +1482,7 @@ ApplicationWindow {
         onOpened: {
             if (app.modalOpen) return
             if (focusEditor && app.hasSelection) noteEditor.forceActiveFocus()
-            else notesClose.forceActiveFocus()
+            else notesPanel.forceActiveFocus()
         }
         onClosed: app.restorePanelFocus()
         contentItem: Rectangle {
@@ -1338,7 +1491,7 @@ ApplicationWindow {
                 color: desktop.background
                 Keys.onEscapePressed: function(event) { app.closeNotes(); event.accepted = true }
                 Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
-                ScrollView {
+                OverlayScrollView {
                     id: notesScroll
                     objectName: "notesScroll"
                     anchors.fill: parent
@@ -1355,20 +1508,6 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         SectionLabel { text: "PASSAGE NOTES"; Layout.fillWidth: true }
-                        QuietButton {
-                            id: notesClose
-                            objectName: "notesClose"
-                            text: "×"
-                            compact: true
-                            tip: "Close notes · Escape"
-                            Accessible.name: "Close notes"
-                            background: Rectangle {
-                                color: notesClose.hovered || notesClose.down ? app.tint(desktop.accent, 0.16) : "transparent"
-                                border.width: notesClose.activeFocus ? 1 : 0
-                                border.color: desktop.accent
-                            }
-                            onClicked: app.closeNotes()
-                        }
                     }
                     Label {
                         text: app.hasSelection ? bible.selectionReference : "A thought worth keeping"
@@ -1381,8 +1520,8 @@ ApplicationWindow {
                     RowLayout {
                         visible: app.hasSelection
                         spacing: 4
-                        QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: app.runCommand("bookmark"); tip: "m · Ctrl M" }
-                        QuietButton { text: bible.selectionHighlighted ? "Highlighted" : "Highlight"; emphasized: bible.selectionHighlighted; compact: true; onClicked: app.runCommand("highlight"); tip: "x · Ctrl H" }
+                        QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: app.runCommand("bookmark"); tip: "m · Ctrl m" }
+                        QuietButton { text: bible.selectionHighlighted ? "Highlighted" : "Highlight"; emphasized: bible.selectionHighlighted; compact: true; onClicked: app.runCommand("highlight"); tip: "x · Ctrl h" }
                         Item { Layout.fillWidth: true }
                         QuietButton { text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy selected passage · y · Ctrl Shift C" }
                     }
@@ -1398,7 +1537,8 @@ ApplicationWindow {
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        ScrollView {
+                        OverlayScrollView {
+                            objectName: "noteEditorScroll"
                             anchors.fill: parent
                             visible: app.hasSelection && !app.notePreview
                             clip: true
@@ -1433,7 +1573,8 @@ ApplicationWindow {
                                 Accessible.name: "Markdown note for " + bible.selectionReference
                             }
                         }
-                        ScrollView {
+                        OverlayScrollView {
+                            objectName: "notePreviewScroll"
                             anchors.fill: parent
                             visible: app.hasSelection && app.notePreview
                             clip: true
@@ -1505,7 +1646,7 @@ ApplicationWindow {
         x: app.width / 2 - width / 2
         width: Math.max(0, Math.min(implicitWidth, app.width - 2 * (floatingActions.width + 24 * app.controlScale)))
         text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
-        tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl K"
+        tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl k"
         visible: !bible.focusMode
         enabled: !bible.busy && !app.modalOpen
         onClicked: app.openPalette(false)
@@ -1521,7 +1662,7 @@ ApplicationWindow {
         FloatingButton {
             objectName: "savedControl"
             glyph: "saved"
-            tip: "Saved · Ctrl L"
+            tip: "Saved · Ctrl l"
             enabled: bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("saved")
         }
@@ -1529,7 +1670,7 @@ ApplicationWindow {
             objectName: "notesControl"
             glyph: "notes"
             selected: app.notesOpen
-            tip: "Notes · Ctrl N"
+            tip: "Notes · Ctrl n"
             enabled: bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.toggleNotes()
         }
@@ -1547,10 +1688,12 @@ ApplicationWindow {
         objectName: "passagePalette"
         property string pendingAction: ""
         property bool navigated: false
+        closePolicy: Popup.CloseOnPressOutside
         width: Math.min(650 * app.scale, app.width - 48)
         height: Math.min(560 * app.scale, app.height - 48)
         padding: 16
         onOpened: referenceInput.forceActiveFocus()
+        onAboutToHide: { if (!app.paletteCleared) app.rememberPalette() }
         onClosed: {
             let action = pendingAction
             pendingAction = ""
@@ -1561,6 +1704,7 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 12
+            Keys.onEscapePressed: app.escapePalette()
             Keys.onLeftPressed: function(event) {
                 event.accepted = app.paletteBook > 0 && event.modifiers === Qt.NoModifier
                 if (event.accepted) app.backToBooks()
@@ -1584,7 +1728,7 @@ ApplicationWindow {
                     leftPadding: 14
                     rightPadding: 14
                     background: Rectangle { color: desktop.surface; radius: 0; border.color: referenceInput.activeFocus ? app.tint(desktop.accent, 0.65) : desktop.border }
-                    onTextChanged: { app.paletteArrowUsed = false; paletteResults.currentIndex = 0 }
+                    onTextChanged: { app.paletteCleared = false; app.paletteArrowUsed = false; paletteResults.currentIndex = 0 }
                     onAccepted: app.acceptPalette()
                     Keys.onDownPressed: app.movePalette(1)
                     Keys.onUpPressed: app.movePalette(-1)
@@ -1600,11 +1744,11 @@ ApplicationWindow {
                         event.accepted = event.modifiers === Qt.NoModifier && browsing && !!entry
                         if (event.accepted) app.activatePaletteEntry(entry)
                     }
-                    Keys.onEscapePressed: passagePalette.close()
+                    Keys.onEscapePressed: app.escapePalette()
                     Accessible.name: "Passage reference or command"
                 }
-                QuietButton { objectName: "paletteBooks"; text: "Books"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.resetBooks() }
-                QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: referenceInput.text.startsWith(">"); onClicked: { app.resetBooks(); referenceInput.text = "> " } }
+                QuietButton { objectName: "paletteBooks"; text: "Books"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.openPalette(false) }
+                QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: referenceInput.text.startsWith(">"); onClicked: app.openPalette(true) }
             }
             Label {
                 objectName: "referencePreview"
@@ -1640,7 +1784,7 @@ ApplicationWindow {
                 currentIndex: 0
                 spacing: 3
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: OverlayScrollbar { objectName: "paletteScrollbar" }
                 Keys.onUpPressed: app.movePalette(-1)
                 Keys.onDownPressed: app.movePalette(1)
                 Keys.onReturnPressed: app.acceptPalette()
@@ -1657,7 +1801,14 @@ ApplicationWindow {
                     contentItem: RowLayout {
                         Label { text: paletteEntry.modelData.title; color: paletteEntry.enabled ? desktop.foreground : desktop.muted; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 14 * app.scale }
                         Label { objectName: "paletteHint" + (paletteEntry.modelData.action || ""); text: paletteEntry.modelData.hint; color: desktop.muted; font.pixelSize: 11 * app.scale }
-                        Label { text: paletteEntry.modelData.action || paletteEntry.modelData.chapter ? "↵" : "›"; color: desktop.muted; Layout.leftMargin: 8 }
+                        Label {
+                            objectName: "paletteChevron" + paletteEntry.index
+                            text: "›"
+                            visible: !!paletteEntry.modelData.book && !paletteEntry.modelData.verse
+                                && (!paletteEntry.modelData.chapter || bible.versePicker)
+                            color: desktop.muted
+                            Layout.leftMargin: 8
+                        }
                     }
                     background: Rectangle { radius: 0; color: paletteEntry.highlighted ? app.tint(desktop.accent, 0.11) : paletteEntry.hovered ? desktop.surface : "transparent" }
                 }
@@ -1677,7 +1828,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Label {
                     objectName: "paletteHints"
-                    text: "↑ ↓ choose    → / ↵ select" + (app.paletteBook > 0 ? "    ← back" : "") + "    Esc close"
+                    text: "↑ ↓ choose    Enter select" + (app.paletteBook > 0 ? "    ← back" : "") + "    Esc clear / close"
                     color: desktop.muted
                     font.pixelSize: 11 * app.scale
                     Layout.fillWidth: true
@@ -1700,23 +1851,24 @@ ApplicationWindow {
         bottomPadding: padding
         leftPadding: padding
         rightPadding: padding
+        closePolicy: deleteConfirmation.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle { color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
-        onOpened: { collectionList.currentIndex = collectionList.count > 0 ? 0 : -1; app.moveSaved(0) }
+        onOpened: app.moveSaved(0)
         onClosed: app.restorePanelFocus()
         contentItem: ColumnLayout {
             objectName: "savedContent"
-            Shortcut { sequence: "Ctrl+L"; enabled: savedDrawer.opened && !bible.busy; onActivated: savedDrawer.close() }
-            Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.opened; onActivated: app.moveSaved(1) }
-            Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.opened; onActivated: app.moveSaved(-1) }
-            Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.opened; onActivated: app.filterSaved(-1) }
-            Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.opened; onActivated: app.filterSaved(1) }
-            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.opened && app.activeFocusItem === collectionList; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
+            Shortcut { sequence: "Ctrl+L"; enabled: savedDrawer.opened && !deleteConfirmation.visible && !bible.busy; onActivated: savedDrawer.close() }
+            Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.opened && !deleteConfirmation.visible; onActivated: app.moveSaved(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.opened && !deleteConfirmation.visible; onActivated: app.moveSaved(-1) }
+            Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.opened && !deleteConfirmation.visible; onActivated: app.filterSaved(-1) }
+            Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.opened && !deleteConfirmation.visible; onActivated: app.filterSaved(1) }
+            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.opened && !deleteConfirmation.visible && app.activeFocusItem === collectionList; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
+            Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.opened && !deleteConfirmation.visible && !bible.busy; onActivated: app.requestDeleteSaved() }
             spacing: (savedDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
             RowLayout {
                 Layout.fillWidth: true
                 Label { objectName: "savedTitle"; text: "Saved"; font.pixelSize: 24 * app.scale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                QuietButton { objectName: "savedClose"; text: "×"; compact: true; Accessible.name: "Close saved passages"; onClicked: savedDrawer.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
             }
             GridLayout {
                 id: savedTabs
@@ -1754,14 +1906,14 @@ ApplicationWindow {
                 clip: true
                 spacing: 6 * app.scale
                 model: app.filteredCollection()
-                onModelChanged: currentIndex = count > 0 ? 0 : -1
-                ScrollBar.vertical: ScrollBar { id: savedScrollbar; objectName: "savedScrollbar" }
+                onModelChanged: currentIndex = count > 0 ? Math.max(0, Math.min(currentIndex, count - 1)) : -1
+                ScrollBar.vertical: OverlayScrollbar { id: savedScrollbar; objectName: "savedScrollbar" }
                 delegate: ItemDelegate {
                     id: savedEntry
                     objectName: "savedEntry" + modelData.reference
                     focusPolicy: Qt.StrongFocus
                     required property var modelData
-                    width: collectionList.width - savedScrollbar.width - 8 * app.scale
+                    width: collectionList.width
                     padding: 12 * app.scale
                     height: savedContent.implicitHeight + topPadding + bottomPadding
                     clip: true
@@ -1769,21 +1921,37 @@ ApplicationWindow {
                     onClicked: app.openSaved(modelData)
                     Keys.onReturnPressed: clicked()
                     Keys.onEnterPressed: clicked()
-                    contentItem: ColumnLayout {
+                    contentItem: RowLayout {
                         id: savedContent
                         objectName: "savedEntryContent" + savedEntry.modelData.reference
+                        spacing: 12 * app.scale
+                        ColumnLayout {
+                            Layout.alignment: Qt.AlignTop
+                            spacing: 7 * app.scale
+                            visible: savedEntry.modelData.bookmark || savedEntry.modelData.note.length > 0
+                            BookmarkGlyph { objectName: "savedBookmark" + savedEntry.modelData.reference; visible: savedEntry.modelData.bookmark; Layout.alignment: Qt.AlignHCenter }
+                            NoteGlyph { objectName: "savedNote" + savedEntry.modelData.reference; visible: savedEntry.modelData.note.length > 0; Layout.alignment: Qt.AlignHCenter }
+                        }
+                        ColumnLayout {
+                        Layout.fillWidth: true
                         spacing: 7 * app.scale
                         Label { text: savedEntry.modelData.reference; color: desktop.foreground; font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                        Label {
-                            text: [savedEntry.modelData.bookmark ? "Bookmark" : "", savedEntry.modelData.highlight ? "Highlight" : "", savedEntry.modelData.note.length ? "Note" : ""].filter(function(s) { return s.length > 0 }).join("  ·  ")
-                            color: desktop.accent
-                            font.pixelSize: 10 * app.scale
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                        }
                         Label { text: savedEntry.modelData.note.replace(/\s+/g, " "); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        }
                     }
-                    background: Rectangle { color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"; radius: 0; border.width: savedEntry.highlighted || savedEntry.activeFocus ? 1 : 0; border.color: desktop.accent }
+                    background: Rectangle {
+                        color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"
+                        radius: 0
+                        border.width: savedEntry.highlighted || savedEntry.activeFocus ? 1 : 0
+                        border.color: desktop.accent
+                        Rectangle {
+                            objectName: "savedHighlight" + savedEntry.modelData.reference
+                            visible: !!savedEntry.modelData.highlight
+                            width: 3 * app.scale
+                            height: parent.height
+                            color: desktop.accent
+                        }
+                    }
                 }
                 Label {
                     objectName: "savedEmpty"
@@ -1809,6 +1977,32 @@ ApplicationWindow {
     }
 
     ModalCard {
+        id: deleteConfirmation
+        objectName: "deleteConfirmation"
+        property string reference: ""
+        property int row: -1
+        closePolicy: Popup.CloseOnEscape
+        onOpened: deleteCancel.forceActiveFocus()
+        onClosed: {
+            reference = ""
+            Qt.callLater(function() { if (savedDrawer.opened) app.moveSaved(0); else app.restorePanelFocus() })
+        }
+        contentItem: ColumnLayout {
+            spacing: 18 * app.scale
+            Label { text: "Delete saved passage?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { objectName: "deleteReference"; text: deleteConfirmation.reference; textFormat: Text.PlainText; color: desktop.accent; font.pixelSize: 16 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { objectName: "deleteExplanation"; text: "This deletes all marks (bookmark and highlight) and the note for this exact reference."; color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton { id: deleteCancel; objectName: "deleteCancel"; text: "Cancel"; onClicked: deleteConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { objectName: "deleteConfirm"; text: "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+            }
+        }
+    }
+
+    ModalCard {
         id: helpDialog
         objectName: "helpDialog"
         property string pendingAction: ""
@@ -1822,6 +2016,14 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 12 * app.scale
+            Keys.onPressed: function(event) {
+                if (event.modifiers !== Qt.NoModifier) return
+                if ([Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)) {
+                    app.keybindingEdge(event.key === Qt.Key_End || event.key === Qt.Key_PageDown,
+                        event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown)
+                    event.accepted = true
+                }
+            }
             RowLayout {
             TextField {
                 id: keybindingSearch
@@ -1836,11 +2038,18 @@ ApplicationWindow {
                 onTextChanged: { keybindingResults.currentIndex = 0; keybindingResults.positionViewAtBeginning() }
                 Keys.onUpPressed: app.moveKeybinding(-1)
                 Keys.onDownPressed: app.moveKeybinding(1)
+                Keys.onPressed: function(event) {
+                    if (event.modifiers !== Qt.NoModifier) return
+                    if ([Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)) {
+                        app.keybindingEdge(event.key === Qt.Key_End || event.key === Qt.Key_PageDown,
+                            event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown)
+                        event.accepted = true
+                    }
+                }
                 onAccepted: app.activateKeybinding(keybindingResults.model[keybindingResults.currentIndex])
                 Keys.onEscapePressed: helpDialog.close()
                 Accessible.name: "Search keybindings by action or key"
             }
-                QuietButton { objectName: "keybindingsClose"; text: "×"; Layout.preferredHeight: keybindingSearch.implicitHeight; Accessible.name: "Close keybindings"; onClicked: helpDialog.close() }
             }
             ListView {
                 id: keybindingResults
@@ -1855,12 +2064,12 @@ ApplicationWindow {
                 Keys.onDownPressed: app.moveKeybinding(1)
                 Keys.onReturnPressed: app.activateKeybinding(model[currentIndex])
                 Keys.onEnterPressed: app.activateKeybinding(model[currentIndex])
-                ScrollBar.vertical: ScrollBar { id: keybindingScrollbar }
+                ScrollBar.vertical: OverlayScrollbar { id: keybindingScrollbar; objectName: "keybindingScrollbar" }
                 delegate: ItemDelegate {
                     id: keybindingRow
                     required property var modelData
                     objectName: "keybinding" + modelData.title
-                    width: keybindingResults.width - keybindingScrollbar.width - 8 * app.scale
+                    width: keybindingResults.width
                     height: keybindingContent.implicitHeight + 20 * app.scale
                     enabled: app.actionAvailable(modelData)
                     highlighted: ListView.isCurrentItem
@@ -1893,7 +2102,8 @@ ApplicationWindow {
                     color: desktop.muted; font.pixelSize: 14 * app.scale
                 }
             }
-            Label { text: "↑ ↓ choose    ↵ select    Esc close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            FineRule { objectName: "keybindingFooterRule"; Layout.fillWidth: true }
+            Label { text: "↑ ↓ choose    Enter select    Esc close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
         }
     }
 
@@ -1905,8 +2115,9 @@ ApplicationWindow {
         height: Math.min(settingsContent.implicitHeight + 48, app.height - 48)
         onOpened: lineHeightSlider.forceActiveFocus()
         onClosed: app.restorePanelFocus()
-        contentItem: ScrollView {
+        contentItem: OverlayScrollView {
             id: settingsScroll
+            objectName: "settingsScroll"
             contentWidth: availableWidth
             clip: true
         ColumnLayout {
@@ -1915,18 +2126,14 @@ ApplicationWindow {
             spacing: 12 * app.scale
             RowLayout {
                 Label { text: settingsDialog.lineOnly ? "Line height" : "Reading settings"; color: desktop.foreground; font.pixelSize: 20 * app.scale; Layout.fillWidth: true }
-                QuietButton { text: "×"; Accessible.name: "Close settings"; onClicked: settingsDialog.close() }
             }
             Repeater {
                 model: app.actions.filter(function(action) { return !!action.setting })
-                delegate: QuietButton {
+                delegate: SettingSwitch {
                     required property var modelData
-                    objectName: "setting" + modelData.id
+                    catalogAction: modelData
                     visible: !settingsDialog.lineOnly
-                    enabled: app.actionAvailable(modelData)
                     Layout.fillWidth: true
-                    text: modelData.title + " · " + app.actionHint(modelData)
-                    onClicked: app.runCommand(modelData.id)
                 }
             }
             RowLayout {
@@ -1945,19 +2152,18 @@ ApplicationWindow {
                 onMoved: bible.setLineHeight(Math.round(value * 10) / 10)
                 Accessible.name: "Line height"
             }
-            Label { text: "Ctrl [ decrease    Ctrl ] increase"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { text: "Ctrl [ decrease    Ctrl ] increase    Ctrl \\ reset"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
         }
         }
-        Shortcut { sequence: "Ctrl+["; enabled: settingsDialog.opened; onActivated: app.runCommand("lineLess") }
-        Shortcut { sequence: "Ctrl+]"; enabled: settingsDialog.opened; onActivated: app.runCommand("lineMore") }
     }
 
     ModalCard {
         id: aboutDialog
         objectName: "aboutDialog"
         onClosed: app.restorePanelFocus()
-        contentItem: ScrollView {
+        contentItem: OverlayScrollView {
             id: aboutScroll
+            objectName: "aboutScroll"
             implicitHeight: Math.min(aboutContent.implicitHeight, app.height - 110)
             contentWidth: availableWidth
             clip: true
@@ -1967,7 +2173,6 @@ ApplicationWindow {
             spacing: 16
             RowLayout {
                 Label { text: "OmaBible"; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
-                QuietButton { text: "×"; compact: true; Accessible.name: "Close about"; onClicked: aboutDialog.close() }
             }
             SectionLabel { text: "READ SLOWLY. KEEP WHAT MATTERS." }
             Label { text: "An offline NET Bible reader with local bookmarks, highlights, and Markdown notes. Built with Qt, at home on your desktop."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
