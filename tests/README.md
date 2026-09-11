@@ -1,6 +1,7 @@
-# Backend tests
+# OmaBible tests
 
-From the repository root, build and run offscreen in `build/tests`:
+From the repository root, build and run backend and integrated UI tests offscreen
+in `build/tests/` and `build/ui-tests/`:
 
 ```sh
 bin/test
@@ -16,7 +17,13 @@ user-supplied EPUB in place. No Bible content is included in the test sources.
 
 - Data lives under Qt's `QStandardPaths::AppDataLocation`: `bible.sqlite` is the
   replaceable, validated edition; `personal.sqlite` holds annotations and reading
-  state with synchronous SQLite commits. Existing valid data opens without import.
+  state and reading preferences with synchronous SQLite commits. Existing valid
+  data opens without import.
+- Preferences default to `showVerseNumbers=true`, `showHeadings=true`,
+  `versePicker=true`, `lineHeight=1.5`, and `focusMode=false`. Coverage includes
+  restart persistence, additive schema-2 initialization, invalid stored values,
+  line-height rounding/clamping to `1.0`–`3.0` in `0.1` steps, non-finite input
+  rejection, and write/commit failures preserving published and persisted state.
 - References support full names, standard aliases, ordinal/roman numbered books,
   compact forms, chapter-only references, cross-chapter/book ranges, and single-chapter
   book shorthand. A range may span omitted verse numbers, but its endpoints must
@@ -30,12 +37,20 @@ user-supplied EPUB in place. No Bible content is included in the test sources.
   notes. Empty notes remove their entry unless a flag remains.
 - No-selection `selectionReference` is the chapter reference; `copySelection()`
   copies that chapter. Annotation commands require an explicit verse selection.
+- The verse picker returns actual chapter verse numbers, skipping NET omissions.
+  Context copy uses the full canonical selection when the clicked verse is inside
+  it, otherwise only that verse, without moving the selection. Quotation copy uses
+  typographic quotation marks and an appended —reference NET attribution.
+- Five- and ten-verse movement stops at chapter edges; a subsequent move from the
+  edge crosses by one verse. Coverage includes direction reversal and omissions.
 - Backups contain personal data only, with format `omabible-backup`, version `2`,
   edition, UTC creation time, reading state, and annotation records. Restore
-  replaces personal data in one transaction after strict field/type/range
-  validation. Restore requires the imported edition to validate verse endpoints.
+  replaces annotations and reading state in one transaction after strict
+  field/type/range validation. Restore requires the imported edition to validate
+  verse endpoints.
   Version-1 backups remain importable; schema-v1 personal databases migrate
   transactionally. Directional anchor/cursor endpoints survive restart and restore.
+  Reading preferences are excluded from annotation backups and retained on restore.
 - Markdown export writes `omabible-notes.md` atomically in the chosen existing
   directory, containing references, flags, and unchanged Markdown notes.
 - Import derives references from embedded verse markers, including cross-file
@@ -45,6 +60,25 @@ user-supplied EPUB in place. No Bible content is included in the test sources.
   are removed; editorial headings/psalm superscriptions/acrostic and speaker
   labels are kept in `heading`, separate from verse text. Poetry and intra-verse
   breaks are retained; HTML is generated from escaped text and safe inline tags.
+
+## Integrated UI coverage
+
+UI tests use original synthetic text and temporary application data. Coverage includes:
+
+- Book → chapter → optional verse browsing, direct reference previews, keyboard
+  back navigation, omitted verse numbers, and Space resuming the last palette.
+- Normal/visual verse selection across chapters, counted verse jumps, bounded
+  five-/ten-verse moves, and reader focus and keyboard-context isolation.
+- Free text selection across verses with Ctrl C, drag autoscroll, and right-click
+  passage / middle-click quotation copying for single verses and canonical ranges.
+- Runtime verse-number, heading, focus-mode, and line-height preferences; Reading
+  settings at small sizes; dynamic command hints; searchable keybindings with
+  arrow-key selection and Enter execution.
+- Animated notes overlays at wide, narrow, and scaled layouts without reader
+  reflow; n to write, Ctrl N to toggle; dismissal, exact-range note isolation,
+  autosave, and save-failure handling.
+- Current-range footer, bookmark markers, Saved filtering and keyboard navigation,
+  restore confirmation, saved scroll positions, and narrow/system-scaled layouts.
 
 ## Import limits and chapter metadata provenance
 

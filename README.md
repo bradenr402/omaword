@@ -1,21 +1,26 @@
-# Omabible
+# OmaBible
 
 A keyboard-first, offline NET Bible 2.1 reader for Linux, built with C++17 and
 Qt 6 Quick. Read by chapter, keep bookmarks and highlights, and write Markdown
-notes alongside a selected passage.
+notes in an overlay for a selected passage.
 
 ## Features
 
-- Passage palette with live resolved-reference previews and book/chapter browsing.
-- Selectable text, verse-range selection, chapter navigation, and saved reading position.
-- Cross-chapter bookmarks, a single highlight color, and autosaved Markdown notes with preview.
-- Verse-based Vim navigation, visual range selection, and searchable keybindings.
+- Passage palette with live reference previews, book/chapter/optional verse browsing,
+  and Space to resume the last palette.
+- Free text selection across verses, verse-range selection, chapter navigation,
+  saved reading position, and mouse copying of passages or formatted quotations.
+- Cross-chapter bookmarks, a single highlight color, and autosaved Markdown notes
+  with preview in an animated overlay at every window width.
+- Verse-based Vim navigation, visual range selection, and searchable, executable keybindings.
+- Persisted reading preferences for verse numbers, headings, verse picking, line
+  height, and distraction-free focus mode.
 - Saved-passages drawer filtered by bookmarks, highlights, or notes.
 - Markdown annotation export and JSON personal-data backup/restore.
 - System fonts and desktop text scaling, live Omarchy theme integration, and a
   standard Qt palette fallback on other desktops.
 
-Omabible supports NET 2.1 only. Full-text search, parallel translations, reading
+OmaBible supports NET 2.1 only. Full-text search, parallel translations, reading
 plans, and cloud sync are outside the current scope. The reader preserves headings,
 poetry, and within-verse breaks; publisher translator notes are not displayed.
 
@@ -56,7 +61,7 @@ This requires no sudo. It installs the compiled binary to `~/.local/bin/omabible
 the desktop launcher to `~/.local/share/applications/omabible.desktop`, and SVG
 icons under `~/.local/share/icons/hicolor/`. Desktop files and icons honor
 `XDG_DATA_HOME` when set. Ensure `~/.local/bin` is on your desktop session's
-`PATH`; then launch **Omabible** from your application launcher or run `omabible`.
+`PATH`; then launch **OmaBible** from your application launcher or run `omabible`.
 The desktop ID and icon name are both `omabible`.
 
 ### Arch package from the local checkout
@@ -79,7 +84,7 @@ license and README under `/usr/share/licenses/omabible` and `/usr/share/doc/omab
 
 1. Visit the official [Bible.org NET Bible download page](https://bible.org/downloads)
    and download **Full Notes Version 2.1 ePub** (`NETBIBLE21.epub`) yourself.
-2. Start Omabible and choose **Choose NET EPUB…**, then select that local file.
+2. Start OmaBible and choose **Choose NET EPUB…**, then select that local file.
    You can also use the command palette's **Import NET 2.1 EPUB** action.
 3. Wait for import and validation to finish. Subsequent launches open the local
    library without importing again or needing a network connection.
@@ -96,8 +101,9 @@ and generated Bible database are not bundled with the application or package.
 
 ## Reading and references
 
-Press **Ctrl+K**, enter a reference, and press Enter; or choose a book and chapter
-from the palette. Examples accepted by the backend:
+Press **Ctrl K**, enter a reference, and press Enter; or browse a book, chapter,
+and verse in the palette. Turn off **Verse picker** in Reading settings to open
+chapters directly when browsing. Direct references work with either setting:
 
 | Reference | Opens |
 | --- | --- |
@@ -116,10 +122,17 @@ Names are case-insensitive; common abbreviations, spaces, and periods are
 accepted. Ranges can cross chapters and books. Both endpoints must exist in NET 2.1;
 a range may span verse numbers intentionally omitted by this edition.
 
-Click a **verse number** to select a verse; Shift-click another number to select
-a range. Drag over the verse text for ordinary text selection. Annotation commands
-use the numbered verse selection. Copy passage copies that range, or the entire
-chapter when no verse range is selected.
+Click the reading surface to give it keyboard focus. Click a **verse number** to
+select a verse; Shift-click another number to select a range. Drag over text for
+free text selection, including across verse boundaries, and press **Ctrl C** to
+copy exactly that text. Annotation commands use the numbered verse selection.
+**Copy passage** copies that range, or the entire chapter when no range is selected.
+
+Right-click a verse's text or number to copy the full selected range if the clicked
+verse is inside it, or just the clicked verse otherwise. Middle-click uses the same
+scope and copies a quotation with typographic quotation marks and an appended
+attribution, formatted as `“passage text”` followed by a blank line and
+`—John 3:16–18 NET`. Mouse copying preserves your current verse selection.
 
 Normal mode moves the verse cursor with `j` / `k`. Press `v` to anchor a visual
 selection, then continue with `j` / `k` to extend or shrink it. `J` / `K` enters
@@ -127,23 +140,55 @@ visual mode and extends immediately. At chapter boundaries, `j` continues to the
 next chapter and `k` to the previous one, skipping omitted NET verse numbers.
 Press `x` to highlight the entire range, including its off-screen chapters.
 Press `v` again to collapse the range to its cursor. Saved ranges reopen at their
-active ending chapter; the full reference appears in the passage control's tooltip
-and in notes. Floating bottom controls leave the reading surface full-height:
-visual mode on the left, book and chapter in the center, and Saved, Notes, and
-Keybindings icons on the right.
+active ending chapter. The current range appears in the center footer control
+(the chapter reference when no range is selected), its tooltip, and notes.
+Floating bottom controls leave the reading surface full-height: visual mode on
+the left, the reference in the center, and Saved, Notes, and Keybindings icons on
+the right.
 
 The palette previews the canonical destination before you press Enter. When
-browsing books, Right Arrow also opens the selected book's chapter list. Left
-Arrow returns to books from the chapter list when the input is empty or its caret
-is at the beginning. Up from the first chapter selects **All books**; Enter goes
-back. The palette's keyboard hints change with its current mode.
+browsing, Right Arrow or Enter advances from books to chapters and, when enabled,
+from chapters to verses. Left Arrow goes back one level when the input is empty
+or its caret is at the beginning. Up from the first result selects the back
+control; Enter goes back. The palette's keyboard hints change with its current
+mode. **Space** reopens the last palette with its query and browsing location;
+**Ctrl K** starts fresh. **Shift Space** has no reader action.
 
 Type `20g` to select verse 20 of the current chapter. Invalid or omitted verse
 numbers leave your location unchanged. A numeric prefix expires after two seconds
 and clears when you change focus or use another command. Verse movement keeps
 three lines of context around the selected verse where space permits.
 
+Bulk movement uses **Ctrl D** / **Ctrl U** for five verses and **Ctrl F** /
+**Ctrl B** or **PageDown** / **PageUp** for ten. These moves stop at the current
+chapter's edge; another press at the edge crosses to the adjacent chapter by one
+verse. Omitted NET verse numbers are skipped.
+
+### Reading settings
+
+Open the command palette with **Ctrl Shift P** and choose **Reading settings**.
+The individual **Show verse numbers**, **Show headings**, **Verse picker**,
+**Focus mode**, and **Line height** commands also configure reading directly.
+Preferences save synchronously in `personal.sqlite` and survive restarts:
+
+| Preference | Default | Control |
+| --- | --- | --- |
+| Verse numbers (`showVerseNumbers`) | On (`true`) | `r` |
+| Headings (`showHeadings`) | On (`true`) | `t` |
+| Verse picker (`versePicker`) | On (`true`) | Reading settings or command toggle |
+| Line height (`lineHeight`) | `1.5` | Ctrl [ / Ctrl ]; range `1.0`–`3.0`, steps of `0.1` |
+| Focus mode (`focusMode`) | Off (`false`) | `f` |
+
+Focus mode hides reading controls and annotation decorations for a quieter page.
+Click the reader to focus its keyboard controls; press **f** again or **Escape**
+to leave focus mode.
+
 ### Notes, bookmarks, and highlights
+
+Press **n** to write a note, or **Ctrl N** to toggle Notes, including while the
+editor has focus. Notes slide in as an animated overlay at every window width;
+opening them does not reflow the passage. The overlay includes Markdown editing
+and preview, and can be dismissed with its close control or an outside click.
 
 Notes save as you type and belong to an **exact verse range**. A note for
 `John 3:16–18` is distinct from a note for `John 3:16`; selecting an overlapping
@@ -161,38 +206,43 @@ reference, or click the ribbon/line to reopen that range. Page icons mark notes.
 ### Keyboard shortcuts
 
 Reader keys apply while reading, with no editable text field or modal dialog
-active. **?** or **F1** opens the searchable **Keybindings** panel.
+active. **?** or **F1** opens **Keybindings**. Search by action or shortcut, move
+through the results with Up / Down, and press Enter to execute an available action.
+Mouse gestures and other explanatory rows are shown as guidance.
 
 | Action | Shortcut |
 | --- | --- |
-| Passage palette / command palette | Ctrl+K / Ctrl+Shift+P |
-| Toggle Saved | Ctrl+L |
-| Previous / next chapter | `h` / `l`, Left / Right, `[` / `]`, Alt+Left / Alt+Right |
+| Passage palette / command palette | Ctrl K / Ctrl Shift P |
+| Resume last palette | Space |
+| Toggle Saved | Ctrl L |
+| Previous / next chapter | `h` / `l`, Left / Right, `[` / `]` |
 | Previous / next verse | `k` / `j`, Up / Down |
-| Move forward / backward 5 verses | Ctrl+D / Ctrl+U |
-| Move forward / backward 10 verses | PageDown / PageUp |
-| Scroll a page down / up | Space / Shift+Space, Ctrl+F / Ctrl+B |
+| Move forward / backward 5 verses | Ctrl D / Ctrl U |
+| Move forward / backward 10 verses | Ctrl F / Ctrl B, PageDown / PageUp |
 | Select numbered verse | Number then `g`, e.g. `20g` |
 | Select chapter beginning / end | `g` / `G`, Home / End |
 | Toggle visual selection / collapse to cursor | `v` |
 | Extend or shrink visual selection | `j` / `k`, Down / Up |
-| Enter visual mode and extend | `J` / `K`, Shift+Down / Shift+Up |
-| Bookmark selected verses | `m`, Ctrl+M |
-| Highlight selected verses | `x`, Ctrl+H |
-| Write a note | `n`, Ctrl+N |
-| Toggle notes panel | Ctrl+Shift+N |
-| Copy passage (or chapter) | `y`, Ctrl+Shift+C |
-| Larger / smaller reader text | Ctrl++ (also Ctrl+=) / Ctrl+- |
-| Reset reader text size | Ctrl+0 |
-| Leave editor / exit visual / close notes / collapse range | Escape |
-| Search keybindings | `?`, F1 |
+| Enter visual mode and extend | `J` / `K`, Shift Down / Shift Up |
+| Bookmark selected verses | `m`, Ctrl M |
+| Highlight selected verses | `x`, Ctrl H |
+| Write a note | `n` |
+| Toggle notes overlay | Ctrl N |
+| Copy passage (or chapter) | `y`, Ctrl Shift C |
+| Copy free text selection | Ctrl C |
+| Toggle verse numbers / headings / focus mode | `r` / `t` / `f` |
+| Decrease / increase line height | Ctrl [ / Ctrl ] |
+| Larger / smaller reader text | Ctrl Plus (also Ctrl =) / Ctrl − |
+| Reset reader text size | Ctrl 0 |
+| Leave editor / exit visual / close notes / collapse range / leave focus mode | Escape |
+| Search and execute keybindings | `?`, F1 |
 
 Use Up/Down and Enter in the palette, or prefix its query with `>` to find
 commands such as import, export, backup, restore, and About.
 
 In the right-hand **Saved** panel, `j` / `k` or Down / Up moves between entries;
 `h` / `l` or Left / Right selects All, Bookmarks, Highlights, or Notes. Enter opens
-the selected entry; Ctrl+L or Escape closes the panel. These keys operate on Saved
+the selected entry; Ctrl L or Escape closes the panel. These keys operate on Saved
 while it is open, without moving the underlying reader.
 
 ## Data, export, and backup
@@ -202,11 +252,13 @@ On Linux, application data lives in **`~/.local/share/omabible/`**, or
 with an empty organization name and application name `omabible`.
 
 - `bible.sqlite`: the imported, validated NET edition.
-- `personal.sqlite`: bookmarks, highlights, exact-range notes, and reading state.
+- `personal.sqlite`: bookmarks, highlights, exact-range notes, reading state, and
+  reading preferences.
 
 Existing version-1 personal databases upgrade transactionally to support
 cross-chapter ranges. New backups use version 2; restoring version-1 backups is
-also supported. Older Omabible binaries cannot read the upgraded database.
+also supported. Older OmaBible binaries cannot read the upgraded database.
+Reading preferences use an additive table in schema version 2.
 
 Use **About & attribution → Open local data folder** to find the actual location.
 
@@ -216,10 +268,11 @@ From the command palette or Saved drawer:
   folder, replacing that export file. It contains references, flags, and your
   Markdown notes.
 - **Save annotation backup** writes a JSON backup of personal annotations and
-  reading state. It does not include the Bible text or your EPUB.
-- **Restore annotation backup** validates and then **replaces all current personal
-  data**, including reading state, in one transaction; it does not merge. Save a
-  backup of the current data first if you want to retain it. Import the NET edition
+  reading state. It does not include reading preferences, Bible text, or your EPUB.
+- **Restore annotation backup** validates and then **replaces all current annotations
+  and reading state** in one transaction; it does not merge or change reading
+  preferences. Save a backup of the current data first if you want to retain it.
+  Import the NET edition
   on the destination installation before restoring so verse ranges can be checked.
 
 Keep your original user-provided EPUB separately for setup on another machine.
@@ -237,16 +290,18 @@ optional; real-edition backend integration tests are skipped without it, and UI
 tests use original synthetic text. Tests isolate application data in temporary directories.
 `JOBS` controls build parallelism, and arguments are passed to the test executable
 (for example, `bin/test -functions`). See [tests/README.md](tests/README.md) for the
-backend behavior covered. UI tests exercise keyboard navigation, verse selection,
-notes, restore confirmation, scroll restoration, and narrow/scaled layouts.
+backend and UI behavior covered. UI tests exercise palette browsing and resume,
+keyboard navigation, free text and verse selection, mouse copying, reading
+preferences, actionable keybindings, notes overlays, restore confirmation,
+scroll restoration, and narrow/scaled layouts.
 
 ## License and Bible attribution
 
 Application code, documentation, and icons are licensed under the [MIT License](LICENSE),
-copyright Omabible contributors.
+copyright OmaBible contributors.
 
 NET Bible® copyright © 1996–2019 by Biblical Studies Press, L.L.C. All rights
-reserved. The Bible is separately copyrighted and is not covered by Omabible's
+reserved. The Bible is separately copyrighted and is not covered by OmaBible's
 MIT license. Obtain your own EPUB from the publisher and follow the
-[NET Bible permissions](https://netbible.com/copyright/). Omabible distributes no
+[NET Bible permissions](https://netbible.com/copyright/). OmaBible distributes no
 Bible text or EPUB.
