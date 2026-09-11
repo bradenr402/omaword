@@ -238,6 +238,21 @@ private slots:
     void emptyAndImportError() {
         QVERIFY(!bible->ready());
         QVERIFY(item("setupScroll")->isVisible());
+        key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        type("write a note"); key(Qt::Key_Return);
+        QVERIFY(prop("passagePalette","opened").toBool());
+        QVERIFY(!window->property("notesOpen").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"notes")));
+        QVERIFY(QMetaObject::invokeMethod(window,"openNotes",Q_ARG(QVariant,true)));
+        QVERIFY(!window->property("notesOpen").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
+        type("write a note");
+        QTRY_VERIFY(item("keybindingWrite a note"));
+        QVERIFY(!item("keybindingWrite a note")->isEnabled());
+        key(Qt::Key_Return); QVERIFY(prop("helpDialog","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
         QVERIFY(!item("readerSurface")->isVisible());
         window->resize(640,480);
         key(Qt::Key_K, Qt::ControlModifier);
@@ -1032,6 +1047,115 @@ private slots:
         QTest::newRow("reverse") << true << true;
         QTest::newRow("forward-hidden-numbers") << false << false;
         QTest::newRow("reverse-hidden-numbers") << true << false;
+    }
+    void nonLeftDoubleClickIsolation() {
+        installDragFixture();
+        bible->selectVerses(1,2);
+        bible->setNoteText("Preserve range note");
+        const auto selected = bible->selectionReference();
+        QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
+        for (auto button : {Qt::RightButton,Qt::MiddleButton}) {
+            auto number = item("verseNumber3");
+            const auto point = number->mapToScene(QPointF(8,12)).toPoint();
+            QTest::mouseDClick(window,button,Qt::NoModifier,point);
+            QTest::qWait(250);
+            QCOMPARE(selection.count(),0);
+            QCOMPARE(bible->selectionReference(),selected);
+            QCOMPARE(bible->noteText(),QString("Preserve range note"));
+            QVERIFY(!window->property("notesOpen").toBool());
+        }
+        QTest::mouseDClick(window,Qt::LeftButton,Qt::NoModifier,item("verseNumber3")->mapToScene(QPointF(8,12)).toPoint());
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        QCOMPARE(bible->cursorVerse(),3);
+    }
+    void nestedNotesMenuFocus() {
+        reference("John 3:16");
+        for (auto menuKey : {Qt::Key_K,Qt::Key_F1}) {
+            key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+            key(menuKey,menuKey == Qt::Key_K ? Qt::ControlModifier : Qt::NoModifier);
+            const char *menu = menuKey == Qt::Key_K ? "passagePalette" : "helpDialog";
+            QTRY_VERIFY(prop(menu,"opened").toBool());
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop(menu,"visible").toBool());
+            QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+            type(" jkhln");
+            QCOMPARE(bible->cursorVerse(),16);
+            QVERIFY(bible->noteText().endsWith(" jkhln"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+            QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        }
+    }
+    void lineHeightClearsFreeSelectionCoherently() {
+        installDragFixture();
+        const auto selected = bible->selectionReference();
+        for (bool backendChange : {false,true}) {
+            drag(textPoint(1,6),textPoint(3,18));
+            QVERIFY(!window->property("freeSelectedText").toString().isEmpty());
+            QVERIFY(!prop("verseBody2","selectedText").toString().isEmpty());
+            if (backendChange) bible->setLineHeight(1.8);
+            else key(Qt::Key_BracketRight,Qt::ControlModifier);
+            QVERIFY(window->property("freeSelectedText").toString().isEmpty());
+            for (int v = 1; v <= 3; ++v)
+                QVERIFY(prop(qPrintable("verseBody" + QString::number(v)),"selectedText").toString().isEmpty());
+            QApplication::clipboard()->setText("No stale selection");
+            key(Qt::Key_C,Qt::ControlModifier);
+            QCOMPARE(QApplication::clipboard()->text(),QString("No stale selection"));
+            QCOMPARE(bible->selectionReference(),selected);
+        }
+        key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
+        type("copy selected text");
+        QTRY_VERIFY(item("keybindingCopy selected text"));
+        QVERIFY(!item("keybindingCopy selected text")->isEnabled());
+        key(Qt::Key_Return); QVERIFY(prop("helpDialog","opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"copyText")));
+        QCOMPARE(QApplication::clipboard()->text(),QString("No stale selection"));
+    }
+    void focusedWorkflowErrors() {
+        reference("John 3:16");
+        bible->setFocusMode(true);
+        for (bool importing : {true,false}) {
+            if (importing) {
+                const auto path = session->filePath("invalid.epub");
+                QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
+                file.write("invalid EPUB"); file.close();
+                bible->importEpub(QUrl::fromLocalFile(path));
+                QTRY_VERIFY(!bible->busy());
+            } else {
+                const auto path = session->filePath("not-a-directory");
+                QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); file.close();
+                QVERIFY(!bible->exportNotes(QUrl::fromLocalFile(path)));
+            }
+            QVERIFY(!bible->error().isEmpty());
+            QTRY_VERIFY(prop("errorDialog","opened").toBool());
+            QCOMPARE(prop("focusedErrorMessage","text").toString(),bible->error());
+            QVERIFY(item("focusedErrorMessage")->isVisible());
+            QVERIFY(bible->focusMode());
+            for (const auto name : {"errorMessage","floatingActions","editionLabel"}) QVERIFY(!item(name)->isVisible());
+            capture(importing ? "review-focused-import-error" : "review-focused-export-error");
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop("errorDialog","visible").toBool());
+            QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+            QVERIFY(bible->focusMode());
+        }
+    }
+    void themedSquareSliders() {
+        for (const auto query : {"line height","reading settings"}) {
+            key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
+            QTRY_VERIFY(prop("passagePalette","opened").toBool());
+            type(query); key(Qt::Key_Return);
+            QTRY_VERIFY(prop("settingsDialog","opened").toBool());
+            auto handle = item("lineHeightSliderHandle");
+            auto track = item("lineHeightSliderTrack");
+            QVERIFY(handle); QVERIFY(track);
+            QCOMPARE(handle->property("radius").toDouble(),0.0);
+            QCOMPARE(track->property("radius").toDouble(),0.0);
+            QCOMPARE(track->property("color"),desktop->property("accent"));
+            QCOMPARE(handle->property("color"),desktop->property("surface"));
+            const auto old = bible->lineHeight();
+            key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
+            QVERIFY(desktop->setProperty("accent",QColor("#b454ea")));
+            QCOMPARE(track->property("color").value<QColor>(),QColor("#b454ea"));
+            capture(QString("review-square-slider-") + query);
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
+        }
     }
     void freeTextAcrossVerses() {
         QFETCH(bool,reverse); QFETCH(bool,numbers);
@@ -1963,7 +2087,7 @@ int main(int argc,char **argv)
     qputenv("QT_FORCE_STDERR_LOGGING","1");
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc,argv);
-    app.setOrganizationName("OmabibleUiTests");
+    app.setOrganizationName("OmaBibleUiTests");
     app.setApplicationName("omabible-ui-test");
     QQuickStyle::setStyle("Basic");
     UiTest test;

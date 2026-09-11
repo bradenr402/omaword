@@ -79,11 +79,19 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: passagePalette.visible || savedDrawer.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool modalOpen: passagePalette.visible || savedDrawer.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
+    readonly property real observedLineHeight: bible.lineHeight
+    onObservedLineHeightChanged: {
+        // Replacing the rich document invalidates Qt's selection offsets.
+        // Clear the shared clipboard source in the same update as the paint.
+        clearTextSelection()
+        draggingText = false
+        dragAnchorRow = -1
+    }
     readonly property real floatingSafety: bible.focusMode ? 0 : 72 * scale
     readonly property real verseGutter: 40 * scale
     readonly property bool observedFocusMode: bible.focusMode
@@ -114,13 +122,13 @@ ApplicationWindow {
     function clearTextSelection() {
         freeSelectedText = ""
         for (let i = 0; i < verseRepeater.count; ++i) {
-            let row = verseRepeater.itemAt(i)
+            let row = verseRepeater.itemAt(i) as VerseItem
             if (row && row.body) row.body.deselect()
         }
     }
     function textHit(point) {
         for (let i = 0; i < verseRepeater.count; ++i) {
-            let row = verseRepeater.itemAt(i)
+            let row = verseRepeater.itemAt(i) as VerseItem
             let p = row.body.mapFromItem(reading, point.x, point.y)
             if (p.y <= row.body.height || i === verseRepeater.count - 1) {
                 let position = p.y < 0 ? 0 : p.y > row.body.height ? row.body.length
@@ -134,7 +142,7 @@ ApplicationWindow {
         dragOrigin = source.mapToItem(reading, mouse.x, mouse.y)
         dragPoint = dragOrigin
         dragAnchorRow = index
-        let body = verseRepeater.itemAt(index).body
+        let body = (verseRepeater.itemAt(index) as VerseItem).body
         let p = body.mapFromItem(reading, dragPoint.x, dragPoint.y)
         dragAnchorPosition = body.positionAt(p.x, p.y)
         gutterDrag = gutter
@@ -142,11 +150,14 @@ ApplicationWindow {
     }
     function updateTextDrag(source, mouse) {
         dragPoint = source.mapToItem(reading, mouse.x, mouse.y)
+        // Qt exposes this runtime style hint without QML property metadata.
+        // qmllint disable missing-property
         if (!draggingText && Math.hypot(dragPoint.x - dragOrigin.x, dragPoint.y - dragOrigin.y) < Qt.styleHints.startDragDistance) return
+        // qmllint enable missing-property
         if (!draggingText) {
             clearTextSelection()
             draggingText = true
-            if (!gutterDrag) verseRepeater.itemAt(dragAnchorRow).body.forceActiveFocus()
+            if (!gutterDrag) (verseRepeater.itemAt(dragAnchorRow) as VerseItem).body.forceActiveFocus()
         }
         applyTextDrag()
     }
@@ -173,7 +184,7 @@ ApplicationWindow {
         let end = forward ? hit.position : dragAnchorPosition
         let pieces = []
         for (let i = 0; i < verseRepeater.count; ++i) {
-            let body = verseRepeater.itemAt(i).body
+            let body = (verseRepeater.itemAt(i) as VerseItem).body
             if (i < first || i > last) body.deselect()
             else {
                 body.select(i === first ? start : 0, i === last ? end : body.length)
@@ -251,6 +262,23 @@ ApplicationWindow {
         return syncingNote || !hasSelection || loadedNoteReference !== bible.selectionReference || noteEditor.text === bible.noteText
     }
     function readerFocus() { readerSurface.forceActiveFocus() }
+    function restorePanelFocus() {
+        // Recheck after popup teardown: a dispatched action may have opened a
+        // new modal already. Never steal its focus from a delayed close signal.
+        Qt.callLater(function() {
+            if (app.modalOpen || bible.busy) return
+            if (notesDrawer.opened) {
+                if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
+                else notesClose.forceActiveFocus()
+            } else app.readerFocus()
+        })
+    }
+    function showFocusedError() {
+        if (bible.focusMode && bible.error.length && !bible.busy) {
+            errorDialog.message = bible.error
+            errorDialog.open()
+        }
+    }
     function notify(message) { toast.text = message; toastTimer.restart() }
     function selectVerse(number, extend) {
         clearCount()
@@ -320,6 +348,7 @@ ApplicationWindow {
         if (!flushNote()) return
         savePosition()
         if (bible.navigate(reference)) {
+            passagePalette.navigated = true
             passagePalette.close()
             readerFocus()
         }
@@ -332,6 +361,7 @@ ApplicationWindow {
         reading.contentY = 0
         restoringPosition = false
         savePosition()
+        passagePalette.navigated = true
         passagePalette.close()
         readerFocus()
     }
@@ -346,6 +376,7 @@ ApplicationWindow {
         referenceInput.forceActiveFocus()
     }
     function openNotes(focusEditor) {
+        if (!bible.ready || bible.busy) return
         clearCount()
         notesDrawer.focusEditor = focusEditor
         notesDrawer.open()
@@ -505,15 +536,19 @@ ApplicationWindow {
         return action.keys
     }
     function shortcutEnabled(action) {
-        if (bible.busy) return false
+        if (!actionAvailable(action)) return false
         if (action.scope === "palette") return !modalOpen || passagePalette.opened
         if (action.scope === "global") return !modalOpen && (bible.ready || action.id === "help" || action.id === "about" || action.id === "import")
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
         return readerKeys && (action.id !== "copyText" || freeSelectedText.length > 0)
     }
     function actionAvailable(action) {
-        return action && !action.explanation && !bible.busy
-            && (bible.ready || ["commands", "help", "about", "import", "settings", "lineHeight"].includes(action.id))
+        if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
+        if (!action || action.explanation || bible.busy) return false
+        if (action.id === "copyText") return bible.ready && freeSelectedText.length > 0
+        if (action.id === "bookmark" || action.id === "highlight") return hasSelection
+        return bible.ready || !!action.setting
+            || ["books", "commands", "help", "about", "import", "settings", "lineHeight", "lineLess", "lineMore"].includes(action.id)
     }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
@@ -552,6 +587,7 @@ ApplicationWindow {
     function activatePaletteEntry(entry) {
         if (!entry) return
         if (entry.action) {
+            if (!actionAvailable(entry.action) || !flushNote()) return
             passagePalette.pendingAction = entry.action
             passagePalette.close()
         } else if (entry.verse) jump(entry.title)
@@ -615,6 +651,7 @@ ApplicationWindow {
         referenceInput.forceActiveFocus()
     }
     function runCommand(action) {
+        if (!actionAvailable(action)) return
         if (action === "first" || action === "last") { countedVerse(action === "last"); return }
         clearCount()
         if (!flushNote()) return
@@ -704,6 +741,39 @@ ApplicationWindow {
         color: desktop.border
         implicitHeight: 1
         opacity: 0.65
+    }
+    component SquareSlider: Slider {
+        id: slider
+        implicitHeight: 32 * app.scale
+        implicitWidth: 200 * app.scale
+        padding: 9 * app.scale
+        background: Rectangle {
+            x: slider.leftPadding
+            y: slider.topPadding + (slider.availableHeight - height) / 2
+            width: slider.availableWidth
+            height: 3 * app.scale
+            radius: 0
+            color: desktop.border
+            Rectangle {
+                objectName: slider.objectName + "Track"
+                x: slider.mirrored ? parent.width - width : 0
+                width: slider.position * parent.width
+                height: parent.height
+                radius: 0
+                color: desktop.accent
+            }
+        }
+        handle: Rectangle {
+            objectName: slider.objectName + "Handle"
+            x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
+            y: slider.topPadding + (slider.availableHeight - height) / 2
+            implicitWidth: 18 * app.scale
+            implicitHeight: 18 * app.scale
+            radius: 0
+            color: slider.pressed ? desktop.accent : desktop.surface
+            border.color: desktop.accent
+            border.width: slider.activeFocus ? 2 : 1
+        }
     }
     component FloatingButton: Button {
         id: floatingButton
@@ -1112,7 +1182,11 @@ ApplicationWindow {
                                             else app.copyClickedVerse(verseRow.modelData.number, mouse.button === Qt.MiddleButton)
                                         }
                                         onCanceled: { app.draggingText = false; app.dragAnchorRow = -1 }
-                                        onDoubleClicked: { app.selectVerse(verseRow.modelData.number, false); app.openNotes(true) }
+                                        onDoubleClicked: function(mouse) {
+                                            if (mouse.button !== Qt.LeftButton) return
+                                            app.selectVerse(verseRow.modelData.number, false)
+                                            app.openNotes(true)
+                                        }
                                     }
                                     ToolTip.visible: numberMouse.containsMouse && !bible.focusMode
                                     ToolTip.delay: 700
@@ -1257,7 +1331,7 @@ ApplicationWindow {
             if (focusEditor && app.hasSelection) noteEditor.forceActiveFocus()
             else notesClose.forceActiveFocus()
         }
-        onClosed: { if (!app.modalOpen) app.readerFocus() }
+        onClosed: app.restorePanelFocus()
         contentItem: Rectangle {
                 id: notesPanel
                 objectName: "notesPanel"
@@ -1472,6 +1546,7 @@ ApplicationWindow {
         id: passagePalette
         objectName: "passagePalette"
         property string pendingAction: ""
+        property bool navigated: false
         width: Math.min(650 * app.scale, app.width - 48)
         height: Math.min(560 * app.scale, app.height - 48)
         padding: 16
@@ -1479,8 +1554,10 @@ ApplicationWindow {
         onClosed: {
             let action = pendingAction
             pendingAction = ""
-            app.readerFocus()
             if (action) Qt.callLater(function() { app.runCommand(action) })
+            else if (navigated) app.readerFocus()
+            else app.restorePanelFocus()
+            navigated = false
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -1575,9 +1652,10 @@ ApplicationWindow {
                     width: paletteResults.width
                     height: 44 * app.scale
                     highlighted: ListView.isCurrentItem
+                    enabled: !modelData.action || app.actionAvailable(modelData.action)
                     onClicked: app.activatePaletteEntry(modelData)
                     contentItem: RowLayout {
-                        Label { text: paletteEntry.modelData.title; color: desktop.foreground; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 14 * app.scale }
+                        Label { text: paletteEntry.modelData.title; color: paletteEntry.enabled ? desktop.foreground : desktop.muted; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 14 * app.scale }
                         Label { objectName: "paletteHint" + (paletteEntry.modelData.action || ""); text: paletteEntry.modelData.hint; color: desktop.muted; font.pixelSize: 11 * app.scale }
                         Label { text: paletteEntry.modelData.action || paletteEntry.modelData.chapter ? "↵" : "›"; color: desktop.muted; Layout.leftMargin: 8 }
                     }
@@ -1625,7 +1703,7 @@ ApplicationWindow {
         background: Rectangle { color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
         onOpened: { collectionList.currentIndex = collectionList.count > 0 ? 0 : -1; app.moveSaved(0) }
-        onClosed: app.readerFocus()
+        onClosed: app.restorePanelFocus()
         contentItem: ColumnLayout {
             objectName: "savedContent"
             Shortcut { sequence: "Ctrl+L"; enabled: savedDrawer.opened && !bible.busy; onActivated: savedDrawer.close() }
@@ -1739,8 +1817,8 @@ ApplicationWindow {
         onClosed: {
             let action = pendingAction
             pendingAction = ""
-            app.readerFocus()
             if (action) Qt.callLater(function() { app.runCommand(action) })
+            else app.restorePanelFocus()
         }
         contentItem: ColumnLayout {
             spacing: 12 * app.scale
@@ -1826,7 +1904,7 @@ ApplicationWindow {
         width: Math.min(480 * app.scale, app.width - 48)
         height: Math.min(settingsContent.implicitHeight + 48, app.height - 48)
         onOpened: lineHeightSlider.forceActiveFocus()
-        onClosed: app.readerFocus()
+        onClosed: app.restorePanelFocus()
         contentItem: ScrollView {
             id: settingsScroll
             contentWidth: availableWidth
@@ -1845,6 +1923,7 @@ ApplicationWindow {
                     required property var modelData
                     objectName: "setting" + modelData.id
                     visible: !settingsDialog.lineOnly
+                    enabled: app.actionAvailable(modelData)
                     Layout.fillWidth: true
                     text: modelData.title + " · " + app.actionHint(modelData)
                     onClicked: app.runCommand(modelData.id)
@@ -1856,7 +1935,7 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 Label { objectName: "lineHeightValue"; text: bible.lineHeight.toFixed(1); color: desktop.accent; font.pixelSize: 14 * app.scale }
             }
-            Slider {
+            SquareSlider {
                 id: lineHeightSlider
                 objectName: "lineHeightSlider"
                 Layout.fillWidth: true
@@ -1876,6 +1955,7 @@ ApplicationWindow {
     ModalCard {
         id: aboutDialog
         objectName: "aboutDialog"
+        onClosed: app.restorePanelFocus()
         contentItem: ScrollView {
             id: aboutScroll
             implicitHeight: Math.min(aboutContent.implicitHeight, app.height - 110)
@@ -1936,7 +2016,7 @@ ApplicationWindow {
         property url backupFile
         closePolicy: Popup.CloseOnEscape
         onOpened: restoreCancel.forceActiveFocus()
-        onClosed: { backupFile = ""; app.readerFocus() }
+        onClosed: { backupFile = ""; app.restorePanelFocus() }
         contentItem: ColumnLayout {
             spacing: 18
             Label {
@@ -1990,6 +2070,20 @@ ApplicationWindow {
                     Keys.onEnterPressed: app.confirmRestore()
                 }
             }
+        }
+    }
+
+    ModalCard {
+        id: errorDialog
+        objectName: "errorDialog"
+        property string message: ""
+        onOpened: errorDismiss.forceActiveFocus()
+        onClosed: app.restorePanelFocus()
+        contentItem: ColumnLayout {
+            spacing: 16 * app.scale
+            Label { text: "Unable to complete action"; color: desktop.foreground; font.pixelSize: 20 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { objectName: "focusedErrorMessage"; text: errorDialog.message; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; Accessible.role: Accessible.AlertMessage }
+            QuietButton { id: errorDismiss; text: "Dismiss"; Layout.alignment: Qt.AlignRight; onClicked: errorDialog.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
         }
     }
 
@@ -2051,6 +2145,8 @@ ApplicationWindow {
     }
     Connections {
         target: bible
+        function onErrorChanged() { Qt.callLater(app.showFocusedError) }
+        function onBusyChanged() { if (!bible.busy) Qt.callLater(app.showFocusedError) }
         function onVersesChanged() {
             app.clearTextSelection()
             app.draggingText = false
