@@ -6,9 +6,10 @@ notes alongside a selected passage.
 
 ## Features
 
-- Passage palette with book/chapter browsing and reference aliases.
+- Passage palette with live resolved-reference previews and book/chapter browsing.
 - Selectable text, verse-range selection, chapter navigation, and saved reading position.
-- Local bookmarks, a single highlight color, and autosaved Markdown notes with preview.
+- Cross-chapter bookmarks, a single highlight color, and autosaved Markdown notes with preview.
+- Verse-based Vim navigation, visual range selection, and searchable keybindings.
 - Saved-passages drawer filtered by bookmarks, highlights, or notes.
 - Markdown annotation export and JSON personal-data backup/restore.
 - System fonts and desktop text scaling, live Omarchy theme integration, and a
@@ -102,6 +103,8 @@ from the palette. Examples accepted by the backend:
 | --- | --- |
 | `John 3` | A whole chapter |
 | `Jn 3:16–18` | A same-chapter verse range |
+| `John 3:35–4:2` | A range across chapters |
+| `Mal 4:6–Matt 1:2` | A range across books |
 | `1Jn3:16` | A compact numbered-book reference |
 | `1 Cor 13`, `First Corinthians 13`, `I Corinthians 13` | Numbered-book aliases |
 | `Psalm 23`, `Ps 23` | Psalms aliases |
@@ -110,13 +113,24 @@ from the palette. Examples accepted by the backend:
 | `3:16` | A reference within the current book |
 
 Names are case-insensitive; common abbreviations, spaces, and periods are
-accepted. Ranges stay within one chapter. Both endpoints must exist in NET 2.1;
+accepted. Ranges can cross chapters and books. Both endpoints must exist in NET 2.1;
 a range may span verse numbers intentionally omitted by this edition.
 
 Click a **verse number** to select a verse; Shift-click another number to select
 a range. Drag over the verse text for ordinary text selection. Annotation commands
 use the numbered verse selection. Copy passage copies that range, or the entire
 chapter when no verse range is selected.
+
+Normal mode moves the verse cursor with `j` / `k`. Press `v` to anchor a visual
+selection, then continue with `j` / `k` to extend or shrink it. `J` / `K` enters
+visual mode and extends immediately. At chapter boundaries, `j` continues to the
+next chapter and `k` to the previous one, skipping omitted NET verse numbers.
+Press `x` to highlight the entire range, including its off-screen chapters.
+Press `v` again to collapse the range to its cursor. Saved ranges reopen at their
+active ending chapter; the full reference remains visible in the footer and notes.
+
+The palette previews the canonical destination before you press Enter. When
+browsing books, Right Arrow also opens the selected book's chapter list.
 
 ### Notes, bookmarks, and highlights
 
@@ -129,31 +143,36 @@ Bookmarks and highlights cover verses. A selection is marked active when all its
 actual verses are covered. Toggling a partially covered selection covers all of
 it; toggling a fully covered selection removes that flag within the selection,
 splitting existing ranges when necessary and preserving other flags and notes.
+One bookmark ribbon marks the start of a saved range; its margin line continues
+through the range, including across chapter boundaries. Hover for the full
+reference, or click the ribbon/line to reopen that range. Page icons mark notes.
 
 ### Keyboard shortcuts
 
 Reader keys apply while reading, with no editable text field or modal dialog
-active. **F1** opens the in-app shortcut help.
+active. **?** or **F1** opens the searchable **Keybindings** panel.
 
 | Action | Shortcut |
 | --- | --- |
 | Passage palette / command palette | Ctrl+K / Ctrl+Shift+P |
 | Saved passages | Ctrl+L |
-| Previous / next chapter | Alt+Left / Alt+Right, or `[` / `]` |
-| Scroll up / down | `k` / `j`, or Up / Down |
+| Previous / next chapter | `h` / `l`, `[` / `]`, Alt+Left / Alt+Right |
+| Previous / next verse | `k` / `j`, Up / Down |
 | Page down | Space, PageDown, Ctrl+F |
 | Page up | Shift+Space, PageUp, Ctrl+B |
-| Chapter beginning / end | Home / End, or `g` / Shift+G |
-| Toggle verse-selection mode | `v` |
-| Move selection in verse mode | `j` / `k`, or Down / Up |
-| Extend selection in verse mode | Shift+J / Shift+K, or Shift+Down / Shift+Up |
-| Bookmark / highlight selected verses | Ctrl+D / Ctrl+H, or `m` / `h` |
-| Write a note / toggle notes panel | Ctrl+N (or `n`) / Ctrl+Shift+N |
-| Copy passage (or chapter) | Ctrl+Shift+C, or `y` |
+| Select chapter beginning / end | `g` / `G`, Home / End |
+| Toggle visual selection / collapse to cursor | `v` |
+| Extend or shrink visual selection | `j` / `k`, Down / Up |
+| Enter visual mode and extend | `J` / `K`, Shift+Down / Shift+Up |
+| Bookmark selected verses | `m`, Ctrl+D |
+| Highlight selected verses | `x`, Ctrl+H |
+| Write a note | `n`, Ctrl+N |
+| Toggle notes panel | Ctrl+Shift+N |
+| Copy passage (or chapter) | `y`, Ctrl+Shift+C |
 | Larger / smaller reader text | Ctrl++ (also Ctrl+=) / Ctrl+- |
 | Reset reader text size | Ctrl+0 |
-| Leave note editor, then close notes, clear selection, or leave verse mode | Escape |
-| Keyboard help | F1, or `?` |
+| Leave editor / exit visual / close notes / collapse range | Escape |
+| Search keybindings | `?`, F1 |
 
 Use Up/Down and Enter in the palette, or prefix its query with `>` to find
 commands such as import, export, backup, restore, and About.
@@ -166,6 +185,10 @@ with an empty organization name and application name `omabible`.
 
 - `bible.sqlite`: the imported, validated NET edition.
 - `personal.sqlite`: bookmarks, highlights, exact-range notes, and reading state.
+
+Existing version-1 personal databases upgrade transactionally to support
+cross-chapter ranges. New backups use version 2; restoring version-1 backups is
+also supported. Older Omabible binaries cannot read the upgraded database.
 
 Use **About & attribution → Open local data folder** to find the actual location.
 

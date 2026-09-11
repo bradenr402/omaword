@@ -18,9 +18,9 @@ user-supplied EPUB in place. No Bible content is included in the test sources.
   replaceable, validated edition; `personal.sqlite` holds annotations and reading
   state with synchronous SQLite commits. Existing valid data opens without import.
 - References support full names, standard aliases, ordinal/roman numbered books,
-  compact forms, chapter-only references, same-chapter ranges, and single-chapter
+  compact forms, chapter-only references, cross-chapter/book ranges, and single-chapter
   book shorthand. A range may span omitted verse numbers, but its endpoints must
-  exist. Cross-chapter ranges are rejected with an explanatory error.
+  exist. Pure reference previews use the same parser as navigation.
 - Flags cover verses: a selection is flagged only when **all** its actual verses
   are covered. Toggling a partially covered selection flags all of it. Toggling
   a fully covered selection removes that flag within the selection, splitting
@@ -30,10 +30,12 @@ user-supplied EPUB in place. No Bible content is included in the test sources.
   notes. Empty notes remove their entry unless a flag remains.
 - No-selection `selectionReference` is the chapter reference; `copySelection()`
   copies that chapter. Annotation commands require an explicit verse selection.
-- Backups contain personal data only, with format `omabible-backup`, version `1`,
+- Backups contain personal data only, with format `omabible-backup`, version `2`,
   edition, UTC creation time, reading state, and annotation records. Restore
   replaces personal data in one transaction after strict field/type/range
   validation. Restore requires the imported edition to validate verse endpoints.
+  Version-1 backups remain importable; schema-v1 personal databases migrate
+  transactionally. Directional anchor/cursor endpoints survive restart and restore.
 - Markdown export writes `omabible-notes.md` atomically in the chosen existing
   directory, containing references, flags, and unchanged Markdown notes.
 - Import derives references from embedded verse markers, including cross-file

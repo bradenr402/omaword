@@ -10,6 +10,7 @@ Properties (NOTIFY as appropriate):
 - bool ready, busy; double importProgress (0..1); QString error (user-readable), status
 - QString passage (e.g. John 3), selectionReference (e.g. John 3:16–18), edition
 - int book (1..66), chapter, selectedStart (0 means none), selectedEnd, chapterCount
+- int cursorVerse; bool crossChapterSelection. Visible selection endpoints are the current chapter intersection; selectionReference describes the full span.
 - QVariantList verses: maps {number:int, text:QString plain, html:QString safe inline/body markup, heading:QString, poetry:bool, highlighted:bool, bookmarked:bool, hasNote:bool}
 - QVariantList books: maps {id:int, name:QString, chapters:int}
 - QVariantList collection: maps {book:int, chapter:int, start:int, end:int, reference:QString, bookmark:bool, highlight:bool, note:QString}
@@ -19,6 +20,7 @@ Properties (NOTIFY as appropriate):
 Invokables:
 - void importEpub(QUrl file), clearError()
 - bool navigate(QString reference) [validate/aliases, sets error on failure]
+- QVariantMap resolveReference(QString reference) [pure canonical preview: valid, reference, error]
 - void openChapter(int book,int chapter), previousChapter(), nextChapter()
 - void selectVerses(int start,int end), clearSelection(), moveSelection(int delta,bool extend=false)
 - void toggleBookmark(), toggleHighlight(), setNoteText(QString)
@@ -28,6 +30,10 @@ Invokables:
 - QString dataDirectory()
 Signals: navigationChanged() (new chapter or requested verse jump), annotationChanged().
 Persist synchronously for reliable saves, debounce may live in UI. Imports background thread, atomic validated DB replacement. Import only explicitly selected user file (CLI main supports --import).
+Personal schema and exported backups are version 2 with canonical range endpoints;
+version-1 data migrates transactionally and version-1 backups remain importable.
+Verse maps include bookmark range start/end/continuation flags and overlapping
+bookmarkRanges metadata. Collection references reopen cross-chapter/book spans.
 NET EPUB is supplied by the user. Do not copy Bible content into the repository.
 
 ## UI (qml/)
@@ -38,6 +44,10 @@ System font throughout. Good margins, theme-aware, responsive >=640px. Standard 
 ## Desktop (src/desktop.h/.cpp)
 
 QObject context `desktop`: QColor background, foreground, surface, muted, accent, border; QString fontFamily; double textScale; bool dark. Live Omarchy theme reads, system fontconfig family + desktop text scaling. Q_INVOKABLE void openExternal(QUrl), QString version (property or constant). Standard Qt palette fallback outside Omarchy.
+
+Normal j/k moves the verse cursor; v anchors visual selection; visual j/k and
+shifted J/K extend it across chapters. h/l navigates chapters, x highlights, m
+bookmarks. Keybindings are searchable. UI uses square corners and system fonts.
 
 ## Scope
 
