@@ -3,6 +3,7 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -275,7 +276,42 @@ QHash<QString, QByteArray> readArchive(const QString &path, const QSet<QString> 
 struct Package {
     Edition edition;
     QStringList paths;
+    QString identifier;
 };
+
+const QString MarkerHelp = "EPUB lacks reliable book/chapter/verse markers. Page-based OCR may have lost reading order. Use a verse-tagged EPUB with explicit book, chapter and verse markers.";
+
+QString abbreviation(const QString &title)
+{
+    const QList<QPair<QString, QString>> names = {
+        {"NKJV", "new king james"}, {"KJV", "king james|authorized version"},
+        {"NIV", "new international version"}, {"WEB", "world english bible"}};
+    for (const auto &name : names) {
+        const QRegularExpression pattern("\\b(?:" + name.first + '|' + name.second + ")\\b",
+                                         QRegularExpression::CaseInsensitiveOption);
+        if (pattern.match(title).hasMatch()) return name.first;
+    }
+    QString initials;
+    const auto words = title.split(QRegularExpression("[^\\p{L}\\p{N}]+"), Qt::SkipEmptyParts);
+    for (const auto &word : words) initials += word.left(1).toUpper();
+    return initials.left(12);
+}
+
+QString editionId(const QString &identifier, const QString &title)
+{
+    const QByteArray identity = (identifier.isEmpty() ? "title:" + title.toCaseFolded() : "identifier:" + identifier).toUtf8();
+    return "epub-" + QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(32));
+}
+
+QString metadataDigest(const QHash<QString, QString> &metadata)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const auto &key : {"version_id", "abbreviation", "edition", "copyright", "source_identifier", "source_keys", "versification"}) {
+        const auto value = metadata.value(key).toUtf8();
+        hash.addData(QByteArray::number(value.size()) + ':' + value);
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
 
 // Haiola's internal IDs are not its three-letter filenames (nor NET aliases).
 const QStringList &haiolaPrefixes()
@@ -306,13 +342,23 @@ Package package(const QHash<QString, QByteArray> &entries)
     QXmlStreamReader xml(entries.value(opf));
     QHash<QString, QString> manifest;
     QStringList ids;
-    QString title, identifier, rights, accessibility;
+    QString title, identifier, rights, accessibility, uniqueIdentifier;
+    QHash<QString, QString> identifiers;
+    QStringList identifierValues;
+    int titles = 0;
     const QString base = QFileInfo(opf).path();
     while (!xml.atEnd()) {
         xml.readNext();
         if (!xml.isStartElement()) continue;
-        if (xml.name() == u"title") title = xml.readElementText();
-        else if (xml.name() == u"identifier") identifier += xml.readElementText();
+        if (xml.name() == u"package") uniqueIdentifier = xml.attributes().value("unique-identifier").toString();
+        else if (xml.name() == u"title") { title = xml.readElementText().simplified(); ++titles; }
+        else if (xml.name() == u"identifier") {
+            const auto id = xml.attributes().value("id").toString();
+            const auto value = xml.readElementText().trimmed();
+            if (!id.isEmpty() && identifiers.contains(id)) fail("Ambiguous EPUB identifier metadata.");
+            if (!id.isEmpty()) identifiers.insert(id, value);
+            if (!value.isEmpty()) identifierValues.append(value);
+        }
         else if (xml.name() == u"rights") rights = xml.readElementText();
         else if (xml.name() == u"meta" && xml.attributes().value("property") == u"schema:accessibilitySummary")
             accessibility += xml.readElementText();
@@ -325,31 +371,40 @@ Package package(const QHash<QString, QByteArray> &entries)
     }
     checkXml(xml, opf);
     Package result;
-    if (accessibility.contains("character recognition", Qt::CaseInsensitive)
-        || accessibility.contains("OCR", Qt::CaseInsensitive))
-        fail("Unsupported OCR study-Bible EPUB: automated character recognition produces page text with unreliable reading order and no supported semantic verse markers. Scripture cannot be reliably separated from study notes. Choose a structured NET Bible 2.1 or Haiola/eBible KJV 2006 EPUB.");
-    if (title.simplified() == "NET Bible 2.1" && identifier.contains("NETBIBLE21"))
+    if (!uniqueIdentifier.isEmpty()) {
+        identifier = identifiers.value(uniqueIdentifier);
+        if (identifier.isEmpty()) fail("Incomplete EPUB metadata: the package identifier is missing.");
+    } else {
+        identifierValues.removeDuplicates();
+        if (identifierValues.size() > 1) fail("Ambiguous EPUB identifier metadata: no unique package identifier.");
+        if (!identifierValues.isEmpty()) identifier = identifierValues.first();
+    }
+    if (titles != 1 || title.isEmpty() || title.size() > 512 || abbreviation(title).isEmpty()) {
+        if (accessibility.contains("character recognition", Qt::CaseInsensitive) || accessibility.contains("OCR", Qt::CaseInsensitive))
+            fail(MarkerHelp);
+        fail("Incomplete or ambiguous EPUB metadata: one nonempty edition title is required.");
+    }
+    if (identifier.size() > 4096) fail("EPUB identifier metadata is too long.");
+    result.identifier = identifier;
+    if (title == "NET Bible 2.1" && identifier == "urn:uuid:NETBIBLE21")
         result.edition = {"net-2.1", "NET", "NET Bible 2.1", rights};
-    else if (title.simplified() == "King James (Authorized) Version"
+    else if (title == "King James (Authorized) Version"
              && identifier == "urn:uuid:51004fba-2cea-50c8-8e37-fcebe15c315a")
         result.edition = {"kjv-2006", "KJV", "King James (Authorized) Version", rights};
     else
-        fail("This edition or EPUB layout is not supported. Choose a structured NET Bible 2.1 or Haiola/eBible KJV 2006 EPUB; OCR study-Bible pages cannot be imported.");
-    static const QStringList kjvFiles = QString("GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV").split(' ');
+        result.edition = {editionId(identifier, title), abbreviation(title), title, rights};
     QSet<QString> seen;
     for (const auto &id : ids) {
         if (!manifest.contains(id)) fail("The EPUB spine references a missing manifest item.");
         const QString path = manifest.value(id);
         if (path.endsWith("_notes.xhtml")) continue;
-        if (result.edition.id == "kjv-2006" && !kjvFiles.contains(QFileInfo(path).completeBaseName())) continue;
         if (!path.endsWith(".xhtml") && !path.endsWith(".html")) fail("Unsupported EPUB spine document: " + path);
         if (seen.contains(path)) fail("The EPUB spine contains duplicate documents.");
         seen.insert(path);
         result.paths.append(path);
     }
     if (result.paths.isEmpty()) fail("The EPUB reading order is empty.");
-    if (result.edition.id == "kjv-2006" && result.paths.size() != 66)
-        fail("The KJV EPUB must contain all 66 structured book documents.");
+    if (result.edition.id != "net-2.1" && result.paths.size() > 256) fail(MarkerHelp);
     return result;
 }
 
@@ -509,12 +564,102 @@ void parseDocument(QByteArray data, const QString &path, QSqlQuery &insert, QSet
     flush();
 }
 
-// The main container supplies the book prefix, not a filename/title guess.
-// Only paragraph/poetry containers contribute Scripture; notes are skipped as
-// entire subtrees so their following text (XML tail) remains in the verse.
-void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
-              QSet<QString> &documents, qint64 &globalOutput)
+// Match one complete, independently defined numbering profile. A source digest
+// alone cannot detect a lost final marker whose words joined the preceding verse.
+// Profiles are selected by actual keys, never by translation title/abbreviation.
+struct SourceKeys {
+    QCryptographicHash hash{QCryptographicHash::Sha256};
+    int count = 0, chapters = 0, lastBook = 0, lastChapter = 0, lastVerse = 0, chapterSize = 0;
+    bool matchesKjv = true, matchesNet = true;
+    void requireProfile() const {
+        if (!matchesKjv && !matchesNet)
+            fail("Verse numbering does not match supported complete NET 2.1 or KJV profiles. Check for missing or unsupported verse markers.");
+    }
+    void finishChapter() {
+        if (!lastBook) return;
+        matchesKjv = matchesKjv && lastVerse == kjvMaximum(lastBook,lastChapter)
+            && chapterSize == kjvMaximum(lastBook,lastChapter);
+        matchesNet = matchesNet && lastVerse == chapterMaximum(lastBook,lastChapter)
+            && chapterSize == chapterVerseCount(lastBook,lastChapter);
+        requireProfile();
+    }
+    void add(int b, int c, int v) {
+        if (b < 1 || b > 66 || c < 1 || c > canon()[b-1].chapters || v < 1 || v > 176)
+            fail("Out-of-range semantic verse marker.");
+        if (b != lastBook || c != lastChapter) {
+            finishChapter();
+            if ((b == lastBook && c != lastChapter + 1)
+                || (b != lastBook && (b != lastBook + 1 || c != 1
+                    || (lastBook && lastChapter != canon()[lastBook-1].chapters))))
+                fail("Missing chapters or decreasing canonical book/chapter markers.");
+            ++chapters; lastVerse = 0; chapterSize = 0;
+        }
+        if (v <= lastVerse) fail("Duplicate or decreasing semantic verse marker.");
+        if (v != lastVerse + 1) matchesKjv = false;
+        for (int missing = lastVerse + 1; missing < v; ++missing)
+            if (!omittedVerse(b,c,missing)) matchesNet = false;
+        if (omittedVerse(b,c,v)) matchesNet = false;
+        matchesKjv = matchesKjv && v <= kjvMaximum(b,c);
+        matchesNet = matchesNet && v <= chapterMaximum(b,c);
+        requireProfile();
+        hash.addData(QString("%1:%2:%3\n").arg(b).arg(c).arg(v).toUtf8());
+        ++count; ++chapterSize; lastBook = b; lastChapter = c; lastVerse = v;
+    }
+    QString finish() {
+        finishChapter();
+        if (lastBook != 66 || lastChapter != 22 || chapters != 1189)
+            fail("Incomplete Bible: expected 66 books, 1,189 chapters and full verse-tagged text.");
+        matchesKjv = matchesKjv && count == 31102;
+        matchesNet = matchesNet && count == 31087;
+        requireProfile();
+        return QString::fromLatin1(hash.result().toHex());
+    }
+    QString profile() {
+        finish();
+        return matchesKjv ? "kjv-v1" : "net-2.1-v1";
+    }
+};
+
+// Explicit book containers only. Common OSIS/USFM book codes are accepted
+// alongside Haiola's own prefixes; no filename or prose/title inference.
+int anchorBook(const QString &id)
 {
+    const int haiola = haiolaPrefixes().indexOf(id) + 1;
+    if (haiola) return haiola;
+    static const QStringList usfm = QString("GEN EXO LEV NUM DEU JOS JDG RUT 1SA 2SA 1KI 2KI 1CH 2CH EZR NEH EST JOB PSA PRO ECC SNG ISA JER LAM EZK DAN HOS JOL AMO OBA JON MIC NAM HAB ZEP HAG ZEC MAL MAT MRK LUK JHN ACT ROM 1CO 2CO GAL EPH PHP COL 1TH 2TH 1TI 2TI TIT PHM HEB JAS 1PE 2PE 1JN 2JN 3JN JUD REV").split(' ');
+    const int standard = usfm.indexOf(id.toUpper()) + 1;
+    return standard ? standard : bookId(id);
+}
+
+int structuredBook(const QByteArray &data, const QString &path)
+{
+    QXmlStreamReader xml(data);
+    int book = 0;
+    bool markers = false;
+    while (!xml.atEnd()) {
+        xml.readNext();
+        if (!xml.isStartElement()) continue;
+        const auto attrs = xml.attributes();
+        if (attrs.value("class") == u"verse") markers = true;
+        if (xml.name() != u"div" || attrs.value("class") != u"main") continue;
+        if (book) fail("Duplicate structured book container in " + path);
+        QString id = attrs.value("id").toString();
+        if (id.endsWith("0_0")) id.chop(3);
+        book = anchorBook(id);
+        if (!book) fail("Unknown semantic book prefix in " + path);
+    }
+    checkXml(xml,path);
+    if (!book && markers) fail("Verse markers lack an explicit canonical book container: " + path);
+    return markers ? book : 0;
+}
+
+void parseStructured(const QByteArray &data, const QString &path, QSqlQuery *insert,
+              QSet<QString> &documents, qint64 &globalOutput, SourceKeys &keys, bool kjv)
+{
+    static const QRegularExpression lineWhitespace(" *\\n *"), trailingBreaks(" *(?:<br/> *)+$"), whitespace("\\s+");
+    static const QRegularExpression osisMarker("^([1-3]?[A-Za-z]+)\\.([1-9][0-9]*)\\.([1-9][0-9]*)$");
+    static const QRegularExpression markerLabel("^(?:[0-9]+(?::[0-9]+)?|[0-9]+\\.)?$");
+    QRegularExpression haiolaMarker;
     QXmlStreamReader xml(data);
     int depth = 0, mainDepth = 0, paragraphDepth = 0, book = 0;
     bool poetry = false, paragraphStart = false;
@@ -531,18 +676,19 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
     auto flush = [&] {
         if (!verse.number) return;
         verse.text = verse.text.trimmed();
-        verse.text.replace(QRegularExpression(" *\\n *"), "\n");
+        verse.text.replace(lineWhitespace, "\n");
         verse.html = verse.html.trimmed();
-        verse.html.replace(QRegularExpression(" *(?:<br/> *)+$"), "");
+        verse.html.replace(trailingBreaks, "");
         if (stripLayoutPilcrow(&verse.text, &verse.html)) verse.paragraphStart = true;
-        if (verse.text.isEmpty()) fail("Empty KJV verse in " + path);
+        if (verse.text.isEmpty()) fail("Empty verse in " + path);
+        keys.add(verse.book, verse.chapter, verse.number);
         if (insert) {
             insert->bindValue(0, verse.book); insert->bindValue(1, verse.chapter); insert->bindValue(2, verse.number);
             insert->bindValue(3, verse.text); insert->bindValue(4, verse.html);
             insert->bindValue(5, verse.heading.isNull() ? QString("") : verse.heading);
             insert->bindValue(6, verse.poetry);
             insert->bindValue(7, verse.paragraphStart);
-            if (!insert->exec()) fail("Duplicate or invalid KJV verse in " + path + ": " + insert->lastError().text());
+            if (!insert->exec()) fail("Duplicate or invalid verse in " + path + ": " + insert->lastError().text());
         }
         verse = Verse(); verseOutput = 0;
     };
@@ -551,7 +697,10 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
         const auto attrs = xml.attributes();
         const auto classes = attrs.value("class").toString().split(' ');
         const auto types = attrs.value("http://www.idpf.org/2007/ops", "type").toString().split(' ');
-        return classes.contains("noteref") || classes.contains("footnote")
+        const auto role = attrs.value("role").toString();
+        return classes.contains("noteref") || classes.contains("footnote") || classes.contains("endnote")
+            || classes.contains("note") || classes.contains("xref")
+            || role == "doc-noteref" || role == "doc-footnote" || role == "doc-endnote"
             || types.contains("noteref") || types.contains("footnote") || types.contains("endnote");
     };
     while (!xml.atEnd()) {
@@ -561,14 +710,14 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
             const QString tag = xml.name().toString();
             const auto attrs = xml.attributes();
             const QString cl = attrs.value("class").toString();
-            if (note() || tag == "script" || tag == "style") { skip(); continue; }
+            if (note() || tag == "aside" || tag == "script" || tag == "style") { skip(); continue; }
             if (tag == "div" && cl == "main") {
-                if (book) fail("Duplicate KJV main container in " + path);
+                if (book) fail("Duplicate structured main container in " + path);
                 const QString id = attrs.value("id").toString();
-                if (!id.endsWith("0_0")) fail("Missing KJV book prefix in " + path);
-                prefix = id.left(id.size() - 3);
-                book = haiolaPrefixes().indexOf(prefix) + 1;
-                if (!book) fail("Unknown KJV book prefix in " + path);
+                prefix = id.endsWith("0_0") ? id.left(id.size() - 3) : id;
+                book = anchorBook(prefix);
+                if (!book) fail("Unknown semantic book prefix in " + path);
+                haiolaMarker.setPattern("^" + QRegularExpression::escape(prefix) + "([1-9][0-9]*)_([1-9][0-9]*)$");
                 mainDepth = depth;
             } else if (mainDepth && tag == "div") {
                 if (cl == "p" || cl == "q" || cl == "q1" || cl == "q2" || cl == "m") {
@@ -590,7 +739,7 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
                     }
                     if (!pendingHeading.isEmpty()) pendingHeading += '\n';
                     pendingHeading += heading.simplified();
-                    if (pendingHeading.size() > MaximumVerseOutput) fail("KJV heading limit exceeded: " + path);
+                    if (pendingHeading.size() > MaximumVerseOutput) fail("EPUB heading limit exceeded: " + path);
                 } else {
                     if (cl == "psalmlabel") { flush(); pendingHeading.clear(); }
                     skip();
@@ -598,22 +747,39 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
             } else if (mainDepth && paragraphDepth && tag == "span" && cl == "verse") {
                 flush();
                 const QString id = attrs.value("id").toString();
-                const auto match = QRegularExpression("^" + QRegularExpression::escape(prefix) + "([1-9][0-9]*)_([1-9][0-9]*)$").match(id);
-                if (!match.hasMatch()) fail("Invalid KJV semantic verse marker in " + path);
-                verse.book = book; verse.chapter = match.captured(1).toInt(); verse.number = match.captured(2).toInt();
-                if (!kjvMaximum(book, verse.chapter) || verse.number > kjvMaximum(book, verse.chapter))
-                    fail("Out-of-range KJV verse marker in " + path);
+                auto match = haiolaMarker.match(id);
+                int chapter = 0, number = 0;
+                if (match.hasMatch()) { chapter = match.captured(1).toInt(); number = match.captured(2).toInt(); }
+                else {
+                    match = osisMarker.match(id);
+                    if (!match.hasMatch() || anchorBook(match.captured(1)) != book)
+                        fail("Invalid or ambiguous semantic verse marker in " + path);
+                    chapter = match.captured(2).toInt(); number = match.captured(3).toInt();
+                }
+                verse.book = book; verse.chapter = chapter; verse.number = number;
+                if (keys.lastBook == book && keys.lastChapter == chapter && number <= keys.lastVerse)
+                    fail("Duplicate or decreasing semantic verse marker in " + path);
+                if (chapter < 1 || chapter > canon()[book-1].chapters || number < 1 || number > 176
+                    || (kjv && number > kjvMaximum(book,chapter))) fail("Out-of-range verse marker in " + path);
                 verse.heading = pendingHeading; pendingHeading.clear(); verse.poetry = poetry;
                 verse.paragraphStart = paragraphStart || verse.number == 1;
                 paragraphStart = false;
                 charge(verse.heading.size());
                 documents.insert(QString("%1:%2").arg(book).arg(verse.chapter));
-                skip();
+                const auto label = xml.readElementText().simplified(); --depth;
+                if (!markerLabel.match(label).hasMatch() || (!label.isEmpty()
+                    && label != QString::number(number) && label != QString::number(number) + '.'
+                    && label != QString("%1:%2").arg(chapter).arg(number)))
+                    fail("Ambiguous verse marker label in " + path);
             } else if (mainDepth && paragraphDepth && (cl == "add" || cl == "tl" || tag == "i" || tag == "em")) {
                 if (italics.size() >= 16) fail("EPUB formatting depth limit exceeded: " + path);
                 italics.append(depth);
             } else if (paragraphDepth && verse.number && tag == "br") {
                 charge(6); verse.text += '\n'; verse.html += "<br/>";
+            } else if (mainDepth && paragraphDepth && (tag != "span" || (cl != "nd" && cl != "wj"))) {
+                fail("Unsupported element inside verse text: " + tag + " in " + path);
+            } else if (cl == "verse") {
+                fail("Verse marker outside a Scripture paragraph in " + path);
             }
         } else if (xml.isEndElement()) {
             if (!italics.isEmpty() && italics.last() == depth) italics.removeLast();
@@ -628,13 +794,16 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
         } else if (xml.isCharacters() && paragraphDepth) {
             charge(7 * qint64(xml.text().size()) + (italics.isEmpty() ? 0 : 7));
             QString text = xml.text().toString();
-            text.replace(QRegularExpression("\\s+"), " ");
+            text.replace(whitespace, " ");
             // A pilcrow is layout only directly after a verse marker or at a
             // source paragraph boundary. Never remove one from quoted prose.
             if (paragraphStart || verse.text.trimmed().isEmpty()) {
                 if (stripLayoutPilcrow(&text) && verse.text.trimmed().isEmpty()) verse.paragraphStart = true;
             }
-            if (!verse.number) continue;
+            if (!verse.number) {
+                if (!text.trimmed().isEmpty()) fail("Scripture text precedes its explicit verse marker in " + path);
+                continue;
+            }
             if (verse.text.isEmpty() || verse.text.endsWith('\n') || verse.text.endsWith(' ')) {
                 while (text.startsWith(' ')) text.remove(0, 1);
             }
@@ -647,7 +816,22 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
     }
     checkXml(xml, path);
     flush();
-    if (!book) fail("Missing Haiola KJV main container and semantic verse markers in " + path);
+    if (!book) fail(MarkerHelp);
+}
+
+QStringList structuredPaths(const Package &info, const QHash<QString, QByteArray> &entries)
+{
+    QStringList paths;
+    for (const auto &path : info.paths) {
+        if (!entries.contains(path)) fail("The EPUB is missing " + path);
+        const int book = structuredBook(entries.value(path), path);
+        if (!book) continue; // front matter/navigation, with no verse markers
+        if (book != paths.size() + 1) fail(QString("EPUB spine book anchors do not match the standard canon: %1 (book %2, expected %3).")
+            .arg(path).arg(book).arg(paths.size() + 1));
+        paths.append(path);
+    }
+    if (paths.size() != 66) fail(MarkerHelp + " A full Bible with all 66 book documents is required.");
+    return paths;
 }
 
 void validate(QSqlDatabase &db)
@@ -657,14 +841,31 @@ void validate(QSqlDatabase &db)
     if (!q.next() || q.value(0).toString() != "ok") fail("The Bible database failed its integrity check.");
     exec(q, "SELECT key,value FROM metadata");
     QHash<QString, QString> metadata;
-    while (q.next()) metadata.insert(q.value(0).toString(), q.value(1).toString());
+    while (q.next()) {
+        const auto key = q.value(0).toString();
+        if (metadata.contains(key)) fail("Duplicate Bible metadata key.");
+        metadata.insert(key, q.value(1).toString());
+    }
     const bool kjv = metadata.value("version_id") == "kjv-2006";
     const bool legacyNet = !metadata.contains("version_id") && metadata.value("edition") == "NET Bible 2.1";
-    if (!(legacyNet || metadata.value("version_id") == "net-2.1" || kjv)
+    const bool generic = metadata.value("version_id").startsWith("epub-");
+    if (generic) {
+        const auto title = metadata.value("edition");
+        const auto identifier = metadata.value("source_identifier");
+        if (title.isEmpty() || title != title.simplified() || title.size() > 512 || identifier != identifier.trimmed()
+            || identifier.size() > 4096 || !metadata.contains("source_identifier") || !metadata.contains("copyright")
+            || metadata.value("version_id") != editionId(identifier,title)
+            || metadata.value("abbreviation").isEmpty() || metadata.value("abbreviation") != abbreviation(title)
+            || (metadata.value("versification") != "kjv-v1" && metadata.value("versification") != "net-2.1-v1")
+            || metadata.value("schema") != "2"
+            || metadata.value("metadata_digest") != metadataDigest(metadata)
+            || !QRegularExpression("^[0-9a-f]{64}$").match(metadata.value("source_keys")).hasMatch())
+            fail("The Bible database has inconsistent source edition metadata.");
+    } else if (!(legacyNet || metadata.value("version_id") == "net-2.1" || kjv)
         || metadata.value("edition") != (kjv ? "King James (Authorized) Version" : "NET Bible 2.1")
         || (!legacyNet && (metadata.value("abbreviation") != (kjv ? "KJV" : "NET") || !metadata.contains("copyright"))))
         fail("The Bible database has an unsupported edition or inconsistent version metadata.");
-    auto maximum = [&](int b, int c) { return kjv ? kjvMaximum(b,c) : chapterMaximum(b,c); };
+    auto maximum = [&](int b, int c) { return generic ? 176 : kjv ? kjvMaximum(b,c) : chapterMaximum(b,c); };
     auto omitted = [&](int b, int c, int v) { return !kjv && omittedVerse(b,c,v); };
     exec(q, "SELECT value FROM metadata WHERE key='schema'");
     if (!q.next() || (q.value(0).toString() != "1" && q.value(0).toString() != "2"))
@@ -675,8 +876,9 @@ void validate(QSqlDatabase &db)
     } else if (metadata.value("paragraph_layout") == "1") fail("Paragraph metadata requires Bible schema 2.");
     exec(q, "SELECT book,chapter,number,text,html FROM verses ORDER BY book,chapter,number");
     int lastBook = 0, lastChapter = 0, lastVerse = 0, chapters = 0, chapterSize = 0;
+    SourceKeys sourceKeys;
     auto finishChapter = [&] {
-        if (lastBook && (lastVerse != maximum(lastBook,lastChapter)
+        if (!generic && lastBook && (lastVerse != maximum(lastBook,lastChapter)
             || chapterSize != (kjv ? maximum(lastBook,lastChapter) : chapterVerseCount(lastBook,lastChapter))))
             fail(QString("Incomplete chapter: %1 %2.").arg(canon()[lastBook-1].name).arg(lastChapter));
     };
@@ -686,18 +888,24 @@ void validate(QSqlDatabase &db)
         if (b < 1 || b > 66 || c < 1 || c > canon()[b-1].chapters || v < 1 || v > maximum(b,c)
             || q.value(3).toString().trimmed().isEmpty() || q.value(4).toString().trimmed().isEmpty())
             fail("The Bible contains an invalid or empty verse.");
+        if (generic) sourceKeys.add(b,c,v);
         if (b != lastBook || c != lastChapter) {
             finishChapter();
             if (c != (b == lastBook ? lastChapter + 1 : 1)) fail("The Bible is missing a chapter.");
             ++chapters; ++counts[b-1]; lastVerse = 0; chapterSize = 0;
         }
-        for (int missing = lastVerse + 1; missing < v; ++missing)
+        for (int missing = lastVerse + 1; !generic && missing < v; ++missing)
             if (!omitted(b,c,missing)) fail(QString("Unexpected missing verse: %1 %2:%3").arg(canon()[b-1].name).arg(c).arg(missing));
-        if (v <= lastVerse || omitted(b,c,v)) fail("The Bible has duplicate or unexpected verse numbering.");
+        if (v <= lastVerse || (!generic && omitted(b,c,v))) fail("The Bible has duplicate or unexpected verse numbering.");
         ++totals[b-1]; ++chapterSize; lastBook = b; lastChapter = c; lastVerse = v;
     }
     if (q.lastError().isValid()) fail(q.lastError().text());
     finishChapter();
+    if (generic) {
+        if (sourceKeys.finish() != metadata.value("source_keys")) fail("The Bible verse keys differ from the imported source.");
+        if (sourceKeys.profile() != metadata.value("versification")) fail("The Bible verse keys differ from the supported numbering profile.");
+        return;
+    }
     if (chapters != 1189) fail(QString("Incomplete Bible: found %1 of 1,189 chapters.").arg(chapters));
     int total = 0;
     for (int i = 0; i < 66; ++i) {
@@ -719,16 +927,15 @@ Edition inspectFile(const QString &path, QString *error)
     if (error) error->clear();
     try {
         const auto info = package(readArchive(path));
-        if (info.edition.id == "kjv-2006") {
-            // One bounded book sample establishes the adapter. Full canonical
-            // validation still occurs on the private database during import.
-            const QString sample = info.paths.first();
-            const auto entries = readArchive(path, {sample});
-            if (!entries.contains(sample)) fail("The EPUB is missing " + sample);
+        if (info.edition.id != "net-2.1") {
+            const auto entries = readArchive(path, QSet<QString>(info.paths.cbegin(), info.paths.cend()));
+            const auto paths = structuredPaths(info,entries);
             QSet<QString> documents;
             qint64 output = 0;
-            parseKjv(entries.value(sample), sample, nullptr, documents, output);
-            if (documents.isEmpty()) fail("The KJV EPUB has no supported semantic verse markers.");
+            SourceKeys keys;
+            for (const auto &document : paths)
+                parseStructured(entries.value(document), document, nullptr, documents, output, keys, info.edition.id == "kjv-2006");
+            keys.finish();
         }
         return info.edition;
     } catch (const std::exception &e) {
@@ -753,11 +960,14 @@ Result importFile(const QString &epubPath, const QString &databasePath,
         report(0.01);
         const auto info = package(readArchive(epubPath));
         result.edition = info.edition;
-        const auto &paths = info.paths;
+        auto paths = info.paths;
         const bool kjv = info.edition.id == "kjv-2006";
+        const bool structured = info.edition.id != "net-2.1";
+        const bool generic = structured && !kjv;
         const auto entries = readArchive(epubPath, QSet<QString>(paths.cbegin(), paths.cend()));
         for (const auto &path : paths)
             if (!entries.contains(path)) fail("The EPUB is missing " + path);
+        if (structured) paths = structuredPaths(info,entries);
         QLockFile lock(databasePath + ".import.lock");
         if (!lock.tryLock(0)) fail("Another " + Brand::name() + " process is importing. Please try again when it finishes.");
         report(0.1);
@@ -784,14 +994,32 @@ Result importFile(const QString &epubPath, const QString &databasePath,
             if (!insert.prepare("INSERT INTO verses VALUES(?,?,?,?,?,?,?,?)")) fail(insert.lastError().text());
             QSet<QString> documents;
             qint64 globalOutput = 0;
+            SourceKeys keys;
             for (int i = 0; i < paths.size(); ++i) {
-                if (kjv) parseKjv(entries.value(paths[i]), paths[i], &insert, documents, globalOutput);
+                if (structured) parseStructured(entries.value(paths[i]), paths[i], &insert, documents, globalOutput, keys, kjv);
                 else parseDocument(entries.value(paths[i]), paths[i], insert, documents, globalOutput);
                 report(0.1 + 0.75 * (i + 1) / paths.size());
             }
             if (documents.size() != 1189) fail("The EPUB does not contain all 1,189 chapters.");
+            if (structured) keys.finish();
+            if (generic) {
+                QHash<QString, QString> values;
+                for (const auto &item : metadata) values.insert(item.first,item.second);
+                values.insert("source_identifier",info.identifier);
+                values.insert("source_keys",keys.finish());
+                values.insert("versification",keys.profile());
+                values.insert("metadata_digest",metadataDigest(values));
+                if (!q.prepare("INSERT INTO metadata VALUES(?,?)")) fail(q.lastError().text());
+                for (const auto &key : {"source_identifier", "source_keys", "versification", "metadata_digest"}) {
+                    q.bindValue(0,key); q.bindValue(1,values.value(key));
+                    if (!q.exec()) fail(q.lastError().text());
+                }
+            }
             if (!c.db.commit()) fail("Cannot commit imported Bible: " + c.db.lastError().text());
             validate(c.db);
+            exec(q,"SELECT COUNT(*) FROM verses");
+            if (!q.next()) fail("Cannot count imported verses.");
+            result.verseCount = q.value(0).toInt();
         }
         report(0.95);
         QFile source(stage);
@@ -806,7 +1034,7 @@ Result importFile(const QString &epubPath, const QString &databasePath,
         }
         if (!destination.commit()) fail("Cannot install imported Bible: " + destination.errorString());
         report(1.0);
-        result.ok = true; result.verseCount = kjv ? 31102 : 31087;
+        result.ok = true;
     } catch (const std::exception &e) { result.error = QString::fromUtf8(e.what()); }
     return result;
 }

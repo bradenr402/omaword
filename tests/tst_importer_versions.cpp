@@ -57,6 +57,47 @@ struct Database {
         QSqlQuery q(db); return q.exec(sql) && q.next() ? q.value(0) : QVariant();
     }
 };
+
+// Original generated words, with real structural conventions but no publisher
+// text. Uses the complete numeric KJV or NET skeleton, independent of its title.
+QMap<QString, QByteArray> structuredFixture(const QString &title = "World English Bible", const QString &identifier = "urn:uuid:original-web-fixture", bool osis = false, bool net = false)
+{
+    QMap<QString, QByteArray> entries = {{"mimetype","application/epub+zip"},
+        {"META-INF/container.xml","<container><rootfiles><rootfile full-path='content.opf'/></rootfiles></container>"}};
+    const auto prefixes = QString("GN EX LV NU DT JS JG RT S1 S2 K1 K2 R1 R2 ER NH ET JB PS PR EC SS IS JR LM EK DN HS JL AM OB JH MC NM HK ZP HG ZC ML MT MK LK JN AC RM C1 C2 GL EP PP CL H1 H2 T1 T2 TT PM HB JM P1 P2 J1 J2 J3 JD RV").split(' ');
+    QString manifest, spine;
+    for (int b = 1; b <= 66; ++b) {
+        const QString file = QString("text%1.xhtml").arg(b);
+        manifest += QString("<item id='b%1' href='%2'/>").arg(b).arg(file);
+        spine += QString("<itemref idref='b%1'/>").arg(b);
+        const QString prefix = osis && b == 1 ? "Gen" : prefixes[b-1];
+        QString body = QString("<html xmlns:epub='http://www.idpf.org/2007/ops'><body><div class='main' id='%1%2'>")
+            .arg(prefix,osis && b == 1 ? "" : "0_0");
+        for (int c = 1; c <= EpubImporter::canon()[b-1].chapters; ++c) {
+            int maximum = EpubImporter::chapterMaximum(b,c);
+            if (!net && b == 47 && c == 13) maximum = 14;
+            if (!net && b == 64 && c == 1) maximum = 14;
+            if (!net && b == 66 && c == 12) maximum = 17;
+            body += "<div class='p'>";
+            for (int v = 1; v <= maximum; ++v) {
+                if (net && EpubImporter::omittedVerse(b,c,v)) continue;
+                const QString marker = osis && b == 1 ? QString("Gen.%1.%2").arg(c).arg(v)
+                    : QString("%1%2_%3").arg(prefix).arg(c).arg(v);
+                body += QString("<span class='verse' id='%1'>%2</span>Original words %3:%4:%2. ")
+                    .arg(marker).arg(v).arg(b).arg(c);
+                if (b == 1 && c == 1 && v == 1)
+                    body += "<span class='add'>supplied</span><aside epub:type='footnote'><span class='verse' id='GN1_99'>99</span>NOTE POISON</aside> tail. ";
+            }
+            body += "</div>";
+        }
+        entries[file] = (body + "</div></body></html>").toUtf8();
+    }
+    const QString id = identifier.isEmpty() ? "" : "<dc:identifier id='uid'>" + identifier.toHtmlEscaped() + "</dc:identifier>";
+    entries["content.opf"] = ("<package xmlns:dc='http://purl.org/dc/elements/1.1/'" + QString(identifier.isEmpty() ? "" : " unique-identifier='uid'")
+        + "><metadata><dc:title>" + title.toHtmlEscaped() + "</dc:title>" + id
+        + "<dc:rights>Original test fixture</dc:rights></metadata><manifest>" + manifest + "</manifest><spine>" + spine + "</spine></package>").toUtf8();
+    return entries;
+}
 }
 
 class ImporterVersionsTest : public QObject
@@ -64,6 +105,185 @@ class ImporterVersionsTest : public QObject
     Q_OBJECT
     QTemporaryDir root;
 private slots:
+    void genericStructured_data() {
+        QTest::addColumn<bool>("osis");
+        QTest::addColumn<bool>("net");
+        QTest::newRow("Haiola-KJV-profile") << false << false;
+        QTest::newRow("OSIS-anchors") << true << false;
+        QTest::newRow("Haiola-NET-profile") << false << true;
+    }
+    void genericStructured() {
+        QFETCH(bool,osis); QFETCH(bool,net);
+        const auto fixture = root.filePath("generic.epub"), target = root.filePath("generic.sqlite");
+        QVERIFY(zip(fixture,structuredFixture("World English Bible","urn:uuid:original-web-fixture",osis,net)));
+        const auto connections = QSqlDatabase::connectionNames();
+        QString error;
+        const auto edition = EpubImporter::inspectFile(fixture,&error);
+        QVERIFY2(!edition.id.isEmpty(),qPrintable(error));
+        QCOMPARE(edition.abbreviation,QString("WEB")); QCOMPARE(edition.name,QString("World English Bible"));
+        QVERIFY(QRegularExpression("^epub-[0-9a-f]{32}$").match(edition.id).hasMatch());
+        QCOMPARE(QSqlDatabase::connectionNames(),connections);
+        const auto renamed = root.filePath("NIV-misleading-filename.epub");
+        QFile::remove(renamed); QVERIFY(QFile::copy(fixture,renamed));
+        QCOMPARE(EpubImporter::inspectFile(renamed,&error).id,edition.id);
+        QCOMPARE(EpubImporter::inspectFile(renamed,&error).abbreviation,QString("WEB"));
+        const auto result = EpubImporter::importFile(fixture,target);
+        QVERIFY2(result.ok,qPrintable(result.error)); QCOMPARE(result.verseCount,net ? 31087 : 31102);
+        QVERIFY2(EpubImporter::validateDatabase(target,&error),qPrintable(error));
+        Database db(target);
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='versification'").toString(),net ? QString("net-2.1-v1") : QString("kjv-v1"));
+        QCOMPARE(db.scalar("SELECT MAX(number) FROM verses WHERE book=1 AND chapter=1").toInt(),31);
+        QCOMPARE(db.scalar("SELECT COUNT(*) FROM verses WHERE book=40 AND chapter=17 AND number=21").toInt(),net ? 0 : 1);
+        QCOMPARE(db.scalar("SELECT COUNT(*) FROM verses WHERE book=41 AND chapter=7 AND number=16").toInt(),net ? 0 : 1);
+        QCOMPARE(db.scalar("SELECT text FROM verses WHERE book=1 AND chapter=1 AND number=1").toString(),QString("Original words 1:1:1. supplied tail."));
+        QVERIFY(db.scalar("SELECT html FROM verses WHERE book=1 AND chapter=1 AND number=1").toString().contains("<i>supplied</i>"));
+        QCOMPARE(db.scalar("SELECT COUNT(*) FROM verses WHERE text LIKE '%POISON%'").toInt(),0);
+        QSqlQuery q(db.db);
+        // The independent profile detects a missing chapter ending, not just
+        // internal gaps or differences from the recorded source-key digest.
+        QVERIFY(q.exec("DELETE FROM verses WHERE book=1 AND chapter=1 AND number=31"));
+        QVERIFY(!EpubImporter::validateDatabase(target,&error)); QVERIFY(error.contains("Verse numbering does not match supported"));
+        QVERIFY(q.exec("UPDATE metadata SET value='Changed edition' WHERE key='edition'"));
+        QVERIFY(!EpubImporter::validateDatabase(target,&error)); QVERIFY(error.contains("metadata"));
+    }
+    void genericIdentity() {
+        const auto fixture = root.filePath("identity.epub");
+        QString error, previous;
+        for (const auto &title : {"New King James Version", "New International Version", "World English Bible", "Original Translation"}) {
+            QVERIFY(zip(fixture,structuredFixture(title,"")));
+            const auto edition = EpubImporter::inspectFile(fixture,&error);
+            QVERIFY2(!edition.id.isEmpty(),qPrintable(error)); QVERIFY(edition.id != previous); previous = edition.id;
+            QCOMPARE(edition.abbreviation,QString(title == QString("New King James Version") ? "NKJV" : title == QString("New International Version") ? "NIV" : title == QString("World English Bible") ? "WEB" : "OT"));
+            QCOMPARE(EpubImporter::inspectFile(fixture,&error).id,edition.id);
+        }
+        const auto real = source("OMAWORD_TEST_KJV_EPUB");
+        if (real.isEmpty()) return;
+        auto entries = unzip(real);
+        entries["OEBPS/content.opf"].replace("51004fba-2cea-50c8-8e37-fcebe15c315a","ffffffff-1234-5678-9012-123456789abc");
+        QVERIFY(zip(fixture,entries));
+        const auto edition = EpubImporter::inspectFile(fixture,&error);
+        QVERIFY2(edition.id.startsWith("epub-"),qPrintable(error));
+        QCOMPARE(edition.name,QString("King James (Authorized) Version"));
+        QCOMPARE(edition.abbreviation,QString("KJV"));
+        const auto result = EpubImporter::importFile(fixture,root.filePath("arbitrary-kjv.sqlite"));
+        QVERIFY2(result.ok,qPrintable(result.error)); QCOMPARE(result.verseCount,31102);
+        QCOMPARE(result.edition.id,edition.id);
+    }
+    void reservedIdentity_data() {
+        QTest::addColumn<QString>("title"); QTest::addColumn<QString>("identifier");
+        QTest::addColumn<QString>("legacyId");
+        const QString kjvId = "urn:uuid:51004fba-2cea-50c8-8e37-fcebe15c315a";
+        QTest::newRow("original-KJV") << "King James (Authorized) Version" << kjvId << "kjv-2006";
+        QTest::newRow("other-UUID-KJV") << "King James (Authorized) Version" << "urn:uuid:other-kjv" << "";
+        QTest::newRow("modern-KJV") << "Modern King James Version" << "urn:uuid:modern-kjv" << "";
+        QTest::newRow("modern-title-original-UUID") << "Modern King James Version" << kjvId << "";
+        QTest::newRow("NET-identifier-substring") << "NET Bible 2.1" << "urn:uuid:NETBIBLE21-other" << "";
+        QTest::newRow("NET-title-other-UUID") << "NET Bible 2.1" << "urn:uuid:other-net" << "";
+    }
+    void reservedIdentity() {
+        QFETCH(QString,title); QFETCH(QString,identifier); QFETCH(QString,legacyId);
+        const auto fixture = root.filePath("reserved.epub"), target = root.filePath("reserved.sqlite");
+        QVERIFY(zip(fixture,structuredFixture(title,identifier)));
+        QString error;
+        const auto edition = EpubImporter::inspectFile(fixture,&error);
+        QVERIFY2(!edition.id.isEmpty(),qPrintable(error));
+        QCOMPARE(edition.name,title);
+        if (legacyId.isEmpty()) QVERIFY(edition.id.startsWith("epub-"));
+        else QCOMPARE(edition.id,legacyId);
+        QCOMPARE(EpubImporter::inspectFile(fixture,&error).id,edition.id);
+        const auto result = EpubImporter::importFile(fixture,target);
+        QVERIFY2(result.ok,qPrintable(result.error)); QCOMPARE(result.edition.id,edition.id);
+        QVERIFY2(EpubImporter::validateDatabase(target,&error),qPrintable(error));
+        Database db(target);
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='edition'").toString(),title);
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='version_id'").toString(),edition.id);
+    }
+    void unsupportedNumbering_data() {
+        QTest::addColumn<QString>("mutation");
+        for (const auto &name : {"missing-final-marker", "missing-final-bible-marker", "extra-verse-32", "compensating-endings", "mixed-profiles", "partial-omissions", "missing-all-omissions"})
+            QTest::newRow(name) << QString(name);
+    }
+    void unsupportedNumbering() {
+        QFETCH(QString,mutation);
+        const auto fixture = root.filePath("numbering.epub"), target = root.filePath("numbering.sqlite");
+        auto entries = structuredFixture();
+        QVERIFY(zip(fixture,entries));
+        const auto good = EpubImporter::importFile(fixture,target);
+        QVERIFY2(good.ok,qPrintable(good.error));
+        const auto installed = bytes(target);
+        auto &gen = entries["text1.xhtml"];
+        if (mutation == "missing-final-marker" || mutation == "compensating-endings") {
+            gen.replace("<span class='verse' id='GN1_31'>31</span>","");
+            QVERIFY(gen.contains("Original words 1:1:31."));
+        }
+        if (mutation == "missing-final-bible-marker")
+            entries["text66.xhtml"].replace("<span class='verse' id='RV22_21'>21</span>","");
+        if (mutation == "extra-verse-32")
+            gen.replace("Original words 1:1:31.","Original words 1:1:31. <span class='verse' id='GN1_32'>32</span>Extra words.");
+        if (mutation == "compensating-endings")
+            gen.replace("Original words 1:2:25.","Original words 1:2:25. <span class='verse' id='GN2_26'>26</span>Extra words.");
+        if (mutation == "mixed-profiles")
+            entries["text64.xhtml"].replace("Original words 64:1:14.","Original words 64:1:14. <span class='verse' id='J31_15'>15</span>Extra words.");
+        if (mutation == "partial-omissions")
+            entries["text40.xhtml"].replace("<span class='verse' id='MT17_21'>21</span>","");
+        if (mutation == "missing-all-omissions") {
+            // NET omissions with KJV chapter endings are neither full profile.
+            for (auto it = entries.begin(); it != entries.end(); ++it) {
+                if (!it.key().endsWith(".xhtml")) continue;
+                QString xml = QString::fromUtf8(it.value());
+                const int book = it.key().mid(4).section('.',0,0).toInt();
+                for (int c = 1; c <= EpubImporter::canon()[book-1].chapters; ++c)
+                    for (int v = 1; v <= EpubImporter::chapterMaximum(book,c); ++v)
+                        if (EpubImporter::omittedVerse(book,c,v))
+                            xml.remove(QRegularExpression(QString("<span class='verse' id='[A-Z0-9]+%1_%2'>%2</span>").arg(c).arg(v)));
+                it.value() = xml.toUtf8();
+            }
+        }
+        QVERIFY(zip(fixture,entries));
+        QString error;
+        QVERIFY(EpubImporter::inspectFile(fixture,&error).id.isEmpty());
+        QVERIFY2(error.contains("Verse numbering does not match supported"),qPrintable(error));
+        const auto bad = EpubImporter::importFile(fixture,target);
+        QVERIFY(!bad.ok); QVERIFY2(bad.error.contains("Verse numbering does not match supported"),qPrintable(bad.error));
+        QCOMPARE(bytes(target),installed);
+    }
+    void genericRejections_data() {
+        QTest::addColumn<QString>("mutation");
+        for (const auto &name : {"no-title", "two-titles", "ambiguous-id", "missing-id", "missing-marker", "duplicate", "decreasing", "wrong-book", "missing-chapter", "out-of-range", "spine-order", "unmarked-notes", "unknown-span", "conflicting-label", "ocr"})
+            QTest::newRow(name) << QString(name);
+    }
+    void genericRejections() {
+        QFETCH(QString,mutation);
+        auto entries = structuredFixture();
+        auto &opf = entries["content.opf"]; auto &gen = entries["text1.xhtml"];
+        if (mutation == "no-title") opf.replace("World English Bible","");
+        if (mutation == "two-titles") opf.replace("</dc:title>","</dc:title><dc:title>Other title</dc:title>");
+        if (mutation == "ambiguous-id") { opf.replace(" unique-identifier='uid'",""); opf.replace("</metadata>","<dc:identifier>other</dc:identifier></metadata>"); }
+        if (mutation == "missing-id") opf.replace("id='uid'","id='other'");
+        if (mutation == "missing-marker") gen.replace("id='GN1_2'","");
+        if (mutation == "duplicate") gen.replace("id='GN1_2'","id='GN1_1'");
+        if (mutation == "decreasing") { gen.replace("id='GN1_2'","id='GN1_3'"); gen.replace("id='GN1_3'>3","id='GN1_2'>3"); }
+        if (mutation == "wrong-book") gen.replace("id='GN1_2'","id='EX1_2'");
+        if (mutation == "missing-chapter") gen.replace("id='GN2_","id='GN3_");
+        if (mutation == "out-of-range") gen.replace("id='GN1_2'","id='GN1_177'");
+        if (mutation == "spine-order") opf.replace("<itemref idref='b1'/><itemref idref='b2'/>","<itemref idref='b2'/><itemref idref='b1'/>");
+        if (mutation == "unmarked-notes") gen.replace(" tail.","<a>UNCLASSIFIED NOTE</a> tail.");
+        if (mutation == "unknown-span") gen.replace(" tail.","<span class='commentary'>UNCLASSIFIED NOTE</span> tail.");
+        if (mutation == "conflicting-label") gen.replace("id='GN1_2'>2", "id='GN1_2'>3");
+        if (mutation == "ocr") {
+            opf.replace("</metadata>","<meta property='schema:accessibilitySummary'>OCR</meta></metadata>");
+            for (int b = 1; b <= 66; ++b) entries[QString("text%1.xhtml").arg(b)] = "<html><body><p>Page 1 untagged words</p></body></html>";
+        }
+        const auto fixture = root.filePath("invalid.epub"), target = root.filePath("sentinel.sqlite");
+        QVERIFY(zip(fixture,entries));
+        QFile sentinel(target); QVERIFY(sentinel.open(QIODevice::WriteOnly)); sentinel.write("preserved target"); sentinel.close();
+        const auto before = bytes(target);
+        QString error;
+        QVERIFY2(EpubImporter::inspectFile(fixture,&error).id.isEmpty(),qPrintable(mutation)); QVERIFY(!error.isEmpty());
+        if (mutation == "ocr") { QVERIFY(error.contains("Page-based OCR")); QVERIFY(!error.contains("study")); QVERIFY(!error.contains("KJV")); }
+        const auto result = EpubImporter::importFile(fixture,target);
+        QVERIFY2(!result.ok,qPrintable(mutation)); QCOMPARE(bytes(target),before);
+    }
     void editions_data() {
         QTest::addColumn<QString>("path"); QTest::addColumn<QString>("id");
         QTest::addColumn<QString>("abbr"); QTest::addColumn<QString>("name");

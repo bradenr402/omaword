@@ -21,7 +21,12 @@ int chapterVerseCount(int book, int chapter);
 struct Edition {
     QString id, abbreviation, name, copyright;
 };
-// Identifies supported structured editions without opening or writing a database.
+// Identifies NET 2.1 or full-canon Haiola-style editions (including explicit
+// OSIS/USFM-compatible book/verse anchors) without opening/writing a database.
+// Structured editions must match a complete NET 2.1 or KJV verse-key profile
+// across all books; other versifications are unsupported. Generic IDs are stable
+// metadata-identifier hashes, falling back to the normalized metadata title;
+// net-2.1 and kjv-2006 are reserved for their exact known title/identifier pairs.
 // An empty id means failure; error explains unsupported/OCR layouts.
 Edition inspectFile(const QString &path, QString *error = nullptr);
 
