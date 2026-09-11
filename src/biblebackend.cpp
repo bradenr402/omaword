@@ -13,6 +13,8 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
+#include <QScopeGuard>
+#include <QSignalBlocker>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -25,30 +27,6 @@
 namespace {
 constexpr qsizetype MaximumNoteSize = 1024 * 1024;
 constexpr qint64 MaximumBackupSize = 32 * 1024 * 1024;
-struct Verse { int book, chapter, verse; };
-// Index zero means no selection. Only published NET verses occupy positions,
-// so stepping and range subtraction automatically skip omitted verse numbers.
-const QVector<Verse> &canonVerses()
-{
-    static const QVector<Verse> verses = [] {
-        QVector<Verse> result{{0,0,0}};
-        for (int b = 1; b <= 66; ++b)
-            for (int c = 1; c <= EpubImporter::canon()[b-1].chapters; ++c)
-                for (int v = 1; v <= EpubImporter::chapterMaximum(b,c); ++v)
-                    if (!EpubImporter::omittedVerse(b,c,v)) result.append({b,c,v});
-        return result;
-    }();
-    return verses;
-}
-int absoluteVerse(int b, int c, int v)
-{
-    const auto &verses = canonVerses();
-    const auto it = std::lower_bound(verses.cbegin()+1, verses.cend(), Verse{b,c,v}, [](Verse a, Verse z) {
-        return std::tie(a.book,a.chapter,a.verse) < std::tie(z.book,z.chapter,z.verse);
-    });
-    return it != verses.cend() && it->book == b && it->chapter == c && it->verse == v ? int(it-verses.cbegin()) : 0;
-}
-Verse endpoint(int index) { return canonVerses().value(index); }
 QString connectionName() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 bool exactKeys(const QJsonObject &object, const QStringList &keys)
 {
@@ -115,6 +93,14 @@ bool writeAtomic(const QString &path, const QByteArray &bytes, QString *error)
 }
 }
 
+int BibleBackend::absoluteVerse(int b, int c, int v) const
+{
+    const auto it = std::lower_bound(m_keys.cbegin()+1, m_keys.cend(), Verse{b,c,v}, [](Verse a, Verse z) {
+        return std::tie(a.book,a.chapter,a.verse) < std::tie(z.book,z.chapter,z.verse);
+    });
+    return it != m_keys.cend() && it->book == b && it->chapter == c && it->verse == v ? int(it-m_keys.cbegin()) : 0;
+}
+
 BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 {
     m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -123,21 +109,14 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         return;
     }
     if (!initializeStore()) return;
-    if (QFileInfo::exists(m_directory + "/bible.sqlite")) {
-        QString error;
-        if (EpubImporter::validateDatabase(m_directory + "/bible.sqlite", &error)) {
-            m_ready = openBible();
-            if (m_ready) {
-                if (!validRange(m_book, m_chapter, m_start, m_end)) {
-                    m_book = 1; m_chapter = 1; m_start = m_end = m_anchor = m_cursor = 0; m_position = 0;
-                }
-                intersectSelection();
-                if (!loadChapter()) m_ready = false;
-                refreshCollection();
-            }
-        } else setError(error + " Re-import your NET Bible 2.1 EPUB to repair it.");
+    if (!readVersions(&m_versions)) return;
+    QSqlQuery active(m_store);
+    if (!active.exec("SELECT active FROM library WHERE id=1") || !active.next()) {
+        setError("Cannot read the active Bible version."); return;
     }
-    setStatus(m_ready ? "Ready · NET Bible 2.1" : "Import your NET Bible 2.1 EPUB to begin.");
+    const QString id = active.value(0).toString(); active.finish();
+    if (!id.isEmpty()) changeVersion(id,{}, {},false,true);
+    if (!m_ready) setStatus("Import a supported Bible EPUB to begin.");
     m_progressTimer.setInterval(100);
     connect(&m_progressTimer, &QTimer::timeout, this, [this] {
         const double value = m_importProgress ? m_importProgress->load() : 0;
@@ -147,23 +126,14 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         m_progressTimer.stop();
         const auto result = m_importWatcher.result();
         if (result.ok) {
-            closeBible();
-            m_ready = openBible();
-            if (m_ready) {
-                if (!validRange(m_book, m_chapter, m_start, m_end)) {
-                    m_book = 1; m_chapter = 1; m_start = m_end = m_anchor = m_cursor = 0; m_position = 0;
-                }
-                if (!loadChapter()) m_ready = false;
-                refreshCollection();
-            }
-            m_progress = 1;
-            emit readyChanged(); emit passageChanged(); emit selectionChanged();
-            emit readingPositionChanged(); emit navigationChanged();
-            setStatus(m_ready ? "Imported 66 books · 1,189 chapters · NET Bible 2.1" : "Import installed; could not open the Bible database.");
+            if (changeVersion(result.edition.id,m_importTarget)) m_progress = 1;
+            else QFile::remove(m_importTarget);
         } else {
+            QFile::remove(m_importTarget);
             setError(result.error);
-            setStatus(m_ready ? "Import failed. Your existing Bible is available." : "Import failed. Choose a complete NET Bible 2.1 EPUB.");
+            setStatus(m_ready ? "Import failed. Your existing Bible is available." : "Import failed. Choose a supported complete EPUB.");
         }
+        m_importTarget.clear();
         m_busy = false;
         emit importProgressChanged(); emit busyChanged();
     });
@@ -174,6 +144,8 @@ BibleBackend::~BibleBackend()
     // The worker captures only paths and shared progress, never this QObject.
     // Waiting ensures a normal application exit cannot leave a half-finished import.
     m_importWatcher.waitForFinished();
+    // A completed worker whose finished signal was never delivered is uninstalled.
+    if (!m_importTarget.isEmpty()) QFile::remove(m_importTarget);
     closeBible();
     m_store.close(); m_store = QSqlDatabase();
     if (!m_storeConnection.isEmpty()) QSqlDatabase::removeDatabase(m_storeConnection);
@@ -201,7 +173,7 @@ QString BibleBackend::reference(int b, int c, int start, int end)
     return result;
 }
 QString BibleBackend::passage() const { return reference(m_book, m_chapter); }
-QString BibleBackend::rangeReference(int start, int end)
+QString BibleBackend::rangeReference(int start, int end) const
 {
     const auto a = endpoint(start), z = endpoint(end);
     if (a.book == z.book && a.chapter == z.chapter) return reference(a.book,a.chapter,a.verse,z.verse);
@@ -222,7 +194,7 @@ void BibleBackend::intersectSelection()
 {
     m_start = m_end = 0;
     if (!m_anchor) return;
-    for (int v = 1; v <= EpubImporter::chapterMaximum(m_book,m_chapter); ++v) {
+    for (int v = 1; v <= 176; ++v) {
         const int index = absoluteVerse(m_book,m_chapter,v);
         if (index && index >= std::min(m_anchor,m_cursor) && index <= std::max(m_anchor,m_cursor)) {
             if (!m_start) m_start = v;
@@ -251,7 +223,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 2) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
+    if (version > 3) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -274,24 +246,44 @@ bool BibleBackend::initializeStore()
     // Additive to schema 2: annotation backups intentionally exclude preferences.
     schema << "CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY,value NOT NULL) WITHOUT ROWID"
            << "INSERT OR IGNORE INTO preferences(key,value) VALUES('showVerseNumbers',1),('showHeadings',1),('versePicker',1),('lineHeight',1.5),('focusMode',0),('blockMode',0)";
+    // Schema 3 design: one root transaction owns installation metadata, active ID,
+    // version-scoped references/annotations, and global preferences. Removed IDs
+    // have no installed row; their retained annotations/reading are an archive.
+    // Text databases are immutable generations: import to a fresh random filename,
+    // validate/read everything, then commit its registry pointer. A crash before
+    // commit leaves only an unreferenced file, never a half-installed edition.
+    // Removal commits registry deletion before garbage collection; a crash or
+    // unlink failure likewise leaves an inaccessible orphan, not lost live data.
+    // Legacy root bible.sqlite is registered in place (no risky file move), and
+    // both schema migrations and its registration share this transaction.
+    if (version < 3) schema <<
+        "ALTER TABLE annotations RENAME TO annotations_v2" <<
+        "CREATE TABLE annotations(book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 66),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 150),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 176),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 176),bookmark INTEGER NOT NULL CHECK(bookmark IN(0,1)),highlight INTEGER NOT NULL CHECK(highlight IN(0,1)),note TEXT NOT NULL,endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 66),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 150),version_id TEXT NOT NULL,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK((book,chapter,start)<=(endBook,endChapter,end)),CHECK(bookmark OR highlight OR length(note)>0)) WITHOUT ROWID" <<
+        "INSERT INTO annotations SELECT *, 'net-2.1' FROM annotations_v2" <<
+        "DROP TABLE annotations_v2" <<
+        "ALTER TABLE reading RENAME TO reading_v2" <<
+        "CREATE TABLE reading(id INTEGER NOT NULL CHECK(id=1),book INTEGER NOT NULL,chapter INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,position REAL NOT NULL CHECK(position BETWEEN 0 AND 1),anchorBook INTEGER NOT NULL,anchorChapter INTEGER NOT NULL,cursorBook INTEGER NOT NULL,cursorChapter INTEGER NOT NULL,version_id TEXT PRIMARY KEY) WITHOUT ROWID" <<
+        "INSERT INTO reading SELECT *, 'net-2.1' FROM reading_v2" <<
+        "DROP TABLE reading_v2" <<
+        "CREATE TABLE installed(version_id TEXT PRIMARY KEY,path TEXT NOT NULL UNIQUE,abbreviation TEXT NOT NULL,name TEXT NOT NULL,copyright TEXT NOT NULL) WITHOUT ROWID" <<
+        "CREATE TABLE library(id INTEGER PRIMARY KEY CHECK(id=1),active TEXT NOT NULL)" <<
+        "INSERT INTO library VALUES(1,'')" <<
+        "PRAGMA user_version=3";
     for (const auto &sql : schema) {
         if (!q.exec(sql)) { m_store.rollback(); return setError("Cannot initialize notes: " + q.lastError().text()); }
     }
-    if (!m_store.commit()) { m_store.rollback(); return setError("Cannot save notes database schema: " + m_store.lastError().text()); }
-    if (!q.exec("SELECT book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter FROM reading WHERE id=1") || !q.next())
-        return setError("Cannot read your saved reading location: " + q.lastError().text());
-    m_book = q.value(0).toInt(); m_chapter = q.value(1).toInt(); m_start = q.value(2).toInt();
-    m_end = q.value(3).toInt(); m_position = q.value(4).toDouble();
-    m_anchor = absoluteVerse(q.value(5).toInt(),q.value(6).toInt(),m_start);
-    m_cursor = absoluteVerse(q.value(7).toInt(),q.value(8).toInt(),m_end);
-    if (!m_anchor || !m_cursor || endpoint(m_cursor).book != m_book || endpoint(m_cursor).chapter != m_chapter)
-        m_anchor = m_cursor = 0;
-    if (m_book < 1 || m_book > 66 || m_chapter < 1 || m_chapter > EpubImporter::canon()[m_book-1].chapters
-        || !std::isfinite(m_position) || m_position < 0 || m_position > 1) {
-        m_book = 1; m_chapter = 1; m_start = m_end = m_anchor = m_cursor = 0; m_position = 0;
+    if (version < 3 && QFileInfo::exists(m_directory + "/bible.sqlite")) {
+        QString error;
+        if (!EpubImporter::validateDatabase(m_directory + "/bible.sqlite",&error)) {
+            m_store.rollback(); return setError(error);
+        }
+        if (!q.exec("INSERT INTO installed VALUES('net-2.1','bible.sqlite','NET','NET Bible 2.1','')")
+            || !q.exec("UPDATE library SET active='net-2.1' WHERE id=1")) {
+            m_store.rollback(); return setError("Cannot migrate the Bible library: " + q.lastError().text());
+        }
     }
-    intersectSelection();
-    return loadPreferences() && loadAnnotations(&m_annotations);
+    if (!m_store.commit()) { m_store.rollback(); return setError("Cannot save notes database schema: " + m_store.lastError().text()); }
+    return loadPreferences();
 }
 
 bool BibleBackend::loadPreferences()
@@ -370,13 +362,175 @@ void BibleBackend::setLineHeight(double value)
     m_lineHeight = value; emit preferencesChanged();
 }
 
-bool BibleBackend::openBible()
+QString BibleBackend::installedPath(const QString &id) const
 {
-    m_bibleConnection = connectionName();
-    m_bible = QSqlDatabase::addDatabase("QSQLITE", m_bibleConnection);
-    m_bible.setDatabaseName(m_directory + "/bible.sqlite");
-    m_bible.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
-    if (!m_bible.open()) return setError("Cannot open the imported Bible: " + m_bible.lastError().text());
+    QSqlQuery q(m_store);
+    q.prepare("SELECT path FROM installed WHERE version_id=?"); q.addBindValue(id);
+    if (!q.exec() || !q.next()) return {};
+    const QString name = q.value(0).toString();
+    if (name != QFileInfo(name).fileName() || !name.endsWith(".sqlite")) return {};
+    return m_directory + '/' + name;
+}
+
+bool BibleBackend::readVersions(QVariantList *result)
+{
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT version_id,abbreviation,name,version_id=(SELECT active FROM library WHERE id=1) FROM installed ORDER BY version_id"))
+        return setError("Cannot read installed versions: " + q.lastError().text());
+    QVariantList rows;
+    while (q.next()) rows.append(QVariantMap{{"id",q.value(0)},{"abbreviation",q.value(1)},
+        {"name",q.value(2)},{"active",q.value(3).toBool()}});
+    if (q.lastError().isValid()) return setError("Cannot read installed versions: " + q.lastError().text());
+    *result = rows; return true;
+}
+
+bool BibleBackend::switchVersion(QString id)
+{
+    if (m_busy) return setError("Wait for the EPUB import to finish before switching versions.");
+    if (id.isEmpty() || installedPath(id).isEmpty()) return setError("That Bible version is not installed.");
+    if (id == m_versionId && m_ready) { clearError(); return true; }
+    return changeVersion(id);
+}
+
+bool BibleBackend::removeVersion(QString id, bool removeAnnotations)
+{
+    if (m_busy) return setError("Wait for the EPUB import to finish before removing versions.");
+    if (id.isEmpty() || installedPath(id).isEmpty()) return setError("That Bible version is not installed.");
+    QString next = m_versionId;
+    if (next == id) {
+        next.clear();
+        for (const auto &row : m_versions)
+            if (row.toMap()["id"].toString() != id) { next = row.toMap()["id"].toString(); break; }
+    }
+    return changeVersion(next,{},id,removeAnnotations);
+}
+
+bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
+                                const QString &removedId, bool deleteAnnotations, bool startup)
+{
+    const QString path = importPath.isEmpty() ? installedPath(id) : importPath;
+    if (!id.isEmpty() && path.isEmpty()) return setError("That Bible version is not installed.");
+    QString validationError;
+    if (!id.isEmpty() && !EpubImporter::validateDatabase(path,&validationError)) return setError(validationError);
+    const QString obsolete = !removedId.isEmpty() ? installedPath(removedId)
+        : !importPath.isEmpty() ? installedPath(id) : QString();
+    const auto oldAnchor = endpoint(m_anchor), oldCursor = endpoint(m_cursor);
+    // Stage using the ordinary SQL/reference readers with signals blocked. Keep
+    // the old read-only connection open until commit; rollback restores every
+    // observable member before reporting the failure. No event loop is entered.
+    auto oldBible = m_bible;
+    const auto oldConnection = m_bibleConnection;
+    const auto oldId = m_versionId, oldEdition = m_edition, oldAbbreviation = m_abbreviation, oldCopyright = m_copyright;
+    const auto oldKeys = m_keys;
+    const int oldBook = m_book, oldChapter = m_chapter, oldStart = m_start, oldEnd = m_end, oldA = m_anchor, oldC = m_cursor;
+    const double oldPosition = m_position;
+    QSignalBlocker blocker(this);
+    bool committed = false;
+    auto rollback = qScopeGuard([&] {
+        if (committed) return;
+        m_store.rollback();
+        closeBible(); m_bible = oldBible; m_bibleConnection = oldConnection;
+        m_versionId = oldId; m_edition = oldEdition; m_abbreviation = oldAbbreviation; m_copyright = oldCopyright;
+        m_keys = oldKeys; m_book = oldBook; m_chapter = oldChapter; m_start = oldStart; m_end = oldEnd;
+        m_anchor = oldA; m_cursor = oldC; m_position = oldPosition;
+        blocker.unblock(); emit errorChanged();
+    });
+    m_bible = QSqlDatabase(); m_bibleConnection.clear();
+    m_versionId = id; m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_keys = {{0,0,0}};
+    if (!id.isEmpty()) {
+        m_bibleConnection = connectionName(); m_bible = QSqlDatabase::addDatabase("QSQLITE",m_bibleConnection);
+        m_bible.setDatabaseName(path); m_bible.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
+        if (!m_bible.open()) return setError("Cannot open imported Bible: " + m_bible.lastError().text());
+        QSqlQuery text(m_bible);
+        if (!text.exec("SELECT key,value FROM metadata")) return setError("Cannot read Bible metadata: " + text.lastError().text());
+        QVariantMap metadata;
+        while (text.next()) metadata.insert(text.value(0).toString(),text.value(1));
+        if (text.lastError().isValid()) return setError("Cannot read Bible metadata.");
+        QString actualId = metadata["version_id"].toString();
+        if (actualId.isEmpty() && metadata["edition"] == "NET Bible 2.1") actualId = "net-2.1";
+        if (actualId != id) return setError("The imported Bible's stable version ID does not match the library.");
+        m_edition = metadata["edition"].toString(); m_abbreviation = metadata["abbreviation"].toString();
+        if (m_abbreviation.isEmpty() && id == "net-2.1") m_abbreviation = "NET";
+        m_copyright = metadata["copyright"].toString();
+        if (!text.exec("SELECT book,chapter,number FROM verses ORDER BY book,chapter,number")) return setError("Cannot read Bible verse keys.");
+        while (text.next()) m_keys.append({text.value(0).toInt(),text.value(1).toInt(),text.value(2).toInt()});
+        if (text.lastError().isValid() || m_keys.size() < 2) return setError("Cannot read complete Bible verse keys.");
+    }
+    if (!m_store.transaction()) return setError("Cannot start library update: " + m_store.lastError().text());
+    QSqlQuery q(m_store);
+    if (!importPath.isEmpty()) {
+        q.prepare("INSERT INTO installed VALUES(?,?,?,?,?) ON CONFLICT(version_id) DO UPDATE SET path=excluded.path,abbreviation=excluded.abbreviation,name=excluded.name,copyright=excluded.copyright");
+        q.addBindValue(id); q.addBindValue(QFileInfo(path).fileName()); q.addBindValue(m_abbreviation);
+        q.addBindValue(m_edition); q.addBindValue(m_copyright.isNull() ? QString("") : m_copyright);
+        if (!q.exec()) return setError("Cannot install Bible version: " + q.lastError().text());
+    }
+    if (!removedId.isEmpty()) {
+        q.prepare("DELETE FROM installed WHERE version_id=?"); q.addBindValue(removedId);
+        if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot remove Bible version: " + q.lastError().text());
+        if (deleteAnnotations) {
+            for (const QString &table : {QString("annotations"),QString("reading")}) {
+                q.prepare("DELETE FROM " + table + " WHERE version_id=?"); q.addBindValue(removedId);
+                if (!q.exec()) return setError("Cannot remove version annotations: " + q.lastError().text());
+                q.prepare("SELECT COUNT(*) FROM " + table + " WHERE version_id=?"); q.addBindValue(removedId);
+                if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify version annotation removal.");
+            }
+        }
+    }
+    q.prepare("UPDATE library SET active=? WHERE id=1"); q.addBindValue(id.isNull() ? QString("") : id);
+    if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot save active version: " + q.lastError().text());
+    q.prepare("SELECT active FROM library WHERE id=1");
+    if (!q.exec() || !q.next() || q.value(0).toString() != id) return setError("Cannot verify active version.");
+    q.finish();
+    bool fallback = false;
+    QVariantList rows, versions;
+    QVector<Annotation> annotations;
+    if (!id.isEmpty()) {
+        q.prepare("INSERT OR IGNORE INTO reading VALUES(1,1,1,0,0,0,0,0,0,0,?)"); q.addBindValue(id);
+        if (!q.exec()) return setError("Cannot initialize version reading location: " + q.lastError().text());
+        m_anchor = absoluteVerse(oldAnchor.book,oldAnchor.chapter,oldAnchor.verse);
+        m_cursor = absoluteVerse(oldCursor.book,oldCursor.chapter,oldCursor.verse);
+        if (startup) {
+            q.prepare("SELECT book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter FROM reading WHERE version_id=?"); q.addBindValue(id);
+            if (!q.exec() || !q.next()) return setError("Cannot read your saved reading location: " + q.lastError().text());
+            m_book = q.value(0).toInt(); m_chapter = q.value(1).toInt(); m_position = q.value(4).toDouble();
+            m_anchor = absoluteVerse(q.value(5).toInt(),q.value(6).toInt(),q.value(2).toInt());
+            m_cursor = absoluteVerse(q.value(7).toInt(),q.value(8).toInt(),q.value(3).toInt());
+            q.finish();
+        } else fallback = oldA && (!m_anchor || !m_cursor);
+        if (!m_anchor || !m_cursor || endpoint(m_cursor).book != m_book || endpoint(m_cursor).chapter != m_chapter)
+            m_anchor = m_cursor = 0;
+        if (!validRange(m_book,m_chapter,0,0)) { m_book = m_chapter = 1; m_anchor = m_cursor = 0; }
+        if (fallback || !std::isfinite(m_position) || m_position < 0 || m_position > 1) m_position = 0;
+        intersectSelection();
+        if (!readChapter(m_book,m_chapter,&rows) || !loadAnnotations(&annotations)
+            || !persistState(m_book,m_chapter,m_anchor,m_cursor,m_position)) return false;
+    } else { m_book = m_chapter = 1; m_start = m_end = m_anchor = m_cursor = 0; m_position = 0; }
+    if (!readVersions(&versions)) return false;
+    if ((!id.isEmpty() && installedPath(id) != path) || (!removedId.isEmpty() && !installedPath(removedId).isEmpty()))
+        return setError("Cannot verify library update.");
+    if (!id.isEmpty()) {
+        q.prepare("SELECT abbreviation,name,copyright FROM installed WHERE version_id=?"); q.addBindValue(id);
+        if (!q.exec() || !q.next() || q.value(0).toString() != m_abbreviation || q.value(1).toString() != m_edition
+            || (!importPath.isEmpty() && q.value(2).toString() != m_copyright)) return setError("Cannot verify installed version metadata.");
+        q.finish();
+    }
+    if (!m_store.commit()) return setError("Cannot commit library update: " + m_store.lastError().text());
+    committed = true;
+    oldBible.close(); oldBible = QSqlDatabase();
+    if (!oldConnection.isEmpty()) QSqlDatabase::removeDatabase(oldConnection);
+    m_ready = !id.isEmpty(); m_verses = rows; m_annotations = annotations;
+    m_collection = collectionRows(annotations); m_versions = versions;
+    blocker.unblock();
+    clearError();
+    setStatus(fallback ? "The selected endpoint is absent in " + edition() + "; opened " + passage() + " instead."
+        : m_ready ? "Ready · " + edition() : "Import a supported Bible EPUB to begin.");
+    updateAnnotations();
+    emit versionChanged(); emit versionsChanged(); emit readyChanged(); emit collectionChanged();
+    emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
+    if (!obsolete.isEmpty() && obsolete != path) {
+        QFile::remove(obsolete);
+        for (const QString &suffix : {QString("-wal"),QString("-shm"),QString("-journal")}) QFile::remove(obsolete+suffix);
+    }
     return true;
 }
 void BibleBackend::closeBible()
@@ -387,7 +541,7 @@ void BibleBackend::closeBible()
 }
 bool BibleBackend::requireReady()
 {
-    return m_ready || setError("Import your NET Bible 2.1 EPUB first.");
+    return m_ready || setError("Import a supported Bible EPUB first.");
 }
 QString BibleBackend::localPath(const QUrl &url)
 {
@@ -406,12 +560,16 @@ void BibleBackend::importEpub(QUrl file)
     const QString path = localPath(file);
     if (path.isEmpty()) return;
     if (!QFileInfo(path).isFile() || !QFileInfo(path).isReadable()) { setError("Cannot read the selected EPUB file."); return; }
+    QString error;
+    const auto edition = EpubImporter::inspectFile(path,&error);
+    if (edition.id.isEmpty()) { setError(error); return; }
     clearError();
     m_busy = true; m_progress = 0;
     m_importProgress = std::make_shared<std::atomic<double>>(0);
-    setStatus("Importing and validating NET Bible 2.1…");
+    setStatus("Importing and validating " + edition.name + "…");
     emit busyChanged(); emit importProgressChanged();
-    const QString target = m_directory + "/bible.sqlite";
+    const QString target = m_directory + "/bible-" + connectionName() + ".sqlite";
+    m_importTarget = target;
     const auto progress = m_importProgress;
     m_importWatcher.setFuture(QtConcurrent::run([path, target, progress] { return EpubImporter::importFile(path, target, progress); }));
     m_progressTimer.start();
@@ -446,10 +604,26 @@ bool BibleBackend::persistState(int b, int c, int start, int end, double positio
 {
     const auto a = endpoint(start), z = endpoint(end);
     QSqlQuery q(m_store);
-    q.prepare("UPDATE reading SET book=?,chapter=?,start=?,end=?,position=?,anchorBook=?,anchorChapter=?,cursorBook=?,cursorChapter=? WHERE id=1");
+    if (!q.exec("SAVEPOINT reading_save")) return setError("Cannot start reading location save: " + q.lastError().text());
+    bool saved = false;
+    const auto rollback = qScopeGuard([&] {
+        if (!saved) { QSqlQuery undo(m_store); undo.exec("ROLLBACK TO reading_save"); undo.exec("RELEASE reading_save"); }
+    });
+    q.prepare("UPDATE reading SET book=?,chapter=?,start=?,end=?,position=?,anchorBook=?,anchorChapter=?,cursorBook=?,cursorChapter=? WHERE id=1 AND version_id=?");
     q.addBindValue(b); q.addBindValue(c); q.addBindValue(a.verse); q.addBindValue(z.verse); q.addBindValue(position);
     q.addBindValue(a.book); q.addBindValue(a.chapter); q.addBindValue(z.book); q.addBindValue(z.chapter);
+    q.addBindValue(m_versionId);
     if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot save your reading location: " + q.lastError().text());
+    q.prepare("SELECT book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter FROM reading WHERE version_id=?");
+    q.addBindValue(m_versionId);
+    if (!q.exec() || !q.next() || q.value(0).toInt() != b || q.value(1).toInt() != c
+        || q.value(2).toInt() != a.verse || q.value(3).toInt() != z.verse || q.value(4).toDouble() != position
+        || q.value(5).toInt() != a.book || q.value(6).toInt() != a.chapter
+        || q.value(7).toInt() != z.book || q.value(8).toInt() != z.chapter)
+        return setError("Cannot verify your saved reading location: " + q.lastError().text());
+    q.finish();
+    if (!q.exec("RELEASE reading_save")) return setError("Cannot commit your reading location: " + q.lastError().text());
+    saved = true;
     return true;
 }
 
@@ -471,13 +645,14 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
     QVariantList rows;
     while (q.next()) rows.append(QVariantMap{{"number",q.value(0)}, {"text",q.value(1)}, {"html",q.value(2)},
         {"heading",q.value(3)}, {"poetry",q.value(4).toBool()}, {"highlighted",false}, {"bookmarked",false}, {"hasNote",false}});
-    if (q.lastError().isValid() || rows.size() != EpubImporter::chapterVerseCount(book,chapter))
+    QVector<int> expected;
+    for (const auto &key : m_keys) if (key.book == book && key.chapter == chapter) expected.append(key.verse);
+    if (q.lastError().isValid() || rows.isEmpty() || rows.size() != expected.size())
         return setError("The requested chapter could not be read completely. Please re-import your EPUB.");
-    int expected = 1;
+    int index = 0;
     for (const auto &row : rows) {
-        while (EpubImporter::omittedVerse(book,chapter,expected)) ++expected;
         const auto map = row.toMap();
-        if (map.value("number").toInt() != expected++ || map.value("text").toString().trimmed().isEmpty()
+        if (map.value("number").toInt() != expected[index++] || map.value("text").toString().trimmed().isEmpty()
             || map.value("html").toString().trimmed().isEmpty())
             return setError("The requested chapter contains invalid verses. Please re-import your EPUB.");
     }
@@ -488,7 +663,7 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
 bool BibleBackend::goTo(int b, int c, int start, int end)
 {
     if (!requireReady()) return false;
-    if (!validRange(b,c,start,end)) return setError("That chapter or verse range is not present in NET Bible 2.1.");
+    if (!validRange(b,c,start,end)) return setError("That chapter or verse range is not present in " + edition() + '.');
     // Display the active endpoint, matching subsequent cursor movement.
     return goToSelection(b,c,absoluteVerse(b,c,start),absoluteVerse(b,c,end),
                          b != m_book || c != m_chapter || start ? 0 : m_position);
@@ -525,7 +700,7 @@ QVariantMap BibleBackend::resolveReference(QString input) const
 bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *first, int *last, QString *error) const
 {
     auto fail = [error](const QString &message) { *error = message; return false; };
-    if (!m_ready) return fail("Import your NET Bible 2.1 EPUB first.");
+    if (!m_ready) return fail("Import a supported Bible EPUB first.");
     input = input.simplified();
     input.replace(QChar(0x2013), '-'); input.replace(QChar(0x2014), '-'); input.replace(QChar(0x2212), '-');
     if (input.size() > 200 || input.isEmpty()) return fail("Enter a reference such as John 3:16–18.");
@@ -582,9 +757,9 @@ bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *f
     if (endChapter < 0) endChapter = c;
     const int a = absoluteVerse(b,c,start), z = absoluteVerse(b,endChapter,end);
     if (!validRange(b,c,start,start) || !validRange(b,endChapter,end,end) || (start && (!a || !z || a > z))) {
-        if (b >= 1 && b <= 66 && start == end && EpubImporter::omittedVerse(b,c,start))
-            return fail(reference(b,c,start,end) + " is omitted in the NET Bible 2.1 text.");
-        return fail("That chapter or verse range is not present in NET Bible 2.1.");
+        if (b >= 1 && b <= 66 && start == end && start && !a)
+            return fail(reference(b,c,start,end) + " is absent in " + edition() + '.');
+        return fail("That chapter or verse range is not present in " + edition() + '.');
     }
     *book = b; *chapter = endChapter; *first = a; *last = z;
     return true;
@@ -663,7 +838,9 @@ void BibleBackend::moveByVerses(int delta, bool extend)
 bool BibleBackend::loadAnnotations(QVector<Annotation> *result)
 {
     QSqlQuery q(m_store);
-    if (!q.exec("SELECT book,chapter,start,end,bookmark,highlight,note,endBook,endChapter FROM annotations ORDER BY book,chapter,start,endBook,endChapter,end"))
+    q.prepare("SELECT book,chapter,start,end,bookmark,highlight,note,endBook,endChapter FROM annotations WHERE version_id=? ORDER BY book,chapter,start,endBook,endChapter,end");
+    q.addBindValue(m_versionId);
+    if (!q.exec())
         return setError("Cannot read your annotations: " + q.lastError().text());
     QVector<Annotation> rows;
     while (q.next()) {
@@ -742,6 +919,7 @@ void BibleBackend::updateAnnotations()
 }
 void BibleBackend::refreshCollection()
 {
+    if (!m_ready) return;
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) return;
     m_annotations = rows;
@@ -777,13 +955,15 @@ bool BibleBackend::saveAnnotations(const QVector<Annotation> &annotations)
         }
     }
     QSqlQuery q(m_store);
-    if (!q.exec("DELETE FROM annotations")) return setError("Cannot save annotations: " + q.lastError().text());
-    if (!q.prepare("INSERT INTO annotations(book,chapter,start,end,bookmark,highlight,note,endBook,endChapter) VALUES(?,?,?,?,?,?,?,?,?)")) return setError(q.lastError().text());
+    q.prepare("DELETE FROM annotations WHERE version_id=?"); q.addBindValue(m_versionId);
+    if (!q.exec()) return setError("Cannot save annotations: " + q.lastError().text());
+    if (!q.prepare("INSERT INTO annotations(book,chapter,start,end,bookmark,highlight,note,endBook,endChapter,version_id) VALUES(?,?,?,?,?,?,?,?,?,?)")) return setError(q.lastError().text());
     for (const auto &a : merged) {
         const auto start = endpoint(a.start), end = endpoint(a.end);
         q.bindValue(0,start.book); q.bindValue(1,start.chapter); q.bindValue(2,start.verse); q.bindValue(3,end.verse);
         q.bindValue(4,a.bookmark); q.bindValue(5,a.highlight); q.bindValue(6,a.note.isNull() ? QString("") : a.note);
         q.bindValue(7,end.book); q.bindValue(8,end.chapter);
+        q.bindValue(9,m_versionId);
         if (!q.exec()) return setError("Cannot save annotations: " + q.lastError().text());
     }
     return true;
@@ -851,9 +1031,10 @@ bool BibleBackend::deleteAnnotation(QString input)
     if (!m_store.transaction()) return setError("Cannot start annotation deletion: " + m_store.lastError().text());
     const auto a = endpoint(first), z = endpoint(last);
     QSqlQuery q(m_store);
-    q.prepare("DELETE FROM annotations WHERE book=? AND chapter=? AND start=? AND endBook=? AND endChapter=? AND end=?");
+    q.prepare("DELETE FROM annotations WHERE book=? AND chapter=? AND start=? AND endBook=? AND endChapter=? AND end=? AND version_id=?");
     q.addBindValue(a.book); q.addBindValue(a.chapter); q.addBindValue(a.verse);
     q.addBindValue(z.book); q.addBindValue(z.chapter); q.addBindValue(z.verse);
+    q.addBindValue(m_versionId);
     if (!q.exec()) { m_store.rollback(); return setError("Cannot delete annotation: " + q.lastError().text()); }
     if (q.numRowsAffected() != 1) { m_store.rollback(); return setError("No saved annotation exists for that exact range."); }
     q.finish();
@@ -929,6 +1110,7 @@ void BibleBackend::copyText(QString text)
 
 bool BibleBackend::exportNotes(QUrl directory)
 {
+    if (!requireReady()) return false;
     if (!m_store.isOpen()) return setError("Your notes database is unavailable.");
     const QString path = localPath(directory);
     if (path.isEmpty()) return false;
@@ -937,7 +1119,7 @@ bool BibleBackend::exportNotes(QUrl directory)
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) return false;
     // The export filename remains stable for existing scripts and consumers.
-    QString markdown = "# " + Brand::name() + " notes\n\nEdition: NET Bible 2.1\n\n";
+    QString markdown = "# " + Brand::name() + " notes\n\nEdition: " + edition() + " (" + versionId() + ")\n\n";
     for (const auto &a : rows) {
         markdown += "## " + rangeReference(a.start,a.end) + "\n\n";
         QStringList flags;
@@ -967,14 +1149,38 @@ bool BibleBackend::protectDestination(const QString &path)
     const QString resolved = target.exists() ? target.canonicalFilePath()
         : QFileInfo(target.absolutePath()).canonicalFilePath() + '/' + target.fileName();
     const QFileInfo resolvedTarget(resolved);
-    if (resolvedTarget.absolutePath() == QFileInfo(m_directory).canonicalFilePath()
-        && (resolvedTarget.fileName().startsWith("personal.sqlite") || resolvedTarget.fileName().startsWith("bible.sqlite")))
+    // Reserve every SQLite generation and sidecar, including unreferenced import
+    // staging/garbage files. Canonical parent resolution covers directory aliases.
+    if ((resolvedTarget.absolutePath() == QFileInfo(m_directory).canonicalFilePath()
+        && (resolvedTarget.fileName().startsWith("personal.sqlite") || resolvedTarget.fileName().startsWith("bible.sqlite")
+            || resolvedTarget.fileName().startsWith("bible-")))
+        || resolved.startsWith(QFileInfo(m_directory).canonicalFilePath() + "/versions/"))
         return setError("Choose an export destination outside the live database files and sidecars.");
+    // Also protect the physical target of an externally symlinked database and
+    // its SQLite sidecars. Never trust just the spelling of the requested path.
+    QStringList databases{m_directory + "/personal.sqlite",m_directory + "/bible.sqlite"};
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT path FROM installed")) return setError("Cannot verify the export destination: " + q.lastError().text());
+    while (q.next()) databases << m_directory + '/' + q.value(0).toString();
+    if (q.lastError().isValid()) return setError("Cannot verify the export destination.");
+    for (const auto &database : databases) {
+        const QString physical = QFileInfo(database).canonicalFilePath();
+        for (const QString &base : {database,physical}) {
+            if (base.isEmpty()) continue;
+            for (const QString &suffix : {QString(""),QString("-wal"),QString("-shm"),QString("-journal")}) {
+                const QFileInfo candidate(base+suffix);
+                const QString candidatePath = candidate.exists() ? candidate.canonicalFilePath()
+                    : QFileInfo(candidate.absolutePath()).canonicalFilePath() + '/' + candidate.fileName();
+                if (resolved == candidatePath) return setError("Choose an export destination outside the live database files and sidecars.");
+            }
+        }
+    }
     return true;
 }
 
 bool BibleBackend::exportBackup(QUrl file)
 {
+    if (!requireReady()) return false;
     if (!m_store.isOpen()) return setError("Your notes database is unavailable.");
     const QString path = localPath(file);
     if (path.isEmpty() || !protectDestination(path)) return false;
@@ -982,7 +1188,9 @@ bool BibleBackend::exportBackup(QUrl file)
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) { m_store.rollback(); return false; }
     QSqlQuery q(m_store);
-    if (!q.exec("SELECT book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter FROM reading WHERE id=1") || !q.next()) {
+    q.prepare("SELECT book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter FROM reading WHERE id=1 AND version_id=?");
+    q.addBindValue(m_versionId);
+    if (!q.exec() || !q.next()) {
         m_store.rollback(); return setError("Cannot read your reading position for backup.");
     }
     const QJsonObject reading{{"book",q.value(0).toInt()},{"chapter",q.value(1).toInt()},
@@ -998,7 +1206,7 @@ bool BibleBackend::exportBackup(QUrl file)
             {"start",start.verse},{"end",end.verse},{"endBook",end.book},{"endChapter",end.chapter},
             {"bookmark",a.bookmark},{"highlight",a.highlight},{"note",a.note}});
     }
-    const QJsonObject root{{"format","omabible-backup"},{"version",2},{"edition",edition()},
+    const QJsonObject root{{"format","omabible-backup"},{"version",3},{"edition",edition()},{"versionId",versionId()},
         {"created",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}, {"reading",reading},{"annotations",annotations}};
     const QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (bytes.size() > MaximumBackupSize) return setError("This backup exceeds the supported 32 MiB size. Export Markdown notes instead.");
@@ -1023,14 +1231,20 @@ bool BibleBackend::importBackup(QUrl file)
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) return setError("Invalid backup JSON: " + parseError.errorString());
     if (!uniqueJsonKeys(bytes)) return setError("The backup contains duplicate JSON fields.");
     const auto root = document.object();
-    if (!exactKeys(root,{"format","version","edition","created","reading","annotations"})
-        || root.value("format") != "omabible-backup" || !integer(root.value("version"),1,2)
-        || root.value("edition") != edition() || !root.value("created").isString()
+    QStringList rootKeys{"format","version","edition","created","reading","annotations"};
+    const bool scoped = root.value("version").toInt() == 3;
+    if (scoped) rootKeys << "versionId";
+    if (!exactKeys(root,rootKeys)
+        || root.value("format") != "omabible-backup" || !integer(root.value("version"),1,3)
+        || !root.value("edition").isString() || !root.value("created").isString()
         || !QDateTime::fromString(root.value("created").toString(),Qt::ISODateWithMs).isValid()
         || !root.value("reading").isObject() || !root.value("annotations").isArray())
         return setError("Unsupported or invalid " + Brand::name() + " backup format.");
+    if ((scoped && root.value("versionId") != versionId()) || (!scoped && versionId() != "net-2.1"))
+        return setError("This backup belongs to a different Bible version. Switch to its version before restoring.");
+    if (root.value("edition") != edition()) return setError("The backup edition does not match the active Bible version.");
     const auto reading = root.value("reading").toObject();
-    const bool v2 = root.value("version").toInt() == 2;
+    const bool v2 = root.value("version").toInt() >= 2;
     auto verse = [this](const QJsonObject &object, const QString &b, const QString &c, const QString &v) {
         if (!integer(object.value(b),1,66) || !integer(object.value(c),1,150) || !integer(object.value(v),1,176)) return 0;
         const int book = object.value(b).toInt(), chapter = object.value(c).toInt(), number = object.value(v).toInt();

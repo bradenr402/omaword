@@ -18,7 +18,11 @@ class BibleBackend : public QObject
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString passage READ passage NOTIFY passageChanged)
     Q_PROPERTY(QString selectionReference READ selectionReference NOTIFY selectionChanged)
-    Q_PROPERTY(QString edition READ edition CONSTANT)
+    Q_PROPERTY(QString edition READ edition NOTIFY versionChanged)
+    Q_PROPERTY(QString versionId READ versionId NOTIFY versionChanged)
+    Q_PROPERTY(QString versionAbbreviation READ versionAbbreviation NOTIFY versionChanged)
+    Q_PROPERTY(QString versionCopyright READ versionCopyright NOTIFY versionChanged)
+    Q_PROPERTY(QVariantList versions READ versions NOTIFY versionsChanged)
     Q_PROPERTY(int book READ book NOTIFY passageChanged)
     Q_PROPERTY(int chapter READ chapter NOTIFY passageChanged)
     Q_PROPERTY(int selectedStart READ selectedStart NOTIFY selectionChanged)
@@ -50,7 +54,11 @@ public:
     QString status() const { return m_status; }
     QString passage() const;
     QString selectionReference() const;
-    QString edition() const { return QStringLiteral("NET Bible 2.1"); }
+    QString edition() const { return m_edition; }
+    QString versionId() const { return m_versionId; }
+    QString versionAbbreviation() const { return m_abbreviation; }
+    QString versionCopyright() const { return m_copyright; }
+    QVariantList versions() const { return m_versions; }
     int book() const { return m_book; }
     int chapter() const { return m_chapter; }
     int selectedStart() const { return m_start; }
@@ -80,6 +88,8 @@ public:
     Q_INVOKABLE void setBlockMode(bool value);
 
     Q_INVOKABLE void importEpub(QUrl file);
+    Q_INVOKABLE bool switchVersion(QString id);
+    Q_INVOKABLE bool removeVersion(QString id, bool removeAnnotations);
     Q_INVOKABLE void clearError();
     Q_INVOKABLE bool navigate(QString reference);
     // Pure preview: {valid, reference, error}; uses the current book for relative input.
@@ -108,6 +118,8 @@ public:
     Q_INVOKABLE QString dataDirectory();
 
 signals:
+    void versionChanged();
+    void versionsChanged();
     void readyChanged();
     void busyChanged();
     void importProgressChanged();
@@ -125,7 +137,7 @@ signals:
 
 private:
     struct Annotation {
-        // Inclusive canonical indices, excluding omitted NET verses; persisted as endpoints.
+        // Inclusive indices in the active SQL verse keys; persisted as references.
         int start = 0, end = 0;
         bool bookmark = false, highlight = false;
         QString note;
@@ -134,7 +146,14 @@ private:
     bool loadPreferences();
     bool savePreference(const QString &key, const QVariant &value);
     QString copyRange(int first, int last, const QString &reference, bool plainText);
-    bool openBible();
+    struct Verse { int book = 0, chapter = 0, verse = 0; };
+    const QVector<Verse> &canonVerses() const { return m_keys; }
+    int absoluteVerse(int book, int chapter, int verse) const;
+    Verse endpoint(int index) const { return m_keys.value(index); }
+    bool changeVersion(const QString &id, const QString &importPath = {},
+                       const QString &removedId = {}, bool deleteAnnotations = false, bool startup = false);
+    QString installedPath(const QString &id) const;
+    bool readVersions(QVariantList *versions);
     void closeBible();
     bool loadChapter();
     bool readChapter(int book, int chapter, QVariantList *rows);
@@ -146,7 +165,7 @@ private:
     void intersectSelection();
     bool commitAnnotations(const QVector<Annotation> &annotations);
     bool flagCovered(const QVector<Annotation> &annotations, bool highlight) const;
-    static QString rangeReference(int start, int end);
+    QString rangeReference(int start, int end) const;
     bool validRange(int book, int chapter, int start, int end) const;
     bool verseExists(int book, int chapter, int verse) const;
     bool persistState(int book, int chapter, int start, int end, double position);
@@ -162,6 +181,9 @@ private:
     static QString reference(int book, int chapter, int start = 0, int end = 0);
 
     QString m_directory, m_error, m_status, m_note;
+    QString m_versionId, m_edition, m_abbreviation, m_copyright, m_importTarget;
+    QVariantList m_versions;
+    QVector<Verse> m_keys{{0,0,0}};
     QString m_bibleConnection, m_storeConnection;
     QSqlDatabase m_bible, m_store;
     bool m_ready = false, m_busy = false, m_bookmarked = false, m_highlighted = false;

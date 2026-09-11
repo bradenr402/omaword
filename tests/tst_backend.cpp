@@ -23,6 +23,15 @@ class BackendTest : public QObject
     QString epub;
     std::unique_ptr<BibleBackend> bible;
     QString file(const QString &name) const { return root.filePath(name); }
+    static QString biblePath(BibleBackend *backend) {
+        for (const auto &name : QSqlDatabase::connectionNames()) {
+            auto db = QSqlDatabase::database(name);
+            if (db.databaseName() != backend->dataDirectory()+"/personal.sqlite") continue;
+            QSqlQuery q(db); q.prepare("SELECT path FROM installed WHERE version_id=?"); q.addBindValue(backend->versionId());
+            if (q.exec() && q.next()) return backend->dataDirectory()+'/'+q.value(0).toString();
+        }
+        return {};
+    }
     static bool write(const QString &path, const QByteArray &bytes) {
         QSaveFile f(path); return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size() && f.commit();
     }
@@ -120,7 +129,7 @@ private slots:
             }
             // Existing schema-2 installs acquire the additive table on next open.
             QVERIFY(q.exec("DROP TABLE preferences"));
-            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),2); q.finish();
+            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),3); q.finish();
         }
         QSqlDatabase::removeDatabase("preferences-test");
         prefs = std::make_unique<BibleBackend>();
@@ -203,7 +212,7 @@ private slots:
         QCOMPARE(ready.count(),1); QCOMPARE(bible->importProgress(),1.0);
         QCOMPARE(bible->verses().size(),31);
         QString validationError;
-        QVERIFY2(EpubImporter::validateDatabase(bible->dataDirectory()+"/bible.sqlite",&validationError),qPrintable(validationError));
+        QVERIFY2(EpubImporter::validateDatabase(biblePath(bible.get()),&validationError),qPrintable(validationError));
         int chapters = 0, verses = 0;
         for (int b = 1; b <= 66; ++b) {
             for (int c = 1; c <= EpubImporter::canon()[b-1].chapters; ++c) {
@@ -287,7 +296,7 @@ private slots:
         }
         QCOMPARE(chapters,1189); QCOMPARE(total,31087);
         if (!bible->ready()) QSKIP("Corruption fixture requires real EPUB");
-        QVERIFY(QFile::copy(bible->dataDirectory()+"/bible.sqlite",file("compensated.sqlite")));
+        QVERIFY(QFile::copy(biblePath(bible.get()),file("compensated.sqlite")));
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","compensated"); db.setDatabaseName(file("compensated.sqlite")); QVERIFY(db.open());
             QSqlQuery q(db);
@@ -384,7 +393,7 @@ private slots:
         QVERIFY(document.isObject());
         const auto rootObject = document.object();
         QByteArray duplicateFields = document.toJson();
-        duplicateFields.replace("\"version\": 2", "\"version\": 1, \"ver\\u0073ion\": 2");
+        duplicateFields.replace("\"version\": 3", "\"version\": 1, \"ver\\u0073ion\": 3");
         QVERIFY(write(file("duplicate-fields.json"),duplicateFields));
         QVERIFY(!bible->importBackup(QUrl::fromLocalFile(file("duplicate-fields.json"))));
         QVERIFY(bible->error().contains("duplicate JSON"));
@@ -392,7 +401,7 @@ private slots:
         for (const auto &kind : corruptions) {
             auto object = rootObject;
             auto rows = object["annotations"].toArray(); auto a = rows.first().toObject();
-            if (kind == "version") object["version"] = 3;
+            if (kind == "version") object["version"] = 4;
             if (kind == "fractional") a["start"] = 16.5;
             if (kind == "wrong-type") a["bookmark"] = 1;
             if (kind == "unknown-key") a["extra"] = "unexpected";
@@ -470,7 +479,7 @@ private slots:
         const auto note = bible->noteText(), selection = bible->selectionReference();
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
         {
-            auto db = QSqlDatabase::addDatabase("QSQLITE","read-failure"); db.setDatabaseName(bible->dataDirectory()+"/bible.sqlite"); QVERIFY(db.open());
+            auto db = QSqlDatabase::addDatabase("QSQLITE","read-failure"); db.setDatabaseName(biblePath(bible.get())); QVERIFY(db.open());
             QSqlQuery q(db);
             QVERIFY(q.exec("ALTER TABLE verses RENAME TO saved_verses"));
             // Endpoints remain queryable; loading verse bodies fails independently.
@@ -513,9 +522,9 @@ private slots:
             QVERIFY(q.exec("ALTER TABLE annotations RENAME TO saved_annotations"));
             QVERIFY(q.exec("CREATE TABLE fault_gate(active INTEGER)"));
             QVERIFY(q.exec("INSERT INTO fault_gate VALUES(0)"));
-            QVERIFY(q.exec("CREATE VIEW annotations AS SELECT book,chapter,start,end,bookmark,highlight,CASE WHEN (SELECT active FROM fault_gate)=1 THEN abs(-9223372036854775808) ELSE note END AS note,endBook,endChapter FROM saved_annotations"));
-            QVERIFY(q.exec("CREATE TRIGGER delete_annotations INSTEAD OF DELETE ON annotations BEGIN DELETE FROM saved_annotations WHERE book=OLD.book AND chapter=OLD.chapter AND start=OLD.start AND end=OLD.end; END"));
-            QVERIFY(q.exec("CREATE TRIGGER insert_annotations INSTEAD OF INSERT ON annotations BEGIN INSERT INTO saved_annotations VALUES(NEW.book,NEW.chapter,NEW.start,NEW.end,NEW.bookmark,NEW.highlight,NEW.note,NEW.endBook,NEW.endChapter); UPDATE fault_gate SET active=1; END"));
+            QVERIFY(q.exec("CREATE VIEW annotations AS SELECT book,chapter,start,end,bookmark,highlight,CASE WHEN (SELECT active FROM fault_gate)=1 THEN abs(-9223372036854775808) ELSE note END AS note,endBook,endChapter,version_id FROM saved_annotations"));
+            QVERIFY(q.exec("CREATE TRIGGER delete_annotations INSTEAD OF DELETE ON annotations BEGIN DELETE FROM saved_annotations WHERE version_id=OLD.version_id AND book=OLD.book AND chapter=OLD.chapter AND start=OLD.start AND end=OLD.end AND endBook=OLD.endBook AND endChapter=OLD.endChapter; END"));
+            QVERIFY(q.exec("CREATE TRIGGER insert_annotations INSTEAD OF INSERT ON annotations BEGIN INSERT INTO saved_annotations VALUES(NEW.book,NEW.chapter,NEW.start,NEW.end,NEW.bookmark,NEW.highlight,NEW.note,NEW.endBook,NEW.endChapter,NEW.version_id); UPDATE fault_gate SET active=1; END"));
             bible->setNoteText("Readback failure must roll back this note");
             QVERIFY2(bible->error().contains("Cannot read your annotations"),qPrintable(bible->error()));
             QCOMPARE(bible->collection(),before); QCOMPARE(bible->noteText(),note);
@@ -909,7 +918,7 @@ private slots:
         QSqlDatabase::removeDatabase("cross-failure");
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","copy-failure");
-            db.setDatabaseName(bible->dataDirectory()+"/bible.sqlite"); QVERIFY(db.open()); QSqlQuery q(db);
+            db.setDatabaseName(biblePath(bible.get())); QVERIFY(db.open()); QSqlQuery q(db);
             QVERIFY(q.exec("ALTER TABLE verses RENAME TO saved_verses"));
             QVERIFY(q.exec("CREATE VIEW verses AS SELECT book,chapter,number,CASE WHEN book=40 THEN abs(-9223372036854775808) ELSE text END AS text,html,heading,poetry FROM saved_verses"));
             QGuiApplication::clipboard()->setText("Keep clipboard on partial read failure");
@@ -1054,13 +1063,297 @@ private slots:
         QVERIFY(bible->deleteAnnotation(selection)); QVERIFY(bible->noteText().isEmpty());
         QVERIFY(!bible->selectionBookmarked()); QVERIFY(!bible->selectionHighlighted());
     }
+    void multiVersionLibrary() {
+        const QString kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires OMABIBLE_TEST_EPUB and OMABIBLE_TEST_KJV.");
+        const QString application = QCoreApplication::applicationName();
+        const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });
+        QCoreApplication::setApplicationName("multi-version-test");
+        auto library = std::make_unique<BibleBackend>();
+        library->setLineHeight(2.2); library->setFocusMode(true);
+        const QString directory = library->dataDirectory();
+        library.reset();
+        // Exercise a schema-2 install with the old root text path and exact
+        // cross-chapter reference endpoints, plus already-existing global prefs.
+        QVERIFY(QFile::copy(biblePath(bible.get()),directory+"/bible.sqlite"));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","legacy-metadata"); db.setDatabaseName(directory+"/bible.sqlite"); QVERIFY(db.open());
+            QSqlQuery q(db);
+            // The UI's synthetic fixture and original installs identify NET by
+            // edition alone; new metadata fields must remain optional for them.
+            QVERIFY(q.exec("DELETE FROM metadata WHERE key IN ('version_id','abbreviation','copyright')"));
+        }
+        QSqlDatabase::removeDatabase("legacy-metadata");
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","library-fixture"); db.setDatabaseName(directory+"/personal.sqlite"); QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("DROP TABLE annotations")); QVERIFY(q.exec("DROP TABLE reading"));
+            QVERIFY(q.exec("DROP TABLE installed")); QVERIFY(q.exec("DROP TABLE library"));
+            QVERIFY(q.exec("CREATE TABLE annotations(book INTEGER,chapter INTEGER,start INTEGER,end INTEGER,bookmark INTEGER,highlight INTEGER,note TEXT,endBook INTEGER,endChapter INTEGER,PRIMARY KEY(book,chapter,start,endBook,endChapter,end)) WITHOUT ROWID"));
+            QVERIFY(q.exec("INSERT INTO annotations VALUES(43,3,35,2,1,1,'NET-only legacy range',43,4)"));
+            QVERIFY(q.exec("CREATE TABLE reading(id INTEGER PRIMARY KEY,book INTEGER,chapter INTEGER,start INTEGER,end INTEGER,position REAL,anchorBook INTEGER,anchorChapter INTEGER,cursorBook INTEGER,cursorChapter INTEGER)"));
+            QVERIFY(q.exec("INSERT INTO reading VALUES(1,43,4,35,2,0.4,43,3,43,4)"));
+            QVERIFY(q.exec("PRAGMA user_version=2"));
+            QVERIFY(q.exec("CREATE TABLE installed(conflict INTEGER)"));
+        }
+        QSqlDatabase::removeDatabase("library-fixture");
+        { BibleBackend failed; QVERIFY(!failed.ready()); QVERIFY(!failed.error().isEmpty()); }
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","library-fixture"); db.setDatabaseName(directory+"/personal.sqlite"); QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),2); q.finish();
+            QVERIFY(!q.exec("SELECT version_id FROM annotations"));
+            QVERIFY(q.exec("SELECT note FROM annotations")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("NET-only legacy range")); q.finish();
+            QVERIFY(q.exec("SELECT position FROM reading")); QVERIFY(q.next()); QCOMPARE(q.value(0).toDouble(),0.4); q.finish();
+            QVERIFY(q.exec("DROP TABLE installed")); QVERIFY(QFileInfo::exists(directory+"/bible.sqlite"));
+        }
+        QSqlDatabase::removeDatabase("library-fixture");
+        library = std::make_unique<BibleBackend>();
+        QVERIFY2(library->ready(),qPrintable(library->error()));
+        QCOMPARE(library->versionId(),QString("net-2.1")); QCOMPARE(library->versionAbbreviation(),QString("NET"));
+        QCOMPARE(library->edition(),QString("NET Bible 2.1"));
+        QCOMPARE(library->versions().size(),1); QCOMPARE(library->versions().first().toMap().size(),4);
+        QVERIFY(library->versions().first().toMap()["active"].toBool());
+        QCOMPARE(library->selectionReference(),QString("John 3:35–4:2"));
+        QCOMPARE(library->noteText(),QString("NET-only legacy range")); QCOMPARE(library->readingPosition(),0.4);
+        QCOMPARE(library->lineHeight(),2.2); QVERIFY(library->focusMode());
+        for (const QString property : {"edition","versionId","versionAbbreviation","versionCopyright","versions"}) {
+            const auto p = library->metaObject()->property(library->metaObject()->indexOfProperty(qPrintable(property)));
+            QVERIFY(p.isReadable()); QVERIFY(!p.isConstant());
+            QCOMPARE(p.notifySignal().name(),property == "versions" ? QByteArray("versionsChanged") : QByteArray("versionChanged"));
+        }
+        QSignalSpy versions(library.get(),&BibleBackend::versionsChanged);
+        library->importEpub(QUrl::fromLocalFile(kjv)); QVERIFY(library->busy());
+        QVERIFY(!library->switchVersion("net-2.1")); QVERIFY(!library->removeVersion("net-2.1",true));
+        QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+        QVERIFY2(library->error().isEmpty(),qPrintable(library->error()));
+        QCOMPARE(library->versionId(),QString("kjv-2006")); QCOMPARE(library->versionAbbreviation(),QString("KJV"));
+        QVERIFY(!library->versionCopyright().isEmpty()); QCOMPARE(library->versions().size(),2); QCOMPARE(versions.count(),1);
+        QCOMPARE(library->selectionReference(),QString("John 3:35–4:2"));
+        QVERIFY(library->collection().isEmpty()); QVERIFY(library->noteText().isEmpty());
+        QVERIFY(!library->selectionBookmarked()); QVERIFY(!library->selectionHighlighted());
+        library->setNoteText("KJV-only range"); library->toggleBookmark(); library->toggleHighlight();
+        const auto kjvCollection = library->collection();
+        int count = 0;
+        for (int b = 1; b <= 66; ++b)
+            for (int c = 1; c <= EpubImporter::canon()[b-1].chapters; ++c) count += library->chapterVerses(b,c).size();
+        QCOMPARE(count,31102);
+        QVERIFY(library->navigate("Mark 9:43")); library->moveSelection(1);
+        QCOMPARE(library->selectionReference(),QString("Mark 9:44"));
+        QVERIFY(library->navigate("Mark 9:43-47"));
+        const QString copied = library->copySelection(); QVERIFY(copied.contains("⁴⁴ ")); QVERIFY(copied.contains("⁴⁶ "));
+        library->toggleHighlight(); QVERIFY(library->navigate("Mark 9:44")); library->toggleHighlight();
+        QVERIFY(!library->selectionHighlighted()); QVERIFY(library->navigate("Mark 9:45")); QVERIFY(library->selectionHighlighted());
+        QVERIFY(library->navigate("Matthew 17:21")); library->setNoteText("KJV verse absent in NET");
+        QVERIFY(library->switchVersion("net-2.1")); QCOMPARE(library->passage(),QString("Matthew 17"));
+        QCOMPARE(library->cursorVerse(),0); QVERIFY(library->status().contains("endpoint is absent"));
+        QCOMPARE(library->collection().size(),1); QVERIFY(library->noteText().isEmpty());
+        QVERIFY(!library->navigate("Matthew 17:21"));
+        QVERIFY(library->navigate("John 3:35-4:2")); QCOMPARE(library->noteText(),QString("NET-only legacy range"));
+        QVERIFY(library->exportBackup(QUrl::fromLocalFile(file("net-scoped.json"))));
+        QFile netBackup(file("net-scoped.json")); QVERIFY(netBackup.open(QIODevice::ReadOnly));
+        const auto netObject = QJsonDocument::fromJson(netBackup.readAll()).object();
+        QCOMPARE(netObject["version"].toInt(),3); QCOMPARE(netObject["versionId"].toString(),QString("net-2.1"));
+        auto legacy = netObject; legacy["version"] = 2; legacy.remove("versionId");
+        QVERIFY(write(file("legacy-net-v2.json"),QJsonDocument(legacy).toJson()));
+        QVERIFY(library->importBackup(QUrl::fromLocalFile(file("legacy-net-v2.json"))));
+        QVERIFY(library->navigate("3 John 1:15"));
+        QVERIFY(library->switchVersion("kjv-2006")); QCOMPARE(library->selectionReference(),QString("3 John 1"));
+        QVERIFY(library->status().contains("endpoint is absent"));
+        QVERIFY(!library->navigate("3 John 1:15"));
+        QVERIFY(library->navigate("John 3:35-4:2")); QCOMPARE(library->noteText(),QString("KJV-only range"));
+        QVERIFY(!library->importBackup(QUrl::fromLocalFile(file("net-scoped.json"))));
+        QVERIFY(!library->importBackup(QUrl::fromLocalFile(file("legacy-net-v2.json"))));
+        auto legacyV1 = legacy; legacyV1["version"] = 1;
+        legacyV1["reading"] = QJsonObject{{"book",43},{"chapter",3},{"start",16},{"end",18},{"position",0.2}};
+        legacyV1["annotations"] = QJsonArray{QJsonObject{{"book",43},{"chapter",3},{"start",16},{"end",18},
+            {"bookmark",true},{"highlight",false},{"note","Old NET backup"}}};
+        QVERIFY(write(file("legacy-net-v1-scoping.json"),QJsonDocument(legacyV1).toJson()));
+        QVERIFY(!library->importBackup(QUrl::fromLocalFile(file("legacy-net-v1-scoping.json"))));
+        QVERIFY(library->error().contains("different Bible version"));
+        // Changing only the display name must not defeat stable-ID scoping.
+        auto disguised = netObject; disguised["edition"] = library->edition();
+        QVERIFY(write(file("wrong-id.json"),QJsonDocument(disguised).toJson()));
+        QVERIFY(!library->importBackup(QUrl::fromLocalFile(file("wrong-id.json"))));
+        QCOMPARE(library->noteText(),QString("KJV-only range"));
+        QVERIFY(library->navigate("Matthew 17:21"));
+        QVERIFY(library->exportBackup(QUrl::fromLocalFile(file("kjv-scoped.json"))));
+        QVERIFY(library->exportNotes(QUrl::fromLocalFile(root.path())));
+        QFile markdown(file("omabible-notes.md")); QVERIFY(markdown.open(QIODevice::ReadOnly));
+        const auto exported = markdown.readAll(); QVERIFY(exported.contains("kjv-2006"));
+        QVERIFY(exported.contains("KJV-only range")); QVERIFY(!exported.contains("NET-only legacy range"));
+        // All installed text generations, root DBs, dangling sidecars and aliases.
+        const QString kjvPath = biblePath(library.get());
+        QVERIFY(library->switchVersion("net-2.1")); const QString netPath = biblePath(library.get());
+        QVERIFY(library->switchVersion("kjv-2006"));
+        QTemporaryDir aliases;
+        for (const QString &database : {kjvPath,netPath,directory+"/personal.sqlite"}) {
+            for (const QString &suffix : {QString(""),QString("-wal"),QString("-shm"),QString("-journal")}) {
+                const QString target = database+suffix;
+                QVERIFY(!library->exportBackup(QUrl::fromLocalFile(target)));
+                const QString alias = aliases.filePath("omabible-notes.md");
+                QVERIFY(QFile::link(target,alias));
+                QVERIFY(!library->exportBackup(QUrl::fromLocalFile(alias)));
+                QVERIFY(!library->exportNotes(QUrl::fromLocalFile(aliases.path())));
+                QVERIFY(QFile::remove(alias));
+            }
+        }
+        QVERIFY(QFile::link(directory,aliases.filePath("data")));
+        QVERIFY(!library->exportBackup(QUrl::fromLocalFile(aliases.filePath("data/")+QFileInfo(kjvPath).fileName()+"-journal")));
+        library.reset(); library = std::make_unique<BibleBackend>();
+        QCOMPARE(library->versionId(),QString("kjv-2006")); QVERIFY(library->navigate("Matthew 17:21"));
+        QCOMPARE(library->noteText(),QString("KJV verse absent in NET"));
+        // A second backend has a separate key vector; switching it cannot change
+        // canonical offsets or annotations in this instance.
+        { BibleBackend other; QVERIFY(other.switchVersion("net-2.1"));
+          QVERIFY(library->navigate("Mark 9:44")); QCOMPARE(library->cursorVerse(),44); }
+        QVERIFY(library->navigate("John 3:35-4:2"));
+        QVERIFY(library->removeVersion("kjv-2006",false)); QCOMPARE(library->versionId(),QString("net-2.1"));
+        QCOMPARE(library->noteText(),QString("NET-only legacy range")); QCOMPARE(library->versions().size(),1);
+        QVERIFY(!QFileInfo::exists(kjvPath)); QVERIFY(!library->switchVersion("kjv-2006"));
+        library.reset(); library = std::make_unique<BibleBackend>();
+        QCOMPARE(library->versions().size(),1); QCOMPARE(library->collection().size(),1);
+        library->importEpub(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+        QCOMPARE(library->versionId(),QString("kjv-2006")); QCOMPARE(library->noteText(),QString("KJV-only range"));
+        QVERIFY(library->collection().size() > kjvCollection.size());
+        QVERIFY(library->importBackup(QUrl::fromLocalFile(file("kjv-scoped.json"))));
+        QCOMPARE(library->noteText(),QString("KJV verse absent in NET"));
+        // Removing an inactive version must preserve active range and annotations.
+        const auto before = library->collection(); const auto selection = library->selectionReference();
+        QVERIFY(library->removeVersion("net-2.1",false)); QCOMPARE(library->selectionReference(),selection);
+        QCOMPARE(library->collection(),before); QCOMPARE(library->versions().size(),1);
+        QVERIFY(library->removeVersion("kjv-2006",false)); QVERIFY(!library->ready());
+        QVERIFY(library->versionId().isEmpty()); QVERIFY(library->edition().isEmpty()); QVERIFY(library->versionCopyright().isEmpty());
+        QVERIFY(library->versions().isEmpty()); QVERIFY(library->verses().isEmpty()); QVERIFY(library->collection().isEmpty());
+        QVERIFY(library->noteText().isEmpty()); QVERIFY(!library->selectionBookmarked());
+        library->refreshCollection(); QVERIFY(library->collection().isEmpty());
+        QVERIFY(!library->exportBackup(QUrl::fromLocalFile(file("empty.json"))));
+        QVERIFY(!library->exportNotes(QUrl::fromLocalFile(root.path())));
+        library->setLineHeight(2.4);
+        library.reset(); library = std::make_unique<BibleBackend>();
+        QVERIFY(!library->ready()); QVERIFY(library->versions().isEmpty()); QVERIFY(library->collection().isEmpty());
+        QCOMPARE(library->lineHeight(),2.4); QVERIFY(library->focusMode());
+        library->importEpub(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+        QVERIFY2(library->ready(),qPrintable(library->error())); QCOMPARE(library->collection(),before);
+        QVERIFY(library->navigate("Matthew 17:21")); QCOMPARE(library->noteText(),QString("KJV verse absent in NET"));
+        QVERIFY(library->removeVersion("kjv-2006",true)); QVERIFY(!library->ready());
+        library->importEpub(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+        QVERIFY(library->ready()); QVERIFY(library->collection().isEmpty());
+        library->importEpub(QUrl::fromLocalFile(epub)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+        QCOMPARE(library->versionId(),QString("net-2.1")); QCOMPARE(library->collection().size(),1);
+        QVERIFY(library->navigate("John 3:35-4:2")); QCOMPARE(library->noteText(),QString("NET-only legacy range"));
+        QCOMPARE(library->lineHeight(),2.4);
+    }
+    void versionOperationRollback() {
+        const QString kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires both EPUB fixtures.");
+        const QString application = QCoreApplication::applicationName();
+        const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });
+        QCoreApplication::setApplicationName("version-errors-test");
+        auto library = std::make_unique<BibleBackend>();
+        library->importEpub(QUrl::fromLocalFile(epub)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+        QVERIFY2(library->ready(),qPrintable(library->error()));
+        QVERIFY(library->navigate("John 3:16-18")); library->setNoteText("Never lose this");
+        const QString netPath = biblePath(library.get());
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","new-install-failure"); db.setDatabaseName(library->dataDirectory()+"/personal.sqlite"); QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TRIGGER fail_install BEFORE INSERT ON installed BEGIN SELECT RAISE(ABORT,'new install failure'); END"));
+            library->importEpub(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+            QVERIFY(library->error().contains("new install failure")); QCOMPARE(library->versionId(),QString("net-2.1"));
+            QCOMPARE(library->versions().size(),1); QCOMPARE(library->noteText(),QString("Never lose this"));
+            QVERIFY(q.exec("DROP TRIGGER fail_install"));
+        }
+        QSqlDatabase::removeDatabase("new-install-failure");
+        library->importEpub(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+        QCOMPARE(library->versionId(),QString("kjv-2006")); library->setNoteText("KJV survives too");
+        const QString kjvPath = biblePath(library.get());
+        QVERIFY(library->switchVersion("net-2.1"));
+        const auto models = library->versions(), collection = library->collection(), verses = library->verses();
+        const auto selection = library->selectionReference(), note = library->noteText();
+        const QString store = library->dataDirectory()+"/personal.sqlite";
+        QSignalSpy changes(library.get(),&BibleBackend::versionChanged);
+        QSignalSpy modelChanges(library.get(),&BibleBackend::versionsChanged);
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","version-failure"); db.setDatabaseName(store); QVERIFY(db.open()); QSqlQuery q(db);
+            const QStringList triggers{
+                "CREATE TRIGGER fail_library BEFORE UPDATE ON library BEGIN SELECT RAISE(ABORT,'library write failure'); END",
+                "CREATE TRIGGER fail_library AFTER UPDATE ON library BEGIN UPDATE library SET active='net-2.1'; END",
+                "CREATE TRIGGER fail_library BEFORE UPDATE ON reading BEGIN SELECT RAISE(ABORT,'reading write failure'); END"};
+            for (const QString &trigger : triggers) {
+                QVERIFY(q.exec(trigger));
+                QVERIFY(!library->switchVersion("kjv-2006")); QVERIFY(!library->error().isEmpty());
+                QVERIFY(!library->removeVersion("net-2.1",true));
+                QCOMPARE(library->versions(),models); QCOMPARE(library->collection(),collection); QCOMPARE(library->verses(),verses);
+                QCOMPARE(library->selectionReference(),selection); QCOMPARE(library->noteText(),note);
+                QCOMPARE(library->versionId(),QString("net-2.1"));
+                QVERIFY(QFileInfo::exists(netPath)); QVERIFY(QFileInfo::exists(kjvPath));
+                QVERIFY(q.exec("DROP TRIGGER fail_library"));
+            }
+            QVERIFY(q.exec("CREATE TRIGGER fail_library BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'annotation delete failure'); END"));
+            QVERIFY(!library->removeVersion("net-2.1",true)); QCOMPARE(library->collection(),collection);
+            QVERIFY(q.exec("DROP TRIGGER fail_library"));
+            QVERIFY(q.exec("CREATE TRIGGER fail_library BEFORE DELETE ON installed BEGIN SELECT RAISE(IGNORE); END"));
+            QVERIFY(!library->removeVersion("kjv-2006",false)); QCOMPARE(library->versions(),models);
+            QVERIFY(q.exec("DROP TRIGGER fail_library"));
+            // An annotation read failure in the target must not publish its
+            // connection/offsets or commit removal of the current edition.
+            QVERIFY(q.exec("UPDATE annotations SET endChapter=150 WHERE version_id='kjv-2006'"));
+            QVERIFY(!library->switchVersion("kjv-2006")); QVERIFY(library->error().contains("Cannot read your annotations"));
+            QVERIFY(!library->removeVersion("net-2.1",true)); QCOMPARE(library->collection(),collection);
+            QVERIFY(q.exec("UPDATE annotations SET endChapter=3 WHERE version_id='kjv-2006'"));
+            for (const auto &name : QSqlDatabase::connectionNames()) {
+                auto connection = QSqlDatabase::database(name);
+                if (connection.databaseName() == store) { QSqlQuery pragma(connection); QVERIFY(pragma.exec("PRAGMA foreign_keys=ON")); }
+            }
+            QVERIFY(q.exec("CREATE TABLE library_parent(id INTEGER PRIMARY KEY)"));
+            QVERIFY(q.exec("CREATE TABLE library_failure(id INTEGER REFERENCES library_parent(id) DEFERRABLE INITIALLY DEFERRED)"));
+            QVERIFY(q.exec("CREATE TRIGGER fail_library AFTER UPDATE ON library BEGIN INSERT INTO library_failure VALUES(1); END"));
+            QVERIFY(!library->switchVersion("kjv-2006")); QVERIFY(library->error().contains("Cannot commit library"));
+            QVERIFY(!library->removeVersion("net-2.1",true));
+            library->importEpub(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+            QVERIFY(library->error().contains("Cannot commit library"));
+            QCOMPARE(library->versions(),models); QCOMPARE(library->collection(),collection); QCOMPARE(biblePath(library.get()),netPath);
+            QVERIFY(QFileInfo::exists(kjvPath));
+            QVERIFY(q.exec("SELECT COUNT(*) FROM library_failure")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
+            QVERIFY(q.exec("DROP TRIGGER fail_library"));
+            // Reject both replacing an installed generation and adding a new ID.
+            QVERIFY(q.exec("CREATE TRIGGER fail_library BEFORE INSERT ON installed BEGIN SELECT RAISE(ABORT,'install failure'); END"));
+            library->importEpub(QUrl::fromLocalFile(epub)); QTRY_VERIFY_WITH_TIMEOUT(!library->busy(),240000);
+            QVERIFY(library->error().contains("install failure")); QCOMPARE(biblePath(library.get()),netPath);
+            QCOMPARE(library->collection(),collection); QCOMPARE(library->selectionReference(),selection);
+            QVERIFY(q.exec("DROP TRIGGER fail_library"));
+        }
+        QSqlDatabase::removeDatabase("version-failure");
+        QVERIFY(!library->switchVersion("../../escape")); QVERIFY(!library->removeVersion("",true));
+        // A missing target fails before touching active metadata or removing files.
+        QVERIFY(QFile::rename(kjvPath,kjvPath+".held"));
+        QVERIFY(!library->switchVersion("kjv-2006")); QVERIFY(!library->removeVersion("net-2.1",true));
+        QVERIFY(QFile::rename(kjvPath+".held",kjvPath));
+        QCOMPARE(changes.count(),0); QCOMPARE(modelChanges.count(),0);
+        QCOMPARE(library->collection(),collection); QCOMPARE(library->verses(),verses);
+        library.reset(); library = std::make_unique<BibleBackend>();
+        QVERIFY2(library->ready(),qPrintable(library->error())); QCOMPARE(library->versionId(),QString("net-2.1"));
+        QCOMPARE(library->collection(),collection); QCOMPARE(library->noteText(),note); QCOMPARE(library->selectionReference(),selection);
+        QVERIFY(library->switchVersion("kjv-2006")); QCOMPARE(library->noteText(),QString("KJV survives too"));
+        QVERIFY(library->removeVersion("net-2.1",false));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","empty-failure"); db.setDatabaseName(store); QVERIFY(db.open()); QSqlQuery q(db);
+            QVERIFY(q.exec("CREATE TRIGGER fail_empty BEFORE UPDATE ON library BEGIN SELECT RAISE(ABORT,'empty library failure'); END"));
+            const auto saved = library->collection(), installed = library->versions();
+            QVERIFY(!library->removeVersion("kjv-2006",true)); QVERIFY(library->ready());
+            QCOMPARE(library->versionId(),QString("kjv-2006")); QCOMPARE(library->collection(),saved); QCOMPARE(library->versions(),installed);
+            QVERIFY(QFileInfo::exists(kjvPath)); QVERIFY(q.exec("DROP TRIGGER fail_empty"));
+        }
+        QSqlDatabase::removeDatabase("empty-failure");
+    }
     void v1MigrationAndBackupCompatibility() {
         const QString application = QCoreApplication::applicationName();
         const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });
         QCoreApplication::setApplicationName("migration-test");
         const QString directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QVERIFY(QDir().mkpath(directory));
-        if (bible->ready()) QVERIFY(QFile::copy(bible->dataDirectory()+"/bible.sqlite",directory+"/bible.sqlite"));
+        if (bible->ready()) QVERIFY(QFile::copy(biblePath(bible.get()),directory+"/bible.sqlite"));
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","migration"); db.setDatabaseName(directory+"/personal.sqlite"); QVERIFY(db.open());
             QSqlQuery q(db);
@@ -1094,7 +1387,7 @@ private slots:
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","migration"); db.setDatabaseName(directory+"/personal.sqlite"); QVERIFY(db.open());
             QSqlQuery q(db);
-            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),2); q.finish();
+            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),3); q.finish();
             QVERIFY(q.exec("SELECT book,chapter,start,end,endBook,endChapter,note FROM annotations WHERE book=43")); QVERIFY(q.next());
             QCOMPARE(q.value(0).toInt(),43); QCOMPARE(q.value(1).toInt(),3); QCOMPARE(q.value(2).toInt(),16);
             QCOMPARE(q.value(3).toInt(),18); QCOMPARE(q.value(4).toInt(),43); QCOMPARE(q.value(5).toInt(),3);
@@ -1125,7 +1418,7 @@ private slots:
         QCOMPARE(migrated->cursorVerse(),18); QCOMPARE(migrated->readingPosition(),0.63);
         QVERIFY(migrated->exportBackup(QUrl::fromLocalFile(file("converted-v2.json"))));
         QFile converted(file("converted-v2.json")); QVERIFY(converted.open(QIODevice::ReadOnly));
-        const auto object = QJsonDocument::fromJson(converted.readAll()).object(); QCOMPARE(object["version"].toInt(),2);
+        const auto object = QJsonDocument::fromJson(converted.readAll()).object(); QCOMPARE(object["version"].toInt(),3);
         QCOMPARE(object["annotations"].toArray().last().toObject()["endBook"].toInt(),43);
         auto reading = backup["reading"].toObject(); reading["start"] = 0; reading["end"] = 0; backup["reading"] = reading;
         QVERIFY(write(file("v1-none.json"),QJsonDocument(backup).toJson()));
