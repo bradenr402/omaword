@@ -79,6 +79,16 @@ class UiTest : public QObject
         QTRY_VERIFY(!prop("passagePalette", "visible").toBool());
         QTRY_VERIFY(!window->property("restoringPosition").toBool());
     }
+    void capture(const QString &name) {
+        const QString directory = qEnvironmentVariable("OMABIBLE_UI_SCREENSHOTS");
+        if (directory.isEmpty()) return;
+        QVERIFY(QDir(directory).exists());
+        QSignalSpy frames(window,&QQuickWindow::frameSwapped);
+        window->update();
+        QTRY_VERIFY(frames.count() > 0);
+        QTest::qWait(150);
+        QVERIFY(window->grabWindow().save(QDir(directory).filePath(name + ".png")));
+    }
     bool makeSyntheticBible() {
         bool ok = true;
         {
@@ -600,7 +610,7 @@ private slots:
         key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
-        type("keyboard"); key(Qt::Key_Return);
+        type("keybindings"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("helpDialog","opened").toBool());
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("helpDialog","visible").toBool());
@@ -611,6 +621,167 @@ private slots:
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("about"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("aboutDialog","opened").toBool());
+    }
+    void searchableKeybindings() {
+        reference("John 3:16");
+        key(Qt::Key_F1);
+        QTRY_VERIFY(prop("helpDialog","opened").toBool());
+        QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        QCOMPARE(prop("keybindingSearch","placeholderText").toString(),QString("Keybindings..."));
+        const int total = prop("keybindingResults","count").toInt();
+        QVERIFY(total > 10);
+        capture("help");
+        for (const auto &query : {QString("m"),QString("x"),QString("bookmark"),QString("Ctrl+H"),QString("Shift+Down")}) {
+            key(Qt::Key_A,Qt::ControlModifier); type(query);
+            QTRY_COMPARE(prop("keybindingResults","count").toInt(),1);
+            const QString action = query == "m" || query == "bookmark" ? "Bookmark selection"
+                : query == "Shift+Down" ? "Enter visual mode and extend" : "Highlight selection";
+            QTRY_VERIFY(item(qPrintable("keybinding" + action)));
+            QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+            QVERIFY(!bible->selectionBookmarked()); QVERIFY(!bible->selectionHighlighted());
+            QVERIFY(!window->property("verseMode").toBool());
+            QVERIFY(item("keybindingSearch")->hasActiveFocus());
+        }
+        key(Qt::Key_A,Qt::ControlModifier); type("no such keybinding jkhlnv");
+        QTRY_COMPARE(prop("keybindingResults","count").toInt(),0);
+        QVERIFY(item("keybindingEmpty")->isVisible());
+        QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        QVERIFY(!window->property("notesOpen").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); key(Qt::Key_Backspace);
+        QTRY_COMPARE(prop("keybindingResults","count").toInt(),total);
+        QVERIFY(!item("keybindingEmpty")->isVisible());
+        key(Qt::Key_Escape);
+        QTRY_VERIFY(!prop("helpDialog","visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        key(Qt::Key_M); QVERIFY(bible->selectionBookmarked());
+        key(Qt::Key_F1);
+        QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        QCOMPARE(prop("keybindingSearch","text").toString(),QString());
+        window->resize(640,480);
+        QVERIFY(desktop->setProperty("textScale",1.8));
+        QTest::qWait(150);
+        QVERIFY(item("keybindingResults")->height() > 50);
+        const auto searchBounds = item("keybindingSearch")->mapRectToScene(item("keybindingSearch")->boundingRect());
+        QVERIFY(QRectF(0,0,640,480).contains(searchBounds));
+        type("x"); QTRY_COMPARE(prop("keybindingResults","count").toInt(),1);
+        capture("help-scaled");
+    }
+    void bookmarkRangeMarkers() {
+        reference("John 3:16-18");
+        key(Qt::Key_M);
+        reference("John 3:16");
+        int glyphs = 0;
+        for (int verse = 1; verse <= 36; ++verse) {
+            auto glyph = item(qPrintable("bookmarkGlyph" + QString::number(verse)));
+            QVERIFY(glyph);
+            if (glyph->isVisible()) ++glyphs;
+        }
+        QCOMPARE(glyphs,1);
+        QVERIFY(item("bookmarkGlyph16")->isVisible());
+        QVERIFY(!item("bookmarkGlyph17")->isVisible());
+        QVERIFY(prop("bookmarkMarker16","starts").toBool());
+        QVERIFY(prop("bookmarkMarker18","ends").toBool());
+        for (int verse : {16,17}) {
+            auto line = item(qPrintable("bookmarkLine" + QString::number(verse)));
+            auto next = item(qPrintable("bookmarkLine" + QString::number(verse + 1)));
+            const double bottom = line->mapToScene(QPointF(0,line->height())).y();
+            QVERIFY(qAbs(bottom - next->mapToScene(QPointF()).y()) < 0.1);
+        }
+        capture("bookmark");
+        click(item("bookmarkMarker16"));
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
+        // An overlapping range gets its own logical start, while shared rows
+        // expose both references and a stable click target.
+        reference("John 3:17-20"); key(Qt::Key_M);
+        reference("John 3:17");
+        QVERIFY(item("bookmarkGlyph17")->isVisible());
+        const QString hint = prop("bookmarkMarker17","hint").toString();
+        QVERIFY(hint.contains(QString::fromUtf8("John 3:16–18")));
+        QVERIFY(hint.contains(QString::fromUtf8("John 3:17–20")));
+        QCOMPARE(prop("bookmarkMarker17","openReference").toString(),QString::fromUtf8("John 3:17–20"));
+        click(item("bookmarkMarker17"));
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:17–20"));
+        reference("John 3:36-4:2"); key(Qt::Key_M);
+        reference("John 3:36");
+        QVERIFY(item("bookmarkGlyph36")->isVisible());
+        QVERIFY(prop("bookmarkMarker36","continuesAfter").toBool());
+        reference("John 4:1");
+        QVERIFY(item("bookmarkMarker1")->isVisible());
+        QVERIFY(prop("bookmarkMarker1","chapterContinuation").toBool());
+        QVERIFY(!item("bookmarkGlyph1")->isVisible());
+        QCOMPARE(item("bookmarkLine1")->y(),0.0);
+        QVERIFY(prop("bookmarkMarker2","ends").toBool());
+        QVERIFY(!item("bookmarkMarker3")->isVisible());
+        capture("bookmark-continuation");
+        click(item("bookmarkMarker1"));
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:36–4:2"));
+    }
+    void savedPanelGeometry_data() {
+        QTest::addColumn<QSize>("size");
+        QTest::addColumn<double>("scale");
+        QTest::newRow("wide") << QSize(1120,820) << 1.0;
+        QTest::newRow("narrow") << QSize(640,480) << 1.0;
+        QTest::newRow("scaled") << QSize(640,640) << 1.8;
+        QTest::newRow("scaled-short") << QSize(640,480) << 1.8;
+    }
+    void savedPanelGeometry() {
+        QFETCH(QSize,size);
+        QFETCH(double,scale);
+        for (int verse = 1; verse <= 12; ++verse) {
+            QVERIFY(bible->navigate(QString("John 3:%1").arg(verse)));
+            bible->toggleBookmark();
+            bible->setNoteText("A saved thought with enough text to wrap comfortably within the entry padding.");
+        }
+        window->resize(size);
+        QVERIFY(desktop->setProperty("textScale",scale));
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTest::qWait(150);
+        auto content = item("savedContent");
+        QVERIFY(content);
+        QCOMPARE(prop("savedDrawer","padding").toDouble(),24 * scale);
+        const auto bounds = content->mapRectToScene(content->boundingRect());
+        QCOMPARE(bounds.left(),24 * scale);
+        QVERIFY(qAbs(bounds.top() - 24 * scale) < 0.1);
+        QCOMPARE(prop("savedDrawer","width").toDouble() - bounds.right(),24 * scale);
+        QVERIFY(qAbs(size.height() - bounds.bottom() - 24 * scale) < 0.1);
+        auto tabs = item("savedTabs");
+        for (int index = 0; index < 4; ++index) {
+            auto tab = item(qPrintable("savedTab" + QString::number(index)));
+            QVERIFY(tab);
+            const auto tabBounds = tab->mapRectToItem(tabs,tab->boundingRect());
+            QVERIFY2(tabs->boundingRect().adjusted(-0.5,-0.5,0.5,0.5).contains(tabBounds),
+                qPrintable(QString("Tab %1: %2,%3 %4x%5 in %6x%7").arg(index).arg(tabBounds.x()).arg(tabBounds.y())
+                    .arg(tabBounds.width()).arg(tabBounds.height()).arg(tabs->width()).arg(tabs->height())));
+            const auto label = qvariant_cast<QQuickItem *>(tab->property("contentItem"));
+            QVERIFY(label);
+            QVERIFY(label->width() >= label->implicitWidth());
+        }
+        auto list = item("collectionList");
+        QVERIFY(list->clip());
+        QVERIFY(list->height() > 80);
+        auto entry = item("savedEntryJohn 3:1");
+        QTRY_VERIFY(entry);
+        QVERIFY(entry->clip());
+        auto entryContent = item("savedEntryContentJohn 3:1");
+        QVERIFY(entryContent);
+        const auto inner = entryContent->mapRectToItem(entry,entryContent->boundingRect());
+        QVERIFY(qAbs(inner.left() - 12 * scale) < 0.1);
+        QVERIFY(qAbs(inner.top() - 12 * scale) < 0.1);
+        QVERIFY(qAbs(entry->width() - inner.right() - 12 * scale) < 0.1);
+        QVERIFY(qAbs(entry->height() - inner.bottom() - 12 * scale) < 0.1);
+        auto bar = item("savedScrollbar");
+        QVERIFY(bar);
+        QVERIFY(entry->width() + 8 * scale <= bar->mapToItem(list,QPointF()).x() + 0.1);
+        capture("saved-" + QString::fromLatin1(QTest::currentDataTag()));
+        click(item("savedTab2"));
+        QTRY_COMPARE(prop("collectionList","count").toInt(),0);
+        click(item("savedTab1"));
+        QTRY_COMPARE(prop("collectionList","count").toInt(),12);
+        // Scrolling must keep the delegate within the clipped viewport and
+        // preserve an unobscured scrollbar gutter.
+        QVERIFY(QMetaObject::invokeMethod(list,"positionViewAtEnd"));
+        QTRY_VERIFY(prop("collectionList","contentY").toDouble() > 0);
     }
     void restoreConfirmationCancelAndAccept() {
         reference("John 3:16");

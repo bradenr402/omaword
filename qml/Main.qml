@@ -224,6 +224,40 @@ ApplicationWindow {
                 || (collectionTab === 2 && entry.highlight) || (collectionTab === 3 && entry.note.length > 0)
         })
     }
+    function openBookmark(reference) {
+        if (!flushNote()) return
+        savePosition()
+        if (bible.navigate(reference)) { syncNote(); readerFocus() }
+    }
+    readonly property var keybindings: [
+        { action: "Open a passage", keys: "Ctrl+K" },
+        { action: "Open commands", keys: "Ctrl+Shift+P" },
+        { action: "Saved passages", keys: "Ctrl+L" },
+        { action: "Previous / next chapter", keys: "h / l · [ / ] · Alt+Left / Alt+Right" },
+        { action: "Move verse (extend in visual mode)", keys: "j / k · Down / Up" },
+        { action: "Toggle visual selection (anchor / collapse)", keys: "v" },
+        { action: "Enter visual mode and extend", keys: "J / K · Shift+Down / Shift+Up" },
+        { action: "Select verse / extend range", keys: "Click number / Shift-click" },
+        { action: "Select chapter beginning / end", keys: "g / G · Home / End" },
+        { action: "Page down / up", keys: "PageDown / PageUp · Space / Shift+Space · Ctrl+F / Ctrl+B" },
+        { action: "Bookmark selection", keys: "m · Ctrl+D" },
+        { action: "Highlight selection", keys: "x · Ctrl+H" },
+        { action: "Write a note", keys: "n · Ctrl+N" },
+        { action: "Toggle notes", keys: "Ctrl+Shift+N" },
+        { action: "Copy passage (or chapter)", keys: "y · Ctrl+Shift+C" },
+        { action: "Larger / smaller / reset text", keys: "Ctrl++ / Ctrl+− / Ctrl+0" },
+        { action: "Leave editor / exit visual / close notes / collapse range", keys: "Esc" },
+        { action: "Keybindings", keys: "? · F1" }
+    ]
+    function filteredKeybindings() {
+        let query = keybindingSearch.text.trim().toLowerCase()
+        return keybindings.filter(function(binding) {
+            // Single-letter searches match a key, rather than every action containing it.
+            return !query || (query.length === 1
+                ? binding.keys.split(/\s*[·/]\s*/).some(function(key) { return key.toLowerCase() === query })
+                : (binding.action + " " + binding.keys).toLowerCase().indexOf(query) >= 0)
+        })
+    }
     readonly property var commands: [
         { title: "Open saved passages", hint: "Ctrl+L", action: "saved" },
         { title: "Write a note", hint: "n · Ctrl+N", action: "notes" },
@@ -234,7 +268,7 @@ ApplicationWindow {
         { title: "Save annotation backup", hint: "JSON file", action: "backup" },
         { title: "Restore annotation backup", hint: "Choose a file", action: "restore" },
         { title: "Import NET 2.1 EPUB", hint: "Local file", action: "import" },
-        { title: "Keyboard shortcuts", hint: "F1", action: "help" },
+        { title: "Keybindings", hint: "? · F1", action: "help" },
         { title: "About & attribution", hint: "Omabible", action: "about" }
     ]
     function paletteEntries() {
@@ -319,7 +353,7 @@ ApplicationWindow {
             elide: Text.ElideRight
         }
         background: Rectangle {
-            radius: 7
+            radius: 0
             color: button.down ? app.tint(desktop.accent, 0.16) : button.emphasized ? app.tint(desktop.accent, 0.10) : button.hovered ? desktop.surface : "transparent"
             border.width: button.activeFocus ? 1 : 0
             border.color: desktop.accent
@@ -333,6 +367,21 @@ ApplicationWindow {
         color: desktop.border
         implicitHeight: 1
         opacity: 0.65
+    }
+    component BookmarkGlyph: Canvas {
+        property color ink: desktop.accent
+        implicitWidth: 11 * app.scale
+        implicitHeight: 15 * app.scale
+        onInkChanged: requestPaint()
+        onPaint: {
+            let ctx = getContext("2d")
+            ctx.clearRect(0, 0, width, height)
+            ctx.fillStyle = ink
+            ctx.beginPath()
+            ctx.moveTo(0, 0); ctx.lineTo(width, 0); ctx.lineTo(width, height)
+            ctx.lineTo(width / 2, height * 0.72); ctx.lineTo(0, height)
+            ctx.closePath(); ctx.fill()
+        }
     }
     component SectionLabel: Label {
         color: desktop.muted
@@ -348,7 +397,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle {
             color: desktop.background
-            radius: 12
+            radius: 0
             border.color: desktop.border
         }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.72) }
@@ -362,15 +411,6 @@ ApplicationWindow {
             anchors.leftMargin: 24
             anchors.rightMargin: 20
             spacing: 8
-            Label {
-                text: "omabible"
-                color: desktop.foreground
-                font.pixelSize: 17 * app.scale
-                font.weight: Font.DemiBold
-                font.letterSpacing: -0.5
-                visible: app.width >= 760
-                Layout.rightMargin: 24
-            }
             QuietButton {
                 text: bible.ready ? bible.passage + "  ⌄" : "Open a passage  ⌄"
                 enabled: bible.ready && !bible.busy
@@ -485,15 +525,74 @@ ApplicationWindow {
                             delegate: Item {
                                 id: verseRow
                                 required property var modelData
+                                required property int index
                                 readonly property bool selected: modelData.number >= bible.selectedStart && modelData.number <= bible.selectedEnd && bible.selectedStart > 0
+                                readonly property real gutter: 40 * app.scale
                                 width: readerColumn.width
                                 height: verseHeading.height + verseBody.height + 7 * app.scale
+                                Item {
+                                    id: bookmarkMarker
+                                    objectName: "bookmarkMarker" + verseRow.modelData.number
+                                    x: 0
+                                    width: 14 * app.scale
+                                    height: parent.height
+                                    visible: verseRow.modelData.bookmarked
+                                    readonly property bool starts: !!verseRow.modelData.bookmarkStart
+                                    readonly property bool ends: !!verseRow.modelData.bookmarkEnd
+                                    readonly property bool continuesBefore: !!verseRow.modelData.bookmarkContinuesBefore
+                                    readonly property bool continuesAfter: !!verseRow.modelData.bookmarkContinuesAfter
+                                    readonly property bool chapterContinuation: verseRow.index === 0 && continuesBefore
+                                    readonly property var ranges: Array.from(verseRow.modelData.bookmarkRanges || []).sort(function(a, b) {
+                                        return a.reference.localeCompare(b.reference)
+                                    })
+                                    readonly property string openReference: {
+                                        let starting = ranges.filter(function(range) { return range.bookmarkStart })
+                                        return (starting.length ? starting : ranges)[0]?.reference || ""
+                                    }
+                                    readonly property string hint: ranges.map(function(range) { return range.reference }).join("\n")
+                                        + "\nOpen " + openReference + " · m · Ctrl+D toggles bookmark"
+                                    // Adjacent row segments meet exactly, including headings and
+                                    // chapter continuation. Caps retain logical overlapping endpoints.
+                                    Rectangle {
+                                        objectName: "bookmarkLine" + verseRow.modelData.number
+                                        x: 5 * app.scale
+                                        y: bookmarkMarker.continuesBefore ? 0 : verseHeading.height + 8 * app.scale
+                                        width: app.scale
+                                        height: (bookmarkMarker.continuesAfter ? parent.height : verseHeading.height + verseBody.height) - y
+                                        color: desktop.accent
+                                        opacity: 0.65
+                                    }
+                                    Rectangle {
+                                        x: 5 * app.scale; y: verseHeading.height + verseBody.height - app.scale
+                                        width: 7 * app.scale; height: app.scale
+                                        visible: bookmarkMarker.ends
+                                        color: desktop.accent
+                                    }
+                                    BookmarkGlyph {
+                                        objectName: "bookmarkGlyph" + verseRow.modelData.number
+                                        y: verseHeading.height + 5 * app.scale
+                                        visible: bookmarkMarker.starts
+                                    }
+                                    MouseArea {
+                                        id: bookmarkMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: app.openBookmark(bookmarkMarker.openReference)
+                                    }
+                                    ToolTip.visible: bookmarkMouse.containsMouse
+                                    ToolTip.text: hint
+                                    ToolTip.delay: 500
+                                    Accessible.role: Accessible.Button
+                                    Accessible.name: "Bookmarked passages: " + ranges.map(function(range) { return range.reference }).join(", ")
+                                    Accessible.onPressAction: app.openBookmark(openReference)
+                                }
                                 Item {
                                     id: verseHeading
                                     objectName: "verseHeading" + verseRow.modelData.number
                                     readonly property bool hasHeading: (verseRow.modelData.heading || "").length > 0
-                                    width: parent.width - 42
-                                    x: 36
+                                    width: parent.width - verseRow.gutter - 6
+                                    x: verseRow.gutter
                                     // Measure text at a fixed width, independent of effective
                                     // visibility. First import creates rows inside a hidden
                                     // reader; Label height/implicitHeight/padding feedback
@@ -514,21 +613,21 @@ ApplicationWindow {
                                     }
                                 }
                                 Rectangle {
-                                    x: 27
+                                    x: verseRow.gutter - 9
                                     y: verseHeading.height
-                                    width: parent.width - 27
+                                    width: parent.width - x
                                     height: verseBody.height + 5
-                                    radius: 4
+                                    radius: 0
                                     color: verseRow.selected ? app.tint(desktop.accent, 0.13) : verseRow.modelData.highlighted ? app.tint(desktop.accent, 0.085) : "transparent"
                                     border.width: verseRow.selected ? 1 : 0
                                     border.color: app.tint(desktop.accent, 0.3)
                                 }
                                 Rectangle {
-                                    x: 27
+                                    x: verseRow.gutter - 9
                                     y: verseHeading.height + 4
                                     height: Math.max(12, verseBody.height - 4)
                                     width: 2
-                                    radius: 1
+                                    radius: 0
                                     visible: verseRow.modelData.highlighted
                                     color: desktop.accent
                                     opacity: 0.7
@@ -536,7 +635,8 @@ ApplicationWindow {
                                 Item {
                                     id: verseNumber
                                     objectName: "verseNumber" + verseRow.modelData.number
-                                    width: 29
+                                    x: 14 * app.scale
+                                    width: 17 * app.scale
                                     y: verseHeading.height
                                     height: Math.max(32, verseBody.height)
                                     Accessible.role: Accessible.Button
@@ -551,12 +651,23 @@ ApplicationWindow {
                                         font.weight: verseRow.selected ? Font.Bold : Font.Normal
                                         color: verseRow.selected ? desktop.accent : desktop.muted
                                     }
-                                    Row {
+                                    Canvas {
                                         anchors.horizontalCenter: parent.horizontalCenter
-                                        y: 25 * app.scale
-                                        spacing: 3
-                                        Rectangle { width: 3; height: 3; radius: 1.5; color: desktop.accent; visible: verseRow.modelData.hasNote }
-                                        Rectangle { width: 3; height: 5; radius: 1; color: desktop.muted; visible: verseRow.modelData.bookmarked }
+                                        y: 24 * app.scale
+                                        width: 8 * app.scale; height: 10 * app.scale
+                                        visible: verseRow.modelData.hasNote
+                                        property color ink: desktop.muted
+                                        onInkChanged: requestPaint()
+                                        onPaint: {
+                                            let ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = ink; ctx.lineWidth = app.scale
+                                            ctx.strokeRect(app.scale / 2, app.scale / 2, width - app.scale, height - app.scale)
+                                            ctx.beginPath()
+                                            ctx.moveTo(width * 0.25, height * 0.35); ctx.lineTo(width * 0.75, height * 0.35)
+                                            ctx.moveTo(width * 0.25, height * 0.65); ctx.lineTo(width * 0.75, height * 0.65)
+                                            ctx.stroke()
+                                        }
                                     }
                                     MouseArea {
                                         id: numberMouse
@@ -572,7 +683,7 @@ ApplicationWindow {
                                 }
                                 TextEdit {
                                     id: verseBody
-                                    x: verseRow.modelData.poetry ? 49 : 36
+                                    x: verseRow.gutter + (verseRow.modelData.poetry ? 13 : 0)
                                     y: verseHeading.height
                                     width: parent.width - x - 9
                                     height: contentHeight
@@ -633,7 +744,7 @@ ApplicationWindow {
                     Layout.alignment: Qt.AlignHCenter
                     implicitWidth: 64
                     implicitHeight: 76
-                    radius: 8
+                    radius: 0
                     color: desktop.surface
                     border.color: desktop.border
                     Rectangle { x: 10; y: 0; width: 1; height: parent.height; color: desktop.border }
@@ -705,7 +816,7 @@ ApplicationWindow {
                         QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: bible.toggleBookmark(); tip: "m · Ctrl+D" }
                         QuietButton { text: bible.selectionHighlighted ? "Highlighted" : "Highlight"; emphasized: bible.selectionHighlighted; compact: true; onClicked: bible.toggleHighlight(); tip: "x · Ctrl+H" }
                         Item { Layout.fillWidth: true }
-                        QuietButton { text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy selected passage" }
+                        QuietButton { text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy selected passage · y · Ctrl+Shift+C" }
                     }
                     FineRule { Layout.fillWidth: true }
                     RowLayout {
@@ -788,7 +899,7 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                         }
                     }
-                    Label { text: app.hasSelection ? (noteEditor.text === bible.noteText ? "Saved on this device · changes save as you type" : "Not saved · your draft is still in the editor") : "A dot beside a verse marks a note."; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { text: app.hasSelection ? (noteEditor.text === bible.noteText ? "Saved on this device · changes save as you type" : "Not saved · your draft is still in the editor") : "A page icon beside a verse marks a note."; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
                 }
             }
@@ -810,7 +921,7 @@ ApplicationWindow {
             QuietButton { text: bible.selectionBookmarked ? "★" : "☆"; visible: app.hasSelection; emphasized: bible.selectionBookmarked; compact: true; tip: "Bookmark · m · Ctrl+D"; Accessible.name: "Toggle bookmark"; onClicked: bible.toggleBookmark() }
             QuietButton { text: "Mark"; visible: app.hasSelection; emphasized: bible.selectionHighlighted; compact: true; tip: "Highlight · x · Ctrl+H"; onClicked: bible.toggleHighlight() }
             QuietButton { text: app.verseMode ? "Visual" : "Normal"; visible: bible.ready; emphasized: app.verseMode; compact: true; tip: "Toggle visual selection · v"; onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() } }
-            QuietButton { text: "?"; compact: true; tip: "Keyboard shortcuts · F1"; Accessible.name: "Keyboard shortcuts"; onClicked: helpDialog.open() }
+            QuietButton { text: "?"; compact: true; tip: "Keybindings · ? · F1"; Accessible.name: "Keybindings"; onClicked: helpDialog.open() }
         }
     }
 
@@ -840,7 +951,7 @@ ApplicationWindow {
                 selectByMouse: true
                 leftPadding: 14
                 rightPadding: 14
-                background: Rectangle { color: desktop.surface; radius: 7; border.color: referenceInput.activeFocus ? app.tint(desktop.accent, 0.65) : desktop.border }
+                background: Rectangle { color: desktop.surface; radius: 0; border.color: referenceInput.activeFocus ? app.tint(desktop.accent, 0.65) : desktop.border }
                 onTextChanged: { app.paletteArrowUsed = false; paletteResults.currentIndex = 0 }
                 onAccepted: app.acceptPalette()
                 Keys.onDownPressed: { app.paletteArrowUsed = true; paletteResults.currentIndex = Math.min(paletteResults.count - 1, paletteResults.currentIndex + 1); paletteResults.positionViewAtIndex(paletteResults.currentIndex, ListView.Contain) }
@@ -888,7 +999,7 @@ ApplicationWindow {
                         Label { text: paletteEntry.modelData.hint; color: desktop.muted; font.pixelSize: 11 * app.scale }
                         Label { text: paletteEntry.modelData.action || paletteEntry.modelData.chapter ? "↵" : "›"; color: desktop.muted; Layout.leftMargin: 8 }
                     }
-                    background: Rectangle { radius: 6; color: paletteEntry.highlighted ? app.tint(desktop.accent, 0.11) : paletteEntry.hovered ? desktop.surface : "transparent" }
+                    background: Rectangle { radius: 0; color: paletteEntry.highlighted ? app.tint(desktop.accent, 0.11) : paletteEntry.hovered ? desktop.surface : "transparent" }
                 }
                 Label {
                     anchors.centerIn: parent
@@ -917,30 +1028,43 @@ ApplicationWindow {
         height: app.height
         edge: Qt.LeftEdge
         modal: true
-        padding: 22
+        padding: 24 * app.scale
+        topPadding: padding
+        bottomPadding: padding
+        leftPadding: padding
+        rightPadding: padding
         background: Rectangle { color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
         onClosed: app.readerFocus()
         contentItem: ColumnLayout {
-            spacing: 16
-            RowLayout {
-                Label { text: "Saved passages"; font.pixelSize: 24 * app.scale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true }
-                QuietButton { text: "×"; compact: true; Accessible.name: "Close saved passages"; onClicked: savedDrawer.close() }
-            }
-            Label { text: "Return to what stayed with you."; color: desktop.muted; font.pixelSize: 13 * app.scale }
+            objectName: "savedContent"
+            spacing: (savedDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 1
+                Label { text: "Saved passages"; font.pixelSize: 24 * app.scale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                QuietButton { text: "×"; compact: true; Accessible.name: "Close saved passages"; onClicked: savedDrawer.close() }
+            }
+            Label { text: "Return to what stayed with you."; visible: savedDrawer.height > 400 * app.scale; color: desktop.muted; font.pixelSize: 13 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            GridLayout {
+                id: savedTabs
+                objectName: "savedTabs"
+                Layout.fillWidth: true
+                columns: width < 350 * app.scale ? 2 : 4
+                columnSpacing: 4 * app.scale
+                rowSpacing: 2 * app.scale
                 Repeater {
                     model: ["All", "Bookmarks", "Highlights", "Notes"]
                     delegate: QuietButton {
                         required property string modelData
                         required property int index
+                        objectName: "savedTab" + index
                         text: modelData
                         emphasized: app.collectionTab === index
                         compact: true
                         Layout.fillWidth: true
-                        padding: 6
+                        Layout.minimumWidth: 0
+                        Layout.preferredWidth: 1
+                        padding: 6 * app.scale
                         font.pixelSize: 11 * app.scale
                         onClicked: app.collectionTab = index
                     }
@@ -953,15 +1077,17 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                spacing: 6
+                spacing: 6 * app.scale
                 model: app.filteredCollection()
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: ScrollBar { id: savedScrollbar; objectName: "savedScrollbar" }
                 delegate: ItemDelegate {
                     id: savedEntry
                     objectName: "savedEntry" + modelData.reference
                     required property var modelData
-                    width: collectionList.width
-                    height: savedContent.implicitHeight + 28
+                    width: collectionList.width - savedScrollbar.width - 8 * app.scale
+                    padding: 12 * app.scale
+                    height: savedContent.implicitHeight + topPadding + bottomPadding
+                    clip: true
                     onClicked: {
                         if (!app.flushNote()) return
                         app.savePosition()
@@ -973,17 +1099,19 @@ ApplicationWindow {
                     }
                     contentItem: ColumnLayout {
                         id: savedContent
-                        spacing: 7
+                        objectName: "savedEntryContent" + savedEntry.modelData.reference
+                        spacing: 7 * app.scale
                         Label { text: savedEntry.modelData.reference; color: desktop.foreground; font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
                         Label {
                             text: [savedEntry.modelData.bookmark ? "Bookmark" : "", savedEntry.modelData.highlight ? "Highlight" : "", savedEntry.modelData.note.length ? "Note" : ""].filter(function(s) { return s.length > 0 }).join("  ·  ")
                             color: desktop.accent
                             font.pixelSize: 10 * app.scale
                             Layout.fillWidth: true
+                            wrapMode: Text.Wrap
                         }
                         Label { text: savedEntry.modelData.note.replace(/\s+/g, " "); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     }
-                    background: Rectangle { color: savedEntry.hovered || savedEntry.activeFocus ? desktop.surface : "transparent"; radius: 7; border.width: savedEntry.activeFocus ? 1 : 0; border.color: desktop.accent }
+                    background: Rectangle { color: savedEntry.hovered || savedEntry.activeFocus ? desktop.surface : "transparent"; radius: 0; border.width: savedEntry.activeFocus ? 1 : 0; border.color: desktop.accent }
                 }
                 Label {
                     anchors.centerIn: parent
@@ -999,9 +1127,10 @@ ApplicationWindow {
             }
             FineRule { Layout.fillWidth: true }
             RowLayout {
-                QuietButton { text: "Export notes…"; compact: true; onClicked: { savedDrawer.close(); app.runCommand("export") } }
+                Layout.fillWidth: true
+                QuietButton { text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: { savedDrawer.close(); app.runCommand("export") } }
                 Item { Layout.fillWidth: true }
-                QuietButton { text: "Backup…"; compact: true; onClicked: { savedDrawer.close(); app.runCommand("backup") } }
+                QuietButton { text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: { savedDrawer.close(); app.runCommand("backup") } }
             }
         }
     }
@@ -1009,51 +1138,66 @@ ApplicationWindow {
     ModalCard {
         id: helpDialog
         objectName: "helpDialog"
+        height: Math.min(660 * app.scale, app.height - 48)
+        onOpened: { keybindingSearch.text = ""; keybindingSearch.forceActiveFocus() }
+        onClosed: app.readerFocus()
         contentItem: ColumnLayout {
-            spacing: 18
+            spacing: 16 * app.scale
             RowLayout {
-                Label { text: "A reader at your fingertips"; color: desktop.foreground; font.pixelSize: 23 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                QuietButton { text: "×"; compact: true; Accessible.name: "Close keyboard help"; onClicked: helpDialog.close() }
+                Label { text: "Keybindings"; color: desktop.foreground; font.pixelSize: 23 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                QuietButton { text: "×"; compact: true; Accessible.name: "Close keybindings"; onClicked: helpDialog.close() }
             }
-            ScrollView {
+            TextField {
+                id: keybindingSearch
+                objectName: "keybindingSearch"
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(440 * app.scale, app.height * 0.62)
-                contentWidth: availableWidth
+                implicitHeight: 42 * app.scale
+                placeholderText: "Keybindings..."
+                font.pixelSize: 15 * app.scale
+                selectByMouse: true
+                padding: 10 * app.scale
+                background: Rectangle { color: desktop.surface; border.color: keybindingSearch.activeFocus ? desktop.accent : desktop.border }
+                onTextChanged: keybindingResults.positionViewAtBeginning()
+                Keys.onEscapePressed: helpDialog.close()
+                Accessible.name: "Search keybindings by action or key"
+            }
+            ListView {
+                id: keybindingResults
+                objectName: "keybindingResults"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
-                ColumnLayout {
-                    width: parent.width
-                    spacing: 10
-                    Repeater {
-                        model: [
-                            ["GO & DISCOVER", ""],
-                            ["Open a passage / commands", "Ctrl+K / Ctrl+Shift+P"],
-                            ["Saved passages", "Ctrl+L"],
-                            ["Previous / next chapter", "h / l  ·  [ / ]  ·  Alt+← / Alt+→"],
-                            ["Page down / up", "PageDown / PageUp  ·  Space / Shift+Space  ·  Ctrl+F / Ctrl+B"],
-                            ["Select chapter beginning / end", "g / G  ·  Home / End"],
-                            ["Larger / smaller text", "Ctrl++ / Ctrl+−"],
-                            ["SELECT & KEEP", ""],
-                            ["Toggle visual selection (anchor / collapse)", "v"],
-                            ["Select verse / extend range", "Click number / Shift-click"],
-                            ["Move verse (extend in visual mode)", "j / k  ·  ↓ / ↑"],
-                            ["Enter visual mode and extend", "J / K  ·  Shift+↓ / ↑"],
-                            ["Bookmark / highlight selection", "m / x  ·  Ctrl+D / Ctrl+H"],
-                            ["Write a note / toggle notes", "n or Ctrl+N / Ctrl+Shift+N"],
-                            ["Copy passage (or chapter)", "y  ·  Ctrl+Shift+C"],
-                            ["Leave editor / exit visual / close notes / collapse range", "Esc"],
-                            ["Keyboard help", "? / F1"]
-                        ]
-                        delegate: RowLayout {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            Layout.topMargin: modelData[1] === "" ? 14 : 0
-                            Label { text: modelData[0]; color: modelData[1] === "" ? desktop.accent : desktop.foreground; font.pixelSize: (modelData[1] === "" ? 10 : 12) * app.scale; font.weight: modelData[1] === "" ? Font.DemiBold : Font.Normal; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                            Label { text: modelData[1]; color: desktop.muted; font.pixelSize: 11 * app.scale; horizontalAlignment: Text.AlignRight; Layout.maximumWidth: helpDialog.width * 0.46; wrapMode: Text.Wrap }
-                        }
+                spacing: 12 * app.scale
+                model: app.filteredKeybindings()
+                ScrollBar.vertical: ScrollBar { id: keybindingScrollbar }
+                delegate: RowLayout {
+                    id: keybindingRow
+                    required property var modelData
+                    objectName: "keybinding" + modelData.action
+                    width: keybindingResults.width - keybindingScrollbar.width - 8 * app.scale
+                    spacing: 16 * app.scale
+                    Label {
+                        text: keybindingRow.modelData.action; color: desktop.foreground
+                        font.pixelSize: 13 * app.scale; Layout.fillWidth: true
+                        Layout.preferredWidth: keybindingRow.width * 0.48; wrapMode: Text.Wrap
                     }
-                    Label { text: "Reading keys pause while you type. Standard editing, selection, undo, and copy shortcuts work in notes. A dot beside a verse means it has a note; a small bar means it is bookmarked."; color: desktop.muted; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; Layout.topMargin: 16; wrapMode: Text.Wrap; lineHeight: 1.4 }
+                    Label {
+                        text: keybindingRow.modelData.keys; color: desktop.muted
+                        font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignRight
+                        Layout.fillWidth: true; Layout.preferredWidth: keybindingRow.width * 0.48; wrapMode: Text.Wrap
+                    }
+                }
+                Label {
+                    objectName: "keybindingEmpty"
+                    anchors.centerIn: parent
+                    width: parent.width
+                    text: "No matching keybindings"
+                    visible: keybindingResults.count === 0
+                    horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                    color: desktop.muted; font.pixelSize: 14 * app.scale
                 }
             }
+            Label { text: "Reading keys pause while you type. Bookmark ribbons mark range starts; margin lines continue through the range. A page icon marks a note."; visible: helpDialog.height > 500 * app.scale; color: desktop.muted; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
         }
     }
 
@@ -1070,7 +1214,7 @@ ApplicationWindow {
             width: aboutScroll.availableWidth
             spacing: 16
             RowLayout {
-                Label { text: "omabible"; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
+                Label { text: "Omabible"; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
                 QuietButton { text: "×"; compact: true; Accessible.name: "Close about"; onClicked: aboutDialog.close() }
             }
             SectionLabel { text: "READ SLOWLY. KEEP WHAT MATTERS." }
@@ -1185,7 +1329,7 @@ ApplicationWindow {
         modal: true
         closePolicy: Popup.NoAutoClose
         visible: bible.busy
-        background: Rectangle { radius: 12; color: desktop.background; border.color: desktop.border }
+        background: Rectangle { radius: 0; color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.78) }
         contentItem: ColumnLayout {
             spacing: 20
@@ -1199,8 +1343,8 @@ ApplicationWindow {
                 to: 1
                 value: Math.max(0, Math.min(1, bible.importProgress))
                 indeterminate: bible.importProgress <= 0
-                background: Rectangle { implicitHeight: 3; radius: 2; color: desktop.surface }
-                contentItem: Item { implicitHeight: 3; Rectangle { width: importProgressBar.indeterminate ? parent.width * 0.15 : parent.width * importProgressBar.visualPosition; height: parent.height; radius: 2; color: desktop.accent } }
+                background: Rectangle { implicitHeight: 3; radius: 0; color: desktop.surface }
+                contentItem: Item { implicitHeight: 3; Rectangle { width: importProgressBar.indeterminate ? parent.width * 0.15 : parent.width * importProgressBar.visualPosition; height: parent.height; radius: 0; color: desktop.accent } }
             }
             Label { text: "Everything stays on this device."; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.alignment: Qt.AlignHCenter }
         }
@@ -1213,7 +1357,7 @@ ApplicationWindow {
         anchors.bottomMargin: 68
         width: Math.min(toast.implicitWidth + 36, app.width - 48)
         height: toast.implicitHeight + 24
-        radius: 8
+        radius: 0
         color: desktop.surface
         border.color: desktop.border
         visible: toastTimer.running
