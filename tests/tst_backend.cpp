@@ -87,10 +87,11 @@ private slots:
         QVERIFY2(prefs->error().isEmpty(),qPrintable(prefs->error()));
         QVERIFY(prefs->showVerseNumbers()); QVERIFY(prefs->showHeadings()); QVERIFY(prefs->versePicker());
         QCOMPARE(prefs->lineHeight(),1.5); QVERIFY(!prefs->focusMode()); QVERIFY(!prefs->blockMode());
+        QCOMPARE(prefs->readingMode(),QString("paragraph")); QCOMPARE(prefs->fontSize(),18);
         QVERIFY(prefs->chapterVerses(1,1).isEmpty());
         const QString path = prefs->dataDirectory()+"/personal.sqlite";
         // QML can both assign the properties and invoke each setter.
-        for (const QString name : {"showVerseNumbers", "showHeadings", "versePicker", "lineHeight", "focusMode", "blockMode"}) {
+        for (const QString name : {"showVerseNumbers", "showHeadings", "versePicker", "lineHeight", "focusMode", "blockMode", "readingMode", "fontSize"}) {
             const auto property = prefs->metaObject()->property(prefs->metaObject()->indexOfProperty(qPrintable(name)));
             QVERIFY(property.isReadable()); QVERIFY(property.isWritable());
             QCOMPARE(property.notifySignal().name(),QByteArray("preferencesChanged"));
@@ -130,7 +131,7 @@ private slots:
             }
             // Existing schema-2 installs acquire the additive table on next open.
             QVERIFY(q.exec("DROP TABLE preferences"));
-            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),3); q.finish();
+            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),4); q.finish();
         }
         QSqlDatabase::removeDatabase("preferences-test");
         prefs = std::make_unique<BibleBackend>();
@@ -138,7 +139,7 @@ private slots:
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","preferences-test"); db.setDatabaseName(path); QVERIFY(db.open());
             QSqlQuery q(db);
-            QVERIFY(q.exec("SELECT COUNT(*) FROM preferences")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),6); q.finish();
+            QVERIFY(q.exec("SELECT COUNT(*) FROM preferences")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),8); q.finish();
             QVERIFY(q.exec("CREATE TRIGGER reject_preferences BEFORE UPDATE ON preferences BEGIN SELECT RAISE(ABORT,'preference disk failure'); END"));
             QSignalSpy changes(prefs.get(),&BibleBackend::preferencesChanged);
             prefs->setShowVerseNumbers(false); prefs->setShowHeadings(false); prefs->setVersePicker(false);
@@ -172,6 +173,32 @@ private slots:
         QCOMPARE(prefs->lineHeight(),2.1); QVERIFY(prefs->blockMode()); QVERIFY(prefs->error().isEmpty());
         prefs->setBlockMode(false);
         prefs.reset(); prefs = std::make_unique<BibleBackend>(); QVERIFY(!prefs->blockMode());
+        QCOMPARE(prefs->readingMode(),QString("verse"));
+        prefs->setReadingMode("paragraph");
+        prefs->setFontSize(-100); QCOMPARE(prefs->fontSize(),8);
+        prefs->setFontSize(100); QCOMPARE(prefs->fontSize(),40);
+        prefs->setFontSize(23);
+        QSignalSpy finalChanges(prefs.get(),&BibleBackend::preferencesChanged);
+        prefs->setFontSize(23); prefs->setReadingMode("paragraph");
+        prefs->setReadingMode("unknown"); QCOMPARE(finalChanges.count(),0);
+        QCOMPARE(prefs->readingMode(),QString("paragraph"));
+        prefs.reset(); prefs = std::make_unique<BibleBackend>();
+        QCOMPARE(prefs->fontSize(),23); QCOMPARE(prefs->readingMode(),QString("paragraph"));
+        prefs.reset();
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","preferences-migration"); db.setDatabaseName(path); QVERIFY(db.open());
+            QSqlQuery q(db);
+            for (int old : {1,0}) {
+                QVERIFY(q.exec("DELETE FROM preferences WHERE key='readingMode'"));
+                QVERIFY(q.exec(QString("UPDATE preferences SET value=%1 WHERE key='blockMode'").arg(old)));
+                { BibleBackend migrated; QCOMPARE(migrated.readingMode(),old ? QString("block") : QString("paragraph")); }
+                QVERIFY(q.exec("SELECT value FROM preferences WHERE key='readingMode'")); QVERIFY(q.next());
+                QCOMPARE(q.value(0).toString(),old ? QString("block") : QString("paragraph")); q.finish();
+            }
+            QVERIFY(q.exec("UPDATE preferences SET value=8.5 WHERE key='fontSize'"));
+            { BibleBackend invalid; QCOMPARE(invalid.fontSize(),18); }
+        }
+        QSqlDatabase::removeDatabase("preferences-migration");
     }
     void invalidArchivePreservesTarget() {
         const auto target = file("untouched.sqlite");
@@ -212,6 +239,9 @@ private slots:
         QVERIFY2(bible->ready(),qPrintable(bible->error()));
         QCOMPARE(ready.count(),1); QCOMPARE(bible->importProgress(),1.0);
         QCOMPARE(bible->verses().size(),31);
+        QVERIFY(bible->hasParagraphs());
+        QVERIFY(bible->verses()[5].toMap()["paragraphStart"].toBool());
+        QVERIFY(!bible->verses()[6].toMap()["paragraphStart"].toBool());
         QString validationError;
         QVERIFY2(EpubImporter::validateDatabase(biblePath(bible.get()),&validationError),qPrintable(validationError));
         int chapters = 0, verses = 0;
@@ -1102,7 +1132,7 @@ private slots:
         QCOMPARE(backend->lineHeight(),2.3);
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","corrupt-legacy"); db.setDatabaseName(directory+"/personal.sqlite"); QVERIFY(db.open()); QSqlQuery q(db);
-            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),3); q.finish();
+            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),4); q.finish();
             QVERIFY(q.exec("SELECT version_id,note FROM annotations")); QVERIFY(q.next());
             QCOMPARE(q.value(0).toString(),QString("net-2.1")); QCOMPARE(q.value(1).toString(),QString("Preserved legacy NET note")); q.finish();
             QVERIFY(q.exec("SELECT COUNT(*) FROM installed")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0);
@@ -1368,6 +1398,94 @@ private slots:
         QVERIFY(library->navigate("John 3:35-4:2")); QCOMPARE(library->noteText(),QString("NET-only legacy range"));
         QCOMPARE(library->lineHeight(),2.4);
     }
+    void legacyParagraphsAndMru() {
+        const QString kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
+        if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires both EPUB fixtures.");
+        const QString application = QCoreApplication::applicationName();
+        const auto restoreName = qScopeGuard([application] { QCoreApplication::setApplicationName(application); });
+        QCoreApplication::setApplicationName("paragraph-mru-test");
+        auto backend = std::make_unique<BibleBackend>();
+        backend->importEpub(QUrl::fromLocalFile(epub)); QTRY_VERIFY_WITH_TIMEOUT(!backend->busy(),240000);
+        QVERIFY2(backend->ready(),qPrintable(backend->error()));
+        const QString netPath = biblePath(backend.get());
+        backend->importEpub(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!backend->busy(),240000);
+        QCOMPARE(backend->versionId(),QString("kjv-2006"));
+        const QString kjvPath = biblePath(backend.get()), store = backend->dataDirectory()+"/personal.sqlite";
+        QVERIFY(backend->navigate("Genesis 1:6"));
+        QVERIFY(backend->hasParagraphs());
+        QVERIFY(backend->verses()[5].toMap()["paragraphStart"].toBool());
+        QVERIFY(!backend->verses()[6].toMap()["paragraphStart"].toBool());
+        QVERIFY(!backend->copySelection().contains(QChar(0xb6)));
+        const QString clean = backend->copySelection(true);
+        backend->setFontSize(25); backend->setReadingMode("paragraph");
+        backend.reset();
+        // Recreate schema-1 storage without access to any original source file.
+        // Legacy KJV keeps layout markers, including safe HTML wrappers; NET
+        // lacks the paragraph boundary information and must fall back to verses.
+        for (const auto &path : {netPath,kjvPath}) {
+            {
+                auto db = QSqlDatabase::addDatabase("QSQLITE","legacy-paragraphs"); db.setDatabaseName(path); QVERIFY(db.open());
+                QSqlQuery q(db);
+                if (path == kjvPath) {
+                    QVERIFY(q.exec("UPDATE verses SET text='¶ '||text,html='¶ '||html WHERE paragraphStart=1"));
+                    QVERIFY(q.exec("UPDATE verses SET html='<i>¶ </i>'||substr(html,3) WHERE book=1 AND chapter=1 AND number=6"));
+                    QVERIFY(q.exec("UPDATE verses SET text=text||' Quoted ‘¶ literal’.',html=html||' Quoted ‘¶ literal’.' WHERE book=1 AND chapter=1 AND number=7"));
+                }
+                QVERIFY(q.exec("ALTER TABLE verses DROP COLUMN paragraphStart"));
+                QVERIFY(q.exec("DELETE FROM metadata WHERE key='paragraph_layout'"));
+                QVERIFY(q.exec("UPDATE metadata SET value='1' WHERE key='schema'"));
+            }
+            QSqlDatabase::removeDatabase("legacy-paragraphs");
+        }
+        QFile original(kjvPath); QVERIFY(original.open(QIODevice::ReadOnly)); const auto bytes = original.readAll(); original.close();
+        backend = std::make_unique<BibleBackend>();
+        QVERIFY2(backend->ready(),qPrintable(backend->error())); QVERIFY(backend->hasParagraphs());
+        QCOMPARE(backend->copySelection(true),clean);
+        QVERIFY(!backend->verses()[5].toMap()["html"].toString().contains(QChar(0xb6)));
+        QVERIFY(backend->chapterVerses(1,1)[5].toMap()["paragraphStart"].toBool());
+        QVERIFY(!backend->chapterVerses(1,1)[5].toMap()["text"].toString().contains(QChar(0xb6)));
+        QVERIFY(backend->copyVerse(7,true).contains("‘¶ literal’"));
+        QVERIFY(backend->navigate("Revelation 22")); QVERIFY(backend->hasParagraphs()); // edition-wide, not this chapter
+        QCOMPARE(backend->versions().first().toMap()["id"].toString(),QString("kjv-2006"));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","mru-check"); db.setDatabaseName(store); QVERIFY(db.open());
+            QSqlQuery q(db);
+            auto rank = [&]() -> qint64 {
+                if (!q.exec("SELECT use_counter FROM library WHERE id=1") || !q.next()) return -1;
+                const auto result = q.value(0).toLongLong(); q.finish(); return result;
+            };
+            qint64 previous = rank(); QVERIFY(previous >= 2);
+            QVERIFY(backend->switchVersion("kjv-2006")); QCOMPARE(rank(),previous);
+            QVERIFY(backend->switchVersion("net-2.1")); QVERIFY(!backend->hasParagraphs());
+            QCOMPARE(backend->versions().first().toMap()["id"].toString(),QString("net-2.1"));
+            QCOMPARE(backend->fontSize(),25); QCOMPARE(backend->readingMode(),QString("paragraph"));
+            QVERIFY(rank() > previous); previous = rank();
+            QVERIFY(backend->navigate("Genesis 1"));
+            for (const auto &row : backend->verses()) QVERIFY(!row.toMap()["paragraphStart"].toBool());
+            backend.reset(); backend = std::make_unique<BibleBackend>();
+            QCOMPARE(rank(),previous); QCOMPARE(backend->versions().first().toMap()["id"].toString(),QString("net-2.1"));
+            const auto versions = backend->versions();
+            QVERIFY(q.exec("CREATE TRIGGER reject_rank AFTER UPDATE OF last_used ON installed BEGIN SELECT RAISE(ABORT,'rank failure'); END"));
+            QVERIFY(!backend->switchVersion("kjv-2006")); QCOMPARE(rank(),previous);
+            QCOMPARE(backend->versions(),versions); QVERIFY(!backend->hasParagraphs());
+            QVERIFY(q.exec("DROP TRIGGER reject_rank"));
+            QVERIFY(q.exec("CREATE TRIGGER reject_rank BEFORE UPDATE ON reading BEGIN SELECT RAISE(ABORT,'late failure'); END"));
+            QVERIFY(!backend->switchVersion("kjv-2006")); QCOMPARE(rank(),previous);
+            QCOMPARE(backend->versions(),versions); QVERIFY(!backend->hasParagraphs());
+            QVERIFY(q.exec("DROP TRIGGER reject_rank"));
+            QVERIFY(backend->switchVersion("kjv-2006")); QVERIFY(backend->hasParagraphs());
+            QVERIFY(original.open(QIODevice::ReadOnly)); QCOMPARE(original.readAll(),bytes); original.close();
+            previous = rank();
+            QVERIFY(backend->removeVersion("kjv-2006",false)); QVERIFY(!backend->hasParagraphs());
+            QVERIFY(rank() > previous); previous = rank();
+            backend->importEpub(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!backend->busy(),240000);
+            QVERIFY2(backend->error().isEmpty(),qPrintable(backend->error())); QVERIFY(rank() > previous);
+            QVERIFY(q.exec("SELECT last_used FROM installed WHERE version_id='kjv-2006'")); QVERIFY(q.next());
+            const auto latest = q.value(0).toLongLong(); q.finish(); QCOMPARE(latest,rank());
+            QCOMPARE(backend->versions().first().toMap()["id"].toString(),QString("kjv-2006"));
+        }
+        QSqlDatabase::removeDatabase("mru-check");
+    }
     void versionOperationRollback() {
         const QString kjv = qEnvironmentVariable("OMABIBLE_TEST_KJV");
         if (!bible->ready() || kjv.isEmpty()) QSKIP("Requires both EPUB fixtures.");
@@ -1514,7 +1632,7 @@ private slots:
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","migration"); db.setDatabaseName(directory+"/personal.sqlite"); QVERIFY(db.open());
             QSqlQuery q(db);
-            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),3); q.finish();
+            QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),4); q.finish();
             QVERIFY(q.exec("SELECT book,chapter,start,end,endBook,endChapter,note FROM annotations WHERE book=43")); QVERIFY(q.next());
             QCOMPARE(q.value(0).toInt(),43); QCOMPARE(q.value(1).toInt(),3); QCOMPARE(q.value(2).toInt(),16);
             QCOMPARE(q.value(3).toInt(),18); QCOMPARE(q.value(4).toInt(),43); QCOMPARE(q.value(5).toInt(),3);

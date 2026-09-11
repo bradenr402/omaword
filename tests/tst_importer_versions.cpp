@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QDomDocument>
 #include <QFile>
+#include <QRegularExpression>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -92,6 +93,29 @@ private slots:
         QVERIFY2(EpubImporter::validateDatabase(target,&error),qPrintable(error));
         Database db(target); QVERIFY(db.db.isOpen());
         QCOMPARE(db.scalar("SELECT COUNT(*) FROM verses").toInt(),count);
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(),QString("2"));
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='paragraph_layout'").toString(),QString("1"));
+        for (int number : {1,6,9,14,20,24,26})
+            QVERIFY2(db.scalar(QString("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=%1").arg(number)).toBool(),qPrintable(QString::number(number)));
+        for (int number : {4,5,7,8,10,12,13})
+            QVERIFY(!db.scalar(QString("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=%1").arg(number)).toBool());
+        QCOMPARE(db.scalar("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=2").toBool(),id == "net-2.1");
+        QCOMPARE(db.scalar("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=3").toBool(),id == "kjv-2006");
+        for (int number : {27,28,31})
+            QCOMPARE(db.scalar(QString("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=%1").arg(number)).toBool(),id == "net-2.1");
+        if (id == "kjv-2006") {
+            // Independently inspected OEBPS/GEN.xhtml div.p groups. Starts 3
+            // and 20 have no pilcrow: ¶ is not the only paragraph signal.
+            QList<int> starts;
+            QSqlQuery paragraphs(db.db);
+            QVERIFY(paragraphs.exec("SELECT number FROM verses WHERE book=1 AND chapter=1 AND paragraphStart=1 ORDER BY number"));
+            while (paragraphs.next()) starts.append(paragraphs.value(0).toInt());
+            QCOMPARE(starts,QList<int>({1,3,6,9,14,20,24,26,29}));
+            QCOMPARE(db.scalar("SELECT COUNT(*) FROM verses WHERE instr(text,'¶') OR instr(html,'¶')").toInt(),0);
+        } else {
+            QVERIFY(db.scalar("SELECT text FROM verses WHERE book=1 AND chapter=1 AND number=27").toString().contains('\n'));
+            QVERIFY(db.scalar("SELECT html FROM verses WHERE book=1 AND chapter=1 AND number=27").toString().contains("<br/>"));
+        }
         QCOMPARE(db.scalar("SELECT COUNT(DISTINCT book) FROM verses").toInt(),66);
         QCOMPARE(db.scalar("SELECT COUNT(*) FROM (SELECT DISTINCT book,chapter FROM verses)").toInt(),1189);
         for (const auto &pair : QList<QPair<QString,QString>>{{"version_id",id},{"abbreviation",abbr},{"edition",name},{"copyright",edition.copyright}}) {
@@ -187,7 +211,10 @@ QT_WARNING_POP
                 QSqlQuery q(db.db); q.prepare("SELECT text,html,heading,poetry FROM verses WHERE book=? AND chapter=? AND number=?");
                 q.addBindValue(book); q.addBindValue(cv[0].toInt()); q.addBindValue(cv[1].toInt());
                 QVERIFY(q.exec()); QVERIFY(q.next());
-                QCOMPARE(q.value(0).toString().simplified(),verse.value().first.simplified());
+                // Independent source oracle: layout pilcrows are not words.
+                QString words = verse.value().first.trimmed();
+                words.remove(QRegularExpression("^¶\\s+"));
+                QCOMPARE(q.value(0).toString().simplified(),words.simplified());
                 const QString html = q.value(1).toString();
                 QVERIFY(!html.contains("noteref")); QVERIFY(!html.contains("href="));
                 if (!verse.value().second.isEmpty()) { QVERIFY(html.contains("<i>")); ++supplied; }
@@ -198,6 +225,34 @@ QT_WARNING_POP
         }
         QCOMPARE(checked,31102); QVERIFY(supplied > 10000); QVERIFY(headings >= 116); QCOMPARE(poetry,2461);
     }
+    void netInternalParagraphs() {
+        const auto path = source("OMABIBLE_TEST_EPUB");
+        if (path.isEmpty()) QSKIP("Set OMABIBLE_TEST_EPUB.");
+        auto entries = unzip(path);
+        QString chapter;
+        for (auto it = entries.cbegin(); it != entries.cend(); ++it)
+            if (it.value().contains("NET Bible 2.1 Genesis 1</title>")) { chapter = it.key(); break; }
+        QVERIFY(!chapter.isEmpty());
+        entries[chapter] = QString("<html><head><title>NET Bible 2.1 Genesis 1</title></head><body>").toUtf8();
+        auto &gen = entries[chapter];
+        gen += "<p class='bodytext'><span class='verse'>1:1</span>Alpha</p>\n";
+        gen += "<p class='bodytext'>continued <span class='verse'>1:2</span>Beta</p>\n";
+        gen += "<p class='bodytext'><span class='verse'>1:3</span>Gamma <span class='verse'>1:4</span>Delta</p>\n";
+        gen += "<p class='poetry'><span class='verse'>1:5</span>First line</p>\n<p class='poetry'>second line</p>\n";
+        gen += "<p class='bodytext'><span class='verse'>1:6</span>Next paragraph.";
+        for (int verse = 7; verse <= 31; ++verse)
+            gen += "<span class='verse'>1:" + QByteArray::number(verse) + "</span>Fixture words.";
+        gen += "</p></body></html>";
+        const auto fixture = root.filePath("net-paragraphs.epub"), target = root.filePath("net-paragraphs.sqlite");
+        QVERIFY(zip(fixture,entries));
+        const auto result = EpubImporter::importFile(fixture,target); QVERIFY2(result.ok,qPrintable(result.error));
+        Database db(target);
+        QCOMPARE(db.scalar("SELECT text FROM verses WHERE book=1 AND chapter=1 AND number=1").toString(),QString("Alpha\ncontinued"));
+        QCOMPARE(db.scalar("SELECT html FROM verses WHERE book=1 AND chapter=1 AND number=1").toString(),QString("Alpha<br/>continued"));
+        QCOMPARE(db.scalar("SELECT text FROM verses WHERE book=1 AND chapter=1 AND number=5").toString(),QString("First line\nsecond line"));
+        for (int verse : {1,3,5,6}) QVERIFY(db.scalar(QString("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=%1").arg(verse)).toBool());
+        for (int verse : {2,4,7}) QVERIFY(!db.scalar(QString("SELECT paragraphStart FROM verses WHERE book=1 AND chapter=1 AND number=%1").arg(verse)).toBool());
+    }
     void kjvNotesAndHtml() {
         const auto path = source("OMABIBLE_TEST_KJV_EPUB");
         if (path.isEmpty()) QSKIP("Set OMABIBLE_TEST_KJV_EPUB.");
@@ -206,7 +261,7 @@ QT_WARNING_POP
         int start = gen.indexOf("id=\"GN1_1\""); QVERIFY(start > 0);
         start = gen.indexOf("</span>",start) + 7;
         const int end = gen.indexOf("<span class=\"verse\"",start); QVERIFY(end > start);
-        gen.replace(start,end-start,"Alpha <span class='add'>supplied</span><a epub:type='noteref'><b>NOTE POISON</b></a> tail <span class='nd'>NAME</span> <span class='wj'>spoken</span><span epub:type='footnote'>FOOTNOTE POISON</span> end. ");
+        gen.replace(start,end-start,QString("¶ Alpha <span class='add'>supplied</span><a epub:type='noteref'><b>NOTE POISON</b></a> tail <span class='nd'>NAME</span> <span class='wj'>spoken</span><span epub:type='footnote'>FOOTNOTE POISON</span> quoted ‘¶ literal’ end. ").toUtf8());
         // Equivalent XHTML content with .html spine paths is supported.
         entries.insert("OEBPS/GEN.html",entries.take("OEBPS/GEN.xhtml"));
         entries["OEBPS/content.opf"].replace("GEN.xhtml","GEN.html");
@@ -215,8 +270,8 @@ QT_WARNING_POP
         const auto target = root.filePath("mutated.sqlite");
         const auto result = EpubImporter::importFile(fixture,target); QVERIFY2(result.ok,qPrintable(result.error));
         Database db(target);
-        QCOMPARE(db.scalar("SELECT text FROM verses WHERE book=1 AND chapter=1 AND number=1").toString(),QString("Alpha supplied tail NAME spoken end."));
-        QCOMPARE(db.scalar("SELECT html FROM verses WHERE book=1 AND chapter=1 AND number=1").toString(),QString("Alpha <i>supplied</i> tail NAME spoken end."));
+        QCOMPARE(db.scalar("SELECT text FROM verses WHERE book=1 AND chapter=1 AND number=1").toString(),QString("Alpha supplied tail NAME spoken quoted ‘¶ literal’ end."));
+        QCOMPARE(db.scalar("SELECT html FROM verses WHERE book=1 AND chapter=1 AND number=1").toString(),QString("Alpha <i>supplied</i> tail NAME spoken quoted ‘¶ literal’ end."));
         const auto installed = bytes(target);
         entries["OEBPS/GEN.html"].replace("id=\"GN1_2\"","id=\"GN1_1\"");
         QVERIFY(zip(fixture,entries));

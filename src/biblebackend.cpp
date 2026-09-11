@@ -108,7 +108,7 @@ bool bibleIdentity(const QString &path, const QString &id)
                 while (q.next()) metadata.insert(q.value(0).toString(),q.value(1));
                 QString actual = metadata["version_id"].toString();
                 if (actual.isEmpty() && metadata["edition"] == "NET Bible 2.1") actual = "net-2.1";
-                matches = !q.lastError().isValid() && metadata["schema"] == "1" && actual == id;
+                matches = !q.lastError().isValid() && (metadata["schema"] == "1" || metadata["schema"] == "2") && actual == id;
             }
         }
     }
@@ -249,7 +249,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 3) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
+    if (version > 4) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -271,7 +271,8 @@ bool BibleBackend::initializeStore()
     };
     // Additive to schema 2: annotation backups intentionally exclude preferences.
     schema << "CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY,value NOT NULL) WITHOUT ROWID"
-           << "INSERT OR IGNORE INTO preferences(key,value) VALUES('showVerseNumbers',1),('showHeadings',1),('versePicker',1),('lineHeight',1.5),('focusMode',0),('blockMode',0)";
+           << "INSERT OR IGNORE INTO preferences(key,value) VALUES('showVerseNumbers',1),('showHeadings',1),('versePicker',1),('lineHeight',1.5),('focusMode',0),('blockMode',0),('fontSize',18)"
+           << "INSERT OR IGNORE INTO preferences(key,value) SELECT 'readingMode',CASE WHEN typeof(value) IN ('integer','real') AND value=1 THEN 'block' ELSE 'paragraph' END FROM preferences WHERE key='blockMode'";
     // Schema 3 design: one root transaction owns installation metadata, active ID,
     // version-scoped references/annotations, and global preferences. Removed IDs
     // have no installed row; their retained annotations/reading are an archive.
@@ -295,6 +296,10 @@ bool BibleBackend::initializeStore()
         "CREATE TABLE library(id INTEGER PRIMARY KEY CHECK(id=1),active TEXT NOT NULL)" <<
         "INSERT INTO library VALUES(1,'')" <<
         "PRAGMA user_version=3";
+    if (version < 4) schema <<
+        "ALTER TABLE installed ADD COLUMN last_used INTEGER NOT NULL DEFAULT 0 CHECK(last_used>=0)" <<
+        "ALTER TABLE library ADD COLUMN use_counter INTEGER NOT NULL DEFAULT 0 CHECK(use_counter>=0 AND typeof(use_counter)='integer')" <<
+        "PRAGMA user_version=4";
     for (const auto &sql : schema) {
         if (!q.exec(sql)) { m_store.rollback(); return setError("Cannot initialize notes: " + q.lastError().text()); }
     }
@@ -306,7 +311,7 @@ bool BibleBackend::initializeStore()
             // Personal data can migrate independently of replaceable Scripture.
             // Leave damaged legacy text unregistered and its NET notes archived.
             setError("The legacy Bible text is unavailable. Re-import NET to repair it. " + error);
-        } else if (!q.exec("INSERT INTO installed VALUES('net-2.1','bible.sqlite','NET','NET Bible 2.1','')")
+        } else if (!q.exec("INSERT INTO installed(version_id,path,abbreviation,name,copyright) VALUES('net-2.1','bible.sqlite','NET','NET Bible 2.1','')")
             || !q.exec("UPDATE library SET active='net-2.1' WHERE id=1")) {
             m_store.rollback(); return setError("Cannot migrate the Bible library: " + q.lastError().text());
         }
@@ -334,7 +339,11 @@ bool BibleBackend::loadPreferences()
     m_showHeadings = boolean("showHeadings",true);
     m_versePicker = boolean("versePicker",true);
     m_focusMode = boolean("focusMode",false);
-    m_blockMode = boolean("blockMode",false);
+    const QString mode = values.value("readingMode").toString();
+    m_readingMode = mode == "block" || mode == "verse" ? mode : "paragraph";
+    const auto size = values.value("fontSize");
+    m_fontSize = numeric(size) && size.toDouble() >= 8 && size.toDouble() <= 40
+        && size.toDouble() == size.toInt() ? size.toInt() : 18;
     const auto value = values.value("lineHeight");
     const double height = value.toDouble();
     m_lineHeight = numeric(value) && std::isfinite(height) && height >= 1 && height <= 3
@@ -380,8 +389,21 @@ void BibleBackend::setFocusMode(bool value)
 }
 void BibleBackend::setBlockMode(bool value)
 {
-    if (value == m_blockMode || !savePreference("blockMode",int(value))) return;
-    m_blockMode = value; emit preferencesChanged();
+    setReadingMode(value ? "block" : "verse");
+}
+void BibleBackend::setReadingMode(QString value)
+{
+    if (value != "paragraph" && value != "block" && value != "verse") {
+        setError("Reading mode must be paragraph, block, or verse."); return;
+    }
+    if (value == m_readingMode || !savePreference("readingMode",value)) return;
+    m_readingMode = value; emit preferencesChanged();
+}
+void BibleBackend::setFontSize(int value)
+{
+    value = std::clamp(value,8,40);
+    if (value == m_fontSize || !savePreference("fontSize",value)) return;
+    m_fontSize = value; emit preferencesChanged();
 }
 void BibleBackend::setLineHeight(double value)
 {
@@ -440,7 +462,7 @@ void BibleBackend::removeOwnedBibleFiles(const QString &path, const QString &id)
 bool BibleBackend::readVersions(QVariantList *result)
 {
     QSqlQuery q(m_store);
-    if (!q.exec("SELECT version_id,abbreviation,name,version_id=(SELECT active FROM library WHERE id=1) FROM installed ORDER BY version_id"))
+    if (!q.exec("SELECT version_id,abbreviation,name,version_id=(SELECT active FROM library WHERE id=1) FROM installed ORDER BY 4 DESC,last_used DESC,version_id"))
         return setError("Cannot read installed versions: " + q.lastError().text());
     QVariantList rows;
     while (q.next()) rows.append(QVariantMap{{"id",q.value(0)},{"abbreviation",q.value(1)},
@@ -506,6 +528,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     const auto oldConnection = m_bibleConnection;
     const auto oldId = m_versionId, oldEdition = m_edition, oldAbbreviation = m_abbreviation, oldCopyright = m_copyright;
     const auto oldKeys = m_keys;
+    const bool oldParagraphs = m_hasParagraphs, oldLegacyKjv = m_legacyKjv;
     const int oldBook = m_book, oldChapter = m_chapter, oldStart = m_start, oldEnd = m_end, oldA = m_anchor, oldC = m_cursor;
     const double oldPosition = m_position;
     QSignalBlocker blocker(this);
@@ -517,10 +540,12 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_versionId = oldId; m_edition = oldEdition; m_abbreviation = oldAbbreviation; m_copyright = oldCopyright;
         m_keys = oldKeys; m_book = oldBook; m_chapter = oldChapter; m_start = oldStart; m_end = oldEnd;
         m_anchor = oldA; m_cursor = oldC; m_position = oldPosition;
+        m_hasParagraphs = oldParagraphs; m_legacyKjv = oldLegacyKjv;
         blocker.unblock(); emit errorChanged();
     });
     m_bible = QSqlDatabase(); m_bibleConnection.clear();
     m_versionId = id; m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_keys = {{0,0,0}};
+    m_hasParagraphs = m_legacyKjv = false;
     if (!id.isEmpty()) {
         m_bibleConnection = connectionName(); m_bible = QSqlDatabase::addDatabase("QSQLITE",m_bibleConnection);
         m_bible.setDatabaseName(path); m_bible.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
@@ -536,14 +561,29 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_edition = metadata["edition"].toString(); m_abbreviation = metadata["abbreviation"].toString();
         if (m_abbreviation.isEmpty() && id == "net-2.1") m_abbreviation = "NET";
         m_copyright = metadata["copyright"].toString();
-        if (!text.exec("SELECT book,chapter,number FROM verses ORDER BY book,chapter,number")) return setError("Cannot read Bible verse keys.");
-        while (text.next()) m_keys.append({text.value(0).toInt(),text.value(1).toInt(),text.value(2).toInt()});
+        m_hasParagraphs = metadata["schema"] == "2" && metadata["paragraph_layout"] == "1";
+        m_legacyKjv = id == "kjv-2006" && !m_hasParagraphs;
+        // Read-only backfill: old KJV retains explicit layout pilcrows. Cache
+        // their keys across the entire edition without rewriting its generation.
+        // NET's trimmed verse strings cannot recover inter-verse p boundaries.
+        const QString layout = m_hasParagraphs ? "paragraphStart" : m_legacyKjv ? "text" : "0";
+        if (!text.exec("SELECT book,chapter,number," + layout + " FROM verses ORDER BY book,chapter,number")) return setError("Cannot read Bible verse keys.");
+        while (text.next()) {
+            bool paragraph = text.value(3).toBool();
+            if (m_legacyKjv) {
+                QString original = text.value(3).toString();
+                paragraph = EpubImporter::stripLayoutPilcrow(&original);
+                m_hasParagraphs = m_hasParagraphs || paragraph;
+                paragraph = paragraph || text.value(2).toInt() == 1;
+            }
+            m_keys.append({text.value(0).toInt(),text.value(1).toInt(),text.value(2).toInt(),paragraph});
+        }
         if (text.lastError().isValid() || m_keys.size() < 2) return setError("Cannot read complete Bible verse keys.");
     }
     if (!m_store.transaction()) return setError("Cannot start library update: " + m_store.lastError().text());
     QSqlQuery q(m_store);
     if (!importPath.isEmpty()) {
-        q.prepare("INSERT INTO installed VALUES(?,?,?,?,?) ON CONFLICT(version_id) DO UPDATE SET path=excluded.path,abbreviation=excluded.abbreviation,name=excluded.name,copyright=excluded.copyright");
+        q.prepare("INSERT INTO installed(version_id,path,abbreviation,name,copyright) VALUES(?,?,?,?,?) ON CONFLICT(version_id) DO UPDATE SET path=excluded.path,abbreviation=excluded.abbreviation,name=excluded.name,copyright=excluded.copyright");
         q.addBindValue(id); q.addBindValue(QFileInfo(path).fileName()); q.addBindValue(m_abbreviation);
         q.addBindValue(m_edition); q.addBindValue(m_copyright.isNull() ? QString("") : m_copyright);
         if (!q.exec()) return setError("Cannot install Bible version: " + q.lastError().text());
@@ -565,6 +605,20 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     q.prepare("SELECT active FROM library WHERE id=1");
     if (!q.exec() || !q.next() || q.value(0).toString() != id) return setError("Cannot verify active version.");
     q.finish();
+    // Rank is a library-owned monotonic counter, never a wall-clock timestamp
+    // or MAX(installed): deleting/readding the newest edition gets a fresh rank.
+    // Startup and removal of an inactive edition are not new uses.
+    if (!id.isEmpty() && !startup && (id != oldId || !importPath.isEmpty())) {
+        if (!q.exec("SELECT use_counter FROM library WHERE id=1") || !q.next()) return setError("Cannot read version usage counter.");
+        const qint64 previous = q.value(0).toLongLong(); q.finish();
+        if (!q.exec("UPDATE library SET use_counter=use_counter+1 WHERE id=1")) return setError("Cannot advance version usage counter: " + q.lastError().text());
+        q.prepare("UPDATE installed SET last_used=(SELECT use_counter FROM library WHERE id=1) WHERE version_id=?"); q.addBindValue(id);
+        if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot save version usage rank.");
+        q.prepare("SELECT last_used,use_counter FROM installed,library WHERE version_id=? AND library.id=1"); q.addBindValue(id);
+        if (!q.exec() || !q.next() || q.value(0).toLongLong() <= previous || q.value(0) != q.value(1))
+            return setError("Cannot verify version usage rank.");
+        q.finish();
+    }
     bool fallback = false;
     QVariantList rows, versions;
     QVector<Annotation> annotations;
@@ -678,7 +732,12 @@ QVariantList BibleBackend::chapterVerses(int book, int chapter) const
     q.addBindValue(book); q.addBindValue(chapter);
     if (!q.exec()) return {};
     QVariantList rows;
-    while (q.next()) rows.append(QVariantMap{{"number",q.value(0)},{"text",q.value(1)}});
+    while (q.next()) {
+        QString text = q.value(1).toString();
+        if (m_legacyKjv) EpubImporter::stripLayoutPilcrow(&text);
+        rows.append(QVariantMap{{"number",q.value(0)},{"text",text},
+            {"paragraphStart",endpoint(absoluteVerse(book,chapter,q.value(0).toInt())).paragraphStart}});
+    }
     return q.lastError().isValid() ? QVariantList() : rows;
 }
 bool BibleBackend::persistState(int b, int c, int start, int end, double position)
@@ -724,8 +783,13 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
     q.addBindValue(book); q.addBindValue(chapter);
     if (!q.exec()) return setError("Cannot load chapter: " + q.lastError().text());
     QVariantList rows;
-    while (q.next()) rows.append(QVariantMap{{"number",q.value(0)}, {"text",q.value(1)}, {"html",q.value(2)},
-        {"heading",q.value(3)}, {"poetry",q.value(4).toBool()}, {"highlighted",false}, {"bookmarked",false}, {"hasNote",false}});
+    while (q.next()) {
+        QString text = q.value(1).toString(), html = q.value(2).toString();
+        if (m_legacyKjv) EpubImporter::stripLayoutPilcrow(&text,&html);
+        rows.append(QVariantMap{{"number",q.value(0)}, {"text",text}, {"html",html},
+            {"paragraphStart",endpoint(absoluteVerse(book,chapter,q.value(0).toInt())).paragraphStart},
+            {"heading",q.value(3)}, {"poetry",q.value(4).toBool()}, {"highlighted",false}, {"bookmarked",false}, {"hasNote",false}});
+    }
     QVector<int> expected;
     for (const auto &key : m_keys) if (key.book == book && key.chapter == chapter) expected.append(key.verse);
     if (q.lastError().isValid() || rows.isEmpty() || rows.size() != expected.size())

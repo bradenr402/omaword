@@ -21,6 +21,20 @@
 #include <stdexcept>
 
 namespace EpubImporter {
+bool stripLayoutPilcrow(QString *text, QString *html)
+{
+    static const QRegularExpression marker("^\\s*¶(?:\\s+|$)");
+    const auto match = marker.match(*text);
+    if (!match.hasMatch()) return false;
+    text->remove(0, match.capturedLength());
+    if (html) {
+        static const QRegularExpression htmlMarker("^(\\s*(?:(?:<i>|<b>)\\s*)*)(?:¶|&para;|&#182;|&#x[bB]6;)(?:\\s+|(?=<|$))");
+        const auto rendered = htmlMarker.match(*html);
+        if (rendered.hasMatch()) html->replace(0, rendered.capturedLength(), rendered.captured(1));
+    }
+    return true;
+}
+
 // Numeric metadata derived from the trusted NETBIBLE21.epub's embedded markers,
 // not document titles. Independently checked against standard KJV maxima:
 // NET differs at 2 Cor 13 (13), 3 John 1 (15), and Rev 12 (18).
@@ -342,7 +356,7 @@ Package package(const QHash<QString, QByteArray> &entries)
 struct Verse {
     int book = 0, chapter = 0, number = 0;
     QString text, html, heading;
-    bool poetry = false;
+    bool poetry = false, paragraphStart = false;
 };
 
 // Only known body paragraphs are Scripture. Superscripts, editorial headings,
@@ -352,7 +366,7 @@ void parseDocument(QByteArray data, const QString &path, QSqlQuery &insert, QSet
     data.replace("&nbsp;", "&#160;");
     QXmlStreamReader xml(data);
     int book = 0;
-    bool bodyParagraph = false, poetry = false;
+    bool bodyParagraph = false, poetry = false, paragraphStart = false;
     QString pendingHeading;
     QStringList styles;
     Verse verse;
@@ -381,6 +395,7 @@ void parseDocument(QByteArray data, const QString &path, QSqlQuery &insert, QSet
         insert.bindValue(0, verse.book); insert.bindValue(1, verse.chapter); insert.bindValue(2, verse.number);
         insert.bindValue(3, verse.text); insert.bindValue(4, verse.html);
         insert.bindValue(5, verse.heading.isNull() ? QString("") : verse.heading); insert.bindValue(6, verse.poetry);
+        insert.bindValue(7, verse.paragraphStart);
         if (!insert.exec()) fail("Duplicate or invalid verse in " + path + ": " + insert.lastError().text());
         verse = Verse();
         verseOutput = 0;
@@ -438,6 +453,7 @@ void parseDocument(QByteArray data, const QString &path, QSqlQuery &insert, QSet
                 } else {
                     bodyParagraph = cl == "bodytext" || cl == "bodyblock" || cl == "quote" || cl.contains("poetry");
                     poetry = cl.contains("poetry");
+                    paragraphStart = bodyParagraph;
                     if (!bodyParagraph) xml.skipCurrentElement();
                 }
             } else if (tag == "span" && cl == "verse" && bodyParagraph) {
@@ -449,6 +465,8 @@ void parseDocument(QByteArray data, const QString &path, QSqlQuery &insert, QSet
                 if (verse.chapter < 1 || verse.chapter > canon()[book-1].chapters || verse.number < 1 || verse.number > chapterMaximum(book,verse.chapter))
                     fail("Out-of-range verse marker in " + path);
                 verse.heading = pendingHeading; pendingHeading.clear(); verse.poetry = poetry;
+                verse.paragraphStart = paragraphStart || verse.number == 1;
+                paragraphStart = false;
                 charge(verse.heading.size());
             } else if (tag == "br" && bodyParagraph) lineBreak();
             else if ((tag == "i" || tag == "b") && bodyParagraph) {
@@ -469,6 +487,9 @@ void parseDocument(QByteArray data, const QString &path, QSqlQuery &insert, QSet
                 while (text.startsWith(' ')) text.remove(0, 1);
             }
             verse.text += text;
+            // A paragraph beginning inside a verse is an internal line break,
+            // not a break before the next verse marker in that paragraph.
+            if (!text.trimmed().isEmpty()) paragraphStart = false;
             QString html = text.toHtmlEscaped();
             for (auto it = styles.crbegin(); it != styles.crend(); ++it) html = '<' + *it + '>' + html + "</" + *it + '>';
             verse.html += html;
@@ -487,7 +508,7 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
 {
     QXmlStreamReader xml(data);
     int depth = 0, mainDepth = 0, paragraphDepth = 0, book = 0;
-    bool poetry = false;
+    bool poetry = false, paragraphStart = false;
     QString prefix, pendingHeading;
     QVector<int> italics;
     Verse verse;
@@ -504,12 +525,14 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
         verse.text.replace(QRegularExpression(" *\\n *"), "\n");
         verse.html = verse.html.trimmed();
         verse.html.replace(QRegularExpression(" *(?:<br/> *)+$"), "");
+        if (stripLayoutPilcrow(&verse.text, &verse.html)) verse.paragraphStart = true;
         if (verse.text.isEmpty()) fail("Empty KJV verse in " + path);
         if (insert) {
             insert->bindValue(0, verse.book); insert->bindValue(1, verse.chapter); insert->bindValue(2, verse.number);
             insert->bindValue(3, verse.text); insert->bindValue(4, verse.html);
             insert->bindValue(5, verse.heading.isNull() ? QString("") : verse.heading);
             insert->bindValue(6, verse.poetry);
+            insert->bindValue(7, verse.paragraphStart);
             if (!insert->exec()) fail("Duplicate or invalid KJV verse in " + path + ": " + insert->lastError().text());
         }
         verse = Verse(); verseOutput = 0;
@@ -541,6 +564,7 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
             } else if (mainDepth && tag == "div") {
                 if (cl == "p" || cl == "q" || cl == "q1" || cl == "q2" || cl == "m") {
                     paragraphDepth = depth; poetry = cl.startsWith('q');
+                    paragraphStart = true;
                 } else if (cl == "d" || cl == "s" || cl == "s1" || cl == "s2") {
                     flush();
                     QString heading;
@@ -571,6 +595,8 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
                 if (!kjvMaximum(book, verse.chapter) || verse.number > kjvMaximum(book, verse.chapter))
                     fail("Out-of-range KJV verse marker in " + path);
                 verse.heading = pendingHeading; pendingHeading.clear(); verse.poetry = poetry;
+                verse.paragraphStart = paragraphStart || verse.number == 1;
+                paragraphStart = false;
                 charge(verse.heading.size());
                 documents.insert(QString("%1:%2").arg(book).arg(verse.chapter));
                 skip();
@@ -590,14 +616,21 @@ void parseKjv(const QByteArray &data, const QString &path, QSqlQuery *insert,
             }
             if (mainDepth == depth) { flush(); mainDepth = 0; }
             --depth;
-        } else if (xml.isCharacters() && paragraphDepth && verse.number) {
+        } else if (xml.isCharacters() && paragraphDepth) {
             charge(7 * qint64(xml.text().size()) + (italics.isEmpty() ? 0 : 7));
             QString text = xml.text().toString();
             text.replace(QRegularExpression("\\s+"), " ");
+            // A pilcrow is layout only directly after a verse marker or at a
+            // source paragraph boundary. Never remove one from quoted prose.
+            if (paragraphStart || verse.text.trimmed().isEmpty()) {
+                if (stripLayoutPilcrow(&text) && verse.text.trimmed().isEmpty()) verse.paragraphStart = true;
+            }
+            if (!verse.number) continue;
             if (verse.text.isEmpty() || verse.text.endsWith('\n') || verse.text.endsWith(' ')) {
                 while (text.startsWith(' ')) text.remove(0, 1);
             }
             verse.text += text;
+            if (!text.trimmed().isEmpty()) paragraphStart = false;
             const QString html = text.toHtmlEscaped();
             verse.html += italics.isEmpty() || html.isEmpty() ? html : "<i>" + html + "</i>";
             if (!text.trimmed().isEmpty()) verse.poetry = verse.poetry || poetry;
@@ -625,7 +658,12 @@ void validate(QSqlDatabase &db)
     auto maximum = [&](int b, int c) { return kjv ? kjvMaximum(b,c) : chapterMaximum(b,c); };
     auto omitted = [&](int b, int c, int v) { return !kjv && omittedVerse(b,c,v); };
     exec(q, "SELECT value FROM metadata WHERE key='schema'");
-    if (!q.next() || q.value(0).toString() != "1") fail("The Bible database has an unsupported format.");
+    if (!q.next() || (q.value(0).toString() != "1" && q.value(0).toString() != "2"))
+        fail("The Bible database has an unsupported format.");
+    if (metadata.value("schema") == "2") {
+        exec(q, "SELECT COUNT(*) FROM verses WHERE paragraphStart IS NULL OR paragraphStart NOT IN (0,1)");
+        if (!q.next() || q.value(0).toInt()) fail("The Bible has invalid paragraph metadata.");
+    } else if (metadata.value("paragraph_layout") == "1") fail("Paragraph metadata requires Bible schema 2.");
     exec(q, "SELECT book,chapter,number,text,html FROM verses ORDER BY book,chapter,number");
     int lastBook = 0, lastChapter = 0, lastVerse = 0, chapters = 0, chapterSize = 0;
     auto finishChapter = [&] {
@@ -725,16 +763,16 @@ Result importFile(const QString &epubPath, const QString &databasePath,
             exec(q, "PRAGMA synchronous=FULL");
             exec(q, "CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)");
             if (!q.prepare("INSERT INTO metadata VALUES(?,?)")) fail(q.lastError().text());
-            const QList<QPair<QString, QString>> metadata = {{"schema", "1"}, {"version_id", info.edition.id},
+            const QList<QPair<QString, QString>> metadata = {{"schema", "2"}, {"paragraph_layout", "1"}, {"version_id", info.edition.id},
                 {"abbreviation", info.edition.abbreviation}, {"edition", info.edition.name}, {"copyright", info.edition.copyright}};
             for (const auto &item : metadata) {
                 q.bindValue(0, item.first); q.bindValue(1, item.second.isNull() ? QString("") : item.second);
                 if (!q.exec()) fail(q.lastError().text());
             }
-            exec(q, "CREATE TABLE verses(book INTEGER NOT NULL,chapter INTEGER NOT NULL,number INTEGER NOT NULL,text TEXT NOT NULL,html TEXT NOT NULL,heading TEXT NOT NULL,poetry INTEGER NOT NULL CHECK(poetry IN (0,1)),PRIMARY KEY(book,chapter,number)) WITHOUT ROWID");
+            exec(q, "CREATE TABLE verses(book INTEGER NOT NULL,chapter INTEGER NOT NULL,number INTEGER NOT NULL,text TEXT NOT NULL,html TEXT NOT NULL,heading TEXT NOT NULL,poetry INTEGER NOT NULL CHECK(poetry IN (0,1)),paragraphStart INTEGER NOT NULL CHECK(paragraphStart IN (0,1)),PRIMARY KEY(book,chapter,number)) WITHOUT ROWID");
             if (!c.db.transaction()) fail(c.db.lastError().text());
             QSqlQuery insert(c.db);
-            if (!insert.prepare("INSERT INTO verses VALUES(?,?,?,?,?,?,?)")) fail(insert.lastError().text());
+            if (!insert.prepare("INSERT INTO verses VALUES(?,?,?,?,?,?,?,?)")) fail(insert.lastError().text());
             QSet<QString> documents;
             qint64 globalOutput = 0;
             for (int i = 0; i < paths.size(); ++i) {

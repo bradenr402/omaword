@@ -43,6 +43,9 @@ class BibleBackend : public QObject
     Q_PROPERTY(double lineHeight READ lineHeight WRITE setLineHeight NOTIFY preferencesChanged)
     Q_PROPERTY(bool focusMode READ focusMode WRITE setFocusMode NOTIFY preferencesChanged)
     Q_PROPERTY(bool blockMode READ blockMode WRITE setBlockMode NOTIFY preferencesChanged)
+    Q_PROPERTY(QString readingMode READ readingMode WRITE setReadingMode NOTIFY preferencesChanged)
+    Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
+    Q_PROPERTY(bool hasParagraphs READ hasParagraphs NOTIFY versionChanged)
 
 public:
     explicit BibleBackend(QObject *parent = nullptr);
@@ -79,13 +82,20 @@ public:
     bool versePicker() const { return m_versePicker; }
     double lineHeight() const { return m_lineHeight; }
     bool focusMode() const { return m_focusMode; }
-    bool blockMode() const { return m_blockMode; }
+    // Compatibility setter: true -> block, false -> verse. Default paragraph
+    // mode also reports false; callers should use readingMode for three states.
+    bool blockMode() const { return m_readingMode == "block"; }
+    QString readingMode() const { return m_readingMode; }
+    int fontSize() const { return m_fontSize; }
+    bool hasParagraphs() const { return m_hasParagraphs; }
     Q_INVOKABLE void setShowVerseNumbers(bool value);
     Q_INVOKABLE void setShowHeadings(bool value);
     Q_INVOKABLE void setVersePicker(bool value);
     Q_INVOKABLE void setLineHeight(double value);
     Q_INVOKABLE void setFocusMode(bool value);
     Q_INVOKABLE void setBlockMode(bool value);
+    Q_INVOKABLE void setReadingMode(QString value);
+    Q_INVOKABLE void setFontSize(int value);
 
     Q_INVOKABLE void importEpub(QUrl file);
     Q_INVOKABLE bool switchVersion(QString id);
@@ -146,7 +156,7 @@ private:
     bool loadPreferences();
     bool savePreference(const QString &key, const QVariant &value);
     QString copyRange(int first, int last, const QString &reference, bool plainText);
-    struct Verse { int book = 0, chapter = 0, verse = 0; };
+    struct Verse { int book = 0, chapter = 0, verse = 0; bool paragraphStart = false; };
     const QVector<Verse> &canonVerses() const { return m_keys; }
     int absoluteVerse(int book, int chapter, int verse) const;
     Verse endpoint(int index) const { return m_keys.value(index); }
@@ -193,7 +203,10 @@ private:
     int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0;
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
-    bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false, m_blockMode = false;
+    bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false;
+    QString m_readingMode = "paragraph";
+    int m_fontSize = 18;
+    bool m_hasParagraphs = false, m_legacyKjv = false;
     double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection;
     QVector<Annotation> m_annotations;

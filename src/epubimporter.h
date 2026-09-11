@@ -38,4 +38,8 @@ struct Result {
 Result importFile(const QString &epubPath, const QString &databasePath,
                   const std::shared_ptr<std::atomic<double>> &progress = {});
 bool validateDatabase(const QString &databasePath, QString *error = nullptr);
+// Haiola layout marker at the beginning of actual verse/boundary text only.
+// Also normalizes the corresponding safe importer-generated HTML, if supplied.
+// Embedded or quoted pilcrows are Scripture and remain untouched.
+bool stripLayoutPilcrow(QString *text, QString *html = nullptr);
 }
