@@ -397,6 +397,76 @@ private slots:
         key(Qt::Key_V); key(Qt::Key_J);
         QCOMPARE(bible->selectedStart(),1); QCOMPARE(bible->selectedEnd(),2);
     }
+    void palettePreviewMatchesAcceptance() {
+        reference("Genesis 1:1");
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John"); key(Qt::Key_Return);
+        QCOMPARE(window->property("paletteBook").toInt(),43);
+        type("3:16");
+        QCOMPARE(prop("referencePreview","text").toString(),QString("John 3:16"));
+        QCOMPARE(navigation.count(),0);
+        QCOMPARE(bible->selectionReference(),QString("Genesis 1:1"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        navigation.clear();
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("Psalms"); key(Qt::Key_Right);
+        QCOMPARE(window->property("paletteBook").toInt(),19);
+        type("1");
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 1"));
+        key(Qt::Key_Down);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 10"));
+        QCOMPARE(navigation.count(),0);
+        QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->book(),19); QCOMPARE(bible->chapter(),10);
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("Psalms"); key(Qt::Key_Return); type("1"); key(Qt::Key_Down);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 10"));
+        // Editing resets the list override and restores the typed destination.
+        type(":2");
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 1:2"));
+        // Arrows with no matching list entry must not discard a valid typed reference.
+        key(Qt::Key_Down);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 1:2"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->chapter(),1); QCOMPARE(bible->cursorVerse(),2);
+    }
+    void failedCopyDoesNotNotifySuccess() {
+        reference("John 3:36-4:1");
+        const auto verses = bible->verses();
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-copy-failure");
+            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QVERIFY(query.exec("ALTER TABLE verses RENAME TO saved_verses"));
+            QVERIFY(query.exec("CREATE VIEW verses AS SELECT book,chapter,number,CASE WHEN book=43 AND chapter=4 THEN abs(-9223372036854775808) ELSE text END AS text,html,heading,poetry FROM saved_verses"));
+            QApplication::clipboard()->setText("Preserve clipboard on partial read failure");
+            key(Qt::Key_Y);
+            QVERIFY(!bible->error().isEmpty());
+            QVERIFY(item("errorMessage")->isVisible());
+            QCOMPARE(QApplication::clipboard()->text(),QString("Preserve clipboard on partial read failure"));
+            QVERIFY(!item("toast")->isVisible());
+            QVERIFY(!prop("toast","text").toString().contains("copied"));
+            QCOMPARE(bible->verses(),verses);
+            QVERIFY(query.exec("DROP VIEW verses"));
+            QVERIFY(query.exec("ALTER TABLE saved_verses RENAME TO verses"));
+        }
+        QSqlDatabase::removeDatabase("ui-copy-failure");
+        key(Qt::Key_Y);
+        QVERIFY(bible->error().isEmpty());
+        QVERIFY(item("toast")->isVisible());
+        QCOMPARE(prop("toast","text").toString(),bible->selectionReference() + " copied");
+        QVERIFY(QApplication::clipboard()->text().contains(bible->selectionReference()));
+    }
     void chapterBoundarySelection_data() {
         QTest::addColumn<bool>("forward");
         QTest::newRow("next-first") << true;

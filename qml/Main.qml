@@ -48,12 +48,23 @@ ApplicationWindow {
     property int paletteBook: 0
     property string paletteBookName: ""
     property bool paletteArrowUsed: false
+    readonly property var paletteDestination: {
+        let query = referenceInput.text.trim()
+        let entry = paletteResults.model[paletteResults.currentIndex]
+        if (entry && (paletteArrowUsed || !query || query.startsWith(">")
+                || (paletteBook === 0 && !/\d/.test(query)))) {
+            return { entry: entry, reference: entry.chapter ? entry.title : "" }
+        }
+        return { entry: null, reference: paletteBook > 0 ? paletteBookName + " " + query : query }
+    }
     readonly property var paletteResolution: {
         // Relative references depend on the current book, even though the resolver is pure.
         let currentBook = bible.book
         let ready = bible.ready
-        let query = referenceInput.text.trim()
-        return bible.resolveReference(paletteBook > 0 ? paletteBookName + " " + query : query)
+        let destination = paletteDestination
+        if (destination.entry && !destination.reference)
+            return { valid: true, reference: destination.entry.book ? "Browse " + destination.entry.title : destination.entry.title }
+        return bible.resolveReference(destination.reference)
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
@@ -191,8 +202,8 @@ ApplicationWindow {
         }
     }
     function copyPassage() {
-        bible.copySelection()
-        notify((hasSelection ? bible.selectionReference : bible.passage) + " copied")
+        if (bible.copySelection().length > 0)
+            notify((hasSelection ? bible.selectionReference : bible.passage) + " copied")
     }
     function savePosition() {
         if (!restoringPosition && bible.ready) {
@@ -308,12 +319,9 @@ ApplicationWindow {
         }
     }
     function acceptPalette() {
-        let query = referenceInput.text.trim()
-        if (paletteArrowUsed || paletteBook > 0 || !query || query.startsWith(">"))
-            activatePaletteEntry(paletteResults.model[paletteResults.currentIndex])
-        else if (/\d/.test(query)) { if (paletteResolution.valid) jump(query) }
-        else if (paletteResults.count > 0) activatePaletteEntry(paletteResults.model[paletteResults.currentIndex])
-        else if (paletteResolution.valid) jump(query)
+        let destination = paletteDestination
+        if (destination.entry) activatePaletteEntry(destination.entry)
+        else if (paletteResolution.valid) jump(destination.reference)
     }
     function runCommand(action) {
         if (!flushNote()) return
@@ -968,7 +976,7 @@ ApplicationWindow {
             }
             Label {
                 objectName: "referencePreview"
-                visible: !referenceInput.text.trim().startsWith(">") && referenceInput.text.trim().length > 0
+                visible: !referenceInput.text.trim().startsWith(">") && (referenceInput.text.trim().length > 0 || app.paletteBook > 0)
                 text: app.paletteResolution.valid ? app.paletteResolution.reference : "Invalid or incomplete reference · " + app.paletteResolution.error
                 color: app.paletteResolution.valid ? desktop.accent : desktop.muted
                 wrapMode: Text.Wrap
@@ -1361,7 +1369,7 @@ ApplicationWindow {
         color: desktop.surface
         border.color: desktop.border
         visible: toastTimer.running
-        Label { id: toast; anchors.centerIn: parent; width: parent.width - 36; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: desktop.foreground; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
+        Label { id: toast; objectName: "toast"; anchors.centerIn: parent; width: parent.width - 36; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: desktop.foreground; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
     }
     Timer { id: toastTimer; interval: 3000 }
     Timer { id: positionSaveTimer; interval: 350; onTriggered: app.savePosition() }
