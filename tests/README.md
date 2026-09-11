@@ -2,27 +2,28 @@
 
 The single-instance suite (`tests/singleinstance.pro`, included in `bin/test`)
 checks process handoff, argument forwarding, startup races, stale socket/lock
-recovery, and bounded IPC validation. Set `OMABIBLE_TEST_APP` to the built executable
+recovery, and bounded IPC validation. Set `OMAWORD_TEST_APP` to the built executable
 to include its actual-application launch checks.
 
-From the repository root, build and run backend, integrated UI, block-annotation,
-then importer-version tests in `build/tests/`, `build/ui-tests/`,
+From the repository root, `bin/test` runs migration and single-instance suites,
+then backend, integrated UI, block-annotation, and importer-version tests in
+`build/tests/`, `build/ui-tests/`,
 `build/blockannotations/`, and `build/importer-versions/`. GUI suites run offscreen:
 
 ```sh
 bin/test
 # Optional integration cases using your own downloaded editions:
-OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" bin/test
-OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
-  OMABIBLE_TEST_KJV="$HOME/Downloads/eng-kjv2006.epub" bin/test
+OMAWORD_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" bin/test
+OMAWORD_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
+  OMAWORD_TEST_KJV="$HOME/Downloads/eng-kjv2006.epub" bin/test
 ```
 
-`OMABIBLE_TEST_EPUB` enables real NET integration. `OMABIBLE_TEST_KJV` enables
+`OMAWORD_TEST_EPUB` enables real NET integration. `OMAWORD_TEST_KJV` enables
 structured Haiola/eBible KJV 2006 backend/UI cases; backend multi-version cases
 require both files, while UI KJV cases can use the synthetic NET fixture. Missing
 optional inputs skip their dependent cases. `bin/test` normalizes NET and KJV
-paths before changing build directories and exports `OMABIBLE_TEST_KJV_EPUB`
-from `OMABIBLE_TEST_KJV` when unset or empty. Explicit importer/NKJV fixture
+paths before changing build directories and exports `OMAWORD_TEST_KJV_EPUB`
+from `OMAWORD_TEST_KJV` when unset or empty. Explicit importer/NKJV fixture
 overrides should use absolute paths; those variables are not normalized.
 Tests isolate application data in temporary directories
 and do not modify the supplied EPUBs. Source-independence UI cases import and
@@ -39,7 +40,7 @@ in this document. `bin/test -functions` lists the available test functions.
 `tests/tst_importer_versions.cpp` and the importer. It uses Qt Core, SQL, XML,
 Test, and libarchive (no GUI); the independent KJV DOM whitespace oracle requires
 Qt 6.5+ in a Qt 6 build. `bin/test` runs this project automatically after the
-other three suites. To build/run it independently from the repository root:
+other suites. To build/run it independently from the repository root:
 
 ```sh
 mkdir -p build/importer-versions
@@ -48,21 +49,21 @@ mkdir -p build/importer-versions
   qmake6 ../../tests/importer_versions.pro
   make -j"${JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 )
-OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
-  OMABIBLE_TEST_KJV_EPUB="$HOME/Downloads/eng-kjv2006.epub" \
+OMAWORD_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
+  OMAWORD_TEST_KJV_EPUB="$HOME/Downloads/eng-kjv2006.epub" \
   ./build/importer-versions/tst_importer_versions
 ./build/importer-versions/tst_importer_versions -functions
 ```
 
-The KJV variable here is **`OMABIBLE_TEST_KJV_EPUB`**, distinct from
-`OMABIBLE_TEST_KJV` used by backend/UI tests; `bin/test` supplies the fallback
+The KJV variable here is **`OMAWORD_TEST_KJV_EPUB`**, distinct from
+`OMAWORD_TEST_KJV` used by backend/UI tests; `bin/test` supplies the fallback
 described above. Optional rejection-only fixtures must be supplied explicitly and
-use `OMABIBLE_TEST_NKJV_ORIGINAL_EPUB` and `OMABIBLE_TEST_NKJV_EPUB` (the exact
+use `OMAWORD_TEST_NKJV_ORIGINAL_EPUB` and `OMAWORD_TEST_NKJV_EPUB` (the exact
 replacement). For example, with each variable set to its absolute local path:
 
 ```sh
-OMABIBLE_TEST_NKJV_ORIGINAL_EPUB="/absolute/path/to/original-nkjv.epub" \
-  OMABIBLE_TEST_NKJV_EPUB="/absolute/path/to/replacement-nkjv.epub" \
+OMAWORD_TEST_NKJV_ORIGINAL_EPUB="/absolute/path/to/original-nkjv.epub" \
+  OMAWORD_TEST_NKJV_EPUB="/absolute/path/to/replacement-nkjv.epub" \
   ./build/importer-versions/tst_importer_versions unsupportedOcr
 ```
 
@@ -79,6 +80,12 @@ Importer coverage includes:
   stable identity, metadata, 66 books/1,189 chapters, edition-specific counts and
   omissions; missing verses/unsupported IDs fail validation, and legacy NET
   edition-only identity metadata remains valid.
+  New imports assert schema 2, paragraph_layout=1, and source paragraphStart
+  metadata. KJV Genesis 1 groups are 1–2 | 3–5 | 6–8 | 9–13 | 14–19 | 20–23 |
+  24–25 | 26–28 | 29–31, independently checked against source div.p groups;
+  starts 3 and 20 lack ¶, so pilcrows alone are insufficient. Layout pilcrows are
+  stripped from imported text and HTML. Synthetic NET cases verify source p
+  boundaries alongside retained within-verse breaks.
 - `kjvAllWordsAndFormatting`: independent DOM comparison of all 31,102 verses,
   including inline tails, supplied-word italics, Psalm headings, and poetry.
 - `kjvNotesAndHtml`: explicit note subtrees are stripped without losing adjacent
@@ -92,29 +99,43 @@ Importer coverage includes:
 The public app is **OmaWord**, the primary command/executable is `omaword` /
 `build/omaword`, and `packaging/PKGBUILD` builds package `omaword`.
 `branding.env` supplies the name, ID, version, bible/scripture launcher keywords,
-and permanent storage identity to qmake and shell scripts. qmake generates the
+and active storage identity to qmake and shell scripts. qmake generates the
 `Brand` header (`brand.h`) via `branding.pri` and the `omaword.desktop` launcher
 from templates in each application build. Desktop/QML properties expose the
 generated public name and ID. App icons are open books; the Notes panel control
 uses a pencil.
 
-Compatibility deliberately retains the checkout at `~/Projects/omabible`,
-`omabible.pro`, Qt applicationName/data directory `omabible`
-(`~/.local/share/omabible`, or `$XDG_DATA_HOME/omabible`), shared lock identity,
-`omabible-backup`, `omabible-notes.md`, the legacy QML registration, and
-`OMABIBLE_*` test variables. Test data is isolated from that real user directory.
-Build, local install, and package install provide `omabible → omaword` command
-symlinks. The package provides/conflicts with/replaces `omabible`. The local
-installer removes an old launcher only when a regular, non-symlink
-`omabible.desktop` exactly matches `assets/legacy/omabible.desktop` byte-for-byte;
-customized files and symlinks are preserved.
+The active project path is `~/Projects/omaword/omaword.pro`, storage/application
+name is `omaword`, and data defaults to `~/.local/share/omaword` (or
+`$XDG_DATA_HOME/omaword`). QML uses `OmaWord.Reader`, and environment variables use
+`OMAWORD_`. Build/install provide only the new command, with no `omabible` aliases.
+The package conflicts with/replaces historical
+`omabible`. Local installation archives and removes the old binary entry plus
+byte-identical historical launcher/icons; custom launchers/icons are preserved.
+`bash tests/test-install.sh` exercises fresh/repeated installation, upgrade,
+backup preservation, custom collisions, symlinks, and alternate package branding.
+Historical names are explicit exceptions for migration, old backup signatures,
+package upgrades, archived installer assets, and history. Checks should verify
+active identities and these exceptions rather than demand literal elimination
+from all code/history.
+
+The migration suite (`tests/migration.pro`, first in `bin/test`) uses temporary
+XDG-style sibling directories exclusively. It covers merging into an existing
+install-backup directory, notes/reading/global preferences/library preservation,
+live old-lock refusal, stale old socket/lock recovery, a real uncheckpointed WAL,
+both-store conflicts, unsafe files/sidecars/registry paths, and interrupted
+copy/publication/archival recovery. Original bundles are retained under
+`omaword/.storage-migration/originals/`; the durable journal permits restart.
+The primary holds both identities' locks before backend creation and keeps the
+historical lock for the backend lifetime. All user data remains isolated in tests.
 
 ## Backend behavior
 
 - Data lives under Qt's `QStandardPaths::AppDataLocation`. Root `personal.sqlite`
   uses schema 3, with version-specific `annotations`/`reading`, global
   `preferences`, an `installed` table (stable IDs, root-relative paths and edition
-  metadata), and `library` (active ID). New text is installed as
+  metadata and `last_used`), and `library` (active ID and MRU `use_counter`).
+  New text is installed as
   `bible-<UUID>.sqlite` generations in the root; legacy NET `bible.sqlite` is
   validated and registered in place during transactional v1/v2 migration. Legacy
   annotations and reading state migrate to `net-2.1`. Existing valid data opens
@@ -127,11 +148,23 @@ customized files and symlinks are preserved.
   Coverage rejects personal-store/sidecar targets, unrelated filenames, wrong
   editions, symlinks, hardlinks, and aliased text/sidecars; cleanup rechecks ownership.
 - Preferences default to `showVerseNumbers=true`, `showHeadings=true`,
-  `versePicker=true`, `lineHeight=1.5`, `focusMode=false`, and `blockMode=false`.
+  `versePicker=true`, `lineHeight=1.5`, `focusMode=false`, `readingMode="paragraph"`,
+  and `fontSize=18`. Reading modes are paragraph/verse/block; migration maps old
+  blockMode=true to Block and false to Paragraph when readingMode is absent.
   Coverage includes restart persistence, additive preference-table initialization
   alongside schema-3 migration, invalid stored values,
   line-height rounding/clamping to `1.0`–`3.0` in `0.1` steps, non-finite input
-  rejection, and write/commit failures preserving published and persisted state.
+  rejection, font-size integer validation/clamping to 8–40, and write/commit
+  failures preserving published and persisted state.
+- `legacyParagraphsAndMru` (both EPUB fixtures required) checks read-only legacy
+  KJV recovery from retained layout pilcrows, including safe HTML wrappers,
+  clean display/copy text, preservation of literal non-layout ¶, and edition-wide
+  paragraph availability. Legacy NET lacks recoverable source boundaries and
+  falls back to verse rows until reimport while preserving Paragraph preference.
+  Recovery cannot reconstruct unmarked source paragraphs in legacy KJV; reimport
+  supplies complete source metadata. The case also checks active-first persisted
+  MRU ordering, no rank change on startup/already-active selection, transactional
+  rank rollback, fresh ranks after removal/reimport, and font-size persistence.
 - References support full names, standard aliases, ordinal/roman numbered books,
   compact forms, chapter-only references, cross-chapter/book ranges, and single-chapter
   book shorthand. A range may span omitted verse numbers, but its endpoints must
@@ -165,15 +198,16 @@ customized files and symlinks are preserved.
 - Five- and ten-verse movement stops at chapter edges; a subsequent move from the
   edge crosses by one verse. Coverage includes direction reversal and omissions.
 - Backups contain active-version personal data only, with format
-  `omabible-backup`, version `3`, `versionId`, edition, UTC creation time, reading
+  `omaword-backup`, version `3`, `versionId`, edition, UTC creation time, reading
   state, and annotation records. Restore replaces only that version's annotations
   and reading state in one transaction after strict field/type/range validation.
   The matching version must be installed and active; both stable ID and edition
-  name must match. Version-1/version-2 backups remain importable as NET-scoped
+  name must match. Both new and historical `omabible-backup` signatures are accepted
+  for versions 1–3. Version-1/version-2 backups remain importable as NET-scoped
   data, requiring active NET 2.1. Directional anchor/cursor endpoints survive
   restart and restore. Other versions' data and global preferences are preserved;
   preferences and Bible text are excluded from annotation backups.
-- Markdown export writes `omabible-notes.md` atomically in the chosen existing
+- Markdown export writes `omaword-notes.md` atomically in the chosen existing
   directory, containing the active edition name/ID, references, flags, and unchanged
   Markdown notes for that version only.
 - `multiVersionLibrary` covers schema-2 NET migration/rollback, dynamic version
@@ -215,20 +249,28 @@ UI tests use original synthetic text and temporary application data. Coverage in
   middle-click, and command entry. Inside mouse hits preserve the full canonical range
   and cursor; outside hits focus only the copied verse. Failed copies preserve the
   clipboard/selection and do not report success.
-- Flowing block layout (`b`, default off): inline verse starts, optional superscript
-  numbers and section paragraphs, retained poetry breaks, verse hit mapping/navigation,
+- Reading mode defaults to Paragraph; `b` cycles Paragraph → Verse → Block →
+  Paragraph. Paragraph honors source paragraphStart boundaries, Verse uses separate
+  rows, and Block flows continuously with visible headings starting paragraphs.
+  Coverage checks metadata-free Paragraph fallback to rows, inline verse starts,
+  optional superscript numbers, retained poetry breaks, verse hit mapping/navigation,
   autoscroll, notes/annotations, and continuous highlight geometry including wrapped
   lines, headings, bidi runs, and gaps between independent adjacent highlights.
-- Runtime verse-number, heading, verse-picker (`p`), block (`b`), focus-mode, and
-  line-height preferences, including persistence across UI reload. Focus temporarily
-  hides numbers, headings, the edition label, and controls in both layouts while
+  Block-annotation cases also cover paragraph boundaries/annotations and headings
+  coinciding with paragraph starts without creating empty blocks.
+- Runtime verse-number, heading, verse-picker (`p`), reading-mode (`b`), focus-mode,
+  font-size, and line-height preferences, including persistence across UI reload.
+  Focus temporarily
+  hides numbers, headings, the edition label, and controls in all modes while
   retaining the chapter header. It preserves number/heading preferences and
   restores their chosen visibility on exit.
   Line-height changes clear free selection coherently.
 - Reading settings via Shift R or its command entry, including small/scaled sizes:
-  left labels, shortcut hints before right-aligned square switches; toggle keys
-  and Ctrl [ / Ctrl ] work while the dialog
-  and slider have focus; `Ctrl \` resets line height to 1.5 in settings and the reader.
+  left labels, shortcut hints before right-aligned square switches, mode choices,
+  and font-size/line-height sliders. Unmodified Left/Right do not mutate sliders,
+  including after Tab focus traversal. Toggle keys, `b`, Ctrl [ / Ctrl ], and
+  Ctrl + / Ctrl − (also Ctrl =) work while the dialog and sliders have focus;
+  `Ctrl \` resets line height to 1.5 and Ctrl 0 resets font size to 18.
   Dynamic command hints show current state. Reset line height is an executable entry.
 - Searchable Keybindings includes only bound actions plus disabled context/gesture
   guidance: p finds Verse picker, Reset line height and Shift R Reading settings
@@ -246,7 +288,8 @@ UI tests use original synthetic text and temporary application data. Coverage in
 - Text-size feedback for larger/smaller/reset commands, including in focus mode:
   `Text size N` appears only when the value changes, with no new toast at size
   limits or a redundant reset. Default/reset is 18; limits are 8 and 40, with
-  steps of 1 before desktop scaling. Size is session-local.
+  steps of 1 before desktop scaling. Size is persisted globally as fontSize and
+  stays synchronized with the Reading settings slider/value across reloads.
 - Current-range footer, bookmark markers, Saved filtering and keyboard navigation,
   stacked bookmark/note glyphs and highlight accent stripe. Delete/Backspace opens
   exact-entry deletion confirmation; Cancel initially has focus, Esc cancels back to
@@ -262,13 +305,15 @@ UI tests use original synthetic text and temporary application data. Coverage in
   `versionPickerKeyboardAndGeometry` covers small/scaled layouts, search and empty
   results, keyboard navigation, footer/Shift V/command/Keybindings entry points,
   unmodified Enter acceptance, Shift Enter/Return doing nothing, and focus mode.
+  Version lists place the active edition first, then other editions in persisted
+  most-recently-used order.
 - `removalWizardCancellationAndLastVersion` covers version → annotations choice
   (keep by default) → final confirmation, initial Cancel focus, cancellation at
   every step, Back, scaled layout, last-version setup/empty state, and optional
   same-ID NET reimport reconnecting retained annotations.
 - `versionCallbacksGuardUnsavedNotes` checks failed draft saves and failed backend
   switches leave the picker open and preserve notes/library state.
-- `realKjvSwitchAndRemoveAnnotations` uses `OMABIBLE_TEST_KJV` for async import,
+- `realKjvSwitchAndRemoveAnnotations` uses `OMAWORD_TEST_KJV` for async import,
   busy guards, source-copy deletion, active footer/reader/About name and copyright,
   same-passage switching and annotation isolation, removal with annotation deletion,
   reimport, and active-version removal selecting the remaining edition.
@@ -289,7 +334,7 @@ UI tests use original synthetic text and temporary application data. Coverage in
   file dialog, exclusions, separate per-edition backups, reimport for retained
   annotations, cancellation, and export. Restore confirmation also names the
   active edition and explains version-scoped replacement.
-- Optional `asyncFirstImportLayout` uses `OMABIBLE_TEST_EPUB` to import a temporary
+- Optional `asyncFirstImportLayout` uses `OMAWORD_TEST_EPUB` to import a temporary
   EPUB copy through the existing file-acceptance handler, verify async completion,
   remove that copy, navigate/read at different sizes, and reopen the reader with
   identical imported text. This verifies source-EPUB independence after successful
@@ -306,8 +351,12 @@ Supported identity metadata is layout-specific:
 
 Package recognition also requires supported structure. KJV uses 66 book spine
 documents and Haiola chapter/verse markers; arbitrary KJV EPUBs are not accepted.
-New text databases store `schema=1`, `version_id`, `abbreviation`, `edition`, and
-`copyright` (from OPF rights). The personal database's schema 3 and backup format
+New text databases store `schema=2`, `paragraph_layout=1`, `version_id`,
+`abbreviation`, `edition`, and `copyright` (from OPF rights), plus validated boolean
+`verses.paragraphStart`. Reliable boundaries come from source paragraph elements
+and layout pilcrows, with layout ¶ stripped from text/HTML. Legacy schema-1 text
+remains supported with the recovery/fallback described above.
+The personal database's schema 3 and backup format
 version 3 are separate from this text-database schema. Both edition imports are
 validated across all 66 books and 1,189 chapters.
 

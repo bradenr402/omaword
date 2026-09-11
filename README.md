@@ -8,7 +8,7 @@ the import that originally started the app.
 Public branding is defined in `branding.env`. The launcher also matches **bible**
 and **scripture**. The local installer preserves changed installation files in
 `~/.local/share/omaword/install-backups/` before replacing them; existing Bible
-and personal data continue to live in `~/.local/share/omabible/`.
+and personal data migrate safely to `~/.local/share/omaword/` on first launch.
 
 A keyboard-first, offline multi-version Bible reader for Linux, built with C++17 and
 Qt 6 Quick. Read by chapter, keep bookmarks and highlights, and write Markdown
@@ -25,8 +25,8 @@ notes in an overlay for a selected passage.
 - Cross-chapter bookmarks, a single highlight color, and autosaved Markdown notes
   with preview in an animated overlay at every window width.
 - Verse-based Vim navigation, visual range selection, and searchable, executable keybindings.
-- Persisted reading preferences for verse numbers, headings, verse picking, flowing
-  block mode, line height, and distraction-free focus mode.
+- Persisted reading preferences for Paragraph, Verse, and Block modes, verse numbers,
+  headings, verse picking, font size, line height, and distraction-free focus mode.
 - Saved panel filtered by bookmarks, highlights, or notes.
 - Markdown annotation export and JSON personal-data backup/restore.
 - System fonts and desktop text scaling, live Omarchy theme integration, and a
@@ -63,8 +63,8 @@ bin/build
 `bin/build` runs `qmake6` in `build/` and then parallel Make. Set `JOBS=4 bin/build`
 to override the detected CPU count. Scripts locate the checkout from their own
 path, so they can also be invoked from another working directory.
-The checkout can stay at `~/Projects/omabible`; the qmake project is still
-`omabible.pro`.
+The active project path is `~/Projects/omaword/omaword.pro`; scripts also work
+after relocating the checkout.
 
 For a user-local installation, after building:
 
@@ -81,11 +81,10 @@ The desktop ID and icon name are both `omaword`; launcher keywords include
 **bible** and **scripture**. The regular and symbolic app icons depict an open
 book, and the Notes panel control uses a pencil.
 
-The installer also creates `~/.local/bin/omabible` as a compatibility symlink to
-`omaword`; the build similarly provides `build/omabible → omaword`. It removes an
-old local `omabible.desktop` only if it is a regular, non-symlink file matching
-the previously shipped launcher byte-for-byte. Customized launchers and symlinks
-are preserved.
+The installer backs up and removes the historical `~/.local/bin/omabible` entry.
+It also archives and removes historical launchers and icons that match the shipped
+snapshots in `assets/legacy/`. Customized launchers/icons and their symlinks are
+preserved. Builds and installations supply only the `omaword` command.
 
 ### Arch package from the local checkout
 
@@ -102,23 +101,39 @@ the checkout: the recipe is for local builds, not a standalone source package.
 Make honors `MAKEFLAGS` from your makepkg configuration. The package installs to
 `/usr/bin`, `/usr/share/applications`, and `/usr/share/icons/hicolor`, with the
 license and README under `/usr/share/licenses/omaword` and `/usr/share/doc/omaword`.
-`packaging/PKGBUILD` names the package `omaword`, provides/conflicts with/replaces
-the legacy `omabible` package, and installs `/usr/bin/omabible → omaword` for
-existing scripts.
+`packaging/PKGBUILD` names the package `omaword` and conflicts with/replaces
+the historical `omabible` package for upgrades.
 
 ### Branding and compatibility
 
 `branding.env` is the central source for the public name, executable/package ID,
-version, launcher keywords, and permanent storage ID. qmake uses `branding.pri`
+version, launcher keywords, and active storage ID. qmake uses `branding.pri`
 and `src/brand.h.in` to generate a build-local `brand.h` with the `Brand` helpers,
 and `assets/launcher.desktop.in` to generate `build/omaword.desktop`. Install and
 packaging scripts read the same metadata. Visible titles, errors, About text,
 and export headings use **OmaWord**.
 
-The rename deliberately preserves `~/Projects/omabible`, the application-data
-identity `omabible`, shared instance locks, the `omabible-backup` JSON format,
-and the `omabible-notes.md` export filename. Existing data is reused in place;
-no data-directory rename or migration is required by the branding change.
+The active storage ID, Qt application name, and instance lock are `omaword`.
+Before opening the backend, the primary instance acquires the historical
+`omabible.lock` too. Close the old app before upgrading; a running old instance
+causes an informative startup error rather than a second empty library.
+
+Migration recognizes `$XDG_DATA_HOME/omabible` (default `~/.local/share/omabible`)
+and merges only owned databases into the sibling `omaword` directory. Existing
+`install-backups` and unrelated files are preserved. A private SQLite snapshot
+incorporates committed WAL data, then Bible text is published before the personal
+store. Journaled steps resume after interruption; conflicting destination data
+is never overwritten. Originals, including SQLite sidecars, are archived under
+`omaword/.storage-migration/originals/` after commit. The journal stays alongside
+the archive. If both directories already contain application data, startup stops
+so both stores can be preserved and reconciled explicitly.
+
+New exports use `omaword-backup` (version 3) and `omaword-notes.md`. Restore accepts
+both `omaword-backup` and historical `omabible-backup` signatures for versions 1–3.
+QML uses `OmaWord.Reader`; test environment variables use the `OMAWORD_` prefix.
+Historical names remain explicitly for migration, backup compatibility, package
+upgrades, archived installer assets, and history; the rename does not imply literal
+elimination from those records. No `omabible` command aliases are supplied.
 
 ## Bring your supported EPUB
 
@@ -154,8 +169,8 @@ omaword --import "$HOME/Downloads/NETBIBLE21.epub"
 omaword --import "$HOME/Downloads/eng-kjv2006.epub"
 ```
 
-The direct `--import` CLI uses the same multi-version importer, including through
-the legacy `omabible` symlink. CLI help names supported NET 2.1 and Haiola/eBible
+The direct `--import` CLI uses the same multi-version importer.
+CLI help names supported NET 2.1 and Haiola/eBible
 KJV 2006 EPUBs. Only your explicitly selected local file is
 imported. The EPUB, Bible text, and generated Bible database are not bundled with
 the application or package. OmaWord runs no Bible download server and does not
@@ -171,6 +186,8 @@ move through installed versions with the arrow keys; unmodified **Enter** select
 and closes the picker. **Shift Enter** has no action. Switching keeps the same
 canonical passage or selected range; if an endpoint is missing in the destination
 edition, it opens the current chapter without a selection and reports the fallback.
+The active version appears first, followed by other versions in most-recently-used
+(MRU) order. This order persists across restarts and updates on successful activation.
 
 **Remove version** in Commands opens a three-step wizard:
 
@@ -279,7 +296,7 @@ verse. Verse numbers absent in the active version are skipped.
 Press **Shift R**, or open Commands with **Ctrl Space** / **Ctrl Shift P** and
 choose **Reading settings**.
 The individual **Show verse numbers**, **Show headings**, **Verse picker**,
-**Block mode**, **Focus mode**, **Line height**, and **Reset line height** commands
+**Reading mode**, **Focus mode**, **Line height**, and **Reset line height** commands
 also configure reading directly.
 These preferences are global across versions, save synchronously in
 `personal.sqlite`, and survive restarts:
@@ -289,24 +306,36 @@ These preferences are global across versions, save synchronously in
 | Verse numbers (`showVerseNumbers`) | On (`true`) | `r` |
 | Headings (`showHeadings`) | On (`true`) | `t` |
 | Verse picker (`versePicker`) | On (`true`) | `p` |
-| Block mode (`blockMode`) | Off (`false`) | `b` |
+| Reading mode (`readingMode`) | Paragraph (`paragraph`) | `b` cycles Paragraph → Verse → Block → Paragraph |
+| Font size (`fontSize`) | `18` | Reading settings; Ctrl + / Ctrl −; Ctrl 0 resets to 18; range 8–40, steps of 1 |
 | Line height (`lineHeight`) | `1.5` | Ctrl [ / Ctrl ]; `Ctrl \` resets to `1.5`; range `1.0`–`3.0`, steps of `0.1` |
 | Focus mode (`focusMode`) | Off (`false`) | `f` |
 
-Reading settings places each label on the left, its shortcut hint beside a
-right-aligned square switch. The toggle shortcuts and line-height adjustment/reset
-shortcuts work while the settings dialog is open, including when its slider has focus.
+Reading settings includes mode choices and font-size/line-height sliders; boolean
+settings have a left label, shortcut hint, and right-aligned square switch.
+Unmodified Left/Right do not change either slider, including after Tab changes focus.
+Toggle shortcuts, `b`, Ctrl [ / Ctrl ] and `Ctrl \`, and Ctrl + / Ctrl − (also Ctrl =)
+and Ctrl 0 work while the dialog is open, including when a slider has focus.
 Toggles show brief on/off feedback, including when switching focus mode.
 Reader text-size changes show a **Text size …** toast, including in focus mode,
 only when the size actually changes; a reset at the default or a change past a
 size limit produces no new feedback.
 Reader font size starts at **18**, changes in steps of 1 from **8** to **40**, and
-**Ctrl 0** resets it to **18**. This is a session-local size before desktop scaling,
-separate from the persisted preferences above.
+**Ctrl 0** resets it to **18**. The size is persisted globally before desktop scaling.
 
-Block mode flows verses inline through one text document, with optional superscript
-verse numbers. Visible section headings start paragraphs; poetry and within-verse
-breaks remain. Toggle **b** to return to the default separate verse rows.
+**Paragraph** (the default) flows verses within source paragraphs; **Verse** uses
+separate verse rows; **Block** flows verses continuously, with visible section
+headings starting paragraphs. Flowing modes have optional superscript verse numbers;
+poetry and within-verse breaks remain. Press **b** to cycle Paragraph → Verse → Block.
+An existing `blockMode=true` preference migrates to Block; `false` becomes Paragraph.
+
+New imports store reliable paragraph metadata from source paragraph boundaries
+(`p` elements or Haiola `div.p`) and layout pilcrows (`¶`), stripping layout pilcrows
+from text and HTML. KJV Genesis 1 begins with verse groups **1–2 | 3–5 | 6–8**;
+source paragraphs without a pilcrow count too. Older KJV databases recover available
+boundaries from retained layout pilcrows without rewriting the database; reimport
+recovers the full source structure. Older NET databases lack recoverable boundaries,
+so Paragraph displays verse rows until reimport, preserving the chosen preference.
 
 Focus mode keeps the chapter header visible while temporarily hiding verse numbers,
 section headings, the edition label, floating controls, the reader scrollbar, and annotation markers/accents.
@@ -334,12 +363,12 @@ Bookmarks and highlights cover verses. A selection is marked active when all its
 actual verses are covered. Toggling a partially covered selection covers all of
 it; toggling a fully covered selection removes that flag within the selection,
 splitting existing ranges when necessary and preserving other flags and notes.
-In the default verse-row layout, one bookmark ribbon marks the start of a saved
+In Verse mode, one bookmark ribbon marks the start of a saved
 range; its margin line continues through the range, including across chapter
 boundaries. Hover for the full
 reference, or click the ribbon/line to reopen that range. Page icons mark notes.
-Block mode uses a left-margin annotation rail with bookmark ribbons, continuous
-range brackets, and stacked note icons. If several annotations share a line,
+Paragraph and Block modes use a left-margin annotation rail with bookmark ribbons,
+continuous range brackets, and stacked note icons. If several annotations share a line,
 their marker shows a count and opens an exact-reference chooser.
 
 ### Keyboard shortcuts
@@ -386,7 +415,8 @@ and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**
 | Copy free text selection | Ctrl c |
 | Reading settings | Shift R |
 | Toggle verse numbers / headings / focus mode | `r` / `t` / `f` |
-| Toggle verse picker / block mode | `p` / `b` |
+| Toggle verse picker | `p` |
+| Cycle Paragraph → Verse → Block | `b` |
 | Decrease / increase line height | Ctrl [ / Ctrl ] |
 | Reset line height to `1.5` | `Ctrl \` |
 | Larger / smaller reader text | Ctrl + (also Ctrl =) / Ctrl − |
@@ -418,15 +448,14 @@ It reserves no content gutter, widens on hover/drag, and fades after activity.
 
 ## Data, export, and backup
 
-On Linux, application data lives in **`~/.local/share/omabible/`**, or
-`$XDG_DATA_HOME/omabible/` when set. This is Qt's `QStandardPaths::AppDataLocation`
-with an empty organization name and application name `omabible`, deliberately
-retained independently of the public OmaWord name and `omaword` desktop ID.
+On Linux, application data lives in **`~/.local/share/omaword/`**, or
+`$XDG_DATA_HOME/omaword/` when set. This is Qt's `QStandardPaths::AppDataLocation`
+with an empty organization name and application name `omaword`.
 
 - `personal.sqlite`: the root schema-3 database, with version-specific annotations
   and reading state, global reading preferences, an `installed` table mapping
   stable version IDs to text database paths and metadata, and a `library` table
-  recording the active version.
+  recording the active version and usage counter for persisted MRU ordering.
 - `bible-<UUID>.sqlite`: validated text generations for new imports, in the same
   data directory. A successful reimport updates the installed path to its new
   generation before removing the obsolete text file.
@@ -448,11 +477,11 @@ Use **About & attribution → Open local data folder** to find the actual locati
 
 From the command palette or Saved panel:
 
-- **Export notes as Markdown** writes `omabible-notes.md` in the chosen existing
+- **Export notes as Markdown** writes `omaword-notes.md` in the chosen existing
   folder, replacing that export file. It contains the active edition name and
   stable ID, references, flags, and that version's Markdown notes.
 - **Save annotation backup** writes the active version's personal annotations and
-  reading state as JSON with format `omabible-backup`, version **3**, `versionId`,
+  reading state as JSON with format `omaword-backup`, version **3**, `versionId`,
   and `edition`. It excludes other versions, reading preferences, Bible text, and
   your EPUB. Before the file dialog, a scope panel names the active edition and
   explains these exclusions. Choose **Choose file…** to continue. Switch to each
@@ -473,19 +502,19 @@ it is not needed for normal use after a successful import.
 
 ```sh
 bin/test
-OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" bin/test
-OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
-  OMABIBLE_TEST_KJV="$HOME/Downloads/eng-kjv2006.epub" bin/test
+OMAWORD_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" bin/test
+OMAWORD_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" \
+  OMAWORD_TEST_KJV="$HOME/Downloads/eng-kjv2006.epub" bin/test
 ```
 
-The script builds and runs backend, integrated UI, block-annotation, then
+The script first runs storage-migration and single-instance tests, then backend, integrated UI, block-annotation, and
 importer-version tests in `build/tests/`, `build/ui-tests/`,
 `build/blockannotations/`, and `build/importer-versions/`. GUI suites run
-offscreen. The legacy `OMABIBLE_TEST_EPUB` environment variable is optional;
+offscreen. The `OMAWORD_TEST_EPUB` environment variable is optional;
 real-NET backend and UI integration cases are skipped without it.
-`OMABIBLE_TEST_KJV` enables KJV backend/UI integration (backend multi-version
+`OMAWORD_TEST_KJV` enables KJV backend/UI integration (backend multi-version
 cases require both files). `bin/test` normalizes both NET and KJV paths and exports
-`OMABIBLE_TEST_KJV_EPUB` from `OMABIBLE_TEST_KJV` when unset or empty, enabling the
+`OMAWORD_TEST_KJV_EPUB` from `OMAWORD_TEST_KJV` when unset or empty, enabling the
 importer suite with the same fixture. NKJV rejection fixtures require explicit
 optional environment variables. Other UI tests use original synthetic text;
 application data is isolated in temporary directories. See
@@ -493,12 +522,13 @@ application data is isolated in temporary directories. See
 `JOBS` controls build parallelism, and arguments are passed to the test executable
 (for example, `bin/test -functions`). See [tests/README.md](tests/README.md) for the
 backend and UI behavior covered. UI tests exercise palette browsing and resume,
-keyboard navigation, free text and verse selection in row/block layouts, quoted
+keyboard navigation, free text and verse selection in Verse/Paragraph/Block layouts, quoted
 and plain copying, reading preferences and settings shortcuts, actionable
 keybindings, exact Saved deletion, notes overlays, restore confirmation, overlay
 scrollbars, scroll restoration, the supported-EPUB guide and source-EPUB
-independence, version switching/removal and annotation isolation, text-size
-feedback and limits, and narrow/scaled layouts. Use the current test
+independence, version switching/removal and annotation isolation, persisted MRU order,
+paragraph metadata and legacy fallback, persisted font size, slider keyboard isolation,
+text-size feedback and limits, and narrow/scaled layouts. Use the current test
 output for validation results and totals rather than a fixed documented count.
 
 ## License and Bible attribution

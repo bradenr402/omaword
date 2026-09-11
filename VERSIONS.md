@@ -16,6 +16,15 @@ returns empty id on failure, without database writes. Stable IDs `net-2.1`,
 remain valid. validateDatabase understands NET and KJV chapter counts separately.
 NET parser preserved; KJV Haiola/eBible adapter preserves supplied words, strips
 explicit note subtrees, handles Psalm headings and poetry, validates 31,102 verses.
+New text databases use schema 2 with paragraph_layout=1 and boolean
+verses.paragraphStart metadata. Source paragraph boundaries (NET p and Haiola
+div.p) and layout pilcrows both contribute; layout ¶ is stripped from text/HTML.
+KJV Genesis 1 groups are 1–2 | 3–5 | 6–8 | 9–13 | 14–19 | 20–23 | 24–25 |
+26–28 | 29–31. Starts 3 and 20 have no pilcrow: ¶ is not the only boundary signal.
+Schema-1 databases remain valid. Legacy KJV recovers retained pilcrow boundaries
+read-only, which cannot recover every source paragraph; legacy NET falls back to
+verse rows in Paragraph mode until reimport. Reimport supplies reliable source
+metadata; fallback preserves the global reading-mode preference.
 Never accept damaged OCR study-Bible pages as Scripture. Both the original local
 NKJV study EPUB and the exact replacement supplied for assessment have been
 assessed as unsupported OCR layouts: unreliable reading order and absent supported
@@ -30,6 +39,7 @@ unsupported; any sample assessment is inspection-only.
 Properties `QString versionId`, `QString versionAbbreviation`, and
 `QString versionCopyright` also use NOTIFY versionChanged. `QVariantList versions`
 contains maps `{id, abbreviation, name, active}` with NOTIFY versionsChanged.
+The active version comes first, followed by other versions in persisted MRU order.
 Invokables `bool switchVersion(QString id)` and
 `bool removeVersion(QString id, bool removeAnnotations)`.
 Existing importEpub identifies the edition, imports locally, and activates it
@@ -46,7 +56,10 @@ preserve old v1/v2 backups as NET, and protect all live databases from export.
 
 Root `personal.sqlite` uses schema 3. `annotations` and `reading` are keyed by
 `version_id`; `preferences` remains global. `installed` stores stable ID, path,
-abbreviation, name, and copyright; `library` stores the active ID. Paths are
+abbreviation, name, copyright, and `last_used`; `library` stores the active ID and
+monotonic `use_counter`. Successful activation/import updates MRU rank atomically;
+startup and choosing the already-active version do not change recency. Failed
+operations preserve order, and removal/reimport receives a fresh rank. Paths are
 root-relative filenames, with new text generations at `bible-<UUID>.sqlite` in
 the data root. The library is represented by tables, not a per-version directory
 tree. Migration validates/registers legacy root `bible.sqlite` in place as NET,
@@ -62,7 +75,7 @@ for NET, with matching edition identity and an unambiguous registry entry.
 Symlinks, hardlinks, non-regular files/sidecars, personal-store aliases, and
 unrelated filenames are rejected; ownership is rechecked before cleanup.
 
-New backups use format `omabible-backup`, version **3**, and include `versionId`
+New backups use format `omaword-backup`, version **3**, and include `versionId`
 and `edition` alongside creation time, reading state, and annotations. They
 contain only the active version's personal data. Restore requires that version
 to be installed **and active**, with matching stable ID and edition name.
@@ -74,10 +87,20 @@ EPUBs, or preferences.
 
 ## UI (qml/Main.qml + tests/tst_ui.cpp)
 
-Font default/reset 18, range 8..40, steps of 1 before desktop scaling; session-local.
+Global `readingMode` persists as `paragraph` (default), `verse`, or `block`;
+`b` cycles Paragraph → Verse → Block → Paragraph. An absent readingMode migrates
+legacy blockMode=true to Block and false to Paragraph. Paragraph uses source
+boundaries, Verse separate rows, and Block continuous flow with visible headings
+starting paragraphs; poetry and within-verse breaks remain.
+Global `fontSize` persists, default/reset 18, range 8..40, steps of 1 before desktop
+scaling, and is exposed in Reading settings. Unmodified Left/Right do not mutate
+the font-size or line-height slider. Ctrl [ / Ctrl ] and `Ctrl \` adjust/reset
+line height; Ctrl + / Ctrl − (also Ctrl =) and Ctrl 0 adjust/reset font size,
+including while a settings slider has focus.
 Version button displays the active abbreviation immediately right of location;
 combined controls centered and responsive. Shift V and Switch version command
 open keyboard picker; Enter selects and closes, Shift Enter does nothing.
+The picker follows active-first, most-recently-used ordering across restarts.
 Remove version wizard: choose edition, remove annotations? (default keep), final
 confirmation. Cancel/Esc cancels removal at every step. Both picker/wizard support empty
 and busy states, safe notes flushing. Add version guide states supported EPUB
@@ -91,6 +114,16 @@ separate backups per edition and reimport before backing up retained annotations
 Restore confirmation names the active edition and replacement scope. CLI `--import`
 help explicitly names supported NET 2.1 and Haiola/eBible KJV 2006 EPUBs.
 
+## Active identity and historical compatibility
+
+The active project is `~/Projects/omaword/omaword.pro`, installed command is
+`omaword`, data defaults to `~/.local/share/omaword` (or `$XDG_DATA_HOME/omaword`),
+and test environment variables use `OMAWORD_`. Build/install ship no `omabible`
+aliases. The installer backs up replaced files and archives recognized legacy
+entries; storage migration archives original databases after commit. Historical
+names remain explicitly for migration, old backup signatures, package upgrades,
+archived assets, and history, rather than requiring literal elimination everywhere.
+
 ## Supported inputs and verification
 
 - NET: official `NETBIBLE21.epub`, stable ID `net-2.1`, 31,087 verses.
@@ -103,7 +136,7 @@ These are layout/metadata contracts, independent of any developer's local paths.
 See [tests/README.md](tests/README.md) for metadata, optional fixture environment
 variables, and standalone commands for the importer-version test project.
 `bin/test` automatically runs it after backend, UI, and block-annotation suites,
-normalizes `OMABIBLE_TEST_KJV`, and exports it as `OMABIBLE_TEST_KJV_EPUB` when the
+normalizes `OMAWORD_TEST_KJV`, and exports it as `OMAWORD_TEST_KJV_EPUB` when the
 latter is unset/empty. NKJV rejection inputs still require explicit environment
 variables.
 No copyrighted Bible content belongs in the repository.
