@@ -1,4 +1,9 @@
-# OmaBible
+# OmaWord
+
+Public branding is defined in `branding.env`. The launcher also matches **bible**
+and **scripture**. The local installer preserves changed installation files in
+`~/.local/share/omaword/install-backups/` before replacing them; existing Bible
+and personal data continue to live in `~/.local/share/omabible/`.
 
 A keyboard-first, offline NET Bible 2.1 reader for Linux, built with C++17 and
 Qt 6 Quick. Read by chapter, keep bookmarks and highlights, and write Markdown
@@ -15,12 +20,12 @@ notes in an overlay for a selected passage.
 - Verse-based Vim navigation, visual range selection, and searchable, executable keybindings.
 - Persisted reading preferences for verse numbers, headings, verse picking, flowing
   block mode, line height, and distraction-free focus mode.
-- Saved-passages drawer filtered by bookmarks, highlights, or notes.
+- Saved panel filtered by bookmarks, highlights, or notes.
 - Markdown annotation export and JSON personal-data backup/restore.
 - System fonts and desktop text scaling, live Omarchy theme integration, and a
   standard Qt palette fallback on other desktops.
 
-OmaBible supports NET 2.1 only. Full-text search, parallel translations, reading
+OmaWord supports NET 2.1 only. Full-text search, parallel translations, reading
 plans, and cloud sync are outside the current scope. The reader preserves headings,
 poetry, and within-verse breaks; publisher translator notes are not displayed.
 
@@ -44,12 +49,14 @@ From the repository root:
 
 ```sh
 bin/build
-./build/omabible
+./build/omaword
 ```
 
 `bin/build` runs `qmake6` in `build/` and then parallel Make. Set `JOBS=4 bin/build`
 to override the detected CPU count. Scripts locate the checkout from their own
 path, so they can also be invoked from another working directory.
+The checkout can stay at `~/Projects/omabible`; the qmake project is still
+`omabible.pro`.
 
 For a user-local installation, after building:
 
@@ -57,19 +64,27 @@ For a user-local installation, after building:
 bin/install
 ```
 
-This requires no sudo. It installs the compiled binary to `~/.local/bin/omabible`,
-the desktop launcher to `~/.local/share/applications/omabible.desktop`, and SVG
+This requires no sudo. It installs the compiled binary to `~/.local/bin/omaword`,
+the desktop launcher to `~/.local/share/applications/omaword.desktop`, and SVG
 icons under `~/.local/share/icons/hicolor/`. Desktop files and icons honor
 `XDG_DATA_HOME` when set. Ensure `~/.local/bin` is on your desktop session's
-`PATH`; then launch **OmaBible** from your application launcher or run `omabible`.
-The desktop ID and icon name are both `omabible`.
+`PATH`; then launch **OmaWord** from your application launcher or run `omaword`.
+The desktop ID and icon name are both `omaword`; launcher keywords include
+**bible** and **scripture**. The regular and symbolic app icons depict an open
+book, and the Notes panel control uses a pencil.
+
+The installer also creates `~/.local/bin/omabible` as a compatibility symlink to
+`omaword`; the build similarly provides `build/omabible → omaword`. It removes an
+old local `omabible.desktop` only if it is a regular, non-symlink file matching
+the previously shipped launcher byte-for-byte. Customized launchers and symlinks
+are preserved.
 
 ### Arch package from the local checkout
 
 ```sh
 cd packaging
 makepkg -s
-sudo pacman -U ./omabible-0.1.0-1-*.pkg.tar.zst
+sudo pacman -U ./omaword-0.1.0-1-*.pkg.tar.zst
 ```
 
 Run `makepkg` as your regular user. The recipe builds the enclosing source
@@ -78,31 +93,59 @@ source archive or manually generated tarball is required. Keep `packaging/` insi
 the checkout: the recipe is for local builds, not a standalone source package.
 Make honors `MAKEFLAGS` from your makepkg configuration. The package installs to
 `/usr/bin`, `/usr/share/applications`, and `/usr/share/icons/hicolor`, with the
-license and README under `/usr/share/licenses/omabible` and `/usr/share/doc/omabible`.
+license and README under `/usr/share/licenses/omaword` and `/usr/share/doc/omaword`.
+`packaging/PKGBUILD` names the package `omaword`, provides/conflicts with/replaces
+the legacy `omabible` package, and installs `/usr/bin/omabible → omaword` for
+existing scripts.
+
+### Branding and compatibility
+
+`branding.env` is the central source for the public name, executable/package ID,
+version, launcher keywords, and permanent storage ID. qmake uses `branding.pri`
+and `src/brand.h.in` to generate a build-local `brand.h` with the `Brand` helpers,
+and `assets/launcher.desktop.in` to generate `build/omaword.desktop`. Install and
+packaging scripts read the same metadata. Visible titles, errors, About text,
+and export headings use **OmaWord**.
+
+The rename deliberately preserves `~/Projects/omabible`, the application-data
+identity `omabible`, shared instance locks, the `omabible-backup` JSON format,
+and the `omabible-notes.md` export filename. Existing data is reused in place;
+no data-directory rename or migration is required by the branding change.
 
 ## Bring your NET 2.1 EPUB
 
-1. Visit the official [Bible.org NET Bible download page](https://bible.org/downloads)
-   and download **Full Notes Version 2.1 ePub** (`NETBIBLE21.epub`) yourself.
-2. Start OmaBible and choose **Choose NET EPUB…**, then select that local file.
-   You can also use the command palette's **Import NET 2.1 EPUB** action.
-3. Wait for import and validation to finish. Subsequent launches open the local
-   library without importing again or needing a network connection.
+1. Start OmaWord and choose **Add a version** in setup or the command palette.
+   This opens an instruction guide for **NET Bible 2.1 only**, not a translation
+   catalog. Other Bible versions and file formats are not supported.
+2. Use the guide's link to the official [Bible.org downloads page](https://bible.org/downloads).
+   In your browser, download **Full Notes Version 2.1 ePub** (`NETBIBLE21.epub`).
+3. Return to the guide, choose **Choose EPUB…**, and select your local `.epub` file.
+   OmaWord validates the complete NET 2.1 edition and imports it into its own local
+   SQLite database. The guide shows the actual data directory.
+4. After a successful import, you can move or delete the source EPUB. Normal
+   reading and subsequent launches use the database without an internet connection.
+   Reimporting the same supported edition replaces Bible data while preserving
+   notes, bookmarks, highlights, and settings.
 
 The command-line import option is also available:
 
 ```sh
-omabible --import "$HOME/Downloads/NETBIBLE21.epub"
+omaword --import "$HOME/Downloads/NETBIBLE21.epub"
 ```
 
-Only your explicitly selected file is imported. Import validates the complete
-NET 2.1 edition before replacing the local Bible database. The EPUB, Bible text,
-and generated Bible database are not bundled with the application or package.
+The direct `--import` CLI remains available, including through the legacy
+`omabible` symlink. Only your explicitly selected local file is imported. The EPUB,
+Bible text, and generated Bible database are not bundled with the application or
+package. OmaWord runs no Bible download server and does not automatically fetch
+anything from Bible.org; you download the text yourself in your browser. The
+optional real-EPUB UI test verifies reading and reopening after removing a
+temporary copy of the source EPUB.
 
 ## Reading and references
 
-Press **Ctrl k**, enter a reference, and press Enter; or browse a book, chapter,
-and verse in the palette. Turn off **Verse picker** with **p** or in Reading settings
+Use **Search for a passage** (**s** or **Ctrl k**), enter a reference, and press
+Enter; or browse a book, chapter, and verse in the palette. Turn off **Verse picker**
+with **p** or in Reading settings
 to open chapters directly when browsing. Direct references work with either setting:
 
 | Reference | Opens |
@@ -166,7 +209,8 @@ mode. **Space** reopens the last palette with its query, browsing location, and
 selected result. **Esc** first clears nonempty query text (keeping the `>` command
 prefix); another **Esc** closes the palette. The snapshot taken before clearing
 is retained for **Space** to resume. **Ctrl k** starts a fresh passage palette;
-**Ctrl Space** starts fresh in commands. **Shift Space** has no reader action.
+**Ctrl Space** or **Ctrl Shift P** starts fresh in Commands. **Shift Space** has
+no reader action.
 
 Type `20g` to select verse 20 of the current chapter. Invalid or omitted verse
 numbers leave your location unchanged. A numeric prefix expires after two seconds
@@ -187,10 +231,11 @@ verse. Omitted NET verse numbers are skipped.
 
 ### Reading settings
 
-Open the command palette with **Ctrl Space** and choose **Reading settings**.
+Press **Shift R**, or open Commands with **Ctrl Space** / **Ctrl Shift P** and
+choose **Reading settings**.
 The individual **Show verse numbers**, **Show headings**, **Verse picker**,
 **Block mode**, **Focus mode**, **Line height**, and **Reset line height** commands
-also configure reading directly. **Ctrl Shift P** is not bound.
+also configure reading directly.
 Preferences save synchronously in `personal.sqlite` and survive restarts:
 
 | Preference | Default | Control |
@@ -206,6 +251,9 @@ Reading settings places each label on the left, its shortcut hint beside a
 right-aligned square switch. The toggle shortcuts and line-height adjustment/reset
 shortcuts work while the settings dialog is open, including when its slider has focus.
 Toggles show brief on/off feedback, including when switching focus mode.
+Reader text-size changes show a **Text size …** toast, including in focus mode,
+only when the size actually changes; a reset at the default or a change past a
+size limit produces no new feedback.
 
 Block mode flows verses inline through one text document, with optional superscript
 verse numbers. Visible section headings start paragraphs; poetry and within-verse
@@ -220,10 +268,11 @@ to leave focus mode. **Esc** in an open panel dismisses that panel first.
 
 ### Notes, bookmarks, and highlights
 
-Press **n** to write a note, or **Ctrl n** to toggle Notes, including while the
+Press **n** to write a note, or **Ctrl n** to toggle **Notes panel**, including while the
 editor has focus. Notes slide in as an animated overlay at every window width;
 opening them does not reflow the passage. The overlay includes Markdown editing
 and preview, and can be dismissed with **Esc** (also from the editor) or an outside click.
+Opening or closing Notes produces no Notes on/off toast.
 
 Notes save as you type and belong to an **exact verse range**. A note for
 `John 3:16–18` is distinct from a note for `John 3:16`; selecting an overlapping
@@ -249,9 +298,12 @@ active. **?** or **F1** opens **Keybindings**. Search by action or shortcut, mov
 through the results with Up / Down, and press Enter to execute an available action.
 Home / End selects the first / last result; PageUp / PageDown moves the list one
 page at a time. Only actions with bound
-keys appear, including **p** for Verse picker and `Ctrl \` for Reset line height.
+keys appear, including **Shift R** for Reading settings, **p** for Verse picker,
+and `Ctrl \` for Reset line height. The list shows shortcut hints without On/Off
+status prefixes; current setting state remains visible in command-palette hints
+and Reading settings.
 Mouse gestures and other context-only rows are non-executable guidance. Commands
-without bound keys, such as Reading settings, remain in the command palette.
+without bound keys, such as Add a version, remain in the command palette.
 
 Shortcut labels use lowercase letters when Shift is not required (**Ctrl k**,
 **Ctrl c**, **Ctrl n**). Uppercase letters indicate Shift: **Y** means **Shift Y**,
@@ -259,9 +311,10 @@ and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**
 
 | Action | Shortcut |
 | --- | --- |
-| Passage palette / command palette | `s` or Ctrl k / Ctrl Space |
+| Search for a passage | `s`, Ctrl k |
+| Open commands | Ctrl Space, Ctrl Shift P |
 | Resume last palette | Space |
-| Toggle Saved | Ctrl l |
+| Saved panel | Ctrl l |
 | Previous / next chapter | `h` / `l`, Left / Right, `[` / `]` |
 | Previous / next verse | `k` / `j`, Up / Down |
 | Move forward / backward 5 verses | Ctrl d / Ctrl u |
@@ -274,10 +327,11 @@ and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**
 | Bookmark selected verses | `m`, Ctrl m |
 | Highlight selected verses | `x`, Ctrl h |
 | Write a note | `n` |
-| Toggle notes overlay | Ctrl n |
+| Notes panel | Ctrl n |
 | Copy passage (or chapter) as quotation | `y`; Ctrl c with a verse selection and no free text selection |
 | Copy passage (or chapter) as plain text | `Y` (Shift Y), Ctrl Shift C |
 | Copy free text selection | Ctrl c |
+| Reading settings | Shift R |
 | Toggle verse numbers / headings / focus mode | `r` / `t` / `f` |
 | Toggle verse picker / block mode | `p` / `b` |
 | Decrease / increase line height | Ctrl [ / Ctrl ] |
@@ -288,7 +342,8 @@ and **Ctrl Shift C** includes Shift. The same convention applies to **J**, **K**
 | Search and execute keybindings | `?`, F1 |
 
 Use Up/Down and Enter in the palette, or prefix its query with `>` to find
-commands such as import, export, backup, restore, and About.
+commands such as Add a version (the NET 2.1 import guide), export, backup, restore,
+and About.
 
 In the right-hand **Saved** panel, `j` / `k` or Down / Up moves between entries;
 `h` / `l` or Left / Right selects All, Bookmarks, Highlights, or Notes. Enter opens
@@ -305,16 +360,17 @@ underlying reader.
 App-owned panels and dialogs have no close-X controls; use **Esc** to dismiss them
 (with the palette's clear-then-close behavior above). All app-owned scrollable
 surfaces use the same custom overlay scrollbar, including the reader, palettes,
-Saved, Notes editing/preview, Reading settings, setup, and About. It reserves no
-content gutter, widens on hover/drag, and fades after activity.
+Saved, Notes editing/preview, Reading settings, the import guide, setup, and About.
+It reserves no content gutter, widens on hover/drag, and fades after activity.
 
 ## Data, export, and backup
 
 On Linux, application data lives in **`~/.local/share/omabible/`**, or
 `$XDG_DATA_HOME/omabible/` when set. This is Qt's `QStandardPaths::AppDataLocation`
-with an empty organization name and application name `omabible`.
+with an empty organization name and application name `omabible`, deliberately
+retained independently of the public OmaWord name and `omaword` desktop ID.
 
-- `bible.sqlite`: the imported, validated NET edition.
+- `bible.sqlite`: the imported, validated NET 2.1 edition.
 - `personal.sqlite`: bookmarks, highlights, exact-range notes, reading state, and
   reading preferences.
 
@@ -325,20 +381,22 @@ Reading preferences use an additive table in schema version 2.
 
 Use **About & attribution → Open local data folder** to find the actual location.
 
-From the command palette or Saved drawer:
+From the command palette or Saved panel:
 
 - **Export notes as Markdown** writes `omabible-notes.md` in the chosen existing
   folder, replacing that export file. It contains references, flags, and your
   Markdown notes.
-- **Save annotation backup** writes a JSON backup of personal annotations and
-  reading state. It does not include reading preferences, Bible text, or your EPUB.
+- **Save annotation backup** writes personal annotations and reading state as a
+  JSON backup with format `omabible-backup`. It does not include reading
+  preferences, Bible text, or your EPUB.
 - **Restore annotation backup** validates and then **replaces all current annotations
   and reading state** in one transaction; it does not merge or change reading
   preferences. Save a backup of the current data first if you want to retain it.
   Import the NET edition
   on the destination installation before restoring so verse ranges can be checked.
 
-Keep your original user-provided EPUB separately for setup on another machine.
+You may keep your original user-provided EPUB for setup on another machine;
+it is not needed for normal use after a successful import.
 
 ## Tests
 
@@ -347,9 +405,10 @@ bin/test
 OMABIBLE_TEST_EPUB="$HOME/Downloads/NETBIBLE21.epub" bin/test
 ```
 
-The script builds backend and integrated UI tests in `build/tests/` and
-`build/ui-tests/`, then runs both offscreen. The EPUB environment variable is
-optional; real-edition backend integration tests are skipped without it, and UI
+The script builds backend, integrated UI, and block-annotation tests in
+`build/tests/`, `build/ui-tests/`, and `build/blockannotations/`, then runs them
+offscreen. The legacy `OMABIBLE_TEST_EPUB` environment variable is optional;
+real-edition backend and UI integration cases are skipped without it. Other UI
 tests use original synthetic text. Tests isolate application data in temporary directories.
 `JOBS` controls build parallelism, and arguments are passed to the test executable
 (for example, `bin/test -functions`). See [tests/README.md](tests/README.md) for the
@@ -357,15 +416,17 @@ backend and UI behavior covered. UI tests exercise palette browsing and resume,
 keyboard navigation, free text and verse selection in row/block layouts, quoted
 and plain copying, reading preferences and settings shortcuts, actionable
 keybindings, exact Saved deletion, notes overlays, restore confirmation, overlay
-scrollbars, scroll restoration, and narrow/scaled layouts.
+scrollbars, scroll restoration, the NET-only import guide and source-EPUB
+independence, text-size feedback, and narrow/scaled layouts. Use the current test
+output for validation results and totals rather than a fixed documented count.
 
 ## License and Bible attribution
 
 Application code, documentation, and icons are licensed under the [MIT License](LICENSE),
-copyright OmaBible contributors.
+copyright OmaWord contributors.
 
 NET Bible® copyright © 1996–2019 by Biblical Studies Press, L.L.C. All rights
-reserved. The Bible is separately copyrighted and is not covered by OmaBible's
+reserved. The Bible is separately copyrighted and is not covered by OmaWord's
 MIT license. Obtain your own EPUB from the publisher and follow the
-[NET Bible permissions](https://netbible.com/copyright/). OmaBible distributes no
+[NET Bible permissions](https://netbible.com/copyright/). OmaWord distributes no
 Bible text or EPUB.
