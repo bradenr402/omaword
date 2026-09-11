@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtQml
 
 ApplicationWindow {
     id: app
@@ -30,6 +31,7 @@ ApplicationWindow {
     palette.mid: desktop.border
 
     property bool notesOpen: false
+    onNotesOpenChanged: clearCount()
     property bool notePreview: false
     property bool syncingNote: true
     property string loadedNoteReference: ""
@@ -38,6 +40,9 @@ ApplicationWindow {
     readonly property bool observedReady: bible.ready
     onObservedReadyChanged: { if (observedReady) restorePosition() }
     property bool verseMode: false
+    onVerseModeChanged: clearCount()
+    property string verseCount: ""
+    onActiveFocusItemChanged: clearCount()
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
     property bool wideLayout: width >= 1080
@@ -70,7 +75,30 @@ ApplicationWindow {
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
     readonly property bool modalOpen: passagePalette.opened || savedDrawer.opened || helpDialog.opened || aboutDialog.opened || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !textInputActive()
+    onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
+    readonly property real readerLineHeight: readerMetrics.lineSpacing * 1.45
+    readonly property real floatingSafety: 72 * scale
+    readonly property real controlScale: Math.min(scale, 1.4)
+    FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.scale }
+
+    function clearCount() { verseCount = ""; if (countTimer) countTimer.stop() }
+    function countDigit(digit) {
+        if (verseCount.length < 6) verseCount += digit
+        countTimer.restart()
+    }
+    function countedVerse(last) {
+        if (!verseCount.length) { chapterEdge(last); return }
+        let number = Number(verseCount)
+        clearCount()
+        // Only existing rows are valid: omitted verses must not silently resolve nearby.
+        if (!Array.from(bible.verses).some(function(verse) { return verse.number === number })) {
+            notify("Verse " + number + " is not available in " + bible.passage)
+            return
+        }
+        selectVerse(number, false)
+        Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, false) })
+    }
 
     function tint(color, alpha) { return Qt.rgba(color.r, color.g, color.b, alpha) }
     function textInputActive() {
@@ -101,6 +129,7 @@ ApplicationWindow {
     function readerFocus() { readerSurface.forceActiveFocus() }
     function notify(message) { toast.text = message; toastTimer.restart() }
     function selectVerse(number, extend) {
+        clearCount()
         if (!flushNote()) return
         if (extend && bible.selectedStart > 0) {
             // Mouse ranges are chapter-local; never reuse an anchor from another chapter.
@@ -114,6 +143,7 @@ ApplicationWindow {
         readerFocus()
     }
     function moveVerse(delta, extend) {
+        clearCount()
         if (!flushNote()) return
         positionTimer.stop()
         restoringPosition = true
@@ -131,6 +161,7 @@ ApplicationWindow {
         })
     }
     function setVisualMode(enabled) {
+        clearCount()
         if (!flushNote() || !bible.ready || bible.verses.length === 0) return false
         if (hasSelection) bible.selectVerses(bible.cursorVerse, bible.cursorVerse)
         else if (enabled) bible.selectVerses(bible.verses[0].number, bible.verses[0].number)
@@ -144,12 +175,14 @@ ApplicationWindow {
         moveVerse(delta, true)
     }
     function chapterEdge(last) {
+        clearCount()
         if (!flushNote() || bible.verses.length === 0) return
         let number = bible.verses[last ? bible.verses.length - 1 : 0].number
         selectVerse(number, false)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, false) })
     }
     function chapterStep(delta) {
+        clearCount()
         if (!flushNote()) return
         savePosition()
         if (delta < 0) bible.previousChapter()
@@ -172,6 +205,7 @@ ApplicationWindow {
         readerFocus()
     }
     function openPalette(commands) {
+        clearCount()
         if (!flushNote()) return
         paletteBook = 0
         paletteBookName = ""
@@ -181,6 +215,7 @@ ApplicationWindow {
         referenceInput.forceActiveFocus()
     }
     function openNotes(focusEditor) {
+        clearCount()
         notesOpen = true
         if (loadedNoteReference !== bible.selectionReference) syncNote()
         if (focusEditor && hasSelection) {
@@ -202,6 +237,7 @@ ApplicationWindow {
         }
     }
     function copyPassage() {
+        clearCount()
         if (bible.copySelection().length > 0)
             notify((hasSelection ? bible.selectionReference : bible.passage) + " copied")
     }
@@ -212,16 +248,24 @@ ApplicationWindow {
         }
     }
     function scrollBy(amount) {
+        clearCount()
         reading.contentY = Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), reading.contentY + amount))
     }
     function scrollToVerse(number, alignTop) {
         let index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
         let row = verseRepeater.itemAt(index)
         if (!row) return
-        let y = row.mapToItem(readerColumn, 0, 0).y
+        let y = row.mapToItem(readerColumn, 0, 0).y + row.textOffset
+        let available = Math.max(1, reading.height - floatingSafety)
+        let margin = Math.min(3 * readerLineHeight, Math.max(12 * scale, (available - row.textHeight) / 2))
+        // A very long verse cannot fit. Keep its beginning and a useful context
+        // margin visible rather than jumping to its end on every movement.
+        if (row.textHeight > available - 24 * scale)
+            margin = Math.min(3 * readerLineHeight, available * 0.2)
+        let extent = Math.min(row.textHeight, Math.max(1, available - 2 * margin))
         let target = reading.contentY
-        if (alignTop || y < target + 24) target = y - 24
-        else if (y + row.height > target + reading.height - 32) target = y + row.height - reading.height + 32
+        if (alignTop || y < target + margin) target = y - margin
+        else if (y + extent > target + available - margin) target = y + extent - available + margin
         reading.contentY = Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), target))
     }
     function restorePosition(jumpToSelection) {
@@ -265,14 +309,17 @@ ApplicationWindow {
         { action: "Open a passage", keys: "Ctrl+K" },
         { action: "Open commands", keys: "Ctrl+Shift+P" },
         { action: "Saved passages", keys: "Ctrl+L" },
-        { action: "Previous / next chapter", keys: "h / l · [ / ] · Alt+Left / Alt+Right" },
+        { action: "Previous / next chapter", keys: "h / l · Left / Right · [ / ] · Alt+Left / Alt+Right" },
         { action: "Move verse (extend in visual mode)", keys: "j / k · Down / Up" },
         { action: "Toggle visual selection (anchor / collapse)", keys: "v" },
         { action: "Enter visual mode and extend", keys: "J / K · Shift+Down / Shift+Up" },
         { action: "Select verse / extend range", keys: "Click number / Shift-click" },
         { action: "Select chapter beginning / end", keys: "g / G · Home / End" },
-        { action: "Page down / up", keys: "PageDown / PageUp · Space / Shift+Space · Ctrl+F / Ctrl+B" },
-        { action: "Bookmark selection", keys: "m · Ctrl+D" },
+        { action: "Go to verse number", keys: "number then g (e.g. 20g)" },
+        { action: "Move five verses (extend in visual mode)", keys: "Ctrl+D / Ctrl+U" },
+        { action: "Move ten verses (extend in visual mode)", keys: "PageDown / PageUp" },
+        { action: "Page down / up", keys: "Space / Shift+Space · Ctrl+F / Ctrl+B" },
+        { action: "Bookmark selection", keys: "m · Ctrl+M" },
         { action: "Highlight selection", keys: "x · Ctrl+H" },
         { action: "Write a note", keys: "n · Ctrl+N" },
         { action: "Toggle notes", keys: "Ctrl+Shift+N" },
@@ -293,7 +340,7 @@ ApplicationWindow {
     readonly property var commands: [
         { title: "Open saved passages", hint: "Ctrl+L", action: "saved" },
         { title: "Write a note", hint: "n · Ctrl+N", action: "notes" },
-        { title: "Toggle bookmark", hint: "m · Ctrl+D", action: "bookmark" },
+        { title: "Toggle bookmark", hint: "m · Ctrl+M", action: "bookmark" },
         { title: "Toggle highlight", hint: "x · Ctrl+H", action: "highlight" },
         { title: "Copy passage", hint: "y · Ctrl+Shift+C", action: "copy" },
         { title: "Export notes as Markdown", hint: "Choose a folder", action: "export" },
@@ -365,6 +412,7 @@ ApplicationWindow {
         referenceInput.forceActiveFocus()
     }
     function runCommand(action) {
+        clearCount()
         if (!flushNote()) return
         switch (action) {
         case "saved": bible.refreshCollection(); savedDrawer.open(); break
@@ -417,6 +465,92 @@ ApplicationWindow {
         implicitHeight: 1
         opacity: 0.65
     }
+    component FloatingButton: Button {
+        id: floatingButton
+        property string glyph: ""
+        property string tip: ""
+        property bool selected: false
+        implicitWidth: glyph.length ? implicitHeight : Math.ceil(floatingText.implicitWidth + leftPadding + rightPadding) + 1
+        implicitHeight: 40 * app.controlScale
+        padding: 8 * app.controlScale
+        hoverEnabled: true
+        focusPolicy: Qt.StrongFocus
+        font.pixelSize: 13 * app.scale
+        onPressed: app.clearCount()
+        Keys.onReturnPressed: clicked()
+        Keys.onEnterPressed: clicked()
+        Accessible.name: tip
+        ToolTip.visible: hovered || activeFocus
+        ToolTip.text: tip
+        ToolTip.delay: 500
+        background: Rectangle {
+            color: floatingButton.down ? app.tint(desktop.accent, 0.18)
+                : floatingButton.hovered ? app.tint(desktop.accent, 0.09) : "transparent"
+            radius: 6 * app.scale
+            border.width: floatingButton.activeFocus ? 1 : 0
+            border.color: desktop.accent
+        }
+        contentItem: Item {
+            Text {
+                id: floatingText
+                objectName: floatingButton.objectName + "Label"
+                anchors.fill: parent
+                text: floatingButton.text
+                visible: !floatingButton.glyph.length
+                color: desktop.foreground
+                font: floatingButton.font
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
+            Canvas {
+                id: floatingIcon
+                anchors.centerIn: parent
+                width: 22 * app.controlScale
+                height: width
+                visible: floatingButton.glyph.length > 0
+                property color ink: !floatingButton.enabled ? desktop.muted : floatingButton.selected ? desktop.accent : desktop.foreground
+                property string glyph: floatingButton.glyph
+                onInkChanged: requestPaint()
+                onGlyphChanged: requestPaint()
+                onPaint: {
+                    let ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.scale(width / 24, height / 24)
+                    ctx.strokeStyle = ink
+                    ctx.fillStyle = ink
+                    ctx.lineWidth = 1.6
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    ctx.beginPath()
+                    if (glyph === "saved") {
+                        ctx.moveTo(6, 3); ctx.lineTo(18, 3); ctx.lineTo(18, 21)
+                        ctx.lineTo(12, 17); ctx.lineTo(6, 21); ctx.closePath()
+                    } else if (glyph === "notes") {
+                        ctx.moveTo(15, 3); ctx.lineTo(5, 3); ctx.lineTo(5, 21)
+                        ctx.lineTo(19, 21); ctx.lineTo(19, 7); ctx.lineTo(15, 3)
+                        ctx.lineTo(15, 7); ctx.lineTo(19, 7)
+                        ctx.moveTo(9, 11); ctx.lineTo(15, 11)
+                        ctx.moveTo(9, 15); ctx.lineTo(15, 15)
+                    } else if (glyph === "help") {
+                        ctx.moveTo(8, 7); ctx.bezierCurveTo(8, 1, 19, 2, 16, 9)
+                        ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
+                        ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
+                    } else if (glyph === "visual") {
+                        ctx.rect(4, 4, 16, 16)
+                        ctx.moveTo(8, 9); ctx.lineTo(16, 9)
+                        ctx.moveTo(8, 13); ctx.lineTo(16, 13)
+                        ctx.moveTo(8, 17); ctx.lineTo(13, 17)
+                    } else {
+                        ctx.moveTo(9, 3); ctx.lineTo(15, 3)
+                        ctx.moveTo(12, 3); ctx.lineTo(12, 21)
+                        ctx.moveTo(9, 21); ctx.lineTo(15, 21)
+                    }
+                    ctx.stroke()
+                }
+            }
+        }
+    }
     component BookmarkGlyph: Canvas {
         property color ink: desktop.accent
         implicitWidth: 11 * app.scale
@@ -452,43 +586,6 @@ ApplicationWindow {
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.72) }
     }
 
-    header: Rectangle {
-        color: desktop.background
-        height: 72 * app.scale
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 24
-            anchors.rightMargin: 20
-            spacing: 8
-            QuietButton {
-                text: bible.ready ? bible.passage + "  ⌄" : "Open a passage  ⌄"
-                enabled: bible.ready && !bible.busy
-                emphasized: true
-                tip: "Go to a passage · Ctrl+K"
-                onClicked: app.openPalette(false)
-                Layout.maximumWidth: app.width * 0.4
-            }
-            Label {
-                text: "NET"
-                color: desktop.muted
-                font.pixelSize: 10 * app.scale
-                font.letterSpacing: 1
-                Layout.leftMargin: 3
-            }
-            Item { Layout.fillWidth: true }
-            QuietButton { text: "Saved"; tip: "Bookmarks, highlights & notes · Ctrl+L"; enabled: bible.ready && !bible.busy; onClicked: app.runCommand("saved") }
-            QuietButton {
-                text: "Notes"
-                emphasized: app.notesOpen
-                tip: "Toggle notes · Ctrl+Shift+N"
-                enabled: bible.ready && !bible.busy
-                onClicked: { app.flushNote(); app.notesOpen = !app.notesOpen }
-            }
-            QuietButton { text: "···"; tip: "Commands & settings · Ctrl+Shift+P"; onClicked: app.openPalette(true); font.pixelSize: 21 * app.scale; Accessible.name: "Open commands" }
-        }
-        FineRule { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom }
-    }
-
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -522,6 +619,11 @@ ApplicationWindow {
                 anchors.rightMargin: app.notesOpen && app.wideLayout && bible.ready ? app.notesWidth : 0
                 focus: true
                 visible: bible.ready
+                Keys.onPressed: function(event) {
+                    // Unbound reader keys also end a pending count. Text editors
+                    // and modal content have their own focus trees.
+                    if (app.readerKeys && event.key !== Qt.Key_Shift && event.key !== Qt.Key_Control && event.key !== Qt.Key_Alt) app.clearCount()
+                }
 
                 Flickable {
                     id: reading
@@ -544,7 +646,7 @@ ApplicationWindow {
                         width: Math.min(760 * app.scale, reading.width - (reading.width < 700 ? 48 : 96))
                         anchors.horizontalCenter: parent.horizontalCenter
                         topPadding: 48 * app.scale
-                        bottomPadding: 48 * app.scale
+                        bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
 
                         SectionLabel { text: "NEW ENGLISH TRANSLATION"; leftPadding: 36; bottomPadding: 12 }
@@ -577,6 +679,8 @@ ApplicationWindow {
                                 required property int index
                                 readonly property bool selected: modelData.number >= bible.selectedStart && modelData.number <= bible.selectedEnd && bible.selectedStart > 0
                                 readonly property real gutter: 40 * app.scale
+                                readonly property real textOffset: verseHeading.height
+                                readonly property real textHeight: verseBody.height
                                 width: readerColumn.width
                                 height: verseHeading.height + verseBody.height + 7 * app.scale
                                 Item {
@@ -599,7 +703,7 @@ ApplicationWindow {
                                         return (starting.length ? starting : ranges)[0]?.reference || ""
                                     }
                                     readonly property string hint: ranges.map(function(range) { return range.reference }).join("\n")
-                                        + "\nOpen " + openReference + " · m · Ctrl+D toggles bookmark"
+                                        + "\nOpen " + openReference + " · m · Ctrl+M toggles bookmark"
                                     // Adjacent row segments meet exactly, including headings and
                                     // chapter continuation. Caps retain logical overlapping endpoints.
                                     Rectangle {
@@ -732,6 +836,7 @@ ApplicationWindow {
                                 }
                                 TextEdit {
                                     id: verseBody
+                                    objectName: "verseBody" + verseRow.modelData.number
                                     x: verseRow.gutter + (verseRow.modelData.poetry ? 13 : 0)
                                     y: verseHeading.height
                                     width: parent.width - x - 9
@@ -762,15 +867,20 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                             padding: 24
                         }
-                        FineRule { width: parent.width - 36; x: 36; height: 1; visible: bible.verses.length > 0 }
-                        RowLayout {
-                            width: parent.width - 36
-                            x: 36
-                            height: 76 * app.scale
-                            QuietButton { text: "←  Previous"; enabled: !(bible.book === 1 && bible.chapter === 1); onClicked: app.chapterStep(-1) }
-                            Item { Layout.fillWidth: true }
-                            QuietButton { text: "Next chapter  →"; enabled: !(bible.book === 66 && bible.chapter === bible.chapterCount); onClicked: app.chapterStep(1) }
-                        }
+                    }
+                }
+                // A continuous fade keeps floating controls legible without a
+                // footer surface, divider, or shortening the reading viewport.
+                Rectangle {
+                    objectName: "readingBottomFade"
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: app.floatingSafety + 24 * app.scale
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: app.tint(desktop.background, 0) }
+                        GradientStop { position: 0.6; color: desktop.background }
+                        GradientStop { position: 1; color: desktop.background }
                     }
                 }
             }
@@ -830,7 +940,7 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 width: app.notesWidth
                 visible: app.notesOpen && bible.ready
-                color: desktop.surface
+                color: desktop.background
                 Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
                 ScrollView {
                     id: notesScroll
@@ -849,7 +959,20 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         SectionLabel { text: "PASSAGE NOTES"; Layout.fillWidth: true }
-                        QuietButton { text: "×"; compact: true; tip: "Close notes · Escape"; Accessible.name: "Close notes"; onClicked: { app.flushNote(); app.notesOpen = false; app.readerFocus() } }
+                        QuietButton {
+                            id: notesClose
+                            objectName: "notesClose"
+                            text: "×"
+                            compact: true
+                            tip: "Close notes · Escape"
+                            Accessible.name: "Close notes"
+                            background: Rectangle {
+                                color: notesClose.hovered || notesClose.down ? app.tint(desktop.accent, 0.16) : "transparent"
+                                border.width: notesClose.activeFocus ? 1 : 0
+                                border.color: desktop.accent
+                            }
+                            onClicked: { if (app.flushNote()) { app.notesOpen = false; app.readerFocus() } }
+                        }
                     }
                     Label {
                         text: app.hasSelection ? bible.selectionReference : "A thought worth keeping"
@@ -862,7 +985,7 @@ ApplicationWindow {
                     RowLayout {
                         visible: app.hasSelection
                         spacing: 4
-                        QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: bible.toggleBookmark(); tip: "m · Ctrl+D" }
+                        QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: bible.toggleBookmark(); tip: "m · Ctrl+M" }
                         QuietButton { text: bible.selectionHighlighted ? "Highlighted" : "Highlight"; emphasized: bible.selectionHighlighted; compact: true; onClicked: bible.toggleHighlight(); tip: "x · Ctrl+H" }
                         Item { Layout.fillWidth: true }
                         QuietButton { text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy selected passage · y · Ctrl+Shift+C" }
@@ -888,8 +1011,6 @@ ApplicationWindow {
                                 id: noteEditor
                                 objectName: "noteEditor"
                                 width: parent.width
-                                placeholderText: "What stands out to you?\n\nWrite a note in Markdown…"
-                                placeholderTextColor: desktop.muted
                                 color: desktop.foreground
                                 selectionColor: app.tint(desktop.accent, 0.35)
                                 selectedTextColor: desktop.foreground
@@ -955,22 +1076,62 @@ ApplicationWindow {
         }
     }
 
-    footer: Rectangle {
-        height: 46 * app.scale
-        color: desktop.background
-        FineRule { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top }
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 20
-            anchors.rightMargin: 20
-            spacing: 8
-            QuietButton { text: "←"; compact: true; enabled: bible.ready && !bible.busy && !(bible.book === 1 && bible.chapter === 1); tip: "Previous chapter · h · [ · Alt+Left"; Accessible.name: "Previous chapter"; onClicked: app.chapterStep(-1) }
-            QuietButton { text: "→"; compact: true; enabled: bible.ready && !bible.busy && !(bible.book === 66 && bible.chapter === bible.chapterCount); tip: "Next chapter · l · ] · Alt+Right"; Accessible.name: "Next chapter"; onClicked: app.chapterStep(1) }
-            Label { text: app.hasSelection ? bible.selectionReference : bible.ready ? bible.passage : "NET 2.1 · Offline reader"; color: desktop.muted; font.pixelSize: 12 * app.scale; elide: Text.ElideRight; Layout.fillWidth: true }
-            QuietButton { text: bible.selectionBookmarked ? "★" : "☆"; visible: app.hasSelection; emphasized: bible.selectionBookmarked; compact: true; tip: "Bookmark · m · Ctrl+D"; Accessible.name: "Toggle bookmark"; onClicked: bible.toggleBookmark() }
-            QuietButton { text: "Mark"; visible: app.hasSelection; emphasized: bible.selectionHighlighted; compact: true; tip: "Highlight · x · Ctrl+H"; onClicked: bible.toggleHighlight() }
-            QuietButton { text: app.verseMode ? "Visual" : "Normal"; visible: bible.ready; emphasized: app.verseMode; compact: true; tip: "Toggle visual selection · v"; onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() } }
-            QuietButton { text: "?"; compact: true; tip: "Keybindings · ? · F1"; Accessible.name: "Keybindings"; onClicked: helpDialog.open() }
+    FloatingButton {
+        id: modeControl
+        objectName: "modeControl"
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: 16 * app.controlScale
+        glyph: app.verseMode ? "visual" : "normal"
+        selected: app.verseMode
+        visible: bible.ready && !(app.notesOpen && !app.wideLayout)
+        enabled: !bible.busy && !app.modalOpen
+        tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · v"
+        onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
+    }
+    FloatingButton {
+        id: passageControl
+        objectName: "passageControl"
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 16 * app.controlScale
+        x: (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) / 2 - width / 2
+        width: Math.min(implicitWidth, (app.notesOpen && app.wideLayout ? readerSurface.width : app.width) - 2 * (floatingActions.width + 24 * app.controlScale))
+        text: bible.ready ? bible.passage + (app.hasSelection ? ":" + bible.cursorVerse : "") : "Open a passage"
+        tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · Ctrl+K"
+        visible: !(app.notesOpen && !app.wideLayout)
+        enabled: !bible.busy && !app.modalOpen
+        onClicked: app.openPalette(false)
+    }
+    Row {
+        id: floatingActions
+        objectName: "floatingActions"
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 16 * app.controlScale
+        anchors.rightMargin: (app.notesOpen && app.wideLayout ? app.notesWidth : 0) + 16 * app.controlScale
+        spacing: 4 * app.controlScale
+        visible: !(app.notesOpen && !app.wideLayout)
+        FloatingButton {
+            objectName: "savedControl"
+            glyph: "saved"
+            tip: "Saved · Ctrl+L"
+            enabled: bible.ready && !bible.busy && !app.modalOpen
+            onClicked: app.runCommand("saved")
+        }
+        FloatingButton {
+            objectName: "notesControl"
+            glyph: "notes"
+            selected: app.notesOpen
+            tip: "Notes · Ctrl+Shift+N"
+            enabled: bible.ready && !bible.busy && !app.modalOpen
+            onClicked: { if (app.flushNote()) { app.notesOpen = !app.notesOpen; app.readerFocus() } }
+        }
+        FloatingButton {
+            objectName: "helpControl"
+            glyph: "help"
+            tip: "Keybindings · ? · F1"
+            enabled: !bible.busy && !app.modalOpen
+            onClicked: helpDialog.open()
         }
     }
 
@@ -1456,6 +1617,7 @@ ApplicationWindow {
         Label { id: toast; objectName: "toast"; anchors.centerIn: parent; width: parent.width - 36; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: desktop.foreground; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
     }
     Timer { id: toastTimer; interval: 3000 }
+    Timer { id: countTimer; interval: 2000; onTriggered: app.clearCount() }
     Timer { id: positionSaveTimer; interval: 350; onTriggered: app.savePosition() }
     Timer {
         id: positionTimer
@@ -1469,6 +1631,7 @@ ApplicationWindow {
     Connections {
         target: bible
         function onNavigationChanged() {
+            app.clearCount()
             if (!app.movingSelection) {
                 app.verseMode = false
                 app.selectionAnchor = bible.crossChapterSelection ? 0 : bible.selectedStart
@@ -1486,8 +1649,8 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+N"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: app.openNotes(true) }
     Shortcut { sequence: "N"; enabled: app.readerKeys; onActivated: app.openNotes(true) }
     Shortcut { sequence: "Ctrl+Shift+N"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: { app.flushNote(); app.notesOpen = !app.notesOpen; app.readerFocus() } }
-    Shortcut { sequence: "Ctrl+D"; enabled: app.readerKeys && app.hasSelection; onActivated: bible.toggleBookmark() }
-    Shortcut { sequence: "Ctrl+H"; enabled: app.readerKeys && app.hasSelection; onActivated: bible.toggleHighlight() }
+    Shortcut { sequence: "Ctrl+M"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleBookmark() } }
+    Shortcut { sequence: "Ctrl+H"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleHighlight() } }
     Shortcut { sequence: "Ctrl+Shift+C"; enabled: app.readerKeys; onActivated: app.copyPassage() }
     Shortcut { sequence: "Alt+Left"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: app.chapterStep(-1) }
     Shortcut { sequence: "Alt+Right"; enabled: bible.ready && !bible.busy && !app.modalOpen; onActivated: app.chapterStep(1) }
@@ -1498,22 +1661,38 @@ ApplicationWindow {
     Shortcut { sequences: ["K", "Up"]; enabled: app.readerKeys; onActivated: app.moveVerse(-1, app.verseMode) }
     Shortcut { sequences: ["Shift+J", "Shift+Down"]; enabled: app.readerKeys; onActivated: app.extendVerse(1) }
     Shortcut { sequences: ["Shift+K", "Shift+Up"]; enabled: app.readerKeys; onActivated: app.extendVerse(-1) }
-    Shortcut { sequences: ["Space", "PgDown", "Ctrl+F"]; enabled: app.readerKeys; onActivated: app.scrollBy(reading.height * 0.85) }
-    Shortcut { sequences: ["Shift+Space", "PgUp", "Ctrl+B"]; enabled: app.readerKeys; onActivated: app.scrollBy(-reading.height * 0.85) }
-    Shortcut { sequences: ["G", "Home"]; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
-    Shortcut { sequences: ["Shift+G", "End"]; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
-    Shortcut { sequences: ["H", "["]; enabled: app.readerKeys; onActivated: app.chapterStep(-1) }
-    Shortcut { sequences: ["L", "]"]; enabled: app.readerKeys; onActivated: app.chapterStep(1) }
-    Shortcut { sequence: "M"; enabled: app.readerKeys && app.hasSelection; onActivated: bible.toggleBookmark() }
-    Shortcut { sequence: "X"; enabled: app.readerKeys && app.hasSelection; onActivated: bible.toggleHighlight() }
+    Shortcut { sequences: ["Space", "Ctrl+F"]; enabled: app.readerKeys; onActivated: app.scrollBy(reading.height * 0.85) }
+    Shortcut { sequences: ["Shift+Space", "Ctrl+B"]; enabled: app.readerKeys; onActivated: app.scrollBy(-reading.height * 0.85) }
+    Shortcut { sequence: "Ctrl+D"; enabled: app.readerKeys; onActivated: app.moveVerse(5, app.verseMode) }
+    Shortcut { sequence: "Ctrl+U"; enabled: app.readerKeys; onActivated: app.moveVerse(-5, app.verseMode) }
+    Shortcut { sequence: "PgDown"; enabled: app.readerKeys; onActivated: app.moveVerse(10, app.verseMode) }
+    Shortcut { sequence: "PgUp"; enabled: app.readerKeys; onActivated: app.moveVerse(-10, app.verseMode) }
+    Shortcut { sequence: "G"; enabled: app.readerKeys; onActivated: app.countedVerse(false) }
+    Shortcut { sequence: "Shift+G"; enabled: app.readerKeys; onActivated: app.countedVerse(true) }
+    Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
+    Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
+    Instantiator {
+        model: 10
+        delegate: Shortcut {
+            required property int index
+            sequence: String(index)
+            enabled: app.readerKeys
+            onActivated: app.countDigit(String(index))
+        }
+    }
+    Shortcut { sequences: ["H", "[", "Left"]; enabled: app.readerKeys; onActivated: app.chapterStep(-1) }
+    Shortcut { sequences: ["L", "]", "Right"]; enabled: app.readerKeys; onActivated: app.chapterStep(1) }
+    Shortcut { sequence: "M"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleBookmark() } }
+    Shortcut { sequence: "X"; enabled: app.readerKeys && app.hasSelection; onActivated: { app.clearCount(); bible.toggleHighlight() } }
     Shortcut { sequence: "Y"; enabled: app.readerKeys; onActivated: app.copyPassage() }
-    Shortcut { sequences: ["Ctrl++", "Ctrl+="]; enabled: app.readerKeys; onActivated: app.readerSize = Math.min(28, app.readerSize + 1) }
-    Shortcut { sequence: "Ctrl+-"; enabled: app.readerKeys; onActivated: app.readerSize = Math.max(15, app.readerSize - 1) }
-    Shortcut { sequence: "Ctrl+0"; enabled: app.readerKeys; onActivated: app.readerSize = 19 }
+    Shortcut { sequences: ["Ctrl++", "Ctrl+="]; enabled: app.readerKeys; onActivated: { app.clearCount(); app.readerSize = Math.min(28, app.readerSize + 1) } }
+    Shortcut { sequence: "Ctrl+-"; enabled: app.readerKeys; onActivated: { app.clearCount(); app.readerSize = Math.max(15, app.readerSize - 1) } }
+    Shortcut { sequence: "Ctrl+0"; enabled: app.readerKeys; onActivated: { app.clearCount(); app.readerSize = 19 } }
     Shortcut {
         sequence: "Escape"
         enabled: app.readerKeys
         onActivated: {
+            if (app.verseCount.length) { app.clearCount(); return }
             if (!app.flushNote()) return
             if (app.verseMode) app.setVisualMode(false)
             else if (app.notesOpen) app.notesOpen = false
