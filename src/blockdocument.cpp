@@ -118,7 +118,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     QMap<QString, QPair<int, int>> extents;
     for (int i = 0; annotationsVisible && i < verses.size(); ++i) {
         const auto verse = verses[i].toMap();
-        for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("tag")}) {
+        for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("note"), QStringLiteral("tag")}) {
             for (const auto &entry : verse.value(kind + "Ranges").toList()) {
                 const auto range = entry.toMap();
                 const QString key = kind + ':' + range.value("reference").toString();
@@ -156,7 +156,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         auto decorate = [&](bool opening) {
             if (!annotationsVisible) return;
             QVariantList entries;
-            for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("tag")}) {
+            for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("note"), QStringLiteral("tag")}) {
                 QSet<QString> seen;
                 for (const auto &entry : verse.value(kind + "Ranges").toList()) {
                     auto range = entry.toMap();
@@ -278,7 +278,7 @@ QVariantList BlockDocument::contextRanges(const QVariantList &verses, int cursor
 {
     auto keys = [](const QVariantMap &verse) {
         QSet<QString> result;
-        for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("tag")})
+        for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("note"), QStringLiteral("tag")})
             for (const auto &entry : verse.value(kind + "Ranges").toList())
                 result.insert(kind + ':' + entry.toMap().value("reference").toString());
         return result;

@@ -1630,7 +1630,10 @@ void BibleBackend::updateAnnotations()
             if (v >= a.start && v <= a.end) {
                 bookmark |= a.bookmark; highlight |= a.highlight; note |= !a.note.isEmpty();
                 if (!a.note.isEmpty()) {
+                    const auto first = endpoint(a.start), last = endpoint(a.end);
                     noteRanges.append(QVariantMap{{"reference",rangeReference(a.start,a.end)},
+                        {"versionId",m_versionId},{"book",first.book},{"chapter",first.chapter},{"start",first.verse},
+                        {"endBook",last.book},{"endChapter",last.chapter},{"end",last.verse},
                         {"noteStart",v == a.start},{"noteEnd",v == a.end},
                         {"continuesBefore",v > a.start},{"continuesAfter",v < a.end}});
                 }

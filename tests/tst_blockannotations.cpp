@@ -4,6 +4,7 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQuickItem>
+#include <QQuickItemGrabResult>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QQuickTextDocument>
@@ -42,6 +43,10 @@ class BlockAnnotationsTest : public QObject
         const auto value = item("reader")->property(property);
         return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toList() : value.toList();
     }
+    QVariantMap navigatedScope() const {
+        const auto value = backend->property("navigatedScope");
+        return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+    }
     static QVariantMap note(QString ref, int start, int end, int chapter = 1, int endChapter = 1) {
         return {{"reference",ref},{"book",1},{"chapter",chapter},{"start",start},
                 {"endBook",1},{"endChapter",endChapter},{"end",end},{"note","Saved note"}};
@@ -49,9 +54,13 @@ class BlockAnnotationsTest : public QObject
     static QVariantMap bookmark(QString ref, bool first, bool last) {
         return {{"reference",ref},{"bookmarkContinuesBefore",!first},{"bookmarkContinuesAfter",!last}};
     }
-    static QVariantMap noteRange(QString ref, bool first, bool last) {
-        return {{"reference",ref},{"noteStart",first},{"noteEnd",last},
-                {"continuesBefore",!first},{"continuesAfter",!last}};
+    static QVariantMap noteRange(QString ref, bool first, bool last, QVariantMap scope = {}) {
+        if (scope.isEmpty()) scope = note(ref,1,3);
+        scope.remove("note");
+        scope["versionId"] = "test-edition";
+        scope["noteStart"] = first; scope["noteEnd"] = last;
+        scope["continuesBefore"] = !first; scope["continuesAfter"] = !last;
+        return scope;
     }
     void populate(bool adjacent = false) {
         QVariantList verses;
@@ -60,7 +69,7 @@ class BlockAnnotationsTest : public QObject
             if (i <= 3) ranges.append(bookmark("Genesis 1:1–3",i == 1,i == 3));
             if (adjacent && i >= 4 && i <= 5) ranges.append(bookmark("Genesis 1:4–5",i == 4,i == 5));
             if (i <= 3) notes.append(noteRange("Genesis 1:1–3",i == 1,i == 3));
-            if (i >= 4 && i <= 5) notes.append(noteRange("Genesis 1:4–5",i == 4,i == 5));
+            if (i >= 4 && i <= 5) notes.append(noteRange("Genesis 1:4–5",i == 4,i == 5,note("Genesis 1:4–5",4,5)));
             verses.append(QVariantMap{{"number",i},{"text",QString("Verse %1 is here.").arg(i)},
                 {"heading",i == 1 ? "A section heading" : ""},{"bookmarkRanges",ranges},{"noteRanges",notes}});
         }
@@ -154,6 +163,32 @@ ApplicationWindow {
             controller: controller; backend: backend; theme: theme; viewport: viewport
         }
     }
+    Reader.AnnotationGlyph { id: sharedGlyph; objectName: "sharedGlyph"; x: 600; y: 500 }
+    Canvas {
+        objectName: "footerNoteReference"; x: 650; y: 500
+        width: sharedGlyph.width; height: sharedGlyph.height
+        property color ink: sharedGlyph.ink
+        onInkChanged: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            ctx.scale(width / 24, height / 24)
+            ctx.strokeStyle = ink
+            ctx.lineWidth = 1.6
+            ctx.lineCap = "square"
+            ctx.lineJoin = "miter"
+            ctx.beginPath()
+            // Snapshot of the original footer path, independent of the component.
+            ctx.moveTo(11, 4); ctx.lineTo(3, 4); ctx.lineTo(3, 21)
+            ctx.lineTo(20, 21); ctx.lineTo(20, 13)
+            ctx.moveTo(10, 11); ctx.lineTo(18, 3); ctx.lineTo(21, 6)
+            ctx.lineTo(13, 14); ctx.lineTo(9, 15); ctx.closePath()
+            ctx.moveTo(16, 5); ctx.lineTo(19, 8)
+            ctx.stroke()
+        }
+    }
 })",QUrl::fromLocalFile(QFileInfo(reader).absolutePath() + "/AnnotationHarness.qml"));
 #endif
         root.reset(component.create());
@@ -182,15 +217,16 @@ ApplicationWindow {
         QCOMPARE(a.value("y"),b.value("y"));
         QVERIFY(b.value("rects").toList().first().toMap().value("x").toDouble()
                 > a.value("rects").toList().first().toMap().value("x").toDouble());
-        QCOMPARE(list("annotationGroups").size(),1);
+        QTRY_COMPARE(list("inlineMarkers").size(),8);
+        QVERIFY(!item("blockAnnotationRail"));
         auto ribbon = item("blockInlineMarker:bookmark:open:Genesis 1:1–3");
-        auto noteIcon = item("blockAnnotationMarker:note:Genesis 1:1–3");
+        auto noteIcon = item("blockInlineMarker:note:open:Genesis 1:1–3");
         QVERIFY(ribbon && noteIcon);
         QVERIFY2(ribbon->width() > 1,qPrintable(QString("cell width %1; %2").arg(ribbon->width()).arg(QJsonDocument::fromVariant(list("inlineMarkers")).toJson())));
         const auto ribbonRect = ribbon->mapRectToItem(item("blockBody"),ribbon->boundingRect());
         const auto noteRect = noteIcon->mapRectToItem(item("blockBody"),noteIcon->boundingRect());
         QVERIFY(!ribbonRect.intersects(noteRect));
-        QVERIFY(ribbonRect.left() >= 0 && noteRect.right() < 0);
+        QVERIFY(ribbonRect.left() >= 0 && noteRect.left() >= 0);
         QVERIFY(!item("blockBookmarkExtent:Genesis 1:1–3"));
         QVERIFY(!item("blockAnnotationMarker:bookmark:Genesis 1:1–3"));
         auto quick = item("blockBody")->property("textDocument").value<QQuickTextDocument *>();
@@ -203,11 +239,12 @@ ApplicationWindow {
         click(item("blockInlineMarker:bookmark:open:Genesis 1:4–5"));
         QCOMPARE(controller->property("openedBookmark").toString(),QString("Genesis 1:4–5"));
         click(noteIcon);
-        QTRY_VERIFY(item("blockAnnotationAction:note:Genesis 1:4–5"));
         controller->setProperty("calls","");
-        click(item("blockAnnotationAction:note:Genesis 1:4–5"));
-        QCOMPARE(backend->property("navigated").toString(),QString("Genesis 1:4–5"));
-        QCOMPARE(controller->property("calls").toString(),QString("flush;navigate;clear;sync;edit;"));
+        click(item("blockInlineMarker:note:open:Genesis 1:4–5"));
+        QCOMPARE(navigatedScope()["reference"].toString(),QString("Genesis 1:4–5"));
+        QCOMPARE(navigatedScope()["start"].toInt(),4);
+        QCOMPARE(navigatedScope()["end"].toInt(),5);
+        QCOMPARE(controller->property("calls").toString(),QString("flush;scope;clear;sync;edit;"));
     }
     void continuationAndSelectionGuard() {
         populate();
@@ -215,7 +252,7 @@ ApplicationWindow {
         for (int i = 0; i < verses.size(); ++i) {
             auto verse = verses[i].toMap();
             verse["bookmarkRanges"] = i < 3 ? QVariantList{bookmark("Genesis 1:30–2:3",false,i == 2)} : QVariantList{};
-            verse["noteRanges"] = i < 3 ? QVariantList{noteRange("Genesis 1:30–2:3",false,i == 2)} : QVariantList{};
+            verse["noteRanges"] = i < 3 ? QVariantList{noteRange("Genesis 1:30–2:3",false,i == 2,note("Genesis 1:30–2:3",30,3,1,2))} : QVariantList{};
             verses[i] = verse;
         }
         backend->setProperty("chapter",2);
@@ -227,7 +264,7 @@ ApplicationWindow {
             QVERIFY(entry.toMap().value("continuesBefore").toBool());
             QVERIFY(!entry.toMap().value("continuesAfter").toBool());
         }
-        auto icon = item("blockAnnotationMarker:note:Genesis 1:30–2:3");
+        auto icon = item("blockInlineMarker:note:continuation:Genesis 1:30–2:3");
         QVERIFY(QMetaObject::invokeMethod(item("blockBody"),"select",Q_ARG(int,0),Q_ARG(int,8)));
         const auto selection = item("blockBody")->property("selectedText").toString();
         QVERIFY(!selection.isEmpty());
@@ -243,16 +280,18 @@ ApplicationWindow {
         backend->setProperty("navigationSucceeds",false);
         controller->setProperty("calls","");
         click(icon);
-        QCOMPARE(controller->property("calls").toString(),QString("flush;navigate;"));
+        QCOMPARE(controller->property("calls").toString(),QString("flush;scope;"));
         QCOMPARE(controller->property("freeSelectedText").toString(),selection);
         QCOMPARE(item("blockBody")->property("selectedText").toString(),selection);
         backend->setProperty("navigationSucceeds",true);
         controller->setProperty("calls","");
         click(icon);
-        QCOMPARE(controller->property("calls").toString(),QString("flush;navigate;clear;sync;edit;"));
+        QCOMPARE(controller->property("calls").toString(),QString("flush;scope;clear;sync;edit;"));
         QVERIFY(controller->property("freeSelectedText").toString().isEmpty());
         QVERIFY(item("blockBody")->property("selectedText").toString().isEmpty());
-        QCOMPARE(backend->property("navigated").toString(),QString("Genesis 1:30–2:3"));
+        QCOMPARE(navigatedScope()["reference"].toString(),QString("Genesis 1:30–2:3"));
+        QCOMPARE(navigatedScope()["start"].toInt(),30);
+        QCOMPARE(navigatedScope()["endChapter"].toInt(),2);
     }
     void sourceOrderedNotes_data() {
         QTest::addColumn<int>("book"); QTest::addColumn<int>("chapter");
@@ -266,11 +305,13 @@ ApplicationWindow {
         QFETCH(int,book); QFETCH(int,chapter); QFETCH(QList<int>,numbers);
         QFETCH(int,firstCovered); QFETCH(int,lastCovered); QFETCH(bool,before); QFETCH(bool,after);
         const QString reference = "2 Esdras 16:78–Matthew 1:2";
+        auto scope = note(reference,78,2,16,1);
+        scope["book"] = 80; scope["endBook"] = 40;
         QVariantList verses;
         for (int number : numbers) {
             QVariantList notes;
             if (firstCovered && number >= firstCovered && number <= lastCovered)
-                notes.append(noteRange(reference,!before && number == firstCovered,!after && number == lastCovered));
+                notes.append(noteRange(reference,!before && number == firstCovered,!after && number == lastCovered,scope));
             verses.append(QVariantMap{{"number",number},{"text",QString("Verse %1 has enough original words to wrap onto several visible lines.").arg(number)},
                                       {"noteRanges",notes}});
         }
@@ -290,8 +331,13 @@ ApplicationWindow {
         QCOMPARE(range["start"].toInt(),start); QCOMPARE(range["end"].toInt(),end);
         QCOMPARE(range["rects"].toList(),mapping->rectangles(start,end));
         QVERIFY(range["rects"].toList().size() > 1);
-        click(item("blockAnnotationMarker:note:"+reference));
-        QCOMPARE(backend->property("navigated").toString(),reference);
+        click(item("blockInlineMarker:note:" + QString(before ? "continuation:" : "open:") + reference));
+        QCOMPARE(navigatedScope()["reference"].toString(),reference);
+        QCOMPARE(navigatedScope()["versionId"].toString(),QString("test-edition"));
+        for (const auto &key : {"book","chapter","start","endBook","endChapter","end"})
+            QCOMPARE(navigatedScope()[key],scope[key]);
+        QCOMPARE(list("inlineMarkers").size(),after ? 1 : 2);
+        QVERIFY(!item("blockAnnotationRail"));
         // Collection tuples alone must never manufacture membership.
         for (auto &row : verses) { auto verse = row.toMap(); verse.remove("noteRanges"); row = verse; }
         backend->setProperty("verses",verses);
@@ -315,12 +361,11 @@ ApplicationWindow {
         backend->setProperty("showVerseNumbers",false);
         QTRY_COMPARE(mapping->selectionText(mapping->positionFor(1),mapping->spans().first().toMap().value("textStart").toInt()),QString());
         controller->setProperty("scale",1.6);
-        QTRY_COMPARE(item("blockAnnotationRail")->width(),64.0);
+        QTRY_COMPARE(item("blockInlineMarker:note:open:Genesis 1:1–3")->height(),40.0);
         backend->setProperty("focusMode",true);
-        QTRY_VERIFY(!item("blockAnnotationRail")->isVisible());
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
         backend->setProperty("focusMode",false);
-        QTRY_VERIFY(item("blockAnnotationRail")->isVisible());
+        QTRY_COMPARE(list("inlineMarkers").size(),8);
     }
     void paragraphBoundariesAndAnnotations() {
         populate(true);
@@ -348,14 +393,12 @@ ApplicationWindow {
         const auto span = mapping->spans()[3].toMap();
         const auto rect = mapping->rectangles(span.value("start").toInt(),span.value("end").toInt()).first().toMap();
         QCOMPARE(mapping->verseAtPoint(rect.value("x").toDouble() + 2,rect.value("y").toDouble() + 5),4);
-        click(item("blockAnnotationMarker:note:Genesis 1:1–3"));
-        QTRY_VERIFY(item("blockAnnotationAction:note:Genesis 1:4–5"));
-        click(item("blockAnnotationAction:note:Genesis 1:4–5"));
-        QCOMPARE(backend->property("navigated").toString(),QString("Genesis 1:4–5"));
+        click(item("blockInlineMarker:note:open:Genesis 1:4–5"));
+        QCOMPARE(navigatedScope()["reference"].toString(),QString("Genesis 1:4–5"));
         backend->setProperty("focusMode",true);
         QTRY_COMPARE(doc->blockCount(),2);
         QVERIFY(doc->toPlainText().startsWith("Verse 1 is here. Verse 2 is here. Verse 3 is here.\nVerse 4 is here."));
-        QVERIFY(!item("blockAnnotationRail")->isVisible());
+        QVERIFY(!item("blockAnnotationRail"));
         QTextCursor selection(doc);
         selection.setPosition(mapping->positionFor(3));
         selection.setPosition(mapping->spans()[3].toMap().value("end").toInt(),QTextCursor::KeepAnchor);
@@ -539,12 +582,13 @@ ApplicationWindow {
     void contextUnionContinuationAndFocus() {
         QVariantList verses;
         for (int i = 1; i <= 7; ++i) {
-            QVariantList bookmarks, tags;
+            QVariantList bookmarks, tags, notes;
             if (i <= 4) bookmarks.append(bookmark("Cross-chapter",false,i == 4));
             if (i >= 2 && i <= 5) tags.append(QVariantMap{{"reference","Overlap"},{"continuesBefore",i != 2},{"continuesAfter",i != 5}});
             if (i == 7) bookmarks.append(bookmark("Unrelated",true,true));
+            if (i >= 3 && i <= 6) notes.append(noteRange("Note extension",i == 3,i == 6));
             verses.append(QVariantMap{{"number",i},{"text",QString("Verse %1.").arg(i)},
-                {"bookmarkRanges",bookmarks},{"tagRanges",tags}});
+                {"bookmarkRanges",bookmarks},{"tagRanges",tags},{"noteRanges",notes}});
         }
         backend->setProperty("verses",verses);
         backend->setProperty("cursorVerse",3);
@@ -554,11 +598,15 @@ ApplicationWindow {
         QCOMPARE(ranges[0].toMap()["start"].toInt(),mapping->positionFor(1));
         QCOMPARE(ranges[0].toMap()["end"],mapping->spans()[1].toMap()["end"]);
         QCOMPARE(ranges[1].toMap()["start"].toInt(),mapping->positionFor(4));
-        QCOMPARE(ranges[1].toMap()["end"],mapping->spans()[4].toMap()["end"]);
+        QCOMPARE(ranges[1].toMap()["end"],mapping->spans()[5].toMap()["end"]);
         QVERIFY(item("blockInlineMarker:bookmark:continuation:Cross-chapter"));
         QVERIFY(!item("blockInlineMarker:bookmark:open:Cross-chapter"));
         QVERIFY(item("blockInlineMarker:bookmark:close:Cross-chapter"));
         backend->setProperty("cursorVerse",6);
+        QTRY_COMPARE(list("contextRanges").size(),1);
+        QCOMPARE(list("contextRanges")[0].toMap()["start"].toInt(),mapping->positionFor(4));
+        QCOMPARE(list("contextRanges")[0].toMap()["end"],mapping->spans()[4].toMap()["end"]);
+        backend->setProperty("cursorVerse",7);
         QTRY_VERIFY(list("contextRanges").isEmpty());
         backend->setProperty("cursorVerse",3);
         QTRY_COMPARE(list("contextRanges").size(),2);
@@ -566,7 +614,7 @@ ApplicationWindow {
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
         QTRY_VERIFY(list("contextRanges").isEmpty());
         backend->setProperty("focusMode",false);
-        QTRY_COMPARE(list("inlineMarkers").size(),6);
+        QTRY_COMPARE(list("inlineMarkers").size(),8);
         QTRY_COMPARE(list("contextRanges").size(),2);
         QSignalSpy geometry(mapping,&BlockDocument::geometryChanged);
         QTest::qWait(100);
@@ -576,9 +624,10 @@ ApplicationWindow {
         backend->setProperty("showVerseNumbers",false);
         backend->setProperty("verses",QVariantList{
             QVariantMap{{"number",1},{"text","Alpha omega."},{"bookmarkRanges",QVariantList{bookmark("A",true,true)}},
+                {"noteRanges",QVariantList{noteRange("A",true,true)}},
                 {"tagRanges",QVariantList{QVariantMap{{"reference","A"},{"tags",QVariantList{QVariantMap{{"name","One"}},QVariantMap{{"name","Two"}}}}}}}},
             QVariantMap{{"number",2},{"text","Next verse."}}});
-        QTRY_COMPARE(list("inlineMarkers").size(),4); // Two tag assignments, one tag icon.
+        QTRY_COMPARE(list("inlineMarkers").size(),6); // Two tag assignments, one tag icon, plus note/bookmark.
         QTest::qWait(120);
         const auto image = window->grabWindow();
         QVERIFY(!image.isNull());
@@ -606,6 +655,39 @@ ApplicationWindow {
         QCOMPARE(mapping->verseAtPoint(final["x"].toDouble()+final["width"].toDouble()+8,
                                       final["y"].toDouble()+final["height"].toDouble()/2),2);
     }
+    void sharedNoteGlyphMatchesFooter_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::addColumn<double>("scale");
+        QTest::newRow("block") << QString("block") << 1.0;
+        QTest::newRow("paragraph-scaled") << QString("paragraph") << 1.6;
+    }
+    void sharedNoteGlyphMatchesFooter() {
+        QFETCH(QString,mode); QFETCH(double,scale);
+        auto shared = item("sharedGlyph");
+        QCOMPARE(shared->width(),18.0); QCOMPARE(shared->height(),18.0);
+        QCOMPARE(shared->property("kind").toString(),QString("note"));
+        QCOMPARE(shared->property("ink").value<QColor>(),QColor(Qt::white));
+        controller->setProperty("scale",scale);
+        item("reader")->setProperty("mode",mode);
+        populate();
+        QTRY_COMPARE(list("inlineMarkers").size(),6);
+        auto glyph = item("blockInlineGlyph:note:Genesis 1:1–3");
+        QVERIFY(glyph && glyph->isVisible());
+        QCOMPARE(glyph->property("kind").toString(),QString("note"));
+        shared->setWidth(glyph->width()); shared->setHeight(glyph->height());
+        shared->setProperty("ink",glyph->property("ink"));
+        QTest::qWait(80);
+        auto actual = glyph->grabToImage();
+        auto common = shared->grabToImage();
+        auto footer = item("footerNoteReference")->grabToImage();
+        QVERIFY(actual && common && footer);
+        QTRY_VERIFY(!actual->image().isNull() && !common->image().isNull() && !footer->image().isNull());
+        QCOMPARE(actual->image(),common->image());
+        QCOMPARE(common->image(),footer->image());
+        backend->setProperty("focusMode",true);
+        QTRY_VERIFY(list("inlineMarkers").isEmpty());
+        QVERIFY(!item("blockInlineGlyph:note:Genesis 1:1–3"));
+    }
     void screenshot() {
         populate(true);
         QTRY_COMPARE(list("annotationRanges").size(),4);
@@ -615,10 +697,6 @@ ApplicationWindow {
         QVERIFY(!image.isNull());
         const auto path = qEnvironmentVariable("OMAWORD_ANNOTATION_SCREENSHOT");
         QVERIFY(image.save(path));
-        click(item("blockAnnotationMarker:note:Genesis 1:1–3"));
-        QTest::qWait(150);
-        QVERIFY(window->grabWindow().save(path + ".chooser.png"));
-        QTest::keyClick(window,Qt::Key_Escape);
         controller->setProperty("scale",1.6);
         item("reader")->setWidth(470);
         QTest::qWait(150);
@@ -631,8 +709,10 @@ ApplicationWindow {
         backend->setProperty("showVerseNumbers",false);
         const QString original = QString::fromUtf8("Unicode 🌿 אבג [text] ") + QChar(0x2060) + QChar(0xfffc) + " original.";
         backend->setProperty("verses",QVariantList{QVariantMap{{"number",1},{"text",original},
-            {"bookmarkRanges",QVariantList{bookmark("A",true,true)}}}});
-        QTRY_COMPARE(list("inlineMarkers").size(),2);
+            {"bookmarkRanges",QVariantList{bookmark("A",true,true)}},
+            {"noteRanges",QVariantList{noteRange("A",true,true),noteRange("B",true,true)}},
+            {"tagRanges",QVariantList{QVariantMap{{"reference","A"}}}}}});
+        QTRY_COMPARE(list("inlineMarkers").size(),8);
         auto body = item("blockBody");
         auto doc = body->property("textDocument").value<QQuickTextDocument *>()->textDocument();
         auto clipboard = QGuiApplication::clipboard();
@@ -700,15 +780,16 @@ ApplicationWindow {
         QVariantList verses;
         for (int i = 1; i <= 5; ++i) {
             // Deliberately misleading lexical order, and metadata in a different
-            // order from the expected nesting. Include a bookmark/tag tie.
+            // order from the expected nesting. Include a bookmark/note/tag tie.
             QVariantList bookmarks{bookmark("Z outer 1-5",i == 1,i == 5)};
             if (i <= 3) bookmarks.append(bookmark("A inner 1-3",i == 1,i == 3));
             if (i >= 3) bookmarks.append(bookmark("A inner 3-5",i == 3,i == 5));
             QVariantList tags{QVariantMap{{"reference","Z outer 1-5"},{"continuesBefore",i != 1},{"continuesAfter",i != 5}}};
-            verses.append(QVariantMap{{"number",i},{"text","Words."},{"bookmarkRanges",bookmarks},{"tagRanges",tags}});
+            QVariantList notes{noteRange("Z outer 1-5",i == 1,i == 5),noteRange("Z outer 1-5",i == 1,i == 5)};
+            verses.append(QVariantMap{{"number",i},{"text","Words."},{"bookmarkRanges",bookmarks},{"tagRanges",tags},{"noteRanges",notes}});
         }
         backend->setProperty("verses",verses);
-        QTRY_COMPARE(list("inlineMarkers").size(),8);
+        QTRY_COMPARE(list("inlineMarkers").size(),10);
         QStringList first, last;
         for (const auto &entry : list("inlineMarkers")) {
             const auto marker = entry.toMap();
@@ -716,8 +797,8 @@ ApplicationWindow {
             if (marker["verse"].toInt() == 1 && marker["edge"] == "open") first.append(key);
             if (marker["verse"].toInt() == 5 && marker["edge"] == "close") last.append(key);
         }
-        QCOMPARE(first,QStringList({"bookmark:Z outer 1-5","tag:Z outer 1-5","bookmark:A inner 1-3"}));
-        QCOMPARE(last,QStringList({"bookmark:A inner 3-5","tag:Z outer 1-5","bookmark:Z outer 1-5"}));
+        QCOMPARE(first,QStringList({"bookmark:Z outer 1-5","note:Z outer 1-5","tag:Z outer 1-5","bookmark:A inner 1-3"}));
+        QCOMPARE(last,QStringList({"bookmark:A inner 3-5","tag:Z outer 1-5","note:Z outer 1-5","bookmark:Z outer 1-5"}));
         // Ordering uses source ordinals even when verse labels are nonmonotonic.
         for (int i = 0; i < verses.size(); ++i) { auto verse = verses[i].toMap(); verse["number"] = 80-i; verses[i] = verse; }
         backend->setProperty("verses",verses);
@@ -733,7 +814,7 @@ ApplicationWindow {
         notes["scope"] = scope;
         backend->setProperty("verses",QVariantList{QVariantMap{{"number",2},{"text","Endpoint."},
             {"bookmarkRanges",QVariantList{mark}},{"noteRanges",QVariantList{notes}}}});
-        QTRY_COMPARE(list("inlineMarkers").size(),2);
+        QTRY_COMPARE(list("inlineMarkers").size(),4);
         click(item("blockInlineMarker:bookmark:continuation:Cross-book"));
         auto value = controller->property("openedBookmarkScope");
         auto opened = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
@@ -741,7 +822,7 @@ ApplicationWindow {
         QCOMPARE(opened["start"].toInt(),78); QCOMPARE(opened["endBook"].toInt(),40);
         QCOMPARE(opened["end"].toInt(),2);
         controller->setProperty("calls","");
-        click(item("blockAnnotationMarker:note:Cross-book"));
+        click(item("blockInlineMarker:note:continuation:Cross-book"));
         value = backend->property("navigatedScope");
         opened = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
         QCOMPARE(opened,scope);

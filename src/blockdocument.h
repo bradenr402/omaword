@@ -28,7 +28,7 @@ public:
     Q_INVOKABLE void copySelection(int start, int end, bool primary = false) const;
     // Reserved cell geometry plus kind/reference/scope/edge/verse/position.
     Q_INVOKABLE QVariantList inlineDecorations() const;
-    // Union of cursor-containing bookmark/tag ranges, excluding selected verses.
+    // Union of cursor-containing bookmark/note/tag ranges, excluding selected verses.
     Q_INVOKABLE QVariantList contextRanges(const QVariantList &verses, int cursorVerse,
                                            int selectedStart = 0, int selectedEnd = 0) const;
     Q_INVOKABLE int verseAt(int position) const;

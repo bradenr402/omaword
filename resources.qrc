@@ -4,6 +4,7 @@
     <file>qml/BlockReader.qml</file>
     <file>qml/TagsPanel.qml</file>
     <file>qml/AppToolTip.qml</file>
+    <file>qml/AnnotationGlyph.qml</file>
     <file>resources/catalog.json</file>
     <file alias="branding/icon.svg">assets/app.svg</file>
   </qresource>
