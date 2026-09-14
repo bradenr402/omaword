@@ -17,7 +17,7 @@ Item {
     readonly property bool browserVisible: hostKind === "browser" && !!embeddedHost && embeddedHost.visible
     readonly property bool visibleModal: surface.visible || relatedDrawer.visible
     readonly property bool contentVisible: visibleModal || browserVisible
-    readonly property bool scopePinned: surface.visible && editingScope !== null
+    readonly property bool scopePinned: (surface.visible || browserVisible) && editingScope !== null
     property var editingScope: null
     property var relatedSource: null
     property string page: "picker"
@@ -87,41 +87,46 @@ Item {
     function open(scope = null) {
         if (!canAct()) return false
         const captured = snapshot(scope || bible.tagScope())
-        if (!installed(captured)) return false
+        if (captured && !installed(captured)) return false
         // Reopening another exact range ends the previous editing session first.
         if (editingScope && !sameRange(editingScope, captured)) releaseEditing()
         editingScope = captured
         relatedDrawer.close()
-        hostKind = "picker"
+        hostKind = embeddedHost ? "browser" : "picker"
         page = "picker"
         query = ""
         message = ""
         confirmation = null
+        filterIds = []
         refresh()
-        surface.open()
+        if (embeddedHost) browserRequested()
+        else surface.open()
         Qt.callLater(function() { search.forceActiveFocus() })
         return true
     }
     function openBrowser(manage = false) {
-        if (!canAct()) return false
-        releaseEditing()
-        surface.close()
-        relatedDrawer.close()
-        hostKind = "browser"
-        relatedSource = null
-        page = manage ? "manage" : "browser"
-        returnPage = "browser"
-        query = ""
-        message = ""
-        filterIds = []
-        matchAll = false
-        allVersions = false
-        managedId = ""
-        confirmation = null
-        refresh()
-        browserRequested()
-        Qt.callLater(function() { search.forceActiveFocus() })
+        if (!open()) return false
+        if (manage) panel.manage()
         return true
+    }
+    function followSelection() {
+        // Only an empty editor may acquire its first selection automatically.
+        // Host/peer navigation can clear Main's pending collapse before this
+        // callback runs; the captured scope itself is the session's authority.
+        if (!browserVisible || editingScope) return
+        if (!canAct()) return
+        const captured = snapshot(bible.tagScope())
+        if (!installed(captured)) return
+        editingScope = captured
+        confirmation = null
+        message = ""
+        refresh()
+    }
+    function embeddedClosed() {
+        if (hostKind !== "browser") return
+        hostKind = "none"
+        confirmation = null
+        releaseEditing()
     }
     function openRelated() {
         if (!canAct()) return false
@@ -167,7 +172,7 @@ Item {
     function close() {
         if (hostKind === "picker") surface.close()
         else if (hostKind === "related") relatedDrawer.close()
-        else if (hostKind === "browser") { hostKind = "none"; browserClosed() }
+        else if (hostKind === "browser") { embeddedClosed(); browserClosed() }
     }
     function closeForFocusMode() { close() }
     function updateTagList() {
@@ -207,8 +212,7 @@ Item {
         refreshResults()
     }
     function refreshResults() {
-        if (page === "browser") results = Array.from(bible.taggedPassages(filterIds, matchAll, allVersions ? "" : bible.versionId))
-        else if (page === "related") results = installed(relatedSource)
+        if (page === "related") results = installed(relatedSource)
             ? Array.from(bible.relatedPassages(relatedSource, filterIds, matchAll, allVersions)) : []
         else results = []
     }
@@ -259,6 +263,7 @@ Item {
         return true
     }
     function manage() {
+        if (page === "related") return
         returnPage = page
         page = "manage"
         query = ""
@@ -399,7 +404,11 @@ Item {
         edge: Qt.RightEdge
         modal: true
         focus: true
-        padding: 16 * panel.controlScale
+        padding: 24 * panel.uiScale
+        topPadding: padding
+        bottomPadding: padding
+        leftPadding: padding
+        rightPadding: padding
         closePolicy: Popup.CloseOnPressOutside
         enter: Transition { NumberAnimation { property: "position"; duration: 220; easing.type: Easing.OutCubic } }
         exit: Transition { NumberAnimation { property: "position"; duration: 180; easing.type: Easing.InCubic } }
@@ -456,18 +465,22 @@ Item {
                 Layout.fillWidth: true
                 TagText {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: panel.page === "picker" ? (panel.editingScope ? panel.editingScope.reference + " · " + panel.versionName(panel.editingScope) : "Tags")
                         : panel.page === "related" ? "Related · " + (panel.relatedSource ? panel.relatedSource.reference + " · " + panel.versionName(panel.relatedSource) : "")
                         : panel.page === "manage" ? "Manage tags" : "Tags"
                 }
                 TagButton { text: "Back"; visible: panel.page === "manage"; onClicked: panel.back() }
-                TagButton { text: "Manage"; visible: panel.page !== "manage"; onClicked: panel.manage() }
+                TagButton { objectName: "manageTags"; text: "Manage"; visible: panel.page === "picker"; onClicked: panel.manage() }
                 TagButton { objectName: "tagsDone"; text: "Done"; onClicked: panel.close() }
             }
             TagText {
                 Layout.fillWidth: true
                 visible: (panel.page === "picker" && !panel.scopeValid) || (panel.page === "related" && !panel.installed(panel.relatedSource))
-                text: "This source version is no longer installed. Choose a current passage to continue."
+                objectName: "tagScopePrompt"
+                text: panel.page === "picker" && !panel.editingScope
+                    ? "Select a passage to add or remove tags."
+                    : "This source version is no longer installed. Choose a current passage to continue."
                 color: panel.desktop.muted
             }
             ColumnLayout {
@@ -504,7 +517,7 @@ Item {
                 objectName: "tagFilters"
                 Layout.fillWidth: true
                 spacing: 4 * panel.controlScale
-                visible: panel.page === "browser" || panel.page === "related"
+                visible: panel.page === "related"
                 TagButton { objectName: "tagMatchAny"; text: "Any"; chosen: !panel.matchAll; onClicked: { panel.matchAll = false; panel.refreshResults() } }
                 TagButton { objectName: "tagMatchAll"; text: "All"; chosen: panel.matchAll; onClicked: { panel.matchAll = true; panel.refreshResults() } }
                 Rectangle { objectName: "tagFilterDivider"; Layout.preferredWidth: 1; Layout.preferredHeight: 24 * panel.controlScale; Layout.leftMargin: 4 * panel.controlScale; Layout.rightMargin: 4 * panel.controlScale; color: panel.desktop.border }
@@ -574,7 +587,7 @@ Item {
                 id: overlapList
                 objectName: "tagOverlaps"
                 Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(150 * panel.uiScale, contentHeight)
+                Layout.preferredHeight: Math.min(100 * panel.controlScale, body.height * 0.18, contentHeight)
                 visible: panel.page === "picker" && panel.overlaps.length > 0
                 model: panel.overlaps
                 clip: true
@@ -619,7 +632,7 @@ Item {
                 TagButton { objectName: "mergeTags"; text: "Merge…"; enabled: panel.mergeTarget.length > 0; onClicked: panel.requestManagement("merge") }
             }
             TagText {
-                visible: panel.page === "browser" || panel.page === "related"
+                visible: panel.page === "related"
                 Layout.fillWidth: true
                 text: panel.filterIds.length ? panel.results.length + " passages · " + panel.tagNames(panel.allTags.filter(function(tag) { return panel.filterIds.indexOf(tag.id) >= 0 }))
                     : "Choose one or more tags"
@@ -630,7 +643,7 @@ Item {
                 objectName: "tagResults"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                visible: panel.page === "browser" || panel.page === "related"
+                visible: panel.page === "related"
                 clip: true
                 spacing: 8 * panel.uiScale
                 model: panel.results

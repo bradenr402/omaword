@@ -102,6 +102,7 @@ ApplicationWindow {
             pendingActionCollapse = null
         openedTagActionScope = null
         openedNoteActionScope = null
+        if (tagsUi) tagsUi.followSelection()
     }
     function actionScope() {
         return { identity: selectionIdentity, versionId: bible.versionId,
@@ -136,7 +137,7 @@ ApplicationWindow {
         completeRangeAction(captured, true)
     }
     function openPassageTags(scope) {
-        if ((!hasSelection && !scope) || bible.busy || !flushNote()) return
+        if (bible.busy || !flushNote()) return
         if (typeof scope === "string") {
             if (!bible.navigate(scope)) return
             scope = bible.tagScope()
@@ -150,8 +151,8 @@ ApplicationWindow {
         tagsUi.open(scope || bible.tagScope())
     }
     function openTagsBrowser(manage) {
-        if (!flushNote()) return
-        tagsUi.openBrowser(!!manage)
+        openPassageTags()
+        if (manage && tagsUi.browserVisible) tagsUi.manage()
     }
     readonly property alias tagsUi: tagsUi
     readonly property var tagBackend: bible
@@ -217,7 +218,7 @@ ApplicationWindow {
         dragAnchorRow = -1
     }
     readonly property real floatingSafety: bible.focusMode ? 0 : 72 * scale
-    readonly property real verseGutter: 40 * scale
+    readonly property real verseGutter: 76 * scale
     readonly property bool continuousReader: bible.readingMode === "block" || (bible.readingMode === "paragraph" && bible.hasParagraphs)
     property bool readerInitialized: false
     readonly property string observedReadingMode: bible.readingMode
@@ -390,29 +391,18 @@ ApplicationWindow {
 
     function tint(color, alpha) { return Qt.rgba(color.r, color.g, color.b, alpha) }
     function tagsPlainText(tags) { return Array.from(tags || []).map(function(t) { return t.name }).join(", ") }
-    component TagGlyph: Canvas {
+    component TagGlyph: AnnotationGlyph {
+        kind: "tag"
         implicitWidth: 12 * app.scale
         implicitHeight: 14 * app.scale
-        property color ink: desktop.accent
-        onInkChanged: requestPaint()
-        onPaint: {
-            const ctx = getContext("2d")
-            ctx.reset()
-            ctx.scale(width / 12, height / 14)
-            ctx.translate(12, 0)
-            ctx.scale(-1, 1)
-            ctx.strokeStyle = ink
-            ctx.lineWidth = 1
-            ctx.beginPath()
-            ctx.moveTo(1, 1); ctx.lineTo(6, 1); ctx.lineTo(11, 7)
-            ctx.lineTo(6, 12); ctx.lineTo(1, 6); ctx.closePath(); ctx.stroke()
-            ctx.beginPath(); ctx.arc(3.5, 3.5, 0.8, 0, Math.PI * 2); ctx.stroke()
-        }
+        width: implicitWidth; height: implicitHeight
+        ink: desktop.accent
     }
     Menu {
         id: verseTagMenu
         objectName: "verseTagMenu"
         property var entries: []
+        property string annotationKind: "tag"
         modal: true
         focus: true
         popupType: Popup.Item
@@ -428,8 +418,11 @@ ApplicationWindow {
                 id: verseTagAction
                 required property var modelData
                 objectName: "verseTagAction:" + modelData.reference
-                text: modelData.reference + " · " + app.tagsPlainText(modelData.tags)
-                onTriggered: app.openPassageTags(modelData)
+                text: modelData.reference + (verseTagMenu.annotationKind === "tag" ? " · " + app.tagsPlainText(modelData.tags) : " · Note")
+                onTriggered: {
+                    if (verseTagMenu.annotationKind === "note") app.openNoteScope(modelData)
+                    else app.openPassageTags(modelData)
+                }
                 Keys.onPressed: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
                 Keys.onReleased: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
                 contentItem: Text { text: verseTagAction.text; textFormat: Text.PlainText; color: desktop.foreground; font: verseTagAction.font }
@@ -758,6 +751,7 @@ ApplicationWindow {
     function filterSaved(delta) {
         const tab = (collectionTab + delta + 4) % 4
         if (tab === 3) { openTagsBrowser(); return }
+        tagsUi.embeddedClosed()
         collectionTab = tab
         collectionList.currentIndex = collectionList.count > 0 ? 0 : -1
         moveSaved(0)
@@ -825,15 +819,23 @@ ApplicationWindow {
         savePosition()
         if (typeof scope === "string" ? bible.navigate(scope) : bible.openTaggedPassage(scope)) { syncNote(); readerFocus() }
     }
+    function openNoteScope(scope) {
+        if (!scope || !flushNote()) return
+        savePosition()
+        if (!bible.openTaggedPassage(scope)) return
+        syncNote()
+        openNotes(true)
+        Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
+    }
     // Row metadata already represents range membership, including chapter
     // continuations. Match canonical identities rather than source display names.
     readonly property var cursorContextScopes: {
         if (bible.readingMode !== "paragraph" || continuousReader || bible.focusMode) return []
         const row = Array.from(bible.verses).find(function(verse) { return verse.number === bible.cursorVerse })
-        return row ? Array.from(row.bookmarkRanges || []).concat(Array.from(row.tagRanges || [])) : []
+        return row ? Array.from(row.bookmarkRanges || []).concat(Array.from(row.tagRanges || []), Array.from(row.noteRanges || [])) : []
     }
     function rowInCursorContext(row) {
-        return Array.from(row.bookmarkRanges || []).concat(Array.from(row.tagRanges || [])).some(function(range) {
+        return Array.from(row.bookmarkRanges || []).concat(Array.from(row.tagRanges || []), Array.from(row.noteRanges || [])).some(function(range) {
             return cursorContextScopes.some(function(scope) { return sameTagScope(range, scope) })
         })
     }
@@ -1453,7 +1455,7 @@ ApplicationWindow {
                 anchors.centerIn: parent
                 width: 22 * app.controlScale
                 height: width
-                visible: floatingButton.glyph.length > 0
+                visible: floatingButton.glyph.length > 0 && floatingButton.glyph !== "notes" && floatingButton.glyph !== "saved"
                 property color ink: !floatingButton.enabled ? desktop.muted : floatingButton.selected ? desktop.accent : desktop.foreground
                 property string glyph: floatingButton.glyph
                 onInkChanged: requestPaint()
@@ -1471,23 +1473,18 @@ ApplicationWindow {
                     if (glyph === "saved") {
                         ctx.moveTo(6, 3); ctx.lineTo(18, 3); ctx.lineTo(18, 21)
                         ctx.lineTo(12, 17); ctx.lineTo(6, 21); ctx.closePath()
-                    } else if (glyph === "notes") {
-                        ctx.moveTo(11, 4); ctx.lineTo(3, 4); ctx.lineTo(3, 21)
-                        ctx.lineTo(20, 21); ctx.lineTo(20, 13)
-                        ctx.moveTo(10, 11); ctx.lineTo(18, 3); ctx.lineTo(21, 6)
-                        ctx.lineTo(13, 14); ctx.lineTo(9, 15); ctx.closePath()
-                        ctx.moveTo(16, 5); ctx.lineTo(19, 8)
                     } else if (glyph === "help") {
                         ctx.moveTo(8, 7); ctx.bezierCurveTo(8, 1, 19, 2, 16, 9)
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
                         ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
                     } else if (glyph === "related") {
-                        ctx.moveTo(6, 12); ctx.lineTo(17, 5)
-                        ctx.moveTo(6, 12); ctx.lineTo(17, 19)
-                        ctx.stroke(); ctx.beginPath()
-                        ctx.arc(5, 12, 3, 0, Math.PI * 2)
-                        ctx.moveTo(21, 4); ctx.arc(18, 4, 3, 0, Math.PI * 2)
-                        ctx.moveTo(21, 20); ctx.arc(18, 20, 3, 0, Math.PI * 2)
+                        // Two overlapping passages, joined through their shared lines.
+                        ctx.rect(3, 3, 12, 15)
+                        ctx.rect(9, 7, 12, 15)
+                        ctx.moveTo(6, 7); ctx.lineTo(12, 7)
+                        ctx.moveTo(6, 11); ctx.lineTo(18, 11)
+                        ctx.moveTo(12, 15); ctx.lineTo(18, 15)
+                        ctx.moveTo(12, 18); ctx.lineTo(18, 18)
                     } else if (glyph === "visual") {
                         // The bracket and square handles span all three verse lines.
                         ctx.moveTo(8, 6); ctx.lineTo(21, 6)
@@ -1508,42 +1505,91 @@ ApplicationWindow {
                     ctx.stroke()
                 }
             }
+            AnnotationGlyph {
+                objectName: floatingButton.objectName + "Glyph"
+                anchors.centerIn: parent
+                width: 22 * app.controlScale; height: width
+                visible: floatingButton.glyph === "notes" || floatingButton.glyph === "saved"
+                kind: floatingButton.glyph === "notes" ? "note" : "bookmark"
+                ink: floatingIcon.ink
+            }
         }
     }
-    component BookmarkGlyph: Canvas {
-        property color ink: desktop.accent
+    component BookmarkGlyph: AnnotationGlyph {
+        kind: "bookmark"
+        ink: desktop.accent
         implicitWidth: 11 * app.scale
         implicitHeight: 15 * app.scale
-        onInkChanged: requestPaint()
-        onPaint: {
-            let ctx = getContext("2d")
-            ctx.clearRect(0, 0, width, height)
-            ctx.fillStyle = ink
-            ctx.beginPath()
-            ctx.moveTo(0, 0); ctx.lineTo(width, 0); ctx.lineTo(width, height)
-            ctx.lineTo(width / 2, height * 0.72); ctx.lineTo(0, height)
-            ctx.closePath(); ctx.fill()
-        }
+        width: implicitWidth; height: implicitHeight
     }
-    component NoteGlyph: Canvas {
-        implicitWidth: 13 * app.scale
+    component NoteGlyph: AnnotationGlyph {
+        kind: "note"
+        implicitWidth: 14 * app.scale
         implicitHeight: 16 * app.scale
-        property color ink: desktop.accent
-        onInkChanged: requestPaint()
-        onPaint: {
-            let ctx = getContext("2d")
-            ctx.reset()
-            ctx.scale(width / 16, height / 20)
-            ctx.strokeStyle = ink
-            ctx.lineWidth = 1.4
-            ctx.beginPath()
-            ctx.moveTo(10, 1); ctx.lineTo(1, 1); ctx.lineTo(1, 19)
-            ctx.lineTo(15, 19); ctx.lineTo(15, 6); ctx.lineTo(10, 1)
-            ctx.lineTo(10, 6); ctx.lineTo(15, 6)
-            ctx.moveTo(4, 10); ctx.lineTo(12, 10)
-            ctx.moveTo(4, 14); ctx.lineTo(12, 14)
-            ctx.stroke()
+        width: implicitWidth; height: implicitHeight
+        ink: desktop.accent
+    }
+    component RangeMarker: ToolButton {
+        id: marker
+        required property string kind
+        required property int number
+        required property int rowIndex
+        required property var ranges
+        required property real headingHeight
+        required property real bodyHeight
+        readonly property bool starts: ranges.some(function(r) { return r[kind + "Start"] })
+        readonly property bool ends: ranges.some(function(r) { return r[kind + "End"] })
+        readonly property bool continuesBefore: ranges.some(function(r) { return r.continuesBefore })
+        readonly property bool continuesAfter: ranges.some(function(r) { return r.continuesAfter })
+        readonly property var entries: ranges.filter(function(r) { return r[kind + "Start"] || (rowIndex === 0 && r.continuesBefore) })
+        readonly property var choices: entries.length ? entries : ranges
+        readonly property string hint: ranges.map(function(r) {
+            return r.reference + (marker.kind === "tag" ? " · " + app.tagsPlainText(r.tags) : "")
+        }).join("\n")
+        width: 16 * app.scale
+        padding: 0
+        visible: ranges.length > 0 && !bible.focusMode
+        Accessible.name: hint
+        onClicked: {
+            if (choices.length === 1) {
+                if (kind === "tag") app.openPassageTags(choices[0])
+                else app.openNoteScope(choices[0])
+            } else {
+                verseTagMenu.annotationKind = kind
+                verseTagMenu.entries = choices
+                const p = mapToItem(app.contentItem, width, headingHeight)
+                verseTagMenu.popup(p.x, p.y)
+            }
         }
+        contentItem: Item {
+            Rectangle {
+                objectName: marker.kind + "Line" + marker.number
+                x: 5 * app.scale
+                y: marker.continuesBefore ? 0 : marker.headingHeight + 8 * app.scale
+                width: app.scale
+                height: Math.max(0, (marker.continuesAfter ? parent.height : marker.headingHeight + marker.bodyHeight) - y)
+                color: desktop.accent; opacity: 0.65
+            }
+            Rectangle {
+                objectName: marker.kind + "EndCap" + marker.number
+                x: 5 * app.scale; y: marker.headingHeight + marker.bodyHeight - app.scale
+                width: 7 * app.scale; height: app.scale
+                visible: marker.ends
+                color: desktop.accent
+            }
+            AnnotationGlyph {
+                objectName: marker.kind + "Glyph" + marker.number
+                kind: marker.kind; ink: desktop.accent
+                y: marker.headingHeight + 5 * app.scale
+                width: 14 * app.scale; height: 16 * app.scale
+                visible: marker.starts || (marker.rowIndex === 0 && marker.continuesBefore)
+            }
+        }
+        background: Rectangle {
+            color: marker.hovered || marker.activeFocus ? app.tint(desktop.accent, 0.12) : "transparent"
+            radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+        }
+        AppToolTip { theme: desktop; visible: marker.visible && (marker.hovered || marker.activeFocus); text: marker.hint }
     }
     component SectionLabel: Label {
         color: desktop.muted
@@ -1707,6 +1753,7 @@ ApplicationWindow {
                                     }
                                     BookmarkGlyph {
                                         objectName: "bookmarkGlyph" + verseRow.modelData.number
+                                        width: 14 * app.scale; height: 16 * app.scale
                                         y: verseHeading.height + 5 * app.scale
                                         visible: bookmarkMarker.starts
                                     }
@@ -1755,37 +1802,20 @@ ApplicationWindow {
                                         color: desktop.foreground
                                     }
                                 }
-                                ToolButton {
+                                RangeMarker {
                                     id: verseTagMarker
                                     objectName: "verseTagMarker" + verseRow.modelData.number
-                                    readonly property var entries: Array.from(verseRow.modelData.tagRanges || []).filter(function(r) {
-                                        return r.tagStart || (verseRow.index === 0 && r.continuesBefore)
-                                    })
-                                    readonly property string hint: entries.map(function(r) {
-                                        return r.reference + " · " + app.tagsPlainText(r.tags)
-                                    }).join("\n")
-                                    x: -18 * app.scale
-                                    y: verseHeading.height + 3 * app.scale
-                                    width: 18 * app.scale
-                                    height: 22 * app.scale
-                                    z: 2
-                                    visible: entries.length > 0 && !bible.focusMode
-                                    padding: 3 * app.scale
-                                    Accessible.name: hint
-                                    onClicked: {
-                                        if (entries.length === 1) app.openPassageTags(entries[0])
-                                        else {
-                                            verseTagMenu.entries = entries
-                                            const p = mapToItem(app.contentItem, width, 0)
-                                            verseTagMenu.popup(p.x, p.y)
-                                        }
-                                    }
-                                    contentItem: TagGlyph {}
-                                    background: Rectangle {
-                                        color: verseTagMarker.hovered || verseTagMarker.activeFocus ? app.tint(desktop.accent, 0.12) : "transparent"
-                                        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                                    }
-                                    AppToolTip { theme: desktop; visible: verseTagMarker.visible && (verseTagMarker.hovered || verseTagMarker.activeFocus); text: verseTagMarker.hint }
+                                    kind: "tag"; number: verseRow.modelData.number; rowIndex: verseRow.index
+                                    ranges: Array.from(verseRow.modelData.tagRanges || [])
+                                    headingHeight: verseHeading.height; bodyHeight: verseBody.height
+                                    x: 18 * app.scale; height: verseRow.height
+                                }
+                                RangeMarker {
+                                    objectName: "verseNoteMarker" + verseRow.modelData.number
+                                    kind: "note"; number: verseRow.modelData.number; rowIndex: verseRow.index
+                                    ranges: Array.from(verseRow.modelData.noteRanges || [])
+                                    headingHeight: verseHeading.height; bodyHeight: verseBody.height
+                                    x: 36 * app.scale; height: verseRow.height
                                 }
                                 Rectangle {
                                     objectName: "contextSegment" + verseRow.modelData.number
@@ -1829,7 +1859,7 @@ ApplicationWindow {
                                 Item {
                                     id: verseNumber
                                     objectName: "verseNumber" + verseRow.modelData.number
-                                    x: 14 * app.scale
+                                    x: 54 * app.scale
                                     width: 17 * app.scale
                                     y: verseHeading.height
                                     height: Math.max(32, verseBody.height)
@@ -1849,24 +1879,6 @@ ApplicationWindow {
                                         font.weight: verseRow.selected ? Font.Bold : Font.Normal
                                         color: verseRow.selected ? desktop.accent : desktop.muted
                                         FontMetrics { id: numberMetrics; font: numberLabel.font }
-                                    }
-                                    Canvas {
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        y: 24 * app.scale
-                                        width: 8 * app.scale; height: 10 * app.scale
-                                        visible: verseRow.modelData.hasNote && !bible.focusMode
-                                        property color ink: desktop.muted
-                                        onInkChanged: requestPaint()
-                                        onPaint: {
-                                            let ctx = getContext("2d")
-                                            ctx.clearRect(0, 0, width, height)
-                                            ctx.strokeStyle = ink; ctx.lineWidth = app.scale
-                                            ctx.strokeRect(app.scale / 2, app.scale / 2, width - app.scale, height - app.scale)
-                                            ctx.beginPath()
-                                            ctx.moveTo(width * 0.25, height * 0.35); ctx.lineTo(width * 0.75, height * 0.35)
-                                            ctx.moveTo(width * 0.25, height * 0.65); ctx.lineTo(width * 0.75, height * 0.65)
-                                            ctx.stroke()
-                                        }
                                     }
                                     MouseArea {
                                         id: numberMouse
@@ -2218,29 +2230,31 @@ ApplicationWindow {
         onClicked: app.closeNotes()
     }
 
-    FloatingButton {
-        id: modeControl
-        objectName: "modeControl"
+    Row {
+        id: leftActions
+        objectName: "leftActions"
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.margins: 16 * app.controlScale
-        glyph: app.verseMode ? "visual" : "normal"
-        selected: app.verseMode
-        visible: bible.ready && !bible.focusMode
-        enabled: !bible.busy && !app.modalOpen
-        tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · v"
-        onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
-    }
-    FloatingButton {
-        objectName: "relatedControl"
-        anchors.left: modeControl.right
-        anchors.leftMargin: 4 * app.controlScale
-        anchors.bottom: modeControl.bottom
-        glyph: "related"
-        visible: bible.ready && !bible.focusMode
-        enabled: app.hasSelection && !bible.busy && !app.modalOpen
-        tip: "Related passages · Shift L"
-        onClicked: app.runCommand("related")
+        spacing: 4 * app.controlScale
+        visible: !bible.focusMode
+        FloatingButton {
+            objectName: "helpControl"
+            glyph: "help"
+            tip: "Keybindings · ? · F1"
+            enabled: !bible.busy && !app.modalOpen
+            onClicked: helpDialog.open()
+        }
+        FloatingButton {
+            id: modeControl
+            objectName: "modeControl"
+            glyph: app.verseMode ? "visual" : "normal"
+            selected: app.verseMode
+            visible: bible.ready
+            enabled: !bible.busy && !app.modalOpen
+            tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · v"
+            onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
+        }
     }
     Row {
         id: locationControls
@@ -2248,7 +2262,7 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 16 * app.controlScale
         x: app.width / 2 - width / 2
-        readonly property real availableWidth: Math.max(0, app.width - 2 * (floatingActions.width + 24 * app.controlScale))
+        readonly property real availableWidth: Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + 24 * app.controlScale))
         width: Math.min(passageControl.implicitWidth + (versionControl.visible ? versionControl.width : 0), availableWidth)
         visible: !bible.focusMode
         FloatingButton {
@@ -2280,6 +2294,14 @@ ApplicationWindow {
         spacing: 4 * app.controlScale
         visible: !bible.focusMode
         FloatingButton {
+            objectName: "relatedControl"
+            glyph: "related"
+            visible: bible.ready
+            enabled: app.hasSelection && !bible.busy && !app.modalOpen
+            tip: "Related passages · Shift L"
+            onClicked: app.runCommand("related")
+        }
+        FloatingButton {
             objectName: "savedControl"
             visible: bible.ready
             glyph: "saved"
@@ -2295,13 +2317,6 @@ ApplicationWindow {
             tip: "Notes · Ctrl n"
             enabled: bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.toggleNotes()
-        }
-        FloatingButton {
-            objectName: "helpControl"
-            glyph: "help"
-            tip: "Keybindings · ? · F1"
-            enabled: !bible.busy && !app.modalOpen
-            onClicked: helpDialog.open()
         }
     }
 
@@ -2665,7 +2680,7 @@ ApplicationWindow {
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
         onOpened: app.moveSaved(0)
-        onClosed: app.restorePanelFocus()
+        onClosed: { tagsUi.embeddedClosed(); app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "savedContent"
             Shortcut { sequence: "Ctrl+A"; enabled: savedDrawer.opened && !deleteConfirmation.visible && !tagsUi.visibleModal && !bible.busy && !app.textInputActive(); onActivated: savedDrawer.close() }
