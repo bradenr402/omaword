@@ -15,8 +15,9 @@ QML and the seven-entry `resources/catalog.json` metadata catalog.
 | `src/singleinstance.*` | One process coordinator per data directory, `omaword.lock`, and bounded launch-request IPC |
 | `src/windowmanager.*` | A backend, catalog object, QML engine, and window per reader; lifecycle and request routing |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing layouts, verse/document mapping, selection and annotation geometry |
-| `qml/Main.qml` | Reader, passage/command palettes, notes, Saved, settings, catalog, and attribution |
-| `src/desktop.*` | System fonts/scaling, live Omarchy theme integration, Qt palette fallback, external links |
+| `qml/Main.qml` | Reader, passage/command palettes, notes, Saved, Visual action completion, settings, catalog, and attribution |
+| `qml/TagsPanel.qml` | Pinned exact-range picker, Saved tags browser, Related, and global tag management |
+| `src/desktop.*`, `qml/AppToolTip.qml` | Shared fonts/scaling, live Omarchy theme, asynchronous compositor corners, themed tooltips, external links |
 
 ## Import and catalog lifecycle
 
@@ -71,6 +72,11 @@ The data root is Qt's application-data location for storage ID `omaword`.
 `personal.sqlite` uses schema **5**, WAL, and synchronous durable writes:
 
 - `annotations` and `reading` are scoped by source `version_id`.
+- `tags(id,name,name_key)` holds global flat definitions with unique normalized
+  name keys. `tag_assignments` has a composite primary key of `version_id`, both
+  book/chapter/verse endpoints, and `tag_id`, plus a `(tag_id,version_id)` index.
+  These independent tables are created transactionally with `IF NOT EXISTS`;
+  the personal schema version remains **5**.
 - `preferences` is global; defaults are Paragraph, font size 18, line height 1.5,
   numbers/headings/verse picker on, and focus mode off. Font size is 8–40 in steps
   of 1; line height is 1.0–3.0 in steps of 0.1.
@@ -87,22 +93,165 @@ checks guard text files and sidecars, including aliases to personal data,
 symlinks, hardlinks, and unrelated targets. Failed operations preserve published
 library and reader state.
 
-Readers share committed annotations, preferences, and library changes while
-keeping independent active versions, passages, directional selections, cursors,
-and scroll positions. Shared imports use a busy guard. Replacement, removal, and
+Readers share committed annotations, tag definitions/assignments, preferences, and
+library changes while keeping independent active versions, passages, directional
+selections, cursors, and scroll positions. Shared imports use a busy guard. Replacement, removal, and
 restore flush affected drafts; failure vetoes the mutation. Note saves compare
 the exact-range saved text with the reader's observed baseline in a transaction.
 Conflicts preserve dirty drafts for **Save my draft** / **Use saved text**.
 
-Removal keeps annotations by default; they reconnect on same-ID reimport. Removing
-an active edition selects another installed version or returns affected readers
-to the empty state. Preferences remain available with no installed text.
+Removal keeps annotations and tag assignments by default; they reconnect on
+same-ID reimport. Retained assignments are hidden from tag results and installed-use
+counts while their source is absent. `removeVersion(id, true)` also deletes that
+version's annotations, reading state, and assignments. Global tag definitions
+remain in either case. Removing an active edition selects another installed
+version or returns affected readers to the empty state. Preferences and backend
+global tag operations remain available with no installed text; the UI's Tags and
+Manage tags commands require a ready reader.
 
-Backups use `omaword-backup`, version **3**, with active source `versionId`,
-`edition`, creation time, reading state, and annotations. Restore requires matching
-active identity/name and valid endpoints, then replaces only that edition's
-personal data transactionally. Preferences and text are outside backup scope.
-Markdown export identifies the active edition and source ID.
+### Backup and Markdown export
+
+Backups use `omaword-backup`, version **4**, with active source `versionId`,
+`edition`, creation time, reading state, annotations, `tags` definitions
+`{id,name}`, and `tagAssignments` with both endpoints and `tagId`. Only definitions
+used by that source and its assignments are exported, from a consistent database
+transaction. Preferences and Bible text are outside backup scope.
+
+Restore accepts versions **3** and **4**, requires matching active source ID/name,
+and validates fields, endpoint existence/source order, duplicate identities and
+assignments before writing. Version 4 requires every supplied definition to be
+used. The 32 MiB backup bound and per-array limits also apply. Affected drafts
+must flush; the captured source is checked again before the transaction.
+
+Version 4 replaces that source's assignments together with its annotations and
+reading state. Global names define identity: existing normalized names are reused;
+portable IDs survive when free, and a colliding ID with a different name is
+remapped. Restore never renames or deletes existing global definitions to fit a
+backup, preserving other versions' tags and unused definitions. Version 3 replaces
+annotations/reading state while preserving existing tags and assignments. Read-back
+and commit precede publication to peers; failures roll back the replacement.
+
+Markdown export remains `omaword-notes.md`, identifies the active edition/source
+ID, and includes tag-only saved ranges. `Tags:` lines escape tag names as literal
+Markdown/HTML text; note bodies retain their authored Markdown.
+
+## Passage tags
+
+Names are edge-trimmed and NFC normalized, with Unicode case-folded identity.
+Internal spaces, punctuation, emoji, and format characters such as emoji joiners
+are preserved; empty names, controls, line/paragraph separators, invalid strings,
+and names exceeding 4096 UTF-16 code units are rejected. There is no hierarchy or
+tag color. Creating an equivalent name returns the existing ID without changing
+its display spelling. Rename preserves the ID and rejects another tag's identity;
+merge explicitly unions assignments into the target and removes the source.
+Delete removes a definition and its assignments across installed and retained
+versions. These operations preserve bookmarks, highlights, and notes.
+
+`tagScope()` snapshots `{versionId,reference,book,chapter,start,endBook,endChapter,end}`.
+Assignments match the source ID and both endpoints exactly, including cross-chapter
+and cross-book ranges. Overlap does not imply exact membership. Writes validate
+the installed source and integer endpoints against its actual text keys; the
+display reference is not the authority. `setTag` is idempotent, and
+`createAndAssignTag` commits definition creation and assignment atomically.
+Transaction/read-back failures publish no successful tag mutation.
+
+`tags` exposes `{id,name,count}` sorted by name key/ID, with counts for installed
+assignments only. `selectionTags` contains exact membership; `overlappingTags`
+contains all intersecting range records, including an exact match. All three
+notify through `tagsChanged`; selection changes also emit that signal locally.
+Committed tag changes refresh collection/verse metadata and notify every reader
+sharing the data directory without navigating peers.
+
+`taggedPassages(tagIds, matchAll, versionId)` filters exact range records by any
+or all selected IDs. Empty filters return no rows; an empty version ID includes
+all installed versions. Records contain source ID/abbreviation, full endpoints,
+reference, all assigned `{id,name}` tags, exact bookmark/highlight/note values,
+bounded excerpt, and `sharedCount`. Sorting is descending shared count, then start
+and end in each source's book/chapter/verse order, then source ID. Read-only source
+connections query endpoints and bounded text without loading entire Bibles.
+
+`relatedPassages(source, tagIds, matchAll, allVersions)` uses the same query and
+excludes every same-source range intersecting the captured source. Current-version
+mode means that captured source's version. Querying never navigates;
+`openTaggedPassage(scope)` explicitly flushes drafts, revalidates, switches source
+if necessary, and opens the complete endpoint range in the requesting reader.
+
+Saved **All** unions annotations and tag-only ranges, deduplicating exact endpoints
+within the active source. The other annotation tabs retain their mark/note filters.
+Deleting a Saved entry atomically removes its bookmark, highlight, note, and all
+tag assignments for that exact range, leaving overlapping entries and global
+definitions intact. `deleteAnnotation(reference, expectedVersionId)` guards the
+confirmation's source identity and rejects absent exact entries.
+
+Verse rows expose `hasTags` and `tagRanges`, carrying full scopes/tags plus
+`tagStart`, `tagEnd`, `continuesBefore`, and `continuesAfter`. Verse rails and
+`BlockDocument` annotation geometry preserve exact scopes and source ordering.
+Markers open the captured range's picker; overlapping markers offer range choices.
+Paragraph/Block layouts share this geometry through `BlockReader`.
+
+### Picker, browser, and Related
+
+`TagsPanel` receives explicit `app`, `bible`, and `desktop` properties. It owns one
+modal popup with picker, browser, related, and manage pages. `open(scope)` copies
+the scope; later selection/version changes do not retarget picker writes. Checked
+tags reflect only that exact range. Other overlapping ranges are listed separately:
+**Open** navigates and closes the picker; **Edit tags** navigates and pins that full
+range for editing.
+
+`t` opens **Tag passage**. Each click or Space/Enter in the tag list saves immediately;
+Enter in search or **Create / assign** atomically creates/reuses and applies the
+typed name. Space in the search field remains text input. Esc cancels a pending
+management confirmation first, otherwise clears a nonempty query, then closes.
+**Done** closes without undoing committed toggles. User labels render as plain text.
+
+Saved's fifth **Tags** tab and Commands → **Tags** open the browser and close the
+Saved drawer. A new browser starts with no filters, **Any**, and **Current version**;
+**All versions** includes installed sources only. Enter/click opens a full result
+and closes the browser. `Shift H` toggles headings; `Shift L` opens **Related
+passages**, pinning the current source and initially selecting the union of tags
+on every overlapping range. Opening Related results keeps the popup/source pinned;
+**Use current** explicitly captures the new source and resets tag filters.
+
+**Manage** is available within the popup and through **Manage tags** in Commands.
+Rename, delete, and merge each require confirmation with global scope. Peer edits
+refresh visible lists, prune deleted IDs, and invalidate confirmations if a source
+or target tag disappears or changes name. Missing source versions disable pinned
+picker actions and empty Related results; backend validation also rejects stale
+endpoints. Busy-library and note-flush guards protect editing/navigation actions.
+
+## Visual action completion
+
+`Main.qml` captures action identity from version, exact endpoints/reference,
+chapter, and cursor. Successful bookmark/highlight actions (`bool` backend results)
+and nonempty passage copies use the full range, switch Visual to Normal, clear the
+numeric prefix, and collapse to the cursor when no editing panel pins the range.
+No extra "Visual selection off" toast is generated for action completion.
+
+Opening Notes or Tags alone does not complete Visual mode. A successful note save
+or tag assignment switches to Normal but retains the original range while Notes
+or a tag editing scope remains open. `editingPanelClosed()` performs the deferred
+collapse after both are released. A changed selection/version/cursor invalidates
+the pending collapse so closing a stale panel cannot collapse a new selection.
+Failed writes, failed draft flushes, and cancellation before a successful edit
+preserve Visual mode and the range.
+
+## Desktop surfaces
+
+One `Desktop` object is shared across reader engines. `cornerRadius` starts at
+zero and asynchronously queries `hyprctl getoption decoration:rounding -j` when
+`HYPRLAND_INSTANCE_SIGNATURE` is present. A separate five-second poll tracks the
+effective compositor value; theme/font refresh polls every two seconds. Only one
+rounding query runs at a time, with a one-second deadline and 8192-byte output
+bound. A finite, nonnegative integer JSON `int` value within the C++ integer range
+is accepted. Missing session/command, invalid output, nonzero exit, or timeout
+resets corners to zero; later polls can recover without blocking the UI.
+
+Application-owned containers and control backgrounds bind to that shared radius,
+including dialogs, menus, drawers, inputs, buttons, rails, scrollbars, and
+`BlockReader` surfaces; small controls clamp it to their dimensions. Passage
+highlight segments stay square. `AppToolTip` replaces stock tooltip instances
+with explicit theme colors, system font/scaling, plain wrapped text, shared
+corners, and width bounded by both 360 scaled pixels and the available window.
 
 ## User interface and verification
 
@@ -112,5 +261,6 @@ About & Attribution shows dynamic source name/rights, source details links, loca
 storage information, and **No version installed** when empty.
 
 `branding.env` supplies shared branding; build-local generated headers and desktop
-files consume it. [tests/README.md](tests/README.md) documents the seven suite
-selectors, generated original fixtures, and optional isolated source archives.
+files consume it. [tests/README.md](tests/README.md) documents suite selectors,
+including `tags`, `tagsui`, and `desktop`, generated original fixtures, and optional
+isolated source archives. [TAGS.md](TAGS.md) records the tag API and UI contract.

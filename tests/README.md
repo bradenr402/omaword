@@ -11,6 +11,9 @@ filters, and `-functions`, require exactly one selected suite.
 | --- | --- | --- | --- |
 | `backend` | `tests/backend.pro` | `build/tests/` | `tst_backend` |
 | `ui` | `tests/ui.pro` | `build/ui-tests/` | `tst_ui` |
+| `tags` | `tests/tags.pro` | `build/tags-tests/` | `tst_tags` |
+| `tagsui` | `tests/tagsui.pro` | `build/tagsui-tests/` | `tst_tagsui` |
+| `desktop` | `tests/desktop.pro` | `build/desktop-tests/` | `tst_desktop` |
 | `importer` | `tests/usfm.pro` | `build/usfm-tests/` | `tst_usfm` |
 | `catalog` | `tests/catalog.pro` | `build/catalog-tests/` | `tst_catalog` |
 | `annotations` | `tests/blockannotations.pro` | `build/blockannotations/` | `tst_blockannotations` |
@@ -21,6 +24,15 @@ filters, and `-functions`, require exactly one selected suite.
 `renderAndMetadata`, `sourceOrdering`, `standalone`, `malformed`, `corruption`,
 and `actualArchives`. Catalog cases include `metadataAndAllowlist`,
 `streamingAtomicSuccess`, `cancelAndReuse`, `timeouts`, and `commitFailureAndRetry`.
+
+Tag targets include `namesAndDurability`, `sourceOrderVersionsRelatedAndPeers`,
+`backupsScopedLegacyAndMarkdown`, and `rollbackAndPublication` in `tags`;
+`pickerPinnedKeyboardAndLiteralNames`, `relatedPinnedUnionAndUseCurrent`, and
+`mainIntegrationVisualCompletionAndDraft` in `tagsui`. Desktop targets include
+`effectiveInteger`, `timeoutDoesNotFreezeOrOverlap`, `toolTipThemeAndWrapping`, and
+`sharedAcrossWindows`. For example, `bin/test --suite tags namesAndDurability`
+selects one function; `bin/test --suite tags --suite tagsui --suite desktop`
+selects the three complete suites.
 
 Builds are incremental. `JOBS` caps total Make jobs, defaulting to CPU count;
 `TEST_JOBS` caps concurrent suites, defaulting to 2. Concurrency is clamped to
@@ -37,6 +49,10 @@ the behavior under test. Backend, UI, and window fixtures cover selected referen
 without generating a whole Bible. Parser fixtures exercise formatting, sparse
 chapters, source ordering, metadata, and malformed input. Catalog tests use fake
 network replies and a local HTTP server; ordinary checks need no public download.
+Tag suites generate small USFM editions in temporary application-data directories;
+backend tag fixtures include sparse/source-ordered Apocrypha and cross-book ranges.
+Desktop tests inject a fake `hyprctl` command and temporary environment/theme state
+to exercise compositor responses without changing the running desktop.
 
 Set `OMAWORD_TEST_USFM_DIR` to a readable directory containing the seven source
 ZIPs, such as a local Downloads directory. The runner normalizes this path before
@@ -86,9 +102,28 @@ installation remains a reader action through Add version.
 - **UI:** empty/About content; catalog search and attribution; download lifecycle
   and guarded import handoff; source-ordered browsing; version picker/removal;
   keyboard contexts; reading layouts/settings; selection/copy; Saved; Markdown
-  draft conflicts; backup scope and source-independent reading.
+  draft conflicts; backup scope and source-independent reading; success-only Visual
+  completion, failed marks, pinned Notes/Tags and stale panels; tag markers,
+  shortcuts, Saved integration, and square highlight geometry.
+- **Tags:** Unicode NFC/case-folded identity and literal names; durable global
+  definitions; exact membership versus overlap; tag-only Saved entries and exact
+  whole-entry deletion; any/all queries, excerpts and source ordering; pinned
+  Related exclusions; cross-version opening and independent peer selections;
+  rename/delete/merge; removal keep/drop and stale scopes; scoped v4 backup,
+  v3 assignment preservation, ID/name collisions, escaped Markdown; injected SQL
+  failures, commit rollback, read-back verification, publication and flush vetoes.
+- **Tags UI:** immediate Space/Enter toggles and create/apply; captured picker
+  scopes, overlap Open/Edit, literal labels, invalid names and failed flushes;
+  any/all and installed-version filters; Related's overlapping-tag union, pinned
+  source and Use current; management confirmations and peer invalidation; removed
+  versions; real Main integration for Visual completion and unsaved note drafts.
+- **Desktop:** effective integer rounding, malformed/oversized output, process
+  failure, missing session/command, timeout responsiveness, nonoverlapping queries,
+  recovery and separate five-second polling; themed plain-text tooltip wrapping,
+  window-width bounds, and shared live radius updates across reader engines.
 - **Annotations:** flowing-text verse mapping, paragraph/layout changes, range
-  painting, bookmark/note geometry, overlapping entries, and focus-mode visibility.
+  painting, bookmark/note/tag geometry, overlapping entries, exact tag marker
+  scopes and continuation metadata, and focus-mode visibility.
 - **Windows:** independent readers with shared commits; compare-and-set note
   conflicts; flush vetoes; replacement/removal; shared import guards; closing one
   reader; last-window exit; secondary launches opening a new reader.
