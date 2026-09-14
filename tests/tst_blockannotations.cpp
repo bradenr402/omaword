@@ -45,14 +45,20 @@ class BlockAnnotationsTest : public QObject
     static QVariantMap bookmark(QString ref, bool first, bool last) {
         return {{"reference",ref},{"bookmarkContinuesBefore",!first},{"bookmarkContinuesAfter",!last}};
     }
+    static QVariantMap noteRange(QString ref, bool first, bool last) {
+        return {{"reference",ref},{"noteStart",first},{"noteEnd",last},
+                {"continuesBefore",!first},{"continuesAfter",!last}};
+    }
     void populate(bool adjacent = false) {
         QVariantList verses;
         for (int i = 1; i <= 6; ++i) {
-            QVariantList ranges;
+            QVariantList ranges, notes;
             if (i <= 3) ranges.append(bookmark("Genesis 1:1–3",i == 1,i == 3));
             if (adjacent && i >= 4 && i <= 5) ranges.append(bookmark("Genesis 1:4–5",i == 4,i == 5));
+            if (i <= 3) notes.append(noteRange("Genesis 1:1–3",i == 1,i == 3));
+            if (i >= 4 && i <= 5) notes.append(noteRange("Genesis 1:4–5",i == 4,i == 5));
             verses.append(QVariantMap{{"number",i},{"text",QString("Verse %1 is here.").arg(i)},
-                {"heading",i == 1 ? "A section heading" : ""},{"bookmarkRanges",ranges}});
+                {"heading",i == 1 ? "A section heading" : ""},{"bookmarkRanges",ranges},{"noteRanges",notes}});
         }
         backend->setProperty("verses",verses);
         backend->setProperty("collection",QVariantList{note("Genesis 1:1–3",1,3),note("Genesis 1:4–5",4,5)});
@@ -184,9 +190,10 @@ ApplicationWindow {
     void continuationAndSelectionGuard() {
         populate();
         auto verses = backend->property("verses").toList();
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < verses.size(); ++i) {
             auto verse = verses[i].toMap();
-            verse["bookmarkRanges"] = QVariantList{bookmark("Genesis 1:30–2:3",false,i == 2)};
+            verse["bookmarkRanges"] = i < 3 ? QVariantList{bookmark("Genesis 1:30–2:3",false,i == 2)} : QVariantList{};
+            verse["noteRanges"] = i < 3 ? QVariantList{noteRange("Genesis 1:30–2:3",false,i == 2)} : QVariantList{};
             verses[i] = verse;
         }
         backend->setProperty("chapter",2);
@@ -224,6 +231,49 @@ ApplicationWindow {
         QVERIFY(controller->property("freeSelectedText").toString().isEmpty());
         QVERIFY(item("blockBody")->property("selectedText").toString().isEmpty());
         QCOMPARE(backend->property("navigated").toString(),QString("Genesis 1:30–2:3"));
+    }
+    void sourceOrderedNotes_data() {
+        QTest::addColumn<int>("book"); QTest::addColumn<int>("chapter");
+        QTest::addColumn<QList<int>>("numbers"); QTest::addColumn<int>("firstCovered");
+        QTest::addColumn<int>("lastCovered"); QTest::addColumn<bool>("before"); QTest::addColumn<bool>("after");
+        QTest::newRow("esdras-start") << 80 << 16 << QList<int>{77,78} << 78 << 78 << false << true;
+        QTest::newRow("matthew-end") << 40 << 1 << QList<int>{1,2,3} << 1 << 2 << true << false;
+        QTest::newRow("unrelated-book") << 60 << 1 << QList<int>{1,2,3} << 0 << 0 << false << false;
+    }
+    void sourceOrderedNotes() {
+        QFETCH(int,book); QFETCH(int,chapter); QFETCH(QList<int>,numbers);
+        QFETCH(int,firstCovered); QFETCH(int,lastCovered); QFETCH(bool,before); QFETCH(bool,after);
+        const QString reference = "2 Esdras 16:78–Matthew 1:2";
+        QVariantList verses;
+        for (int number : numbers) {
+            QVariantList notes;
+            if (firstCovered && number >= firstCovered && number <= lastCovered)
+                notes.append(noteRange(reference,!before && number == firstCovered,!after && number == lastCovered));
+            verses.append(QVariantMap{{"number",number},{"text",QString("Verse %1 has enough original words to wrap onto several visible lines.").arg(number)},
+                                      {"noteRanges",notes}});
+        }
+        backend->setProperty("book",book); backend->setProperty("chapter",chapter);
+        backend->setProperty("collection",QVariantList{QVariantMap{{"reference",reference},{"book",80},{"chapter",16},
+            {"start",78},{"endBook",40},{"endChapter",1},{"end",2},{"note","Cross-book note"}}});
+        item("reader")->setWidth(210);
+        backend->setProperty("verses",verses);
+        QTRY_COMPARE(mapping->spans().size(),numbers.size());
+        QTRY_COMPARE(list("annotationRanges").size(),firstCovered ? 1 : 0);
+        if (!firstCovered) return;
+        const auto range = list("annotationRanges").first().toMap();
+        QCOMPARE(range["kind"].toString(),QString("note")); QCOMPARE(range["reference"].toString(),reference);
+        QCOMPARE(range["continuesBefore"].toBool(),before); QCOMPARE(range["continuesAfter"].toBool(),after);
+        const int start = mapping->positionFor(firstCovered);
+        const int end = mapping->spans()[numbers.indexOf(lastCovered)].toMap()["end"].toInt();
+        QCOMPARE(range["start"].toInt(),start); QCOMPARE(range["end"].toInt(),end);
+        QCOMPARE(range["rects"].toList(),mapping->rectangles(start,end));
+        QVERIFY(range["rects"].toList().size() > 1);
+        click(item("blockAnnotationMarker:note:"+reference));
+        QCOMPARE(backend->property("navigated").toString(),reference);
+        // Collection tuples alone must never manufacture membership.
+        for (auto &row : verses) { auto verse = row.toMap(); verse.remove("noteRanges"); row = verse; }
+        backend->setProperty("verses",verses);
+        QTRY_VERIFY(list("annotationRanges").isEmpty());
     }
     void relayoutAndFocus() {
         populate(true);

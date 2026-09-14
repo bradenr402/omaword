@@ -28,7 +28,7 @@ class WindowsTest : public QObject
     std::unique_ptr<Desktop> desktop;
     std::unique_ptr<WindowManager> windows;
     QString fixture;
-    QString structuredEpub;
+    QString structuredUsfm;
     static QObject *visualObject(QQuickItem *item, const QString &name) {
         if (item->objectName() == name) return item;
         for (auto *child : item->childItems())
@@ -44,32 +44,20 @@ class WindowsTest : public QObject
         QVariant saved;
         return QMetaObject::invokeMethod(window,"flushNote",Q_RETURN_ARG(QVariant,saved)) && saved.toBool();
     }
-    // Original words in the same Haiola structure used by the importer tests.
-    // A complete KJV numbering profile includes Mark 7:16, absent from NET.
-    static bool writeStructuredEpub(const QString &path) {
-        QMap<QString,QByteArray> entries{{"mimetype","application/epub+zip"},
-            {"META-INF/container.xml","<container><rootfiles><rootfile full-path='content.opf'/></rootfiles></container>"}};
-        const auto prefixes = QString("GN EX LV NU DT JS JG RT S1 S2 K1 K2 R1 R2 ER NH ET JB PS PR EC SS IS JR LM EK DN HS JL AM OB JH MC NM HK ZP HG ZC ML MT MK LK JN AC RM C1 C2 GL EP PP CL H1 H2 T1 T2 TT PM HB JM P1 P2 J1 J2 J3 JD RV").split(' ');
-        QString manifest, spine;
-        for (int b = 1; b <= 66; ++b) {
-            const QString file = QString("text%1.xhtml").arg(b);
-            manifest += QString("<item id='b%1' href='%2'/>").arg(b).arg(file);
-            spine += QString("<itemref idref='b%1'/>").arg(b);
-            QString body = "<html><body><div class='main' id='" + prefixes[b-1] + "0_0'>";
-            for (int c = 1; c <= EpubImporter::canon()[b-1].chapters; ++c) {
-                body += "<div class='p'>";
-                const int maximum = (b == 47 && c == 13) || (b == 64 && c == 1) ? 14
-                    : b == 66 && c == 12 ? 17 : EpubImporter::chapterMaximum(b,c);
-                for (int v = 1; v <= maximum; ++v)
-                    body += QString("<span class='verse' id='%1%2_%3'>%3</span>Original window fixture words %4:%2:%3. ")
-                        .arg(prefixes[b-1]).arg(c).arg(v).arg(b);
-                body += "</div>";
+    // Small original USFM content covers only references used by these tests.
+    static bool writeStructuredUsfm(const QString &path, const QString &id) {
+        QMap<QString,QByteArray> entries;
+        const QStringList codes{"GEN","MRK","JHN","ROM"};
+        for (int b = 0; b < codes.size(); ++b) {
+            QString body = "\\id " + codes[b] + " Original Window Bible\n";
+            const QList<int> chapters = b == 0 ? QList<int>{1,2} : b == 1 ? QList<int>{7} : b == 2 ? QList<int>{3,4} : QList<int>{8};
+            for (int c : chapters) {
+                body += QString("\\c %1\n\\p\n").arg(c);
+                for (int v = 1; v <= 36; ++v)
+                    body += QString("\\v %1 Original window fixture words %2:%3:%1.\n").arg(v).arg(codes[b]).arg(c);
             }
-            entries[file] = (body + "</div></body></html>").toUtf8();
+            entries[QString("%1-%2%3.usfm").arg(b+1,2,10,QChar('0')).arg(codes[b],id)] = body.toUtf8();
         }
-        entries["content.opf"] = ("<package xmlns:dc='http://purl.org/dc/elements/1.1/' unique-identifier='uid'><metadata>"
-            "<dc:title>Original Window Bible</dc:title><dc:identifier id='uid'>urn:omaword:window-fixture</dc:identifier>"
-            "<dc:rights>Original test words</dc:rights></metadata><manifest>" + manifest + "</manifest><spine>" + spine + "</spine></package>").toUtf8();
         archive *zip = archive_write_new();
         const auto cleanup = qScopeGuard([&] { archive_write_free(zip); });
         if (archive_write_set_format_zip(zip) != ARCHIVE_OK
@@ -103,34 +91,22 @@ class WindowsTest : public QObject
 private slots:
     void initTestCase() {
         QVERIFY(fixtures.isValid());
-        fixture = fixtures.filePath("bible.sqlite");
-        {
-            auto db = QSqlDatabase::addDatabase("QSQLITE", "windows-fixture");
-            db.setDatabaseName(fixture); QVERIFY(db.open());
-            QSqlQuery q(db);
-            QVERIFY(q.exec("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)"));
-            QVERIFY(q.exec("INSERT INTO metadata VALUES('edition','NET Bible 2.1'),('schema','1')"));
-            QVERIFY(q.exec("CREATE TABLE verses(book INTEGER,chapter INTEGER,number INTEGER,text TEXT,html TEXT,heading TEXT,poetry INTEGER,PRIMARY KEY(book,chapter,number))"));
-            QVERIFY(db.transaction());
-            q.prepare("INSERT INTO verses VALUES(?,?,?,'Original window test text.','Original window test text.','',0)");
-            for (int b = 1; b <= 66; ++b)
-                for (int c = 1; c <= EpubImporter::canon()[b-1].chapters; ++c)
-                    for (int v = 1; v <= EpubImporter::chapterMaximum(b,c); ++v) {
-                        if (EpubImporter::omittedVerse(b,c,v)) continue;
-                        q.bindValue(0,b); q.bindValue(1,c); q.bindValue(2,v); QVERIFY(q.exec());
-                    }
-            QVERIFY(db.commit());
-        }
-        QSqlDatabase::removeDatabase("windows-fixture");
-        structuredEpub = fixtures.filePath("original-window.epub");
-        QVERIFY(writeStructuredEpub(structuredEpub));
+        fixture = fixtures.filePath("engnet_usfm.zip");
+        structuredUsfm = fixtures.filePath("window-original_usfm.zip");
+        QVERIFY(writeStructuredUsfm(fixture,"engnet"));
+        QVERIFY(writeStructuredUsfm(structuredUsfm,"window-original"));
     }
     void init() {
         session = std::make_unique<QTemporaryDir>();
         qputenv("XDG_DATA_HOME", session->path().toUtf8());
         const auto data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QVERIFY(QDir().mkpath(data));
-        QVERIFY(QFile::copy(fixture, data + "/bible.sqlite"));
+        {
+            BibleBackend seed;
+            seed.importUsfm(QUrl::fromLocalFile(fixture));
+            QTRY_VERIFY_WITH_TIMEOUT(!seed.busy(),30000);
+            QVERIFY2(seed.ready(),qPrintable(seed.error()));
+        }
         desktop = std::make_unique<Desktop>();
         windows = std::make_unique<WindowManager>(desktop.get());
         windows->newWindow(); windows->newWindow();
@@ -195,12 +171,12 @@ private slots:
         QFETCH(bool,saveDraft);
         auto *a = windows->backendAt(0), *b = windows->backendAt(1);
         auto *first = windows->windowAt(0), *second = windows->windowAt(1);
-        a->importEpub(QUrl::fromLocalFile(structuredEpub));
+        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
         QVERIFY2(a->busy(),qPrintable(a->error()));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),30000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
         const QString id = a->versionId();
-        QVERIFY(id.startsWith("epub-")); QVERIFY(b->switchVersion(id));
+        QCOMPARE(id,QString("window-original")); QVERIFY(b->switchVersion(id));
         QVERIFY(a->navigate("John 3:16")); QVERIFY(b->navigate("John 3:16"));
         auto *editorA = windowObject(first,"noteEditor"), *editorB = windowObject(second,"noteEditor");
         QVERIFY(editorA); QVERIFY(editorB);
@@ -236,7 +212,7 @@ private slots:
         // Use the manager's real root callbacks, without replacing them with test lambdas.
         QVERIFY(!a->importBackup(backup));
         QVERIFY(!a->removeVersion(id,true));
-        a->importEpub(QUrl::fromLocalFile(structuredEpub));
+        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
         QVERIFY(!a->busy()); QVERIFY(a->error().contains("unsaved note"));
         QVERIFY(!second->close());
         QCOMPARE(windows->count(),2); QVERIFY(first->isVisible()); QVERIFY(second->isVisible());
@@ -257,14 +233,14 @@ private slots:
         QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),resolved); q.finish();
         QVERIFY(a->importBackup(backup));
         QCOMPARE(editorB->property("text").toString(),QString("Initial shared note"));
-        a->importEpub(QUrl::fromLocalFile(structuredEpub));
+        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
         QVERIFY2(a->busy(),qPrintable(a->error()));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),30000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
         QCOMPARE(b->versionId(),id); QCOMPARE(b->noteText(),QString("Initial shared note"));
         QVERIFY(installedPath(b) != generation); QVERIFY(!QFile::exists(generation));
         QVERIFY(a->removeVersion(id,true));
-        QCOMPARE(a->versionId(),QString("net-2.1")); QCOMPARE(b->versionId(),QString("net-2.1"));
+        QCOMPARE(a->versionId(),QString("engnet")); QCOMPARE(b->versionId(),QString("engnet"));
         QVERIFY(a->ready()); QVERIFY(b->ready());
         QPointer<QWindow> closed(second);
         QVERIFY(second->close()); QTRY_COMPARE(windows->count(),1); QTRY_VERIFY(!closed);
@@ -273,17 +249,17 @@ private slots:
     void genericStructuredEditionAcrossWindows() {
         auto *a = windows->backendAt(0), *b = windows->backendAt(1);
         QVERIFY(b->navigate("John 3:16"));
-        a->importEpub(QUrl::fromLocalFile(structuredEpub));
+        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
         QVERIFY2(a->busy(),qPrintable(a->error()));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),30000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
         const QString id = a->versionId();
-        QVERIFY(QRegularExpression("^epub-[0-9a-f]{32}$").match(id).hasMatch());
-        QCOMPARE(a->edition(),QString("Original Window Bible"));
-        QCOMPARE(a->versionAbbreviation(),QString("OWB"));
+        QCOMPARE(id,QString("window-original"));
+        QVERIFY(!a->edition().isEmpty());
+        QVERIFY(!a->versionAbbreviation().isEmpty());
         QString error;
-        QVERIFY2(EpubImporter::validateDatabase(installedPath(a),&error),qPrintable(error));
-        QCOMPARE(b->versionId(),QString("net-2.1")); QCOMPARE(b->versions().size(),2);
+        QVERIFY2(UsfmImporter::validateDatabase(installedPath(a),&error),qPrintable(error));
+        QCOMPARE(b->versionId(),QString("engnet")); QCOMPARE(b->versions().size(),2);
         QCOMPARE(b->selectionReference(),QString("John 3:16"));
         QVERIFY(a->navigate("Mark 7:16")); QVERIFY(b->switchVersion(id));
         QCOMPARE(b->selectionReference(),QString("John 3:16"));
@@ -293,16 +269,16 @@ private slots:
         QCOMPARE(b->noteText(),QString("Source-numbered shared note"));
         QCOMPARE(windowObject(windows->windowAt(1),"noteEditor")->property("text").toString(),b->noteText());
         const auto obsolete = installedPath(a);
-        a->importEpub(QUrl::fromLocalFile(structuredEpub));
+        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),30000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
         QCOMPARE(a->versionId(),id); QCOMPARE(b->versionId(),id);
         QCOMPARE(b->selectionReference(),QString("Mark 7:16"));
         QCOMPARE(b->noteText(),QString("Source-numbered shared note"));
         QVERIFY(installedPath(b) != obsolete); QVERIFY(!QFile::exists(obsolete));
-        QVERIFY2(EpubImporter::validateDatabase(installedPath(b),&error),qPrintable(error));
+        QVERIFY2(UsfmImporter::validateDatabase(installedPath(b),&error),qPrintable(error));
         QVERIFY(a->removeVersion(id,true));
-        QCOMPARE(a->versionId(),QString("net-2.1")); QCOMPARE(b->versionId(),QString("net-2.1"));
+        QCOMPARE(a->versionId(),QString("engnet")); QCOMPARE(b->versionId(),QString("engnet"));
         QVERIFY(a->ready()); QVERIFY(b->ready()); QCOMPARE(b->versions().size(),1);
     }
     void flushVetoRestoreAndRemoval() {
@@ -314,14 +290,14 @@ private slots:
         const auto path = installedPath(a);
         int calls = 0;
         b->setFlushCallback([&] { ++calls; return false; });
-        QVERIFY(!a->removeVersion("net-2.1",true));
+        QVERIFY(!a->removeVersion("engnet",true));
         QVERIFY(!a->importBackup(backup));
         QCOMPARE(calls,2); QVERIFY(QFile::exists(path)); QVERIFY(b->ready());
         b->setFlushCallback([&] { b->setNoteText("Flushed peer draft"); return b->noteText() == "Flushed peer draft"; });
         // Restore refreshes annotations but leaves the peer's cursor/direction alone.
         QVERIFY(a->importBackup(backup)); QCOMPARE(b->cursorVerse(),18);
         QVERIFY(b->noteText().isEmpty()); QCOMPARE(a->collection(),b->collection());
-        QVERIFY(a->removeVersion("net-2.1",false));
+        QVERIFY(a->removeVersion("engnet",false));
         QVERIFY(!a->ready()); QVERIFY(!b->ready()); QVERIFY(b->versions().isEmpty());
         QVERIFY(!QFile::exists(path));
         b->setNoteText("Cannot resurrect removed annotations"); QVERIFY(!b->error().isEmpty());
@@ -361,15 +337,15 @@ private slots:
             // Real WindowManager callbacks flush A then B, withholding A's peer
             // notification until B has tried to save against its old baseline.
             if (import) {
-                third->importEpub(QUrl::fromLocalFile(structuredEpub));
+                third->importUsfm(QUrl::fromLocalFile(structuredUsfm));
                 QVERIFY(!third->busy());
-            } else QVERIFY(!third->removeVersion("net-2.1",true));
+            } else QVERIFY(!third->removeVersion("engnet",true));
             disconnect(observer);
             QVERIFY2(conflict.contains("changed in another window"),qPrintable(conflict));
             QVERIFY(third->error().contains("unsaved note"));
             QCOMPARE(firstCommits.count(),0); QCOMPARE(secondCommits.count(),0);
             QCOMPARE(libraryCommits.count(),1); // Deferred A annotation commit only.
-            QCOMPARE(libraryCommits.first().at(0).toString(),QString("net-2.1"));
+            QCOMPARE(libraryCommits.first().at(0).toString(),QString("engnet"));
             QVERIFY(!libraryCommits.first().at(1).toBool());
             QCOMPARE(firstEditor->property("text").toString(),QString("First draft"));
             QCOMPARE(secondEditor->property("text").toString(),QString("Second draft"));
@@ -379,7 +355,7 @@ private slots:
             QCOMPARE(a->noteText(),QString("First draft")); QCOMPARE(b->noteText(),QString("First draft"));
             QCOMPARE(installedPath(third),generation); QVERIFY(QFile::exists(generation));
             QCOMPARE(third->versions().size(),1); QVERIFY(a->ready()); QVERIFY(b->ready());
-            QVERIFY(q.exec("SELECT note FROM annotations WHERE version_id='net-2.1'"));
+            QVERIFY(q.exec("SELECT note FROM annotations WHERE version_id='engnet'"));
             QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("First draft")); q.finish();
             QVERIFY(!flush(secondRoot)); QVERIFY(!secondRoot->close()); QCOMPARE(windows->count(),3);
             // Explicit consent uses the refreshed backend baseline and succeeds.
@@ -388,31 +364,30 @@ private slots:
             QCOMPARE(a->noteText(),QString("Second draft")); QCOMPARE(b->noteText(),QString("Second draft"));
             QCOMPARE(firstEditor->property("text").toString(),QString("Second draft"));
             QVERIFY(!secondRoot->property("noteConflict").toBool()); QVERIFY(flush(secondRoot));
-            QVERIFY(third->removeVersion("net-2.1",false));
+            QVERIFY(third->removeVersion("engnet",false));
             QVERIFY(!a->ready()); QVERIFY(!b->ready()); QVERIFY(!QFile::exists(generation));
-            QVERIFY(q.exec("SELECT note FROM annotations WHERE version_id='net-2.1'"));
+            QVERIFY(q.exec("SELECT note FROM annotations WHERE version_id='engnet'"));
             QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("Second draft")); q.finish();
         }
         QSqlDatabase::removeDatabase("windows-flushed");
     }
     void versionReplacementAndFallback() {
-        const auto net = qEnvironmentVariable("OMAWORD_TEST_EPUB"), kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
-        if (net.isEmpty() || kjv.isEmpty()) QSKIP("Set NET and KJV fixture paths for import/replacement checks.");
+        const auto net = fixture, kjv = structuredUsfm;
         auto *a = windows->backendAt(0), *b = windows->backendAt(1);
         QVERIFY(a->navigate("John 3:16")); QVERIFY(b->navigate("John 4:3"));
         b->moveSelection(-1,true); b->setReadingPosition(0.37);
         const auto selection = b->selectionReference();
-        a->importEpub(QUrl::fromLocalFile(kjv)); QVERIFY(a->busy()); QVERIFY(b->busy());
-        QVERIFY(!b->removeVersion("net-2.1",true));
-        b->importEpub(QUrl::fromLocalFile(net)); QVERIFY(!b->error().isEmpty());
+        a->importUsfm(QUrl::fromLocalFile(kjv)); QVERIFY(a->busy()); QVERIFY(b->busy());
+        QVERIFY(!b->removeVersion("engnet",true));
+        b->importUsfm(QUrl::fromLocalFile(net)); QVERIFY(!b->error().isEmpty());
         QVERIFY(b->navigate("John 4:3")); // Reading remains usable during import.
         b->moveSelection(-1,true); b->setReadingPosition(0.37);
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),60000);
-        QCOMPARE(a->versionId(),QString("kjv-2006")); QCOMPARE(b->versionId(),QString("net-2.1"));
+        QCOMPARE(a->versionId(),QString("window-original")); QCOMPARE(b->versionId(),QString("engnet"));
         QCOMPARE(b->versions().size(),2); QCOMPARE(b->selectionReference(),selection);
         QCOMPARE(b->versions().first().toMap()["active"].toBool(),true);
-        QCOMPARE(b->versions().first().toMap()["id"].toString(),QString("net-2.1"));
-        QVERIFY(a->switchVersion("net-2.1"));
+        QCOMPARE(b->versions().first().toMap()["id"].toString(),QString("engnet"));
+        QVERIFY(a->switchVersion("engnet"));
         const QString obsolete = installedPath(b);
         double positionBeforeReplacement = 0, positionAfterReplacement = -1;
         b->setFlushCallback([&] {
@@ -422,9 +397,9 @@ private slots:
             return true;
         });
         const auto observer = connect(a,&BibleBackend::sharedCommitted,this,[&](const QString &id, bool library, bool) {
-            if (library && id == "net-2.1") positionAfterReplacement = b->readingPosition();
+            if (library && id == "engnet") positionAfterReplacement = b->readingPosition();
         });
-        a->importEpub(QUrl::fromLocalFile(net));
+        a->importUsfm(QUrl::fromLocalFile(net));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),60000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
         QVERIFY(installedPath(b) != obsolete); QVERIFY(!QFile::exists(obsolete));
@@ -433,8 +408,8 @@ private slots:
         disconnect(observer);
         for (const auto &name : QSqlDatabase::connectionNames())
             QVERIFY(QSqlDatabase::database(name).databaseName() != obsolete);
-        QVERIFY(a->removeVersion("net-2.1",true));
-        QCOMPARE(b->versionId(),QString("kjv-2006")); QVERIFY(b->ready());
+        QVERIFY(a->removeVersion("engnet",true));
+        QCOMPARE(b->versionId(),QString("window-original")); QVERIFY(b->ready());
         QCOMPARE(b->selectionReference(),selection); QCOMPARE(b->cursorVerse(),2);
         b->setNoteText("Fallback remains writable"); QCOMPARE(a->collection(),b->collection());
     }
@@ -449,13 +424,12 @@ private slots:
         QVERIFY(windows->backendAt(0)->navigate("Romans 8:1"));
     }
     void importCompletionFlushVeto() {
-        const auto net = qEnvironmentVariable("OMAWORD_TEST_EPUB");
-        if (net.isEmpty()) QSKIP("Set NET fixture path for asynchronous flush check.");
+        const auto net = fixture;
         auto *a = windows->backendAt(0), *b = windows->backendAt(1);
         const auto original = installedPath(a);
         int flushes = 0;
         b->setFlushCallback([&] { return ++flushes == 1; });
-        a->importEpub(QUrl::fromLocalFile(net)); QVERIFY(a->busy());
+        a->importUsfm(QUrl::fromLocalFile(net)); QVERIFY(a->busy());
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),60000);
         QCOMPARE(flushes,2); QVERIFY(a->error().contains("unsaved note"));
         QCOMPARE(installedPath(a),original); QCOMPARE(installedPath(b),original);

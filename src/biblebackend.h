@@ -1,8 +1,9 @@
 #pragma once
 
-#include "epubimporter.h"
+#include "usfmimporter.h"
 #include <QObject>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QSqlDatabase>
 #include <QTimer>
 #include <QUrl>
@@ -33,7 +34,8 @@ class BibleBackend : public QObject
     Q_PROPERTY(bool crossChapterSelection READ crossChapterSelection NOTIFY selectionChanged)
     Q_PROPERTY(int chapterCount READ chapterCount NOTIFY passageChanged)
     Q_PROPERTY(QVariantList verses READ verses NOTIFY versesChanged)
-    Q_PROPERTY(QVariantList books READ books CONSTANT)
+    Q_PROPERTY(QVariantList books READ books NOTIFY booksChanged)
+    Q_PROPERTY(QVariantList chapterNumbers READ chapterNumbers NOTIFY passageChanged)
     Q_PROPERTY(QVariantList collection READ collection NOTIFY collectionChanged)
     Q_PROPERTY(QString noteText READ noteText WRITE setNoteText NOTIFY noteTextChanged)
     Q_PROPERTY(bool selectionBookmarked READ selectionBookmarked NOTIFY annotationChanged)
@@ -73,6 +75,8 @@ public:
     int cursorVerse() const;
     bool crossChapterSelection() const;
     int chapterCount() const;
+    QVariantList chapterNumbers() const { return chaptersForBook(m_book); }
+    Q_INVOKABLE QVariantList chaptersForBook(int book) const;
     QVariantList verses() const { return m_verses; }
     QVariantList books() const;
     QVariantList collection() const { return m_collection; }
@@ -101,7 +105,7 @@ public:
     Q_INVOKABLE void setReadingMode(QString value);
     Q_INVOKABLE void setFontSize(int value);
 
-    Q_INVOKABLE void importEpub(QUrl file);
+    Q_INVOKABLE void importUsfm(QUrl file);
     Q_INVOKABLE bool switchVersion(QString id);
     Q_INVOKABLE bool removeVersion(QString id, bool removeAnnotations);
     Q_INVOKABLE void clearError();
@@ -132,6 +136,7 @@ public:
     Q_INVOKABLE QString dataDirectory();
 
 signals:
+    void booksChanged();
     void versionChanged();
     void versionsChanged();
     void readyChanged();
@@ -204,11 +209,16 @@ private:
     bool setError(const QString &error);
     void setStatus(const QString &status);
     QString localPath(const QUrl &url);
-    static QString reference(int book, int chapter, int start = 0, int end = 0);
+    QString reference(int book, int chapter, int start = 0, int end = 0) const;
+    int resolveBook(QString name) const;
 
     QString m_directory, m_error, m_status, m_note;
     QString m_versionId, m_edition, m_abbreviation, m_copyright, m_importTarget;
     QVariantList m_versions;
+    QVariantList m_books;
+    QHash<int, QVariantList> m_chapters;
+    QHash<QString, int> m_bookAliases;
+    QHash<int, int> m_keyIndices;
     QVector<Verse> m_keys{{0,0,0}};
     QString m_bibleConnection, m_storeConnection;
     QSqlDatabase m_bible, m_store;
@@ -220,11 +230,11 @@ private:
     bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;
-    bool m_hasParagraphs = false, m_legacyKjv = false;
+    bool m_hasParagraphs = false;
     double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection;
     QVector<Annotation> m_annotations;
     std::shared_ptr<std::atomic<double>> m_importProgress;
-    QFutureWatcher<EpubImporter::Result> m_importWatcher;
+    QFutureWatcher<UsfmImporter::Result> m_importWatcher;
     QTimer m_progressTimer;
 };

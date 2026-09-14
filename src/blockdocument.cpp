@@ -9,7 +9,6 @@
 #include <QTextFragment>
 #include <QTextLayout>
 #include <algorithm>
-#include <tuple>
 
 static void registerBlockDocument()
 {
@@ -72,7 +71,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         QTextDocument source;
         const auto html = verse.value("html").toString();
         if (html.isEmpty()) source.setPlainText(verse.value("text").toString());
-        else source.setHtml(html); // Already sanitized by the EPUB importer.
+        else source.setHtml(html); // Already sanitized by the USFM importer.
         // Flatten source paragraph wrappers, preserving internal poetry breaks
         // and inline formats. Source verse-boundary paragraphs are handled above.
         for (auto block = source.begin(); block.isValid(); block = block.next()) {
@@ -92,6 +91,9 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
 QVariantList BlockDocument::annotations(const QVariantList &verses, const QVariantList &collection,
                                        int book, int chapter) const
 {
+    Q_UNUSED(collection);
+    Q_UNUSED(book);
+    Q_UNUSED(chapter);
     QMap<QString, QVariantMap> ranges;
     auto include = [&ranges](const QString &kind, const QString &reference, const QVariantMap &span,
                              bool before, bool after) {
@@ -114,18 +116,13 @@ QVariantList BlockDocument::annotations(const QVariantList &verses, const QVaria
                         range.value("bookmarkContinuesBefore").toBool(),
                         range.value("bookmarkContinuesAfter").toBool());
             }
+            for (const auto &entry : verse.value("noteRanges").toList()) {
+                const auto range = entry.toMap();
+                include("note",range.value("reference").toString(),span,
+                        range.value("continuesBefore").toBool(),
+                        range.value("continuesAfter").toBool());
+            }
             break;
-        }
-        // Canonical endpoint tuples also handle omitted verses and cross-book
-        // notes, without parsing localized display references or using hasNote.
-        const auto here = std::make_tuple(book,chapter,number);
-        for (const auto &entry : collection) {
-            const auto note = entry.toMap();
-            if (note.value("note").toString().isEmpty()) continue;
-            const auto first = std::make_tuple(note.value("book").toInt(),note.value("chapter").toInt(),note.value("start").toInt());
-            const auto last = std::make_tuple(note.value("endBook").toInt(),note.value("endChapter").toInt(),note.value("end").toInt());
-            if (here >= first && here <= last)
-                include("note",note.value("reference").toString(),span,here > first,here < last);
         }
     }
     QVariantList result;
