@@ -80,9 +80,9 @@ retarget a write. Global rename/delete/merge preserve marks and notes.
 ## Annotations summary and modal tag picker
 
 `TagsPanel.qml` is the reusable tag UI, with explicit `app`, `bible`, `desktop`, and
-`embeddedHost` properties. Main supplies an embedded host for the read-only
-Annotations summary. The shared body also serves the modal picker/management and
-Related right-side drawer. Entry points are `open(scope=null)`,
+`embeddedHost` properties. Main supplies an embedded host for the Annotations
+summary, with explicit range-edit entry points. The shared body also serves the
+modal picker/management and Related right-side drawer. Entry points are `open(scope=null)`,
 `openSummary(scope=null)`, `openBrowser(manage=false)`, `openRelated()`,
 `openRelatedForTag(id, source)`, and `closeForFocusMode()`.
 `browserRequested`/`browserClosed` control the Annotations drawer;
@@ -112,7 +112,7 @@ Main owns action completion through
   otherwise closes. **Done** closes. Neither closing action undoes saved toggles.
 - `Ctrl a` toggles Annotations in reader/panel navigation contexts; editable fields
   retain Select All. Its single tab row is **Bookmarks**, **Highlights**, **Notes**,
-  **Tags**, with no **All** tab. Tags and Commands → **Tags** open the read-only
+  **Tags**, with no **All** tab. Tags and Commands → **Tags** open the
   summary below the tab divider via `openSummary()` / `openBrowser(false)`.
   **Tags on this range** shows exact membership; **Tags on overlapping ranges**
   lists separate intersecting assignments; **Other passages with these tags**
@@ -120,6 +120,16 @@ Main owns action completion through
   all same-version overlaps. References open full ranges and refresh the open
   summary. Empty states distinguish no tags, no exact tags, and no other passages.
   There are no search, filter, assignment, creation, Manage, or Done controls.
+- **Edit range** is an explicitly required exception to the summary's viewing-only
+  role: exact tagged scopes, overlapping ranges, and related passage rows can open
+  the separate range editor. `Shift E` uses the focused row's captured scope, or
+  the summary scope when no row supplies one. All tags on that exact source are
+  preselected, and the component chooser permits individual tags or other saved
+  components. This relocates existing assignments; it does not add a tag picker
+  to the summary. See [RANGE_EDITING.md](RANGE_EDITING.md).
+- `h` / `l` and Left/Right cycle Annotations tabs even from Tags. `j` / `k` and
+  Up/Down navigate items, including enabled summary buttons. Editable fields keep
+  normal text navigation.
 - Clicking any summary tag chip opens Related seeded with only that tag ID and
   the summary's captured source/version, including chips on overlapping or related
   rows. This closes Annotations and does not change assignments or complete a
@@ -166,6 +176,20 @@ for correction/retry and preserve saved marks and notes.
 
 ## Annotation entries, removal, and backup
 
+- `Shift E` / **Edit annotation range**, Annotations row **Edit range**, and reader
+  marker right-click → **Edit range** or Shift-click select an exact saved range
+  and components to move. Overlap never implicitly selects all covered assignments.
+  Moves extend, shrink, or relocate within one installed version, including across
+  source-ordered books. `o` swaps the active endpoint, Enter saves, and Esc restores
+  the original selection. Unselected components stay at the source; destination
+  flags union and duplicate tag assignments deduplicate without changing global
+  definitions. Distinct nonempty notes require explicit confirmation and combine
+  destination text, a blank line, then source text. Snapshot/generation and preview
+  token validation, shared draft flushing, transactional read-back, and atomic
+  commit prevent stale or partial moves. Failed saves retain the active edit.
+  Backend entry points are `annotationRanges`, `annotationSnapshot`,
+  `previewRangeChange`, `changeAnnotationRange`, and `swapSelectionEnds`; their
+  signatures and collision rules are in the range-editing guide.
 - The backend collection includes tag-only ranges and deduplicates tags/marks/notes
   at exact endpoints in the active version. Annotations' Bookmarks, Highlights,
   and Notes tabs filter by type; Tags summarizes exact/overlapping tags and related
@@ -207,6 +231,10 @@ through the whole interval. Later starts/ends cannot bend an existing rail; free
 lanes are reused by subsequent intervals. Segments connect across rows/headings and
 retain endpoint caps. All three kinds share `RangeMarker` and overlap choices.
 Note clicks flush drafts and open the complete captured scope before Notes.
+Opening Notes for editing places its cursor at the end, including an explicit
+focus request on an open editor; ordinary synchronization/autosave does not.
+Right-clicking a reader marker offers **Open** / **Edit range**; Shift-click opens
+range editing directly, with an exact-range choice for overlapping Verse markers.
 
 Paragraph and Block keep a continuous text layout with inline bookmark/note/tag start
 and end brackets. Opening brackets have a superscript icon on their left; tag
@@ -217,14 +245,18 @@ Markers open the bookmark range, exact tag editor, or exact note scope. Notes ar
 inline too, with no margin-note rail or grouped margin chooser. `AnnotationGlyph.qml`
 supplies all three kinds with `filled: false` by default. Verse and flowing-reader
 icons set `filled: true`; footer and other annotation controls use outlines. The
-filled note is a solid sheet with a transparent pencil; its outline variant retains
+filled note is a folded sheet with two cutout text lines and a separate solid
+pencil, rendered with three-times supersampling; its outline variant retains
 the footer's pencil-in-an-open-square path. Nesting follows source-order extents,
 with outer starts first, inner ends first, and reversed kind order for equal-range
 closing brackets.
 
 Reserved document cells keep decorations clear of verse text through wrapping and
-relayout. Copy filters only generated decoration positions, preserving original
-text and Unicode. In Paragraph/Block, while the cursor verse is inside a bookmark,
+relayout. Brackets start one pixel above the text's letter top and extend below
+the baseline using endpoint font/ink metrics, independent of proportional line
+height. Baseline cells reserve font height plus two pixels; generated joiners avoid
+fallback-font height inflation. Copy filters only generated decoration positions,
+preserving original text and Unicode. In Paragraph/Block, while the cursor verse is inside a bookmark,
 note, or tag range, subtle context shading marks its other visible members,
 excluding the cursor and current
 selection. Overlapping active ranges are unioned; moving outside clears the shade.
@@ -254,8 +286,12 @@ corners for tooltips. Passage highlight segments remain square.
 [tests/README.md](tests/README.md) maps `bin/test` selectors to projects/builds.
 `tags` covers backend identity, exact/overlap queries, persistence, peers, removal,
 backup/export and rollback; `tagsui` covers the modal picker with/without an embedded
-host, read-only summary, tag-seeded discovery-only Related, management, and Main
+host, summary browsing, tag-seeded discovery-only Related, management, and Main
 integration; `desktop` covers asynchronous rounding and shared themed tooltips.
+`ranges` covers exact component moves, source order, note collisions, stale
+snapshots/tokens, peers and rollback; `rangesui` covers choosers, movement,
+restoration, failed-save retention, marker/Annotations/summary entry points,
+note cursor placement, and Tags tab navigation.
 `ui` and `annotations` also cover Visual completion, Annotations shortcut
 contexts, footer order, padded Related geometry, interval-packed row rails and inline
 endpoints/copy, exact note clicks, shared filled/outline glyph rendering, and cursor-context

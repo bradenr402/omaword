@@ -27,6 +27,7 @@ Internet is needed only to download a version. Once installed, reading and annot
 - `v` starts visual selection; `j` / `k` extends it. `J` / `K` starts and extends a range immediately.
 - `4j` moves four verses; `20g` goes to verse 20.
 - `m` bookmarks; `x` highlights; `n` writes a note; `t` opens the modal passage tag picker.
+- `Shift E` edits an existing annotation range: choose components, adjust endpoints, `o` swaps, Enter saves, Esc restores. See [range editing](RANGE_EDITING.md).
 - In the tag editor, `Space` / `Enter` toggles a tag; Enter in search creates and applies it.
 - `Ctrl n` toggles Notes; `Ctrl a` toggles Annotations (Bookmarks, Highlights, Notes, Tags).
 - `y` copies a quotation; `Y` copies plain text. `Ctrl c` copies selected text, or the passage when no text is selected.
@@ -38,7 +39,7 @@ Internet is needed only to download a version. Once installed, reading and annot
 
 Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
 
-Annotations → Tags is a read-only summary of exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related. Use `t` to edit exact-range assignments and Commands → **Manage tags** to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version. See the [tag contract](TAGS.md).
+Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related or **Edit range** to move assignments. Use `t` to edit exact-range assignments and Commands → **Manage tags** to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version. See the [tag contract](TAGS.md).
 
 The footer puts `?` before mode on the left and Related (outline left-pointing tag), Annotations, and Notes on the right. Bookmark, tag, and note icons are filled in the reader and outlined elsewhere, with straight, dynamically packed Verse rails or inline Paragraph/Block brackets and subtle cursor-range shading.
 

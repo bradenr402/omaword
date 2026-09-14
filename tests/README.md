@@ -13,6 +13,8 @@ filters, and `-functions`, require exactly one selected suite.
 | `ui` | `tests/ui.pro` | `build/ui-tests/` | `tst_ui` |
 | `tags` | `tests/tags.pro` | `build/tags-tests/` | `tst_tags` |
 | `tagsui` | `tests/tagsui.pro` | `build/tagsui-tests/` | `tst_tagsui` |
+| `ranges` | `tests/ranges.pro` | `build/ranges-tests/` | `tst_ranges` |
+| `rangesui` | `tests/rangesui.pro` | `build/rangesui-tests/` | `tst_rangesui` |
 | `desktop` | `tests/desktop.pro` | `build/desktop-tests/` | `tst_desktop` |
 | `importer` | `tests/usfm.pro` | `build/usfm-tests/` | `tst_usfm` |
 | `catalog` | `tests/catalog.pro` | `build/catalog-tests/` | `tst_catalog` |
@@ -42,6 +44,22 @@ the existing `saved*` test/object names now exercise Annotations. Flowing-reader
 selects one function; `bin/test --suite tags --suite tagsui --suite desktop`
 selects the three complete suites.
 
+Range targets include `moveAll` (expand/shrink/overlap/disjoint/cross-book rows),
+`subsetOverlapAndDestinationUnion`, `noteConfirmationAndDestinationDrift`,
+`sourceDrift`, `draftsFlushBeforeValidation`, `invalidScopesSnapshotsAndVersions`,
+and `rollback` in `ranges`; `componentSubsets`, `overlapChooserCancelAndNoop`,
+`swapAcrossChapterAndRestoreDirection`, `noteCollision`,
+`staleSourceAndFailedSaveStayActive`, `staleMergeDoesNotOverwritePeer`,
+`notesEndCursorAndTagsTabNavigation`, `focusedAnnotationRow`,
+`chooserEmptyAndBulkMotion`, and `markerEntrypoints` in `rangesui`.
+Additional `rangesui` targets are `cancelIgnoresUnrelatedPeerDraftVeto`,
+`cancelReadingFailureKeepsSnapshotForRetry`, `cancelAfterVersionChangeEndsSafely`,
+`peerRemovesLastVersionEndsSession`, and `singletonEndpointTracksMotionAndSwap`.
+`bracketFontGeometry` and `markerRangeEditing` are additional `annotations` targets.
+For example, `bin/test --suite ranges --suite rangesui` selects both complete
+suites; `bin/test --suite ranges noteConfirmationAndDestinationDrift` selects one
+function. Both new suites are included by default and by `--suite all`.
+
 Builds are incremental. `JOBS` caps total Make jobs, defaulting to CPU count;
 `TEST_JOBS` caps concurrent suites, defaulting to 2. Concurrency is clamped to
 selected suites and `JOBS`; each worker gets `floor(JOBS / concurrency)` jobs.
@@ -58,6 +76,10 @@ chapters, source ordering, metadata, and malformed input. Catalog tests use fake
 network replies and a local HTTP server; ordinary checks need no public download.
 Tag suites generate small USFM editions in temporary application-data directories;
 backend tag fixtures include sparse/source-ordered Apocrypha and cross-book ranges.
+Range suites also generate original USFM editions in temporary data directories.
+`ranges` uses noncanonical ESG/GEN/TOB source order, omitted verses, and sparse
+chapters; `rangesui` loads packaged Main with the real backend and miniature
+NET/KJV-ID John fixtures. They do not require downloaded source archives.
 Desktop tests inject a fake `hyprctl` command and temporary environment/theme state
 to exercise compositor responses without changing the running desktop.
 
@@ -117,7 +139,7 @@ working-tree updates. It describes assertions, not results from a test run.
   shortcuts, Annotations integration, and square highlight geometry. Annotations
   checks cover `Ctrl a` in each reader layout and panel navigation, Select All in
   note/search/rename fields, the single-row Bookmarks/Highlights/Notes/Tags tabs
-  without All, read-only embedded Tags summaries and modal `t` editing, `?` before
+  without All, embedded Tags summaries and modal `t` editing, `?` before
   mode on the left and Related/Annotations/Notes on the right, the Related button
   and `Shift L`, the shared outline tag footer control, and the rendered left-pointing
   tag glyph. Existing panel cases cover type filters, empty states, deletion, keyboard
@@ -129,6 +151,8 @@ working-tree updates. It describes assertions, not results from a test run.
   tie priority, and focus-mode restoration without text movement. They also cover
   full-scope note opening with a draft-flush veto and greater rendered ink for filled
   reader glyphs than outline footer glyphs for all three kinds.
+  Working-tree additions assert end-of-note cursor placement on opening,
+  Shift-click bookmark range entry, and tab cycling from the Tags summary.
 - **Tags:** Unicode NFC/case-folded identity and literal names; durable global
   definitions; exact membership versus overlap; tag-only collection entries and exact
   whole-entry deletion; any/all queries, excerpts and source ordering; pinned
@@ -142,7 +166,7 @@ working-tree updates. It describes assertions, not results from a test run.
   with disabled creation until reopening captures a scope. Summary checks cover exact
   tags, overlapping ranges, Any-match related results in the source version,
   reference navigation with the summary open, focus following, empty states, hidden
-  search/filter/edit/Manage/Done controls, and mutation guards. Summary chip clicks
+  search/filter/tag-assignment/Manage/Done controls, and mutation guards. Summary chip clicks
   close Annotations and seed Related with only the clicked ID and captured source,
   even when another version is focused, without tag writes or Visual completion.
   Related checks cover the full-height right-edge drawer, 24-pixel padding at unit
@@ -153,6 +177,42 @@ working-tree updates. It describes assertions, not results from a test run.
   without assigning them; Related hides create/Manage and rejects `manage()`.
   The separate Manage tags entry opens modal management; confirmations, peer
   invalidation, removed versions, and real Main Visual/draft integration are covered.
+- **Ranges:** unioned exact saved ranges including tag-only records; source-order
+  queries without navigation or display-reference identity; full/subset moves,
+  expansion, contraction, disjoint relocation, and cross-book endpoints over
+  omissions. Checks preserve unselected components and independent overlaps,
+  union destination marks/tags, persist across reopening, and publish to peers
+  without navigating them. Note cases assert destination-first blank-line combine,
+  explicit token-backed confirmation, equal-note deduplication, and a same-range
+  no-op without flushing, writes, or publication. Stale source marks/notes/tags,
+  tag rename/deletion, destination note/tag drift, draft flushing/vetoes, forged
+  snapshots, invalid scopes/components, cross-version targets, replacement and
+  removal are rejected. Injected annotation/tag write and read-back failures and
+  deferred commit failure assert rollback, no publication, and retry. Endpoint
+  swapping covers direction, source-order chapter/book boundaries, and failed
+  reading-state saves.
+- **Ranges UI:** real packaged Main and backend exercise general/context component
+  defaults, individual tags, and **Select all components**; counts, endpoint swapping, shifted/arrow/bulk
+  movement; exact overlap choice; disabled empty choice; same-range no-op; status
+  banner, mutation/version guards, and independent New window. Cancellation restores
+  original selection/direction/Visual state or an unselected chapter and reading
+  position without invoking an unrelated peer's vetoing draft callback. Reading
+  SQL failure retains the session, original snapshot, and proposed selection,
+  vetoes window closing, and permits Esc retry after the failure is removed.
+  Direct `restoreSelection` checks reject wrong-version scopes and invalid positions.
+  Cancellation after a version change ends with a notice without switching back;
+  peer removal of the last source closes the session/dialogs and permits Add version.
+  Endpoint labels track movement, swaps, coincident endpoints, crossing the anchor,
+  and chapter boundaries. Select-all checks include every saved component and tag;
+  the custom checkbox label asserts literal text and the desktop foreground color.
+  Note confirmation displays literal source/destination
+  text and combines in destination-first order; stale source, SQL failure/retry,
+  and stale destination confirmation retain active editing without overwriting
+  peer data. Entry checks cover `Shift E`, focused Annotations rows, Tags-summary
+  **Edit range**, Shift-click note markers in all three layouts, and Verse marker
+  right-click **Edit range**. Notes open with the cursor at the end, subsequent
+  editing/synchronization retains its position, Tags supports item/tab navigation,
+  and tag-search fields retain typed `h`/`l`.
 - **Desktop:** effective integer rounding, malformed/oversized output, process
   failure, missing session/command, timeout responsiveness, nonoverlapping queries,
   recovery and separate five-second polling; themed plain-text tooltip wrapping,
@@ -173,6 +233,13 @@ working-tree updates. It describes assertions, not results from a test run.
   Render checks verify ink for all three kinds in marker cells and final-character
   hit boundaries. Native clipboard checks include overlapping notes with marks/tags;
   nesting checks include equal-range kind order and deduplicated note metadata.
+  `bracketFontGeometry` covers 8/18/40-pixel fonts, 1.0/1.6 scale, and 1.0/3.0
+  leading: brackets enclose accented/descending ink without stretching to line
+  height, neighboring brackets do not overlap, and reserved cells add only bounded
+  height. `markerRangeEditing` verifies Shift-click and right-click **Open** /
+  **Edit range** for bookmark/note/tag inline markers with full cross-book scopes.
+  Optional screenshot output also captures the 14-pixel filled folded-note glyph,
+  a zoom, and line-height extremes; captures do not establish visual review.
 - **Windows:** independent readers with shared commits; compare-and-set note
   conflicts; flush vetoes; replacement/removal; shared import guards; closing one
   reader; last-window exit; secondary launches opening a new reader.
@@ -181,7 +248,8 @@ working-tree updates. It describes assertions, not results from a test run.
 
 `tests/test-runner.sh` separately checks runner selection, argument forwarding,
 fixture paths, concurrency, logs, failure propagation, and interruption cleanup
-using fake build/test tools. `tests/test-install.sh` exercises installation with
+using fake build/test tools; its default/all inventory includes `ranges` and
+`rangesui`. `tests/test-install.sh` exercises installation with
 temporary homes. Test results are reported from actual runs, not fixed totals in
 documentation.
 
@@ -192,10 +260,16 @@ window widths, and themes: superscript icon/bracket alignment for bookmarks, tag
 and inline notes, filled reader versus outline control glyphs, mirrored tag shape, subtle
 three-kind context-shade contrast, and focus-mode transitions. Also review Verse
 interval-packed straight row rails, footer order and outline left-pointing Related
-tag icon, the read-only Tags summary and tag-seeded navigation, modal picker and
-separate Manage tags entry, and the padded discovery-only Related panel with its
+tag icon, the Tags summary with explicit **Edit range** and tag-seeded navigation,
+modal picker and separate Manage tags entry, and the padded discovery-only Related panel with its
 large heading, smaller pinned source, and **Find related to current passage** button
 during cross-version reading.
+Review range/component choosers, active-endpoint banner, cross-chapter/book motion,
+cancel restoration/retry, and both-note confirmation at narrow widths/scales.
+Review the custom themed buttons/checkboxes, Select all components, and endpoint
+label updates through single-verse selections and swaps. Check the
+folded sheet's text cutouts and pencil at small reader sizes, plus bracket alignment
+just above letters and below the baseline at minimum/maximum line heights.
 These visual checks remain planned; automated geometry/ink assertions above do
 not establish their completion. No tests or builds were run for this documentation
 update.

@@ -16,7 +16,8 @@ QML and the seven-entry `resources/catalog.json` metadata catalog.
 | `src/windowmanager.*` | A backend, catalog object, QML engine, and window per reader; lifecycle and request routing |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing layouts, verse/document mapping, selection and annotation geometry |
 | `qml/Main.qml` | Reader, passage/command palettes, notes, Annotations, Visual action completion, settings, catalog, and attribution |
-| `qml/TagsPanel.qml` | Embedded read-only Annotations summary, discovery-only Related drawer, modal exact-range picker and global management |
+| `qml/TagsPanel.qml` | Embedded Annotations summary with range-edit entry points, discovery-only Related drawer, modal exact-range picker and global management |
+| `qml/RangeEditor.qml` | Exact-range/component chooser, temporary endpoint editing, cancel restoration and note-combine confirmation |
 | `qml/AnnotationGlyph.qml` | Shared bookmark, left-pointing tag, and note glyphs; `filled` selects reader versus outline control rendering |
 | `src/desktop.*`, `qml/AppToolTip.qml` | Shared fonts/scaling, live Omarchy theme, asynchronous compositor corners, themed tooltips, external links |
 
@@ -181,7 +182,10 @@ The backend `collection` unions annotations and tag-only ranges, deduplicating e
 endpoints within the active source. Annotations has **Bookmarks**, **Highlights**,
 **Notes**, and **Tags** tabs in one row, with no **All** tab. The first three filter
 the collection by their mark/note type; Tags summarizes the focused range's tags,
-overlaps, and related passages without editing controls.
+overlaps, and related passages, with explicit **Edit range** actions but no tag
+assignment controls. `h` / `l` and Left/Right cycle all four tabs, including from
+Tags; `j` / `k` and Up/Down navigate collection items or summary buttons.
+Editable fields retain normal text navigation.
 Deleting an Annotations entry atomically removes its bookmark, highlight, note,
 and all tag assignments for that exact range, leaving overlapping entries and global
 definitions intact. Main confirms a captured scope through `deleteAnnotationScope(scope)`;
@@ -199,9 +203,14 @@ nearest available lane to the verse number. Each interval keeps that lane until
 its end, even when another lane becomes free, preserving straight continuity;
 later intervals reuse free lanes. Adjacent segments meet across rows and headings.
 All three kinds share `RangeMarker` and offer choices for overlapping ranges.
+Right-clicking a Verse or inline marker opens **Open** / **Edit range**;
+Shift-click edits its captured range, with an exact-range chooser when needed.
 Note actions open the exact captured scope through `openTaggedPassage` before
 opening Notes; failed draft
 flushes or navigation preserve the current editing context.
+`focusNoteEnd()` places the caret at the end when Notes opens for editing or an
+already-open editor is explicitly focused; `syncNote()` and autosaves do not
+repeat that positioning.
 
 Paragraph and Block share a continuous `BlockReader` text layout. `BlockDocument`
 reserves transparent inline image cells and word joiners at bookmark/note/tag endpoints;
@@ -209,8 +218,9 @@ QML paints opening/closing brackets within those cells, with a superscript icon
 to the left of each opening bracket. Tag icons are horizontally mirrored to point
 left. `AnnotationGlyph` supplies all three kinds through a shared `filled` property,
 defaulting to false. Verse and inline reader glyphs set it true; footer and other
-annotation controls remain outlines. The filled note is a solid sheet with a
-transparent pencil, while the outline note keeps the pencil-in-an-open-square path.
+annotation controls remain outlines. The filled note is a folded sheet with two
+cutout text lines and a separate solid pencil, supersampled at three times the
+display size. The outline note keeps the pencil-in-an-open-square path.
 Each exact tagged range has one marker pair regardless of its tag count. Source-order extents put
 outer openings first and inner closings first, reversing equal-range kind order
 at the closing edge.
@@ -227,6 +237,13 @@ verse and subtly shades their other visible members, excluding the cursor and
 selected verses. It clears when the cursor leaves those ranges. Focus mode removes
 inline cells, row indicators, and context shading; selection and highlight painting
 remain independent. Width, font, and layout changes recalculate the shared geometry.
+Inline bracket geometry uses the endpoint text font and line ink bounds:
+`textTop`/`textBottom` are document coordinates, `bracketTop` is relative to the
+paint bounds, and `bracketHeight` excludes proportional line leading. The bracket
+starts one pixel above the letter top and ends at least at baseline plus descent
+or one pixel below the ink. Baseline-aligned cells reserve the body font height
+plus two pixels; generated joiners disable font merging to avoid taller fallback
+fonts inflating annotated lines. Line-height settings do not stretch brackets.
 
 ### Annotations summary, modal picker, Related, and management
 
@@ -263,7 +280,7 @@ management confirmation first, otherwise clears a nonempty query, then closes.
 **Done** closes without undoing committed toggles. User labels render as plain text.
 
 `Ctrl a` toggles Annotations in reader/panel navigation contexts; editable fields
-retain Select All. Its fourth **Tags** tab and Commands → **Tags** open the read-only
+retain Select All. Its fourth **Tags** tab and Commands → **Tags** open the
 summary below the tab divider. It shows **Tags on this range**, **Tags on overlapping
 ranges** (excluding the exact match), and **Other passages with these tags**.
 `summaryIds` unions exact and overlapping tags; results use
@@ -271,9 +288,12 @@ ranges** (excluding the exact match), and **Other passages with these tags**.
 summary source version, excluding same-source overlaps. References open complete
 ranges and refresh the still-open summary. Tag chips call
 `openRelatedForTag(id, summaryScope)`, pinning that source and selecting only the
-clicked ID, including chips on overlap/result rows. The summary has no search,
-filter, editing, creation, Manage, or Done controls. Empty states distinguish no
-tags, no exact membership, and no other passages in the version.
+clicked ID, including chips on overlap/result rows. **Edit range** on exact tagged
+scopes, overlap rows, and related rows opens `RangeEditor` with tags preselected;
+`Shift E` uses the focused row's scope, falling back to the summary scope. This
+explicit requirement is an exception to the summary's viewing-only role. It has
+no search, filter, tag assignment, creation, Manage, or Done controls. Empty states
+distinguish no tags, no exact membership, and no other passages in the version.
 
 `Shift H` toggles headings; `Shift L`, Commands → **Related passages**, or the
 bottom-right outline left-pointing tag icon opens Related's right-side panel.
@@ -301,6 +321,75 @@ refresh visible lists, prune deleted IDs, and invalidate confirmations if a sour
 or target tag disappears or changes name. Missing source versions disable pinned
 editor actions and empty Related results; backend validation also rejects stale
 endpoints. Busy-library and note-flush guards protect editing/navigation actions.
+
+## Annotation range editing
+
+`RangeEditor` is embedded by Main and packaged in `resources.qrc`. Commands →
+**Edit annotation range** / `Shift E`, Annotations row actions/shortcuts, reader
+marker menus/Shift-click, and Tags summary actions all pass canonical scopes.
+`annotationRanges(aroundScope)` unions intersecting exact saved annotations and
+tag-only ranges in source order. The chooser resolves overlaps explicitly, then
+`annotationSnapshot(scope)` captures every exact component and a token. Context
+entry points preselect their mark/note kind or all assigned tags; general entry
+preselects all available components. Each tag can be selected individually;
+**Select all components** (`rangeSelectAll` / `selectAll()`) checks every available
+source component. Custom `RangeButton` and `RangeCheckBox` controls use desktop
+theme colors, fonts, corners, hover/focus/disabled states, and plain wrapping
+labels, with control scaling capped at 1.4. Buttons handle Enter/Return, and the
+select-all action has an `AppToolTip`.
+
+The editor deep-copies/freezes the source and original reader state. `sessionOpen`
+covers choosing, moving, and confirmation; `active` means endpoint movement;
+`visibleModal` covers the chooser and note confirmation. Opening closes editing
+panels; Continue opens the exact source range. Verse motions always extend the active
+endpoint, independent of ordinary Visual mode; `o` calls `swapSelectionEnds()`.
+The endpoint binding reads `selectedStart`, `selectedEnd`, `cursorVerse`, `book`,
+and `chapter` explicitly alongside `tagScope()` to react to movement; coincident
+endpoints use `coincidentEndpoint`, including swaps on a single verse.
+Enter previews and commits; Esc requests local restoration of the original
+scope/direction, Visual state, and reading position. A successful range save leaves the
+destination selected in Normal mode. A failed save shows an error and retains
+the edit. Main guards annotation mutations, passage/chapter jumps, and version/
+library operations during the session; verse movement, copying, text size, and
+opening an independent window remain available outside modal choosers.
+
+Cancellation calls `restoreSelection(scope, reversed=false, position=-1)` rather
+than shared-draft-flushing navigation. This active-version-only backend method
+accepts canonical selected endpoints or `{versionId,book,chapter,start:0,end:0}`
+for an unselected chapter. Position must be finite and in `[0,1]`, or `-1` to
+retain the current position. `goToSelection()` reads the chapter and persists
+reading state before changing the local reader; no peer drafts are flushed.
+A failed restore keeps the session, immutable original snapshot, and proposed
+selection intact, clears pending merge confirmation, and prompts Esc to retry.
+Main vetoes window closing while cancellation is incomplete.
+
+Cancellation never switches versions: if the original version is no longer
+active/installed or the reader is not ready, it ends the session with a notice.
+`pinnedVersion` plus `versionsChanged` detects source removal and ends editing
+automatically, closing both dialogs even if restoration fails or is impossible.
+It first attempts local cancellation when the original version is still active
+and installed. A `restoring` guard prevents reentrant cancellation.
+
+`previewRangeChange(sourceSnapshot, destination, components)` is read-only.
+`changeAnnotationRange(...)` moves selected bookmark/highlight/note fields and
+tag IDs between two exact ranges in the same active installed version. Actual
+source keys allow expansion, contraction, or relocation across chapters/books.
+Unselected source components and independent overlapping ranges survive;
+destination flags union and duplicate tags deduplicate. Different nonempty notes
+require confirmation showing both texts: the result is destination text, two
+newlines, then source text. Equal notes deduplicate without confirmation.
+
+Tokens hash canonical endpoints/source ID, every saved component (including tag
+names), and the immutable installed database generation, excluding display
+references. Save flushes shared drafts before transaction-time source validation;
+it checks caller snapshot fields against freshly read state and revalidates the
+destination token supplied by the UI preview. A note combine requires that token
+and explicit consent. Source drift, destination drift, replacement/removal,
+invalid components/endpoints, or failed SQL/read-back/commit reject the move.
+Both exact rows and tag assignments commit atomically before `publishTags()`
+refreshes readers, without navigating peers. A validated same-range save is a
+true no-op, with no draft flush, writes, or publication. See
+[RANGE_EDITING.md](RANGE_EDITING.md) for the workflow and API contract.
 
 ## Visual action completion
 
@@ -352,5 +441,6 @@ storage information, and **No version installed** when empty.
 
 `branding.env` supplies shared branding; build-local generated headers and desktop
 files consume it. [tests/README.md](tests/README.md) documents suite selectors,
-including `tags`, `tagsui`, and `desktop`, generated original fixtures, and optional
-isolated source archives. [TAGS.md](TAGS.md) records the tag API and UI contract.
+including `ranges`, `rangesui`, `tags`, `tagsui`, and `desktop`, generated original
+fixtures, and optional isolated source archives. [TAGS.md](TAGS.md) records the tag
+API and UI contract.
