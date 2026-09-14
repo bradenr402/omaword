@@ -4,6 +4,7 @@
 #include <QUrl>
 class BibleBackend;
 class Desktop;
+class VersionCatalog;
 class QQmlApplicationEngine;
 class QWindow;
 
@@ -26,7 +27,7 @@ public slots:
 signals:
     void countChanged();
 private:
-    struct Reader { QQmlApplicationEngine *engine = nullptr; BibleBackend *bible = nullptr; QWindow *window = nullptr; };
+    struct Reader { QQmlApplicationEngine *engine = nullptr; BibleBackend *bible = nullptr; QWindow *window = nullptr; VersionCatalog *catalog = nullptr; };
     Reader *createWindow();
     void retire(QWindow *window);
     static bool flush(QObject *root);

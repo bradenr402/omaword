@@ -5,6 +5,6 @@ TEMPLATE = app
 include(../branding.pri)
 TARGET = tst_windows
 INCLUDEPATH += ../src
-SOURCES += tst_windows.cpp ../src/windowmanager.cpp ../src/singleinstance.cpp ../src/biblebackend.cpp ../src/epubimporter.cpp ../src/desktop.cpp ../src/blockdocument.cpp
-HEADERS += ../src/windowmanager.h ../src/singleinstance.h ../src/biblebackend.h ../src/epubimporter.h ../src/desktop.h ../src/blockdocument.h
+SOURCES += tst_windows.cpp ../src/windowmanager.cpp ../src/singleinstance.cpp ../src/biblebackend.cpp ../src/usfmimporter.cpp ../src/biblebooks.cpp ../src/versioncatalog.cpp ../src/desktop.cpp ../src/blockdocument.cpp
+HEADERS += ../src/windowmanager.h ../src/singleinstance.h ../src/biblebackend.h ../src/usfmimporter.h ../src/biblebooks.h ../src/versioncatalog.h ../src/desktop.h ../src/blockdocument.h
 RESOURCES += ../resources.qrc

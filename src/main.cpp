@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
     // Display the public name rather than the lowercase storage identity.
     const QCommandLineOption versionOption({QStringLiteral("v"), QStringLiteral("version")}, QStringLiteral("Displays version information."));
     parser.addOption(versionOption);
-    QCommandLineOption importOption(QStringLiteral("import"), QStringLiteral("Import a verse-tagged Bible EPUB using supported NET or Haiola/eBible markup and versification."), QStringLiteral("epub"));
+    QCommandLineOption importOption(QStringLiteral("import"), QStringLiteral("Import a USFM ZIP archive or local USFM file."), QStringLiteral("file"));
     parser.addOption(importOption);
     parser.addPositionalArgument(QStringLiteral("reference"), QStringLiteral("Passage to open, e.g. \"John 3:16\"."), QStringLiteral("[reference]"));
     parser.process(app);

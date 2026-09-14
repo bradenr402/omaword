@@ -4,8 +4,8 @@ PKGCONFIG += libarchive fontconfig
 include(branding.pri)
 TARGET = $$BRAND_ID
 TEMPLATE = app
-SOURCES += src/main.cpp src/singleinstance.cpp src/windowmanager.cpp src/desktop.cpp src/biblebackend.cpp src/epubimporter.cpp
-HEADERS += src/singleinstance.h src/windowmanager.h src/desktop.h src/biblebackend.h src/epubimporter.h
+SOURCES += src/main.cpp src/singleinstance.cpp src/windowmanager.cpp src/desktop.cpp src/biblebackend.cpp src/usfmimporter.cpp src/biblebooks.cpp src/versioncatalog.cpp
+HEADERS += src/singleinstance.h src/windowmanager.h src/desktop.h src/biblebackend.h src/usfmimporter.h src/biblebooks.h src/versioncatalog.h
 RESOURCES += resources.qrc
 SOURCES += src/blockdocument.cpp
 HEADERS += src/blockdocument.h

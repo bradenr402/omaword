@@ -23,6 +23,8 @@ public:
     Q_INVOKABLE QVariantList rectangles(int start, int end) const;
     // One entry per logical annotation intersecting this chapter. Geometry is
     // in document coordinates; the rail never inserts characters into the text.
+    // Membership comes from per-verse bookmarkRanges/noteRanges in source order.
+    // The remaining arguments retain the reader call signature, not ordering data.
     Q_INVOKABLE QVariantList annotations(const QVariantList &verses, const QVariantList &collection,
                                          int book, int chapter) const;
 signals:

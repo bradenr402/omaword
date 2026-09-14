@@ -2,6 +2,7 @@
 #include "biblebackend.h"
 #include "brand.h"
 #include "desktop.h"
+#include "versioncatalog.h"
 #include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -19,6 +20,7 @@ WindowManager::~WindowManager()
         reader.window->disconnect(this);
         reader.bible->setFlushCallback({});
         delete reader.engine; // QML dies while its context objects are still valid.
+        delete reader.catalog;
         delete reader.bible;
     }
 }
@@ -32,13 +34,15 @@ bool WindowManager::flush(QObject *root)
 WindowManager::Reader *WindowManager::createWindow()
 {
     auto *bible = new BibleBackend(this);
+    auto *catalog = new VersionCatalog(this);
     auto *engine = new QQmlApplicationEngine(this);
     engine->rootContext()->setContextProperty(QStringLiteral("desktop"), m_desktop);
     engine->rootContext()->setContextProperty(QStringLiteral("bible"), bible);
+    engine->rootContext()->setContextProperty(QStringLiteral("catalog"), catalog);
     engine->rootContext()->setContextProperty(QStringLiteral("windows"), this);
     engine->load(m_source);
     auto *window = engine->rootObjects().isEmpty() ? nullptr : qobject_cast<QWindow *>(engine->rootObjects().first());
-    if (!window) { delete engine; delete bible; return nullptr; }
+    if (!window) { delete engine; delete catalog; delete bible; return nullptr; }
     const QString suffix = QStringLiteral(" · Window %1").arg(++m_serial);
     // Distinguish surfaces belonging to this PID even when passages/titles match.
     connect(window, &QWindow::windowTitleChanged, window, [window, suffix](const QString &title) {
@@ -49,7 +53,7 @@ WindowManager::Reader *WindowManager::createWindow()
     bible->setFlushCallback([root] { return flush(root); });
     if (window->metaObject()->indexOfSignal("newWindowRequested()") >= 0)
         connect(window, SIGNAL(newWindowRequested()), this, SLOT(newWindow()));
-    m_readers.append({engine, bible, window});
+    m_readers.append({engine, bible, window, catalog});
     connect(window, &QWindow::visibleChanged, this, [this, root](bool visible) {
         if (!visible && root) QTimer::singleShot(0, this, [this, root] {
             if (root && !root->isVisible()) retire(root);
@@ -69,6 +73,7 @@ void WindowManager::retire(QWindow *window)
         reader.bible->setFlushCallback({});
         // This runs on the next event turn, after the QML close handler returned.
         delete reader.engine;
+        delete reader.catalog;
         reader.bible->deleteLater();
         emit countChanged();
         return;
@@ -101,9 +106,9 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
         else {
             QMetaObject::invokeMethod(root, "savePosition");
             if (!request.importPath.isEmpty()) {
-                if (bible->busy()) action = {false, QStringLiteral("An EPUB import is already running.")};
+                if (bible->busy()) action = {false, QStringLiteral("A USFM import is already running.")};
                 else {
-                    bible->importEpub(QUrl::fromLocalFile(request.importPath));
+                    bible->importUsfm(QUrl::fromLocalFile(request.importPath));
                     if (!bible->busy()) action = {false, bible->error()};
                     else if (!request.reference.isEmpty()) {
                         auto connection = std::make_shared<QMetaObject::Connection>();

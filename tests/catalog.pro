@@ -1,0 +1,12 @@
+QT += core network testlib
+QT -= gui
+CONFIG += c++17 testcase console
+TEMPLATE = app
+TARGET = tst_catalog
+INCLUDEPATH += ../src
+SOURCES += tst_catalog.cpp ../src/versioncatalog.cpp
+HEADERS += ../src/versioncatalog.h
+catalog_resource.files = ../resources/catalog.json
+catalog_resource.prefix = /resources
+catalog_resource.base = ../resources
+RESOURCES += catalog_resource
