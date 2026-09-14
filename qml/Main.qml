@@ -887,7 +887,13 @@ ApplicationWindow {
             }
             return result
         }
-        return Array.from(bible.books).filter(function(b) { return !query || b.name.toLowerCase().indexOf(query) >= 0 })
+        // Resolve exact canonical/source aliases without changing the displayed source name.
+        const resolved = query && !/\d\s*$/.test(query) ? bible.resolveReference(query) : null
+        return Array.from(bible.books).filter(function(b) {
+            return !query || b.name.toLowerCase().indexOf(query) >= 0
+                || b.code.toLowerCase().indexOf(query) >= 0 || b.abbreviation.toLowerCase().indexOf(query) >= 0
+                || (resolved && resolved.valid && resolved.reference === b.name + " " + b.chapterNumbers[0])
+        })
             .map(function(b) { return { title: b.name, hint: b.chapters + " chapters", book: b.id, chapter: 0 } })
     }
     function activatePaletteEntry(entry) {

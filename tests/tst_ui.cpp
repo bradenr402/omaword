@@ -1800,6 +1800,10 @@ private slots:
     }
     void palettePreviewMatchesAcceptance() {
         bible->setVersePicker(false);
+        QString psalmName;
+        for (const auto &entry : bible->books())
+            if (entry.toMap().value("id").toInt() == 19) psalmName = entry.toMap().value("name").toString();
+        QVERIFY(!psalmName.isEmpty());
         reference("Genesis 1:1");
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
         key(Qt::Key_K,Qt::ControlModifier);
@@ -1819,9 +1823,9 @@ private slots:
         type("Psalms"); key(Qt::Key_Right);
         QCOMPARE(window->property("paletteBook").toInt(),19);
         type("1");
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 1"));
+        QCOMPARE(prop("referencePreview","text").toString(),psalmName + " 1");
         key(Qt::Key_Down);
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 10"));
+        QCOMPARE(prop("referencePreview","text").toString(),psalmName + " 10");
         QCOMPARE(navigation.count(),0);
         QCOMPARE(bible->selectionReference(),QString("John 3:16"));
         key(Qt::Key_Return);
@@ -1830,13 +1834,13 @@ private slots:
         key(Qt::Key_K,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("Psalms"); key(Qt::Key_Return); type("1"); key(Qt::Key_Down);
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 10"));
+        QCOMPARE(prop("referencePreview","text").toString(),psalmName + " 10");
         // Editing resets the list override and restores the typed destination.
         type(":2");
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 1:2"));
+        QCOMPARE(prop("referencePreview","text").toString(),psalmName + " 1:2");
         // Arrows with no matching list entry must not discard a valid typed reference.
         key(Qt::Key_Down);
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Psalms 1:2"));
+        QCOMPARE(prop("referencePreview","text").toString(),psalmName + " 1:2");
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         QCOMPARE(bible->chapter(),1); QCOMPARE(bible->cursorVerse(),2);
@@ -2111,7 +2115,22 @@ private slots:
         QCOMPARE(QApplication::clipboard()->text(),bible->copySelection());
     }
     void blockInlineDocumentAndPreferences() {
-        installDragFixture();
+        // Restart validates the content digest: create rich text through USFM,
+        // rather than mutating an already validated database generation.
+        const auto source = session->filePath("001-JHNengnet.usfm");
+        QFile file(source); QVERIFY(file.open(QIODevice::WriteOnly));
+        const auto content = QString::fromUtf8(
+            "\\id JHN Original rich reader fixture\n\\h John\n\\toc2 John\n"
+            "\\c 3\n\\s A section title\n"
+            "\\v 1 Start café — λόγος 🌿 and finish.\n"
+            "\\q1\n\\v 2 \\it Poetry sings softly.\\it*\n\\q1 A second line — שלום.\n"
+            "\\p\n\\v 3 Final naïve résumé ends here.\n"
+            "\\v 4 Original wrapping text gives the reading surface enough height to exercise line spacing and restoration.\n").toUtf8();
+        QCOMPARE(file.write(content),content.size()); file.close();
+        bible->importUsfm(QUrl::fromLocalFile(source));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY2(bible->ready() && bible->error().isEmpty(),qPrintable(bible->error()));
+        reference("John 3:1");
         QVERIFY(!bible->blockMode());
         key(Qt::Key_B);
         QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() == bible->verses().size());
@@ -2144,6 +2163,7 @@ private slots:
         QVERIFY(item("chapterTitle")->isVisible()); QVERIFY(!item("editionLabel")->isVisible());
         unloadUi(); loadUi();
         QVERIFY(bible->blockMode()); QVERIFY(bible->focusMode());
+        QVERIFY2(bible->ready(),qPrintable(bible->error()));
         QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings());
         QTRY_VERIFY(blockTextDocument() && blockTextDocument()->toPlainText().startsWith("Start café"));
         key(Qt::Key_F);
