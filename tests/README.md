@@ -27,15 +27,16 @@ and `actualArchives`. Catalog cases include `metadataAndAllowlist`,
 
 Tag targets include `namesAndDurability`, `sourceOrderVersionsRelatedAndPeers`,
 `backupsScopedLegacyAndMarkdown`, and `rollbackAndPublication` in `tags`;
-`pickerPinnedKeyboardAndLiteralNames`, `embeddedEditorAssignmentsAndSelection`,
+`pickerPinnedKeyboardAndLiteralNames`, `modalPickerWithEmbeddedHostKeepsSelection`,
+`summaryExactOverlapsAndReadOnlyNavigation`, `summaryTagOpensRelatedWithPinnedIdAndVersion`,
 `emptyEditorPromptsAndRelatedFindsUnrelatedTags`, `relatedPinnedUnionAndUseCurrent`, and
 `mainIntegrationVisualCompletionAndDraft` in `tagsui`. UI targets include
 `annotationsShortcutContextsAndRelatedControl`, `savedPanelGeometry`,
-`rowAnnotationRailsAndExactNoteClick`, and `tagGlyphPointsLeft`; the existing
-`saved*` test/object names now exercise Annotations. Flowing-reader targets include
+`rowAnnotationLanePacking`, `rowAnnotationRailsAndExactNoteClick`, and `tagGlyphPointsLeft`;
+the existing `saved*` test/object names now exercise Annotations. Flowing-reader targets include
 `reservedEndpointsAndUnicodeCopy`,
 `contextUnionContinuationAndFocus`, `renderedCellsAndLastCharacterHit`, and
-`sharedNoteGlyphMatchesFooter` in `annotations`. Desktop targets include
+`sharedNoteGlyphOutlineAndFilled` in `annotations`. Desktop targets include
 `effectiveInteger`, `timeoutDoesNotFreezeOrOverlap`, `toolTipThemeAndWrapping`, and
 `sharedAcrossWindows`. For example, `bin/test --suite tags namesAndDurability`
 selects one function; `bin/test --suite tags --suite tagsui --suite desktop`
@@ -116,15 +117,18 @@ working-tree updates. It describes assertions, not results from a test run.
   shortcuts, Annotations integration, and square highlight geometry. Annotations
   checks cover `Ctrl a` in each reader layout and panel navigation, Select All in
   note/search/rename fields, the single-row Bookmarks/Highlights/Notes/Tags tabs
-  without All, embedded Tags editing with discovery controls hidden, `?` before
+  without All, read-only embedded Tags summaries and modal `t` editing, `?` before
   mode on the left and Related/Annotations/Notes on the right, the Related button
-  and `Shift L`, and the rendered left-pointing tag
-  glyph. Existing panel cases cover type filters, empty states, deletion, keyboard
+  and `Shift L`, the shared outline tag footer control, and the rendered left-pointing
+  tag glyph. Existing panel cases cover type filters, empty states, deletion, keyboard
   isolation, focus restoration, and scaled geometry. Related checks assert
   24-scaled-pixel padding on every edge, control containment, and hidden Manage/create
-  controls. Verse checks cover connected bookmark/tag/note rails, separate lanes
-  before verse numbers, full-scope note opening with a draft-flush veto, and
-  rendered row/footer note-glyph equality.
+  controls. Verse checks cover connected bookmark/tag/note rails, nearest-available
+  interval lanes, straight continuity through later starts/ends, disjoint lane reuse,
+  source ordinals with sparse/nonmonotonic labels, same-kind continuous coverage,
+  tie priority, and focus-mode restoration without text movement. They also cover
+  full-scope note opening with a draft-flush veto and greater rendered ink for filled
+  reader glyphs than outline footer glyphs for all three kinds.
 - **Tags:** Unicode NFC/case-folded identity and literal names; durable global
   definitions; exact membership versus overlap; tag-only collection entries and exact
   whole-entry deletion; any/all queries, excerpts and source ordering; pinned
@@ -132,18 +136,23 @@ working-tree updates. It describes assertions, not results from a test run.
   rename/delete/merge; removal keep/drop and stale scopes; scoped v4 backup,
   v3 assignment preservation, ID/name collisions, escaped Markdown; injected SQL
   failures, commit rollback, read-back verification, publication and flush vetoes.
-- **Tags UI:** immediate Space/Enter toggles and create/apply; captured standalone
-  picker scopes, overlap Open/Edit, literal labels, invalid names and failed flushes;
-  embedded exact-range assignment editing, guarded selection following, pending
-  Visual-collapse pinning, hidden discovery filters/results, and the no-selection
-  prompt with disabled creation. Related's full-height right-edge drawer has
-  24-pixel padding at unit scale, a filter divider, exclusive version pair,
-  overlapping-tag union,
-  pinned source/abbreviation across result navigation, Use current, focus-mode close,
-  and reopening. Untagged-source discovery can select other global names without
-  assigning them; Related hides create/Manage and rejects `manage()`.
-  Management confirmations and peer invalidation; removed versions;
-  real Main integration for Visual completion and unsaved note drafts.
+- **Tags UI:** immediate Space/Enter toggles and create/apply; captured modal picker
+  scopes with/without an embedded host, overlap Open/Edit, literal labels, invalid
+  names and failed flushes; pending Visual-collapse pinning and no-selection prompt
+  with disabled creation until reopening captures a scope. Summary checks cover exact
+  tags, overlapping ranges, Any-match related results in the source version,
+  reference navigation with the summary open, focus following, empty states, hidden
+  search/filter/edit/Manage/Done controls, and mutation guards. Summary chip clicks
+  close Annotations and seed Related with only the clicked ID and captured source,
+  even when another version is focused, without tag writes or Visual completion.
+  Related checks cover the full-height right-edge drawer, 24-pixel padding at unit
+  scale, large standalone heading and source label, filter divider, exclusive version
+  pair, overlapping-tag union, pinned source/abbreviation across result navigation,
+  **Find related to current passage** (`tagUseCurrent` / `useCurrent()`), focus-mode
+  close, and reopening. Untagged-source discovery can select other global names
+  without assigning them; Related hides create/Manage and rejects `manage()`.
+  The separate Manage tags entry opens modal management; confirmations, peer
+  invalidation, removed versions, and real Main Visual/draft integration are covered.
 - **Desktop:** effective integer rounding, malformed/oversized output, process
   failure, missing session/command, timeout responsiveness, nonoverlapping queries,
   recovery and separate five-second polling; themed plain-text tooltip wrapping,
@@ -151,10 +160,11 @@ working-tree updates. It describes assertions, not results from a test run.
 - **Annotations:** flowing-text verse mapping, paragraph/layout changes, range
   painting, inline bookmark/note/tag brackets with no margin-note rail, overlapping
   entries, exact tag/note scopes, note navigation/flush guards, and continuation
-  chevrons. Shared note-glyph checks compare inline rendering with the shared
-  component and an independent snapshot of the original footer path, in Block
-  and scaled Paragraph layouts. Reserved-cell checks cover
-  Paragraph/Block wrapping, endpoint attachment, no overlap with source text,
+  chevrons. All three inline kinds assert `filled: true`. In Block and scaled
+  Paragraph, shared note-glyph checks compare the default outline with an independent
+  snapshot of the original footer path, assert greater ink for the filled inline
+  note, then compare it with the shared component switched to filled. Reserved-cell
+  checks cover Paragraph/Block wrapping, endpoint attachment, no overlap with source text,
   Unicode/bidirectional hit testing, decoration-free full/partial/drag/keyboard
   copy, and preservation of original joiners/object characters. Context checks
   cover bookmark/note/tag overlapping-range unions, exclusion of the cursor/selected
@@ -179,11 +189,13 @@ documentation.
 
 Review the continuous Paragraph/Block layout on the desktop with varied fonts,
 window widths, and themes: superscript icon/bracket alignment for bookmarks, tags,
-and inline notes, the shared footer-style note glyph, mirrored tag shape, subtle
+and inline notes, filled reader versus outline control glyphs, mirrored tag shape, subtle
 three-kind context-shade contrast, and focus-mode transitions. Also review Verse
-row rails, footer order and overlapping-passages icon, the embedded exact-range
-tag editor/Manage page, and the padded discovery-only Related panel with its
-pinned source and Use current during cross-version reading.
+interval-packed straight row rails, footer order and outline left-pointing Related
+tag icon, the read-only Tags summary and tag-seeded navigation, modal picker and
+separate Manage tags entry, and the padded discovery-only Related panel with its
+large heading, smaller pinned source, and **Find related to current passage** button
+during cross-version reading.
 These visual checks remain planned; automated geometry/ink assertions above do
 not establish their completion. No tests or builds were run for this documentation
 update.
