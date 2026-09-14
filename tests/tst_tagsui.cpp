@@ -8,6 +8,7 @@
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -68,7 +69,8 @@ class TagsUiTest : public QObject
     }
     QVariant prop(const char *name) const { return variant(panel->property(name)); }
     QVariant invoke(const char *method) {
-        if (qstrcmp(method, "open") == 0 || qstrcmp(method, "openBrowser") == 0) return invoke(method, QVariant());
+        if (qstrcmp(method, "open") == 0 || qstrcmp(method, "openBrowser") == 0 || qstrcmp(method, "openSummary") == 0)
+            return invoke(method, QVariant());
         QVariant result;
         if (!QMetaObject::invokeMethod(panel, method, Q_RETURN_ARG(QVariant, result))) QTest::qFail(method, __FILE__, __LINE__);
         return variant(result);
@@ -351,15 +353,17 @@ ApplicationWindow {
         QCOMPARE(item("tagSearch")->property("font").value<QFont>().pixelSize(), 20);
         QCOMPARE(item("tagSearch")->scale(), 1.0);
     }
-    void embeddedEditorAssignmentsAndSelection() {
+    void modalPickerWithEmbeddedHostKeepsSelection() {
         const auto first = scope(1, 2);
         const auto a = bible->createAndAssignTag(first, "Alpha");
         const auto b = bible->createTag("Beta");
         root->setProperty("useEmbedding", true);
-        QVERIFY(invoke("openBrowser").toBool());
+        QVERIFY(invoke("open").toBool());
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("page").toString(), QString("picker"));
-        QVERIFY(prop("browserVisible").toBool()); QVERIFY(!prop("visibleModal").toBool());
+        QVERIFY(!prop("browserVisible").toBool()); QVERIFY(prop("visibleModal").toBool());
+        QCOMPARE(prop("hostKind").toString(), QString("picker"));
+        QVERIFY(panel->findChild<QObject *>("tagsSurface")->property("modal").toBool());
         QVERIFY(prop("scopePinned").toBool());
         QVERIFY(item("tag:" + a)->property("chosen").toBool());
         QVERIFY(!item("tag:" + b)->property("chosen").toBool());
@@ -377,7 +381,7 @@ ApplicationWindow {
         QCOMPARE(bible->tagsForScope(first).size(), 2);
         QVERIFY(bible->tagsForScope(second).isEmpty());
         invoke("close");
-        QVERIFY(invoke("openBrowser").toBool());
+        QVERIFY(invoke("open").toBool());
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), second);
         QVERIFY(prop("exactIds").toList().isEmpty());
@@ -390,6 +394,120 @@ ApplicationWindow {
         invoke("close");
         QTRY_VERIFY(!prop("browserVisible").toBool());
         QVERIFY(!prop("scopePinned").toBool());
+    }
+    void summaryExactOverlapsAndReadOnlyNavigation() {
+        const auto source = scope(2, 3);
+        const auto a = bible->createAndAssignTag(source, "Alpha <b>literal</b>");
+        const auto overlap = scope(3, 4);
+        const auto b = bible->createAndAssignTag(overlap, "Beta");
+        const auto target = scope(8, 9);
+        QVERIFY(bible->setTag(target, b, true));
+        install(kjv);
+        const auto remote = scope(8, 9);
+        QVERIFY(bible->setTag(remote, a, true));
+        QVERIFY(bible->openTaggedPassage(source));
+        root->setProperty("useEmbedding", true);
+        const auto savedTags = bible->tags();
+        QVERIFY(invoke("openSummary").toBool());
+        QTRY_VERIFY(prop("browserVisible").toBool());
+        QTRY_VERIFY(item("tagsBody")->hasActiveFocus());
+        QCOMPARE(prop("page").toString(), QString("summary"));
+        QVERIFY(!prop("scopePinned").toBool());
+        QVERIFY(!prop("visibleModal").toBool());
+        QVERIFY(prop("editingScope").toMap().isEmpty());
+        QCOMPARE(prop("summaryScope").toMap(), source);
+        QCOMPARE(prop("exactIds").toList(), QVariantList{a});
+        QCOMPARE(prop("overlaps").toList().size(), 1);
+        QCOMPARE(prop("summaryIds").toList().size(), 2);
+        QCOMPARE(rows().size(), 1);
+        QCOMPARE(rows().first().toMap()["versionId"], source["versionId"]);
+        QCOMPARE(rows().first().toMap()["start"], target["start"]);
+        for (const auto &name : {"tagSearch", "tagRenameInput", "tagFilters", "tagList", "createPassageTag", "manageTags", "tagsDone"})
+            QVERIFY2(!item(name)->isVisible(), name);
+        QTRY_VERIFY(item("summaryTag:" + a) && item("summaryTag:" + a)->isVisible());
+        QVERIFY(item("summaryOverlap:" + overlap["reference"].toString())->isVisible());
+        QVERIFY(item("summaryPassage:" + target["reference"].toString())->isVisible());
+        invoke("toggleTag", a); invoke("manage"); invoke("createFromQuery");
+        QCOMPARE(prop("page").toString(), QString("summary"));
+        click("summaryPassage:" + target["reference"].toString());
+        QCOMPARE(bible->tagScope(), target);
+        QCOMPARE(prop("summaryScope").toMap(), target);
+        QVERIFY(prop("browserVisible").toBool());
+        QCOMPARE(root->property("completed").toInt(), 0);
+        QCOMPARE(root->property("closed").toInt(), 0);
+        QCOMPARE(bible->tags(), savedTags);
+        QCOMPARE(ids(bible->tagsForScope(source)), QStringList{a});
+        QCOMPARE(ids(bible->tagsForScope(overlap)), QStringList{b});
+        QCOMPARE(ids(bible->tagsForScope(target)), QStringList{b});
+
+        // A focused passage with only covering assignments still exposes their tags.
+        const auto covered = scope(4, 4);
+        invoke("followSelection");
+        QCOMPARE(prop("summaryScope").toMap(), covered);
+        QVERIFY(prop("exactIds").toList().isEmpty());
+        QCOMPARE(prop("summaryIds").toList(), QVariantList{b});
+        QVERIFY(!item("summaryEmpty")->isVisible());
+        QTest::qWait(30); // Let the changed summary delegates/layout reach a rendered frame.
+        click("summaryOverlap:" + overlap["reference"].toString());
+        QCOMPARE(prop("summaryScope").toMap(), overlap);
+        scope(11, 12); invoke("followSelection");
+        QVERIFY(item("summaryEmpty")->isVisible());
+        QCOMPARE(item("summaryEmpty")->property("text").toString(), QString("No tags on this passage or overlapping ranges."));
+        QVERIFY(rows().isEmpty());
+        QCOMPARE(bible->tags(), savedTags);
+        invoke("close");
+        QCOMPARE(root->property("closed").toInt(), 0);
+        QVERIFY(invoke("openBrowser", true).toBool());
+        QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        QCOMPARE(prop("hostKind").toString(), QString("picker"));
+        QCOMPARE(prop("page").toString(), QString("manage"));
+        QVERIFY(!prop("browserVisible").toBool());
+    }
+    void summaryTagOpensRelatedWithPinnedIdAndVersion() {
+        const auto source = scope(2, 3);
+        const auto a = bible->createAndAssignTag(source, "Alpha");
+        const auto overlap = scope(3, 4);
+        const auto b = bible->createAndAssignTag(overlap, "Beta");
+        const auto target = scope(8, 9);
+        QVERIFY(bible->setTag(target, a, true));
+        QVERIFY(bible->setTag(target, b, true));
+        install(kjv);
+        const auto remote = scope(8, 9);
+        QVERIFY(bible->setTag(remote, a, true));
+        QVERIFY(bible->setTag(remote, b, true));
+        root->setProperty("useEmbedding", true);
+        QSignalSpy changes(bible.get(), &BibleBackend::tagsChanged);
+        // The supplied NET snapshot is authoritative even with KJV currently focused.
+        QVERIFY(invoke("openSummary", source).toBool());
+        QTRY_VERIFY(item("tagsBody")->hasActiveFocus());
+        QTRY_VERIFY(item("summaryTag:" + a) && item("summaryTag:" + a)->isVisible());
+        click("summaryTag:" + a);
+        auto drawer = panel->findChild<QObject *>("relatedDrawer");
+        QTRY_VERIFY(drawer->property("opened").toBool());
+        QVERIFY(!root->property("browserOpen").toBool());
+        QCOMPARE(prop("relatedSource").toMap(), source);
+        QCOMPARE(prop("filterIds").toList(), QVariantList{a});
+        QCOMPARE(rows().size(), 1);
+        QCOMPARE(rows().first().toMap()["versionId"], source["versionId"]);
+        QCOMPARE(item("tagsTitle")->property("text").toString(), QString("Related"));
+        QCOMPARE(item("tagsTitle")->property("font").value<QFont>().pixelSize(), 25);
+        QCOMPARE(item("relatedSourceLabel")->property("text").toString(), source["reference"].toString() + " · NET");
+        QCOMPARE(item("tagUseCurrent")->property("text").toString(), QString("Find related to current passage"));
+        click("tagAllVersions"); QCOMPARE(rows().size(), 2);
+        click("tagMatchAll"); click("tag:" + b);
+        QCOMPARE(prop("relatedSource").toMap(), source);
+        QCOMPARE(changes.size(), 0);
+        QVERIFY(invoke("openSummary", source).toBool());
+        QTRY_VERIFY(!drawer->property("visible").toBool());
+        click("summaryOverlap:" + overlap["reference"].toString() + ":tag:" + b);
+        QTRY_VERIFY(drawer->property("opened").toBool());
+        QCOMPARE(prop("relatedSource").toMap(), source);
+        QCOMPARE(prop("filterIds").toList(), QVariantList{b});
+        QVERIFY(!prop("allVersions").toBool());
+        QVERIFY(!prop("matchAll").toBool());
+        QCOMPARE(changes.size(), 0);
+        QCOMPARE(root->property("completed").toInt(), 0);
+        QCOMPARE(root->property("closed").toInt(), 0);
     }
     void overlapOpenAndEditRemainExact() {
         const auto original = scope(1, 3);
@@ -411,7 +529,7 @@ ApplicationWindow {
         root->setProperty("useEmbedding", true);
         bible->clearSelection();
         QVERIFY(bible->tagScope().isEmpty());
-        QVERIFY(invoke("openBrowser").toBool());
+        QVERIFY(invoke("open").toBool());
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QVERIFY(item("tagScopePrompt")->isVisible());
         QCOMPARE(item("tagScopePrompt")->property("text").toString(), QString("Select a passage to add or remove tags."));
@@ -422,6 +540,8 @@ ApplicationWindow {
         root->setProperty("flushAllowed", false); invoke("followSelection");
         QVERIFY(prop("editingScope").toMap().isEmpty());
         root->setProperty("flushAllowed", true); invoke("followSelection");
+        QVERIFY(prop("editingScope").toMap().isEmpty());
+        QVERIFY(invoke("open").toBool());
         QCOMPARE(prop("editingScope").toMap(), initial);
         QVERIFY(!item("tagScopePrompt")->isVisible());
         QVERIFY(prop("scopePinned").toBool());
@@ -503,7 +623,7 @@ ApplicationWindow {
         const auto a = bible->createAndAssignTag(original, "Alpha");
         const auto b = bible->createAndAssignTag(original, "Beta");
         bible->setNoteText("Preserve note"); QVERIFY(bible->toggleBookmark());
-        QVERIFY(invoke("openBrowser").toBool()); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        QVERIFY(invoke("open").toBool()); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QVERIFY(rows().isEmpty());
         invoke("manage"); click("tag:" + a);
         item("tagRenameInput")->setProperty("text", QString::fromUtf8("Αγάπη <b>🌿</b>"));
@@ -554,6 +674,10 @@ ApplicationWindow {
         root.reset(); engine.reset(); window = nullptr; panel = nullptr;
         Desktop desktop;
         VersionCatalog catalog;
+        // QVERIFY/QCOMPARE can return early: destroy QML before its context objects.
+        const auto cleanupQml = qScopeGuard([this] {
+            root.reset(); engine.reset(); window = nullptr; panel = nullptr;
+        });
         engine = std::make_unique<QQmlEngine>();
         connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
             for (const auto &error : errors) warnings << error.toString();
@@ -574,7 +698,13 @@ ApplicationWindow {
         const auto second = bible->createTag("Second");
         root->setProperty("verseMode", true);
         QVERIFY(QMetaObject::invokeMethod(root.get(), "openPassageTags", Q_ARG(QVariant, original)));
-        QTRY_VERIFY(root->findChild<QObject *>("savedDrawer")->property("opened").toBool());
+        auto picker = panel->findChild<QObject *>("tagsSurface"); QVERIFY(picker);
+        auto annotations = root->findChild<QObject *>("savedDrawer"); QVERIFY(annotations);
+        QTRY_VERIFY(picker->property("opened").toBool());
+        QVERIFY(picker->property("modal").toBool());
+        QCOMPARE(prop("hostKind").toString(), QString("picker"));
+        QVERIFY(prop("scopePinned").toBool());
+        QVERIFY(!annotations->property("visible").toBool());
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         invoke("toggleTag", first);
         QVERIFY(!root->property("verseMode").toBool());
@@ -583,11 +713,15 @@ ApplicationWindow {
         const auto changed = scope(5, 7);
         QVERIFY(variant(root->property("pendingActionCollapse")).toMap().isEmpty());
         QCOMPARE(prop("editingScope").toMap(), original);
+        QVERIFY(picker->property("opened").toBool());
+        QVERIFY(prop("scopePinned").toBool());
         invoke("toggleTag", second);
         QCOMPARE(bible->tagsForScope(original).size(), 2);
         QVERIFY(bible->tagsForScope(changed).isEmpty());
         invoke("close");
-        QTRY_VERIFY(!root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
+        QTRY_VERIFY(!picker->property("visible").toBool());
+        QVERIFY(!prop("scopePinned").toBool());
+        QVERIFY(!annotations->property("visible").toBool());
         QCOMPARE(bible->tagScope(), changed); // Closing cannot collapse the new range.
 
         QVERIFY(QMetaObject::invokeMethod(root.get(), "openPassageTags", Q_ARG(QVariant, QVariant())));
@@ -596,6 +730,9 @@ ApplicationWindow {
         QVERIFY(bible->switchVersion("eng-kjv"));
         const auto otherVersion = scope(8, 9);
         QCOMPARE(prop("editingScope").toMap(), changed);
+        QVERIFY(picker->property("opened").toBool());
+        QVERIFY(prop("scopePinned").toBool());
+        QVERIFY(!annotations->property("visible").toBool());
         QVERIFY(prop("scopeValid").toBool());
         invoke("toggleTag", first);
         QCOMPARE(ids(bible->tagsForScope(changed)), QStringList{first});
@@ -611,18 +748,22 @@ ApplicationWindow {
         QVERIFY(bible->tagsForScope(otherVersion).isEmpty());
         QVERIFY(!item("createPassageTag")->isEnabled());
         invoke("close");
-        QTRY_VERIFY(!root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
+        QTRY_VERIFY(!picker->property("visible").toBool());
+        QVERIFY(!prop("scopePinned").toBool());
+        QVERIFY(!annotations->property("visible").toBool());
         QCOMPARE(bible->tagScope(), otherVersion);
         QVERIFY(QMetaObject::invokeMethod(root.get(), "openPassageTags", Q_ARG(QVariant, QVariant())));
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), otherVersion);
         invoke("close");
-        root.reset(); engine.reset(); window = nullptr; panel = nullptr;
     }
     void mainIntegrationVisualCompletionAndDraft() {
         root.reset(); engine.reset(); window = nullptr; panel = nullptr;
         Desktop desktop;
         VersionCatalog catalog;
+        const auto cleanupQml = qScopeGuard([this] {
+            root.reset(); engine.reset(); window = nullptr; panel = nullptr;
+        });
         engine = std::make_unique<QQmlEngine>();
         connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
             for (const auto &error : errors) warnings << error.toString();
@@ -666,7 +807,6 @@ ApplicationWindow {
         QTRY_VERIFY(prop("scopePinned").toBool());
         QCOMPARE(bible->noteText(), QString("Unsaved original draft <b>literal</b>"));
         invoke("closeForFocusMode");
-        root.reset(); engine.reset(); window = nullptr; panel = nullptr;
     }
 };
 

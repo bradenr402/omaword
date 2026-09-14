@@ -17,15 +17,18 @@ Item {
     readonly property bool browserVisible: hostKind === "browser" && !!embeddedHost && embeddedHost.visible
     readonly property bool visibleModal: surface.visible || relatedDrawer.visible
     readonly property bool contentVisible: visibleModal || browserVisible
-    readonly property bool scopePinned: (surface.visible || browserVisible) && editingScope !== null
+    readonly property bool scopePinned: hostKind === "picker" && surface.visible && editingScope !== null
     property var editingScope: null
+    property var summaryScope: null
     property var relatedSource: null
     property string page: "picker"
     property string returnPage: "browser"
     property string query: ""
     property var allTags: []
     property var exactIds: []
+    property var exactTags: []
     property var overlaps: []
+    property var summaryIds: []
     property var filterIds: []
     property var sourceIds: []
     property var results: []
@@ -92,32 +95,50 @@ Item {
         if (editingScope && !sameRange(editingScope, captured)) releaseEditing()
         editingScope = captured
         relatedDrawer.close()
-        hostKind = embeddedHost ? "browser" : "picker"
+        hostKind = "picker"
+        browserClosed()
         page = "picker"
         query = ""
         message = ""
         confirmation = null
         filterIds = []
         refresh()
-        if (embeddedHost) browserRequested()
-        else surface.open()
+        surface.open()
         Qt.callLater(function() { search.forceActiveFocus() })
         return true
     }
     function openBrowser(manage = false) {
+        if (!manage) return openSummary()
         if (!open()) return false
-        if (manage) panel.manage()
+        panel.manage()
+        return true
+    }
+    function openSummary(scope = null) {
+        if (!canAct() || !embeddedHost) return false
+        const captured = snapshot(scope || bible.tagScope())
+        if (captured && !installed(captured)) return false
+        releaseEditing()
+        hostKind = "browser"
+        surface.close()
+        relatedDrawer.close()
+        summaryScope = captured
+        page = "summary"
+        query = ""
+        message = ""
+        confirmation = null
+        filterIds = []
+        refresh()
+        browserRequested()
+        Qt.callLater(function() { body.forceActiveFocus() })
         return true
     }
     function followSelection() {
-        // Only an empty editor may acquire its first selection automatically.
-        // Host/peer navigation can clear Main's pending collapse before this
-        // callback runs; the captured scope itself is the session's authority.
-        if (!browserVisible || editingScope) return
+        // The summary follows focus; an editing session always keeps its snapshot.
+        if (!browserVisible || page !== "summary") return
         if (!canAct()) return
         const captured = snapshot(bible.tagScope())
-        if (!installed(captured)) return
-        editingScope = captured
+        if (captured && !installed(captured)) return
+        summaryScope = captured
         confirmation = null
         message = ""
         refresh()
@@ -126,15 +147,24 @@ Item {
         if (hostKind !== "browser") return
         hostKind = "none"
         confirmation = null
-        releaseEditing()
+        summaryScope = null
     }
     function openRelated() {
+        return showRelated(bible.tagScope())
+    }
+    function openRelatedForTag(id, source) {
+        return showRelated(source, id)
+    }
+    function showRelated(source, id = "") {
         if (!canAct()) return false
-        const captured = snapshot(bible.tagScope())
+        const captured = snapshot(source)
         if (!installed(captured)) return false
+        if (id && !Array.from(bible.tags).some(function(tag) { return tag.id === id })) return false
         releaseEditing()
-        surface.close()
         hostKind = "related"
+        surface.close()
+        // Close Annotations before opening/focusing the exclusive Related drawer.
+        browserClosed()
         relatedSource = captured
         page = "related"
         query = ""
@@ -144,6 +174,7 @@ Item {
         confirmation = null
         allTags = Array.from(bible.tags)
         resetSourceTags()
+        if (id) filterIds = [id]
         refresh()
         relatedDrawer.open()
         Qt.callLater(function() { search.forceActiveFocus() })
@@ -204,19 +235,29 @@ Item {
         if (confirmation && (!tagById(confirmation.id) || tagById(confirmation.id).name !== confirmation.name
                 || (confirmation.action === "merge" && (!tagById(confirmation.target) || tagById(confirmation.target).name !== confirmation.targetName))))
             confirmation = null
-        scopeValid = installed(editingScope)
-        exactIds = scopeValid ? Array.from(bible.tagsForScope(editingScope, false)).map(function(tag) { return tag.id }) : []
-        overlaps = scopeValid ? Array.from(bible.tagsForScope(editingScope, true)).filter(function(range) {
-            return !sameRange(range, editingScope)
+        const scope = page === "summary" ? summaryScope : editingScope
+        scopeValid = installed(scope)
+        exactTags = scopeValid ? Array.from(bible.tagsForScope(scope, false)) : []
+        exactIds = exactTags.map(function(tag) { return tag.id })
+        overlaps = scopeValid ? Array.from(bible.tagsForScope(scope, true)).filter(function(range) {
+            return !sameRange(range, scope)
         }) : []
+        let ids = exactIds.slice()
+        overlaps.forEach(function(range) {
+            Array.from(range.tags).forEach(function(tag) { if (ids.indexOf(tag.id) < 0) ids.push(tag.id) })
+        })
+        summaryIds = ids
         refreshResults()
     }
     function refreshResults() {
         if (page === "related") results = installed(relatedSource)
             ? Array.from(bible.relatedPassages(relatedSource, filterIds, matchAll, allVersions)) : []
+        else if (page === "summary") results = installed(summaryScope) && summaryIds.length
+            ? Array.from(bible.relatedPassages(summaryScope, summaryIds, false, false)) : []
         else results = []
     }
     function toggleTag(id) {
+        if (page === "summary") return
         if (!tagById(id)) return
         if (page === "manage") {
             managedId = id
@@ -258,12 +299,15 @@ Item {
         if (edit) {
             // Main captures Visual-mode completion context for the new exact range.
             app.openPassageTags(captured)
+        } else if (page === "summary") {
+            summaryScope = captured
+            refresh()
         } else if (page !== "related") close()
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         return true
     }
     function manage() {
-        if (page === "related") return
+        if (hostKind !== "picker") return
         returnPage = page
         page = "manage"
         query = ""
@@ -330,6 +374,7 @@ Item {
         id: control
         property bool chosen: false
         property string hint: ""
+        property bool wrapText: false
         font.family: panel.desktop.fontFamily
         font.pixelSize: 13 * panel.controlScale
         padding: 8 * panel.controlScale
@@ -339,7 +384,8 @@ Item {
             font: control.font
             color: control.enabled ? panel.desktop.foreground : panel.desktop.muted
             textFormat: Text.PlainText
-            elide: Text.ElideRight
+            elide: control.wrapText ? Text.ElideNone : Text.ElideRight
+            wrapMode: control.wrapText ? Text.Wrap : Text.NoWrap
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
@@ -394,6 +440,49 @@ Item {
             }
         }
         background: Item {}
+    }
+    component SummaryChips: Flow {
+        id: chips
+        required property var tags
+        required property string prefix
+        spacing: 6 * panel.controlScale
+        Repeater {
+            model: chips.tags
+            delegate: TagButton {
+                required property var modelData
+                objectName: chips.prefix + modelData.id
+                text: modelData.name
+                width: Math.min(implicitWidth, chips.width)
+                wrapText: true
+                onClicked: panel.openRelatedForTag(modelData.id, panel.summaryScope)
+            }
+        }
+    }
+    component SummaryRange: ColumnLayout {
+        id: range
+        required property var entry
+        required property string prefix
+        spacing: 4 * panel.controlScale
+        TagButton {
+            objectName: range.prefix + range.entry.reference
+            Layout.fillWidth: true
+            text: range.entry.reference
+            wrapText: true
+            onClicked: panel.openTagged(range.entry)
+        }
+        SummaryChips {
+            Layout.fillWidth: true
+            tags: range.entry.tags
+            prefix: range.prefix + range.entry.reference + ":tag:"
+        }
+        TagText {
+            Layout.fillWidth: true
+            visible: text.length > 0
+            text: range.entry.excerpt || ""
+            maximumLineCount: 3
+            elide: Text.ElideRight
+            color: panel.desktop.muted
+        }
     }
     Drawer {
         id: relatedDrawer
@@ -464,15 +553,101 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 TagText {
+                    objectName: "tagsTitle"
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     text: panel.page === "picker" ? (panel.editingScope ? panel.editingScope.reference + " · " + panel.versionName(panel.editingScope) : "Tags")
-                        : panel.page === "related" ? "Related · " + (panel.relatedSource ? panel.relatedSource.reference + " · " + panel.versionName(panel.relatedSource) : "")
+                        : panel.page === "related" ? "Related"
+                        : panel.page === "summary" ? (panel.summaryScope ? panel.summaryScope.reference + " · " + panel.versionName(panel.summaryScope) : "Tags")
                         : panel.page === "manage" ? "Manage tags" : "Tags"
+                    font.pixelSize: (panel.page === "related" ? 25 * panel.uiScale : 14 * panel.controlScale)
                 }
                 TagButton { text: "Back"; visible: panel.page === "manage"; onClicked: panel.back() }
                 TagButton { objectName: "manageTags"; text: "Manage"; visible: panel.page === "picker"; onClicked: panel.manage() }
-                TagButton { objectName: "tagsDone"; text: "Done"; onClicked: panel.close() }
+                TagButton { objectName: "tagsDone"; text: "Done"; visible: panel.page !== "summary"; onClicked: panel.close() }
+            }
+            TagText {
+                objectName: "relatedSourceLabel"
+                Layout.fillWidth: true
+                visible: panel.page === "related"
+                text: panel.relatedSource ? panel.relatedSource.reference + " · " + panel.versionName(panel.relatedSource) : ""
+                color: panel.desktop.muted
+            }
+            Flickable {
+                id: summaryView
+                objectName: "tagSummary"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: panel.page === "summary"
+                clip: true
+                contentWidth: width
+                contentHeight: summaryContent.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: TagScrollbar {}
+                ColumnLayout {
+                    id: summaryContent
+                    width: summaryView.width - 20 * panel.controlScale
+                    spacing: 12 * panel.controlScale
+                    TagText {
+                        objectName: "summaryEmpty"
+                        Layout.fillWidth: true
+                        visible: panel.summaryIds.length === 0
+                        text: "No tags on this passage or overlapping ranges."
+                        color: panel.desktop.muted
+                    }
+                    TagText {
+                        Layout.fillWidth: true
+                        visible: panel.summaryIds.length > 0
+                        text: "Tags on this range"
+                    }
+                    SummaryChips {
+                        objectName: "summaryExactTags"
+                        Layout.fillWidth: true
+                        visible: panel.exactTags.length > 0
+                        tags: panel.exactTags
+                        prefix: "summaryTag:"
+                    }
+                    TagText {
+                        Layout.fillWidth: true
+                        visible: panel.summaryIds.length > 0 && panel.exactTags.length === 0
+                        text: "No tags attached to this exact range."
+                        color: panel.desktop.muted
+                    }
+                    TagText {
+                        Layout.fillWidth: true
+                        visible: panel.overlaps.length > 0
+                        text: "Tags on overlapping ranges"
+                    }
+                    Repeater {
+                        model: panel.page === "summary" ? panel.overlaps : []
+                        delegate: SummaryRange {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            entry: modelData
+                            prefix: "summaryOverlap:"
+                        }
+                    }
+                    TagText {
+                        Layout.fillWidth: true
+                        visible: panel.summaryIds.length > 0
+                        text: "Other passages with these tags"
+                    }
+                    Repeater {
+                        model: panel.page === "summary" ? panel.results : []
+                        delegate: SummaryRange {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            entry: modelData
+                            prefix: "summaryPassage:"
+                        }
+                    }
+                    TagText {
+                        Layout.fillWidth: true
+                        visible: panel.summaryIds.length > 0 && panel.results.length === 0
+                        text: "No other passages in this version."
+                        color: panel.desktop.muted
+                    }
+                }
             }
             TagText {
                 Layout.fillWidth: true
@@ -502,7 +677,7 @@ Item {
                 id: search
                 objectName: "tagSearch"
                 Layout.fillWidth: true
-                visible: panel.confirmation === null
+                visible: panel.page !== "summary" && panel.confirmation === null
                 placeholderText: panel.page === "picker" ? "Find or create a tag…" : "Filter tags…"
                 text: panel.query
                 onTextEdited: panel.query = text
@@ -525,7 +700,15 @@ Item {
                 TagButton { objectName: "tagAllVersions"; text: "All versions"; chosen: panel.allVersions; onClicked: { panel.allVersions = true; panel.refreshResults() } }
                 Item { Layout.fillWidth: true }
             }
-            TagButton { objectName: "tagUseCurrent"; text: "Use current"; visible: panel.page === "related"; onClicked: panel.useCurrent() }
+            TagButton {
+                objectName: "tagUseCurrent"
+                Layout.fillWidth: true
+                text: "Find related to current passage"
+                wrapText: true
+                hint: "Replace the pinned source with the currently focused passage and its tags."
+                visible: panel.page === "related"
+                onClicked: panel.useCurrent()
+            }
             ListView {
                 id: tagList
                 objectName: "tagList"
@@ -533,7 +716,7 @@ Item {
                 Layout.fillHeight: panel.page === "picker" || panel.page === "manage"
                 Layout.preferredHeight: Math.min(150 * panel.controlScale, body.height * 0.22)
                 Layout.minimumHeight: 34 * panel.controlScale
-                visible: panel.confirmation === null
+                visible: panel.page !== "summary" && panel.confirmation === null
                 clip: true
                 spacing: 4 * panel.uiScale
                 model: []
@@ -674,6 +857,7 @@ Item {
             TagText { objectName: "tagMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.message }
             TagText {
                 Layout.fillWidth: true
+                visible: panel.page !== "summary"
                 text: panel.page === "picker" ? "Space / Enter toggles · Enter in search creates / assigns · Esc clears, then closes"
                     : "Enter opens a passage · Esc clears, then closes"
                 font.pixelSize: 11 * panel.controlScale
