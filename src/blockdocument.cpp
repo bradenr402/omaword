@@ -8,6 +8,15 @@
 #include <QTextCursor>
 #include <QTextFragment>
 #include <QTextLayout>
+#include <QTextImageFormat>
+#include <QImage>
+#include <QFontMetricsF>
+#include <QSet>
+#include <QGuiApplication>
+#include <QMimeData>
+#include <QScopedValueRollback>
+#include <QTextDocumentFragment>
+#include <QUuid>
 #include <algorithm>
 
 static void registerBlockDocument()
@@ -17,10 +26,62 @@ static void registerBlockDocument()
 }
 Q_COREAPP_STARTUP_FUNCTION(registerBlockDocument)
 
+BlockDocument::BlockDocument(QObject *parent)
+    : QObject(parent), m_cellName("omaword:inline-cell/" + QUuid::createUuid().toString(QUuid::WithoutBraces))
+{
+    connect(QGuiApplication::clipboard(), &QClipboard::changed, this, &BlockDocument::filterClipboard);
+}
+
+void BlockDocument::trackSelection(int start, int end)
+{
+    if (m_building) return;
+    if (m_selectionStart == qMin(start, end) && m_selectionEnd == qMax(start, end)) return;
+    m_selectionStart = qMin(start, end);
+    m_selectionEnd = qMax(start, end);
+    // Keyboard selections also publish PRIMARY on platforms supporting it.
+    // Native publication can occur before or after TextEdit's selection signals;
+    // the changed handler handles a subsequent native write as well.
+    if (start != end && QGuiApplication::clipboard()->supportsSelection()) copySelection(start, end, true);
+}
+
+void BlockDocument::copySelection(int start, int end, bool primary) const
+{
+    if (!m_document || start == end) return;
+    auto clipboard = QGuiApplication::clipboard();
+    if (primary && !clipboard->supportsSelection()) return;
+    clipboard->setText(selectionText(start, end), primary ? QClipboard::Selection : QClipboard::Clipboard);
+}
+
+void BlockDocument::filterClipboard(QClipboard::Mode mode)
+{
+    if (m_filteringClipboard || m_building || !m_document || m_selectionStart == m_selectionEnd
+        || m_selectionEnd >= m_document->characterCount() || mode == QClipboard::FindBuffer) return;
+    bool decorated = false;
+    for (const auto &segment : m_decorationSegments)
+        if (segment.first < m_selectionEnd && segment.second > m_selectionStart) { decorated = true; break; }
+    if (!decorated) return;
+    auto clipboard = QGuiApplication::clipboard();
+    const auto mime = clipboard->mimeData(mode);
+    if (!mime || !mime->hasText()) return;
+    QTextCursor cursor(m_document);
+    cursor.setPosition(m_selectionStart);
+    cursor.setPosition(m_selectionEnd, QTextCursor::KeepAnchor);
+    // Restrict interception to this reader's exact native serialization. The
+    // resource is unique per reader; plain-only exports must match its raw text.
+    if (mime->text() != cursor.selection().toPlainText()) return;
+    if (mime->hasHtml() && !mime->html().contains(m_cellName)
+        && mime->html() != cursor.selection().toHtml()) return;
+    const QString filtered = selectionText(m_selectionStart, m_selectionEnd);
+    QScopedValueRollback<bool> guard(m_filteringClipboard, true);
+    clipboard->setText(filtered, mode); // Also removes the image-bearing HTML MIME.
+}
+
 void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses,
-                          bool numbers, bool headings, double lineHeight, const QString &mode)
+                          bool numbers, bool headings, double lineHeight, const QString &mode,
+                          bool annotationsVisible, double decorationSize)
 {
     if (!target || !target->textDocument()) return;
+    QScopedValueRollback<bool> building(m_building, true);
     if (m_document != target->textDocument()) {
         if (m_document) {
             disconnect(m_document, nullptr, this, nullptr);
@@ -34,15 +95,40 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         // reflows that keep the same size. Do not use layout::update here: it
         // fires for caret/selection repaints as well as actual layout changes.
     }
+    m_selectionStart = m_selectionEnd = 0;
     m_document->clear();
     m_document->setDocumentMargin(0);
     m_spans.clear();
+    m_decorations.clear();
+    m_decorationSegments.clear();
+    // Qt Quick lays out image objects with their explicit dimensions. Painting
+    // is done by the reader over these transparent cells, never over verse text.
+    const QUrl cellUrl(m_cellName);
+    QImage cell(1, 1, QImage::Format_ARGB32_Premultiplied);
+    cell.fill(Qt::transparent);
+    m_document->addResource(QTextDocument::ImageResource, cellUrl, cell);
+    const double em = decorationSize > 0 ? decorationSize : QFontMetricsF(m_document->defaultFont()).height();
     QTextCursor cursor(m_document);
     QTextBlockFormat paragraph;
     paragraph.setLineHeight(lineHeight * 100, QTextBlockFormat::ProportionalHeight);
     cursor.setBlockFormat(paragraph);
     const QTextCharFormat normal;
-    for (const auto &value : verses) {
+    // Derive nesting from source-order membership, not reference spelling or
+    // numeric book IDs (which need not follow the edition's book order).
+    QMap<QString, QPair<int, int>> extents;
+    for (int i = 0; annotationsVisible && i < verses.size(); ++i) {
+        const auto verse = verses[i].toMap();
+        for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("tag")}) {
+            for (const auto &entry : verse.value(kind + "Ranges").toList()) {
+                const auto range = entry.toMap();
+                const QString key = kind + ':' + range.value("reference").toString();
+                if (!extents.contains(key)) extents[key] = {i, i};
+                extents[key].second = i;
+            }
+        }
+    }
+    for (int verseIndex = 0; verseIndex < verses.size(); ++verseIndex) {
+        const auto &value = verses[verseIndex];
         const auto verse = value.toMap();
         const QString heading = verse.value("heading").toString();
         if (headings && !heading.isEmpty()) {
@@ -67,6 +153,55 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
             cursor.insertText(verse.value("number").toString(), number);
             cursor.insertText(QString(QChar(0x00a0)), normal);
         }
+        auto decorate = [&](bool opening) {
+            if (!annotationsVisible) return;
+            QVariantList entries;
+            for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("tag")}) {
+                QSet<QString> seen;
+                for (const auto &entry : verse.value(kind + "Ranges").toList()) {
+                    auto range = entry.toMap();
+                    const auto reference = range.value("reference").toString();
+                    if (seen.contains(reference)) continue;
+                    seen.insert(reference);
+                    const bool before = range.value(kind == "bookmark" ? "bookmarkContinuesBefore" : "continuesBefore").toBool();
+                    const bool after = range.value(kind == "bookmark" ? "bookmarkContinuesAfter" : "continuesAfter").toBool();
+                    if (opening ? (before && verseIndex != 0) : after) continue;
+                    range["kind"] = kind;
+                    range["scope"] = range.value("scope", entry);
+                    range["continuesBefore"] = before;
+                    range["edge"] = opening ? (before ? "continuation" : "open") : "close";
+                    entries.append(range);
+                }
+            }
+            std::sort(entries.begin(), entries.end(), [&](const QVariant &a, const QVariant &b) {
+                const auto x = a.toMap(), y = b.toMap();
+                const QString xKey = x.value("kind").toString() + ':' + x.value("reference").toString();
+                const QString yKey = y.value("kind").toString() + ':' + y.value("reference").toString();
+                const auto xExtent = extents.value(xKey), yExtent = extents.value(yKey);
+                const int xEdge = opening ? xExtent.second : xExtent.first;
+                const int yEdge = opening ? yExtent.second : yExtent.first;
+                if (xEdge != yEdge) return xEdge > yEdge; // Outer opens first; inner closes first.
+                return opening ? xKey < yKey : xKey > yKey; // Equal ranges close in reverse order.
+            });
+            for (auto entry : entries) {
+                auto marker = entry.toMap();
+                const int segmentStart = cursor.position();
+                if (!opening) cursor.insertText(QString(QChar(0x2060)), normal);
+                marker["position"] = cursor.position();
+                marker["verse"] = verse.value("number");
+                marker["cellWidth"] = qMax(1, qRound(em * (opening ? 0.92 : 0.32)));
+                marker["cellHeight"] = qMax(1, qRound(em * 0.9));
+                QTextImageFormat format;
+                format.setName(cellUrl.toString());
+                format.setWidth(marker.value("cellWidth").toDouble());
+                format.setHeight(marker.value("cellHeight").toDouble());
+                cursor.insertImage(format);
+                if (opening) cursor.insertText(QString(QChar(0x2060)), normal);
+                m_decorationSegments.append({segmentStart, cursor.position()});
+                m_decorations.append(marker);
+            }
+        };
+        decorate(true);
         const int textStart = cursor.position();
         QTextDocument source;
         const auto html = verse.value("html").toString();
@@ -81,11 +216,93 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
                 if (fragment.isValid()) cursor.insertText(fragment.text(), fragment.charFormat());
             }
         }
+        const int textEnd = cursor.position();
+        decorate(false);
         m_spans.append(QVariantMap{{"number",verse.value("number")}, {"start",start},
-                                  {"textStart",textStart}, {"end",cursor.position()}});
+                                  {"textStart",textStart}, {"textEnd",textEnd}, {"end",cursor.position()}});
     }
     emit spansChanged();
     emit geometryChanged();
+}
+
+QString BlockDocument::selectionText(int start, int end) const
+{
+    if (!m_document) return {};
+    if (start > end) std::swap(start, end);
+    start = qBound(0, start, m_document->characterCount() - 1);
+    end = qBound(start, end, m_document->characterCount() - 1);
+    QString result;
+    auto append = [&](int a, int b) {
+        if (a >= b) return;
+        QTextCursor cursor(m_document);
+        cursor.setPosition(a);
+        cursor.setPosition(b, QTextCursor::KeepAnchor);
+        result += cursor.selectedText();
+    };
+    for (const auto &segment : m_decorationSegments) {
+        if (segment.second <= start) continue;
+        if (segment.first >= end) break;
+        append(start, qMin(end, segment.first));
+        start = qMax(start, segment.second);
+    }
+    append(start, end);
+    result.replace(QChar::ParagraphSeparator, '\n');
+    result.replace(QChar::LineSeparator, '\n');
+    return result;
+}
+
+QVariantList BlockDocument::inlineDecorations() const
+{
+    QVariantList result;
+    if (!m_document) return result;
+    for (const auto &entry : m_decorations) {
+        auto marker = entry.toMap();
+        const int position = marker.value("position").toInt();
+        const auto block = m_document->findBlock(position);
+        const auto line = block.layout()->lineForTextPosition(position - block.position());
+        if (!line.isValid()) continue;
+        const auto origin = m_document->documentLayout()->blockBoundingRect(block).topLeft();
+        const double a = line.cursorToX(position - block.position(), QTextLine::Leading);
+        const double b = line.cursorToX(position - block.position() + 1, QTextLine::Leading);
+        marker["x"] = origin.x() + qMin(a, b);
+        marker["y"] = origin.y() + line.y() + line.ascent() - marker.value("cellHeight").toDouble();
+        marker["width"] = qAbs(b - a);
+        marker["height"] = marker.value("cellHeight");
+        result.append(marker);
+    }
+    return result;
+}
+
+QVariantList BlockDocument::contextRanges(const QVariantList &verses, int cursorVerse,
+                                         int selectedStart, int selectedEnd) const
+{
+    auto keys = [](const QVariantMap &verse) {
+        QSet<QString> result;
+        for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("tag")})
+            for (const auto &entry : verse.value(kind + "Ranges").toList())
+                result.insert(kind + ':' + entry.toMap().value("reference").toString());
+        return result;
+    };
+    QSet<QString> active;
+    for (const auto &verse : verses)
+        if (verse.toMap().value("number").toInt() == cursorVerse) active = keys(verse.toMap());
+    QVariantList result;
+    bool adjacent = false;
+    for (int i = 0; i < m_spans.size() && i < verses.size(); ++i) {
+        const auto span = m_spans[i].toMap();
+        const int number = span.value("number").toInt();
+        const bool covered = number != cursorVerse && !(selectedStart > 0 && number >= selectedStart && number <= selectedEnd)
+            && keys(verses[i].toMap()).intersects(active);
+        if (covered) {
+            if (adjacent) {
+                auto range = result.last().toMap();
+                range["end"] = span.value("end");
+                result.last() = range;
+            } else result.append(QVariantMap{{"start",span.value("start")}, {"end",span.value("end")}});
+        }
+        adjacent = covered;
+    }
+    return result;
 }
 
 QVariantList BlockDocument::annotations(const QVariantList &verses, const QVariantList &collection,
@@ -104,7 +321,7 @@ QVariantList BlockDocument::annotations(const QVariantList &verses, const QVaria
             if (!metadata.isEmpty()) {
                 // Document offsets use start/end; retain canonical endpoints in
                 // their own frozen scope instead of overwriting them with offsets.
-                ranges[key]["scope"] = metadata;
+                ranges[key]["scope"] = metadata.value("scope", metadata);
                 ranges[key]["tags"] = metadata.value("tags");
             }
         }
@@ -121,13 +338,13 @@ QVariantList BlockDocument::annotations(const QVariantList &verses, const QVaria
                 const auto range = entry.toMap();
                 include("bookmark",range.value("reference").toString(),span,
                         range.value("bookmarkContinuesBefore").toBool(),
-                        range.value("bookmarkContinuesAfter").toBool());
+                        range.value("bookmarkContinuesAfter").toBool(),range);
             }
             for (const auto &entry : verse.value("noteRanges").toList()) {
                 const auto range = entry.toMap();
                 include("note",range.value("reference").toString(),span,
                         range.value("continuesBefore").toBool(),
-                        range.value("continuesAfter").toBool());
+                        range.value("continuesAfter").toBool(),range);
             }
             for (const auto &entry : verse.value("tagRanges").toList()) {
                 const auto range = entry.toMap();
@@ -175,6 +392,14 @@ int BlockDocument::positionFor(int verse) const
 int BlockDocument::verseAtPoint(double x, double y) const
 {
     if (!m_document) return 0;
+    // Image cells at bidi boundaries may share a caret with the neighboring
+    // visual run. Their reserved box has an unambiguous logical owner.
+    for (const auto &entry : inlineDecorations()) {
+        const auto marker = entry.toMap();
+        if (QRectF(marker.value("x").toDouble(), marker.value("y").toDouble(),
+                   marker.value("width").toDouble(), marker.value("height").toDouble()).contains(x, y))
+            return marker.value("verse").toInt();
+    }
     const auto documentLayout = m_document->documentLayout();
     const int nearest = documentLayout->hitTest(QPointF(x,y), Qt::FuzzyHit);
     const auto block = m_document->findBlock(nearest);
@@ -220,7 +445,8 @@ QVariantList BlockDocument::rectangles(int start, int end) const
             QList<QPair<double,double>> runs;
             for (int p = first; p < last; p = layout->nextCursorPosition(p)) {
                 const double a = line.cursorToX(p,QTextLine::Leading);
-                const double b = line.cursorToX(p,QTextLine::Trailing);
+                const double b = block.text().at(p) == QChar::ObjectReplacementCharacter
+                    ? line.cursorToX(p + 1, QTextLine::Leading) : line.cursorToX(p,QTextLine::Trailing);
                 runs.append({qMin(a,b),qMax(a,b)});
             }
             std::sort(runs.begin(),runs.end());

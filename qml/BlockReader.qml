@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Shapes
 // Registered by blockdocument.cpp at application startup, without a QML plugin.
 // qmllint disable import
 import OmaWord.Reader 1.0
@@ -21,6 +20,8 @@ Item {
     onRailWidthChanged: if (!destroying) geometryTimer.restart()
     property var annotationRanges: []
     property var annotationGroups: []
+    property var inlineMarkers: []
+    property var contextRanges: []
     readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
     function tagsPlainText(tags) { return Array.from(tags || []).map(function(t) { return t.name }).join(", ") }
     property real annotationScale: 0
@@ -30,6 +31,8 @@ Item {
     function updateAnnotations() {
         if (destroying) return
         const ranges = document.annotations(backend.verses, backend.collection, backend.book, backend.chapter)
+        const markers = document.inlineDecorations()
+        if (JSON.stringify(markers) !== JSON.stringify(inlineMarkers)) inlineMarkers = markers
         if (JSON.stringify(ranges) === JSON.stringify(annotationRanges) && annotationScale === controller.scale) return
         annotationScale = controller.scale
         annotationMenu.close()
@@ -37,6 +40,7 @@ Item {
         // independent action in the chooser. No icon drifts onto another line.
         const groups = []
         for (const range of ranges) {
+            if (range.kind !== "note") continue
             let group = groups.length ? groups[groups.length - 1] : null
             if (!group || range.y >= group.y + 54 * controller.scale) {
                 group = { y: range.y, bookmark: [], note: [], tag: [] }
@@ -48,11 +52,12 @@ Item {
         annotationGroups = groups
     }
     function openAnnotation(entry) {
-        if (entry.kind === "bookmark") controller.openBookmark(entry.reference)
+        if (entry.kind === "bookmark") controller.openBookmark(entry.scope || entry.reference)
         else if (entry.kind === "tag") controller.openPassageTags(entry.scope || entry.reference)
         else {
             if (!controller.flushNote()) return
-            if (backend.navigate(entry.reference)) {
+            const scope = entry.scope
+            if (scope && scope.versionId ? backend.openTaggedPassage(scope) : backend.navigate(entry.reference)) {
                 controller.clearTextSelection()
                 controller.syncNote()
                 controller.openNotes(true)
@@ -62,18 +67,27 @@ Item {
     readonly property bool numbers: backend.showVerseNumbers && !backend.focusMode
     readonly property bool headings: backend.showHeadings && !backend.focusMode
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
-        return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart }
-    })) + numbers + headings + backend.lineHeight + mode
+        return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart,
+            bookmarkRanges: v.bookmarkRanges, tagRanges: v.tagRanges }
+    })) + numbers + headings + backend.lineHeight + mode + backend.focusMode + controller.readerSize + controller.scale
     height: body.height
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
     function rebuild() {
         if (destroying) return
         controller.clearTextSelection()
         cancelDrag()
-        document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight, mode)
+        document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight, mode,
+                       !backend.focusMode, controller.readerSize * controller.scale)
         geometryTimer.restart()
     }
-    function refreshGeometry() { if (!destroying) { paint.requestPaint(); updateAnnotations() } }
+    function refreshGeometry() {
+        if (!destroying) {
+            contextRanges = backend.focusMode ? [] : document.contextRanges(backend.verses, backend.cursorVerse,
+                                                                           backend.selectedStart, backend.selectedEnd)
+            paint.requestPaint()
+            updateAnnotations()
+        }
+    }
     function cancelDrag() { dragging = false; pressed = false; autoscroll.stop() }
     function clearSelection() { body.deselect() }
     function verseRect(number) { return body.positionToRectangle(document.positionFor(number)) }
@@ -87,7 +101,7 @@ Item {
     function updateDrag() {
         const p = body.mapFromItem(viewport, pointer.x, pointer.y)
         body.select(anchor, body.positionAt(p.x, p.y))
-        controller.freeSelectedText = body.selectedText
+        controller.freeSelectedText = document.selectionText(body.selectionStart, body.selectionEnd)
     }
     // qmllint disable import
     BlockDocument {
@@ -99,15 +113,20 @@ Item {
     // spaces and wrapped lines; adjacent independent highlights keep their gap.
     Canvas {
         id: paint
+        objectName: "blockRangeBackground"
         anchors.fill: body
         property var annotations: root.backend.verses
         property int first: root.backend.selectedStart
         property int last: root.backend.selectedEnd
         property color accent: root.theme.accent
         property bool focused: root.backend.focusMode
+        property int cursorVerse: root.backend.cursorVerse
+        property var contextRanges: root.contextRanges
+        onCursorVerseChanged: if (!root.destroying) geometryTimer.restart()
+        onContextRangesChanged: requestPaint()
         onAnnotationsChanged: requestPaint()
-        onFirstChanged: requestPaint()
-        onLastChanged: requestPaint()
+        onFirstChanged: if (!root.destroying) geometryTimer.restart()
+        onLastChanged: if (!root.destroying) geometryTimer.restart()
         onAccentChanged: requestPaint()
         onFocusedChanged: requestPaint()
         onWidthChanged: if (!root.destroying) geometryTimer.restart()
@@ -137,6 +156,11 @@ Item {
                 }
             }
             for (const ref in ranges) draw(ranges[ref].start, ranges[ref].end, false)
+            if (!focused) {
+                ctx.fillStyle = root.controller.tint(accent, 0.06)
+                for (const range of contextRanges)
+                    for (const r of document.rectangles(range.start, range.end)) ctx.fillRect(r.x, r.y, r.width, r.height)
+            }
             const selected = Array.from(spans).filter(function(s) { return first > 0 && s.number >= first && s.number <= last })
             if (selected.length) draw(selected[0].start, selected[selected.length - 1].end, true)
         }
@@ -160,12 +184,22 @@ Item {
         wrapMode: TextEdit.Wrap
         padding: 0
         onContentHeightChanged: paint.requestPaint()
+        function syncSelection() {
+            document.trackSelection(selectionStart, selectionEnd)
+            root.controller.freeSelectedText = document.selectionText(selectionStart, selectionEnd)
+        }
+        onSelectedTextChanged: syncSelection()
+        onSelectionStartChanged: syncSelection()
+        onSelectionEndChanged: syncSelection()
         Keys.onShortcutOverride: function(event) {
-            if (event.key === Qt.Key_C && event.modifiers === Qt.ControlModifier && root.controller.freeSelectedText.length) event.accepted = true
+            if (event.matches(StandardKey.Copy)) event.accepted = true
         }
         Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_C && event.modifiers === Qt.ControlModifier && root.controller.freeSelectedText.length) {
-                root.controller.copyFreeText(); event.accepted = true
+            if (event.matches(StandardKey.Copy)) {
+                root.controller.freeSelectedText = document.selectionText(selectionStart, selectionEnd)
+                if (root.controller.freeSelectedText.length) root.controller.copyFreeText()
+                else root.controller.copyPassage(false)
+                event.accepted = true
             }
         }
         MouseArea {
@@ -206,6 +240,95 @@ Item {
             }
         }
     }
+    // Each delegate occupies an image cell reserved by QTextDocument. The icon
+    // sits to the left of the opening bracket, in the cell's superscript area.
+    Repeater {
+        model: root.inlineMarkers
+        delegate: Item {
+            id: inlineMarker
+            required property var modelData
+            readonly property bool opening: modelData.edge !== "close"
+            readonly property string hint: (modelData.kind === "bookmark" ? "Bookmark" : "Tag") + "\n"
+                + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
+                + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
+            objectName: "blockInlineMarker:" + modelData.kind + ":" + modelData.edge + ":" + modelData.reference
+            x: modelData.x; y: modelData.y
+            width: modelData.width; height: modelData.height
+            z: 2
+            visible: !root.backend.focusMode
+            activeFocusOnTab: opening
+            Keys.onPressed: function(event) {
+                if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Return || event.key === Qt.Key_Space)) {
+                    root.openAnnotation(modelData)
+                    event.accepted = true
+                }
+            }
+            Canvas {
+                id: inlinePaint
+                anchors.fill: parent
+                property color accent: root.theme.accent
+                onAccentChanged: requestPaint()
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.strokeStyle = accent
+                    ctx.fillStyle = accent
+                    ctx.lineWidth = Math.max(1, height / 18)
+                    const opening = inlineMarker.opening
+                    const bx = opening ? width * 0.78 : width * 0.65
+                    const tip = opening ? width * 0.97 : width * 0.1
+                    ctx.beginPath()
+                    if (inlineMarker.modelData.edge === "continuation") {
+                        // A chevron denotes a continued range, not a false start.
+                        ctx.moveTo(bx, height * 0.35)
+                        ctx.lineTo(tip, height * 0.62)
+                        ctx.lineTo(bx, height * 0.9)
+                    } else {
+                        ctx.moveTo(tip, height * 0.32)
+                        ctx.lineTo(bx, height * 0.32)
+                        ctx.lineTo(bx, height * 0.96)
+                        ctx.lineTo(tip, height * 0.96)
+                    }
+                    ctx.stroke()
+                    if (!opening) return
+                    ctx.save()
+                    ctx.translate(width * 0.05, height * 0.03)
+                    ctx.scale(width * 0.56 / 12, height * 0.54 / 13)
+                    if (inlineMarker.modelData.kind === "bookmark") {
+                        ctx.beginPath()
+                        ctx.moveTo(1, 0); ctx.lineTo(11, 0); ctx.lineTo(11, 13)
+                        ctx.lineTo(6, 9); ctx.lineTo(1, 13); ctx.closePath(); ctx.fill()
+                    } else {
+                        // Horizontal mirror of the existing right-pointing tag.
+                        ctx.translate(12, 0); ctx.scale(-1, 1)
+                        ctx.beginPath()
+                        ctx.moveTo(1, 1); ctx.lineTo(6, 1); ctx.lineTo(11, 7)
+                        ctx.lineTo(6, 12); ctx.lineTo(1, 6); ctx.closePath(); ctx.stroke()
+                        ctx.beginPath(); ctx.moveTo(3, 3); ctx.lineTo(4, 4); ctx.stroke()
+                    }
+                    ctx.restore()
+                }
+            }
+            MouseArea {
+                id: inlineMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.openAnnotation(inlineMarker.modelData)
+            }
+            Accessible.role: Accessible.Button
+            Accessible.name: hint
+            Accessible.onPressAction: root.openAnnotation(modelData)
+            AppToolTip {
+                theme: root.theme
+                visible: inlineMarker.visible && (inlineMouse.containsMouse || inlineMarker.activeFocus) && !annotationMenu.visible
+                delay: 500
+                text: inlineMarker.hint
+            }
+        }
+    }
     // Outside the text's bounds, above both the highlight canvas and TextEdit.
     // Main reserves this gutter at the BlockReader loader's left edge.
     Item {
@@ -218,38 +341,6 @@ Item {
         visible: !root.backend.focusMode
         onVisibleChanged: if (!visible) annotationMenu.close()
         Repeater {
-            model: root.annotationRanges.filter(function(r) { return r.kind === "bookmark" })
-            delegate: Item {
-                id: bracket
-                required property var modelData
-                required property int index
-                objectName: "blockBookmarkExtent:" + modelData.reference
-                // Separate overlapping and adjacent ranges, even if their
-                // endpoints are mid-line. Brackets cover the whole line box.
-                x: (2 + (index % 3) * 3) * root.controller.scale
-                y: modelData.y
-                width: 4 * root.controller.scale
-                height: modelData.height
-                Rectangle {
-                    width: root.controller.scale
-                    height: parent.height
-                    color: root.theme.accent
-                    opacity: 0.5
-                }
-                Rectangle {
-                    width: parent.width; height: root.controller.scale
-                    color: root.theme.accent
-                    visible: !bracket.modelData.continuesBefore
-                }
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    width: parent.width; height: root.controller.scale
-                    color: root.theme.accent
-                    visible: !bracket.modelData.continuesAfter
-                }
-            }
-        }
-        Repeater {
             model: root.annotationGroups
             delegate: Column {
                 id: group
@@ -260,12 +351,12 @@ Item {
                 y: modelData.y
                 width: 23 * root.controller.scale
                 Repeater {
-                    model: ["bookmark", "note", "tag"].filter(function(kind) { return group.modelData[kind].length > 0 })
+                    model: ["note"].filter(function(kind) { return group.modelData[kind].length > 0 })
                     delegate: ToolButton {
                         id: marker
                         required property string modelData
                         readonly property var entries: group.modelData[modelData]
-                        readonly property string hint: (modelData === "bookmark" ? "Bookmark" : modelData === "tag" ? "Tag" : "Note")
+                        readonly property string hint: "Note"
                             + (entries.length > 1 ? "s" : "") + "\n"
                             + entries.map(function(e) { return e.reference + (e.continuesBefore ? " (continued)" : "") + (e.kind === "tag" ? " · " + root.tagsPlainText(e.tags) : "") }).join("\n")
                         objectName: "blockAnnotationMarker:" + modelData + ":" + entries[0].reference
@@ -293,23 +384,8 @@ Item {
                                 height: 13 * root.controller.scale
                                 anchors.centerIn: parent
                                 anchors.horizontalCenterOffset: marker.entries.length > 1 ? -3 * root.controller.scale : 0
-                                Shape {
-                                    anchors.fill: parent
-                                    visible: marker.modelData === "bookmark"
-                                    ShapePath {
-                                        strokeColor: "transparent"
-                                        fillColor: root.theme.accent
-                                        startX: 0; startY: 0
-                                        PathLine { x: 10 * root.controller.scale; y: 0 }
-                                        PathLine { x: 10 * root.controller.scale; y: 13 * root.controller.scale }
-                                        PathLine { x: 5 * root.controller.scale; y: 9 * root.controller.scale }
-                                        PathLine { x: 0; y: 13 * root.controller.scale }
-                                        PathLine { x: 0; y: 0 }
-                                    }
-                                }
                                 Rectangle {
                                     anchors.fill: parent
-                                    visible: marker.modelData === "note"
                                     color: "transparent"
                                     border.color: root.theme.accent
                                     border.width: root.controller.scale
@@ -324,27 +400,6 @@ Item {
                                             height: root.controller.scale
                                             color: root.theme.accent
                                         }
-                                    }
-                                }
-                                Shape {
-                                    anchors.fill: parent
-                                    visible: marker.modelData === "tag"
-                                    ShapePath {
-                                        strokeColor: root.theme.accent
-                                        strokeWidth: root.controller.scale
-                                        fillColor: "transparent"
-                                        startX: root.controller.scale; startY: root.controller.scale
-                                        PathLine { x: 6 * root.controller.scale; y: root.controller.scale }
-                                        PathLine { x: 11 * root.controller.scale; y: 7 * root.controller.scale }
-                                        PathLine { x: 6 * root.controller.scale; y: 12 * root.controller.scale }
-                                        PathLine { x: root.controller.scale; y: 6 * root.controller.scale }
-                                        PathLine { x: root.controller.scale; y: root.controller.scale }
-                                    }
-                                    ShapePath {
-                                        strokeColor: root.theme.accent
-                                        strokeWidth: 2 * root.controller.scale
-                                        startX: 3 * root.controller.scale; startY: 3 * root.controller.scale
-                                        PathLine { x: 4 * root.controller.scale; y: 4 * root.controller.scale }
                                     }
                                 }
                             }

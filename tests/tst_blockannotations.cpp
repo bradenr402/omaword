@@ -11,7 +11,11 @@
 #include <QTextDocumentFragment>
 #include <QTextBlock>
 #include <QTextCursor>
+#include <QTextLayout>
 #include <QJSValue>
+#include <QJsonDocument>
+#include <QClipboard>
+#include <QMimeData>
 #include "blockdocument.h"
 
 // Standalone, loads the real BlockReader and QTextDocument without Main or a
@@ -66,6 +70,7 @@ class BlockAnnotationsTest : public QObject
     void click(QQuickItem *target) {
         QVERIFY(target);
         QVERIFY(target->isVisible());
+        QTest::qWait(60); // Let popup enter transitions and scene transforms settle.
         QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,
                           target->mapToScene(QPointF(target->width()/2,target->height()/2)).toPoint());
         QCoreApplication::processEvents();
@@ -99,9 +104,12 @@ ApplicationWindow {
         property real lineHeight: 1.5
         property int selectedStart: 0
         property int selectedEnd: 0
+        property int cursorVerse: 0
         property string navigated: ""
         property bool navigationSucceeds: true
+        property var navigatedScope: ({})
         function navigate(ref) { navigated = ref; controller.calls += "navigate;"; return navigationSucceeds }
+        function openTaggedPassage(scope) { navigatedScope = scope; controller.calls += "scope;"; return navigationSucceeds }
     }
     QtObject {
         id: controller; objectName: "controller"
@@ -110,16 +118,21 @@ ApplicationWindow {
         property real floatingSafety: 0
         property string freeSelectedText: ""
         property string openedBookmark: ""
+        property var openedBookmarkScope: ({})
         property var openedTags: ({})
         property string calls: ""
         property bool canFlush: true
+        property string copied: ""
         function tint(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
         function clearTextSelection() { calls += "clear;"; freeSelectedText = ""; reader.clearSelection() }
         function flushNote() { calls += "flush;"; return canFlush }
         function syncNote() { calls += "sync;" }
         function openNotes(edit) { calls += edit ? "edit;" : "preview;" }
-        function openBookmark(ref) { openedBookmark = ref }
+        function openBookmark(scope) { openedBookmarkScope = scope; openedBookmark = typeof scope === "string" ? scope : scope.reference }
         function openPassageTags(scope) { openedTags = scope }
+        function copyFreeText() { copied = freeSelectedText }
+        function copyPassage(plain) { calls += "passage:" + plain + ";" }
+        function selectVerse(verse, extend) { backend.cursorVerse = verse }
     }
     QtObject {
         id: theme
@@ -170,21 +183,24 @@ ApplicationWindow {
         QVERIFY(b.value("rects").toList().first().toMap().value("x").toDouble()
                 > a.value("rects").toList().first().toMap().value("x").toDouble());
         QCOMPARE(list("annotationGroups").size(),1);
-        auto ribbon = item("blockAnnotationMarker:bookmark:Genesis 1:1–3");
+        auto ribbon = item("blockInlineMarker:bookmark:open:Genesis 1:1–3");
         auto noteIcon = item("blockAnnotationMarker:note:Genesis 1:1–3");
         QVERIFY(ribbon && noteIcon);
+        QVERIFY2(ribbon->width() > 1,qPrintable(QString("cell width %1; %2").arg(ribbon->width()).arg(QJsonDocument::fromVariant(list("inlineMarkers")).toJson())));
         const auto ribbonRect = ribbon->mapRectToItem(item("blockBody"),ribbon->boundingRect());
         const auto noteRect = noteIcon->mapRectToItem(item("blockBody"),noteIcon->boundingRect());
         QVERIFY(!ribbonRect.intersects(noteRect));
-        QVERIFY(ribbonRect.right() < 0 && noteRect.right() < 0);
+        QVERIFY(ribbonRect.left() >= 0 && noteRect.right() < 0);
+        QVERIFY(!item("blockBookmarkExtent:Genesis 1:1–3"));
+        QVERIFY(!item("blockAnnotationMarker:bookmark:Genesis 1:1–3"));
         auto quick = item("blockBody")->property("textDocument").value<QQuickTextDocument *>();
         QVERIFY(quick);
-        const auto text = quick->textDocument()->toPlainText();
+        const auto text = mapping->selectionText(0,quick->textDocument()->characterCount() - 1);
         QVERIFY(!text.contains("Genesis"));
         QVERIFY(!text.contains(QChar(0xfffc)));
         click(ribbon);
-        QTRY_VERIFY(item("blockAnnotationAction:bookmark:Genesis 1:4–5"));
-        click(item("blockAnnotationAction:bookmark:Genesis 1:4–5"));
+        QCOMPARE(controller->property("openedBookmark").toString(),QString("Genesis 1:1–3"));
+        click(item("blockInlineMarker:bookmark:open:Genesis 1:4–5"));
         QCOMPARE(controller->property("openedBookmark").toString(),QString("Genesis 1:4–5"));
         click(noteIcon);
         QTRY_VERIFY(item("blockAnnotationAction:note:Genesis 1:4–5"));
@@ -297,12 +313,12 @@ ApplicationWindow {
         backend->setProperty("lineHeight",1.9);
         QTRY_VERIFY(list("annotationRanges")[0].toMap().value("height").toDouble() > previousHeight);
         backend->setProperty("showVerseNumbers",false);
-        QTRY_COMPARE(mapping->spans().first().toMap().value("textStart"),mapping->spans().first().toMap().value("start"));
+        QTRY_COMPARE(mapping->selectionText(mapping->positionFor(1),mapping->spans().first().toMap().value("textStart").toInt()),QString());
         controller->setProperty("scale",1.6);
         QTRY_COMPARE(item("blockAnnotationRail")->width(),64.0);
         backend->setProperty("focusMode",true);
         QTRY_VERIFY(!item("blockAnnotationRail")->isVisible());
-        QVERIFY(!item("blockAnnotationMarker:bookmark:Genesis 1:1–3")->isVisible());
+        QTRY_VERIFY(list("inlineMarkers").isEmpty());
         backend->setProperty("focusMode",false);
         QTRY_VERIFY(item("blockAnnotationRail")->isVisible());
     }
@@ -404,16 +420,11 @@ ApplicationWindow {
         QVERIFY(continuation["continuesBefore"].toBool());
         QVERIFY(!continuation["continuesAfter"].toBool());
         QCOMPARE(continuation["tags"].toList(),tags);
-        auto marker = item("blockAnnotationMarker:tag:Genesis 1:1–3");
+        auto marker = item("blockInlineMarker:tag:open:Genesis 1:1–3");
         QVERIFY(marker);
         QVERIFY(marker->property("hint").toString().contains("<b>Faith & 🌿</b>"));
         click(marker);
-        const auto action = item("blockAnnotationAction:tag:Genesis 1:30–2:2");
-        QTRY_VERIFY(action && action->isVisible());
-        const auto label = action->property("contentItem").value<QQuickItem *>();
-        QVERIFY(label);
-        QCOMPARE(label->property("textFormat").toInt(),0); // Text.PlainText
-        click(action);
+        click(item("blockInlineMarker:tag:continuation:Genesis 1:30–2:2"));
         const auto value = controller->property("openedTags");
         const auto opened = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
         QCOMPARE(opened["start"].toInt(),30);
@@ -439,6 +450,162 @@ ApplicationWindow {
         QTRY_VERIFY(doc->isEmpty());
         QCOMPARE(doc->blockCount(),1);
     }
+    void reservedEndpointsAndUnicodeCopy_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::addColumn<int>("width");
+        QTest::addColumn<bool>("rtl");
+        QTest::newRow("block-one-line") << QString("block") << 1800 << false;
+        QTest::newRow("block-wrapped") << QString("block") << 190 << false;
+        QTest::newRow("paragraph-one-line") << QString("paragraph") << 1800 << false;
+        QTest::newRow("paragraph-wrapped") << QString("paragraph") << 190 << false;
+        QTest::newRow("rtl-one-line") << QString("paragraph") << 1800 << true;
+        QTest::newRow("rtl-wrapped") << QString("paragraph") << 190 << true;
+    }
+    void reservedEndpointsAndUnicodeCopy() {
+        QFETCH(QString,mode); QFETCH(int,width); QFETCH(bool,rtl);
+        backend->setProperty("showVerseNumbers",false);
+        item("reader")->setProperty("mode",mode);
+        item("reader")->setWidth(width);
+        const QString first = QString::fromUtf8(rtl ? "אבג שלום < > [ ] 🌿 é text." : "Alpha < > [ ] 🌿 é אבג text.");
+        // Original joiners/object characters must survive: filter positions,
+        // never globally delete characters that happen to resemble decorations.
+        const QString second = QString::fromUtf8("שלום עולם, second long verse with original ") + QChar(0x2060) + QChar(0xfffc) + " marks.";
+        QVariantList verses{
+            QVariantMap{{"number",1},{"text",first},{"bookmarkRanges",QVariantList{bookmark("A",true,false),bookmark("B",true,true)}}},
+            QVariantMap{{"number",2},{"text",second},{"bookmarkRanges",QVariantList{bookmark("A",false,true),bookmark("C",true,true)}}},
+            QVariantMap{{"number",3},{"text","Final words."},{"paragraphStart",true}}};
+        backend->setProperty("verses",verses);
+        QTRY_COMPARE(list("inlineMarkers").size(),6);
+        auto doc = item("blockBody")->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        const QString expected = first + ' ' + second + (mode == "paragraph" ? '\n' : ' ') + "Final words.";
+        QCOMPARE(mapping->selectionText(0,doc->characterCount()),expected);
+        QCOMPARE(mapping->selectionText(doc->characterCount(),0),expected);
+        int closeB = -1, openC = -1;
+        for (const auto &entry : list("inlineMarkers")) {
+            const auto marker = entry.toMap();
+            if (marker["reference"] == "B" && marker["edge"] == "close") closeB = marker["position"].toInt();
+            if (marker["reference"] == "C" && marker["edge"] == "open") openC = marker["position"].toInt();
+        }
+        QVERIFY(closeB >= 0 && openC > closeB); // Close before opening the next verse's range.
+        for (const auto &entry : list("inlineMarkers")) {
+            const auto marker = entry.toMap();
+            const int position = marker["position"].toInt();
+            QCOMPARE(doc->characterAt(position),QChar::ObjectReplacementCharacter);
+            QCOMPARE(mapping->selectionText(position,position+1),QString());
+            QVERIFY2(qAbs(marker["width"].toDouble() - marker["cellWidth"].toDouble()) < 0.1,
+                     qPrintable(QJsonDocument::fromVariant(marker).toJson()));
+            const auto span = mapping->spans()[marker["verse"].toInt()-1].toMap();
+            QCOMPARE(mapping->verseAt(position),marker["verse"].toInt());
+            QCOMPARE(mapping->verseAtPoint(marker["x"].toDouble()+marker["width"].toDouble()/2,
+                                          marker["y"].toDouble()+marker["height"].toDouble()/2),marker["verse"].toInt());
+            const auto block = doc->findBlock(position);
+            const auto line = block.layout()->lineForTextPosition(position-block.position());
+            const int endpoint = marker["edge"] == "open" ? span["textStart"].toInt() : span["textEnd"].toInt()-1;
+            QCOMPARE(line.lineNumber(),block.layout()->lineForTextPosition(endpoint-block.position()).lineNumber());
+            const QRectF cell(marker["x"].toDouble(),marker["y"].toDouble(),marker["width"].toDouble(),marker["height"].toDouble());
+            for (const auto &r : mapping->rectangles(span["textStart"].toInt(),span["textEnd"].toInt())) {
+                const auto rect = r.toMap();
+                const QRectF textRect(rect["x"].toDouble(),rect["y"].toDouble(),rect["width"].toDouble(),rect["height"].toDouble());
+                QVERIFY2(!cell.adjusted(0.1,0.1,-0.1,-0.1).intersects(textRect),"Decoration overlaps original text");
+            }
+        }
+        // Full and partial keyboard selections go through the same filtered API.
+        auto body = item("blockBody");
+        // Exercise the reader's drag update with real TextEdit hit-test offsets.
+        const auto dragSpan = mapping->spans()[0].toMap();
+        const int dragEnd = dragSpan["textEnd"].toInt();
+        QRectF caret;
+        QVERIFY(QMetaObject::invokeMethod(body,"positionToRectangle",Q_RETURN_ARG(QRectF,caret),Q_ARG(int,dragEnd)));
+        const QPointF pointer = body->mapToItem(item("reader")->parentItem(),caret.center());
+        item("reader")->setProperty("anchor",0);
+        item("reader")->setProperty("pointer",pointer);
+        QVERIFY(QMetaObject::invokeMethod(item("reader"),"updateDrag"));
+        QCOMPARE(controller->property("freeSelectedText").toString(),first);
+        body->forceActiveFocus();
+        QTest::keyClick(window,Qt::Key_A,Qt::ControlModifier);
+        QTRY_COMPARE(controller->property("freeSelectedText").toString(),expected);
+        QTest::keyClick(window,Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(controller->property("copied").toString(),expected);
+        const auto span = mapping->spans()[1].toMap();
+        const int a = span["textStart"].toInt()+2, b = span["textEnd"].toInt()-2;
+        QVERIFY(QMetaObject::invokeMethod(body,"select",Q_ARG(int,a),Q_ARG(int,b)));
+        QCOMPARE(controller->property("freeSelectedText").toString(),second.mid(2,second.size()-4));
+        // A mark change invalidates the old selection coherently.
+        auto v = verses[0].toMap(); v["bookmarkRanges"] = QVariantList{}; verses[0] = v;
+        backend->setProperty("verses",verses);
+        QTRY_VERIFY(controller->property("freeSelectedText").toString().isEmpty());
+        QVERIFY(body->property("selectedText").toString().isEmpty());
+    }
+    void contextUnionContinuationAndFocus() {
+        QVariantList verses;
+        for (int i = 1; i <= 7; ++i) {
+            QVariantList bookmarks, tags;
+            if (i <= 4) bookmarks.append(bookmark("Cross-chapter",false,i == 4));
+            if (i >= 2 && i <= 5) tags.append(QVariantMap{{"reference","Overlap"},{"continuesBefore",i != 2},{"continuesAfter",i != 5}});
+            if (i == 7) bookmarks.append(bookmark("Unrelated",true,true));
+            verses.append(QVariantMap{{"number",i},{"text",QString("Verse %1.").arg(i)},
+                {"bookmarkRanges",bookmarks},{"tagRanges",tags}});
+        }
+        backend->setProperty("verses",verses);
+        backend->setProperty("cursorVerse",3);
+        backend->setProperty("selectedStart",3); backend->setProperty("selectedEnd",3);
+        QTRY_COMPARE(list("contextRanges").size(),2);
+        auto ranges = list("contextRanges");
+        QCOMPARE(ranges[0].toMap()["start"].toInt(),mapping->positionFor(1));
+        QCOMPARE(ranges[0].toMap()["end"],mapping->spans()[1].toMap()["end"]);
+        QCOMPARE(ranges[1].toMap()["start"].toInt(),mapping->positionFor(4));
+        QCOMPARE(ranges[1].toMap()["end"],mapping->spans()[4].toMap()["end"]);
+        QVERIFY(item("blockInlineMarker:bookmark:continuation:Cross-chapter"));
+        QVERIFY(!item("blockInlineMarker:bookmark:open:Cross-chapter"));
+        QVERIFY(item("blockInlineMarker:bookmark:close:Cross-chapter"));
+        backend->setProperty("cursorVerse",6);
+        QTRY_VERIFY(list("contextRanges").isEmpty());
+        backend->setProperty("cursorVerse",3);
+        QTRY_COMPARE(list("contextRanges").size(),2);
+        backend->setProperty("focusMode",true);
+        QTRY_VERIFY(list("inlineMarkers").isEmpty());
+        QTRY_VERIFY(list("contextRanges").isEmpty());
+        backend->setProperty("focusMode",false);
+        QTRY_COMPARE(list("inlineMarkers").size(),6);
+        QTRY_COMPARE(list("contextRanges").size(),2);
+        QSignalSpy geometry(mapping,&BlockDocument::geometryChanged);
+        QTest::qWait(100);
+        QCOMPARE(geometry.count(),0); // Painting/selection cannot feed a layout loop.
+    }
+    void renderedCellsAndLastCharacterHit() {
+        backend->setProperty("showVerseNumbers",false);
+        backend->setProperty("verses",QVariantList{
+            QVariantMap{{"number",1},{"text","Alpha omega."},{"bookmarkRanges",QVariantList{bookmark("A",true,true)}},
+                {"tagRanges",QVariantList{QVariantMap{{"reference","A"},{"tags",QVariantList{QVariantMap{{"name","One"}},QVariantMap{{"name","Two"}}}}}}}},
+            QVariantMap{{"number",2},{"text","Next verse."}}});
+        QTRY_COMPARE(list("inlineMarkers").size(),4); // Two tag assignments, one tag icon.
+        QTest::qWait(120);
+        const auto image = window->grabWindow();
+        QVERIFY(!image.isNull());
+        for (const auto &entry : list("inlineMarkers")) {
+            const auto marker = entry.toMap();
+            auto visual = item("blockInlineMarker:"+marker["kind"].toString()+':'+marker["edge"].toString()+':'+marker["reference"].toString());
+            QVERIFY(visual);
+            const auto rect = visual->mapRectToScene(visual->boundingRect());
+            const qreal ratio = image.devicePixelRatio();
+            const auto pixels = image.copy(QRect((rect.topLeft()*ratio).toPoint(),(rect.size()*ratio).toSize()));
+            int accentPixels = 0;
+            for (int y = 0; y < pixels.height(); ++y)
+                for (int x = 0; x < pixels.width(); ++x) {
+                    const QColor c = pixels.pixelColor(x,y);
+                    if (c.blue() > 100 && c.blue() > c.red()+20) ++accentPixels;
+                }
+            QVERIFY2(accentPixels > 4,qPrintable("Missing rendered icon/bracket: " + visual->objectName()));
+        }
+        const auto span = mapping->spans()[0].toMap();
+        const auto last = mapping->rectangles(span["textEnd"].toInt()-1,span["textEnd"].toInt()).last().toMap();
+        QCOMPARE(mapping->verseAtPoint(last["x"].toDouble()+last["width"].toDouble()-0.1,
+                                      last["y"].toDouble()+last["height"].toDouble()/2),1);
+        const auto lastSpan = mapping->spans().last().toMap();
+        const auto final = mapping->rectangles(lastSpan["textEnd"].toInt()-1,lastSpan["textEnd"].toInt()).last().toMap();
+        QCOMPARE(mapping->verseAtPoint(final["x"].toDouble()+final["width"].toDouble()+8,
+                                      final["y"].toDouble()+final["height"].toDouble()/2),2);
+    }
     void screenshot() {
         populate(true);
         QTRY_COMPARE(list("annotationRanges").size(),4);
@@ -448,7 +615,7 @@ ApplicationWindow {
         QVERIFY(!image.isNull());
         const auto path = qEnvironmentVariable("OMAWORD_ANNOTATION_SCREENSHOT");
         QVERIFY(image.save(path));
-        click(item("blockAnnotationMarker:bookmark:Genesis 1:1–3"));
+        click(item("blockAnnotationMarker:note:Genesis 1:1–3"));
         QTest::qWait(150);
         QVERIFY(window->grabWindow().save(path + ".chooser.png"));
         QTest::keyClick(window,Qt::Key_Escape);
@@ -459,6 +626,126 @@ ApplicationWindow {
         backend->setProperty("focusMode",true);
         QTest::qWait(150);
         QVERIFY(window->grabWindow().save(path + ".focus.png"));
+    }
+    void copyFallbackAndNativeSerialization() {
+        backend->setProperty("showVerseNumbers",false);
+        const QString original = QString::fromUtf8("Unicode 🌿 אבג [text] ") + QChar(0x2060) + QChar(0xfffc) + " original.";
+        backend->setProperty("verses",QVariantList{QVariantMap{{"number",1},{"text",original},
+            {"bookmarkRanges",QVariantList{bookmark("A",true,true)}}}});
+        QTRY_COMPARE(list("inlineMarkers").size(),2);
+        auto body = item("blockBody");
+        auto doc = body->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        auto clipboard = QGuiApplication::clipboard();
+        body->forceActiveFocus();
+        controller->setProperty("calls","");
+        QTest::keyClick(window,Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(controller->property("calls").toString(),QString("passage:false;"));
+        QTest::keyClick(window,Qt::Key_A,Qt::ControlModifier);
+        QTest::keyClick(window,Qt::Key_C,Qt::ControlModifier);
+        QCOMPARE(controller->property("copied").toString(),original);
+        QCOMPARE(controller->property("calls").toString(),QString("passage:false;"));
+        clipboard->setText("sentinel");
+        // Invoke the actual native TextEdit method, including its HTML MIME.
+        QVERIFY(QMetaObject::invokeMethod(body,"copy"));
+        QCOMPARE(clipboard->text(),original);
+        QVERIFY(!clipboard->mimeData()->hasHtml());
+        // Select just a joiner: no image URI is present in this native fragment.
+        const int joiner = list("inlineMarkers").first().toMap()["position"].toInt()+1;
+        QVERIFY(QMetaObject::invokeMethod(body,"select",Q_ARG(int,joiner),Q_ARG(int,joiner+1)));
+        QVERIFY(QMetaObject::invokeMethod(body,"copy"));
+        QCOMPARE(clipboard->text(),QString());
+        QVERIFY(!clipboard->mimeData()->hasHtml());
+        // Plain-only native serialization is filtered too.
+        QVERIFY(QMetaObject::invokeMethod(body,"selectAll"));
+        QTextCursor cursor(doc); cursor.select(QTextCursor::Document);
+        clipboard->setText(cursor.selection().toPlainText());
+        QCOMPARE(clipboard->text(),original);
+        // Unrelated clipboard values, including HTML, retain all their MIME.
+        auto external = new QMimeData;
+        external->setText("External text"); external->setHtml("<b>External text</b>");
+        clipboard->setMimeData(external);
+        QCOMPARE(clipboard->text(),QString("External text"));
+        QVERIFY(clipboard->mimeData()->hasHtml());
+        external = new QMimeData;
+        external->setText(cursor.selection().toPlainText()); external->setHtml("<b>Different producer</b>");
+        clipboard->setMimeData(external);
+        QCOMPARE(clipboard->text(),cursor.selection().toPlainText());
+        QVERIFY(clipboard->mimeData()->hasHtml());
+        // Clearing this reader's selection disables interception.
+        QVERIFY(QMetaObject::invokeMethod(body,"deselect"));
+        clipboard->setText(cursor.selection().toPlainText());
+        QCOMPARE(clipboard->text(),cursor.selection().toPlainText());
+    }
+    void primaryKeyboardSerialization() {
+        auto clipboard = QGuiApplication::clipboard();
+        if (!clipboard->supportsSelection()) QSKIP("Platform does not support PRIMARY selection");
+        populate();
+        QTRY_VERIFY(!list("inlineMarkers").isEmpty());
+        auto body = item("blockBody");
+        auto doc = body->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        body->forceActiveFocus();
+        QTest::keyClick(window,Qt::Key_A,Qt::ControlModifier);
+        const auto expected = mapping->selectionText(0,doc->characterCount());
+        QTRY_COMPARE(clipboard->text(QClipboard::Selection),expected);
+        QVERIFY(!clipboard->mimeData(QClipboard::Selection)->hasHtml());
+        // A later native PRIMARY publication must not restore decorations.
+        QTextCursor cursor(doc); cursor.select(QTextCursor::Document);
+        auto native = new QMimeData;
+        native->setText(cursor.selection().toPlainText()); native->setHtml(cursor.selection().toHtml());
+        clipboard->setMimeData(native,QClipboard::Selection);
+        QCOMPARE(clipboard->text(QClipboard::Selection),expected);
+        QVERIFY(!clipboard->mimeData(QClipboard::Selection)->hasHtml());
+    }
+    void nestedEndpointOrder() {
+        QVariantList verses;
+        for (int i = 1; i <= 5; ++i) {
+            // Deliberately misleading lexical order, and metadata in a different
+            // order from the expected nesting. Include a bookmark/tag tie.
+            QVariantList bookmarks{bookmark("Z outer 1-5",i == 1,i == 5)};
+            if (i <= 3) bookmarks.append(bookmark("A inner 1-3",i == 1,i == 3));
+            if (i >= 3) bookmarks.append(bookmark("A inner 3-5",i == 3,i == 5));
+            QVariantList tags{QVariantMap{{"reference","Z outer 1-5"},{"continuesBefore",i != 1},{"continuesAfter",i != 5}}};
+            verses.append(QVariantMap{{"number",i},{"text","Words."},{"bookmarkRanges",bookmarks},{"tagRanges",tags}});
+        }
+        backend->setProperty("verses",verses);
+        QTRY_COMPARE(list("inlineMarkers").size(),8);
+        QStringList first, last;
+        for (const auto &entry : list("inlineMarkers")) {
+            const auto marker = entry.toMap();
+            const QString key = marker["kind"].toString()+':'+marker["reference"].toString();
+            if (marker["verse"].toInt() == 1 && marker["edge"] == "open") first.append(key);
+            if (marker["verse"].toInt() == 5 && marker["edge"] == "close") last.append(key);
+        }
+        QCOMPARE(first,QStringList({"bookmark:Z outer 1-5","tag:Z outer 1-5","bookmark:A inner 1-3"}));
+        QCOMPARE(last,QStringList({"bookmark:A inner 3-5","tag:Z outer 1-5","bookmark:Z outer 1-5"}));
+        // Ordering uses source ordinals even when verse labels are nonmonotonic.
+        for (int i = 0; i < verses.size(); ++i) { auto verse = verses[i].toMap(); verse["number"] = 80-i; verses[i] = verse; }
+        backend->setProperty("verses",verses);
+        QTRY_COMPARE(list("inlineMarkers").first().toMap()["verse"].toInt(),80);
+        QCOMPARE(list("inlineMarkers").first().toMap()["reference"].toString(),QString("Z outer 1-5"));
+    }
+    void exactAnnotationScopes() {
+        auto scope = note("Cross-book",78,2,16,1);
+        scope.remove("note"); scope["book"] = 80; scope["endBook"] = 40; scope["versionId"] = "frozen-edition";
+        auto mark = bookmark("Cross-book",false,true);
+        for (auto it = scope.begin(); it != scope.end(); ++it) mark[it.key()] = it.value();
+        auto notes = noteRange("Cross-book",false,true);
+        notes["scope"] = scope;
+        backend->setProperty("verses",QVariantList{QVariantMap{{"number",2},{"text","Endpoint."},
+            {"bookmarkRanges",QVariantList{mark}},{"noteRanges",QVariantList{notes}}}});
+        QTRY_COMPARE(list("inlineMarkers").size(),2);
+        click(item("blockInlineMarker:bookmark:continuation:Cross-book"));
+        auto value = controller->property("openedBookmarkScope");
+        auto opened = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+        QCOMPARE(opened["versionId"],scope["versionId"]);
+        QCOMPARE(opened["start"].toInt(),78); QCOMPARE(opened["endBook"].toInt(),40);
+        QCOMPARE(opened["end"].toInt(),2);
+        controller->setProperty("calls","");
+        click(item("blockAnnotationMarker:note:Cross-book"));
+        value = backend->property("navigatedScope");
+        opened = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+        QCOMPARE(opened,scope);
+        QCOMPARE(controller->property("calls").toString(),QString("flush;scope;clear;sync;edit;"));
     }
 };
 
