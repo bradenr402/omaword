@@ -151,8 +151,10 @@ ApplicationWindow {
         tagsUi.open(scope || bible.tagScope())
     }
     function openTagsBrowser(manage) {
-        openPassageTags()
-        if (manage && tagsUi.browserVisible) tagsUi.manage()
+        if (bible.busy || !flushNote()) return
+        clearCount()
+        if (manage) tagsUi.openBrowser(true)
+        else tagsUi.openSummary()
     }
     readonly property alias tagsUi: tagsUi
     readonly property var tagBackend: bible
@@ -219,6 +221,34 @@ ApplicationWindow {
     }
     readonly property real floatingSafety: bible.focusMode ? 0 : 72 * scale
     readonly property real verseGutter: 76 * scale
+    // Source rows, rather than numeric verse labels, define chapter intervals.
+    // Union each kind's continuous coverage: overlapping logical ranges already
+    // share one rail. Allocate once per interval so later starts/ends never bend it.
+    readonly property var annotationLanes: packAnnotationLanes(bible.verses)
+    function packAnnotationLanes(sourceRows) {
+        const rows = Array.from(sourceRows), kinds = ["bookmark", "tag", "note"]
+        const intervals = [], lanes = rows.map(function() { return {} })
+        kinds.forEach(function(kind, priority) {
+            let interval = null
+            rows.forEach(function(row, ordinal) {
+                if (Array.from(row[kind + "Ranges"] || []).length) {
+                    if (!interval) {
+                        interval = { kind: kind, priority: priority, start: ordinal, end: ordinal }
+                        intervals.push(interval)
+                    }
+                    interval.end = ordinal
+                } else interval = null
+            })
+        })
+        intervals.sort(function(a, b) { return a.start - b.start || a.priority - b.priority })
+        const occupiedUntil = [-1, -1, -1]
+        intervals.forEach(function(interval) {
+            const lane = occupiedUntil.findIndex(function(end) { return end < interval.start })
+            occupiedUntil[lane] = interval.end
+            for (let row = interval.start; row <= interval.end; ++row) lanes[row][interval.kind] = lane
+        })
+        return lanes
+    }
     readonly property bool continuousReader: bible.readingMode === "block" || (bible.readingMode === "paragraph" && bible.hasParagraphs)
     property bool readerInitialized: false
     readonly property string observedReadingMode: bible.readingMode
@@ -418,9 +448,11 @@ ApplicationWindow {
                 id: verseTagAction
                 required property var modelData
                 objectName: "verseTagAction:" + modelData.reference
-                text: modelData.reference + (verseTagMenu.annotationKind === "tag" ? " · " + app.tagsPlainText(modelData.tags) : " · Note")
+                text: modelData.reference + (verseTagMenu.annotationKind === "tag" ? " · " + app.tagsPlainText(modelData.tags)
+                    : verseTagMenu.annotationKind === "bookmark" ? " · Bookmark" : " · Note")
                 onTriggered: {
                     if (verseTagMenu.annotationKind === "note") app.openNoteScope(modelData)
+                    else if (verseTagMenu.annotationKind === "bookmark") app.openBookmark(modelData)
                     else app.openPassageTags(modelData)
                 }
                 Keys.onPressed: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
@@ -1455,7 +1487,7 @@ ApplicationWindow {
                 anchors.centerIn: parent
                 width: 22 * app.controlScale
                 height: width
-                visible: floatingButton.glyph.length > 0 && floatingButton.glyph !== "notes" && floatingButton.glyph !== "saved"
+                visible: floatingButton.glyph.length > 0 && !["notes", "saved", "related"].includes(floatingButton.glyph)
                 property color ink: !floatingButton.enabled ? desktop.muted : floatingButton.selected ? desktop.accent : desktop.foreground
                 property string glyph: floatingButton.glyph
                 onInkChanged: requestPaint()
@@ -1470,21 +1502,10 @@ ApplicationWindow {
                     ctx.lineCap = "square"
                     ctx.lineJoin = "miter"
                     ctx.beginPath()
-                    if (glyph === "saved") {
-                        ctx.moveTo(6, 3); ctx.lineTo(18, 3); ctx.lineTo(18, 21)
-                        ctx.lineTo(12, 17); ctx.lineTo(6, 21); ctx.closePath()
-                    } else if (glyph === "help") {
+                    if (glyph === "help") {
                         ctx.moveTo(8, 7); ctx.bezierCurveTo(8, 1, 19, 2, 16, 9)
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
                         ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
-                    } else if (glyph === "related") {
-                        // Two overlapping passages, joined through their shared lines.
-                        ctx.rect(3, 3, 12, 15)
-                        ctx.rect(9, 7, 12, 15)
-                        ctx.moveTo(6, 7); ctx.lineTo(12, 7)
-                        ctx.moveTo(6, 11); ctx.lineTo(18, 11)
-                        ctx.moveTo(12, 15); ctx.lineTo(18, 15)
-                        ctx.moveTo(12, 18); ctx.lineTo(18, 18)
                     } else if (glyph === "visual") {
                         // The bracket and square handles span all three verse lines.
                         ctx.moveTo(8, 6); ctx.lineTo(21, 6)
@@ -1509,8 +1530,8 @@ ApplicationWindow {
                 objectName: floatingButton.objectName + "Glyph"
                 anchors.centerIn: parent
                 width: 22 * app.controlScale; height: width
-                visible: floatingButton.glyph === "notes" || floatingButton.glyph === "saved"
-                kind: floatingButton.glyph === "notes" ? "note" : "bookmark"
+                visible: ["notes", "saved", "related"].includes(floatingButton.glyph)
+                kind: floatingButton.glyph === "notes" ? "note" : floatingButton.glyph === "related" ? "tag" : "bookmark"
                 ink: floatingIcon.ink
             }
         }
@@ -1539,20 +1560,23 @@ ApplicationWindow {
         required property real bodyHeight
         readonly property bool starts: ranges.some(function(r) { return r[kind + "Start"] })
         readonly property bool ends: ranges.some(function(r) { return r[kind + "End"] })
-        readonly property bool continuesBefore: ranges.some(function(r) { return r.continuesBefore })
-        readonly property bool continuesAfter: ranges.some(function(r) { return r.continuesAfter })
-        readonly property var entries: ranges.filter(function(r) { return r[kind + "Start"] || (rowIndex === 0 && r.continuesBefore) })
+        readonly property bool continuesBefore: ranges.some(function(r) { return r.continuesBefore || r[kind + "ContinuesBefore"] })
+        readonly property bool continuesAfter: ranges.some(function(r) { return r.continuesAfter || r[kind + "ContinuesAfter"] })
+        readonly property var entries: ranges.filter(function(r) { return r[kind + "Start"] || (rowIndex === 0 && (r.continuesBefore || r[kind + "ContinuesBefore"])) })
         readonly property var choices: entries.length ? entries : ranges
         readonly property string hint: ranges.map(function(r) {
             return r.reference + (marker.kind === "tag" ? " · " + app.tagsPlainText(r.tags) : "")
         }).join("\n")
         width: 16 * app.scale
+        readonly property int lane: (app.annotationLanes[rowIndex] || {})[kind] || 0
+        x: (36 - lane * 18) * app.scale
         padding: 0
         visible: ranges.length > 0 && !bible.focusMode
         Accessible.name: hint
         onClicked: {
             if (choices.length === 1) {
                 if (kind === "tag") app.openPassageTags(choices[0])
+                else if (kind === "bookmark") app.openBookmark(choices[0])
                 else app.openNoteScope(choices[0])
             } else {
                 verseTagMenu.annotationKind = kind
@@ -1580,6 +1604,7 @@ ApplicationWindow {
             AnnotationGlyph {
                 objectName: marker.kind + "Glyph" + marker.number
                 kind: marker.kind; ink: desktop.accent
+                filled: true
                 y: marker.headingHeight + 5 * app.scale
                 width: 14 * app.scale; height: 16 * app.scale
                 visible: marker.starts || (marker.rowIndex === 0 && marker.continuesBefore)
@@ -1712,62 +1737,12 @@ ApplicationWindow {
                                 textHeight: verseBody.height
                                 width: readerColumn.width
                                 height: verseHeading.height + verseBody.height + 7 * app.scale
-                                Item {
-                                    id: bookmarkMarker
+                                RangeMarker {
                                     objectName: "bookmarkMarker" + verseRow.modelData.number
-                                    x: 0
-                                    width: 14 * app.scale
-                                    height: parent.height
-                                    visible: verseRow.modelData.bookmarked && !bible.focusMode
-                                    readonly property bool starts: !!verseRow.modelData.bookmarkStart
-                                    readonly property bool ends: !!verseRow.modelData.bookmarkEnd
-                                    readonly property bool continuesBefore: !!verseRow.modelData.bookmarkContinuesBefore
-                                    readonly property bool continuesAfter: !!verseRow.modelData.bookmarkContinuesAfter
-                                    readonly property bool chapterContinuation: verseRow.index === 0 && continuesBefore
-                                    readonly property var ranges: Array.from(verseRow.modelData.bookmarkRanges || []).sort(function(a, b) {
-                                        return a.reference.localeCompare(b.reference)
-                                    })
-                                    readonly property var openRange: {
-                                        let starting = ranges.filter(function(range) { return range.bookmarkStart })
-                                        return (starting.length ? starting : ranges)[0] || null
-                                    }
-                                    readonly property string openReference: openRange ? openRange.reference : ""
-                                    readonly property string hint: ranges.map(function(range) { return range.reference }).join("\n")
-                                        + "\nOpen " + openReference + " · m · Ctrl m toggles bookmark"
-                                    // Adjacent row segments meet exactly, including headings and
-                                    // chapter continuation. Caps retain logical overlapping endpoints.
-                                    Rectangle {
-                                        objectName: "bookmarkLine" + verseRow.modelData.number
-                                        x: 5 * app.scale
-                                        y: bookmarkMarker.continuesBefore ? 0 : verseHeading.height + 8 * app.scale
-                                        width: app.scale
-                                        height: (bookmarkMarker.continuesAfter ? parent.height : verseHeading.height + verseBody.height) - y
-                                        color: desktop.accent
-                                        opacity: 0.65
-                                    }
-                                    Rectangle {
-                                        x: 5 * app.scale; y: verseHeading.height + verseBody.height - app.scale
-                                        width: 7 * app.scale; height: app.scale
-                                        visible: bookmarkMarker.ends
-                                        color: desktop.accent
-                                    }
-                                    BookmarkGlyph {
-                                        objectName: "bookmarkGlyph" + verseRow.modelData.number
-                                        width: 14 * app.scale; height: 16 * app.scale
-                                        y: verseHeading.height + 5 * app.scale
-                                        visible: bookmarkMarker.starts
-                                    }
-                                    MouseArea {
-                                        id: bookmarkMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: app.openBookmark(bookmarkMarker.openRange)
-                                    }
-                                    AppToolTip { theme: desktop; visible: bookmarkMarker.visible && bookmarkMouse.containsMouse; text: bookmarkMarker.hint; delay: 500 }
-                                    Accessible.role: Accessible.Button
-                                    Accessible.name: "Bookmarked passages: " + ranges.map(function(range) { return range.reference }).join(", ")
-                                    Accessible.onPressAction: app.openBookmark(openRange)
+                                    kind: "bookmark"; number: verseRow.modelData.number; rowIndex: verseRow.index
+                                    ranges: Array.from(verseRow.modelData.bookmarkRanges || [])
+                                    headingHeight: verseHeading.height; bodyHeight: verseBody.height
+                                    height: verseRow.height
                                 }
                                 Item {
                                     id: verseHeading
@@ -1808,14 +1783,14 @@ ApplicationWindow {
                                     kind: "tag"; number: verseRow.modelData.number; rowIndex: verseRow.index
                                     ranges: Array.from(verseRow.modelData.tagRanges || [])
                                     headingHeight: verseHeading.height; bodyHeight: verseBody.height
-                                    x: 18 * app.scale; height: verseRow.height
+                                    height: verseRow.height
                                 }
                                 RangeMarker {
                                     objectName: "verseNoteMarker" + verseRow.modelData.number
                                     kind: "note"; number: verseRow.modelData.number; rowIndex: verseRow.index
                                     ranges: Array.from(verseRow.modelData.noteRanges || [])
                                     headingHeight: verseHeading.height; bodyHeight: verseBody.height
-                                    x: 36 * app.scale; height: verseRow.height
+                                    height: verseRow.height
                                 }
                                 Rectangle {
                                     objectName: "contextSegment" + verseRow.modelData.number

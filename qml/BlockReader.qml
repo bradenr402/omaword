@@ -280,6 +280,7 @@ Item {
                 objectName: "blockInlineGlyph:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.reference
                 visible: inlineMarker.opening
                 kind: inlineMarker.modelData.kind
+                filled: true
                 ink: root.theme.accent
                 x: parent.width * 0.05
                 y: parent.height * 0.03

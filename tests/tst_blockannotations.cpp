@@ -628,6 +628,12 @@ ApplicationWindow {
                 {"tagRanges",QVariantList{QVariantMap{{"reference","A"},{"tags",QVariantList{QVariantMap{{"name","One"}},QVariantMap{{"name","Two"}}}}}}}},
             QVariantMap{{"number",2},{"text","Next verse."}}});
         QTRY_COMPARE(list("inlineMarkers").size(),6); // Two tag assignments, one tag icon, plus note/bookmark.
+        for (const auto kind : {"bookmark", "tag", "note"}) {
+            auto glyph = item("blockInlineGlyph:" + QString(kind) + ":A");
+            QVERIFY(glyph && glyph->isVisible());
+            QCOMPARE(glyph->property("kind").toString(),QString(kind));
+            QVERIFY(glyph->property("filled").toBool());
+        }
         QTest::qWait(120);
         const auto image = window->grabWindow();
         QVERIFY(!image.isNull());
@@ -655,13 +661,13 @@ ApplicationWindow {
         QCOMPARE(mapping->verseAtPoint(final["x"].toDouble()+final["width"].toDouble()+8,
                                       final["y"].toDouble()+final["height"].toDouble()/2),2);
     }
-    void sharedNoteGlyphMatchesFooter_data() {
+    void sharedNoteGlyphOutlineAndFilled_data() {
         QTest::addColumn<QString>("mode");
         QTest::addColumn<double>("scale");
         QTest::newRow("block") << QString("block") << 1.0;
         QTest::newRow("paragraph-scaled") << QString("paragraph") << 1.6;
     }
-    void sharedNoteGlyphMatchesFooter() {
+    void sharedNoteGlyphOutlineAndFilled() {
         QFETCH(QString,mode); QFETCH(double,scale);
         auto shared = item("sharedGlyph");
         QCOMPARE(shared->width(),18.0); QCOMPARE(shared->height(),18.0);
@@ -674,6 +680,8 @@ ApplicationWindow {
         auto glyph = item("blockInlineGlyph:note:Genesis 1:1–3");
         QVERIFY(glyph && glyph->isVisible());
         QCOMPARE(glyph->property("kind").toString(),QString("note"));
+        QVERIFY(glyph->property("filled").toBool());
+        QVERIFY(!shared->property("filled").toBool());
         shared->setWidth(glyph->width()); shared->setHeight(glyph->height());
         shared->setProperty("ink",glyph->property("ink"));
         QTest::qWait(80);
@@ -682,8 +690,19 @@ ApplicationWindow {
         auto footer = item("footerNoteReference")->grabToImage();
         QVERIFY(actual && common && footer);
         QTRY_VERIFY(!actual->image().isNull() && !common->image().isNull() && !footer->image().isNull());
-        QCOMPARE(actual->image(),common->image());
         QCOMPARE(common->image(),footer->image());
+        const auto ink = [](const QImage &image) {
+            qint64 amount = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) amount += image.pixelColor(x,y).alpha();
+            return amount;
+        };
+        QVERIFY(ink(actual->image()) > ink(footer->image()) * 1.2);
+        shared->setProperty("filled",true);
+        QTest::qWait(80);
+        common = shared->grabToImage(); QVERIFY(common);
+        QTRY_VERIFY(!common->image().isNull());
+        QCOMPARE(actual->image(),common->image());
         backend->setProperty("focusMode",true);
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
         QVERIFY(!item("blockInlineGlyph:note:Genesis 1:1–3"));

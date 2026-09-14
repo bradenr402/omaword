@@ -1564,13 +1564,14 @@ private slots:
         key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         if (tagsOnly) {
             QCOMPARE(prop("collectionList","count").toInt(),0);
-            click(item("savedTab3")); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+            key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
             QVERIFY(QMetaObject::invokeMethod(object("tagsUi"),"toggleTag",Q_ARG(QVariant,tag)));
             QVERIFY(bible->tagsForScope(john).isEmpty());
             QCOMPARE(bible->tagsForScope(genesis).size(),1);
             QVERIFY(!item("tagResults")->isVisible());
             key(Qt::Key_Escape);
-            QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+            QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
             QCOMPARE(bible->tagScope(),john);
             QCOMPARE(bible->collection().size(),1);
             return;
@@ -2083,12 +2084,13 @@ private slots:
         key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QCOMPARE(prop("collectionList","count").toInt(),0);
         QCOMPARE(bible->collection().size(),2);
-        // The Tags tab remains selected when reopening after a marker edit.
+        click(item("savedTab3"));
         QTRY_VERIFY(prop("tagsUi","browserVisible").toBool());
         QVERIFY(!prop("tagsUi","visibleModal").toBool());
         QVERIFY(prop("savedDrawer","visible").toBool());
-        QCOMPARE(prop("tagsUi","page").toString(),QString("picker"));
-        QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        QCOMPARE(prop("tagsUi","page").toString(),QString("summary"));
+        QVERIFY(!prop("tagsUi","scopePinned").toBool());
+        QVERIFY(!item("tagSearch")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_H,Qt::ShiftModifier); QVERIFY(!bible->showHeadings());
         key(Qt::Key_L,Qt::ShiftModifier);
@@ -2100,7 +2102,8 @@ private slots:
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("manage tags"); key(Qt::Key_Return);
-        QTRY_VERIFY(prop("tagsUi","browserVisible").toBool());
+        QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
+        QVERIFY(!prop("savedDrawer","visible").toBool());
         QCOMPARE(prop("tagsUi","page").toString(),QString("manage"));
     }
     void palettePreviewMatchesAcceptance() {
@@ -4517,7 +4520,7 @@ private slots:
         const QString hint = prop("bookmarkMarker17","hint").toString();
         QVERIFY(hint.contains(QString::fromUtf8("John 3:16–18")));
         QVERIFY(hint.contains(QString::fromUtf8("John 3:17–20")));
-        QCOMPARE(prop("bookmarkMarker17","openReference").toString(),QString::fromUtf8("John 3:17–20"));
+        QCOMPARE(prop("bookmarkMarker17","choices").value<QJSValue>().toVariant().toList().first().toMap()["reference"].toString(),QString::fromUtf8("John 3:17–20"));
         click(item("bookmarkMarker17"));
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:17–20"));
         reference("John 3:36-4:2"); key(Qt::Key_M);
@@ -4526,8 +4529,8 @@ private slots:
         QVERIFY(prop("bookmarkMarker36","continuesAfter").toBool());
         reference("John 4:1");
         QVERIFY(item("bookmarkMarker1")->isVisible());
-        QVERIFY(prop("bookmarkMarker1","chapterContinuation").toBool());
-        QVERIFY(!item("bookmarkGlyph1")->isVisible());
+        QVERIFY(prop("bookmarkMarker1","continuesBefore").toBool());
+        QVERIFY(item("bookmarkGlyph1")->isVisible());
         QCOMPARE(item("bookmarkLine1")->y(),0.0);
         QVERIFY(prop("bookmarkMarker2","ends").toBool());
         QVERIFY(!item("bookmarkMarker3")->isVisible());
@@ -4563,22 +4566,32 @@ private slots:
         window->resize(640,640);
         desktop->setProperty("textScale",1.8);
         key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        click(item("savedTab3")); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        click(item("savedTab3")); QTRY_COMPARE(prop("tagsUi","page").toString(),QString("summary"));
         QVERIFY(item("tagsBody")->parentItem() == item("annotationsTagsHost"));
         QVERIFY(!prop("tagsSurface","visible").toBool());
         QVERIFY(!prop("tagsUi","visibleModal").toBool());
-        for (const auto name : {"tagMatchAny", "tagMatchAll", "tagSourceVersion", "tagAllVersions", "tagResults"})
+        QVERIFY(!prop("tagsUi","scopePinned").toBool());
+        for (const auto name : {"tagMatchAny", "tagMatchAll", "tagSourceVersion", "tagAllVersions", "tagResults", "tagSearch", "createPassageTag"})
             QVERIFY(!item(name)->isVisible());
+        click(item(qPrintable("summaryTag:" + tag)));
+        QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        QVERIFY(prop("tagsUi","visibleModal").toBool());
+        QVERIFY(prop("tagsUi","scopePinned").toBool());
+        QVERIFY(!prop("savedDrawer","visible").toBool());
         type("Context"); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("tagSearch","selectedText").toString(),QString("Context"));
-        QVERIFY(prop("savedDrawer","opened").toBool());
+        QVERIFY(prop("tagsUi","visibleModal").toBool());
         QVERIFY(QMetaObject::invokeMethod(object("tagsUi"),"manage"));
         QVERIFY(QMetaObject::invokeMethod(object("tagsUi"),"toggleTag",Q_ARG(QVariant,tag)));
         item("tagRenameInput")->forceActiveFocus(); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("tagRenameInput","selectedText").toString(),QString("Context tag"));
-        QVERIFY(prop("savedDrawer","opened").toBool());
-        item("tagList")->forceActiveFocus();
-        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QVERIFY(prop("tagsUi","visibleModal").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
         auto related = item("relatedControl"); QVERIFY(related && related->isVisible());
         const auto relatedBounds = related->mapRectToScene(related->boundingRect());
         const auto modeBounds = item("modeControl")->mapRectToScene(item("modeControl")->boundingRect());
@@ -4591,6 +4604,8 @@ private slots:
         QVERIFY(item("savedControl")->mapToScene(QPointF(item("savedControl")->width(),0)).x()
             < item("notesControl")->mapToScene(QPointF()).x());
         QCOMPARE(related->property("glyph").toString(),QString("related"));
+        QCOMPARE(prop("relatedControlGlyph","kind").toString(),QString("tag"));
+        QVERIFY(!prop("relatedControlGlyph","filled").toBool());
         click(related); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
         QVERIFY(!prop("savedDrawer","visible").toBool());
         const auto inner = item("tagsBody")->mapRectToScene(item("tagsBody")->boundingRect());
@@ -4608,6 +4623,60 @@ private slots:
         QVERIFY(!item("createPassageTag")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
         key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+    }
+    void rowAnnotationLanePacking() {
+        reference("John 3:1-5");
+        bible->setReadingMode("verse");
+        bible->setNoteText("Long rail starts first");
+        reference("John 3:2-3"); QVERIFY(bible->toggleBookmark());
+        reference("John 3:3-4");
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Middle overlap").isEmpty());
+        reference("John 3:7-8"); QVERIFY(bible->toggleBookmark());
+        reference("John 3:10");
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Disjoint tag").isEmpty());
+        reference("John 3:1");
+        const qreal scale = window->property("scale").toReal();
+        for (int verse = 1; verse <= 5; ++verse) {
+            auto marker = item(qPrintable(QString("verseNoteMarker%1").arg(verse)));
+            QVERIFY(marker && marker->isVisible());
+            QCOMPARE(marker->x(),36 * scale);
+            if (verse < 5) {
+                auto line = item(qPrintable(QString("noteLine%1").arg(verse)));
+                auto next = item(qPrintable(QString("noteLine%1").arg(verse + 1)));
+                QVERIFY(QLineF(line->mapToScene(QPointF(0,line->height())),next->mapToScene(QPointF())).length() < 0.1);
+            }
+        }
+        for (int verse : {2,3}) QCOMPARE(item(qPrintable(QString("bookmarkMarker%1").arg(verse)))->x(),18 * scale);
+        for (int verse : {3,4}) QCOMPARE(item(qPrintable(QString("verseTagMarker%1").arg(verse)))->x(),0.0);
+        for (int verse : {7,8}) QCOMPARE(item(qPrintable(QString("bookmarkMarker%1").arg(verse)))->x(),36 * scale);
+        QCOMPARE(item("verseTagMarker10")->x(),36 * scale);
+        const qreal textX = item("verseBody1")->x();
+        bible->setFocusMode(true);
+        for (const auto name : {"verseNoteMarker1","bookmarkMarker2","verseTagMarker3"}) QTRY_VERIFY(!item(name)->isVisible());
+        bible->setFocusMode(false);
+        QTRY_VERIFY(item("verseNoteMarker1")->isVisible());
+        QCOMPARE(item("verseBody1")->x(),textX);
+
+        // Sparse, nonmonotonic labels: source ordinals control starts and reuse.
+        // Same-kind overlapping/adjacent coverage is aggregated into one lane.
+        const QVariantList present{QVariantMap{{"reference","range"}}};
+        const QVariantList rows{
+            QVariantMap{{"number",80},{"noteRanges",present}},
+            QVariantMap{{"number",2},{"noteRanges",present},{"bookmarkRanges",present},{"tagRanges",present}},
+            QVariantMap{{"number",78},{"noteRanges",present},{"tagRanges",present}},
+            QVariantMap{{"number",1},{"bookmarkRanges",present},{"tagRanges",present}},
+            QVariantMap{{"number",40}},
+            QVariantMap{{"number",3},{"bookmarkRanges",present},{"tagRanges",present},{"noteRanges",present}}};
+        QVariant packed;
+        QVERIFY(QMetaObject::invokeMethod(window,"packAnnotationLanes",Q_RETURN_ARG(QVariant,packed),Q_ARG(QVariant,rows)));
+        const auto lanes = packed.value<QJSValue>().toVariant().toList();
+        QCOMPARE(lanes.size(),6);
+        QCOMPARE(lanes[0].toMap()["note"].toInt(),0);
+        QCOMPARE(lanes[1].toMap(),(QVariantMap{{"note",0},{"bookmark",1},{"tag",2}}));
+        QCOMPARE(lanes[2].toMap(),(QVariantMap{{"note",0},{"tag",2}}));
+        QCOMPARE(lanes[3].toMap(),(QVariantMap{{"bookmark",0},{"tag",2}}));
+        QVERIFY(lanes[4].toMap().isEmpty());
+        QCOMPARE(lanes[5].toMap(),(QVariantMap{{"bookmark",0},{"tag",1},{"note",2}}));
     }
     void rowAnnotationRailsAndExactNoteClick() {
         reference("John 3:1-3");
@@ -4632,20 +4701,31 @@ private slots:
             }
         }
         const auto bookmark = item("bookmarkMarker1"), tag = item("verseTagMarker1"), note = item("verseNoteMarker1");
-        QVERIFY(bookmark->x() + bookmark->width() <= tag->x());
-        QVERIFY(tag->x() + tag->width() <= note->x());
-        QVERIFY(note->x() + note->width() <= item("verseNumber1")->x());
+        QVERIFY(note->x() + note->width() <= tag->x());
+        QVERIFY(tag->x() + tag->width() <= bookmark->x());
+        QVERIFY(bookmark->x() + bookmark->width() <= item("verseNumber1")->x());
         QCOMPARE(prop("verseNoteMarker1","hint").toString(), scope["reference"].toString());
-        // Normalize dimensions and ink before comparing the rendered shared glyph.
-        auto footer = item("notesControlGlyph"), row = item("noteGlyph1");
-        QVERIFY(footer && row);
-        row->setWidth(footer->width()); row->setHeight(footer->height());
-        row->setProperty("ink", footer->property("ink"));
-        QTest::qWait(50);
-        auto footerGrab = footer->grabToImage(), rowGrab = row->grabToImage();
-        QVERIFY(footerGrab && rowGrab);
-        QTRY_VERIFY(!footerGrab->image().isNull() && !rowGrab->image().isNull());
-        QCOMPARE(footerGrab->image(), rowGrab->image());
+        // Equal-size captures distinguish the actual filled/outline renderings.
+        const auto ink = [](const QImage &image) {
+            qint64 amount = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) amount += image.pixelColor(x,y).alpha();
+            return amount;
+        };
+        for (const auto kind : {"bookmark", "tag", "note"}) {
+            auto footer = item(qstrcmp(kind,"bookmark") == 0 ? "savedControlGlyph" : qstrcmp(kind,"tag") == 0 ? "relatedControlGlyph" : "notesControlGlyph");
+            auto row = item(qPrintable(QString(kind) + "Glyph1"));
+            QVERIFY(footer && row);
+            QVERIFY(!footer->property("filled").toBool());
+            QVERIFY(row->property("filled").toBool());
+            row->setWidth(footer->width()); row->setHeight(footer->height());
+            row->setProperty("ink",footer->property("ink"));
+            QTest::qWait(50);
+            auto footerGrab = footer->grabToImage(), rowGrab = row->grabToImage();
+            QVERIFY(footerGrab && rowGrab);
+            QTRY_VERIFY(!footerGrab->image().isNull() && !rowGrab->image().isNull());
+            QVERIFY2(ink(rowGrab->image()) > ink(footerGrab->image()) * 1.2,kind);
+        }
         // A rejected draft save must leave both navigation and note scope intact.
         window->setProperty("syncingNote", true);
         item("noteEditor")->setProperty("text", "Unsaved current draft");
@@ -4888,9 +4968,10 @@ private slots:
         QTRY_VERIFY(prop("tagsUi","browserVisible").toBool());
         QVERIFY(!prop("tagsUi","visibleModal").toBool());
         QVERIFY(prop("savedDrawer","visible").toBool());
-        QCOMPARE(prop("tagsUi","page").toString(),QString("picker"));
-        QCOMPARE(prop("tagList","count").toInt(),0);
-        QCOMPARE(prop("tagResults","count").toInt(),0);
+        QCOMPARE(prop("tagsUi","page").toString(),QString("summary"));
+        QVERIFY(item("summaryEmpty")->isVisible());
+        QVERIFY(!item("tagList")->isVisible());
+        QVERIFY(!item("tagSearch")->isVisible());
         QCOMPARE(window->property("collectionTab").toInt(),3);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
@@ -4899,12 +4980,12 @@ private slots:
         key(Qt::Key_Left);
         QTRY_VERIFY(prop("tagsUi","browserVisible").toBool());
         QVERIFY(prop("savedDrawer","visible").toBool());
-        QCOMPARE(prop("tagsUi","page").toString(),QString("picker"));
+        QCOMPARE(prop("tagsUi","page").toString(),QString("summary"));
         QCOMPARE(window->property("collectionTab").toInt(),3);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        item("tagList")->forceActiveFocus();
+        item("tagsBody")->forceActiveFocus();
         key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
     }
