@@ -149,6 +149,7 @@ ApplicationWindow {
     property int closed: 0
     property var completedScope: null
     property bool pinnedAtCompletion: false
+    property bool browserOpen: false
     function flushNote() { return flushAllowed }
     function savePosition() {}
     function syncNote() {}
@@ -170,7 +171,13 @@ ApplicationWindow {
         property real textScale: 1
         property real cornerRadius: 0
     }
-    TagsPanel { id: tags; objectName: "testTags"; app: app; bible: testBible; desktop: theme }
+    Item { id: browserHost; anchors.fill: parent; anchors.margins: 24; visible: app.browserOpen }
+    TagsPanel {
+        id: tags; objectName: "testTags"; app: app; bible: testBible; desktop: theme
+        embeddedHost: browserHost
+        onBrowserRequested: app.browserOpen = true
+        onBrowserClosed: app.browserOpen = false
+    }
 }
 )QML", QUrl::fromLocalFile(QStringLiteral(TAGS_QML_DIR) + "/TagsUiHarness.qml"));
 #endif
@@ -339,7 +346,7 @@ ApplicationWindow {
         openPicker();
         QCOMPARE(prop("uiScale").toReal(), 1.5);
         QCOMPARE(qobject_cast<QQuickItem *>(panel)->scale(), 1.0);
-        QCOMPARE(item("tagSearch")->property("font").value<QFont>().pixelSize(), 21);
+        QCOMPARE(item("tagSearch")->property("font").value<QFont>().pixelSize(), 20);
         QCOMPARE(item("tagSearch")->scale(), 1.0);
     }
     void browserAnyAllVersionsAndEnter() {
@@ -361,9 +368,10 @@ ApplicationWindow {
         int index = rows().first().toMap()["versionId"] == third["versionId"] ? 0 : 1;
         auto results = item("tagResults"); results->setProperty("currentIndex", index); results->forceActiveFocus();
         root->setProperty("flushAllowed", false); key(Qt::Key_Return);
-        QVERIFY(prop("visibleModal").toBool()); QCOMPARE(bible->versionId(), first["versionId"].toString());
+        QVERIFY(prop("browserVisible").toBool()); QVERIFY(!prop("visibleModal").toBool());
+        QCOMPARE(bible->versionId(), first["versionId"].toString());
         root->setProperty("flushAllowed", true); key(Qt::Key_Return);
-        QTRY_VERIFY(!prop("visibleModal").toBool());
+        QTRY_VERIFY(!prop("browserVisible").toBool());
         QCOMPARE(bible->tagScope(), third);
         QCOMPARE(root->property("completed").toInt(), 0);
     }
@@ -392,19 +400,48 @@ ApplicationWindow {
         install(kjv); const auto remote = scope(2, 3); QVERIFY(bible->setTag(remote, b, true));
         QVERIFY(bible->openTaggedPassage(source));
         QVERIFY(invoke("openRelated").toBool());
+        auto drawer = panel->findChild<QObject *>("relatedDrawer"); QVERIFY(drawer);
+        QTRY_VERIFY(drawer->property("opened").toBool());
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        QCOMPARE(drawer->property("edge").toInt(), int(Qt::RightEdge));
+        QCOMPARE(drawer->property("height").toReal(), window->height());
+        const auto bounds = item("tagsBody")->mapRectToScene(item("tagsBody")->boundingRect());
+        QVERIFY(bounds.left() >= window->width() - drawer->property("width").toReal());
+        QVERIFY(bounds.right() <= window->width());
+        QVERIFY(!panel->findChild<QObject *>("tagsSurface")->property("visible").toBool());
+        QVERIFY(item("tagFilterDivider")->isVisible());
+        QVERIFY(item("tagFilterDivider")->x() > item("tagMatchAll")->x() + item("tagMatchAll")->width());
+        QVERIFY(item("tagSourceVersion")->x() > item("tagFilterDivider")->x());
+        QCOMPARE(item("tagSourceVersion")->property("text").toString(), QString("NET only"));
         QCOMPARE(prop("sourceIds").toList().size(), 2);
         QCOMPARE(rows().size(), 1); QCOMPARE(rows().first().toMap()["start"].toInt(), 8);
         item("tagResults")->forceActiveFocus(); key(Qt::Key_Return);
         QCOMPARE(bible->tagScope(), target); QVERIFY(prop("visibleModal").toBool());
         QCOMPARE(prop("relatedSource").toMap(), source);
+        QVERIFY(drawer->property("opened").toBool());
+        QCOMPARE(item("tagsBody")->window(), window);
         click("tagAllVersions"); QCOMPARE(rows().size(), 2);
-        QVERIFY(bible->openTaggedPassage(remote));
+        click("tagAllVersions"); QCOMPARE(rows().size(), 2);
+        QVERIFY(!item("tagSourceVersion")->property("chosen").toBool());
+        QVERIFY(item("tagAllVersions")->property("chosen").toBool());
+        const int remoteIndex = rows().first().toMap()["versionId"] == remote["versionId"] ? 0 : 1;
+        item("tagResults")->setProperty("currentIndex", remoteIndex);
+        item("tagResults")->forceActiveFocus(); key(Qt::Key_Return);
+        QCOMPARE(bible->tagScope(), remote);
+        QVERIFY(drawer->property("opened").toBool());
         QCOMPARE(prop("relatedSource").toMap(), source);
-        click("tagAllVersions"); QCOMPARE(rows().size(), 1); // Still NET source version, despite current KJV.
+        QCOMPARE(item("tagSourceVersion")->property("text").toString(), QString("NET only"));
+        click("tagSourceVersion"); QCOMPARE(rows().size(), 1); // Still NET source version, despite current KJV.
         click("tagUseCurrent"); QCOMPARE(prop("relatedSource").toMap(), remote);
+        QCOMPARE(item("tagSourceVersion")->property("text").toString(), bible->versionAbbreviation() + " only");
         QCOMPARE(prop("filterIds").toList(), QVariantList{b}); QVERIFY(rows().isEmpty());
         click("tagAllVersions"); QCOMPARE(rows().size(), 2);
+        invoke("closeForFocusMode"); QTRY_VERIFY(!prop("visibleModal").toBool());
+        QVERIFY(bible->openTaggedPassage(target));
+        QVERIFY(invoke("openRelated").toBool());
+        QTRY_VERIFY(drawer->property("opened").toBool());
+        QCOMPARE(prop("relatedSource").toMap(), target);
+        QVERIFY(!prop("allVersions").toBool());
     }
     void managementConfirmationsAndPeerChanges() {
         const auto original = bible->tagScope();

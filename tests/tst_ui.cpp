@@ -11,6 +11,7 @@
 #include <QJsonObject>
 #include <QMetaProperty>
 #include <QQuickItem>
+#include <QQuickItemGrabResult>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSignalSpy>
@@ -35,6 +36,24 @@
 // Optional: OMAWORD_TEST_USFM_DIR contains engnet_usfm.zip and eng-kjv2006_usfm.zip.
 // OMAWORD_TEST_KJV can override the KJV ZIP path. Otherwise original synthetic
 // USFM exercises reader interactions without bundling Bible text or using a network.
+// Current USFM validation requires paragraph_layout=1. Exercise the reader's
+// no-layout capability branch with real backend rows and annotation operations.
+class NoParagraphLayoutBackend : public BibleBackend
+{
+    Q_OBJECT
+    Q_PROPERTY(bool hasParagraphs READ paragraphLayoutAvailable CONSTANT)
+    Q_PROPERTY(QVariantList verses READ fallbackVerses NOTIFY versesChanged)
+public:
+    bool paragraphLayoutAvailable() const { return false; }
+    QVariantList fallbackVerses() const {
+        auto rows = verses();
+        for (auto &value : rows) {
+            auto row = value.toMap(); row["paragraphStart"] = false; value = row;
+        }
+        return rows;
+    }
+};
+
 class MockVersionCatalog : public QObject
 {
     Q_OBJECT
@@ -276,7 +295,9 @@ class UiTest : public QObject
         return ok;
     }
     void loadUi(bool verseFixture = false) {
-        bible = std::make_unique<BibleBackend>();
+        if (qstrcmp(QTest::currentTestFunction(),"paragraphFallbackRangeContext") == 0)
+            bible = std::make_unique<NoParagraphLayoutBackend>();
+        else bible = std::make_unique<BibleBackend>();
         // Existing interaction fixtures exercise verse rows explicitly. New
         // preference/default tests opt into the backend's initial paragraph mode.
         const QString testName = QString::fromLatin1(QTest::currentTestFunction());
@@ -1434,7 +1455,7 @@ private slots:
         QVERIFY(current()->isEnabled());
         const auto selectedAction = current()->property("modelData").toMap().value("id").toString();
         // The paged row is also the executable choice when focus stays in search.
-        const QHash<QString,const char *> panels = {{"saved","savedDrawer"},{"toggleNotes","notesDrawer"}};
+        const QHash<QString,const char *> panels = {{"annotations","savedDrawer"},{"toggleNotes","notesDrawer"}};
         QVERIFY(panels.contains(selectedAction));
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("helpDialog","visible").toBool());
@@ -1456,7 +1477,7 @@ private slots:
         key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
-        type("saved panel"); key(Qt::Key_Return);
+        type("annotations panel"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QTest::qWait(100);
         auto bookmark = item("savedBookmarkJohn 3:16");
@@ -1493,8 +1514,9 @@ private slots:
         QCOMPARE(bible->selectionReference(),selection);
         QCOMPARE(bible->noteText(),QString());
         QCOMPARE(prop("noteEditor","text").toString(),QString());
-        QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
+        QCOMPARE(prop("collectionList","currentIndex").toInt(),-1);
         QVERIFY(bible->collection().first().toMap().value("note").toString().contains("overlapping"));
+        click(item("savedTab2"));
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
         click(item("deleteConfirm")); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
         QCOMPARE(prop("collectionList","currentIndex").toInt(),-1);
@@ -1539,7 +1561,19 @@ private slots:
         QVERIFY(bible->navigate("John 3:1-2"));
         QCOMPARE(bible->book(),43);
         item("readerSurface")->forceActiveFocus();
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        if (tagsOnly) {
+            QCOMPARE(prop("collectionList","count").toInt(),0);
+            click(item("savedTab3")); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+            QVERIFY(QMetaObject::invokeMethod(object("tagsUi"),"toggleTag",Q_ARG(QVariant,tag)));
+            QTRY_COMPARE(prop("tagResults","count").toInt(),2);
+            object("tagResults")->setProperty("currentIndex",0);
+            item("tagResults")->forceActiveFocus(); key(Qt::Key_Return);
+            QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+            QCOMPARE(bible->tagScope(),genesis);
+            QCOMPARE(bible->collection().size(),2);
+            return;
+        }
         object("collectionList")->setProperty("currentIndex",0);
         item("collectionList")->forceActiveFocus();
         key(Qt::Key_Return); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
@@ -1550,7 +1584,7 @@ private slots:
             QTRY_VERIFY(prop("notesDrawer","opened").toBool());
             key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         }
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         object("collectionList")->setProperty("currentIndex",0);
         item("collectionList")->forceActiveFocus();
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
@@ -1570,6 +1604,8 @@ private slots:
         // Disappearance of GEN invalidates its pending confirmation even though
         // JHN still supplies an identical display reference in the collection.
         QVERIFY(bible->setTag(genesis,tag,true));
+        QVERIFY(bible->openTaggedPassage(genesis));
+        QVERIFY(bible->toggleBookmark());
         object("collectionList")->setProperty("currentIndex",0);
         item("collectionList")->forceActiveFocus();
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
@@ -1610,7 +1646,7 @@ private slots:
         const auto kjv = peer.collection();
         reference("John 3:16");
         bible->setNoteText("NET deletion target"); bible->toggleBookmark();
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
         QCOMPARE(prop("deleteConfirmation","versionId").toString(),QString("engnet"));
         QCOMPARE(prop("deleteConfirmation","reference").toString(),QString("John 3:16"));
@@ -1634,7 +1670,8 @@ private slots:
     }
     void pendingDeleteMissingCapture() {
         reference("John 3:16"); bible->setNoteText("Original target");
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        window->setProperty("collectionTab",2);
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
         BibleBackend peer;
         QVERIFY(peer.navigate("John 3:16"));
@@ -1654,9 +1691,9 @@ private slots:
             reference(QString("John 3:%1").arg(verse));
             bible->setNoteText(QString("Note %1").arg(verse));
         }
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        key(Qt::Key_Right); key(Qt::Key_Right); key(Qt::Key_Right);
-        QCOMPARE(window->property("collectionTab").toInt(),3);
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_Right); key(Qt::Key_Right);
+        QCOMPARE(window->property("collectionTab").toInt(),2);
         key(Qt::Key_J); key(Qt::Key_J);
         QCOMPARE(prop("collectionList","currentIndex").toInt(),2);
         const auto before = bible->collection();
@@ -1682,7 +1719,7 @@ private slots:
         QCOMPARE(bible->collection().size(),2);
         QCOMPARE(bible->noteText(),QString());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
     }
     void referencePreviewIsPure() {
@@ -2039,15 +2076,16 @@ private slots:
         const auto opened = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
         QCOMPARE(opened["start"],second["start"]); QCOMPARE(opened["end"],second["end"]);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        QTRY_VERIFY(item("savedTagJohn 3:1–2") && item("savedTagJohn 3:1–2")->isVisible());
-        QCOMPARE(prop("savedTagsJohn 3:1–2","text").toString(),QString("<b>Faith & 🌿</b>"));
-        QCOMPARE(prop("savedTagsJohn 3:1–2","textFormat").toInt(),0);
-        click(item("savedTab4"));
-        QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QCOMPARE(prop("collectionList","count").toInt(),0);
+        QCOMPARE(bible->collection().size(),2);
+        click(item("savedTab3"));
+        QTRY_VERIFY(prop("tagsUi","browserVisible").toBool());
+        QVERIFY(!prop("tagsUi","visibleModal").toBool());
+        QVERIFY(prop("savedDrawer","visible").toBool());
         QCOMPARE(prop("tagsUi","page").toString(),QString("browser"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
+        QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_H,Qt::ShiftModifier); QVERIFY(!bible->showHeadings());
         key(Qt::Key_L,Qt::ShiftModifier);
         QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
@@ -2056,7 +2094,7 @@ private slots:
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("manage tags"); key(Qt::Key_Return);
-        QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
+        QTRY_VERIFY(prop("tagsUi","browserVisible").toBool());
         QCOMPARE(prop("tagsUi","page").toString(),QString("manage"));
     }
     void palettePreviewMatchesAcceptance() {
@@ -2216,7 +2254,7 @@ private slots:
         unloadUi(); loadUi();
         QCOMPARE(bible->collection().size(),1);
         QCOMPARE(bible->collection().first().toMap().value("reference").toString(),span);
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         const QByteArray name = ("savedEntry" + span).toUtf8();
         QTRY_VERIFY(item(name.constData()));
@@ -2306,7 +2344,7 @@ private slots:
         QCOMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),17);
         key(Qt::Key_H,Qt::ControlModifier); QVERIFY(bible->selectionHighlighted());
         key(Qt::Key_M,Qt::ControlModifier); QVERIFY(bible->selectionBookmarked());
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer", "opened").toBool());
         QTRY_COMPARE(prop("collectionList", "count").toInt(),1);
         const QByteArray entryName = ("savedEntry" + bible->selectionReference()).toUtf8();
@@ -3104,7 +3142,7 @@ private slots:
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QVERIFY(!item("notesControl")->isEnabled());
         capture("omaword-refined-saved-" + QString::fromLatin1(QTest::currentDataTag()));
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         click(item("notesControl"));
         QTRY_VERIFY(prop("notesDrawer","opened").toBool());
@@ -3410,10 +3448,10 @@ private slots:
         type("12"); QCOMPARE(prop("referenceInput","text").toString(),QString("12"));
         key(Qt::Key_Escape);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
-        type("20"); key(Qt::Key_L,Qt::ControlModifier);
+        type("20"); key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         type("12g"); QVERIFY(window->property("verseCount").toString().isEmpty());
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         type("20"); key(Qt::Key_N);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(window->property("verseCount").toString().isEmpty());
@@ -3727,7 +3765,7 @@ private slots:
         }
         const QList<QStringList> expected = {
             {"books","Search for a passage","s · Ctrl k"},
-            {"saved","Saved panel","Ctrl l"}, {"toggleNotes","Notes panel","Ctrl n"},
+            {"annotations","Annotations panel","Ctrl a"}, {"toggleNotes","Notes panel","Ctrl n"},
             {"selectVerse","Select verse","Click"},
             {"clickCopy","Copy passage as quotation","Right Click"},
             {"middleCopy","Copy passage as plain text","Middle Click"},
@@ -4351,6 +4389,93 @@ private slots:
         type("x"); QTRY_COMPARE(prop("keybindingResults","count").toInt(),1);
         capture("help-scaled");
     }
+    void bookmarkGlyphCanonicalScope_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << QString("verse");
+        QTest::newRow("block") << QString("block");
+    }
+    void bookmarkGlyphCanonicalScope() {
+        QFETCH(QString,mode);
+        const auto source = session->filePath("bookmark-colliding-names.zip");
+        QVERIFY(writeSyntheticUsfm(source,"engojb",false,true));
+        bible->importUsfm(QUrl::fromLocalFile(source));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        bible->openChapter(1,3); bible->selectVerses(1,3);
+        const auto scope = bible->tagScope();
+        QCOMPARE(scope.value("reference").toString(),QString::fromUtf8("John 3:1–3"));
+        QVERIFY(bible->toggleBookmark());
+        for (int index = 0; index < 3; ++index) {
+            const auto ranges = bible->verses()[index].toMap().value("bookmarkRanges").toList();
+            QCOMPARE(ranges.size(),1);
+            const auto range = ranges.first().toMap();
+            for (auto it = scope.cbegin(); it != scope.cend(); ++it) QCOMPARE(range.value(it.key()),it.value());
+            QCOMPARE(range.value("bookmarkStart").toBool(),index == 0);
+            QCOMPARE(range.value("bookmarkEnd").toBool(),index == 2);
+        }
+        // This source's GEN display name deliberately resolves to canonical JHN.
+        QVERIFY(bible->navigate(scope.value("reference").toString()));
+        QCOMPARE(bible->book(),43);
+        bible->openChapter(1,3); bible->selectVerses(5,5);
+        bible->setReadingMode(mode);
+        QTest::qWait(200);
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        object("reading")->setProperty("contentY",0);
+        const auto name = mode == "verse" ? QString("bookmarkGlyph1")
+            : "blockInlineMarker:bookmark:open:" + scope.value("reference").toString();
+        QTRY_VERIFY(item(qPrintable(name)) && item(qPrintable(name))->isVisible());
+        click(item(qPrintable(name)));
+        QTRY_COMPARE(bible->book(),1);
+        QCOMPARE(bible->tagScope(),scope);
+        QVERIFY(!window->property("verseMode").toBool());
+    }
+    void paragraphFallbackRangeContext() {
+        QVERIFY(bible->ready());
+        QVERIFY(!bible->property("hasParagraphs").toBool());
+        reference("John 3:1-4"); QVERIFY(bible->toggleBookmark());
+        reference("John 3:3-6");
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Context").isEmpty());
+        reference("John 3:2"); QVERIFY(bible->toggleHighlight());
+        reference("John 3:8-9"); QVERIFY(bible->toggleBookmark());
+        reference("John 3:3");
+        bible->setReadingMode("paragraph");
+        QTRY_VERIFY(!window->property("continuousReader").toBool());
+        QVERIFY(item("verseBody1"));
+        QVERIFY(!bible->property("verses").toList().first().toMap().value("paragraphStart").toBool());
+        const auto shaded = [this](int verse) {
+            auto segment = item(qPrintable("contextSegment" + QString::number(verse)));
+            return segment && segment->isVisible();
+        };
+        QTRY_VERIFY(shaded(1));
+        QVERIFY(!shaded(2)); // Persistent highlight keeps its stronger fill.
+        QVERIFY(!shaded(3)); // Active selection keeps its stronger fill.
+        QVERIFY(shaded(4)); QVERIFY(shaded(5)); QVERIFY(shaded(6));
+        QVERIFY(!shaded(7)); QVERIFY(!shaded(8)); QVERIFY(!shaded(9));
+        QCOMPARE(prop("contextSegment4","color").value<QColor>().alpha(),15);
+        QCOMPARE(prop("contextSegment5","color").value<QColor>(),prop("contextSegment4","color").value<QColor>());
+        const auto context = item("contextSegment4");
+        QVERIFY(context->width() > 0 && context->height() > 0);
+        QVERIFY(context->parentItem()->boundingRect().contains(context->mapRectToItem(context->parentItem(),context->boundingRect())));
+        bible->selectVerses(5,5);
+        QTRY_VERIFY(!shaded(1));
+        QVERIFY(shaded(3)); QVERIFY(shaded(4)); QVERIFY(!shaded(5)); QVERIFY(shaded(6));
+        bible->selectVerses(4,5);
+        QTRY_VERIFY(!shaded(4)); QVERIFY(!shaded(5)); QVERIFY(shaded(3)); QVERIFY(shaded(6));
+        bible->selectVerses(7,7);
+        for (int verse = 1; verse <= 9; ++verse) QVERIFY(!shaded(verse));
+        bible->selectVerses(3,3);
+        bible->setReadingMode("verse"); QTRY_VERIFY(!shaded(1));
+        bible->setReadingMode("paragraph"); QTRY_VERIFY(shaded(1));
+        bible->setFocusMode(true); QTRY_VERIFY(!shaded(1));
+        bible->setFocusMode(false); QTRY_VERIFY(shaded(1));
+        reference("John 3:36-4:2"); QVERIFY(bible->toggleBookmark());
+        const auto scope = bible->tagScope();
+        reference("John 4:1");
+        QTRY_VERIFY(shaded(2)); QVERIFY(!shaded(1)); QVERIFY(!shaded(3));
+        const auto range = bible->verses().first().toMap().value("bookmarkRanges").toList().first().toMap();
+        for (auto it = scope.cbegin(); it != scope.cend(); ++it) QCOMPARE(range.value(it.key()),it.value());
+        QVERIFY(range.value("bookmarkContinuesBefore").toBool());
+    }
     void bookmarkRangeMarkers() {
         reference("John 3:16-18");
         key(Qt::Key_M);
@@ -4401,6 +4526,89 @@ private slots:
         click(item("bookmarkMarker1"));
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:36–4:2"));
     }
+    void annotationsShortcutContextsAndRelatedControl() {
+        reference("John 3:1");
+        const auto tag = bible->createAndAssignTag(bible->tagScope(),"Context tag");
+        QVERIFY(!tag.isEmpty());
+        for (const auto mode : {"verse", "block", "paragraph"}) {
+            bible->setReadingMode(mode);
+            QTest::qWait(150);
+            auto body = qstrcmp(mode,"verse") == 0 ? item("verseBody1") : item("blockBody");
+            QVERIFY(body); body->forceActiveFocus();
+            key(Qt::Key_A,Qt::ControlModifier);
+            QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+            key(Qt::Key_A,Qt::ControlModifier);
+            QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        }
+        key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("Editable note selection"); key(Qt::Key_A,Qt::ControlModifier);
+        QCOMPARE(prop("noteEditor","selectedText").toString(),QString("Editable note selection"));
+        QVERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John"); key(Qt::Key_A,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","selectedText").toString(),QString("John"));
+        QVERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        window->resize(640,640);
+        desktop->setProperty("textScale",1.8);
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        click(item("savedTab3")); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        QVERIFY(item("tagsBody")->parentItem() == item("annotationsTagsHost"));
+        QVERIFY(!prop("tagsSurface","visible").toBool());
+        QVERIFY(!prop("tagsUi","visibleModal").toBool());
+        for (const auto name : {"tagMatchAny", "tagMatchAll", "tagSourceVersion", "tagAllVersions"}) {
+            auto button = item(name); QVERIFY(button);
+            auto label = button->property("contentItem").value<QQuickItem *>(); QVERIFY(label);
+            QVERIFY(label->width() + 0.5 >= label->implicitWidth());
+            QVERIFY(!label->property("truncated").toBool());
+            QVERIFY(item("tagsBody")->boundingRect().contains(button->mapRectToItem(item("tagsBody"),button->boundingRect())));
+        }
+        type("Context"); key(Qt::Key_A,Qt::ControlModifier);
+        QCOMPARE(prop("tagSearch","selectedText").toString(),QString("Context"));
+        QVERIFY(prop("savedDrawer","opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(object("tagsUi"),"manage"));
+        QVERIFY(QMetaObject::invokeMethod(object("tagsUi"),"toggleTag",Q_ARG(QVariant,tag)));
+        item("tagRenameInput")->forceActiveFocus(); key(Qt::Key_A,Qt::ControlModifier);
+        QCOMPARE(prop("tagRenameInput","selectedText").toString(),QString("Context tag"));
+        QVERIFY(prop("savedDrawer","opened").toBool());
+        item("tagList")->forceActiveFocus();
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        auto related = item("relatedControl"); QVERIFY(related && related->isVisible());
+        const auto relatedBounds = related->mapRectToScene(related->boundingRect());
+        const auto modeBounds = item("modeControl")->mapRectToScene(item("modeControl")->boundingRect());
+        QVERIFY(relatedBounds.left() > modeBounds.right());
+        QCOMPARE(relatedBounds.bottom(),modeBounds.bottom());
+        QVERIFY(relatedBounds.right() < window->width() / 2);
+        QCOMPARE(related->property("glyph").toString(),QString("related"));
+        click(related); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        QVERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
+        key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+    }
+    void tagGlyphPointsLeft() {
+        reference("John 3:1");
+        QVERIFY(bible->toggleBookmark());
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Glyph").isEmpty());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        auto glyph = item("savedTagJohn 3:1"); QVERIFY(glyph && glyph->isVisible());
+        auto grab = glyph->grabToImage(QSize(120,140)); QVERIFY(grab);
+        QSignalSpy ready(grab.data(),&QQuickItemGrabResult::ready);
+        QTRY_VERIFY(!grab->image().isNull());
+        const auto image = grab->image();
+        // The hole and vertical shoulder are on the right, with the point on
+        // the left. Check rendered ink at fixed landmarks, not a mirrored copy.
+        const auto ink = [&image](QRect region) {
+            int amount = 0;
+            for (int y = region.top(); y <= region.bottom(); ++y)
+                for (int x = region.left(); x <= region.right(); ++x)
+                    amount += image.pixelColor(x,y).alpha();
+            return amount;
+        };
+        QVERIFY(ink(QRect(75,24,20,23)) > ink(QRect(25,24,20,23)) + 1000);
+        QVERIFY(ink(QRect(104,20,12,28)) > ink(QRect(4,20,12,28)) + 1000);
+    }
     void savedTabFocusActivation() {
         reference("John 3:1"); bible->toggleBookmark();
         reference("John 3:2"); bible->toggleBookmark(); bible->toggleHighlight();
@@ -4416,17 +4624,17 @@ private slots:
             qWarning() << "Tab target" << name << "visited" << visited;
             return false;
         };
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QVERIFY(!item("savedClose"));
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         QCOMPARE(navigation.count(),0);
 
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        QVERIFY(tabTo("savedTab2")); key(Qt::Key_Enter);
-        QCOMPARE(window->property("collectionTab").toInt(),2);
+        QVERIFY(tabTo("savedTab1")); key(Qt::Key_Enter);
+        QCOMPARE(window->property("collectionTab").toInt(),1);
         QCOMPARE(prop("collectionList","count").toInt(),1);
         QCOMPARE(navigation.count(),0);
         QVERIFY(tabTo("savedTab0")); key(Qt::Key_Space);
@@ -4453,7 +4661,7 @@ private slots:
             window->requestActivate();
             QTRY_VERIFY(window->isActive());
             item("readerSurface")->forceActiveFocus();
-            key(Qt::Key_L,Qt::ControlModifier);
+            key(Qt::Key_A,Qt::ControlModifier);
             QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         }
         for (auto activation : {Qt::Key_Space,Qt::Key_Return,Qt::Key_Enter}) {
@@ -4464,7 +4672,7 @@ private slots:
             key(activation);
             QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
             QCOMPARE(bible->selectionReference(),QString("John 3:2"));
-            key(Qt::Key_L,Qt::ControlModifier);
+            key(Qt::Key_A,Qt::ControlModifier);
             QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         }
         object("collectionList")->setProperty("currentIndex",0);
@@ -4484,7 +4692,7 @@ private slots:
         reference("John 3:1"); bible->toggleBookmark();
         reference("John 3:2"); bible->toggleBookmark();
         reference("John 3:3"); bible->toggleBookmark();
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         for (int i = 0; i < 40 && window->activeFocusItem() != item("savedEntryJohn 3:2"); ++i)
             key(Qt::Key_Tab);
@@ -4523,10 +4731,10 @@ private slots:
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
         QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
         QApplication::clipboard()->setText("Saved isolation");
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QVERIFY(item("collectionList")->hasActiveFocus());
-        QCOMPARE(prop("savedTitle","text").toString(),QString("Saved"));
+        QCOMPARE(prop("savedTitle","text").toString(),QString("Annotations"));
         QCOMPARE(prop("savedDrawer","edge").toInt(),int(Qt::RightEdge));
         key(Qt::Key_J); QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
         key(Qt::Key_Down); QCOMPARE(prop("collectionList","currentIndex").toInt(),2);
@@ -4543,13 +4751,11 @@ private slots:
         QVERIFY(background);
         QVERIFY(background->property("color").value<QColor>().alpha() > 0);
         key(Qt::Key_L); QCOMPARE(window->property("collectionTab").toInt(),1);
-        QCOMPARE(prop("collectionList","count").toInt(),12);
+        QCOMPARE(prop("collectionList","count").toInt(),1);
         key(Qt::Key_Right); QCOMPARE(window->property("collectionTab").toInt(),2);
         QCOMPARE(prop("collectionList","count").toInt(),1);
-        key(Qt::Key_Right); QCOMPARE(window->property("collectionTab").toInt(),3);
-        QCOMPARE(prop("collectionList","count").toInt(),1);
-        key(Qt::Key_H); QCOMPARE(window->property("collectionTab").toInt(),2);
-        key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(),1);
+        key(Qt::Key_H); QCOMPARE(window->property("collectionTab").toInt(),1);
+        key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(),0);
         for (const auto k : {Qt::Key_M,Qt::Key_X,Qt::Key_N,Qt::Key_V,Qt::Key_Y,Qt::Key_G,
                             Qt::Key_BracketLeft,Qt::Key_BracketRight,Qt::Key_PageDown,Qt::Key_Space}) {
             key(k);
@@ -4568,15 +4774,15 @@ private slots:
         QVERIFY(!window->property("verseMode").toBool());
         QVERIFY(!window->property("notesOpen").toBool());
         QVERIFY(!prop("passagePalette","visible").toBool());
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         QVERIFY(item("readerSurface")->hasActiveFocus());
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         key(Qt::Key_Right); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         QCOMPARE(bible->selectionReference(),QString("John 3:2"));
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         key(Qt::Key_Right); key(Qt::Key_Enter);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
@@ -4588,11 +4794,11 @@ private slots:
         window->resize(640,480);
         QVERIFY(desktop->setProperty("textScale",1.8));
         const QStringList messages = {
-            "No saved passages yet.", "No bookmarks yet.", "No highlights yet.", "No notes yet."
+            "No bookmarks yet.", "No highlights yet.", "No notes yet."
         };
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        for (int tab = 0; tab < 4; ++tab) {
+        for (int tab = 0; tab < 3; ++tab) {
             QTest::qWait(100);
             QCOMPARE(window->property("collectionTab").toInt(),tab);
             QCOMPARE(prop("collectionList","count").toInt(),0);
@@ -4604,26 +4810,28 @@ private slots:
             QVERIFY(prop("savedDrawer","opened").toBool());
             key(Qt::Key_Right);
         }
-        // The fifth tab opens the tag browser and retains the last Saved filter.
-        QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        // Tags is the fourth tab, embedded in the same drawer.
+        QTRY_VERIFY(prop("tagsUi","browserVisible").toBool());
+        QVERIFY(!prop("tagsUi","visibleModal").toBool());
+        QVERIFY(prop("savedDrawer","visible").toBool());
         QCOMPARE(prop("tagsUi","page").toString(),QString("browser"));
         QCOMPARE(prop("tagList","count").toInt(),0);
         QCOMPARE(prop("tagResults","count").toInt(),0);
         QCOMPARE(window->property("collectionTab").toInt(),3);
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
-        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_A,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QCOMPARE(window->property("collectionTab").toInt(),3);
         click(item("savedTab0")); QCOMPARE(window->property("collectionTab").toInt(),0);
         key(Qt::Key_Left);
-        QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QTRY_VERIFY(prop("tagsUi","browserVisible").toBool());
+        QVERIFY(prop("savedDrawer","visible").toBool());
         QCOMPARE(prop("tagsUi","page").toString(),QString("browser"));
-        QCOMPARE(window->property("collectionTab").toInt(),0);
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
-        key(Qt::Key_L,Qt::ControlModifier);
+        QCOMPARE(window->property("collectionTab").toInt(),3);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        key(Qt::Key_L,Qt::ControlModifier);
+        item("tagList")->forceActiveFocus();
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
     }
     void savedPanelGeometry_data() {
@@ -4644,24 +4852,25 @@ private slots:
         }
         window->resize(size);
         QVERIFY(desktop->setProperty("textScale",scale));
-        key(Qt::Key_L,Qt::ControlModifier);
+        key(Qt::Key_A,Qt::ControlModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QTest::qWait(150);
         auto content = item("savedContent");
         QVERIFY(content);
-        QCOMPARE(prop("savedDrawer","padding").toDouble(),24 * scale);
+        const double padding = 16 * qMin(scale,1.4);
+        QCOMPARE(prop("savedDrawer","padding").toDouble(),padding);
         const auto bounds = content->mapRectToScene(content->boundingRect());
         QCOMPARE(prop("savedDrawer","edge").toInt(),int(Qt::RightEdge));
-        QCOMPARE(prop("savedTitle","text").toString(),QString("Saved"));
-        QCOMPARE(bounds.left(),size.width() - prop("savedDrawer","width").toDouble() + 24 * scale);
-        QVERIFY(qAbs(bounds.top() - 24 * scale) < 0.1);
-        QCOMPARE(size.width() - bounds.right(),24 * scale);
-        QVERIFY(qAbs(size.height() - bounds.bottom() - 24 * scale) < 0.1);
+        QCOMPARE(prop("savedTitle","text").toString(),QString("Annotations"));
+        QCOMPARE(bounds.left(),size.width() - prop("savedDrawer","width").toDouble() + padding);
+        QVERIFY(qAbs(bounds.top() - padding) < 0.1);
+        QVERIFY(qAbs(size.width() - bounds.right() - padding) < 0.1);
+        QVERIFY(qAbs(size.height() - bounds.bottom() - padding) < 0.1);
         auto tabs = item("savedTabs");
         QVERIFY(tabs);
-        QCOMPARE(tabs->property("columns").toInt(),tabs->width() < 350 * scale ? 2 : 3);
         QList<QRectF> tabRects;
-        for (int index = 0; index < 5; ++index) {
+        const QStringList labels = {"Bookmarks", "Highlights", "Notes", "Tags"};
+        for (int index = 0; index < 4; ++index) {
             auto tab = item(qPrintable("savedTab" + QString::number(index)));
             QVERIFY(tab);
             const auto tabBounds = tab->mapRectToItem(tabs,tab->boundingRect());
@@ -4670,6 +4879,10 @@ private slots:
                     .arg(tabBounds.width()).arg(tabBounds.height()).arg(tabs->width()).arg(tabs->height())));
             const auto label = qvariant_cast<QQuickItem *>(tab->property("contentItem"));
             QVERIFY(label);
+            QCOMPARE(label->property("text").toString(),labels[index]);
+            QCOMPARE(label->property("lineCount").toInt(),1);
+            QVERIFY(!label->property("truncated").toBool());
+            if (!tabRects.isEmpty()) QCOMPARE(tabBounds.top(),tabRects.first().top());
             QVERIFY2(label->width() + 0.5 >= label->implicitWidth(),
                 qPrintable(QString("Tab %1 label: %2 available, %3 required").arg(index).arg(label->width()).arg(label->implicitWidth())));
             for (const auto &previous : tabRects) QVERIFY(!previous.intersects(tabBounds));
@@ -4693,9 +4906,9 @@ private slots:
         QCOMPARE(entry->width(),list->width());
         QVERIFY(qAbs(bar->mapToItem(list,QPointF()).x() + bar->width() - list->width()) < 0.1);
         capture("saved-" + QString::fromLatin1(QTest::currentDataTag()));
-        click(item("savedTab2"));
-        QTRY_COMPARE(prop("collectionList","count").toInt(),0);
         click(item("savedTab1"));
+        QTRY_COMPARE(prop("collectionList","count").toInt(),0);
+        click(item("savedTab0"));
         QTRY_COMPARE(prop("collectionList","count").toInt(),12);
         // Scrolling preserves the full-width clipped viewport and overlay bar.
         QVERIFY(QMetaObject::invokeMethod(list,"positionViewAtEnd"));

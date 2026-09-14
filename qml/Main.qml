@@ -152,12 +152,18 @@ ApplicationWindow {
     function openTagsBrowser(manage) {
         if (!flushNote()) return
         tagsUi.openBrowser(!!manage)
-        savedDrawer.close()
     }
     readonly property alias tagsUi: tagsUi
     readonly property var tagBackend: bible
     readonly property var tagDesktop: desktop
-    TagsPanel { id: tagsUi; objectName: "tagsUi"; app: app; bible: app.tagBackend; desktop: app.tagDesktop }
+    TagsPanel {
+        id: tagsUi
+        objectName: "tagsUi"
+        app: app; bible: app.tagBackend; desktop: app.tagDesktop
+        embeddedHost: annotationsTagsHost
+        onBrowserRequested: { app.collectionTab = 3; savedDrawer.open() }
+        onBrowserClosed: savedDrawer.close()
+    }
     onVerseModeChanged: clearCount()
     property string verseCount: ""
     onActiveFocusItemChanged: clearCount()
@@ -393,6 +399,8 @@ ApplicationWindow {
             const ctx = getContext("2d")
             ctx.reset()
             ctx.scale(width / 12, height / 14)
+            ctx.translate(12, 0)
+            ctx.scale(-1, 1)
             ctx.strokeStyle = ink
             ctx.lineWidth = 1
             ctx.beginPath()
@@ -734,11 +742,12 @@ ApplicationWindow {
     }
     function filteredCollection() {
         return Array.from(bible.collection).filter(function(entry) {
-            return collectionTab === 0 || (collectionTab === 1 && entry.bookmark)
-                || (collectionTab === 2 && entry.highlight) || (collectionTab === 3 && entry.note.length > 0)
+            return (collectionTab === 0 && entry.bookmark)
+                || (collectionTab === 1 && entry.highlight) || (collectionTab === 2 && entry.note.length > 0)
         })
     }
     function moveSaved(delta) {
+        if (collectionTab === 3) return
         if (collectionList.count > 0) {
             collectionList.currentIndex = Math.max(0, Math.min(collectionList.count - 1, collectionList.currentIndex + delta))
             collectionList.positionViewAtIndex(collectionList.currentIndex, ListView.Contain)
@@ -747,8 +756,8 @@ ApplicationWindow {
         collectionList.forceActiveFocus()
     }
     function filterSaved(delta) {
-        const tab = (collectionTab + delta + 5) % 5
-        if (tab === 4) { openTagsBrowser(); return }
+        const tab = (collectionTab + delta + 4) % 4
+        if (tab === 3) { openTagsBrowser(); return }
         collectionTab = tab
         collectionList.currentIndex = collectionList.count > 0 ? 0 : -1
         moveSaved(0)
@@ -811,10 +820,22 @@ ApplicationWindow {
         collectionList.currentIndex = Math.min(row, collectionList.count - 1)
         deleteConfirmation.close()
     }
-    function openBookmark(reference) {
+    function openBookmark(scope) {
         if (!flushNote()) return
         savePosition()
-        if (bible.navigate(reference)) { syncNote(); readerFocus() }
+        if (typeof scope === "string" ? bible.navigate(scope) : bible.openTaggedPassage(scope)) { syncNote(); readerFocus() }
+    }
+    // Row metadata already represents range membership, including chapter
+    // continuations. Match canonical identities rather than source display names.
+    readonly property var cursorContextScopes: {
+        if (bible.readingMode !== "paragraph" || continuousReader || bible.focusMode) return []
+        const row = Array.from(bible.verses).find(function(verse) { return verse.number === bible.cursorVerse })
+        return row ? Array.from(row.bookmarkRanges || []).concat(Array.from(row.tagRanges || [])) : []
+    }
+    function rowInCursorContext(row) {
+        return Array.from(row.bookmarkRanges || []).concat(Array.from(row.tagRanges || [])).some(function(range) {
+            return cursorContextScopes.some(function(scope) { return sameTagScope(range, scope) })
+        })
     }
     function openVersions(removing) {
         if (bible.busy || !flushNote()) return
@@ -917,7 +938,7 @@ ApplicationWindow {
         { id: "books", title: "Search for a passage", keys: "s · Ctrl k", sequences: ["S", "Ctrl+K"], scope: "palette", command: true },
         { id: "commands", title: "Open commands", keys: "Ctrl Space · Ctrl Shift P", sequences: ["Ctrl+Space", "Ctrl+Shift+P"], scope: "palette" },
         { id: "newWindow", title: "New window", keys: "Ctrl Shift N", sequences: ["Ctrl+Shift+N"], scope: "global", command: true },
-        { id: "saved", title: "Saved panel", keys: "Ctrl l", sequences: ["Ctrl+L"], command: true },
+        { id: "annotations", title: "Annotations panel", keys: "Ctrl a", sequences: ["Ctrl+A"], command: true },
         { id: "toggleNotes", title: "Notes panel", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
         { id: "notes", title: "Write a note", keys: "n", sequences: ["N"], scope: "notes", command: true },
         { id: "tags", title: "Tag passage", keys: "t", sequences: ["T"], command: true },
@@ -1160,7 +1181,11 @@ ApplicationWindow {
         case "lineReset": bible.setLineHeight(1.5); break
         case "lineHeight": settingsDialog.lineOnly = true; settingsDialog.open(); break
         case "settings": settingsDialog.lineOnly = false; settingsDialog.open(); break
-        case "saved": bible.refreshCollection(); savedDrawer.open(); break
+        case "annotations":
+            bible.refreshCollection()
+            if (collectionTab === 3) openTagsBrowser()
+            else savedDrawer.open()
+            break
         case "notes": openNotes(true); break
         case "bookmark": markPassage(false); break
         case "highlight": markPassage(true); break
@@ -1456,6 +1481,13 @@ ApplicationWindow {
                         ctx.moveTo(8, 7); ctx.bezierCurveTo(8, 1, 19, 2, 16, 9)
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
                         ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
+                    } else if (glyph === "related") {
+                        ctx.moveTo(6, 12); ctx.lineTo(17, 5)
+                        ctx.moveTo(6, 12); ctx.lineTo(17, 19)
+                        ctx.stroke(); ctx.beginPath()
+                        ctx.arc(5, 12, 3, 0, Math.PI * 2)
+                        ctx.moveTo(21, 4); ctx.arc(18, 4, 3, 0, Math.PI * 2)
+                        ctx.moveTo(21, 20); ctx.arc(18, 20, 3, 0, Math.PI * 2)
                     } else if (glyph === "visual") {
                         // The bracket and square handles span all three verse lines.
                         ctx.moveTo(8, 6); ctx.lineTo(21, 6)
@@ -1649,10 +1681,11 @@ ApplicationWindow {
                                     readonly property var ranges: Array.from(verseRow.modelData.bookmarkRanges || []).sort(function(a, b) {
                                         return a.reference.localeCompare(b.reference)
                                     })
-                                    readonly property string openReference: {
+                                    readonly property var openRange: {
                                         let starting = ranges.filter(function(range) { return range.bookmarkStart })
-                                        return (starting.length ? starting : ranges)[0]?.reference || ""
+                                        return (starting.length ? starting : ranges)[0] || null
                                     }
+                                    readonly property string openReference: openRange ? openRange.reference : ""
                                     readonly property string hint: ranges.map(function(range) { return range.reference }).join("\n")
                                         + "\nOpen " + openReference + " · m · Ctrl m toggles bookmark"
                                     // Adjacent row segments meet exactly, including headings and
@@ -1682,12 +1715,12 @@ ApplicationWindow {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: app.openBookmark(bookmarkMarker.openReference)
+                                        onClicked: app.openBookmark(bookmarkMarker.openRange)
                                     }
                                     AppToolTip { theme: desktop; visible: bookmarkMarker.visible && bookmarkMouse.containsMouse; text: bookmarkMarker.hint; delay: 500 }
                                     Accessible.role: Accessible.Button
                                     Accessible.name: "Bookmarked passages: " + ranges.map(function(range) { return range.reference }).join(", ")
-                                    Accessible.onPressAction: app.openBookmark(openReference)
+                                    Accessible.onPressAction: app.openBookmark(openRange)
                                 }
                                 Item {
                                     id: verseHeading
@@ -1753,6 +1786,16 @@ ApplicationWindow {
                                         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
                                     }
                                     AppToolTip { theme: desktop; visible: verseTagMarker.visible && (verseTagMarker.hovered || verseTagMarker.activeFocus); text: verseTagMarker.hint }
+                                }
+                                Rectangle {
+                                    objectName: "contextSegment" + verseRow.modelData.number
+                                    x: verseRow.gutter - 9
+                                    y: verseHeading.height
+                                    width: verseRow.width - x
+                                    height: verseBody.height + 3
+                                    visible: !verseRow.selected && !verseRow.modelData.highlighted && app.rowInCursorContext(verseRow.modelData)
+                                    color: app.tint(desktop.accent, 0.06)
+                                    radius: 0
                                 }
                                 Repeater {
                                     model: verseRow.modelData.highlightRanges || []
@@ -1876,9 +1919,11 @@ ApplicationWindow {
                                     onLinkActivated: function(link) { desktop.openExternal(link) }
                                     Accessible.name: "Verse " + verseRow.modelData.number + ": " + verseRow.modelData.text
                                     Keys.onShortcutOverride: function(event) {
+                                        if (event.key === Qt.Key_A && event.modifiers === Qt.ControlModifier && app.readerKeys) event.accepted = true
                                         if (event.key === Qt.Key_C && event.modifiers === Qt.ControlModifier && app.freeSelectedText.length) event.accepted = true
                                     }
                                     Keys.onPressed: function(event) {
+                                        if (event.key === Qt.Key_A && event.modifiers === Qt.ControlModifier && app.readerKeys) { app.runCommand("annotations"); event.accepted = true }
                                         if (event.key === Qt.Key_C && event.modifiers === Qt.ControlModifier && app.freeSelectedText.length) { app.copyFreeText(); event.accepted = true }
                                     }
                                     MouseArea {
@@ -2186,6 +2231,17 @@ ApplicationWindow {
         tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · v"
         onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
     }
+    FloatingButton {
+        objectName: "relatedControl"
+        anchors.left: modeControl.right
+        anchors.leftMargin: 4 * app.controlScale
+        anchors.bottom: modeControl.bottom
+        glyph: "related"
+        visible: bible.ready && !bible.focusMode
+        enabled: app.hasSelection && !bible.busy && !app.modalOpen
+        tip: "Related passages · Shift L"
+        onClicked: app.runCommand("related")
+    }
     Row {
         id: locationControls
         objectName: "locationControls"
@@ -2227,9 +2283,9 @@ ApplicationWindow {
             objectName: "savedControl"
             visible: bible.ready
             glyph: "saved"
-            tip: "Saved · Ctrl l"
+            tip: "Annotations · Ctrl a"
             enabled: bible.ready && !bible.busy && !app.modalOpen
-            onClicked: app.runCommand("saved")
+            onClicked: app.runCommand("annotations")
         }
         FloatingButton {
             objectName: "notesControl"
@@ -2594,44 +2650,46 @@ ApplicationWindow {
     Drawer {
         id: savedDrawer
         objectName: "savedDrawer"
-        width: Math.min(430 * app.scale, app.width - 48)
+        width: Math.min(520 * app.scale, app.width - 48)
         height: app.height
         edge: Qt.RightEdge
         modal: true
         focus: true
-        padding: 24 * app.scale
+        padding: 16 * app.controlScale
         topPadding: padding
         bottomPadding: padding
         leftPadding: padding
         rightPadding: padding
-        closePolicy: deleteConfirmation.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        readonly property bool collectionKeys: opened && app.collectionTab !== 3 && !deleteConfirmation.visible && !tagsUi.visibleModal && !app.textInputActive()
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
         onOpened: app.moveSaved(0)
         onClosed: app.restorePanelFocus()
         contentItem: ColumnLayout {
             objectName: "savedContent"
-            Shortcut { sequence: "Ctrl+L"; enabled: savedDrawer.opened && !deleteConfirmation.visible && !bible.busy; onActivated: savedDrawer.close() }
-            Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.opened && !deleteConfirmation.visible; onActivated: app.moveSaved(1) }
-            Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.opened && !deleteConfirmation.visible; onActivated: app.moveSaved(-1) }
-            Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.opened && !deleteConfirmation.visible; onActivated: app.filterSaved(-1) }
-            Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.opened && !deleteConfirmation.visible; onActivated: app.filterSaved(1) }
+            Shortcut { sequence: "Ctrl+A"; enabled: savedDrawer.opened && !deleteConfirmation.visible && !tagsUi.visibleModal && !bible.busy && !app.textInputActive(); onActivated: savedDrawer.close() }
+            Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(-1) }
+            Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.collectionKeys; onActivated: app.filterSaved(-1) }
+            Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.collectionKeys; onActivated: app.filterSaved(1) }
             Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.opened && !deleteConfirmation.visible && app.activeFocusItem === collectionList; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
-            Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.opened && !deleteConfirmation.visible && !bible.busy; onActivated: app.requestDeleteSaved() }
+            Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.requestDeleteSaved() }
             spacing: (savedDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
             RowLayout {
                 Layout.fillWidth: true
-                Label { objectName: "savedTitle"; text: "Saved"; font.pixelSize: 24 * app.scale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                Label { objectName: "savedTitle"; text: "Annotations"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
             }
-            GridLayout {
+            RowLayout {
                 id: savedTabs
                 objectName: "savedTabs"
                 Layout.fillWidth: true
-                columns: width < 350 * app.scale ? 2 : 3
-                columnSpacing: 4 * app.scale
-                rowSpacing: 2 * app.scale
+                spacing: 4 * app.controlScale
+                // One row takes priority over unbounded text scaling. Allocate
+                // natural label widths, with the same bounded font for all tabs.
+                readonly property real labelSize: Math.max(12, Math.min(14 * app.controlScale, width / 29))
                 Repeater {
-                    model: ["All", "Bookmarks", "Highlights", "Notes", "Tags"]
+                    model: ["Bookmarks", "Highlights", "Notes", "Tags"]
                     delegate: QuietButton {
                         required property string modelData
                         required property int index
@@ -2639,12 +2697,12 @@ ApplicationWindow {
                         text: modelData
                         emphasized: app.collectionTab === index
                         compact: true
-                        implicitHeight: (savedDrawer.height < 350 * app.scale ? 24 : 32) * app.scale
+                        implicitHeight: 32 * app.controlScale
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
-                        Layout.preferredWidth: 1
-                        padding: 6 * app.scale
-                        font.pixelSize: 11 * app.scale
+                        Layout.preferredWidth: implicitWidth
+                        padding: 6 * app.controlScale
+                        font.pixelSize: savedTabs.labelSize
                         onClicked: app.filterSaved(index - app.collectionTab)
                         Keys.onReturnPressed: clicked()
                         Keys.onEnterPressed: clicked()
@@ -2652,8 +2710,16 @@ ApplicationWindow {
                 }
             }
             FineRule { Layout.fillWidth: true }
+            Item {
+                id: annotationsTagsHost
+                objectName: "annotationsTagsHost"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: app.collectionTab === 3
+            }
             ListView {
                 id: collectionList
+                visible: app.collectionTab !== 3
                 objectName: "collectionList"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -2712,7 +2778,7 @@ ApplicationWindow {
                     objectName: "savedEmpty"
                     anchors.centerIn: parent
                     width: parent.width - 24
-                    text: ["No saved passages yet.", "No bookmarks yet.", "No highlights yet.", "No notes yet."][app.collectionTab]
+                    text: ["No bookmarks yet.", "No highlights yet.", "No notes yet."][app.collectionTab] || ""
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     color: desktop.muted
@@ -2755,7 +2821,7 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 18 * app.scale
-            Label { text: "Delete saved passage?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: "Delete annotations?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { objectName: "deleteReference"; text: deleteConfirmation.reference; textFormat: Text.PlainText; color: desktop.accent; font.pixelSize: 16 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { objectName: "deleteExplanation"; text: "This deletes all marks (bookmark and highlight), the note, and tags for this exact reference."; color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }

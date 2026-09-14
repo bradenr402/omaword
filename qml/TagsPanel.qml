@@ -10,7 +10,13 @@ Item {
     required property var bible
     required property var desktop
 
-    readonly property bool visibleModal: surface.visible
+    property Item embeddedHost: null
+    signal browserRequested()
+    signal browserClosed()
+    property string hostKind: "none"
+    readonly property bool browserVisible: hostKind === "browser" && !!embeddedHost && embeddedHost.visible
+    readonly property bool visibleModal: surface.visible || relatedDrawer.visible
+    readonly property bool contentVisible: visibleModal || browserVisible
     readonly property bool scopePinned: surface.visible && editingScope !== null
     property var editingScope: null
     property var relatedSource: null
@@ -31,6 +37,7 @@ Item {
     property string mergeTarget: ""
     property var confirmation: null
     readonly property real uiScale: desktop.textScale
+    readonly property real controlScale: Math.min(uiScale, 1.4, Math.max(1, body.width / 440))
     readonly property var filteredTags: allTags.filter(function(tag) {
         return fold(tag.name).indexOf(fold(query)) !== -1
     })
@@ -84,6 +91,8 @@ Item {
         // Reopening another exact range ends the previous editing session first.
         if (editingScope && !sameRange(editingScope, captured)) releaseEditing()
         editingScope = captured
+        relatedDrawer.close()
+        hostKind = "picker"
         page = "picker"
         query = ""
         message = ""
@@ -96,6 +105,9 @@ Item {
     function openBrowser(manage = false) {
         if (!canAct()) return false
         releaseEditing()
+        surface.close()
+        relatedDrawer.close()
+        hostKind = "browser"
         relatedSource = null
         page = manage ? "manage" : "browser"
         returnPage = "browser"
@@ -107,7 +119,7 @@ Item {
         managedId = ""
         confirmation = null
         refresh()
-        surface.open()
+        browserRequested()
         Qt.callLater(function() { search.forceActiveFocus() })
         return true
     }
@@ -116,6 +128,8 @@ Item {
         const captured = snapshot(bible.tagScope())
         if (!installed(captured)) return false
         releaseEditing()
+        surface.close()
+        hostKind = "related"
         relatedSource = captured
         page = "related"
         query = ""
@@ -126,7 +140,7 @@ Item {
         allTags = Array.from(bible.tags)
         resetSourceTags()
         refresh()
-        surface.open()
+        relatedDrawer.open()
         Qt.callLater(function() { search.forceActiveFocus() })
         return true
     }
@@ -150,7 +164,12 @@ Item {
         resetSourceTags()
         refresh()
     }
-    function closeForFocusMode() { surface.close() }
+    function close() {
+        if (hostKind === "picker") surface.close()
+        else if (hostKind === "related") relatedDrawer.close()
+        else if (hostKind === "browser") { hostKind = "none"; browserClosed() }
+    }
+    function closeForFocusMode() { close() }
     function updateTagList() {
         // Replacing a JS-array model destroys delegates and resets ListView's
         // index. Capture identity and focus before handing it the new rows.
@@ -235,7 +254,7 @@ Item {
         if (edit) {
             // Main captures Visual-mode completion context for the new exact range.
             app.openPassageTags(captured)
-        } else if (page !== "related") surface.close()
+        } else if (page !== "related") close()
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         return true
     }
@@ -286,19 +305,19 @@ Item {
     function handleEscape() {
         if (confirmation) { confirmation = null; search.forceActiveFocus() }
         else if (query.length) query = ""
-        else surface.close()
+        else close()
     }
     Connections {
         target: panel.bible
-        function onTagsChanged() { if (surface.visible) panel.refresh() }
-        function onVersionsChanged() { if (surface.visible) panel.refresh() }
-        function onVersionChanged() { if (surface.visible) panel.refreshResults() }
+        function onTagsChanged() { if (panel.contentVisible) panel.refresh() }
+        function onVersionsChanged() { if (panel.contentVisible) panel.refresh() }
+        function onVersionChanged() { if (panel.contentVisible) panel.refreshResults() }
     }
 
     component TagText: Text {
         color: panel.desktop.foreground
         font.family: panel.desktop.fontFamily
-        font.pixelSize: 14 * panel.uiScale
+        font.pixelSize: 14 * panel.controlScale
         textFormat: Text.PlainText
         wrapMode: Text.Wrap
     }
@@ -307,9 +326,9 @@ Item {
         property bool chosen: false
         property string hint: ""
         font.family: panel.desktop.fontFamily
-        font.pixelSize: 13 * panel.uiScale
-        padding: 8 * panel.uiScale
-        implicitHeight: Math.max(34 * panel.uiScale, contentItem.implicitHeight + topPadding + bottomPadding)
+        font.pixelSize: 13 * panel.controlScale
+        padding: 8 * panel.controlScale
+        implicitHeight: Math.max(34 * panel.controlScale, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: control.text
             font: control.font
@@ -330,16 +349,72 @@ Item {
     component TagInput: TextField {
         id: input
         font.family: panel.desktop.fontFamily
-        font.pixelSize: 14 * panel.uiScale
+        font.pixelSize: 14 * panel.controlScale
         color: panel.desktop.foreground
         placeholderTextColor: panel.desktop.muted
         selectionColor: panel.desktop.accent
         selectedTextColor: panel.desktop.background
-        padding: 10 * panel.uiScale
+        padding: 10 * panel.controlScale
         background: Rectangle {
             color: panel.desktop.background
             border.color: input.activeFocus ? panel.desktop.accent : panel.desktop.border
             radius: panel.desktop.cornerRadius
+        }
+    }
+    component TagScrollbar: ScrollBar {
+        id: bar
+        implicitWidth: 18 * panel.controlScale
+        width: implicitWidth
+        anchors.right: parent.right
+        z: 10
+        policy: ScrollBar.AlwaysOn
+        visible: size < 1
+        hoverEnabled: true
+        padding: 0
+        minimumSize: 0.035
+        onPositionChanged: linger.restart()
+        onHoveredChanged: linger.restart()
+        Timer { id: linger; interval: 1100 }
+        contentItem: Item {
+            Rectangle {
+                anchors.right: parent.right
+                anchors.rightMargin: 4 * panel.controlScale
+                height: parent.height
+                width: (bar.hovered || bar.pressed ? 10 : 4) * panel.controlScale
+                color: panel.desktop.muted
+                radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+                opacity: bar.hovered || bar.pressed ? 0.8 : linger.running ? 0.5 : 0.2
+                Behavior on width { NumberAnimation { duration: 120 } }
+                Behavior on opacity { NumberAnimation { duration: 200 } }
+            }
+        }
+        background: Item {}
+    }
+    Drawer {
+        id: relatedDrawer
+        objectName: "relatedDrawer"
+        parent: Overlay.overlay
+        width: Math.min(520 * panel.uiScale, panel.app.width - 48)
+        height: panel.app.height
+        edge: Qt.RightEdge
+        modal: true
+        focus: true
+        padding: 16 * panel.controlScale
+        closePolicy: Popup.CloseOnPressOutside
+        enter: Transition { NumberAnimation { property: "position"; duration: 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "position"; duration: 180; easing.type: Easing.InCubic } }
+        background: Rectangle {
+            color: panel.desktop.background
+            border.color: panel.desktop.border
+            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+        }
+        Overlay.modal: Rectangle { color: Qt.rgba(panel.desktop.background.r, panel.desktop.background.g, panel.desktop.background.b, 0.65) }
+        contentItem: Item { id: relatedHost }
+        onClosed: {
+            if (panel.hostKind !== "related") return
+            panel.hostKind = "none"
+            panel.confirmation = null
+            panel.app.restorePanelFocus()
         }
     }
     Popup {
@@ -355,6 +430,8 @@ Item {
         focus: true
         closePolicy: Popup.NoAutoClose
         onClosed: {
+            if (panel.hostKind !== "picker") return
+            panel.hostKind = "none"
             panel.confirmation = null
             panel.editingScope = null
             panel.app.editingPanelClosed()
@@ -365,8 +442,15 @@ Item {
             border.color: panel.desktop.border
             radius: panel.desktop.cornerRadius
         }
-        contentItem: ColumnLayout {
-            spacing: 10 * panel.uiScale
+        contentItem: Item { id: pickerHost }
+    }
+        ColumnLayout {
+            id: body
+            objectName: "tagsBody"
+            parent: panel.hostKind === "browser" ? panel.embeddedHost : panel.hostKind === "related" ? relatedHost : pickerHost
+            anchors.fill: parent
+            visible: panel.contentVisible
+            spacing: 8 * panel.controlScale
             Keys.onEscapePressed: panel.handleEscape()
             RowLayout {
                 Layout.fillWidth: true
@@ -374,11 +458,11 @@ Item {
                     Layout.fillWidth: true
                     text: panel.page === "picker" ? (panel.editingScope ? panel.editingScope.reference + " · " + panel.versionName(panel.editingScope) : "Tags")
                         : panel.page === "related" ? "Related · " + (panel.relatedSource ? panel.relatedSource.reference + " · " + panel.versionName(panel.relatedSource) : "")
-                        : panel.page === "manage" ? "Manage tags" : "Saved tags"
+                        : panel.page === "manage" ? "Manage tags" : "Tags"
                 }
                 TagButton { text: "Back"; visible: panel.page === "manage"; onClicked: panel.back() }
                 TagButton { text: "Manage"; visible: panel.page !== "manage"; onClicked: panel.manage() }
-                TagButton { text: "Done"; onClicked: surface.close() }
+                TagButton { objectName: "tagsDone"; text: "Done"; onClicked: panel.close() }
             }
             TagText {
                 Layout.fillWidth: true
@@ -416,19 +500,26 @@ Item {
                 Keys.onDownPressed: { if (tagList.count) { tagList.currentIndex = 0; tagList.forceActiveFocus() } }
             }
             RowLayout {
+                id: filters
+                objectName: "tagFilters"
+                Layout.fillWidth: true
+                spacing: 4 * panel.controlScale
                 visible: panel.page === "browser" || panel.page === "related"
                 TagButton { objectName: "tagMatchAny"; text: "Any"; chosen: !panel.matchAll; onClicked: { panel.matchAll = false; panel.refreshResults() } }
                 TagButton { objectName: "tagMatchAll"; text: "All"; chosen: panel.matchAll; onClicked: { panel.matchAll = true; panel.refreshResults() } }
-                TagButton { objectName: "tagAllVersions"; text: panel.allVersions ? "All versions" : "Current version"; chosen: panel.allVersions; hint: panel.page === "related" ? "Current version means the pinned source version" : "Include all installed versions"; onClicked: { panel.allVersions = !panel.allVersions; panel.refreshResults() } }
-                TagButton { objectName: "tagUseCurrent"; text: "Use current"; visible: panel.page === "related"; onClicked: panel.useCurrent() }
+                Rectangle { objectName: "tagFilterDivider"; Layout.preferredWidth: 1; Layout.preferredHeight: 24 * panel.controlScale; Layout.leftMargin: 4 * panel.controlScale; Layout.rightMargin: 4 * panel.controlScale; color: panel.desktop.border }
+                TagButton { objectName: "tagSourceVersion"; text: (panel.page === "related" ? panel.versionName(panel.relatedSource) : panel.bible.versionAbbreviation) + " only"; chosen: !panel.allVersions; hint: panel.page === "related" ? "Pinned source version" : "Active version"; onClicked: { panel.allVersions = false; panel.refreshResults() } }
+                TagButton { objectName: "tagAllVersions"; text: "All versions"; chosen: panel.allVersions; onClicked: { panel.allVersions = true; panel.refreshResults() } }
+                Item { Layout.fillWidth: true }
             }
+            TagButton { objectName: "tagUseCurrent"; text: "Use current"; visible: panel.page === "related"; onClicked: panel.useCurrent() }
             ListView {
                 id: tagList
                 objectName: "tagList"
                 Layout.fillWidth: true
                 Layout.fillHeight: panel.page === "picker" || panel.page === "manage"
-                Layout.preferredHeight: 150 * panel.uiScale
-                Layout.minimumHeight: 50 * panel.uiScale
+                Layout.preferredHeight: Math.min(150 * panel.controlScale, body.height * 0.22)
+                Layout.minimumHeight: 34 * panel.controlScale
                 visible: panel.confirmation === null
                 clip: true
                 spacing: 4 * panel.uiScale
@@ -444,7 +535,7 @@ Item {
                 Keys.onReturnPressed: { if (currentIndex >= 0) panel.toggleTag(panel.filteredTags[currentIndex].id) }
                 Keys.onEnterPressed: { if (currentIndex >= 0) panel.toggleTag(panel.filteredTags[currentIndex].id) }
                 Keys.onUpPressed: { if (currentIndex <= 0) search.forceActiveFocus(); else decrementCurrentIndex() }
-                ScrollBar.vertical: ScrollBar { }
+                ScrollBar.vertical: TagScrollbar { objectName: "tagListScrollbar" }
                 delegate: TagButton {
                     id: tagDelegate
                     required property var modelData
@@ -487,7 +578,7 @@ Item {
                 visible: panel.page === "picker" && panel.overlaps.length > 0
                 model: panel.overlaps
                 clip: true
-                ScrollBar.vertical: ScrollBar { }
+                ScrollBar.vertical: TagScrollbar { objectName: "tagOverlapsScrollbar" }
                 delegate: RowLayout {
                     id: overlapDelegate
                     required property var modelData
@@ -515,7 +606,7 @@ Item {
                     Layout.preferredHeight: 100 * panel.uiScale
                     clip: true
                     model: panel.allTags.filter(function(tag) { return tag.id !== panel.managedId })
-                    ScrollBar.vertical: ScrollBar { }
+                    ScrollBar.vertical: TagScrollbar { objectName: "tagMergeScrollbar" }
                     delegate: TagButton {
                         required property var modelData
                         objectName: "mergeTarget:" + modelData.id
@@ -548,7 +639,7 @@ Item {
                 keyNavigationEnabled: true
                 Keys.onReturnPressed: { if (currentIndex >= 0) panel.openTagged(panel.results[currentIndex]) }
                 Keys.onEnterPressed: { if (currentIndex >= 0) panel.openTagged(panel.results[currentIndex]) }
-                ScrollBar.vertical: ScrollBar { }
+                ScrollBar.vertical: TagScrollbar { objectName: "tagResultsScrollbar" }
                 delegate: TagButton {
                     id: resultDelegate
                     required property var modelData
@@ -572,9 +663,8 @@ Item {
                 Layout.fillWidth: true
                 text: panel.page === "picker" ? "Space / Enter toggles · Enter in search creates / assigns · Esc clears, then closes"
                     : "Enter opens a passage · Esc clears, then closes"
-                font.pixelSize: 11 * panel.uiScale
+                font.pixelSize: 11 * panel.controlScale
                 color: panel.desktop.muted
             }
         }
-    }
 }

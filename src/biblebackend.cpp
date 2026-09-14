@@ -1636,7 +1636,10 @@ void BibleBackend::updateAnnotations()
                 }
                 if (a.bookmark) {
                     start |= v == a.start; end |= v == a.end; before |= v > a.start; after |= v < a.end;
+                    const auto first = endpoint(a.start), last = endpoint(a.end);
                     ranges.append(QVariantMap{{"reference",rangeReference(a.start,a.end)},
+                        {"versionId",m_versionId},{"book",first.book},{"chapter",first.chapter},{"start",first.verse},
+                        {"endBook",last.book},{"endChapter",last.chapter},{"end",last.verse},
                         {"bookmarkStart",v == a.start},{"bookmarkEnd",v == a.end},
                         {"bookmarkContinuesBefore",v > a.start},{"bookmarkContinuesAfter",v < a.end}});
                 }
