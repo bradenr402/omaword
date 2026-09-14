@@ -2,6 +2,8 @@
   <qresource prefix="/">
     <file>qml/Main.qml</file>
     <file>qml/BlockReader.qml</file>
+    <file>qml/TagsPanel.qml</file>
+    <file>qml/AppToolTip.qml</file>
     <file>resources/catalog.json</file>
     <file alias="branding/icon.svg">assets/app.svg</file>
   </qresource>

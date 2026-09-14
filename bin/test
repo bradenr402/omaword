@@ -3,7 +3,7 @@ set -euo pipefail
 
 root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 usage() {
-    printf 'Usage: bin/test [--suite backend|ui|importer|catalog|annotations|instance|windows|all] [Qt test arguments]\n'
+    printf 'Usage: bin/test [--suite backend|ui|tags|tagsui|desktop|importer|catalog|annotations|instance|windows|all] [Qt test arguments]\n'
     printf 'Repeat --suite to select multiple suites; Qt arguments require one suite.\n'
     printf 'JOBS caps total build jobs; TEST_JOBS caps concurrent suites (default 2).\n'
 }
@@ -21,14 +21,14 @@ while (( $# )); do
     esac
 done
 (( ${#suites[@]} )) || suites=(all)
-available=(backend ui importer catalog annotations instance)
+available=(backend ui tags tagsui desktop importer catalog annotations instance)
 [[ ! -f $root/tests/windows.pro ]] || available+=(windows)
 selected=()
 declare -A seen=()
 for suite in "${suites[@]}"; do
     case $suite in
         all) expanded=("${available[@]}") ;;
-        backend|ui|importer|catalog|annotations|instance|windows) expanded=("$suite") ;;
+        backend|ui|tags|tagsui|desktop|importer|catalog|annotations|instance|windows) expanded=("$suite") ;;
         *) printf 'Unknown suite: %s\n' "$suite" >&2; usage >&2; exit 1 ;;
     esac
     for name in "${expanded[@]}"; do
@@ -40,9 +40,9 @@ if (( $# && ${#selected[@]} != 1 )); then
     exit 1
 fi
 declare -A projects=([backend]=backend [ui]=ui [importer]=usfm [catalog]=catalog
-    [annotations]=blockannotations [instance]=singleinstance [windows]=windows)
+    [annotations]=blockannotations [instance]=singleinstance [windows]=windows [tags]=tags [tagsui]=tagsui [desktop]=desktop)
 declare -A directories=([backend]=tests [ui]=ui-tests [importer]=usfm-tests [catalog]=catalog-tests
-    [annotations]=blockannotations [instance]=singleinstance-tests [windows]=windows-tests)
+    [annotations]=blockannotations [instance]=singleinstance-tests [windows]=windows-tests [tags]=tags-tests [tagsui]=tagsui-tests [desktop]=desktop-tests)
 for suite in "${selected[@]}"; do
     if [[ ! -f $root/tests/${projects[$suite]}.pro ]]; then
         printf 'Suite project is unavailable: %s\n' "$root/tests/${projects[$suite]}.pro" >&2

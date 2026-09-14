@@ -96,11 +96,18 @@ QVariantList BlockDocument::annotations(const QVariantList &verses, const QVaria
     Q_UNUSED(chapter);
     QMap<QString, QVariantMap> ranges;
     auto include = [&ranges](const QString &kind, const QString &reference, const QVariantMap &span,
-                             bool before, bool after) {
+                             bool before, bool after, const QVariantMap &metadata = QVariantMap{}) {
         const QString key = kind + ':' + reference;
-        if (!ranges.contains(key))
+        if (!ranges.contains(key)) {
             ranges[key] = {{"kind",kind}, {"reference",reference}, {"start",span.value("start")},
                            {"continuesBefore",before}};
+            if (!metadata.isEmpty()) {
+                // Document offsets use start/end; retain canonical endpoints in
+                // their own frozen scope instead of overwriting them with offsets.
+                ranges[key]["scope"] = metadata;
+                ranges[key]["tags"] = metadata.value("tags");
+            }
+        }
         ranges[key]["end"] = span.value("end");
         ranges[key]["continuesAfter"] = after;
     };
@@ -121,6 +128,12 @@ QVariantList BlockDocument::annotations(const QVariantList &verses, const QVaria
                 include("note",range.value("reference").toString(),span,
                         range.value("continuesBefore").toBool(),
                         range.value("continuesAfter").toBool());
+            }
+            for (const auto &entry : verse.value("tagRanges").toList()) {
+                const auto range = entry.toMap();
+                include("tag",range.value("reference").toString(),span,
+                        range.value("continuesBefore").toBool(),
+                        range.value("continuesAfter").toBool(),range);
             }
             break;
         }

@@ -21,6 +21,8 @@ Item {
     onRailWidthChanged: if (!destroying) geometryTimer.restart()
     property var annotationRanges: []
     property var annotationGroups: []
+    readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
+    function tagsPlainText(tags) { return Array.from(tags || []).map(function(t) { return t.name }).join(", ") }
     property real annotationScale: 0
     readonly property string annotationKey: JSON.stringify(backend.verses) + JSON.stringify(backend.collection)
         + backend.book + ":" + backend.chapter
@@ -36,8 +38,8 @@ Item {
         const groups = []
         for (const range of ranges) {
             let group = groups.length ? groups[groups.length - 1] : null
-            if (!group || range.y >= group.y + 36 * controller.scale) {
-                group = { y: range.y, bookmark: [], note: [] }
+            if (!group || range.y >= group.y + 54 * controller.scale) {
+                group = { y: range.y, bookmark: [], note: [], tag: [] }
                 groups.push(group)
             }
             group[range.kind].push(range)
@@ -47,6 +49,7 @@ Item {
     }
     function openAnnotation(entry) {
         if (entry.kind === "bookmark") controller.openBookmark(entry.reference)
+        else if (entry.kind === "tag") controller.openPassageTags(entry.scope || entry.reference)
         else {
             if (!controller.flushNote()) return
             if (backend.navigate(entry.reference)) {
@@ -257,14 +260,14 @@ Item {
                 y: modelData.y
                 width: 23 * root.controller.scale
                 Repeater {
-                    model: ["bookmark", "note"].filter(function(kind) { return group.modelData[kind].length > 0 })
+                    model: ["bookmark", "note", "tag"].filter(function(kind) { return group.modelData[kind].length > 0 })
                     delegate: ToolButton {
                         id: marker
                         required property string modelData
                         readonly property var entries: group.modelData[modelData]
-                        readonly property string hint: (modelData === "bookmark" ? "Bookmark" : "Note")
+                        readonly property string hint: (modelData === "bookmark" ? "Bookmark" : modelData === "tag" ? "Tag" : "Note")
                             + (entries.length > 1 ? "s" : "") + "\n"
-                            + entries.map(function(e) { return e.reference + (e.continuesBefore ? " (continued)" : "") }).join("\n")
+                            + entries.map(function(e) { return e.reference + (e.continuesBefore ? " (continued)" : "") + (e.kind === "tag" ? " · " + root.tagsPlainText(e.tags) : "") }).join("\n")
                         objectName: "blockAnnotationMarker:" + modelData + ":" + entries[0].reference
                         width: group.width
                         height: 18 * root.controller.scale
@@ -280,7 +283,7 @@ Item {
                             }
                         }
                         background: Rectangle {
-                            radius: 0
+                            radius: Math.min(root.cornerRadius, width / 2, height / 2)
                             color: root.controller.tint(root.theme.accent, marker.down ? 0.25 : 0.12)
                             visible: marker.hovered || marker.activeFocus
                         }
@@ -310,7 +313,7 @@ Item {
                                     color: "transparent"
                                     border.color: root.theme.accent
                                     border.width: root.controller.scale
-                                    radius: root.controller.scale
+                                    radius: 0 // Deliberate document glyph, not a widget surface.
                                     Repeater {
                                         model: 3
                                         Rectangle {
@@ -323,6 +326,27 @@ Item {
                                         }
                                     }
                                 }
+                                Shape {
+                                    anchors.fill: parent
+                                    visible: marker.modelData === "tag"
+                                    ShapePath {
+                                        strokeColor: root.theme.accent
+                                        strokeWidth: root.controller.scale
+                                        fillColor: "transparent"
+                                        startX: root.controller.scale; startY: root.controller.scale
+                                        PathLine { x: 6 * root.controller.scale; y: root.controller.scale }
+                                        PathLine { x: 11 * root.controller.scale; y: 7 * root.controller.scale }
+                                        PathLine { x: 6 * root.controller.scale; y: 12 * root.controller.scale }
+                                        PathLine { x: root.controller.scale; y: 6 * root.controller.scale }
+                                        PathLine { x: root.controller.scale; y: root.controller.scale }
+                                    }
+                                    ShapePath {
+                                        strokeColor: root.theme.accent
+                                        strokeWidth: 2 * root.controller.scale
+                                        startX: 3 * root.controller.scale; startY: 3 * root.controller.scale
+                                        PathLine { x: 4 * root.controller.scale; y: 4 * root.controller.scale }
+                                    }
+                                }
                             }
                             Text {
                                 anchors.right: parent.right
@@ -333,24 +357,12 @@ Item {
                                 color: root.theme.accent
                             }
                         }
-                        ToolTip {
+                        AppToolTip {
                             id: markerTip
+                            theme: root.theme
                             visible: rail.visible && (marker.hovered || marker.activeFocus) && !annotationMenu.visible
                             delay: 500
                             text: marker.hint
-                            palette.window: root.theme.background
-                            palette.windowText: root.theme.foreground
-                            contentItem: Text {
-                                text: markerTip.text
-                                color: root.theme.foreground
-                                font.family: root.theme.fontFamily
-                                font.pixelSize: 12 * root.controller.scale
-                            }
-                            background: Rectangle {
-                                color: root.theme.background
-                                border.color: root.theme.accent
-                                radius: 4 * root.controller.scale
-                            }
                         }
                     }
                 }
@@ -368,6 +380,12 @@ Item {
             if (itemAt(0)) itemAt(0).forceActiveFocus()
         }
         property var entries: []
+        background: Rectangle {
+            implicitWidth: 260 * root.controller.scale
+            color: root.theme.background
+            border.color: root.theme.accent
+            radius: Math.min(root.cornerRadius, width / 2, height / 2)
+        }
         palette.window: root.theme.background
         palette.base: root.theme.background
         palette.text: root.theme.foreground
@@ -378,6 +396,7 @@ Item {
         Instantiator {
             model: annotationMenu.entries
             delegate: MenuItem {
+                id: annotationAction
                 required property var modelData
                 // Menu buttons otherwise treat Ctrl+Space like Space and
                 // activate a reference, exposing the reader to subsequent keys.
@@ -385,6 +404,18 @@ Item {
                 Keys.onReleased: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
                 objectName: "blockAnnotationAction:" + modelData.kind + ":" + modelData.reference
                 text: modelData.reference + (modelData.continuesBefore ? " (continued)" : "")
+                    + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
+                contentItem: Text {
+                    text: annotationAction.text
+                    textFormat: Text.PlainText
+                    color: root.theme.foreground
+                    font: annotationAction.font
+                }
+                background: Rectangle {
+                    implicitHeight: 36 * root.controller.scale
+                    color: annotationAction.highlighted ? root.controller.tint(root.theme.accent, 0.16) : "transparent"
+                    radius: Math.min(root.cornerRadius, width / 2, height / 2)
+                }
                 onTriggered: root.openAnnotation(modelData)
             }
             onObjectAdded: function(index, object) { annotationMenu.insertItem(index, object) }

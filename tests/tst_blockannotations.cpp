@@ -110,6 +110,7 @@ ApplicationWindow {
         property real floatingSafety: 0
         property string freeSelectedText: ""
         property string openedBookmark: ""
+        property var openedTags: ({})
         property string calls: ""
         property bool canFlush: true
         function tint(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
@@ -118,12 +119,17 @@ ApplicationWindow {
         function syncNote() { calls += "sync;" }
         function openNotes(edit) { calls += edit ? "edit;" : "preview;" }
         function openBookmark(ref) { openedBookmark = ref }
+        function openPassageTags(scope) { openedTags = scope }
     }
     QtObject {
         id: theme
         property color background: "#181c21"
         property color foreground: "#d9e1ea"
         property color accent: "#8db5d4"
+        property color surface: "#222830"
+        property color border: "#485563"
+        property real textScale: 1
+        property real cornerRadius: 8
         property string fontFamily: "DejaVu Sans"
     }
     Flickable {
@@ -344,6 +350,79 @@ ApplicationWindow {
         // The old five-argument API retains block behavior.
         mapping->build(quick,verses,false,false,1.5);
         QCOMPARE(doc->blockCount(),1);
+    }
+    void overlappingTagScopes_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("block") << QString("block");
+        QTest::newRow("paragraph") << QString("paragraph");
+    }
+    void overlappingTagScopes() {
+        QFETCH(QString,mode);
+        populate();
+        item("reader")->setProperty("mode",mode);
+        const QVariantList tags{QVariantMap{{"id","tag-one"},{"name","<b>Faith & 🌿</b>"}}};
+        auto first = note("Genesis 1:1–3",1,3);
+        auto continued = note("Genesis 1:30–2:2",30,2,1,2);
+        for (auto scope : {&first,&continued}) {
+            scope->remove("note");
+            (*scope)["versionId"] = "test-edition";
+            (*scope)["tags"] = tags;
+        }
+        auto verses = backend->property("verses").toList();
+        for (int i = 0; i < verses.size(); ++i) {
+            auto verse = verses[i].toMap();
+            QVariantList ranges;
+            if (i < 3) {
+                auto range = first;
+                range["tagStart"] = i == 0;
+                range["continuesBefore"] = i != 0;
+                range["continuesAfter"] = i != 2;
+                ranges.append(range);
+            }
+            if (i < 2) {
+                auto range = continued;
+                range["tagStart"] = false;
+                range["continuesBefore"] = true;
+                range["continuesAfter"] = i != 1;
+                ranges.append(range);
+            }
+            verse["tagRanges"] = ranges;
+            verse["paragraphStart"] = i == 0 || i == 3;
+            verses[i] = verse;
+        }
+        backend->setProperty("verses",verses);
+        QTRY_COMPARE(list("annotationRanges").size(),5); // Existing marks/notes plus two tagged scopes.
+        QVariantMap continuation;
+        for (const auto &entry : list("annotationRanges")) {
+            const auto range = entry.toMap();
+            if (range["kind"] == "tag" && range["reference"] == continued["reference"]) continuation = range;
+        }
+        QVERIFY(!continuation.isEmpty());
+        QCOMPARE(continuation["start"].toInt(),mapping->positionFor(1));
+        QCOMPARE(continuation["scope"].toMap()["start"].toInt(),30); // Endpoint must not become a document offset.
+        QCOMPARE(continuation["scope"].toMap()["versionId"].toString(),QString("test-edition"));
+        QVERIFY(continuation["continuesBefore"].toBool());
+        QVERIFY(!continuation["continuesAfter"].toBool());
+        QCOMPARE(continuation["tags"].toList(),tags);
+        auto marker = item("blockAnnotationMarker:tag:Genesis 1:1–3");
+        QVERIFY(marker);
+        QVERIFY(marker->property("hint").toString().contains("<b>Faith & 🌿</b>"));
+        click(marker);
+        const auto action = item("blockAnnotationAction:tag:Genesis 1:30–2:2");
+        QTRY_VERIFY(action && action->isVisible());
+        const auto label = action->property("contentItem").value<QQuickItem *>();
+        QVERIFY(label);
+        QCOMPARE(label->property("textFormat").toInt(),0); // Text.PlainText
+        click(action);
+        const auto value = controller->property("openedTags");
+        const auto opened = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+        QCOMPARE(opened["start"].toInt(),30);
+        QCOMPARE(opened["endChapter"].toInt(),2);
+        QCOMPARE(opened["tags"].toList(),tags);
+        QVERIFY(backend->property("navigated").toString().isEmpty());
+        for (auto &row : verses) { auto verse = row.toMap(); verse.remove("tagRanges"); row = verse; }
+        backend->setProperty("verses",verses);
+        QTRY_COMPARE(list("annotationRanges").size(),3); // Removing tags cannot erase marks or notes.
     }
     void paragraphHeadingDoesNotCreateEmptyBlocks() {
         backend->setProperty("verses",QVariantList{
