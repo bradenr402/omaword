@@ -37,6 +37,9 @@ class BibleBackend : public QObject
     Q_PROPERTY(QVariantList books READ books NOTIFY booksChanged)
     Q_PROPERTY(QVariantList chapterNumbers READ chapterNumbers NOTIFY passageChanged)
     Q_PROPERTY(QVariantList collection READ collection NOTIFY collectionChanged)
+    Q_PROPERTY(QVariantList tags READ tags NOTIFY tagsChanged)
+    Q_PROPERTY(QVariantList selectionTags READ selectionTags NOTIFY tagsChanged)
+    Q_PROPERTY(QVariantList overlappingTags READ overlappingTags NOTIFY tagsChanged)
     Q_PROPERTY(QString noteText READ noteText WRITE setNoteText NOTIFY noteTextChanged)
     Q_PROPERTY(bool selectionBookmarked READ selectionBookmarked NOTIFY annotationChanged)
     Q_PROPERTY(bool selectionHighlighted READ selectionHighlighted NOTIFY annotationChanged)
@@ -80,6 +83,29 @@ public:
     QVariantList verses() const { return m_verses; }
     QVariantList books() const;
     QVariantList collection() const { return m_collection; }
+    QVariantList tags() const;
+    QVariantList selectionTags();
+    QVariantList overlappingTags();
+    // Capture once when opening an editor; pass this value on every mutation.
+    // Identity is versionId + all six endpoints. reference is display-only.
+    // Exact queries return {id,name,count}; overlap/browser queries return ranges.
+    // tagsChanged is delivered to every window after committed tag/library changes,
+    // and locally on selection changes (the exact and overlapping properties).
+    Q_INVOKABLE QVariantMap tagScope() const;
+    Q_INVOKABLE QVariantList tagsForScope(QVariantMap scope, bool overlapping = false);
+    Q_INVOKABLE QString createTag(QString name);
+    Q_INVOKABLE bool setTag(QVariantMap scope, QString tagId, bool assigned);
+    Q_INVOKABLE QString createAndAssignTag(QVariantMap scope, QString name);
+    Q_INVOKABLE bool renameTag(QString id, QString name);
+    Q_INVOKABLE bool deleteTag(QString id);
+    Q_INVOKABLE bool mergeTags(QString sourceId, QString targetId);
+    // Empty filters produce no results; empty versionId searches installed editions.
+    // Results contain all tags, exact marks/note, bounded excerpt and sharedCount.
+    // Querying never navigates; openTaggedPassage is the explicit navigation action.
+    Q_INVOKABLE QVariantList taggedPassages(QVariantList tagIds, bool matchAll = false, QString versionId = QString());
+    Q_INVOKABLE QVariantList relatedPassages(QVariantMap source, QVariantList tagIds,
+                                           bool matchAll = false, bool allVersions = false);
+    Q_INVOKABLE bool openTaggedPassage(QVariantMap scope);
     QString noteText() const { return m_note; }
     bool selectionBookmarked() const { return m_bookmarked; }
     bool selectionHighlighted() const { return m_highlighted; }
@@ -122,9 +148,13 @@ public:
     // With no selection, start at the first verse and apply delta within this chapter.
     // Multi-verse steps stop at its edge; a subsequent step crosses by one verse.
     Q_INVOKABLE void moveByVerses(int delta, bool extend = false);
-    Q_INVOKABLE void toggleBookmark();
-    Q_INVOKABLE void toggleHighlight();
+    // True only after persistence succeeds; false must not complete Visual mode.
+    Q_INVOKABLE bool toggleBookmark();
+    Q_INVOKABLE bool toggleHighlight();
     Q_INVOKABLE void setNoteText(QString text);
+    // Saved UI passes its captured range map; reference is display-only.
+    // Deletes exact marks/note/tags in scope.versionId without navigating.
+    Q_INVOKABLE bool deleteAnnotationScope(QVariantMap scope);
     Q_INVOKABLE bool deleteAnnotation(QString reference, QString expectedVersionId = QString());
     Q_INVOKABLE QString copySelection(bool plainText = false);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
@@ -148,6 +178,7 @@ signals:
     void selectionChanged();
     void versesChanged();
     void collectionChanged();
+    void tagsChanged();
     void noteTextChanged();
     void readingPositionChanged();
     void navigationChanged();
@@ -172,7 +203,7 @@ private:
     Verse endpoint(int index) const { return m_keys.value(index); }
     bool changeVersion(const QString &id, const QString &importPath = {},
                        const QString &removedId = {}, bool deleteAnnotations = false, bool startup = false,
-                       bool peerReload = false);
+                       bool peerReload = false, const QVariantMap &targetScope = {});
     void refreshShared(const QString &versionId, bool library, bool preferences);
     bool flushDrafts();
     void publishAnnotations();
@@ -204,7 +235,13 @@ private:
     void updateAnnotations();
     bool loadAnnotations(QVector<Annotation> *annotations);
     bool saveAnnotations(const QVector<Annotation> &annotations);
-    void toggleFlag(bool highlight);
+    bool toggleFlag(bool highlight);
+    bool validateScope(const QVariantMap &scope, QVariantMap *canonical = nullptr) const;
+    QVariantList tagRangeRows(const QString &versionId, bool excerpts) const;
+    bool writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned);
+    QString ensureTag(const QString &name);
+    bool commitTagMutation();
+    void publishTags();
     bool requireReady();
     bool setError(const QString &error);
     void setStatus(const QString &status);

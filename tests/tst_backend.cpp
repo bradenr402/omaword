@@ -269,7 +269,9 @@ private slots:
             QVERIFY(write(invalid.toLocalFile(),QJsonDocument(root).toJson()));
             QVERIFY2(!bible->importBackup(invalid),qPrintable(kind)); QCOMPARE(bible->collection(),original); QCOMPARE(bible->readingPosition(),0.73);
         }
-        QByteArray duplicate = document.toJson(); duplicate.replace("\"version\": 3","\"version\": 3, \"ver\\u0073ion\": 3");
+        QByteArray duplicate = document.toJson();
+        const QByteArray backupVersion = QByteArray::number(document.object().value("version").toInt());
+        duplicate.replace("\"version\": " + backupVersion,"\"version\": " + backupVersion + ", \"ver\\u0073ion\": " + backupVersion);
         QVERIFY(write(session->filePath("duplicate.json"),duplicate));
         QVERIFY(!bible->importBackup(QUrl::fromLocalFile(session->filePath("duplicate.json"))));
         QVERIFY(bible->error().contains("duplicate JSON"));

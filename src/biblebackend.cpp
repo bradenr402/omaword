@@ -124,6 +124,132 @@ bool bibleIdentity(const QString &path, const QString &id)
     QSqlDatabase::removeDatabase(name);
     return matches;
 }
+
+const QStringList scopeFields{"book","chapter","start","endBook","endChapter","end"};
+QString normalizedTag(QString name)
+{
+    // Reject controls before trimming, including edge tabs/newlines. Format
+    // characters (e.g. emoji joiners) are legitimate parts of a name.
+    if (name.size() > 4096 || !safeString(name)) return {};
+    for (const auto c : name)
+        if (c.category() == QChar::Other_Control || c.category() == QChar::Separator_Line
+            || c.category() == QChar::Separator_Paragraph) return {};
+    name = name.trimmed().normalized(QString::NormalizationForm_C);
+    return name.size() <= 4096 ? name : QString();
+}
+QString tagKey(const QString &name)
+{
+    // Qt provides simple (one-codepoint) folding. Canonical decomposition
+    // handles accented/Greek expansions; these remaining full-fold mappings
+    // are not decomposable (or have compatibility-only decompositions).
+    const QString simple = name.normalized(QString::NormalizationForm_D).toCaseFolded();
+    static const QMap<ushort,QString> expansions{
+        {0x00df,QStringLiteral("ss")},{0x0149,QStringLiteral("\u02bcn")},
+        {0x0587,QStringLiteral("\u0565\u0582")},{0x1e9a,QStringLiteral("a\u02be")},
+        {0xfb00,QStringLiteral("ff")},{0xfb01,QStringLiteral("fi")},{0xfb02,QStringLiteral("fl")},
+        {0xfb03,QStringLiteral("ffi")},{0xfb04,QStringLiteral("ffl")},
+        {0xfb05,QStringLiteral("st")},{0xfb06,QStringLiteral("st")},
+        {0xfb13,QStringLiteral("\u0574\u0576")},{0xfb14,QStringLiteral("\u0574\u0565")},
+        {0xfb15,QStringLiteral("\u0574\u056b")},{0xfb16,QStringLiteral("\u057e\u0576")},
+        {0xfb17,QStringLiteral("\u0574\u056d")}};
+    QString folded;
+    for (const auto c : simple) {
+        const auto it = expansions.constFind(c.unicode());
+        if (it == expansions.cend()) folded += c;
+        else folded += it.value();
+    }
+    return folded.normalized(QString::NormalizationForm_C);
+}
+QString rangeKey(const QVariantMap &scope)
+{
+    QStringList parts{scope.value("versionId").toString()};
+    for (const auto &key : scopeFields) parts << QString::number(scope.value(key).toInt());
+    return parts.join(':');
+}
+void bindScope(QSqlQuery &q, const QVariantMap &scope)
+{
+    q.addBindValue(scope.value("versionId"));
+    for (const auto &key : scopeFields) q.addBindValue(scope.value(key));
+}
+const QString scopeWhere = "version_id=? AND book=? AND chapter=? AND start=? AND endBook=? AND endChapter=? AND end=?";
+// Query only requested endpoint keys and bounded text, never validate/read an
+// entire Bible for the tag browser. Connections cannot outlive their queries.
+struct TagBible {
+    QString connection = connectionName();
+    QSqlDatabase db;
+    TagBible(const QString &path, const QString &id) {
+        db = QSqlDatabase::addDatabase("QSQLITE",connection);
+        db.setDatabaseName(path); db.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
+        if (path.isEmpty() || !db.open()) return;
+        QSqlQuery q(db);
+        q.prepare("SELECT value FROM metadata WHERE key='version_id'");
+        if (!q.exec() || !q.next() || q.value(0).toString() != id) db.close();
+    }
+    ~TagBible() { db.close(); db = {}; QSqlDatabase::removeDatabase(connection); }
+    bool scope(const QVariantMap &input, QVariantMap *result) const {
+        if (!db.isOpen() || input.value("versionId").metaType().id() != QMetaType::QString
+            || input.value("versionId").toString().isEmpty()) return false;
+        for (const auto &key : scopeFields) {
+            const auto value = QJsonValue::fromVariant(input.value(key));
+            if (!integer(value,1,key.endsWith("Book") || key == "book" ? 80 : 999)) return false;
+        }
+        QVariantMap out{{"versionId",input.value("versionId")}};
+        for (const auto &key : scopeFields) out[key] = input.value(key).toInt();
+        QStringList names;
+        for (int side = 0; side < 2; ++side) {
+            QSqlQuery q(db);
+            q.prepare("SELECT b.ordinal,b.name FROM verses v JOIN books b ON b.id=v.book WHERE v.book=? AND v.chapter=? AND v.number=?");
+            for (int i = 0; i < 3; ++i) q.addBindValue(out.value(scopeFields[side*3+i]));
+            if (!q.exec() || !q.next()) return false;
+            const qint64 order = q.value(0).toLongLong()*1000000 + out.value(scopeFields[side*3+1]).toInt()*1000 + out.value(scopeFields[side*3+2]).toInt();
+            out[side ? "_endOrder" : "_order"] = order;
+            names << q.value(1).toString();
+        }
+        if (out.value("_order").toLongLong() > out.value("_endOrder").toLongLong()) return false;
+        QString ref = QString("%1 %2:%3").arg(names[0]).arg(out["chapter"].toInt()).arg(out["start"].toInt());
+        if (out["_order"] != out["_endOrder"]) {
+            ref += QChar(0x2013);
+            if (out["book"] != out["endBook"]) ref += names[1] + ' ';
+            if (out["book"] != out["endBook"] || out["chapter"] != out["endChapter"])
+                ref += QString::number(out["endChapter"].toInt()) + ':';
+            ref += QString::number(out["end"].toInt());
+        }
+        out["reference"] = ref;
+        *result = out; return true;
+    }
+    QString excerpt(const QVariantMap &scope) const {
+        QSqlQuery q(db);
+        q.prepare("SELECT substr(v.text,1,512) FROM verses v JOIN books b ON b.id=v.book "
+                  "WHERE (b.ordinal,v.chapter,v.number)>=(?,?,?) AND (b.ordinal,v.chapter,v.number)<=(?,?,?) "
+                  "ORDER BY b.ordinal,v.chapter,v.number LIMIT 8");
+        q.addBindValue(scope.value("_order").toLongLong()/1000000);
+        q.addBindValue(scope.value("chapter")); q.addBindValue(scope.value("start"));
+        q.addBindValue(scope.value("_endOrder").toLongLong()/1000000);
+        q.addBindValue(scope.value("endChapter")); q.addBindValue(scope.value("end"));
+        if (!q.exec()) return {};
+        QString text;
+        while (q.next() && text.size() < 320) { if (!text.isEmpty()) text += ' '; text += q.value(0).toString().simplified(); }
+        return text.size() > 320 ? text.left(319) + QChar(0x2026) : text;
+    }
+};
+bool rangesOverlap(const QVariantMap &a, const QVariantMap &b)
+{
+    return a.value("versionId") == b.value("versionId")
+        && a.value("_order").toLongLong() <= b.value("_endOrder").toLongLong()
+        && b.value("_order").toLongLong() <= a.value("_endOrder").toLongLong();
+}
+QVariantMap publicRange(QVariantMap map) { map.remove("_order"); map.remove("_endOrder"); return map; }
+QString markdownText(const QString &text)
+{
+    QString out;
+    for (const auto c : text) {
+        if (c == '&') out += "&amp;";
+        else if (c == '<') out += "&lt;";
+        else if (c == '>') out += "&gt;";
+        else { if (QStringLiteral("\\`*_{}[]()#+-.!|~").contains(c)) out += '\\'; out += c; }
+    }
+    return out;
+}
 }
 
 int BibleBackend::absoluteVerse(int b, int c, int v) const
@@ -134,6 +260,7 @@ int BibleBackend::absoluteVerse(int b, int c, int v) const
 
 BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 {
+    connect(this, &BibleBackend::selectionChanged, this, &BibleBackend::tagsChanged);
     m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     for (auto *peer : readers) {
         if (peer->m_directory != m_directory) continue;
@@ -284,6 +411,311 @@ void BibleBackend::setStatus(const QString &status)
     if (m_status != status) { m_status = status; emit statusChanged(); }
 }
 QString BibleBackend::dataDirectory() { return m_directory; }
+
+QVariantMap BibleBackend::tagScope() const
+{
+    if (!m_ready || !m_anchor || !m_cursor) return {};
+    const auto a = endpoint(std::min(m_anchor,m_cursor)), z = endpoint(std::max(m_anchor,m_cursor));
+    return {{"versionId",m_versionId},{"reference",selectionReference()},
+        {"book",a.book},{"chapter",a.chapter},{"start",a.verse},
+        {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse}};
+}
+
+bool BibleBackend::validateScope(const QVariantMap &scope, QVariantMap *canonical) const
+{
+    if (!m_storeReady) return false;
+    const QString id = scope.value("versionId").toString(), path = installedPath(id);
+    if (id.isEmpty() || path.isEmpty()) return false;
+    TagBible bible(path,id);
+    QVariantMap result;
+    if (!bible.scope(scope,&result)) return false;
+    if (canonical) *canonical = result;
+    return true;
+}
+
+QVariantList BibleBackend::tags() const
+{
+    if (!m_storeReady) return {};
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT t.id,t.name,COUNT(i.version_id) FROM tags t LEFT JOIN tag_assignments a ON a.tag_id=t.id "
+                "LEFT JOIN installed i ON i.version_id=a.version_id GROUP BY t.id ORDER BY t.name_key,t.id")) return {};
+    QVariantList rows;
+    while (q.next()) rows.append(QVariantMap{{"id",q.value(0)},{"name",q.value(1)},{"count",q.value(2).toInt()}});
+    return q.lastError().isValid() ? QVariantList() : rows;
+}
+
+QVariantList BibleBackend::tagRangeRows(const QString &id, bool excerpts) const
+{
+    if (!m_storeReady || id.isEmpty()) return {};
+    TagBible bible(installedPath(id),id);
+    if (!bible.db.isOpen()) return {};
+    QSqlQuery q(m_store);
+    q.prepare("SELECT a.book,a.chapter,a.start,a.endBook,a.endChapter,a.end,t.id,t.name,i.abbreviation,"
+              "COALESCE(n.bookmark,0),COALESCE(n.highlight,0),COALESCE(n.note,'') "
+              "FROM tag_assignments a JOIN tags t ON t.id=a.tag_id JOIN installed i ON i.version_id=a.version_id "
+              "LEFT JOIN annotations n ON n.version_id=a.version_id AND n.book=a.book AND n.chapter=a.chapter "
+              "AND n.start=a.start AND n.endBook=a.endBook AND n.endChapter=a.endChapter AND n.end=a.end "
+              "WHERE a.version_id=? ORDER BY t.name_key,t.id");
+    q.addBindValue(id);
+    if (!q.exec()) return {};
+    QMap<QString,QVariantMap> ranges;
+    while (q.next()) {
+        QVariantMap scope{{"versionId",id}};
+        for (int i = 0; i < scopeFields.size(); ++i) scope[scopeFields[i]] = q.value(i);
+        const QString key = rangeKey(scope);
+        if (!ranges.contains(key)) {
+            QVariantMap row;
+            if (!bible.scope(scope,&row)) continue;
+            row["versionAbbreviation"] = q.value(8);
+            row["bookmark"] = q.value(9).toBool(); row["highlight"] = q.value(10).toBool(); row["note"] = q.value(11);
+            row["sharedCount"] = 0;
+            row["excerpt"] = excerpts ? bible.excerpt(row) : QString();
+            ranges.insert(key,row);
+        }
+        auto &row = ranges[key];
+        auto assigned = row.value("tags").toList();
+        assigned.append(QVariantMap{{"id",q.value(6)},{"name",q.value(7)}});
+        row["tags"] = assigned;
+    }
+    if (q.lastError().isValid()) return {};
+    QVariantList rows;
+    for (const auto &row : ranges) rows.append(row);
+    std::sort(rows.begin(),rows.end(),[](const QVariant &a, const QVariant &b) {
+        const auto x = a.toMap(), y = b.toMap();
+        return std::make_pair(x.value("_order").toLongLong(),x.value("_endOrder").toLongLong())
+            < std::make_pair(y.value("_order").toLongLong(),y.value("_endOrder").toLongLong());
+    });
+    return rows;
+}
+
+QVariantList BibleBackend::selectionTags() { return tagsForScope(tagScope()); }
+QVariantList BibleBackend::overlappingTags() { return tagsForScope(tagScope(),true); }
+QVariantList BibleBackend::tagsForScope(QVariantMap scope, bool overlapping)
+{
+    QVariantMap canonical;
+    if (!validateScope(scope,&canonical)) return {};
+    QVariantList result;
+    QSet<QString> ids;
+    for (const auto &value : tagRangeRows(canonical.value("versionId").toString(),false)) {
+        const auto row = value.toMap();
+        if (overlapping) {
+            if (rangesOverlap(canonical,row)) result.append(publicRange(row));
+        } else if (rangeKey(canonical) == rangeKey(row)) {
+            for (const auto &tag : row.value("tags").toList()) ids.insert(tag.toMap().value("id").toString());
+        }
+    }
+    if (!overlapping) for (const auto &tag : tags()) if (ids.contains(tag.toMap().value("id").toString())) result.append(tag);
+    return result;
+}
+
+QString BibleBackend::ensureTag(const QString &input)
+{
+    const QString name = normalizedTag(input);
+    if (name.isEmpty()) { setError("Enter a tag name without tabs, newlines or control characters."); return {}; }
+    QSqlQuery q(m_store);
+    q.prepare("SELECT id FROM tags WHERE name_key=?"); q.addBindValue(tagKey(name));
+    if (!q.exec()) { setError("Cannot read tags: " + q.lastError().text()); return {}; }
+    if (q.next()) return q.value(0).toString();
+    const QString id = connectionName();
+    q.prepare("INSERT INTO tags(id,name,name_key) VALUES(?,?,?)");
+    q.addBindValue(id); q.addBindValue(name); q.addBindValue(tagKey(name));
+    if (!q.exec() || q.numRowsAffected() != 1) { setError("Cannot create tag: " + q.lastError().text()); return {}; }
+    q.prepare("SELECT name,name_key FROM tags WHERE id=?"); q.addBindValue(id);
+    if (!q.exec() || !q.next() || q.value(0).toString() != name || q.value(1).toString() != tagKey(name)) {
+        setError("Cannot verify tag creation."); return {};
+    }
+    return id;
+}
+
+bool BibleBackend::writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned)
+{
+    QSqlQuery q(m_store);
+    q.prepare("SELECT id FROM tags WHERE id=?"); q.addBindValue(id);
+    if (!q.exec() || !q.next()) return setError("That tag no longer exists.");
+    q.finish();
+    q.prepare(assigned ? "INSERT INTO tag_assignments(version_id,book,chapter,start,endBook,endChapter,end,tag_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING"
+                       : "DELETE FROM tag_assignments WHERE " + scopeWhere + " AND tag_id=?");
+    bindScope(q,scope); q.addBindValue(id);
+    if (!q.exec()) return setError("Cannot save tag assignment: " + q.lastError().text());
+    q.prepare("SELECT COUNT(*) FROM tag_assignments WHERE " + scopeWhere + " AND tag_id=?");
+    bindScope(q,scope); q.addBindValue(id);
+    if (!q.exec() || !q.next() || q.value(0).toInt() != int(assigned)) return setError("Cannot verify tag assignment.");
+    return true;
+}
+
+void BibleBackend::publishTags()
+{
+    QList<QPointer<BibleBackend>> snapshot;
+    for (auto *peer : readers) if (peer->m_directory == m_directory) snapshot.append(peer);
+    for (const auto &peer : snapshot) if (peer) {
+        peer->refreshCollection();
+        emit peer->tagsChanged();
+    }
+}
+
+bool BibleBackend::commitTagMutation()
+{
+    if (!m_store.commit()) return setError("Cannot commit tags: " + m_store.lastError().text());
+    clearError(); publishTags(); return true;
+}
+
+QString BibleBackend::createTag(QString name)
+{
+    if (!m_storeReady || sharedMutationBusy()) { setError("The personal store is unavailable or busy."); return {}; }
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) { setError(m_store.lastError().text()); return {}; }
+    const QString id = ensureTag(name);
+    return !id.isEmpty() && commitTagMutation() ? id : QString();
+}
+
+bool BibleBackend::setTag(QVariantMap scope, QString id, bool assigned)
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    QVariantMap canonical;
+    if (!validateScope(scope,&canonical)) return setError("That Bible version or passage is no longer available.");
+    return writeTagAssignment(canonical,id,assigned) && commitTagMutation();
+}
+
+QString BibleBackend::createAndAssignTag(QVariantMap scope, QString name)
+{
+    if (!m_storeReady || sharedMutationBusy()) { setError("The personal store is unavailable or busy."); return {}; }
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) { setError(m_store.lastError().text()); return {}; }
+    QVariantMap canonical;
+    if (!validateScope(scope,&canonical)) { setError("That Bible version or passage is no longer available."); return {}; }
+    const QString id = ensureTag(name);
+    return !id.isEmpty() && writeTagAssignment(canonical,id,true) && commitTagMutation() ? id : QString();
+}
+
+bool BibleBackend::renameTag(QString id, QString input)
+{
+    const QString name = normalizedTag(input);
+    if (name.isEmpty()) return setError("Enter a tag name without tabs, newlines or control characters.");
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    QSqlQuery q(m_store);
+    q.prepare("UPDATE tags SET name=?,name_key=? WHERE id=?");
+    q.addBindValue(name); q.addBindValue(tagKey(name)); q.addBindValue(id);
+    if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot rename tag (use Merge for an existing name): " + q.lastError().text());
+    q.prepare("SELECT name,name_key FROM tags WHERE id=?"); q.addBindValue(id);
+    if (!q.exec() || !q.next() || q.value(0).toString() != name || q.value(1).toString() != tagKey(name)) return setError("Cannot verify tag rename.");
+    q.finish();
+    return commitTagMutation();
+}
+
+bool BibleBackend::deleteTag(QString id)
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    QSqlQuery q(m_store);
+    q.prepare("DELETE FROM tags WHERE id=?"); q.addBindValue(id);
+    if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot delete tag: " + q.lastError().text());
+    q.prepare("DELETE FROM tag_assignments WHERE tag_id=?"); q.addBindValue(id);
+    if (!q.exec()) return setError("Cannot delete tag assignments: " + q.lastError().text());
+    q.prepare("SELECT (SELECT COUNT(*) FROM tags WHERE id=?)+(SELECT COUNT(*) FROM tag_assignments WHERE tag_id=?)");
+    q.addBindValue(id); q.addBindValue(id);
+    if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify tag deletion.");
+    q.finish();
+    return commitTagMutation();
+}
+
+bool BibleBackend::mergeTags(QString source, QString target)
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    QSqlQuery q(m_store);
+    q.prepare("SELECT COUNT(*) FROM tags WHERE id IN (?,?)"); q.addBindValue(source); q.addBindValue(target);
+    if (!q.exec() || !q.next() || q.value(0).toInt() != (source == target ? 1 : 2)) return setError("A tag no longer exists.");
+    q.finish();
+    if (source == target) return commitTagMutation();
+    q.prepare("INSERT INTO tag_assignments SELECT version_id,book,chapter,start,endBook,endChapter,end,? FROM tag_assignments WHERE tag_id=? ON CONFLICT DO NOTHING");
+    q.addBindValue(target); q.addBindValue(source);
+    if (!q.exec()) return setError("Cannot merge tags: " + q.lastError().text());
+    q.prepare("SELECT COUNT(*) FROM (SELECT version_id,book,chapter,start,endBook,endChapter,end FROM tag_assignments WHERE tag_id=? EXCEPT SELECT version_id,book,chapter,start,endBook,endChapter,end FROM tag_assignments WHERE tag_id=?)");
+    q.addBindValue(source); q.addBindValue(target);
+    if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify merged assignments.");
+    q.finish();
+    for (const auto &table : {QString("tag_assignments"),QString("tags")}) {
+        const QString where = table == "tags" ? "id=?" : "tag_id=?";
+        q.prepare("DELETE FROM " + table + " WHERE " + where); q.addBindValue(source);
+        if (!q.exec()) return setError("Cannot finish tag merge: " + q.lastError().text());
+        q.prepare("SELECT COUNT(*) FROM " + table + " WHERE " + where); q.addBindValue(source);
+        if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify tag merge.");
+        q.finish();
+    }
+    return commitTagMutation();
+}
+
+QVariantList BibleBackend::taggedPassages(QVariantList tagIds, bool matchAll, QString version)
+{
+    QSet<QString> ids;
+    for (const auto &id : tagIds) if (!id.toString().isEmpty()) ids.insert(id.toString());
+    if (ids.isEmpty() || !m_storeReady) return {};
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT version_id FROM installed ORDER BY version_id")) return {};
+    QStringList versions;
+    while (q.next()) if (version.isEmpty() || version == q.value(0).toString()) versions << q.value(0).toString();
+    if (q.lastError().isValid()) return {};
+    QVariantList result;
+    for (const auto &id : versions) for (const auto &value : tagRangeRows(id,true)) {
+        auto row = value.toMap();
+        int count = 0;
+        for (const auto &tag : row.value("tags").toList()) count += ids.contains(tag.toMap().value("id").toString());
+        if (!count || (matchAll && count != ids.size())) continue;
+        row["sharedCount"] = count; result.append(row);
+    }
+    std::sort(result.begin(),result.end(),[](const QVariant &a, const QVariant &b) {
+        const auto x = a.toMap(), y = b.toMap();
+        return std::make_tuple(-x.value("sharedCount").toInt(),x.value("_order").toLongLong(),x.value("_endOrder").toLongLong(),x.value("versionId").toString())
+            < std::make_tuple(-y.value("sharedCount").toInt(),y.value("_order").toLongLong(),y.value("_endOrder").toLongLong(),y.value("versionId").toString());
+    });
+    for (auto &row : result) row = publicRange(row.toMap());
+    return result;
+}
+
+QVariantList BibleBackend::relatedPassages(QVariantMap source, QVariantList ids, bool matchAll, bool allVersions)
+{
+    QVariantMap canonical;
+    if (!validateScope(source,&canonical)) return {};
+    const QString version = canonical.value("versionId").toString();
+    TagBible bible(installedPath(version),version);
+    QVariantList result;
+    for (const auto &value : taggedPassages(ids,matchAll,allVersions ? QString() : version)) {
+        const auto row = value.toMap();
+        QVariantMap candidate;
+        if (row.value("versionId").toString() == version && bible.scope(row,&candidate) && rangesOverlap(canonical,candidate)) continue;
+        result.append(row);
+    }
+    return result;
+}
+
+bool BibleBackend::openTaggedPassage(QVariantMap scope)
+{
+    if (sharedMutationBusy()) return setError("Wait for the shared library operation to finish.");
+    QVariantMap canonical;
+    if (!validateScope(scope,&canonical)) return setError("That Bible version or passage is no longer available.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_mutating = false; });
+    if (!flushDrafts() || !validateScope(scope,&canonical)) return false;
+    const QString id = canonical.value("versionId").toString();
+    if (id != m_versionId) return changeVersion(id,{}, {},false,false,false,canonical);
+    const int a = absoluteVerse(canonical.value("book").toInt(),canonical.value("chapter").toInt(),canonical.value("start").toInt());
+    const int z = absoluteVerse(canonical.value("endBook").toInt(),canonical.value("endChapter").toInt(),canonical.value("end").toInt());
+    if (!a || z < a) return setError("The tagged passage endpoints are no longer available.");
+    return goToSelection(endpoint(z).book,endpoint(z).chapter,a,z,0);
+}
+
 QString BibleBackend::reference(int b, int c, int start, int end) const
 {
     if (b < 1 || b > BibleBooks::canon().size()) return {};
@@ -400,6 +832,9 @@ bool BibleBackend::initializeStore()
         "CREATE TABLE annotations(book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),bookmark INTEGER NOT NULL CHECK(bookmark IN(0,1)),highlight INTEGER NOT NULL CHECK(highlight IN(0,1)),note TEXT NOT NULL,endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),version_id TEXT NOT NULL,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(bookmark OR highlight OR length(note)>0)) WITHOUT ROWID" <<
         "INSERT INTO annotations SELECT * FROM annotations_v4" <<
         "DROP TABLE annotations_v4" << "PRAGMA user_version=5";
+    schema << "CREATE TABLE IF NOT EXISTS tags(id TEXT PRIMARY KEY,name TEXT NOT NULL,name_key TEXT NOT NULL UNIQUE) WITHOUT ROWID"
+           << "CREATE TABLE IF NOT EXISTS tag_assignments(version_id TEXT NOT NULL,book INTEGER NOT NULL,chapter INTEGER NOT NULL,start INTEGER NOT NULL,endBook INTEGER NOT NULL,endChapter INTEGER NOT NULL,end INTEGER NOT NULL,tag_id TEXT NOT NULL,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end,tag_id)) WITHOUT ROWID"
+           << "CREATE INDEX IF NOT EXISTS tag_assignments_tag ON tag_assignments(tag_id,version_id)";
     for (const auto &sql : schema) {
         if (!q.exec(sql)) { m_store.rollback(); return setError("Cannot initialize notes: " + q.lastError().text()); }
     }
@@ -587,7 +1022,8 @@ bool BibleBackend::removeVersion(QString id, bool removeAnnotations)
 }
 
 bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
-                                const QString &removedId, bool deleteAnnotations, bool startup, bool peerReload)
+                                const QString &removedId, bool deleteAnnotations, bool startup, bool peerReload,
+                                const QVariantMap &targetScope)
 {
     if (!m_storeReady) return setError("Your notes database is unavailable.");
     const QString path = importPath.isEmpty() ? installedPath(id) : importPath;
@@ -689,6 +1125,23 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     }
     if (!m_store.transaction()) return setError("Cannot start library update: " + m_store.lastError().text());
     QSqlQuery q(m_store);
+    // m_keys now belongs to the candidate generation, not the installed file.
+    // Tags-only ranges must gate replacement just like annotated ranges do.
+    // Read every retained assignment, including editions being reinstalled after
+    // removal; missing or reversed endpoints would otherwise disappear in queries.
+    if (!id.isEmpty()) {
+        q.prepare("SELECT DISTINCT book,chapter,start,endBook,endChapter,end FROM tag_assignments WHERE version_id=?");
+        q.addBindValue(id);
+        if (!q.exec()) return setError("Cannot validate retained passage tags: " + q.lastError().text());
+        while (q.next()) {
+            const int first = absoluteVerse(q.value(0).toInt(),q.value(1).toInt(),q.value(2).toInt());
+            const int last = absoluteVerse(q.value(3).toInt(),q.value(4).toInt(),q.value(5).toInt());
+            if (!first || last < first)
+                return setError("This Bible cannot replace the installed edition: a retained tagged passage has missing or reversed endpoints.");
+        }
+        if (q.lastError().isValid()) return setError("Cannot read all retained passage tags: " + q.lastError().text());
+        q.finish();
+    }
     if (!importPath.isEmpty()) {
         q.prepare("INSERT INTO installed(version_id,path,abbreviation,name,copyright) VALUES(?,?,?,?,?) ON CONFLICT(version_id) DO UPDATE SET path=excluded.path,abbreviation=excluded.abbreviation,name=excluded.name,copyright=excluded.copyright");
         q.addBindValue(id); q.addBindValue(QFileInfo(path).fileName()); q.addBindValue(m_abbreviation);
@@ -699,7 +1152,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         q.prepare("DELETE FROM installed WHERE version_id=?"); q.addBindValue(removedId);
         if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot remove Bible version: " + q.lastError().text());
         if (deleteAnnotations) {
-            for (const QString &table : {QString("annotations"),QString("reading")}) {
+            for (const QString &table : {QString("annotations"),QString("reading"),QString("tag_assignments")}) {
                 q.prepare("DELETE FROM " + table + " WHERE version_id=?"); q.addBindValue(removedId);
                 if (!q.exec()) return setError("Cannot remove version annotations: " + q.lastError().text());
                 q.prepare("SELECT COUNT(*) FROM " + table + " WHERE version_id=?"); q.addBindValue(removedId);
@@ -761,6 +1214,12 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
             m_anchor = m_cursor = 0;
         }
         if (fallback || !std::isfinite(m_position) || m_position < 0 || m_position > 1) m_position = 0;
+        if (!targetScope.isEmpty()) {
+            m_anchor = absoluteVerse(targetScope.value("book").toInt(),targetScope.value("chapter").toInt(),targetScope.value("start").toInt());
+            m_cursor = absoluteVerse(targetScope.value("endBook").toInt(),targetScope.value("endChapter").toInt(),targetScope.value("end").toInt());
+            if (!m_anchor || m_cursor < m_anchor) return setError("The tagged passage endpoints are no longer available.");
+            m_book = endpoint(m_cursor).book; m_chapter = endpoint(m_cursor).chapter; m_position = 0; fallback = false;
+        }
         intersectSelection();
         if (!readChapter(m_book,m_chapter,&rows) || !loadAnnotations(&annotations)
             || (!peerReload && !persistState(m_book,m_chapter,m_anchor,m_cursor,m_position))) return false;
@@ -782,7 +1241,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     m_collection = collectionRows(annotations); m_versions = versions;
     blocker.unblock();
     // Direct delivery closes/reloads every peer before obsolete files are unlinked.
-    if (!peerReload) emit sharedCommitted(obsoleteId, true, false);
+    if (!peerReload) { emit sharedCommitted(obsoleteId, true, false); publishTags(); }
     clearError();
     setStatus(fallback ? "The selected endpoint is absent in " + edition() + "; opened " + passage() + " instead."
         : m_ready ? "Ready · " + edition() : "Import a USFM Bible to begin.");
@@ -1159,6 +1618,7 @@ bool BibleBackend::flagCovered(const QVector<Annotation> &annotations, bool high
 }
 void BibleBackend::updateAnnotations()
 {
+    const auto tagged = tagRangeRows(m_versionId,false);
     for (auto &row : m_verses) {
         auto map = row.toMap();
         const int v = absoluteVerse(m_book,m_chapter,map.value("number").toInt());
@@ -1194,6 +1654,18 @@ void BibleBackend::updateAnnotations()
         map["bookmarkContinuesBefore"] = before; map["bookmarkContinuesAfter"] = after;
         map["bookmarkRanges"] = ranges;
         map["noteRanges"] = noteRanges;
+        QVariantList tagRanges;
+        for (const auto &value : tagged) {
+            auto range = value.toMap();
+            const int a = absoluteVerse(range.value("book").toInt(),range.value("chapter").toInt(),range.value("start").toInt());
+            const int z = absoluteVerse(range.value("endBook").toInt(),range.value("endChapter").toInt(),range.value("end").toInt());
+            if (v < a || v > z) continue;
+            range = publicRange(range);
+            range["tagStart"] = v == a; range["tagEnd"] = v == z;
+            range["continuesBefore"] = v > a; range["continuesAfter"] = v < z;
+            tagRanges.append(range);
+        }
+        map["hasTags"] = !tagRanges.isEmpty(); map["tagRanges"] = tagRanges;
         map["highlightStart"] = highlightStart; map["highlightEnd"] = highlightEnd;
         map["highlightContinuesBefore"] = highlightBefore; map["highlightContinuesAfter"] = highlightAfter;
         map["highlightRanges"] = highlightRanges;
@@ -1217,9 +1689,26 @@ QVariantList BibleBackend::collectionRows(const QVector<Annotation> &rows) const
         const auto start = endpoint(a.start), end = endpoint(a.end);
         collection.append(QVariantMap{{"book",start.book},{"chapter",start.chapter},
             {"start",start.verse},{"end",end.verse},{"endBook",end.book},{"endChapter",end.chapter},
-            {"reference",rangeReference(a.start,a.end)},
+            {"reference",rangeReference(a.start,a.end)},{"versionId",m_versionId},
+            {"versionAbbreviation",m_abbreviation},{"tags",QVariantList()},
             {"bookmark",a.bookmark},{"highlight",a.highlight},{"note",a.note}});
     }
+    for (const auto &value : tagRangeRows(m_versionId,false)) {
+        const auto tagged = publicRange(value.toMap());
+        auto found = std::find_if(collection.begin(),collection.end(),[&](const QVariant &row) {
+            return rangeKey(row.toMap()) == rangeKey(tagged);
+        });
+        if (found == collection.end()) collection.append(tagged);
+        else { auto row = found->toMap(); row["tags"] = tagged.value("tags"); *found = row; }
+    }
+    std::sort(collection.begin(),collection.end(),[this](const QVariant &a, const QVariant &b) {
+        auto order = [this](const QVariant &v) {
+            const auto r = v.toMap();
+            return std::make_pair(absoluteVerse(r.value("book").toInt(),r.value("chapter").toInt(),r.value("start").toInt()),
+                absoluteVerse(r.value("endBook").toInt(),r.value("endChapter").toInt(),r.value("end").toInt()));
+        };
+        return order(a) < order(b);
+    });
     return collection;
 }
 
@@ -1250,16 +1739,24 @@ bool BibleBackend::saveAnnotations(const QVector<Annotation> &annotations)
         q.bindValue(9,m_versionId);
         if (!q.exec()) return setError("Cannot save annotations: " + q.lastError().text());
     }
+    QVector<Annotation> verified;
+    if (!loadAnnotations(&verified)) return false;
+    if (verified.size() != merged.size()) return setError("Cannot verify saved annotations.");
+    for (const auto &a : verified) {
+        const auto it = merged.constFind(QString("%1:%2").arg(a.start).arg(a.end));
+        if (it == merged.cend() || it->bookmark != a.bookmark || it->highlight != a.highlight || it->note != a.note)
+            return setError("Cannot verify saved annotations.");
+    }
     return true;
 }
 
-void BibleBackend::toggleFlag(bool highlight)
+bool BibleBackend::toggleFlag(bool highlight)
 {
-    if (!requireReady()) return;
-    if (!m_start) { setError("Select one or more verses first."); return; }
-    if (!m_store.transaction()) { setError("Cannot start annotation save: " + m_store.lastError().text()); return; }
+    if (!requireReady()) return false;
+    if (!m_start) return setError("Select one or more verses first.");
+    if (!m_store.transaction()) return setError("Cannot start annotation save: " + m_store.lastError().text());
     QVector<Annotation> rows;
-    if (!loadAnnotations(&rows)) { m_store.rollback(); return; }
+    if (!loadAnnotations(&rows)) { m_store.rollback(); return false; }
     const bool covered = flagCovered(rows,highlight);
     const int start = std::min(m_anchor,m_cursor), end = std::max(m_anchor,m_cursor);
     if (covered) {
@@ -1273,7 +1770,7 @@ void BibleBackend::toggleFlag(bool highlight)
         }
         rows += pieces;
     } else rows.append({start,end,!highlight,highlight,{}});
-    commitAnnotations(rows);
+    return commitAnnotations(rows);
 }
 bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows)
 {
@@ -1285,8 +1782,8 @@ bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows)
     publishAnnotations();
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
 }
-void BibleBackend::toggleBookmark() { toggleFlag(false); }
-void BibleBackend::toggleHighlight() { toggleFlag(true); }
+bool BibleBackend::toggleBookmark() { return toggleFlag(false); }
+bool BibleBackend::toggleHighlight() { return toggleFlag(true); }
 
 void BibleBackend::setNoteText(QString text)
 {
@@ -1324,26 +1821,36 @@ bool BibleBackend::deleteAnnotation(QString input, QString expectedVersionId)
     QString error;
     if (!parseReference(input,&b,&c,&first,&last,&error)) return setError(error);
     if (!first) return setError("Choose an exact saved verse range to delete.");
-    if (!m_store.transaction()) return setError("Cannot start annotation deletion: " + m_store.lastError().text());
     const auto a = endpoint(first), z = endpoint(last);
+    return deleteAnnotationScope({{"versionId",m_versionId},{"book",a.book},{"chapter",a.chapter},{"start",a.verse},
+        {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse}});
+}
+
+bool BibleBackend::deleteAnnotationScope(QVariantMap scope)
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError("Cannot start annotation deletion: " + m_store.lastError().text());
+    QVariantMap canonical;
+    if (!validateScope(scope,&canonical)) return setError("That Bible version or passage is no longer available.");
     QSqlQuery q(m_store);
-    q.prepare("DELETE FROM annotations WHERE book=? AND chapter=? AND start=? AND endBook=? AND endChapter=? AND end=? AND version_id=?");
-    q.addBindValue(a.book); q.addBindValue(a.chapter); q.addBindValue(a.verse);
-    q.addBindValue(z.book); q.addBindValue(z.chapter); q.addBindValue(z.verse);
-    q.addBindValue(m_versionId);
-    if (!q.exec()) { m_store.rollback(); return setError("Cannot delete annotation: " + q.lastError().text()); }
-    if (q.numRowsAffected() != 1) { m_store.rollback(); return setError("No saved annotation exists for that exact range."); }
-    q.finish();
-    QVector<Annotation> saved;
-    if (!loadAnnotations(&saved)) { m_store.rollback(); return false; }
-    for (const auto &row : saved) {
-        if (row.start == first && row.end == last) {
-            m_store.rollback(); return setError("Cannot verify annotation deletion.");
-        }
+    qint64 deleted = 0;
+    for (const auto &table : {QString("annotations"),QString("tag_assignments")}) {
+        q.prepare("DELETE FROM " + table + " WHERE " + scopeWhere); bindScope(q,canonical);
+        if (!q.exec()) return setError("Cannot delete saved passage: " + q.lastError().text());
+        deleted += q.numRowsAffected();
+        q.prepare("SELECT COUNT(*) FROM " + table + " WHERE " + scopeWhere); bindScope(q,canonical);
+        if (!q.exec() || !q.next() || q.value(0).toLongLong()) return setError("Cannot verify saved passage deletion.");
+        q.finish();
     }
-    if (!m_store.commit()) { m_store.rollback(); return setError("Cannot commit annotation deletion: " + m_store.lastError().text()); }
+    if (!deleted) return setError("No saved annotation exists for that exact range.");
+    QVector<Annotation> saved;
+    if (!loadAnnotations(&saved)) return false;
+    if (!m_store.commit()) return setError("Cannot commit annotation deletion: " + m_store.lastError().text());
     m_annotations = saved; m_collection = collectionRows(saved);
-    publishAnnotations();
+    emit sharedCommitted(canonical.value("versionId").toString(),false,false);
+    publishTags();
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
 }
 
@@ -1417,13 +1924,17 @@ bool BibleBackend::exportNotes(QUrl directory)
     if (!loadAnnotations(&rows)) return false;
     // The export filename remains stable for existing scripts and consumers.
     QString markdown = "# " + Brand::name() + " notes\n\nEdition: " + edition() + " (" + versionId() + ")\n\n";
-    for (const auto &a : rows) {
-        markdown += "## " + rangeReference(a.start,a.end) + "\n\n";
+    for (const auto &value : collectionRows(rows)) {
+        const auto a = value.toMap();
+        markdown += "## " + markdownText(a.value("reference").toString()) + "\n\n";
         QStringList flags;
-        if (a.bookmark) flags << "Bookmark";
-        if (a.highlight) flags << "Highlight";
+        if (a.value("bookmark").toBool()) flags << "Bookmark";
+        if (a.value("highlight").toBool()) flags << "Highlight";
         if (!flags.isEmpty()) markdown += "*" + flags.join(" · ") + "*\n\n";
-        if (!a.note.isEmpty()) markdown += a.note + "\n\n";
+        QStringList names;
+        for (const auto &tag : a.value("tags").toList()) names << markdownText(tag.toMap().value("name").toString());
+        if (!names.isEmpty()) markdown += "Tags: " + names.join(" · ") + "\n\n";
+        if (!a.value("note").toString().isEmpty()) markdown += a.value("note").toString() + "\n\n";
     }
     QString error;
     if (!writeAtomic(QDir(path).filePath("omaword-notes.md"),markdown.toUtf8(),&error))
@@ -1495,6 +2006,22 @@ bool BibleBackend::exportBackup(QUrl file)
         {"anchorBook",q.value(5).toInt()},{"anchorChapter",q.value(6).toInt()},
         {"cursorBook",q.value(7).toInt()},{"cursorChapter",q.value(8).toInt()}};
     q.finish();
+    QJsonArray tagDefinitions, assignments;
+    q.prepare("SELECT DISTINCT t.id,t.name FROM tags t JOIN tag_assignments a ON a.tag_id=t.id WHERE a.version_id=? ORDER BY t.id");
+    q.addBindValue(m_versionId);
+    if (!q.exec()) { m_store.rollback(); return setError("Cannot read backup tags: " + q.lastError().text()); }
+    while (q.next()) tagDefinitions.append(QJsonObject{{"id",q.value(0).toString()},{"name",q.value(1).toString()}});
+    if (q.lastError().isValid()) { m_store.rollback(); return setError("Cannot read complete backup tags."); }
+    q.prepare("SELECT book,chapter,start,endBook,endChapter,end,tag_id FROM tag_assignments WHERE version_id=? ORDER BY book,chapter,start,endBook,endChapter,end,tag_id");
+    q.addBindValue(m_versionId);
+    if (!q.exec()) { m_store.rollback(); return setError("Cannot read backup tag assignments: " + q.lastError().text()); }
+    while (q.next()) {
+        QJsonObject assignment;
+        for (int i = 0; i < scopeFields.size(); ++i) assignment[scopeFields[i]] = q.value(i).toInt();
+        assignment["tagId"] = q.value(6).toString(); assignments.append(assignment);
+    }
+    if (q.lastError().isValid()) { m_store.rollback(); return setError("Cannot read complete backup tag assignments."); }
+    q.finish();
     if (!m_store.commit()) { m_store.rollback(); return setError("Cannot finish reading the backup: " + m_store.lastError().text()); }
     QJsonArray annotations;
     for (const auto &a : rows) {
@@ -1503,8 +2030,9 @@ bool BibleBackend::exportBackup(QUrl file)
             {"start",start.verse},{"end",end.verse},{"endBook",end.book},{"endChapter",end.chapter},
             {"bookmark",a.bookmark},{"highlight",a.highlight},{"note",a.note}});
     }
-    const QJsonObject root{{"format","omaword-backup"},{"version",3},{"edition",edition()},{"versionId",versionId()},
-        {"created",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}, {"reading",reading},{"annotations",annotations}};
+    const QJsonObject root{{"format","omaword-backup"},{"version",4},{"edition",edition()},{"versionId",versionId()},
+        {"created",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}, {"reading",reading},{"annotations",annotations},
+        {"tags",tagDefinitions},{"tagAssignments",assignments}};
     const QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (bytes.size() > MaximumBackupSize) return setError("This backup exceeds the supported 32 MiB size. Export Markdown notes instead.");
     QString error;
@@ -1515,6 +2043,7 @@ bool BibleBackend::exportBackup(QUrl file)
 bool BibleBackend::importBackup(QUrl file)
 {
     if (!requireReady()) return false;
+    const QString restoreVersion = m_versionId;
     if (sharedMutationBusy()) return setError("Wait for the shared library operation to finish before restoring annotations.");
     const QString path = localPath(file);
     if (path.isEmpty()) return false;
@@ -1529,9 +2058,11 @@ bool BibleBackend::importBackup(QUrl file)
     if (!uniqueJsonKeys(bytes)) return setError("The backup contains duplicate JSON fields.");
     const auto root = document.object();
     QStringList rootKeys{"format","version","edition","created","reading","annotations","versionId"};
+    const bool withTags = root.value("version").toInt() == 4;
+    if (withTags) rootKeys << "tags" << "tagAssignments";
     if (!exactKeys(root,rootKeys)
         || root.value("format") != "omaword-backup"
-        || !integer(root.value("version"),3,3)
+        || !integer(root.value("version"),3,4)
         || !root.value("edition").isString() || !root.value("created").isString()
         || !QDateTime::fromString(root.value("created").toString(),Qt::ISODateWithMs).isValid()
         || !root.value("reading").isObject() || !root.value("annotations").isArray())
@@ -1580,12 +2111,78 @@ bool BibleBackend::importBackup(QUrl file)
         if (ranges.contains(key)) return setError("The backup contains duplicate annotation ranges.");
         ranges.insert(key); rows.append(a);
     }
+    QMap<QString,QString> definitions;
+    QVariantList assignments;
+    if (withTags) {
+        if (!root.value("tags").isArray() || !root.value("tagAssignments").isArray()
+            || root.value("tags").toArray().size() > 100000 || root.value("tagAssignments").toArray().size() > 100000)
+            return setError("The backup contains invalid or excessive tags.");
+        QSet<QString> names, used, assignmentKeys;
+        for (const auto &value : root.value("tags").toArray()) {
+            const auto object = value.toObject();
+            const QString id = object.value("id").toString(), name = normalizedTag(object.value("name").toString());
+            if (!value.isObject() || !exactKeys(object,{"id","name"}) || !object.value("id").isString()
+                || id.isEmpty() || id.size() > 4096 || !safeString(id) || !object.value("name").isString() || name.isEmpty()
+                || definitions.contains(id) || names.contains(tagKey(name))) return setError("The backup contains invalid or duplicate tag definitions.");
+            definitions[id] = name; names.insert(tagKey(name));
+        }
+        for (const auto &value : root.value("tagAssignments").toArray()) {
+            const auto object = value.toObject();
+            const QString id = object.value("tagId").toString();
+            auto keys = scopeFields; keys << "tagId";
+            QVariantMap scope = object.toVariantMap(), canonical;
+            scope["versionId"] = restoreVersion;
+            if (!value.isObject() || !exactKeys(object,keys) || !definitions.contains(id) || !validateScope(scope,&canonical))
+                return setError("The backup contains an invalid tag assignment.");
+            const QString key = rangeKey(canonical) + ':' + id;
+            if (assignmentKeys.contains(key)) return setError("The backup contains duplicate tag assignments.");
+            assignmentKeys.insert(key); used.insert(id);
+            canonical["tagId"] = id; assignments.append(canonical);
+        }
+        if (used.size() != definitions.size()) return setError("The scoped backup contains unused tag definitions.");
+    }
     // Restore is replacement, not a lossy merge. Validation precedes all writes;
     // notes, flags and reading state commit together or not at all.
     m_mutating = true;
     const auto guard = qScopeGuard([this] { m_mutating = false; });
     if (!flushDrafts()) return false;
+    if (m_versionId != restoreVersion || installedPath(restoreVersion).isEmpty()) return setError("The Bible version changed before restore. Open the backup again.");
     if (!m_store.transaction()) return setError("Cannot start backup restore: " + m_store.lastError().text());
+    const auto rollback = qScopeGuard([this] { m_store.rollback(); });
+    if (withTags) {
+        QSqlQuery q(m_store);
+        q.prepare("DELETE FROM tag_assignments WHERE version_id=?"); q.addBindValue(restoreVersion);
+        if (!q.exec()) return setError("Cannot replace backup tags: " + q.lastError().text());
+        q.prepare("SELECT COUNT(*) FROM tag_assignments WHERE version_id=?"); q.addBindValue(restoreVersion);
+        if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify backup tag replacement.");
+        q.finish();
+        // Names define global identity. Never rename or delete a global definition
+        // to accommodate an old backup ID: other editions may still use it.
+        QMap<QString,QString> ids;
+        for (auto it = definitions.cbegin(); it != definitions.cend(); ++it) {
+            q.prepare("SELECT id FROM tags WHERE id=? OR name_key=?"); q.addBindValue(it.key()); q.addBindValue(tagKey(it.value()));
+            if (!q.exec()) return setError("Cannot inspect restored tag identity: " + q.lastError().text());
+            const bool existing = q.next(); q.finish();
+            QString id;
+            if (existing) id = ensureTag(it.value());
+            else {
+                id = it.key();
+                q.prepare("INSERT INTO tags(id,name,name_key) VALUES(?,?,?)");
+                q.addBindValue(id); q.addBindValue(it.value()); q.addBindValue(tagKey(it.value()));
+                if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot restore tag definition: " + q.lastError().text());
+                q.prepare("SELECT name,name_key FROM tags WHERE id=?"); q.addBindValue(id);
+                if (!q.exec() || !q.next() || q.value(0).toString() != it.value() || q.value(1).toString() != tagKey(it.value()))
+                    return setError("Cannot verify restored tag definition.");
+                q.finish();
+            }
+            if (id.isEmpty()) return false;
+            ids[it.key()] = id;
+        }
+        for (const auto &value : assignments) {
+            const auto scope = value.toMap();
+            if (!writeTagAssignment(scope,ids.value(scope.value("tagId").toString()),true)) return false;
+        }
+    }
     const double position = reading.value("position").toDouble();
     QVariantList chapterRows;
     QVector<Annotation> savedRows;
@@ -1599,6 +2196,7 @@ bool BibleBackend::importBackup(QUrl file)
     intersectSelection();
     m_verses = chapterRows; m_annotations = savedRows; m_collection = savedCollection;
     publishAnnotations();
+    if (withTags) publishTags();
     updateAnnotations(); emit collectionChanged();
     emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
     clearError(); setStatus(QString("Restored %1 annotations from backup.").arg(rows.size())); return true;
