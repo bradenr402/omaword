@@ -78,12 +78,13 @@ class RangesUiTest : public QObject
     }
     void open(const QVariant &scope, const QString &kind = {}) {
         QVERIFY(QMetaObject::invokeMethod(window, "openRangeEditor", Q_ARG(QVariant, scope), Q_ARG(QVariant, kind)));
-        QTRY_VERIFY(prop("visibleModal").toBool());
+        QTRY_VERIFY(prop("visibleModal").toBool() || prop("active").toBool());
         QTest::qWait(60);
     }
     void begin() {
         QTest::qWait(60); // Polish the component form after replacing the range list.
-        click("rangeContinue"); QTRY_VERIFY(prop("active").toBool()); QTRY_VERIFY(!prop("visibleModal").toBool());
+        if (!prop("active").toBool()) click("rangeContinue");
+        QTRY_VERIFY(prop("active").toBool()); QTRY_VERIFY(!prop("visibleModal").toBool());
         QTRY_VERIFY(window->property("readerKeys").toBool()); call(window, "readerFocus");
     }
     void sql(const QString &statement) {
@@ -130,6 +131,8 @@ private slots:
         const auto one = bible->createAndAssignTag(source, "One"), two = bible->createAndAssignTag(source, "Two");
         QVERIFY(!one.isEmpty() && !two.isEmpty());
         open(source, kind);
+        QVERIFY(prop("visibleModal").toBool()); QVERIFY(!prop("active").toBool());
+        QCOMPARE(prop("presentKinds").toList().size(), 4);
         if (kind == "tag") click("rangeTag:" + two); // Move a selected tag subset.
         begin();
         QVERIFY(!window->property("verseMode").toBool());
@@ -161,7 +164,9 @@ private slots:
         const auto collection = bible->collection(); QSignalSpy commits(bible.get(), &BibleBackend::sharedCommitted);
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("visibleModal").toBool()); QTest::qWait(60);
         QCOMPARE(prop("ranges").toList().size(), 2); QVERIFY(prop("source").isNull());
-        click("rangeChoice:" + second.value("reference").toString()); begin();
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("Arrows move · Enter select range · Esc Cancel"));
+        click("rangeChoice:" + second.value("reference").toString());
+        QVERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool()); begin();
         QCOMPARE(bible->tagScope(), second); key(Qt::Key_J); key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("sessionOpen").toBool()); QCOMPARE(bible->tagScope(), original); QCOMPARE(bible->collection(), collection); QCOMPARE(commits.count(), 0);
         open(first); begin(); key(Qt::Key_Return); QTRY_VERIFY(!prop("sessionOpen").toBool()); QCOMPARE(commits.count(), 0);
@@ -251,12 +256,13 @@ private slots:
         navigate("John 3:8"); QVERIFY(bible->toggleBookmark());
         key(Qt::Key_A, Qt::ControlModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         item("savedEditRange:" + source.value("reference").toString())->forceActiveFocus();
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("visibleModal").toBool());
+        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("active").toBool());
+        QVERIFY(!prop("visibleModal").toBool());
         QCOMPARE(prop("source").toMap().value("scope").toMap().value("start").toInt(), 2);
         begin(); key(Qt::Key_Escape); QCOMPARE(bible->cursorVerse(), 8);
     }
     void chooserEmptyAndBulkMotion() {
-        QVERIFY(bible->toggleHighlight()); const auto scope = bible->tagScope();
+        QVERIFY(bible->toggleHighlight()); QVERIFY(bible->toggleBookmark()); const auto scope = bible->tagScope();
         open(scope, "highlight"); click("rangeComponent:highlight"); QVERIFY(!item("rangeContinue")->isEnabled());
         key(Qt::Key_J); QCOMPARE(bible->tagScope(), scope);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("sessionOpen").toBool());
@@ -267,7 +273,7 @@ private slots:
         key(Qt::Key_PageUp); QCOMPARE(bible->chapter(), 3); QCOMPARE(bible->cursorVerse(), 12);
         key(Qt::Key_O); key(Qt::Key_Down); QCOMPARE(bible->tagScope().value("start").toInt(), 3);
         key(Qt::Key_Escape); QCOMPARE(bible->tagScope(), scope);
-        QVERIFY(bible->toggleBookmark()); bible->setNoteText("Everything");
+        bible->setNoteText("Everything");
         const auto tag = bible->createAndAssignTag(scope, "<b>Literal tag</b>"); QVERIFY(!tag.isEmpty());
         open(scope, "highlight");
         QVERIFY(!prop("components").toMap().value("bookmark").toBool());
@@ -356,6 +362,186 @@ private slots:
         key(Qt::Key_K); key(Qt::Key_K); QCOMPARE(prop("endpoint").toString(), QString("start"));
         key(Qt::Key_Escape);
     }
+    void singleTypeSkipsChooser_data() {
+        QTest::addColumn<QString>("kind");
+        for (const auto &kind : {"bookmark", "highlight", "note", "tags"}) QTest::newRow(kind) << QString(kind);
+    }
+    void singleTypeSkipsChooser() {
+        QFETCH(QString, kind);
+        if (kind == "bookmark") QVERIFY(bible->toggleBookmark());
+        if (kind == "highlight") QVERIFY(bible->toggleHighlight());
+        if (kind == "note") bible->setNoteText("Only note");
+        const auto source = bible->tagScope();
+        if (kind == "tags") {
+            QVERIFY(!bible->createAndAssignTag(source, "First").isEmpty());
+            QVERIFY(!bible->createAndAssignTag(source, "Second").isEmpty());
+        }
+        const auto snapshot = bible->annotationSnapshot(source);
+        QSignalSpy commits(bible.get(), &BibleBackend::sharedCommitted);
+        open(source, "unrelated"); // One present type wins even over an absent context.
+        QVERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
+        QCOMPARE(prop("presentKinds").toList(), QVariantList{kind});
+        QCOMPARE(bible->annotationSnapshot(source), snapshot); QCOMPARE(commits.count(), 0);
+        if (kind == "tags") QCOMPARE(prop("components").toMap().value("tags").toList().size(), 2);
+        else QVERIFY(prop("components").toMap().value(kind).toBool());
+        key(Qt::Key_J); const auto destination = bible->tagScope();
+        key(Qt::Key_Return); QTRY_VERIFY(!prop("sessionOpen").toBool());
+        const auto moved = bible->annotationSnapshot(destination), old = bible->annotationSnapshot(source);
+        if (kind == "tags") {
+            QCOMPARE(bible->tagsForScope(destination).size(), 2); QVERIFY(bible->tagsForScope(source).isEmpty());
+        } else {
+            QCOMPARE(moved.value(kind), snapshot.value(kind));
+            QVERIFY(kind == "note" ? old.value(kind).toString().isEmpty() : !old.value(kind).toBool());
+        }
+    }
+    void chooserKeyboardAndRollback() {
+        QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight()); bible->setNoteText("Original note");
+        const auto source = bible->tagScope();
+        const auto one = bible->createAndAssignTag(source, "One"), two = bible->createAndAssignTag(source, "Two");
+        QVERIFY(!one.isEmpty() && !two.isEmpty());
+        const auto snapshot = bible->annotationSnapshot(source);
+        const auto collection = bible->collection();
+        navigate("John 4:3-6"); bible->selectVerses(6, 3); window->setProperty("verseMode", true);
+        const auto initial = bible->tagScope();
+        open(source, "bookmark");
+        QVERIFY(prop("visibleModal").toBool()); QVERIFY(!prop("active").toBool());
+        const auto original = prop("original"), frozenSource = prop("source");
+        QCOMPARE(item("rangeSelectAll")->property("text").toString(), QString("Select all components"));
+        key(Qt::Key_A); QVERIFY(prop("allSelected").toBool());
+        QCOMPARE(item("rangeSelectAll")->property("text").toString(), QString("Deselect all components"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("m bookmark · x highlight · t tags · n note · Arrows move · Space toggle · a deselect all · Enter Continue · Esc Cancel"));
+        key(Qt::Key_A); QVERIFY(!prop("hasComponents").toBool()); QVERIFY(!item("rangeContinue")->isEnabled());
+        key(Qt::Key_A); QVERIFY(prop("allSelected").toBool());
+        click("rangeSelectAll"); QVERIFY(!prop("hasComponents").toBool()); QVERIFY(!item("rangeContinue")->isEnabled());
+        key(Qt::Key_Return); QVERIFY(!prop("active").toBool()); QVERIFY(prop("visibleModal").toBool());
+        const QStringList rows = {"rangeComponent:bookmark", "rangeComponent:highlight", "rangeComponent:note", "rangeTag:" + one, "rangeTag:" + two};
+        for (int i = 0; i < rows.size(); ++i) {
+            QTRY_VERIFY(item(rows[i])->hasActiveFocus());
+            key(Qt::Key_Space);
+            for (int j = 0; j < rows.size(); ++j) QCOMPARE(item(rows[j])->property("checked").toBool(), j <= i);
+            if (i + 1 < rows.size()) key(Qt::Key_Down);
+        }
+        key(Qt::Key_Up); QVERIFY(item(rows[3])->hasActiveFocus());
+        key(Qt::Key_Space); QCOMPARE(prop("components").toMap().value("tags").toList(), QVariantList{two});
+        key(Qt::Key_T); QCOMPARE(prop("components").toMap().value("tags").toList().size(), 2);
+        key(Qt::Key_T); QVERIFY(prop("components").toMap().value("tags").toList().isEmpty());
+        key(Qt::Key_M); key(Qt::Key_X); key(Qt::Key_N); QVERIFY(!prop("hasComponents").toBool());
+        key(Qt::Key_N); key(Qt::Key_X); key(Qt::Key_M); key(Qt::Key_T); QVERIFY(prop("allSelected").toBool());
+        key(Qt::Key_Right); QVERIFY(item(rows[4])->hasActiveFocus());
+        key(Qt::Key_Left); QVERIFY(item(rows[3])->hasActiveFocus());
+        const auto selected = prop("components");
+        key(Qt::Key_J); key(Qt::Key_Z); QCOMPARE(prop("components"), selected); QCOMPARE(bible->tagScope(), initial);
+        QCOMPARE(prop("source"), frozenSource); QCOMPARE(prop("original"), original);
+        QCOMPARE(bible->annotationSnapshot(source), snapshot); QCOMPARE(bible->collection(), collection);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("sessionOpen").toBool());
+        QCOMPARE(bible->tagScope(), initial); QCOMPARE(bible->cursorVerse(), 3); QVERIFY(window->property("verseMode").toBool());
+        QCOMPARE(bible->annotationSnapshot(source), snapshot); QCOMPARE(bible->collection(), collection);
+    }
+    void chooserPresentOnlyAndEnter_data() {
+        QTest::addColumn<bool>("cancelFocus");
+        QTest::newRow("checkbox-return") << false; QTest::newRow("cancel-enter") << true;
+    }
+    void chooserPresentOnlyAndEnter() {
+        QFETCH(bool, cancelFocus);
+        QVERIFY(bible->toggleHighlight()); bible->setNoteText("Note"); const auto source = bible->tagScope();
+        const auto snapshot = bible->annotationSnapshot(source);
+        open(source, "highlight"); QVERIFY(prop("visibleModal").toBool());
+        QVERIFY(!item("rangeComponent:bookmark")); QCOMPARE(prop("componentRows").toList().size(), 2);
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("x highlight · n note · Arrows move · Space toggle · a select all · Enter Continue · Esc Cancel"));
+        const auto selected = prop("components");
+        key(Qt::Key_M); key(Qt::Key_T); key(Qt::Key_Z); QCOMPARE(prop("components"), selected);
+        auto target = item(cancelFocus ? "rangeChooserCancel" : "rangeComponent:highlight"); QVERIFY(target); target->forceActiveFocus();
+        key(cancelFocus ? Qt::Key_Enter : Qt::Key_Return);
+        QTRY_VERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
+        QCOMPARE(prop("components"), selected); QCOMPARE(bible->annotationSnapshot(source), snapshot);
+        QTRY_VERIFY(window->property("readerKeys").toBool());
+        key(Qt::Key_J); QCOMPARE(bible->selectedEnd(), 5);
+        key(Qt::Key_Escape); QCOMPARE(bible->tagScope(), source); QCOMPARE(bible->annotationSnapshot(source), snapshot);
+    }
+    void chooserAbsentHighlightAndNote() {
+        QVERIFY(bible->toggleBookmark()); const auto source = bible->tagScope();
+        const auto tag = bible->createAndAssignTag(source, "Only tag"); QVERIFY(!tag.isEmpty());
+        open(source); QVERIFY(prop("visibleModal").toBool());
+        QVERIFY(!item("rangeComponent:highlight")); QVERIFY(!item("rangeComponent:note"));
+        QVERIFY(item("rangeComponent:bookmark")); QVERIFY(item("rangeTag:" + tag));
+        QCOMPARE(prop("componentRows").toList().size(), 2);
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("m bookmark · t tags · Arrows move · Space toggle · a deselect all · Enter Continue · Esc Cancel"));
+        const auto selected = prop("components"); key(Qt::Key_X); key(Qt::Key_N); QCOMPARE(prop("components"), selected);
+        click("rangeChooserCancel"); QVERIFY(!prop("sessionOpen").toBool()); QCOMPARE(bible->tagScope(), source);
+    }
+    void sourceChooserKeyboardThenSkip_data() {
+        QTest::addColumn<bool>("mixed");
+        QTest::newRow("only-tags-skip") << false; QTest::newRow("mixed-choose-components") << true;
+    }
+    void sourceChooserKeyboardThenSkip() {
+        QFETCH(bool, mixed);
+        QVERIFY(bible->toggleBookmark()); const auto first = bible->tagScope();
+        navigate("John 3:3-5"); const auto second = bible->tagScope();
+        QVERIFY(!bible->createAndAssignTag(second, "One").isEmpty());
+        QVERIFY(!bible->createAndAssignTag(second, "Two").isEmpty());
+        if (mixed) QVERIFY(bible->toggleHighlight());
+        navigate("John 3:3"); const auto initial = bible->tagScope(); const auto collection = bible->collection();
+        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("visibleModal").toBool()); QTest::qWait(60);
+        QCOMPARE(prop("ranges").toList().size(), 2); QVERIFY(prop("source").isNull()); QVERIFY(!prop("active").toBool());
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("Arrows move · Enter select range · Esc Cancel"));
+        auto firstRow = item("rangeChoice:" + first.value("reference").toString()); QVERIFY(firstRow); QVERIFY(firstRow->hasActiveFocus());
+        key(Qt::Key_Down); auto secondRow = item("rangeChoice:" + second.value("reference").toString()); QVERIFY(secondRow); QVERIFY(secondRow->hasActiveFocus());
+        key(Qt::Key_Return);
+        if (mixed) {
+            QVERIFY(prop("visibleModal").toBool()); QVERIFY(!prop("active").toBool());
+            QCOMPARE(prop("source").toMap().value("scope").toMap(), second);
+            QCOMPARE(prop("presentKinds").toList().size(), 2);
+            QTRY_VERIFY(item("rangeComponent:highlight") && item("rangeComponent:highlight")->hasActiveFocus());
+            key(Qt::Key_Return);
+        }
+        QTRY_VERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
+        QCOMPARE(bible->tagScope(), second); QCOMPARE(prop("components").toMap().value("tags").toList().size(), 2);
+        QCOMPARE(bible->collection(), collection); key(Qt::Key_Escape); QCOMPARE(bible->tagScope(), initial);
+    }
+    void singleTypeBeginFailureShowsChooser() {
+        QVERIFY(bible->toggleBookmark()); const auto source = bible->tagScope();
+        navigate("John 4:3-6"); const auto initial = bible->tagScope(); const auto collection = bible->collection();
+        sql("CREATE TRIGGER fail_reading BEFORE UPDATE ON reading BEGIN SELECT RAISE(ABORT,'begin fixture failure'); END");
+        open(source); QVERIFY(!prop("active").toBool()); QVERIFY(prop("visibleModal").toBool());
+        QVERIFY(prop("message").toString().contains("begin fixture failure"));
+        const auto snapshot = prop("source");
+        QTest::qWait(100); QVERIFY(!prop("active").toBool()); QCOMPARE(prop("source"), snapshot); QCOMPARE(bible->collection(), collection);
+        sql("DROP TRIGGER fail_reading"); key(Qt::Key_Return); QTRY_VERIFY(prop("active").toBool());
+        QVERIFY(prop("message").toString().isEmpty());
+        key(Qt::Key_Escape); QCOMPARE(bible->tagScope(), initial);
+        auto invalid = source; invalid["end"] = 99;
+        open(invalid); QVERIFY(prop("visibleModal").toBool()); QVERIFY(!prop("active").toBool());
+        QVERIFY(prop("source").isNull()); QVERIFY(!prop("message").toString().isEmpty());
+        QTest::qWait(100); QVERIFY(prop("visibleModal").toBool()); QVERIFY(!prop("active").toBool());
+        QCOMPARE(bible->tagScope(), initial); QCOMPARE(bible->collection(), collection);
+        key(Qt::Key_Escape); QVERIFY(!prop("sessionOpen").toBool());
+    }
+    void chooserGeometry_data() {
+        QTest::addColumn<double>("scale"); QTest::addColumn<QSize>("size");
+        QTest::newRow("normal") << 1.0 << QSize(1000, 760);
+        QTest::newRow("scaled-narrow") << 1.8 << QSize(640, 480);
+    }
+    void chooserGeometry() {
+        QFETCH(double, scale); QFETCH(QSize, size);
+        desktop->setProperty("textScale", scale); window->setMinimumSize(QSize(0, 0)); window->resize(size);
+        QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight()); bible->setNoteText("Note");
+        const auto source = bible->tagScope();
+        for (int i = 0; i < 8; ++i) QVERIFY(!bible->createAndAssignTag(source, QString("Tag %1 with a descriptive name").arg(i)).isEmpty());
+        open(source); QVERIFY(prop("visibleModal").toBool()); QTest::qWait(100);
+        auto title = item("rangeChooserTitle"), all = item("rangeSelectAll"), footer = item("rangeChooserKeys");
+        QVERIFY(title && all && footer); QCOMPARE(window->size(), size);
+        const auto titleBottom = title->mapToScene(QPointF(0, title->height())).y();
+        const auto allTop = all->mapToScene(QPointF(0, 0)).y();
+        QVERIFY2(allTop >= titleBottom + 5, qPrintable(QString("title bottom %1, select-all top %2").arg(titleBottom).arg(allTop)));
+        QVERIFY(footer->mapToScene(QPointF(0, footer->height())).y() <= size.height() - 16);
+        QVERIFY(item("rangeContinue")->height() > 0); QVERIFY(all->height() >= all->implicitHeight());
+        const auto rows = prop("componentRows").toList();
+        for (int i = 1; i < rows.size(); ++i) key(Qt::Key_Down);
+        const auto last = item("rangeTag:" + rows.last().toMap().value("id").toString()); QVERIFY(last && last->hasActiveFocus());
+        QVERIFY(last->mapToScene(QPointF(0, last->height())).y() <= item("rangeContinue")->mapToScene(QPointF()).y());
+        key(Qt::Key_Space); QVERIFY(!last->property("checked").toBool());
+        key(Qt::Key_Escape); QVERIFY(!prop("sessionOpen").toBool());
+    }
     void markerEntrypoints_data() {
         QTest::addColumn<QString>("mode");
         QTest::newRow("verse") << QString("verse"); QTest::newRow("block") << QString("block"); QTest::newRow("paragraph") << QString("paragraph");
@@ -370,13 +556,13 @@ private slots:
         auto target = item(marker); const auto point = target->mapToScene(QPointF(target->width()/2, qMin(12.0, target->height()/2))).toPoint();
         QVERIFY(QRect(QPoint(), window->size()).contains(point));
         QTest::mouseClick(window, Qt::LeftButton, Qt::ShiftModifier, point);
-        QTRY_VERIFY(prop("visibleModal").toBool());
+        QTRY_VERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
         QVERIFY(prop("components").toMap().value("note").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("sessionOpen").toBool());
         if (mode == "verse") {
             QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, point);
             QTRY_VERIFY(object("rangeMarkerMenu")->property("opened").toBool());
-            click("rangeMarkerEdit"); QTRY_VERIFY(prop("visibleModal").toBool());
+            click("rangeMarkerEdit"); QTRY_VERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
             key(Qt::Key_Escape); QTRY_VERIFY(!prop("sessionOpen").toBool());
         }
         click(marker); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());

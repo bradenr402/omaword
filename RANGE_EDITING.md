@@ -10,12 +10,15 @@ implementation in `qml/RangeEditor.qml`, `qml/Main.qml`, and `src/biblebackend.*
    intersect the current selection, choose the exact range to edit; overlapping
    ranges stay separate. With no matching annotation, the reader reports
    **No annotations on this range**.
-2. Choose the components: bookmark, highlight, note, individual tags, or all
-   available components. General entry preselects all; a marker or Annotations
-   tab preselects its kind, and tag entry preselects all assigned tags. Other
-   available components can still be checked; **Select all components** selects
-   every available mark, note, and tag on this exact range. **Continue** requires
-   a nonempty choice; it opens the exact source range for endpoint editing.
+2. If only one annotation type exists on that range, proceed directly to endpoint
+   editing with that type selected (including all tags when tags are the only type).
+   Otherwise, choose from the components actually present: bookmark, highlight,
+   note, and individual tags. General entry preselects all; a marker or Annotations
+   tab preselects its kind. Arrow keys select a row and Space toggles it. `m`, `x`,
+   `n`, and `t` toggle bookmark, highlight, note, and all tags respectively. `a`
+   switches between **Select all components** and **Deselect all components**.
+   Enter continues with a nonempty selection; Esc cancels. The footer lists only
+   shortcuts relevant to the present annotation types.
 3. Extend, shrink, or relocate the range using verse motions. `j` / `k`, Up/Down,
    counts such as `2j`, `J` / `K`, Shift+Up/Down, Ctrl+u/d, Ctrl+b/f, and
    PageUp/PageDown adjust the active endpoint. Chapter-edge motions and verse

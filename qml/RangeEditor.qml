@@ -51,7 +51,7 @@ Item {
             chapter: bible.chapter, cursor: bible.cursorVerse, selected: app.hasSelection,
             reversed: app.hasSelection && bible.book === initial.book && bible.chapter === initial.chapter && bible.cursorVerse === initial.start,
             position: bible.readingPosition, visual: app.verseMode}))
-        ranges = copy(Array.isArray(scope) ? scope : scope ? [scope] : Array.from(bible.annotationRanges(bible.tagScope())))
+        ranges = freeze(copy(Array.isArray(scope) ? scope : scope ? [scope] : Array.from(bible.annotationRanges(bible.tagScope()))))
         if (!ranges.length) { app.notify("No annotations on this range", true); return false }
         contextKind = kind || ""
         source = null
@@ -60,10 +60,12 @@ Item {
         sessionOpen = true
         app.prepareRangeEditor()
         if (ranges.length === 1) choose(ranges[0])
-        chooser.open()
+        // choose() may already have entered the reader for a single component type.
+        if (!active) chooser.open()
         return true
     }
     function choose(scope) {
+        message = ""
         if (scope.versionId !== bible.versionId && !bible.openTaggedPassage(copy(scope))) { message = bible.error; return }
         const snapshot = bible.annotationSnapshot(copy(scope))
         if (snapshot.ok === false || !snapshot.scope || !snapshot.scope.versionId) { message = snapshot.error || bible.error || "This annotation is no longer available."; return }
@@ -74,24 +76,54 @@ Item {
             highlight: !!source.highlight && (all || contextKind === "highlight"),
             note: !!source.note && (all || contextKind === "note"),
             tags: all || contextKind === "tag" || contextKind === "tags" ? Array.from(source.tags || []).map(function(t) { return t.id }) : []}
+        if (presentKinds.length === 1) { selectAll(); begin() }
+        if (!active) Qt.callLater(function() { if (chooser.visible) chooser.focusRow(0) })
     }
+    readonly property var presentKinds: source ? ["bookmark", "highlight", "note", "tags"].filter(function(kind) {
+        return kind === "tags" ? (source.tags || []).length > 0 : !!source[kind]
+    }) : []
+    readonly property var componentRows: {
+        if (!source) return []
+        const rows = presentKinds.filter(function(kind) { return kind !== "tags" }).map(function(kind) {
+            return {kind: kind, id: "", label: kind.charAt(0).toUpperCase() + kind.slice(1)}
+        })
+        return rows.concat(Array.from(source.tags || []).map(function(tag) {
+            return {kind: "tags", id: tag.id, label: "Tag · " + tag.name}
+        }))
+    }
+    readonly property bool allSelected: !!source && presentKinds.length > 0 && presentKinds.every(function(kind) {
+        return kind === "tags" ? source.tags.every(function(tag) { return components.tags.indexOf(tag.id) >= 0 }) : components[kind]
+    })
     function selectAll() {
         if (!source) return
         components = {bookmark: !!source.bookmark, highlight: !!source.highlight, note: !!source.note,
             tags: Array.from(source.tags || []).map(function(tag) { return tag.id })}
     }
     function toggle(kind, id = "") {
+        if (presentKinds.indexOf(kind) < 0) return
         const next = copy(components)
         if (kind === "tags") {
+            if (!id) {
+                const ids = source.tags.map(function(tag) { return tag.id })
+                next.tags = ids.every(function(tagId) { return next.tags.indexOf(tagId) >= 0 }) ? [] : ids
+                components = next
+                return
+            }
+            if (!source.tags.some(function(tag) { return tag.id === id })) return
             const index = next.tags.indexOf(id)
             if (index < 0) next.tags.push(id); else next.tags.splice(index, 1)
         } else next[kind] = !next[kind]
         components = next
     }
+    function toggleAll() {
+        if (allSelected) components = {bookmark: false, highlight: false, note: false, tags: []}
+        else selectAll()
+    }
     readonly property bool hasComponents: components.bookmark || components.highlight || components.note || components.tags.length > 0
     function begin() {
         if (!source || !hasComponents || bible.busy) return
         if (!bible.openTaggedPassage(copy(source.scope))) { message = bible.error; return }
+        message = ""
         moving = true
         coincidentEndpoint = "end"
         app.verseMode = false
@@ -245,62 +277,133 @@ Item {
     RangeDialog {
         id: chooser
         objectName: "rangeChooser"
-        onOpened: contentItem.forceActiveFocus()
+        property int focusedRow: 0
+        function focusRow(index) {
+            const rows = editor.source ? componentChoices : sourceChoices
+            if (!rows.count) { contentItem.forceActiveFocus(); return }
+            focusedRow = (index + rows.count) % rows.count
+            const row = rows.itemAt(focusedRow)
+            if (!row) return
+            row.forceActiveFocus()
+            const y = row.mapToItem(choices, 0, 0).y
+            const flick = choiceScroll.contentItem as Flickable
+            if (!flick) return
+            if (y < flick.contentY) flick.contentY = y
+            else if (y + row.height > flick.contentY + flick.height)
+                flick.contentY = y + row.height - flick.height
+        }
+        function continueChoice() {
+            if (editor.source) editor.begin()
+            else if (editor.ranges.length) editor.choose(editor.ranges[focusedRow])
+        }
+        onOpened: focusRow(0)
+        // Shortcuts intercept Return before a focused checkbox or Cancel button can
+        // consume it. Arrow/Tab navigation stays within the selectable rows.
+        Shortcut { sequences: ["Return", "Enter"]; enabled: chooser.visible; onActivated: chooser.continueChoice() }
+        Shortcut { sequence: "Escape"; enabled: chooser.visible; onActivated: editor.cancel() }
+        Shortcut { sequences: ["Down", "Right", "Tab"]; enabled: chooser.visible; onActivated: chooser.focusRow(chooser.focusedRow + 1) }
+        Shortcut { sequences: ["Up", "Left", "Shift+Tab"]; enabled: chooser.visible; onActivated: chooser.focusRow(chooser.focusedRow - 1) }
+        Shortcut {
+            sequence: "Space"; enabled: chooser.visible && !!editor.source
+            onActivated: {
+                const row = editor.componentRows[chooser.focusedRow]
+                if (row) editor.toggle(row.kind, row.id)
+            }
+        }
+        Shortcut { sequence: "M"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggle("bookmark") }
+        Shortcut { sequence: "X"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggle("highlight") }
+        Shortcut { sequence: "N"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggle("note") }
+        Shortcut { sequence: "T"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggle("tags") }
+        Shortcut { sequence: "A"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggleAll() }
         contentItem: ColumnLayout {
+            spacing: 10 * editor.uiScale
             Keys.onEscapePressed: editor.cancel()
-            RangeText { text: editor.source ? "Choose components · " + editor.source.scope.reference : "Choose an exact annotation range"; font.bold: true }
+            RangeText {
+                objectName: "rangeChooserTitle"
+                text: editor.source ? "Choose components · " + editor.source.scope.reference : "Choose an exact annotation range"
+                font.bold: true
+                Layout.fillHeight: false
+                Layout.preferredHeight: implicitHeight
+            }
             ScrollView {
+                id: choiceScroll
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.minimumHeight: 50 * editor.uiScale
+                Layout.preferredHeight: Math.min(380, choices.implicitHeight)
                 implicitHeight: Math.min(380, choices.implicitHeight)
                 contentWidth: availableWidth
+                clip: true
                 ColumnLayout {
                     id: choices
-                    width: parent.width
+                    width: choiceScroll.availableWidth
+                    spacing: 6 * editor.uiScale
                     Repeater {
+                        id: sourceChoices
                         model: editor.source ? [] : editor.ranges
                         delegate: RangeButton {
                             required property var modelData
+                            required property int index
                             objectName: "rangeChoice:" + modelData.reference
                             text: modelData.reference
                             Layout.fillWidth: true
+                            Layout.fillHeight: false
+                            focusPolicy: Qt.ClickFocus
+                            onActiveFocusChanged: if (activeFocus) chooser.focusedRow = index
                             onClicked: editor.choose(modelData)
                         }
                     }
                     RangeButton {
-                        objectName: "rangeSelectAll"; text: "Select all components"
+                        objectName: "rangeSelectAll"
+                        text: editor.allSelected ? "Deselect all components" : "Select all components"
                         visible: !!editor.source
-                        hint: "Move every component attached to this exact range"
-                        onClicked: editor.selectAll()
+                        Layout.fillHeight: false
+                        Layout.preferredHeight: implicitHeight
+                        focusPolicy: Qt.NoFocus
+                        hint: "a · " + text
+                        onClicked: editor.toggleAll()
                     }
                     Repeater {
-                        model: editor.source ? ["bookmark", "highlight", "note"] : []
-                        delegate: RangeCheckBox {
-                            required property string modelData
-                            objectName: "rangeComponent:" + modelData
-                            text: modelData.charAt(0).toUpperCase() + modelData.slice(1)
-                            enabled: !!editor.source && !!editor.source[modelData]
-                            checked: editor.components[modelData]
-                            onClicked: editor.toggle(modelData)
-                        }
-                    }
-                    Repeater {
-                        model: editor.source ? editor.source.tags || [] : []
+                        id: componentChoices
+                        model: editor.componentRows
                         delegate: RangeCheckBox {
                             required property var modelData
-                            objectName: "rangeTag:" + modelData.id
-                            text: "Tag · " + modelData.name
-                            checked: editor.components.tags.indexOf(modelData.id) >= 0
-                            onClicked: editor.toggle("tags", modelData.id)
+                            required property int index
+                            objectName: modelData.kind === "tags" ? "rangeTag:" + modelData.id : "rangeComponent:" + modelData.kind
+                            text: modelData.label
+                            Layout.fillHeight: false
+                            Layout.preferredHeight: implicitHeight
+                            focusPolicy: Qt.ClickFocus
+                            checked: modelData.kind === "tags" ? editor.components.tags.indexOf(modelData.id) >= 0 : editor.components[modelData.kind]
+                            onActiveFocusChanged: if (activeFocus) chooser.focusedRow = index
+                            onClicked: editor.toggle(modelData.kind, modelData.id)
                         }
                     }
                 }
             }
             RangeText { text: editor.message; visible: text.length > 0 }
             RowLayout {
-                RangeButton { text: "Cancel"; onClicked: editor.cancel() }
-                RangeButton { text: "Choose another range"; visible: !!editor.source && editor.ranges.length > 1; onClicked: editor.source = null }
-                RangeButton { objectName: "rangeContinue"; text: "Continue"; enabled: !!editor.source && editor.hasComponents && !editor.bible.busy; onClicked: editor.begin() }
+                Layout.fillHeight: false
+                RangeButton { objectName: "rangeChooserCancel"; text: "Cancel"; focusPolicy: Qt.NoFocus; onClicked: editor.cancel() }
+                RangeButton {
+                    text: "Choose another range"; visible: !!editor.source && editor.ranges.length > 1; focusPolicy: Qt.NoFocus
+                    onClicked: { editor.source = null; Qt.callLater(function() { chooser.focusRow(0) }) }
+                }
+                RangeButton { objectName: "rangeContinue"; text: "Continue"; visible: !!editor.source; focusPolicy: Qt.NoFocus; enabled: editor.hasComponents && !editor.bible.busy; onClicked: editor.begin() }
+            }
+            RangeText {
+                objectName: "rangeChooserKeys"
+                Layout.fillHeight: false
+                Layout.preferredHeight: implicitHeight
+                text: {
+                    if (!editor.source) return "Arrows move · Enter select range · Esc Cancel"
+                    const hints = []
+                    if (editor.presentKinds.indexOf("bookmark") >= 0) hints.push("m bookmark")
+                    if (editor.presentKinds.indexOf("highlight") >= 0) hints.push("x highlight")
+                    if (editor.presentKinds.indexOf("tags") >= 0) hints.push("t tags")
+                    if (editor.presentKinds.indexOf("note") >= 0) hints.push("n note")
+                    return hints.concat(["Arrows move", "Space toggle", editor.allSelected ? "a deselect all" : "a select all", "Enter Continue", "Esc Cancel"]).join(" · ")
+                }
             }
         }
     }
