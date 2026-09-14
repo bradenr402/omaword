@@ -77,12 +77,16 @@ return failure through their result plus `bible.error`. Missing tags, removed
 versions, stale endpoints, busy shared operations, or SQL failures cannot silently
 retarget a write. Global rename/delete/merge preserve marks and notes.
 
-## Picker and Saved tags
+## Picker and Annotations tags
 
-`TagsPanel.qml` receives explicit `app`, `bible`, and `desktop` properties. Its
+`TagsPanel.qml` is the reusable tag UI, with explicit `app`, `bible`, `desktop`, and
+`embeddedHost` properties. One body serves the picker popup, embedded Annotations
+browser, and Related right-side drawer; management stays in the current host. Its
 entry points are `open(scope=null)`, `openBrowser(manage=false)`, `openRelated()`,
-and `closeForFocusMode()`; `visibleModal` exposes popup visibility, and `scopePinned`
-indicates a visible captured editing scope. Main owns action completion through
+and `closeForFocusMode()`. `browserRequested`/`browserClosed` control the containing
+Annotations drawer. `browserVisible` tracks embedded visibility, `visibleModal`
+covers the picker and Related, and `contentVisible` combines them. `scopePinned`
+indicates a visible captured picker scope. Main owns action completion through
 `tagActionCompleted(scope)` and `editingPanelClosed()`.
 
 - `t` / **Tag passage** opens a picker pinned to a copy of the exact scope.
@@ -95,12 +99,17 @@ indicates a visible captured editing scope. Main owns action completion through
   **Edit tags** opens it and pins its own picker.
 - Esc cancels a pending management confirmation, otherwise clears the query,
   otherwise closes. **Done** closes. Neither closing action undoes saved toggles.
-- Saved has **All**, **Bookmarks**, **Highlights**, **Notes**, and **Tags** tabs.
-  Tags opens its browser and closes Saved; Commands → **Tags** does the same.
-  The browser starts with no filters, **Any**, and **Current version**. **All**
-  requires every chosen tag on the same exact range; **All versions** includes
-  installed sources only. Enter/click on a result opens it and closes the browser.
-- `Shift H` toggles headings. `Shift L` / **Related passages** opens Related.
+- `Ctrl a` toggles Annotations in reader/panel navigation contexts; editable fields
+  retain Select All. Its single tab row is **Bookmarks**, **Highlights**, **Notes**,
+  **Tags**, with no **All** tab. Tags embeds the browser below the tab divider;
+  Commands → **Tags** opens that same tab.
+- The browser starts with no filters, **Any**, and **\<abbr\> only**. A vertical
+  divider separates the **Any** / **All** pair from **\<abbr\> only** / **All versions**.
+  Each pair is exclusive. **All** requires every chosen tag on the same exact
+  range; **All versions** includes installed sources only. The browser abbreviation
+  follows the active version. Enter/click opens a full result and closes Annotations.
+- `Shift H` toggles headings. `Shift L` / **Related passages**, or the bottom-left
+  button beside the mode control, opens Related's full-height right-side panel.
   **Tag passage**, **Tags**, **Related passages**, and **Manage tags** are commands.
 - User names/references/excerpts render as plain text. Peer updates refresh lists,
   prune deleted filter IDs, and disable actions for removed source versions.
@@ -109,26 +118,29 @@ indicates a visible captured editing scope. Main owns action completion through
 ## Related and management
 
 Related pins the source scope on opening and selects the union of tags on all
-overlapping source ranges, including exact membership. It starts in Any/current
-source-version mode and excludes all same-version overlaps from results. Tags may
-be adjusted with the same filters as the browser. Opening a result keeps Related
-open and the source pinned, even across versions. **Use current** explicitly
+overlapping source ranges, including exact membership. It starts with **Any** and
+the pinned source's **\<abbr\> only**, excluding all same-version overlaps from results.
+Tags may be adjusted with the same filter pairs and divider as the browser.
+Opening a result keeps the side panel open and the source pinned, even across
+versions; the version label still names the source. **Use current** explicitly
 captures the reader's new range and resets the selected tags from its overlaps.
 Peer refreshes keep the chosen filters except for deleted IDs; they do not silently
 replace the pinned source or reselect its tag union.
 
-**Manage** opens global management with Back navigation; Commands → **Manage tags**
-opens it directly. Rename, delete, and merge each show a confirmation describing
-the global operation. Delete includes assignments in every version; merge keeps
+**Manage** opens global management in the current host with Back navigation;
+Commands → **Manage tags** opens it in Annotations' Tags tab. Rename, delete, and
+merge each show a confirmation describing the global operation. Delete includes
+assignments in every version; merge keeps
 the target name and removes the source. A peer rename/deletion of either involved
 tag invalidates the pending confirmation. Failures leave the operation available
 for correction/retry and preserve saved marks and notes.
 
-## Saved entries, removal, and backup
+## Annotation entries, removal, and backup
 
-- Saved **All** includes tag-only ranges and deduplicates tags/marks/notes at exact
-  endpoints in the active version. Deleting an entry through
-  `deleteAnnotation(reference, expectedVersionId)` removes its bookmark,
+- The backend collection includes tag-only ranges and deduplicates tags/marks/notes
+  at exact endpoints in the active version. Annotations' Bookmarks, Highlights,
+  and Notes tabs filter by type; tag-only ranges appear through the Tags browser.
+  Deleting an entry through `deleteAnnotation(reference, expectedVersionId)` removes its bookmark,
   highlight, note, and all tags atomically. Overlapping entries and global tag
   names survive; a tag-only entry is a valid deletion target.
 - `removeVersion(id, false)` retains assignments, hidden from results/counts until
@@ -146,8 +158,26 @@ for correction/retry and preserve saved marks and notes.
   tags and assignments while restoring annotations/reading state.
 - Markdown export includes tag-only entries and safely escaped `Tags:` lines.
   Verse models expose `hasTags` and `tagRanges` with exact scopes/tags and
-  `tagStart`, `tagEnd`, `continuesBefore`, `continuesAfter` metadata for reader rails
+  `tagStart`, `tagEnd`, `continuesBefore`, `continuesAfter` metadata for Verse rails
   and flowing annotation geometry.
+
+## Inline range indicators
+
+Paragraph and Block keep a continuous text layout with inline bookmark/tag start
+and end brackets. Opening brackets have a superscript icon on their left; tag
+icons are mirrored to point left. Multiple tags on one exact range share a marker
+pair, while overlapping ranges keep independent scopes. Chapter continuations use
+a chevron instead of a false opening and omit a closing bracket until the true end.
+Markers open the bookmark range or its exact tag picker. Notes stay in the margin,
+with a chooser for nearby note anchors.
+
+Reserved document cells keep decorations clear of verse text through wrapping and
+relayout. Copy filters only generated decoration positions, preserving original
+text and Unicode. While the cursor verse is inside a bookmark/tag range, subtle
+context shading marks its other visible members, excluding the cursor and current
+selection. Overlapping active ranges are unioned; moving outside clears the shade.
+Focus mode hides the inline/margin indicators and context shading, closes tag
+surfaces, and hides the Related button.
 
 ## Visual actions and corners
 
@@ -173,5 +203,7 @@ corners for tooltips. Passage highlight segments remain square.
 `tags` covers backend identity, exact/overlap queries, persistence, peers, removal,
 backup/export and rollback; `tagsui` covers picker/browser/Related/management and
 Main integration; `desktop` covers asynchronous rounding and shared themed
-tooltips. `ui` and `annotations` also cover Visual completion and reader tag
-geometry. These are coverage descriptions, not test-run results.
+tooltips. `ui` and `annotations` also cover Visual completion, Annotations shortcut
+contexts, embedded browser geometry, inline endpoints/copy, and cursor-context
+shading. These describe assertions present in the test sources, not test-run
+results; remaining manual visual checks are listed in the test guide.

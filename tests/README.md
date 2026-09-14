@@ -28,7 +28,12 @@ and `actualArchives`. Catalog cases include `metadataAndAllowlist`,
 Tag targets include `namesAndDurability`, `sourceOrderVersionsRelatedAndPeers`,
 `backupsScopedLegacyAndMarkdown`, and `rollbackAndPublication` in `tags`;
 `pickerPinnedKeyboardAndLiteralNames`, `relatedPinnedUnionAndUseCurrent`, and
-`mainIntegrationVisualCompletionAndDraft` in `tagsui`. Desktop targets include
+`mainIntegrationVisualCompletionAndDraft` in `tagsui`. UI targets include
+`annotationsShortcutContextsAndRelatedControl`, `savedPanelGeometry`, and
+`tagGlyphPointsLeft`; the existing `saved*` test/object names now exercise
+Annotations. Flowing-reader targets include `reservedEndpointsAndUnicodeCopy`,
+`contextUnionContinuationAndFocus`, and `renderedCellsAndLastCharacterHit` in
+`annotations`. Desktop targets include
 `effectiveInteger`, `timeoutDoesNotFreezeOrOverlap`, `toolTipThemeAndWrapping`, and
 `sharedAcrossWindows`. For example, `bin/test --suite tags namesAndDurability`
 selects one function; `bin/test --suite tags --suite tagsui --suite desktop`
@@ -39,8 +44,7 @@ Builds are incremental. `JOBS` caps total Make jobs, defaulting to CPU count;
 selected suites and `JOBS`; each worker gets `floor(JOBS / concurrency)` jobs.
 Both settings require positive integers. `BUILD_DIR` overrides the build root.
 Each suite reports status/timing and writes complete output to
-`build/test-logs/<selector>.log`. Qt totals in current logs provide pass/fail/skip
-counts. GUI suites use offscreen Qt with software rendering.
+`build/test-logs/<selector>.log`. GUI suites use offscreen Qt with software rendering.
 
 ## Fixtures and isolated source archives
 
@@ -89,6 +93,9 @@ installation remains a reader action through Add version.
 
 ## Coverage
 
+The following coverage is implemented in the current test sources, including
+working-tree updates. It describes assertions, not results from a test run.
+
 - **Importer:** stable 80-book identities; source names/order; standalone USFM;
   `copr.htm` title/rights decoding; nested notes and word attributes; paragraphs,
   headings, poetry, omissions; explicit bridge/suffix errors; unsafe archives;
@@ -101,12 +108,18 @@ installation remains a reader action through Add version.
   transactional failures; file ownership; MRU/fallback; peer commits and draft vetoes.
 - **UI:** empty/About content; catalog search and attribution; download lifecycle
   and guarded import handoff; source-ordered browsing; version picker/removal;
-  keyboard contexts; reading layouts/settings; selection/copy; Saved; Markdown
+  keyboard contexts; reading layouts/settings; selection/copy; Annotations; Markdown
   draft conflicts; backup scope and source-independent reading; success-only Visual
   completion, failed marks, pinned Notes/Tags and stale panels; tag markers,
-  shortcuts, Saved integration, and square highlight geometry.
+  shortcuts, Annotations integration, and square highlight geometry. Annotations
+  checks cover `Ctrl a` in each reader layout and panel navigation, Select All in
+  note/search/rename fields, the single-row Bookmarks/Highlights/Notes/Tags tabs
+  without All, embedded Tags hosting, filter-label fit at increased text scale,
+  the bottom-left Related button and `Shift L`, and the rendered left-pointing tag
+  glyph. Existing panel cases cover type filters, empty states, deletion, keyboard
+  isolation, focus restoration, and scaled geometry.
 - **Tags:** Unicode NFC/case-folded identity and literal names; durable global
-  definitions; exact membership versus overlap; tag-only Saved entries and exact
+  definitions; exact membership versus overlap; tag-only collection entries and exact
   whole-entry deletion; any/all queries, excerpts and source ordering; pinned
   Related exclusions; cross-version opening and independent peer selections;
   rename/delete/merge; removal keep/drop and stale scopes; scoped v4 backup,
@@ -114,16 +127,24 @@ installation remains a reader action through Add version.
   failures, commit rollback, read-back verification, publication and flush vetoes.
 - **Tags UI:** immediate Space/Enter toggles and create/apply; captured picker
   scopes, overlap Open/Edit, literal labels, invalid names and failed flushes;
-  any/all and installed-version filters; Related's overlapping-tag union, pinned
-  source and Use current; management confirmations and peer invalidation; removed
-  versions; real Main integration for Visual completion and unsaved note drafts.
+  any/all and installed-version filters in an embedded browser; Related's full-height
+  right-edge drawer, filter divider, exclusive version pair, overlapping-tag union,
+  pinned source/abbreviation across result navigation, Use current, focus-mode close,
+  and reopening; management confirmations and peer invalidation; removed versions;
+  real Main integration for Visual completion and unsaved note drafts.
 - **Desktop:** effective integer rounding, malformed/oversized output, process
   failure, missing session/command, timeout responsiveness, nonoverlapping queries,
   recovery and separate five-second polling; themed plain-text tooltip wrapping,
   window-width bounds, and shared live radius updates across reader engines.
 - **Annotations:** flowing-text verse mapping, paragraph/layout changes, range
-  painting, bookmark/note/tag geometry, overlapping entries, exact tag marker
-  scopes and continuation metadata, and focus-mode visibility.
+  painting, inline bookmark/tag brackets and margin-note geometry, overlapping
+  entries, exact tag scopes, and continuation chevrons. Reserved-cell checks cover
+  Paragraph/Block wrapping, endpoint attachment, no overlap with source text,
+  Unicode/bidirectional hit testing, decoration-free full/partial/drag/keyboard
+  copy, and preservation of original joiners/object characters. Context checks
+  cover overlapping-range unions, exclusion of the cursor/selected verse, clearing
+  outside the ranges, focus-mode removal/restoration, and geometry-loop avoidance.
+  Render checks verify ink in marker cells and final-character hit boundaries.
 - **Windows:** independent readers with shared commits; compare-and-set note
   conflicts; flush vetoes; replacement/removal; shared import guards; closing one
   reader; last-window exit; secondary launches opening a new reader.
@@ -135,3 +156,13 @@ fixture paths, concurrency, logs, failure propagation, and interruption cleanup
 using fake build/test tools. `tests/test-install.sh` exercises installation with
 temporary homes. Test results are reported from actual runs, not fixed totals in
 documentation.
+
+### Planned manual visual checks
+
+Review the continuous Paragraph/Block layout on the desktop with varied fonts,
+window widths, and themes: superscript icon/bracket alignment, mirrored tag shape,
+margin notes, subtle context-shade contrast, and focus-mode transitions. Also
+review the embedded browser and pinned Related panel during cross-version reading.
+These visual checks remain planned; automated geometry/ink assertions above do
+not establish their completion. No tests or builds were run for this documentation
+update.

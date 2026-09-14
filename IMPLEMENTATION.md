@@ -15,8 +15,8 @@ QML and the seven-entry `resources/catalog.json` metadata catalog.
 | `src/singleinstance.*` | One process coordinator per data directory, `omaword.lock`, and bounded launch-request IPC |
 | `src/windowmanager.*` | A backend, catalog object, QML engine, and window per reader; lifecycle and request routing |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing layouts, verse/document mapping, selection and annotation geometry |
-| `qml/Main.qml` | Reader, passage/command palettes, notes, Saved, Visual action completion, settings, catalog, and attribution |
-| `qml/TagsPanel.qml` | Pinned exact-range picker, Saved tags browser, Related, and global tag management |
+| `qml/Main.qml` | Reader, passage/command palettes, notes, Annotations, Visual action completion, settings, catalog, and attribution |
+| `qml/TagsPanel.qml` | Reusable tag UI: pinned exact-range picker, embedded Annotations browser, Related side panel, and global management |
 | `src/desktop.*`, `qml/AppToolTip.qml` | Shared fonts/scaling, live Omarchy theme, asynchronous compositor corners, themed tooltips, external links |
 
 ## Import and catalog lifecycle
@@ -54,7 +54,7 @@ actual chapter integers.
 
 The active database supplies verse keys ordered by source book ordinal, chapter,
 and verse. References resolve canonical aliases, USFM codes, and imported source
-names. Navigation, range ordering, copy, Saved, and annotations use those keys;
+names. Navigation, range ordering, copy, Annotations, and reader marks use those keys;
 persistent endpoints use stable book IDs and chapter/verse numbers. Source
 omissions are preserved. Switching retains available endpoints and reports a
 fallback when the destination lacks them.
@@ -176,23 +176,48 @@ mode means that captured source's version. Querying never navigates;
 `openTaggedPassage(scope)` explicitly flushes drafts, revalidates, switches source
 if necessary, and opens the complete endpoint range in the requesting reader.
 
-Saved **All** unions annotations and tag-only ranges, deduplicating exact endpoints
-within the active source. The other annotation tabs retain their mark/note filters.
-Deleting a Saved entry atomically removes its bookmark, highlight, note, and all
-tag assignments for that exact range, leaving overlapping entries and global
+The backend `collection` unions annotations and tag-only ranges, deduplicating exact
+endpoints within the active source. Annotations has **Bookmarks**, **Highlights**,
+**Notes**, and **Tags** tabs in one row, with no **All** tab. The first three filter
+the collection by their mark/note type; tag-only ranges are browsed through Tags.
+Deleting an Annotations entry atomically removes its bookmark, highlight, note,
+and all tag assignments for that exact range, leaving overlapping entries and global
 definitions intact. `deleteAnnotation(reference, expectedVersionId)` guards the
 confirmation's source identity and rejects absent exact entries.
 
 Verse rows expose `hasTags` and `tagRanges`, carrying full scopes/tags plus
-`tagStart`, `tagEnd`, `continuesBefore`, and `continuesAfter`. Verse rails and
-`BlockDocument` annotation geometry preserve exact scopes and source ordering.
-Markers open the captured range's picker; overlapping markers offer range choices.
-Paragraph/Block layouts share this geometry through `BlockReader`.
+`tagStart`, `tagEnd`, `continuesBefore`, and `continuesAfter`. Verse-layout rails
+preserve exact scopes and offer choices for overlapping tag ranges.
+
+Paragraph and Block share a continuous `BlockReader` text layout. `BlockDocument`
+reserves transparent inline image cells and word joiners at bookmark/tag endpoints;
+QML paints opening/closing brackets within those cells, with a superscript icon
+to the left of each opening bracket. Tag icons are horizontally mirrored to point
+left. Each exact tagged range has one marker pair regardless of its tag count.
+A range entering the chapter has a continuation chevron instead of a false start;
+a range continuing beyond it has no false closing bracket. Notes remain in the
+margin, with nearby note anchors grouped into a range chooser.
+
+`inlineDecorations()` supplies cell geometry and captured scopes; verse spans keep
+`textStart`/`textEnd` separate from decorated endpoints. `selectionText()` omits
+only generated decoration segments, preserving original Unicode, brackets, joiners,
+and object characters in copied text. Hit testing maps cells and text to their
+owning verse. `contextRanges()` unions bookmark/tag ranges containing the cursor
+verse and subtly shades their other visible members, excluding the cursor and
+selected verses. It clears when the cursor leaves those ranges. Focus mode removes
+inline cells, margin markers, and context shading; selection and highlight painting
+remain independent. Width, font, and layout changes recalculate the shared geometry.
 
 ### Picker, browser, and Related
 
-`TagsPanel` receives explicit `app`, `bible`, and `desktop` properties. It owns one
-modal popup with picker, browser, related, and manage pages. `open(scope)` copies
+`TagsPanel` receives explicit `app`, `bible`, and `desktop` properties plus an
+`embeddedHost`. A single reusable `tagsBody` is reparented by `hostKind` into the
+picker's modal popup, Annotations' `annotationsTagsHost`, or Related's full-height
+right-edge drawer. Management uses the current host with Back navigation.
+`browserRequested`/`browserClosed` let Main select the Tags tab and open/close
+Annotations. `browserVisible` tracks embedded content; `visibleModal` covers the
+picker and Related, and `contentVisible` combines them for peer refreshes.
+`scopePinned` tracks a visible picker editing scope. `open(scope)` copies
 the scope; later selection/version changes do not retarget picker writes. Checked
 tags reflect only that exact range. Other overlapping ranges are listed separately:
 **Open** navigates and closes the picker; **Edit tags** navigates and pins that full
@@ -204,17 +229,26 @@ typed name. Space in the search field remains text input. Esc cancels a pending
 management confirmation first, otherwise clears a nonempty query, then closes.
 **Done** closes without undoing committed toggles. User labels render as plain text.
 
-Saved's fifth **Tags** tab and Commands → **Tags** open the browser and close the
-Saved drawer. A new browser starts with no filters, **Any**, and **Current version**;
-**All versions** includes installed sources only. Enter/click opens a full result
-and closes the browser. `Shift H` toggles headings; `Shift L` opens **Related
-passages**, pinning the current source and initially selecting the union of tags
-on every overlapping range. Opening Related results keeps the popup/source pinned;
-**Use current** explicitly captures the new source and resets tag filters.
+`Ctrl a` toggles Annotations in reader/panel navigation contexts; editable fields
+retain Select All. Its fourth **Tags** tab and Commands → **Tags** open the browser
+inside Annotations, below the tab divider. A new browser starts with no filters
+and two exclusive pairs: **Any** / **All**, then a vertical divider, then
+**\<abbr\> only** / **All versions**. The abbreviation follows the active version in
+the browser; all-version queries include installed sources only. Enter/click opens
+a full result and closes Annotations.
 
-**Manage** is available within the popup and through **Manage tags** in Commands.
-Rename, delete, and merge each require confirmation with global scope. Peer edits
-refresh visible lists, prune deleted IDs, and invalidate confirmations if a source
+`Shift H` toggles headings; `Shift L`, Commands → **Related passages**, or the
+bottom-left button beside the mode control opens Related's right-side panel.
+It pins the source and initially selects the union of tags on every overlapping
+range. Its version pair uses the pinned source abbreviation, even after opening
+a result in another version. Opening results keeps the panel/source pinned;
+**Use current** explicitly captures the new source and resets the tag filters.
+Focus mode closes tag surfaces and hides the floating controls.
+
+**Manage** is available in each tag host; **Manage tags** in Commands opens management
+inside Annotations' Tags tab. Rename, delete, and merge each require confirmation
+with global scope. Peer edits refresh visible lists, prune deleted IDs, and
+invalidate confirmations if a source
 or target tag disappears or changes name. Missing source versions disable pinned
 picker actions and empty Related results; backend validation also rejects stale
 endpoints. Busy-library and note-flush guards protect editing/navigation actions.
@@ -256,7 +290,7 @@ corners, and width bounded by both 360 scaled pixels and the available window.
 ## User interface and verification
 
 The empty view uses the application name, catalog/local-import guidance, and local
-privacy text. Ready-only Saved/Notes footer controls avoid empty reader actions.
+privacy text. Ready-only Annotations/Notes footer controls avoid empty reader actions.
 About & Attribution shows dynamic source name/rights, source details links, local
 storage information, and **No version installed** when empty.
 

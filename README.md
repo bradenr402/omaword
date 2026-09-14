@@ -28,11 +28,11 @@ Internet is needed only to download a version. Once installed, reading and annot
 - `4j` moves four verses; `20g` goes to verse 20.
 - `m` bookmarks; `x` highlights; `n` writes a note; `t` tags a passage.
 - In the tag list, `Space` / `Enter` toggles a tag; Enter in picker search creates and applies it.
-- `Ctrl n` toggles Notes; `Ctrl l` toggles Saved.
+- `Ctrl n` toggles Notes; `Ctrl a` toggles Annotations (Bookmarks, Highlights, Notes, Tags).
 - `y` copies a quotation; `Y` copies plain text. `Ctrl c` copies selected text, or the passage when no text is selected.
 - `b` cycles Paragraph, Verse, and Block layouts; `f` toggles focus mode.
 - `Shift V` switches versions; `Shift R` opens Reading settings; `Shift H` toggles headings.
-- `Shift L` finds related passages. Saved → Tags filters by any or all chosen tags, in the current or all installed versions.
+- `Shift L` opens Related passages. Annotations → Tags filters by any or all chosen tags, in the current or all installed versions.
 - `Ctrl Shift N` opens another reader window.
 - `?` or `F1` opens the searchable keybindings list, where Enter performs the selected action.
 
