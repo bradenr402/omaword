@@ -3,7 +3,7 @@ source "${startdir:-$(pwd)}/../branding.env"
 pkgname=$BRAND_ID
 pkgver=$BRAND_VERSION
 pkgrel=1
-pkgdesc='Offline NET Bible reader with local bookmarks, highlights, and Markdown notes'
+pkgdesc='Offline Bible reader with USFM downloads, bookmarks, highlights, and Markdown notes'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'libarchive' 'fontconfig')

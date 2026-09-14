@@ -17,7 +17,9 @@ qrc_*.cpp
 *.log
 
 # User-provided Bible content and local data
-*.[eE][pP][uU][bB]
+*_usfm.zip
+*.usfm
+*.sfm
 *.sqlite*
 *.db
 *.db-*
