@@ -2628,9 +2628,13 @@ private slots:
         QCOMPARE(quoted,QString::fromUtf8("“¹ Start café — λόγος 🌿 and finish. ² Poetry sings softly. A second line — שלום. ³ Final naïve résumé ends here.”\n\n—John 3:1–3"));
         QTextCursor cursor(blockTextDocument());
         cursor.setPosition(blockOffset(1,6)); cursor.setPosition(blockOffset(3,18),QTextCursor::KeepAnchor);
-        const auto expected = cursor.selectedText();
+        const auto documentSelection = cursor.selectedText();
+        // Clipboard text uses ordinary newlines for both document paragraphs
+        // and explicit line breaks; the TextEdit still exposes Qt separators.
+        const auto expected = QString(documentSelection).replace(QChar::ParagraphSeparator,'\n').replace(QChar::LineSeparator,'\n');
         QVERIFY(expected.contains(QString::fromUtf8("café — λόγος 🌿")));
         QVERIFY(expected.contains(QString::fromUtf8("שלום")));
+        QVERIFY(!expected.contains(QChar::ObjectReplacementCharacter));
         // Selection changes schedule viewport restoration; annotation commits
         // schedule block geometry work. Sample only after both have settled,
         // otherwise restoration moves the text beneath an in-progress drag.
@@ -2649,7 +2653,7 @@ private slots:
         const auto first = blockPoint(1,6), last = blockPoint(3,18);
         drag(reverse ? last : first,reverse ? first : last);
         QCOMPARE(window->property("freeSelectedText").toString(),expected);
-        QCOMPARE(prop("blockBody","selectedText").toString(),expected);
+        QCOMPARE(prop("blockBody","selectedText").toString(),documentSelection);
         QCOMPARE(bible->selectionReference(),range);
         key(Qt::Key_C,Qt::ControlModifier);
         QCOMPARE(QApplication::clipboard()->text(),expected);
@@ -3193,8 +3197,8 @@ private slots:
         QVERIFY(passage->width() >= 0);
     }
     void blockAnnotationChooserKeyboardIsolation() {
-        // Real backend/Main shortcuts, with adjacent ranges starting on the
-        // same rendered line, each carrying both a bookmark and a note.
+        // Notes retain a rail chooser for overlapping ranges. Bookmarks now
+        // have individual inline markers rather than a shared rail chooser.
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","ui-annotation-fixture");
             db.setDatabaseName(installedPath());
@@ -3206,22 +3210,22 @@ private slots:
         reference("John 4:1");
         reference("John 3:1-2");
         bible->toggleBookmark(); bible->setNoteText("First range note");
-        reference("John 3:3-4");
+        reference("John 3:1-4");
         bible->toggleBookmark(); bible->setNoteText("Second range note");
         reference("John 3:1-2");
         bible->setBlockMode(true);
-        QTRY_VERIFY(item("blockAnnotationMarker:bookmark:John 3:1–2"));
+        QTRY_VERIFY(item("blockAnnotationMarker:note:John 3:1–2"));
         QTRY_VERIFY(!window->property("restoringPosition").toBool());
         const auto annotations = bible->collection();
-        const auto open = [this](const QString &kind) {
-            click(item(qPrintable("blockAnnotationMarker:" + kind + ":John 3:1–2")));
+        const auto open = [this] {
+            click(item("blockAnnotationMarker:note:John 3:1–2"));
             QTRY_VERIFY(prop("blockReader","annotationMenuOpen").toBool());
             QVERIFY(window->property("modalOpen").toBool());
             QVERIFY(!window->property("readerKeys").toBool());
             QTRY_COMPARE(prop("blockAnnotationMenu","currentIndex").toInt(),0);
         };
-        for (const auto &kind : {QString("bookmark"),QString("note")}) {
-            open(kind);
+        {
+            open();
             const auto selected = bible->selectionReference();
             const auto isolatedKey = [this,&selected,&annotations](Qt::Key code, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
                 key(code,modifiers);
@@ -3244,17 +3248,15 @@ private slots:
             key(Qt::Key_Down);
             key(Qt::Key_Return);
             QTRY_VERIFY(!prop("blockReader","annotationMenuOpen").toBool());
-            QCOMPARE(bible->selectionReference(),QString("John 3:3–4"));
+            QCOMPARE(bible->selectionReference(),QString("John 3:1–4"));
             QCOMPARE(bible->collection(),annotations);
-            if (kind == "note") {
-                QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-                QCOMPARE(prop("noteEditor","text").toString(),QString("Second range note"));
-                key(Qt::Key_Escape);
-                QTRY_VERIFY(!window->property("notesOpen").toBool());
-            }
+            QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+            QCOMPARE(prop("noteEditor","text").toString(),QString("Second range note"));
+            key(Qt::Key_Escape);
+            QTRY_VERIFY(!window->property("notesOpen").toBool());
             reference("John 3:1-2");
         }
-        open("bookmark");
+        open();
         key(Qt::Key_Escape);
         QTRY_VERIFY(!window->property("modalOpen").toBool());
         QCOMPARE(bible->selectionReference(),QString("John 3:1–2"));
