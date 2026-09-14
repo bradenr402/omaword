@@ -255,6 +255,7 @@ class UiTest : public QObject
         const auto &books = BibleBooks::canon();
         QVector<int> order;
         if (sourceOrder) order = {69,40,43};
+        else if (qEnvironmentVariableIsSet("OMAWORD_UI_FAST_FIXTURE")) order = {43};
         else for (int i = 0; i < books.size(); ++i) {
             order.append(i + 1);
             if (QString::fromLatin1(books[i].code) == "REV") break;
@@ -264,7 +265,7 @@ class UiTest : public QObject
             const auto &book = books[id - 1];
             // Only interaction-relevant boundaries are specialized. The remaining
             // original chapters deliberately do not reproduce a numbering profile.
-            const int chapters = id == 19 ? 150 : id == 40 ? 28 : id == 43 ? 21
+            const int chapters = qEnvironmentVariableIsSet("OMAWORD_UI_FAST_FIXTURE") && !sourceOrder ? 4 : id == 19 ? 150 : id == 40 ? 28 : id == 43 ? 21
                 : id == 46 ? 13 : id == 52 ? 5 : id == 53 ? 3 : id == 69 ? 16
                 : QString::fromLatin1(book.code) == "REV" ? 22 : 4;
             QByteArray text = QString("\\id %1 Original reader test edition\n\\h %2\n\\toc1 %2\n\\toc2 %2\n\\toc3 %1\n")
@@ -2306,6 +2307,7 @@ private slots:
         QCOMPARE(bible->selectedStart(),16);
         QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->selectionBookmarked());
         QVERIFY(!window->property("verseMode").toBool());
+        QCOMPARE(prop("noteEditor", "cursorPosition").toInt(), first.size());
         // Standard undo must stay inside the editor too.
         type("!"); key(Qt::Key_Z, Qt::ControlModifier);
         QVERIFY(!bible->noteText().endsWith('!'));
@@ -4512,6 +4514,10 @@ private slots:
         capture("bookmark");
         click(item("bookmarkMarker16"));
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
+        click(item("bookmarkMarker16"),Qt::ShiftModifier);
+        QTRY_VERIFY(prop("rangeChooser","opened").toBool());
+        QCOMPARE(prop("rangeEditor","components").value<QJSValue>().toVariant().toMap().value("bookmark").toBool(),true);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeChooser","visible").toBool());
         // An overlapping range gets its own logical start, while shared rows
         // expose both references and a stable click target.
         reference("John 3:17-20"); key(Qt::Key_M);
@@ -4571,6 +4577,10 @@ private slots:
         QVERIFY(!prop("tagsSurface","visible").toBool());
         QVERIFY(!prop("tagsUi","visibleModal").toBool());
         QVERIFY(!prop("tagsUi","scopePinned").toBool());
+        key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(),2);
+        key(Qt::Key_Right); QCOMPARE(window->property("collectionTab").toInt(),3);
+        key(Qt::Key_L); QCOMPARE(window->property("collectionTab").toInt(),0);
+        key(Qt::Key_H); QCOMPARE(window->property("collectionTab").toInt(),3);
         for (const auto name : {"tagMatchAny", "tagMatchAll", "tagSourceVersion", "tagAllVersions", "tagResults", "tagSearch", "createPassageTag"})
             QVERIFY(!item(name)->isVisible());
         click(item(qPrintable("summaryTag:" + tag)));

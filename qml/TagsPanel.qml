@@ -80,7 +80,7 @@ Item {
         const version = Array.from(bible.versions).find(function(row) { return row.id === scope.versionId })
         return version ? version.abbreviation : scope.versionId
     }
-    function canAct() { return !bible.busy && app.flushNote() }
+    function canAct() { return !app.rangeEditing && !bible.busy && app.flushNote() }
     function failed() { message = bible.error || "Could not save this change. Please try again." }
     function releaseEditing() {
         if (!editingScope) return
@@ -206,6 +206,42 @@ Item {
         else if (hostKind === "browser") { embeddedClosed(); browserClosed() }
     }
     function closeForFocusMode() { close() }
+    function textInputActive() {
+        let focused = app.activeFocusItem
+        while (focused) {
+            if ((focused instanceof TextEdit || focused instanceof TextInput) && !focused.readOnly) return true
+            focused = focused.parent
+        }
+        return false
+    }
+    function focusedSummaryScope() {
+        let focused = app.activeFocusItem
+        while (focused && focused !== body) {
+            if (focused.rangeEditScope) return focused.rangeEditScope
+            focused = focused.parent
+        }
+        return summaryScope
+    }
+    function moveSummary(delta) {
+        const buttons = []
+        function collect(item) {
+            Array.from(item.children).forEach(function(child) {
+                if (!child.visible) return
+                if (child instanceof Button && child.enabled) buttons.push(child)
+                else collect(child)
+            })
+        }
+        collect(summaryContent)
+        if (!buttons.length) return
+        const current = buttons.indexOf(app.activeFocusItem)
+        const index = Math.max(0, Math.min(buttons.length - 1, current + delta))
+        const target = buttons[index]
+        target.forceActiveFocus()
+        const y = target.mapToItem(summaryContent, 0, 0).y
+        if (y < summaryView.contentY) summaryView.contentY = y
+        else if (y + target.height > summaryView.contentY + summaryView.height)
+            summaryView.contentY = y + target.height - summaryView.height
+    }
     function updateTagList() {
         // Replacing a JS-array model destroys delegates and resets ListView's
         // index. Capture identity and focus before handing it the new rows.
@@ -462,6 +498,7 @@ Item {
         id: range
         required property var entry
         required property string prefix
+        readonly property var rangeEditScope: entry
         spacing: 4 * panel.controlScale
         TagButton {
             objectName: range.prefix + range.entry.reference
@@ -469,6 +506,12 @@ Item {
             text: range.entry.reference
             wrapText: true
             onClicked: panel.openTagged(range.entry)
+        }
+        TagButton {
+            objectName: range.prefix + "editRange:" + range.entry.reference
+            text: "Edit range"
+            enabled: !panel.app.rangeEditing && !panel.bible.busy
+            onClicked: panel.app.openRangeEditor(range.entry, "tag")
         }
         SummaryChips {
             Layout.fillWidth: true
@@ -550,6 +593,9 @@ Item {
             visible: panel.contentVisible
             spacing: 8 * panel.controlScale
             Keys.onEscapePressed: panel.handleEscape()
+            Shortcut { sequence: "Shift+E"; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.app.openRangeEditor(panel.focusedSummaryScope(), "tag") }
+            Shortcut { sequences: ["J", "Down"]; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.moveSummary(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.moveSummary(-1) }
             RowLayout {
                 Layout.fillWidth: true
                 TagText {
@@ -606,6 +652,13 @@ Item {
                         visible: panel.exactTags.length > 0
                         tags: panel.exactTags
                         prefix: "summaryTag:"
+                    }
+                    TagButton {
+                        objectName: "summaryEditRange"
+                        visible: panel.exactTags.length > 0
+                        text: "Edit range"
+                        enabled: !panel.app.rangeEditing && !panel.bible.busy
+                        onClicked: panel.app.openRangeEditor(panel.summaryScope, "tag")
                     }
                     TagText {
                         Layout.fillWidth: true
