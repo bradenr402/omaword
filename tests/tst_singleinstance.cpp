@@ -79,7 +79,7 @@ private slots:
         QList<SingleInstance::Request> requests;
         primary.setHandler([&](const auto &request, auto reply) { requests.append(request); reply({true, {}}); });
         const auto first = SingleInstance::Request::fromArguments({QString::fromUtf8("Jean 3:16 — λόγος 🌿")},
-            dir.path() + QString::fromUtf8("/日本語 Bible.epub"), true);
+            dir.path() + QString::fromUtf8("/日本語 Bible.zip"), true);
         bool done = false;
         SingleInstance::Result result{false, {}};
         secondary.forward(first, [&](auto value) { result = value; done = true; });
@@ -159,7 +159,7 @@ private slots:
         QTest::newRow("reference-type") << QByteArray("{\"version\":1,\"activate\":true,\"reference\":8}\n");
         QTest::newRow("newWindow-type") << QByteArray("{\"version\":1,\"activate\":true,\"newWindow\":8}\n");
         QTest::newRow("unknown-field") << QByteArray("{\"version\":1,\"activate\":true,\"path\":\"/tmp/x\"}\n");
-        QTest::newRow("relative-import") << QByteArray("{\"version\":1,\"activate\":true,\"import\":\"x.epub\"}\n");
+        QTest::newRow("relative-import") << QByteArray("{\"version\":1,\"activate\":true,\"import\":\"x.zip\"}\n");
         QTest::newRow("long-reference") << QByteArray("{\"version\":1,\"activate\":true,\"reference\":\"") + QByteArray(1025, 'x') + "\"}\n";
         QTest::newRow("null-in-path") << QByteArray("{\"version\":1,\"activate\":true,\"import\":\"/tmp/x\\u0000\"}\n");
         QTest::newRow("two-frames") << activation + activation;
@@ -306,13 +306,13 @@ private slots:
         SingleInstance secondary(dir.path(), "test", dir.path());
         QCOMPARE(secondary.start(), SingleInstance::Role::Secondary);
         bool done = false;
-        secondary.forward({QString::fromUtf8("Éphésiens 2:8"), dir.path() + "/explicit.epub", {}, {}},
+        secondary.forward({QString::fromUtf8("Éphésiens 2:8"), dir.path() + "/explicit.zip", {}, {}},
                           [&](auto result) { QVERIFY2(result.ok, qPrintable(result.error)); done = true; });
         QTRY_VERIFY(done);
         QTRY_VERIFY(primary.bytesAvailable() > 0);
         const auto received = QJsonDocument::fromJson(primary.readLine()).object();
         QCOMPARE(received.value("reference").toString(), QString::fromUtf8("Éphésiens 2:8"));
-        QCOMPARE(received.value("import").toString(), dir.path() + "/explicit.epub");
+        QCOMPARE(received.value("import").toString(), dir.path() + "/explicit.zip");
         QVERIFY(QFile::exists(secondary.endpoint()));
         primary.kill(); // Only the test-owned child; leave a real stale socket + lock.
         QVERIFY(primary.waitForFinished());
@@ -341,10 +341,10 @@ private slots:
         QTemporaryDir dir;
         Child primary;
         primary.setProcessEnvironment(isolatedEnvironment(dir.path()));
-        primary.start(executable, {"--import", dir.path() + "/missing-initial.epub"});
+        primary.start(executable, {"--import", dir.path() + "/missing-initial.zip"});
         QVERIFY(primary.waitForStarted());
         QByteArray errors;
-        QTRY_VERIFY_WITH_TIMEOUT((errors += primary.readAllStandardError()).contains("Cannot read the selected EPUB"), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT((errors += primary.readAllStandardError()).contains("Cannot read the selected USFM file."), 5000);
         QCOMPARE(primary.state(), QProcess::Running);
         // An empty relaunch must not repeat the original failing import.
         Child secondary;
@@ -352,10 +352,10 @@ private slots:
         secondary.start(executable, QStringList{});
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 0);
-        secondary.start(executable, {"--import", dir.path() + QString::fromUtf8("/不存在.epub")});
+        secondary.start(executable, {"--import", dir.path() + QString::fromUtf8("/不存在.zip")});
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 1);
-        QVERIFY(secondary.readAllStandardError().contains("Cannot read the selected EPUB"));
+        QVERIFY(secondary.readAllStandardError().contains("Cannot read the selected USFM file."));
         secondary.start(executable, {"John 3:16"});
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 1); // No Bible installed: cannot claim navigation succeeded.

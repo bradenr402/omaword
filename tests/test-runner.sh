@@ -8,7 +8,7 @@ trap 'if [[ -n $running ]]; then kill "$running" 2>/dev/null || true; wait "$run
 export STATE="$workspace/state"
 mkdir -p "$workspace/checkout/bin" "$workspace/checkout/tests" "$workspace/tools" "$STATE"
 cp "$root/bin/test" "$workspace/checkout/bin/test"
-for project in backend ui importer_versions blockannotations singleinstance windows; do
+for project in backend ui usfm catalog blockannotations singleinstance windows; do
     touch "$workspace/checkout/tests/$project.pro"
 done
 cat > "$workspace/tools/qmake6" <<'SH'
@@ -41,9 +41,10 @@ flock -u 9
 trap 'rm -f "$STATE/active-$BASHPID"' EXIT
 if [[ $phase == test ]]; then
     printf '%s\n' "$@" > "$STATE/$project.args"
-    for variable in OMAWORD_TEST_KJV OMAWORD_TEST_KJV_EPUB OMAWORD_TEST_EPUB; do
-        [[ ${!variable} == "$FIXTURE" ]]
+    for variable in OMAWORD_TEST_NET_ZIP OMAWORD_TEST_KJV_ZIP OMAWORD_TEST_KJV; do
+        [[ -z ${!variable:-} || ${!variable} == "$USFM_FIXTURE" ]]
     done
+    [[ -z ${OMAWORD_TEST_USFM_DIR:-} || $OMAWORD_TEST_USFM_DIR == "$USFM_DIRECTORY" ]]
     [[ $QT_QPA_PLATFORM == offscreen && $QT_QUICK_BACKEND == software ]]
 fi
 if [[ ${HOLD:-0} == 1 ]]; then
@@ -59,9 +60,15 @@ SH
 chmod +x "$workspace/tools/qmake6" "$workspace/tools/worker"
 ln -s worker "$workspace/tools/make"
 export TOOLS="$workspace/tools" PATH="$workspace/tools:$PATH"
-touch "$workspace/input book.epub"
-export FIXTURE="$workspace/input book.epub"
-export OMAWORD_TEST_KJV='input book.epub' OMAWORD_TEST_KJV_EPUB='input book.epub' OMAWORD_TEST_EPUB='input book.epub'
+mkdir -p "$workspace/source archives/nested"
+ln -s 'source archives' "$workspace/source alias"
+touch "$workspace/source archives/input book.zip"
+export USFM_FIXTURE="$workspace/source archives/input book.zip"
+export USFM_DIRECTORY="$workspace/source archives"
+export OMAWORD_TEST_USFM_DIR='source alias/nested/..'
+export OMAWORD_TEST_NET_ZIP='source alias/nested/../input book.zip'
+export OMAWORD_TEST_KJV_ZIP='source alias/nested/../input book.zip'
+export OMAWORD_TEST_KJV='source alias/nested/../input book.zip'
 export BUILD_DIR='output tree/../output tree' JOBS=3 TEST_JOBS=2 EXPECTED_JOBS=1
 cd "$workspace"
 runner="$workspace/checkout/bin/test"
@@ -101,18 +108,48 @@ assert_output '[annotations] PASS'
 [[ $(<"$workspace/output") != *'[backend] START'* ]]
 printf 'PASS targeted Qt arguments and caller-relative paths\n'
 
+for suite in importer catalog; do
+    run_status --suite "$suite" selectedFunction
+    [[ $status == 0 ]]
+    project=$suite
+    [[ $suite != importer ]] || project=usfm
+    [[ $(<"$STATE/$project.args") == selectedFunction ]]
+    assert_output "[$suite] PASS"
+done
+printf 'PASS importer and catalog selectors map to their projects and executables\n'
+
+for invalid in 'missing directory' 'source archives/input book.zip'; do
+    OMAWORD_TEST_USFM_DIR="$invalid" run_status --suite importer
+    [[ $status == 1 ]]
+    assert_output 'OMAWORD_TEST_USFM_DIR must name a readable directory.'
+done
+for variable in OMAWORD_TEST_NET_ZIP OMAWORD_TEST_KJV_ZIP OMAWORD_TEST_KJV; do
+    for invalid in 'missing.zip' 'source archives'; do
+        saved=${!variable}
+        printf -v "$variable" '%s' "$invalid"
+        run_status --suite importer
+        printf -v "$variable" '%s' "$saved"
+        [[ $status == 1 ]]
+        assert_output "$variable must name a readable USFM ZIP file."
+    done
+done
+printf 'PASS fixture directory and ZIP paths reject missing or wrong-type inputs\n'
+
+unset OMAWORD_TEST_USFM_DIR OMAWORD_TEST_NET_ZIP OMAWORD_TEST_KJV_ZIP OMAWORD_TEST_KJV
+rm -f "$STATE"/*.test "$STATE"/*.build
 export JOBS=1 TEST_JOBS=8 EXPECTED_JOBS=1
 run_status
 [[ $status == 0 ]]
-for project in backend ui importer_versions blockannotations singleinstance windows; do
+for project in backend ui usfm catalog blockannotations singleinstance windows; do
     [[ -f $STATE/$project.test ]]
 done
 assert_output '[windows] PASS'
+assert_output '[catalog] PASS'
 assert_idle
 run_status --suite all selectedFunction
 [[ $status == 1 ]]
 assert_output 'require a single --suite target'
-printf 'PASS default all discovers windows, clamps concurrency, rejects ambiguous Qt arguments\n'
+printf 'PASS default all includes catalog and windows, accepts optional fixtures, clamps concurrency, rejects ambiguous Qt arguments\n'
 
 HOLD=1 bash "$runner" --suite annotations > "$workspace/output" 2>&1 &
 running=$!

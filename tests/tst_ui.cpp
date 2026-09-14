@@ -24,12 +24,40 @@
 #include "blockdocument.h"
 #include "biblebackend.h"
 #include "desktop.h"
-#include "epubimporter.h"
+#include "usfmimporter.h"
+#include "biblebooks.h"
+#include "versioncatalog.h"
+#include <archive.h>
+#include <archive_entry.h>
 
 // Run: QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./tst_ui
-// Optional: OMAWORD_TEST_EPUB=/path/to/NETBIBLE21.epub and
-// OMAWORD_TEST_KJV=/path/to/eng-kjv2006.epub for multi-version integration. Without NET a full,
-// canonically numbered synthetic database is generated; no Bible text is bundled.
+// Optional: OMAWORD_TEST_USFM_DIR contains engnet_usfm.zip and eng-kjv2006_usfm.zip.
+// OMAWORD_TEST_KJV can override the KJV ZIP path. Otherwise original synthetic
+// USFM exercises reader interactions without bundling Bible text or using a network.
+class MockVersionCatalog : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QVariantList entries MEMBER entries CONSTANT)
+    Q_PROPERTY(bool busy MEMBER busy NOTIFY changed)
+    Q_PROPERTY(double progress MEMBER progress NOTIFY changed)
+    Q_PROPERTY(QString error MEMBER error NOTIFY changed)
+public:
+    QVariantList entries = VersionCatalog().entries();
+    bool busy = false;
+    double progress = 0;
+    QString error;
+    Q_INVOKABLE void download(const QString &id) { busy = true; progress = 0; error.clear(); emit changed(); emit requested(id); }
+    Q_INVOKABLE void cancel() { busy = false; emit changed(); emit canceled(); }
+    Q_INVOKABLE void clearError() { error.clear(); emit changed(); }
+    void fail(const QString &message) { busy = false; error = message; emit changed(); }
+    void finish(const QUrl &url) { busy = false; progress = 1; emit changed(); emit downloadFinished(url); }
+signals:
+    void changed();
+    void requested(const QString &id);
+    void canceled();
+    void downloadFinished(const QUrl &url);
+};
+
 class UiTest : public QObject
 {
     Q_OBJECT
@@ -37,10 +65,37 @@ class UiTest : public QObject
     std::unique_ptr<QTemporaryDir> session;
     std::unique_ptr<BibleBackend> bible;
     std::unique_ptr<Desktop> desktop;
+    std::unique_ptr<MockVersionCatalog> catalog;
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
     QStringList qmlWarnings;
     QString fixture;
+    QString syntheticSource;
+    UsfmImporter::Edition fixtureEdition;
+    QString netSource() const {
+        const auto directory = qEnvironmentVariable("OMAWORD_TEST_USFM_DIR");
+        return directory.isEmpty() ? QString() : QDir(directory).filePath("engnet_usfm.zip");
+    }
+    QString kjvSource() const {
+        const auto explicitPath = qEnvironmentVariable("OMAWORD_TEST_KJV");
+        if (!explicitPath.isEmpty()) return explicitPath;
+        const auto directory = qEnvironmentVariable("OMAWORD_TEST_USFM_DIR");
+        return directory.isEmpty() ? QString() : QDir(directory).filePath("eng-kjv2006_usfm.zip");
+    }
+    QString installedPath() const {
+        QString path;
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-installed-path");
+            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+            if (db.open()) {
+                QSqlQuery q(db);
+                q.prepare("SELECT path FROM installed WHERE version_id=?"); q.addBindValue(bible->versionId());
+                if (q.exec() && q.next()) path = QDir(bible->dataDirectory()).filePath(q.value(0).toString());
+            }
+        }
+        QSqlDatabase::removeDatabase("ui-installed-path");
+        return path;
+    }
 
     static QQuickItem *visualItem(QQuickItem *root, const QString &name) {
         if (root->objectName() == name) return root;
@@ -130,10 +185,10 @@ class UiTest : public QObject
     }
     void installDragFixture() {
         // Distinct rich paragraphs exercise document offsets, Unicode, poetry,
-        // and the join between delegates independently of the source EPUB.
+        // and the join between delegates independently of the source USFM.
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","ui-drag-fixture");
-            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            db.setDatabaseName(installedPath());
             QVERIFY(db.open());
             QSqlQuery query(db);
             query.prepare("UPDATE verses SET text=?,html=?,poetry=?,heading=? WHERE book=43 AND chapter=3 AND number=?");
@@ -172,37 +227,51 @@ class UiTest : public QObject
         QTest::qWait(150);
         QVERIFY(window->grabWindow().save(QDir(directory).filePath(name + ".png")));
     }
-    bool makeSyntheticBible() {
+    bool writeSyntheticUsfm(const QString &path, const QString &edition = "engnet", bool sourceOrder = false) {
+        auto archive = archive_write_new();
+        archive_write_set_format_zip(archive);
+        if (archive_write_open_filename(archive,qPrintable(path)) != ARCHIVE_OK) { archive_write_free(archive); return false; }
         bool ok = true;
-        {
-            auto db = QSqlDatabase::addDatabase("QSQLITE", "ui-fixture");
-            db.setDatabaseName(fixture);
-            if (!db.open()) return false;
-            QSqlQuery q(db);
-            ok = q.exec("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
-                && q.exec("INSERT INTO metadata VALUES('edition','NET Bible 2.1'),('schema','1')")
-                && q.exec("CREATE TABLE verses(book INTEGER,chapter INTEGER,number INTEGER,text TEXT,html TEXT,heading TEXT,poetry INTEGER,PRIMARY KEY(book,chapter,number))")
-                && db.transaction();
-            q.prepare("INSERT INTO verses VALUES(?,?,?,?,?,?,?)");
-            for (int b = 1; ok && b <= 66; ++b) {
-                for (int c = 1; ok && c <= EpubImporter::canon()[b-1].chapters; ++c) {
-                    for (int v = 1; ok && v <= EpubImporter::chapterMaximum(b,c); ++v) {
-                        if (EpubImporter::omittedVerse(b,c,v)) continue;
-                        const QString text = QString("Synthetic reader fixture %1:%2. This is original test text for checking comfortable wrapping, verse selection, and annotation workflows. A second sentence gives the reading surface enough height to exercise scrolling and restoration.").arg(c).arg(v);
-                        q.bindValue(0,b); q.bindValue(1,c); q.bindValue(2,v);
-                        q.bindValue(3,text); q.bindValue(4,text);
-                        q.bindValue(5,v == 1 ? QString("Reader integration fixture") : QString(""));
-                        q.bindValue(6,0);
-                        ok = q.exec();
-                    }
+        const auto &books = BibleBooks::canon();
+        QVector<int> order;
+        if (sourceOrder) order = {69,40,43};
+        else for (int i = 0; i < books.size(); ++i) {
+            order.append(i + 1);
+            if (QString::fromLatin1(books[i].code) == "REV") break;
+        }
+        int ordinal = 0;
+        for (int id : order) {
+            const auto &book = books[id - 1];
+            // Only interaction-relevant boundaries are specialized. The remaining
+            // original chapters deliberately do not reproduce a numbering profile.
+            const int chapters = id == 19 ? 150 : id == 40 ? 28 : id == 43 ? 21
+                : id == 46 ? 13 : id == 52 ? 5 : id == 53 ? 3 : id == 69 ? 16
+                : QString::fromLatin1(book.code) == "REV" ? 22 : 4;
+            QByteArray text = QString("\\id %1 Original reader test edition\n\\h %2\n\\toc1 %2\n\\toc2 %2\n\\toc3 %1\n")
+                .arg(book.code,sourceOrder && id == 43 ? "Yochanan" : book.name).toUtf8();
+            for (int chapter = id == 69 ? 10 : 1; chapter <= chapters; ++chapter) {
+                const int verses = id == 19 && chapter == 119 ? 176 : id == 40 && chapter == 17 ? 27
+                    : id == 43 && chapter == 2 ? 25 : id == 43 && chapter == 3 ? 36 : id == 43 && chapter == 4 ? 54
+                    : id == 43 && chapter == 21 ? 25 : id == 53 && chapter == 3 ? 18
+                    : QString::fromLatin1(book.code) == "REV" && chapter == 22 ? 21 : 40;
+                text += QString("\\c %1\n\\s Reader integration fixture\n").arg(chapter).toUtf8();
+                for (int verse = 1; verse <= verses; ++verse) {
+                    if (edition == "engnet" && id == 40 && chapter == 17 && verse == 21) continue;
+                    text += QString("\\v %1 Synthetic reader fixture %2:%1. This is original test text for checking comfortable wrapping, verse selection, and annotation workflows. A second sentence gives the reading surface enough height to exercise scrolling and restoration.\n").arg(verse).arg(chapter).toUtf8();
                 }
             }
-            ok = db.commit() && ok;
-            if (!ok) qWarning() << q.lastError();
+            auto entry = archive_entry_new();
+            const auto name = QString("%1-%2%3.usfm").arg(++ordinal,3,10,QChar('0')).arg(book.code,edition).toUtf8();
+            archive_entry_set_pathname(entry,name.constData());
+            archive_entry_set_filetype(entry,AE_IFREG);
+            archive_entry_set_perm(entry,0600);
+            archive_entry_set_size(entry,text.size());
+            ok = archive_write_header(archive,entry) == ARCHIVE_OK && archive_write_data(archive,text.constData(),text.size()) == text.size() && ok;
+            archive_entry_free(entry);
         }
-        QSqlDatabase::removeDatabase("ui-fixture");
-        QString error;
-        return ok && EpubImporter::validateDatabase(fixture, &error);
+        ok = archive_write_close(archive) == ARCHIVE_OK && ok;
+        archive_write_free(archive);
+        return ok;
     }
     void loadUi(bool verseFixture = false) {
         bible = std::make_unique<BibleBackend>();
@@ -212,12 +281,14 @@ class UiTest : public QObject
         if (verseFixture && !testName.startsWith("defaultParagraph") && testName != "fontControlsBeforeImport")
             bible->setReadingMode("verse");
         desktop = std::make_unique<Desktop>();
+        catalog = std::make_unique<MockVersionCatalog>();
         engine = std::make_unique<QQmlApplicationEngine>();
         connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
             for (const auto &error : errors) qmlWarnings.append(error.toString());
         });
         engine->rootContext()->setContextProperty("bible", bible.get());
         engine->rootContext()->setContextProperty("desktop", desktop.get());
+        engine->rootContext()->setContextProperty("catalog", catalog.get());
         engine->load(QUrl("qrc:/qml/Main.qml"));
         QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(qmlWarnings.join('\n')));
         window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
@@ -232,7 +303,7 @@ class UiTest : public QObject
     void unloadUi() {
         if (window) window->close();
         engine.reset(); window = nullptr;
-        desktop.reset(); bible.reset();
+        catalog.reset(); desktop.reset(); bible.reset();
     }
     QVariantMap saved(int verse) const {
         for (const auto &row : bible->collection()) {
@@ -246,13 +317,11 @@ private slots:
     void initTestCase() {
         QVERIFY(fixtures.isValid());
         fixture = fixtures.filePath("bible.sqlite");
-        const QString epub = qEnvironmentVariable("OMAWORD_TEST_EPUB");
-        if (epub.isEmpty()) {
-            QVERIFY(makeSyntheticBible());
-        } else {
-            const auto imported = EpubImporter::importFile(epub, fixture);
-            QVERIFY2(imported.ok, qPrintable(imported.error));
-        }
+        syntheticSource = fixtures.filePath("original_usfm.zip");
+        QVERIFY(writeSyntheticUsfm(syntheticSource));
+        const auto imported = UsfmImporter::importFile(netSource().isEmpty() ? syntheticSource : netSource(), fixture);
+        QVERIFY2(imported.ok, qPrintable(imported.error));
+        fixtureEdition = imported.edition;
     }
     void init() {
         session = std::make_unique<QTemporaryDir>();
@@ -261,10 +330,25 @@ private slots:
         const auto data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QVERIFY(QDir().mkpath(data));
         const QString testName = QString::fromLatin1(QTest::currentTestFunction());
-        if (testName != "emptyAndImportError" && testName != "asyncFirstImportLayout" && testName != "fontControlsBeforeImport")
-            QVERIFY(QFile::copy(fixture, data + "/bible.sqlite"));
+        if (testName != "emptyAndImportError" && testName != "asyncFirstImportLayout" && testName != "fontControlsBeforeImport"
+                && testName != "catalogDownloadLifecycle") {
+            BibleBackend setup;
+            const QString filename = "bible-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.sqlite";
+            QVERIFY(QFile::copy(fixture, data + '/' + filename));
+            {
+                auto db = QSqlDatabase::addDatabase("QSQLITE","ui-setup");
+                db.setDatabaseName(data + "/personal.sqlite"); QVERIFY(db.open()); QSqlQuery q(db);
+                q.prepare("INSERT INTO installed(version_id,path,abbreviation,name,copyright) VALUES('engnet',?,'NET',?,?)");
+                q.addBindValue(filename); q.addBindValue(fixtureEdition.name);
+                q.addBindValue(fixtureEdition.copyright.isNull() ? QString("") : fixtureEdition.copyright); QVERIFY(q.exec());
+                QVERIFY(q.exec("UPDATE library SET active='engnet' WHERE id=1"));
+            }
+            QSqlDatabase::removeDatabase("ui-setup");
+        }
         qmlWarnings.clear();
         loadUi(true);
+        if (testName != "emptyAndImportError" && testName != "asyncFirstImportLayout" && testName != "fontControlsBeforeImport"
+                && testName != "catalogDownloadLifecycle") QVERIFY2(bible->ready(),qPrintable(bible->error()));
     }
     void cleanup() {
         unloadUi();
@@ -318,6 +402,224 @@ private slots:
         QCOMPARE(window->property("readerSize").toInt(),27);
         QCOMPARE(bible->readingMode(),QString("paragraph"));
     }
+    void catalogSearchAndAttribution() {
+        QSignalSpy downloads(catalog.get(),&MockVersionCatalog::requested);
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"import")));
+        QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
+        QCOMPARE(prop("catalogResults","count").toInt(),7);
+        QVERIFY(item("catalogInstalled:engnet")->isVisible());
+        QVERIFY(!item("catalogInstalled:engojb")->isVisible());
+        type("oRtHoDoX");
+        QCOMPARE(prop("catalogResults","count").toInt(),1);
+        QTest::qWait(100);
+        click(item("catalogDetails:engojb"));
+        QTRY_VERIFY(prop("catalogDetails","opened").toBool());
+        QString copyright;
+        for (const auto &entry : catalog->entries)
+            if (entry.toMap().value("id") == "engojb") copyright = entry.toMap().value("copyright").toString();
+        QVERIFY(!copyright.isEmpty());
+        QCOMPARE(prop("catalogCopyright","text").toString(),copyright);
+        QVERIFY(item("catalogProvider")->isVisible());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("catalogDetails","visible").toBool());
+        QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
+        key(Qt::Key_A,Qt::ControlModifier); type("no matching version");
+        QCOMPARE(prop("catalogResults","count").toInt(),0);
+        QCOMPARE(downloads.count(),0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"about")));
+        QTRY_VERIFY(prop("aboutDialog","opened").toBool());
+        QVERIFY(prop("aboutSources","text").toString().contains("directly from eBible.org"));
+        QVERIFY(prop("aboutSources","text").toString().contains("No connection is needed"));
+    }
+    void catalogDownloadLifecycle() {
+        QVERIFY(!bible->ready());
+        QSignalSpy downloads(catalog.get(),&MockVersionCatalog::requested);
+        QSignalSpy canceled(catalog.get(),&MockVersionCatalog::canceled);
+        QSignalSpy commits(bible.get(),&BibleBackend::sharedCommitted);
+        click(item("setupImport"));
+        QTRY_VERIFY(prop("importGuide","opened").toBool());
+        QTest::qWait(100);
+        click(item("catalogInstall:engnet"));
+        QCOMPARE(downloads.count(),1); QCOMPARE(downloads.first().first().toString(),QString("engnet"));
+        QVERIFY(!bible->busy()); QVERIFY(!bible->ready());
+        QVERIFY(!item("importChoose")->isEnabled());
+        QVERIFY(!item("catalogInstall:engojb")->isEnabled());
+        QVERIFY(!item("catalogInstalled:engnet")->isVisible());
+        catalog->progress = 0.42; emit catalog->changed();
+        QCOMPARE(prop("catalogProgress","value").toDouble(),0.42);
+        QVERIFY(prop("catalogStatus","text").toString().contains("42%"));
+        QVERIFY(!prop("toast","text").toString().contains("Installed"));
+        catalog->fail("Synthetic connection failure");
+        QCOMPARE(prop("catalogError","text").toString(),QString("Synthetic connection failure"));
+        QVERIFY(QMetaObject::invokeMethod(object("catalogRetry"),"clicked"));
+        QCOMPARE(downloads.count(),2);
+        QVERIFY(QMetaObject::invokeMethod(object("catalogCancel"),"clicked"));
+        QCOMPARE(canceled.count(),1); QVERIFY(!catalog->busy);
+        catalog->finish(QUrl::fromLocalFile(syntheticSource));
+        QVERIFY(!bible->busy()); QVERIFY(!bible->ready()); QCOMPARE(commits.count(),0);
+        const auto invalidSource = session->filePath("invalid-catalog.zip");
+        QFile invalid(invalidSource); QVERIFY(invalid.open(QIODevice::WriteOnly));
+        invalid.write("Invalid USFM ZIP"); invalid.close();
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engnet")));
+        catalog->finish(QUrl::fromLocalFile(invalidSource));
+        QTRY_VERIFY(!bible->busy());
+        QVERIFY(!bible->ready()); QVERIFY(!bible->error().isEmpty());
+        QVERIFY(!item("catalogInstalled:engnet")->isVisible());
+        QVERIFY(!prop("toast","text").toString().contains("Installed"));
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engnet")));
+        catalog->finish(QUrl::fromLocalFile(syntheticSource));
+        QVERIFY(bible->busy());
+        QVERIFY(!prop("toast","text").toString().contains("Installed"));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY2(bible->ready(),qPrintable(bible->error()));
+        QCOMPARE(bible->versionId(),QString("engnet"));
+        QCOMPARE(prop("toast","text").toString(),QString("Installed NET"));
+        const auto commitCount = commits.count();
+        catalog->finish(QUrl::fromLocalFile(syntheticSource));
+        QVERIFY(!bible->busy()); QCOMPARE(commits.count(),commitCount);
+        QVERIFY(QFile::exists(syntheticSource));
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engnet")));
+        catalog->finish(QUrl::fromLocalFile(syntheticSource));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QCOMPARE(bible->versions().size(),1);
+        QCOMPARE(prop("toast","text").toString(),QString("Reimported NET"));
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engojb")));
+        const auto requestsBeforeClose = downloads.count();
+        QVERIFY(window->close());
+        QVERIFY(!catalog->busy);
+        const auto afterClose = commits.count();
+        catalog->finish(QUrl::fromLocalFile(syntheticSource));
+        QTest::qWait(100);
+        QCOMPARE(downloads.count(),requestsBeforeClose);
+        QCOMPARE(commits.count(),afterClose);
+        QVERIFY(!bible->busy()); QVERIFY(QFile::exists(syntheticSource));
+    }
+    void catalogRetryAfterPeerDraftRejection() {
+        bool peerDraftSaved = false;
+        int flushAttempts = 0;
+        BibleBackend peer;
+        peer.setFlushCallback([&] { ++flushAttempts; return peerDraftSaved; });
+        QSignalSpy downloads(catalog.get(),&MockVersionCatalog::requested);
+        QSignalSpy busy(bible.get(),&BibleBackend::busyChanged);
+        QSignalSpy commits(bible.get(),&BibleBackend::sharedCommitted);
+        const auto cached = QUrl::fromLocalFile(syntheticSource);
+        const auto previousToast = prop("toast","text");
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"import")));
+        QTRY_VERIFY(prop("importGuide","opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engnet")));
+        QCOMPARE(downloads.count(),1);
+        catalog->finish(cached);
+        QVERIFY(flushAttempts > 0);
+        QVERIFY(!bible->busy()); QCOMPARE(busy.count(),0); QCOMPARE(commits.count(),0);
+        QCOMPARE(window->property("pendingDownload").toUrl(),cached);
+        QCOMPARE(window->property("downloadId").toString(),QString("engnet"));
+        QVERIFY(window->property("importingCatalogId").toString().isEmpty());
+        QVERIFY(!window->property("replacingCatalogVersion").toBool());
+        QVERIFY(!bible->error().isEmpty());
+        QCOMPARE(prop("catalogError","text").toString(),bible->error());
+        QVERIFY(item("catalogRetry")->isVisible()); QVERIFY(item("catalogRetry")->isEnabled());
+        QCOMPARE(prop("toast","text"),previousToast);
+        const int rejectedAttempts = flushAttempts;
+        QVERIFY(QMetaObject::invokeMethod(object("catalogRetry"),"clicked"));
+        QVERIFY(flushAttempts > rejectedAttempts);
+        QCOMPARE(downloads.count(),1); QCOMPARE(busy.count(),0); QCOMPARE(commits.count(),0);
+        QCOMPARE(window->property("pendingDownload").toUrl(),cached);
+        QCOMPARE(window->property("downloadId").toString(),QString("engnet"));
+        QVERIFY(item("catalogRetry")->isVisible());
+        QCOMPARE(prop("toast","text"),previousToast);
+        QVERIFY(QFile::exists(cached.toLocalFile()));
+
+        peerDraftSaved = true;
+        QVERIFY(QMetaObject::invokeMethod(object("catalogRetry"),"clicked"));
+        QVERIFY(bible->busy());
+        QCOMPARE(window->property("importingCatalogId").toString(),QString("engnet"));
+        QVERIFY(window->property("pendingDownload").toUrl().isEmpty());
+        QVERIFY(window->property("downloadId").toString().isEmpty());
+        QCOMPARE(prop("toast","text"),previousToast);
+        QCOMPARE(downloads.count(),1);
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY2(bible->ready(),qPrintable(bible->error()));
+        QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        QCOMPARE(bible->versionId(),QString("engnet"));
+        QCOMPARE(bible->versions().size(),1);
+        QCOMPARE(prop("toast","text").toString(),QString("Reimported NET"));
+        QVERIFY(window->property("importingCatalogId").toString().isEmpty());
+        QVERIFY(commits.count() > 0); QCOMPARE(downloads.count(),1);
+        QVERIFY(QFile::exists(cached.toLocalFile()));
+    }
+    void catalogCompletionGuardsDraftAndSharedImport() {
+        reference("John 3:16");
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engnet")));
+        QSignalSpy downloads(catalog.get(),&MockVersionCatalog::requested);
+        QVERIFY(window->setProperty("syncingNote",true));
+        QVERIFY(object("noteEditor")->setProperty("text","Unresolved download draft"));
+        QVERIFY(window->setProperty("syncingNote",false));
+        BibleBackend peer;
+        QVERIFY(peer.navigate("John 3:16"));
+        peer.setNoteText("Peer revision");
+        QVERIFY(window->property("noteConflict").toBool());
+        catalog->finish(QUrl::fromLocalFile(syntheticSource));
+        QVERIFY(!bible->busy());
+        QCOMPARE(prop("noteEditor","text").toString(),QString("Unresolved download draft"));
+        QVERIFY(!window->property("pendingDownload").toUrl().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(window,"loadSavedNote"));
+        peer.importUsfm(QUrl::fromLocalFile(syntheticSource));
+        QVERIFY(peer.busy()); QVERIFY(bible->busy());
+        QVERIFY(!item("versionControl")->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(window,"importDownloaded"));
+        QVERIFY(!window->property("pendingDownload").toUrl().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engojb")));
+        QCOMPARE(downloads.count(),0);
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY(QMetaObject::invokeMethod(window,"importDownloaded"));
+        QVERIFY(bible->busy());
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        QCOMPARE(downloads.count(),0);
+        QCOMPARE(bible->noteText(),QString("Peer revision"));
+        QVERIFY(QFile::exists(syntheticSource));
+    }
+    void sourceOrderedChaptersAndNames() {
+        const auto source = session->filePath("source-order.zip");
+        QVERIFY(writeSyntheticUsfm(source,"engojb",true));
+        bible->importUsfm(QUrl::fromLocalFile(source));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        QCOMPARE(bible->books().first().toMap().value("id").toInt(),69);
+        bible->openChapter(69,10);
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        const auto book = bible->books().first().toMap();
+        const QVariant entry = QVariantMap{{"book",69},{"title",book.value("name")}};
+        QVERIFY(QMetaObject::invokeMethod(window,"activatePaletteEntry",Q_ARG(QVariant,entry)));
+        QCOMPARE(prop("paletteResults","count").toInt(),7);
+        key(Qt::Key_Right);
+        QCOMPARE(window->property("paletteChapter").toInt(),10);
+        key(Qt::Key_Left);
+        QCOMPARE(prop("paletteResults","currentIndex").toInt(),0);
+        for (int i = 0; i < 6; ++i) key(Qt::Key_Down);
+        key(Qt::Key_Right);
+        QCOMPARE(window->property("paletteChapter").toInt(),16);
+        key(Qt::Key_Left);
+        QCOMPARE(prop("paletteResults","currentIndex").toInt(),6);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        bible->openChapter(69,16);
+        QVERIFY(QMetaObject::invokeMethod(window,"chapterStep",Q_ARG(QVariant,1)));
+        QCOMPARE(bible->book(),40); QCOMPARE(bible->chapter(),1);
+        QVERIFY(QMetaObject::invokeMethod(window,"chapterStep",Q_ARG(QVariant,-2)));
+        QCOMPARE(bible->book(),69); QCOMPARE(bible->chapter(),15);
+        bible->openChapter(69,16); bible->selectVerses(40,40);
+        QVERIFY(QMetaObject::invokeMethod(window,"moveVerse",Q_ARG(QVariant,1),Q_ARG(QVariant,true),Q_ARG(QVariant,false)));
+        QVERIFY(bible->crossChapterSelection());
+        QCOMPARE(bible->book(),40); QCOMPARE(bible->cursorVerse(),1);
+        const auto range = bible->selectionReference();
+        QVERIFY(range.contains(book.value("name").toString()));
+        QVERIFY(range.contains("Matthew 1:1"));
+        reference("Yochanan 3:16");
+        QCOMPARE(bible->book(),43);
+        QVERIFY(bible->selectionReference().contains("Yochanan"));
+        QVERIFY(prop("passageControl","tip").toString().contains("Yochanan"));
+    }
     void defaultParagraphCycleAndFallback() {
         QCOMPARE(bible->readingMode(),QString("paragraph"));
         QCOMPARE(window->property("continuousReader").toBool(),bible->hasParagraphs());
@@ -351,11 +653,11 @@ private slots:
         QCOMPARE(window->property("continuousReader").toBool(),bible->hasParagraphs());
     }
     void defaultParagraphKjvFlowAndCopy() {
-        const auto kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
-        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_KJV to the structured eng-kjv2006.epub.");
-        bible->importEpub(QUrl::fromLocalFile(kjv));
+        const auto kjv = kjvSource();
+        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_USFM_DIR or OMAWORD_TEST_KJV to exercise KJV USFM.");
+        bible->importUsfm(QUrl::fromLocalFile(kjv));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
-        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        QCOMPARE(bible->versionId(),QString("eng-kjv2006"));
         QVERIFY(bible->hasParagraphs());
         QCOMPARE(bible->readingMode(),QString("paragraph"));
         reference("Genesis 1:1");
@@ -393,8 +695,7 @@ private slots:
         bible->setReadingMode("paragraph");
         QTRY_VERIFY(doc->blockCount() > 1);
         const auto first = doc->findBlock(blockOffset(1));
-        // OEBPS/GEN.xhtml has separate div.p containers for 1:1–2,
-        // 1:3–5 (no pilcrow), and 1:6–8 (leading layout pilcrow).
+        // Source paragraph boundaries group 1:1–2, 1:3–5, and 1:6–8.
         QCOMPARE(doc->findBlock(blockOffset(2)),first);
         const auto second = doc->findBlock(blockOffset(3));
         QVERIFY(second != first);
@@ -418,8 +719,13 @@ private slots:
         click(item("setupImport"));
         QTRY_VERIFY(prop("importGuide","opened").toBool());
         QVERIFY(!item("importReplacement")->isVisible());
-        QVERIFY(prop("importSupported","text").toString().contains("Verse-tagged Bible EPUBs"));
-        QVERIFY(prop("importSupported","text").toString().contains("NET format and Haiola/eBible markup supported"));
+        QCOMPARE(prop("setupTitle","text").toString(),desktop->property("appName").toString());
+        QCOMPARE(prop("setupDescription","text").toString(),QString("Add a version to begin. Install from the catalog or import a USFM ZIP.\nRead offline, bookmark and highlight passages, and keep your notes alongside the text."));
+        QCOMPARE(prop("setupPrivacy","text").toString(),QString("All your Bible versions, highlights, bookmarks, and notes stay on this device."));
+        QVERIFY(!item("savedControl")->isVisible()); QVERIFY(!item("notesControl")->isVisible());
+        QVERIFY(item("helpControl")->isVisible());
+        QCOMPARE(prop("catalogResults","count").toInt(),7);
+        QVERIFY(prop("importSupported","text").toString().contains("USFM ZIP"));
         capture("revision-import-guide-setup");
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("importGuide","visible").toBool());
@@ -456,10 +762,10 @@ private slots:
         QVERIFY(prop("referenceInput", "text").toString().startsWith('>'));
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette", "visible").toBool());
-        const auto invalidPath = session->filePath("invalid.epub");
+        const auto invalidPath = session->filePath("invalid.zip");
         QFile invalid(invalidPath);
         QVERIFY(invalid.open(QIODevice::WriteOnly));
-        invalid.write("Invalid EPUB test fixture"); invalid.close();
+        invalid.write("Invalid USFM ZIP test fixture"); invalid.close();
         QVERIFY(object("importDialog")->setProperty("selectedFile",QUrl::fromLocalFile(invalidPath)));
         QVERIFY(QMetaObject::invokeMethod(object("importDialog"),"accepted"));
         // Metadata inspection can reject invalid archives before async import starts.
@@ -471,8 +777,8 @@ private slots:
         QVERIFY(item("setupScroll")->isVisible());
     }
     void asyncFirstImportLayout() {
-        const QString epub = qEnvironmentVariable("OMAWORD_TEST_EPUB");
-        if (epub.isEmpty()) QSKIP("Set OMAWORD_TEST_EPUB to exercise asynchronous first import into the loaded UI.");
+        const QString usfm = netSource();
+        if (usfm.isEmpty()) QSKIP("Set OMAWORD_TEST_USFM_DIR to exercise asynchronous first import into the loaded UI.");
         QVERIFY(!bible->ready());
         QVERIFY(item("setupScroll")->isVisible());
         QVERIFY(!item("readerSurface")->isVisible());
@@ -481,8 +787,8 @@ private slots:
         window->resize(1267,694);
         QSignalSpy ready(bible.get(),&BibleBackend::readyChanged);
         QSignalSpy frames(window,&QQuickWindow::frameSwapped);
-        const auto source = session->filePath("download.epub");
-        QVERIFY(QFile::copy(epub,source));
+        const auto source = session->filePath("download.zip");
+        QVERIFY(QFile::copy(usfm,source));
         click(item("setupImport"));
         QTRY_VERIFY(prop("importGuide","opened").toBool());
         // Exercise the existing file acceptance handler without a native picker.
@@ -1200,37 +1506,23 @@ private slots:
     void pendingDeleteVersionScope() {
         QFETCH(bool,peerRemoval);
         // A synthetic second edition keeps this UI scope regression independent
-        // of optional downloaded EPUBs and WindowManager's separate test target.
+        // of optional downloaded USFM and WindowManager's separate test target.
         const QString name = "bible-11111111-2222-3333-4444-555555555555.sqlite";
         const QString path = bible->dataDirectory() + '/' + name;
-        {
-            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-delete-kjv");
-            db.setDatabaseName(path); QVERIFY(db.open()); QSqlQuery q(db);
-            QVERIFY(q.exec("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)"));
-            QVERIFY(q.exec("INSERT INTO metadata VALUES('schema','1'),('edition','King James (Authorized) Version'),('version_id','kjv-2006'),('abbreviation','KJV'),('copyright','')"));
-            QVERIFY(q.exec("CREATE TABLE verses(book INTEGER,chapter INTEGER,number INTEGER,text TEXT,html TEXT,heading TEXT,poetry INTEGER,PRIMARY KEY(book,chapter,number))"));
-            QVERIFY(db.transaction());
-            q.prepare("INSERT INTO verses VALUES(?,?,?,'Original second-edition UI fixture.','Original second-edition UI fixture.','',0)");
-            for (int b = 1; b <= 66; ++b) for (int c = 1; c <= EpubImporter::canon()[b-1].chapters; ++c) {
-                const int maximum = (b == 47 && c == 13) || b == 64 ? 14
-                    : b == 66 && c == 12 ? 17 : EpubImporter::chapterMaximum(b,c);
-                for (int v = 1; v <= maximum; ++v) {
-                    q.bindValue(0,b); q.bindValue(1,c); q.bindValue(2,v); QVERIFY(q.exec());
-                }
-            }
-            QVERIFY(db.commit());
-        }
-        QSqlDatabase::removeDatabase("ui-delete-kjv");
+        const auto source = session->filePath("second_usfm.zip");
+        QVERIFY(writeSyntheticUsfm(source,"eng-kjv2006"));
+        const auto imported = UsfmImporter::importFile(source,path);
+        QVERIFY2(imported.ok,qPrintable(imported.error));
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","ui-delete-library");
             db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
             QVERIFY(db.open()); QSqlQuery q(db);
-            q.prepare("INSERT INTO installed(version_id,path,abbreviation,name,copyright) VALUES('kjv-2006',?,'KJV','King James (Authorized) Version','')");
-            q.addBindValue(name); QVERIFY(q.exec());
+            q.prepare("INSERT INTO installed(version_id,path,abbreviation,name,copyright) VALUES('eng-kjv2006',?,'KJV',?,'')");
+            q.addBindValue(name); q.addBindValue(imported.edition.name); QVERIFY(q.exec());
         }
         QSqlDatabase::removeDatabase("ui-delete-library");
         BibleBackend peer;
-        QVERIFY2(peer.switchVersion("kjv-2006"),qPrintable(peer.error()));
+        QVERIFY2(peer.switchVersion("eng-kjv2006"),qPrintable(peer.error()));
         QVERIFY(peer.navigate("John 3:16"));
         peer.setNoteText("Keep KJV note"); peer.toggleBookmark(); peer.toggleHighlight();
         const auto kjv = peer.collection();
@@ -1238,12 +1530,12 @@ private slots:
         bible->setNoteText("NET deletion target"); bible->toggleBookmark();
         key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        QCOMPARE(prop("deleteConfirmation","versionId").toString(),QString("net-2.1"));
+        QCOMPARE(prop("deleteConfirmation","versionId").toString(),QString("engnet"));
         QCOMPARE(prop("deleteConfirmation","reference").toString(),QString("John 3:16"));
         QSignalSpy commits(bible.get(),&BibleBackend::sharedCommitted);
-        if (peerRemoval) QVERIFY2(peer.removeVersion("net-2.1",false),qPrintable(peer.error()));
-        else QVERIFY2(bible->switchVersion("kjv-2006"),qPrintable(bible->error()));
-        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        if (peerRemoval) QVERIFY2(peer.removeVersion("engnet",false),qPrintable(peer.error()));
+        else QVERIFY2(bible->switchVersion("eng-kjv2006"),qPrintable(bible->error()));
+        QCOMPARE(bible->versionId(),QString("eng-kjv2006"));
         commits.clear(); // Switching publishes library metadata; confirmation must not publish anything.
         QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved")); // Even during close animation.
         QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
@@ -1253,7 +1545,7 @@ private slots:
         QCOMPARE(bible->collection(),kjv); QCOMPARE(peer.collection(),kjv);
         QCOMPARE(bible->noteText(),QString("Keep KJV note"));
         if (!peerRemoval) {
-            QVERIFY(bible->switchVersion("net-2.1"));
+            QVERIFY(bible->switchVersion("engnet"));
             QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved"));
             QCOMPARE(bible->noteText(),QString("NET deletion target"));
         }
@@ -1554,7 +1846,7 @@ private slots:
         const auto verses = bible->verses();
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","ui-copy-failure");
-            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            db.setDatabaseName(installedPath());
             QVERIFY(db.open());
             QSqlQuery query(db);
             QVERIFY(query.exec("ALTER TABLE verses RENAME TO saved_verses"));
@@ -1889,7 +2181,7 @@ private slots:
         // End verse 2 with RTL text, with no LTR punctuation after it.
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","ui-hit-fixture");
-            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            db.setDatabaseName(installedPath());
             QVERIFY(db.open());
             QSqlQuery q(db);
             QVERIFY(q.exec(QString::fromUtf8("UPDATE verses SET text='Second שלום',html='Second שלום',poetry=0 WHERE book=43 AND chapter=3 AND number=2")));
@@ -2156,7 +2448,7 @@ private slots:
         // Put a visible heading inside the range, not only at its beginning.
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","ui-highlight-heading");
-            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            db.setDatabaseName(installedPath());
             QVERIFY(db.open());
             QSqlQuery q(db);
             QVERIFY(q.exec("UPDATE verses SET heading='An internal heading' WHERE book=43 AND chapter=3 AND number=2"));
@@ -2216,10 +2508,10 @@ private slots:
         bible->setFocusMode(true);
         for (bool importing : {true,false}) {
             if (importing) {
-                const auto path = session->filePath("invalid.epub");
+                const auto path = session->filePath("invalid.zip");
                 QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
-                file.write("invalid EPUB"); file.close();
-                bible->importEpub(QUrl::fromLocalFile(path));
+                file.write("invalid USFM ZIP"); file.close();
+                bible->importUsfm(QUrl::fromLocalFile(path));
                 QTRY_VERIFY(!bible->busy());
             } else {
                 const auto path = session->filePath("not-a-directory");
@@ -2575,7 +2867,7 @@ private slots:
         // same rendered line, each carrying both a bookmark and a note.
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE","ui-annotation-fixture");
-            db.setDatabaseName(bible->dataDirectory() + "/bible.sqlite");
+            db.setDatabaseName(installedPath());
             QVERIFY(db.open());
             QSqlQuery q(db);
             QVERIFY(q.exec("UPDATE verses SET text='Short verse.',html='Short verse.',heading='',poetry=0 WHERE book=43 AND chapter=3 AND number<=4"));
@@ -3095,9 +3387,11 @@ private slots:
         QSignalSpy first(window,SIGNAL(newWindowRequested()));
         QVERIFY(first.isValid());
         // Two UI roots exercise shortcut ownership without the host's window factory.
+        MockVersionCatalog secondCatalog;
         QQmlApplicationEngine secondEngine;
         secondEngine.rootContext()->setContextProperty("bible",bible.get());
         secondEngine.rootContext()->setContextProperty("desktop",desktop.get());
+        secondEngine.rootContext()->setContextProperty("catalog",&secondCatalog);
         connect(&secondEngine,&QQmlEngine::warnings,this,[this](const QList<QQmlError> &errors) {
             for (const auto &error : errors) qmlWarnings.append(error.toString());
         });
@@ -3214,7 +3508,7 @@ private slots:
     }
     void versionPickerKeyboardAndGeometry() {
         QFETCH(double,scale);
-        QCOMPARE(bible->versionId(),QString("net-2.1")); // Includes legacy synthetic startup migration.
+        QCOMPARE(bible->versionId(),QString("engnet"));
         QCOMPARE(bible->versions().size(),1);
         reference("1 Thessalonians 1:1-2 Thessalonians 3:18");
         const auto selected = bible->selectionReference();
@@ -3392,9 +3686,9 @@ private slots:
         QTest::qWait(100); // Polish the newly opened, empty picker before clicking.
         click(item("versionAdd")); QTRY_VERIFY(prop("importGuide","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
-        const QString epub = qEnvironmentVariable("OMAWORD_TEST_EPUB");
-        if (!epub.isEmpty()) {
-            bible->importEpub(QUrl::fromLocalFile(epub));
+        const QString usfm = netSource().isEmpty() ? syntheticSource : netSource();
+        if (!usfm.isEmpty()) {
+            bible->importUsfm(QUrl::fromLocalFile(usfm));
             QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
             QVERIFY2(bible->ready(),qPrintable(bible->error()));
             QVERIFY(bible->navigate("John 3:16"));
@@ -3418,7 +3712,7 @@ private slots:
             QVERIFY(window->setProperty("syncingNote",true));
             QVERIFY(object("noteEditor")->setProperty("text","Unsaved version draft"));
             QVERIFY(window->setProperty("syncingNote",false));
-            QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"net-2.1")));
+            QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"engnet")));
             QVERIFY(prop("versionDialog","opened").toBool());
             QVERIFY(bible->error().contains("version draft failure"));
             QVERIFY(QMetaObject::invokeMethod(window,"confirmRemoveVersion"));
@@ -3453,13 +3747,13 @@ private slots:
         key(Qt::Key_Return); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
     }
     void realKjvSwitchAndRemoveAnnotations() {
-        const auto kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
-        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_KJV to the structured eng-kjv2006.epub.");
+        const auto kjv = kjvSource();
+        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_USFM_DIR or OMAWORD_TEST_KJV to exercise KJV USFM.");
         reference("John 3:16-18");
         bible->setNoteText("NET annotation"); bible->toggleBookmark();
         const auto netText = bodyText(16);
         const auto selected = bible->selectionReference();
-        const auto source = session->filePath("kjv.epub");
+        const auto source = session->filePath("kjv.zip");
         QVERIFY(QFile::copy(kjv,source));
         QVERIFY(object("importDialog")->setProperty("selectedFile",QUrl::fromLocalFile(source)));
         QVERIFY(QMetaObject::invokeMethod(object("importDialog"),"accepted"));
@@ -3467,9 +3761,9 @@ private slots:
         QVERIFY(!item("versionControl")->isEnabled());
         QVERIFY(QMetaObject::invokeMethod(window,"openVersions",Q_ARG(QVariant,false)));
         QVERIFY(!prop("versionDialog","visible").toBool());
-        QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"net-2.1")));
+        QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"engnet")));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
-        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        QCOMPARE(bible->versionId(),QString("eng-kjv2006"));
         QCOMPARE(bible->versions().size(),2);
         QCOMPARE(bible->selectionReference(),selected);
         QVERIFY(bible->noteText().isEmpty()); QVERIFY(!bible->selectionBookmarked());
@@ -3487,9 +3781,9 @@ private slots:
         key(Qt::Key_End); QCOMPARE(prop("versionResults","currentIndex").toInt(),1);
         key(Qt::Key_Home); QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
         type("NET"); key(Qt::Key_Return,Qt::ShiftModifier);
-        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        QCOMPARE(bible->versionId(),QString("eng-kjv2006"));
         key(Qt::Key_Return); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
-        QCOMPARE(bible->versionId(),QString("net-2.1"));
+        QCOMPARE(bible->versionId(),QString("engnet"));
         QCOMPARE(bible->selectionReference(),selected);
         QCOMPARE(bible->noteText(),QString("NET annotation")); QVERIFY(bible->selectionBookmarked());
         QCOMPARE(bodyText(16),netText);
@@ -3499,11 +3793,11 @@ private slots:
         QCOMPARE(prop("versionDialog","step").toInt(),2);
         key(Qt::Key_Right); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("versionDialog","visible").toBool());
-        QCOMPARE(bible->versions().size(),1); QCOMPARE(bible->versionId(),QString("net-2.1"));
+        QCOMPARE(bible->versions().size(),1); QCOMPARE(bible->versionId(),QString("engnet"));
         QCOMPARE(bible->noteText(),QString("NET annotation"));
-        bible->importEpub(QUrl::fromLocalFile(kjv));
+        bible->importUsfm(QUrl::fromLocalFile(kjv));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
-        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        QCOMPARE(bible->versionId(),QString("eng-kjv2006"));
         QCOMPARE(bible->selectionReference(),selected);
         QVERIFY(bible->noteText().isEmpty());
         // Removing the active version chooses the remaining edition.
@@ -3512,22 +3806,22 @@ private slots:
         type("KJV"); key(Qt::Key_Return); key(Qt::Key_Return);
         key(Qt::Key_Right); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("versionDialog","visible").toBool());
-        QCOMPARE(bible->versionId(),QString("net-2.1"));
+        QCOMPARE(bible->versionId(),QString("engnet"));
         QCOMPARE(bible->noteText(),QString("NET annotation"));
     }
     void versionSwitchFallbackFeedback() {
-        const auto kjv = qEnvironmentVariable("OMAWORD_TEST_KJV");
-        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_KJV to the structured eng-kjv2006.epub.");
-        bible->importEpub(QUrl::fromLocalFile(kjv));
+        const auto kjv = kjvSource();
+        if (kjv.isEmpty()) QSKIP("Set OMAWORD_TEST_USFM_DIR or OMAWORD_TEST_KJV to exercise KJV USFM.");
+        bible->importUsfm(QUrl::fromLocalFile(kjv));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
-        QCOMPARE(bible->versionId(),QString("kjv-2006"));
+        QCOMPARE(bible->versionId(),QString("eng-kjv2006"));
         reference("Matthew 17:21");
         key(Qt::Key_F); QVERIFY(bible->focusMode());
         key(Qt::Key_V,Qt::ShiftModifier);
         QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
         type("NET"); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("versionDialog","visible").toBool());
-        QCOMPARE(bible->versionId(),QString("net-2.1"));
+        QCOMPARE(bible->versionId(),QString("engnet"));
         QVERIFY(bible->error().isEmpty());
         QCOMPARE(bible->passage(),QString("Matthew 17"));
         QCOMPARE(bible->selectedStart(),0);
@@ -3597,7 +3891,7 @@ private slots:
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
         const auto backup = QJsonDocument::fromJson(file.readAll()).object();
         QCOMPARE(backup.value("version").toInt(),3);
-        QCOMPARE(backup.value("versionId").toString(),QString("net-2.1"));
+        QCOMPARE(backup.value("versionId").toString(),QString("engnet"));
         QCOMPARE(prop("toast","text").toString(),QString("Saved NET annotation backup"));
         QVERIFY(prop("exportDialog","title").toString().contains("NET notes only"));
         QVERIFY(prop("restoreDialog","title").toString().contains("NET"));
@@ -3634,17 +3928,12 @@ private slots:
         if (notes) QCOMPARE(bible->noteText(),QString("A draft before adding a version"));
         QVERIFY(item("importReplacement")->isVisible());
         QVERIFY(prop("importReplacement","text").toString().contains("preserves your notes, bookmarks, highlights, and settings"));
-        QVERIFY(prop("importSupported","text").toString().contains("ordinary ebook/OCR may lack chapter/verse anchors"));
-        QVERIFY(prop("importSupported","text").toString().contains("not an exact edition or filename"));
-        QVERIFY(prop("importOcr","text").toString().contains("metadata and verse anchors"));
-        QVERIFY(prop("importOcr","text").toString().contains("without those anchors cannot be imported as Scripture"));
-        QCOMPARE(prop("importDownloadLink","downloadUrl").toUrl(),QUrl("https://bible.org/downloads"));
-        QVERIFY(prop("importSteps","text").toString().contains("NET-format or Haiola/eBible"));
-        QVERIFY(prop("importSteps","text").toString().contains("OmaWord validates"));
-        QVERIFY(prop("importSteps","text").toString().contains("local SQLite database"));
+        QVERIFY(prop("importSupported","text").toString().contains("USFM ZIP directly from eBible.org"));
+        QCOMPARE(prop("catalogResults","count").toInt(),7);
+        QCOMPARE(prop("importChoose","text").toString(),QString::fromUtf8("Import USFM ZIP…"));
         QCOMPARE(prop("importDataPath","text").toString(),bible->dataDirectory());
-        QVERIFY(prop("importOffline","text").toString().contains("move or delete the source EPUB"));
-        QVERIFY(prop("importOffline","text").toString().contains("No internet connection"));
+        QVERIFY(prop("importOffline","text").toString().contains("move or delete the source USFM ZIP"));
+        QVERIFY(prop("importOffline","text").toString().contains("No connection"));
         const auto checkFocus = [&] {
             if (notes) QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
             else QTRY_VERIFY(item("readerSurface")->hasActiveFocus());

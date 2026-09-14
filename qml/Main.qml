@@ -41,6 +41,53 @@ ApplicationWindow {
     property string loadedVersionId: ""
     property string loadedNoteText: ""
     property bool noteConflict: false
+    property bool closingWindow: false
+    property string downloadId: ""
+    property url pendingDownload: ""
+    property string downloadMessage: ""
+    property string importingCatalogId: ""
+    property bool replacingCatalogVersion: false
+    function installedVersion(id) {
+        return Array.from(bible.versions).some(function(entry) { return entry.id === id })
+    }
+    function installVersion(id) {
+        if (closingWindow || bible.busy || catalog.busy || !flushNote()) return
+        pendingDownload = ""
+        downloadMessage = ""
+        downloadId = id
+        catalog.clearError()
+        catalog.download(id)
+    }
+    function cancelDownload() {
+        downloadId = ""
+        pendingDownload = ""
+        downloadMessage = ""
+        catalog.cancel()
+    }
+    function importDownloaded() {
+        if (closingWindow || !pendingDownload.toString().length) return
+        if (bible.busy || !flushNote()) {
+            downloadMessage = bible.busy ? "Download ready. Wait for the current import, then retry."
+                : "Download ready. Save or resolve your note draft, then retry."
+            return
+        }
+        const file = pendingDownload
+        // Set completion context before importUsfm emits busyChanged synchronously.
+        importingCatalogId = downloadId
+        replacingCatalogVersion = installedVersion(downloadId)
+        downloadMessage = ""
+        bible.clearError()
+        bible.importUsfm(file)
+        if (bible.busy) {
+            pendingDownload = ""
+            downloadId = ""
+            importGuide.close()
+        } else {
+            importingCatalogId = ""
+            replacingCatalogVersion = false
+            downloadMessage = bible.error || "Download ready. Resolve any unsaved drafts, then retry."
+        }
+    }
     readonly property bool noteScopeMatches: loadedVersionId === bible.versionId && loadedNoteReference === bible.selectionReference
     readonly property string observedNoteText: bible.noteText
     onObservedNoteTextChanged: syncNote()
@@ -86,7 +133,7 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
+    readonly property bool modalOpen: backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -407,16 +454,14 @@ ApplicationWindow {
         savePosition()
         // Map once over the books, rather than opening every intervening chapter.
         let books = Array.from(bible.books)
-        let current = bible.chapter - 1
-        let total = 0
+        let chapters = []
         for (let book of books) {
-            if (book.id < bible.book) current += book.chapters
-            total += book.chapters
+            for (let number of book.chapterNumbers) chapters.push({ book: book.id, chapter: number })
         }
-        let target = Math.max(0, Math.min(total - 1, current + delta))
-        if (target !== current) for (let book of books) {
-            if (target < book.chapters) { bible.openChapter(book.id, target + 1); break }
-            target -= book.chapters
+        let current = chapters.findIndex(function(entry) { return entry.book === bible.book && entry.chapter === bible.chapter })
+        let target = Math.max(0, Math.min(chapters.length - 1, current + delta))
+        if (current >= 0 && target !== current) {
+            bible.openChapter(chapters[target].book, chapters[target].chapter)
         }
         readerFocus()
     }
@@ -772,7 +817,7 @@ ApplicationWindow {
         { id: "import", title: "Add version", keys: "", scope: "global", command: true },
         { id: "resume", title: "Resume last palette", keys: "Space", sequences: ["Space"] },
         { id: "help", title: "Keybindings", keys: "? · F1", sequences: ["?", "F1"], scope: "global", command: true },
-        { id: "about", title: "About & attribution", keys: "", scope: "global", command: true },
+        { id: "about", title: "About & Attribution", keys: "", scope: "global", command: true },
         { id: "goToVerse", title: "Go to verse number", keys: "number then g (e.g. 20g)", explanation: true },
         { id: "dismiss", title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
     ]
@@ -836,7 +881,7 @@ ApplicationWindow {
         if (paletteBook > 0) {
             let book = Array.from(bible.books).find(function(b) { return b.id === paletteBook })
             let result = []
-            if (book) for (let i = 1; i <= book.chapters; ++i) {
+            if (book) for (let i of book.chapterNumbers) {
                 if (!query || String(i).indexOf(query) === 0)
                     result.push({ title: paletteBookName + " " + i, hint: "Chapter " + i, book: paletteBook, chapter: i })
             }
@@ -883,8 +928,9 @@ ApplicationWindow {
             paletteChapter = 0
             referenceInput.text = ""
             paletteArrowUsed = true
-            paletteResults.currentIndex = chapter - 1
-            paletteResults.positionViewAtIndex(chapter - 1, ListView.Contain)
+            const row = Array.from(bible.chaptersForBook(paletteBook)).indexOf(chapter)
+            paletteResults.currentIndex = row
+            paletteResults.positionViewAtIndex(row, ListView.Contain)
             referenceInput.forceActiveFocus()
             return
         }
@@ -1718,20 +1764,10 @@ ApplicationWindow {
                 y: Math.max(32, (setupScroll.availableHeight - implicitHeight) / 2)
                 width: Math.min(470 * app.scale, setupScroll.availableWidth - 80)
                 spacing: 20
-                Rectangle {
-                    Layout.alignment: Qt.AlignHCenter
-                    implicitWidth: 64
-                    implicitHeight: 76
-                    radius: 0
-                    color: desktop.surface
-                    border.color: desktop.border
-                    Rectangle { x: 10; y: 0; width: 1; height: parent.height; color: desktop.border }
-                    Label { anchors.centerIn: parent; anchors.horizontalCenterOffset: 4; text: "N"; color: desktop.accent; font.pixelSize: 32; font.weight: Font.Medium }
-                }
-                SectionLabel { text: "A QUIET PLACE TO READ"; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 10 }
-                Label { text: "Make room for the Word."; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -0.8; color: desktop.foreground; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Label { objectName: "setupTitle"; text: desktop.appName; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -0.8; color: desktop.foreground; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label {
-                    text: "Add a verse-tagged Bible EPUB to begin. NET format and Haiola/eBible markup are supported. Read offline, mark passages, and keep your thoughts alongside the text."
+                    objectName: "setupDescription"
+                    text: "Add a version to begin. Install from the catalog or import a USFM ZIP.\nRead offline, bookmark and highlight passages, and keep your notes alongside the text."
                     color: desktop.muted
                     font.pixelSize: 15 * app.scale
                     horizontalAlignment: Text.AlignHCenter
@@ -1740,8 +1776,8 @@ ApplicationWindow {
                     Layout.fillWidth: true
                 }
                 QuietButton { objectName: "setupImport"; text: "Add version"; emphasized: true; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 6; onClicked: app.runCommand("import") }
-                Label { text: "Your Bible and annotations stay on this device."; color: desktop.muted; font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                QuietButton { text: "About & attribution"; compact: true; Layout.alignment: Qt.AlignHCenter; onClicked: aboutDialog.open() }
+                Label { objectName: "setupPrivacy"; text: "All your Bible versions, highlights, bookmarks, and notes stay on this device."; color: desktop.muted; font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                QuietButton { objectName: "setupAbout"; text: "About & Attribution"; compact: true; Layout.alignment: Qt.AlignHCenter; onClicked: aboutDialog.open() }
             }
             }
 
@@ -1997,6 +2033,7 @@ ApplicationWindow {
         visible: !bible.focusMode
         FloatingButton {
             objectName: "savedControl"
+            visible: bible.ready
             glyph: "saved"
             tip: "Saved · Ctrl l"
             enabled: bible.ready && !bible.busy && !app.modalOpen
@@ -2004,6 +2041,7 @@ ApplicationWindow {
         }
         FloatingButton {
             objectName: "notesControl"
+            visible: bible.ready
             glyph: "notes"
             selected: app.notesOpen
             tip: "Notes · Ctrl n"
@@ -2149,7 +2187,7 @@ ApplicationWindow {
                         + (versionDialog.removeAnnotations ? "Delete its notes, bookmarks, and highlights. This cannot be undone."
                             : "Keep its notes, bookmarks, and highlights. They will reconnect when the same version is reimported.")
                         + "\n\n" + (bible.versions.length === 1 ? "The library will be empty. You can add a version again at any time." : "Other installed versions remain available.")
-                        + " Your settings and source EPUB are kept." : ""
+                        + " Your settings and source USFM files are kept." : ""
                     textFormat: Text.PlainText
                     color: desktop.foreground; font.pixelSize: 14 * versionDialog.uiScale; wrapMode: Text.Wrap
                 }
@@ -2759,13 +2797,17 @@ ApplicationWindow {
             RowLayout {
                 Label { text: desktop.appName; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
             }
-            SectionLabel { text: "READ SLOWLY. KEEP WHAT MATTERS." }
-            Label { text: "An offline Bible reader with local bookmarks, highlights, and Markdown notes. Built with Qt, at home on your desktop."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
+            Label { text: "About & Attribution"; color: desktop.foreground; font.pixelSize: 18 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: "An offline Bible reader with local bookmarks, highlights, and Markdown notes."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
             FineRule { Layout.fillWidth: true }
             Label { objectName: "aboutEdition"; text: bible.ready ? bible.edition : "No version installed"; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale }
             Label { objectName: "aboutCopyright"; text: bible.versionCopyright; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
-            Label { text: "Bible text is imported from your own supported EPUB and is not distributed with " + desktop.appName + "."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
-            QuietButton { text: "NET Bible & permissions ↗"; visible: bible.versionId === "net-2.1"; compact: true; onClicked: desktop.openExternal("https://netbible.com/copyright/") }
+            Label { objectName: "aboutSources"; text: "Install versions directly from eBible.org or import your own local USFM ZIP. Bible text is stored in this app's local library. No connection is needed to read, bookmark, highlight, or write notes after import."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
+            QuietButton {
+                readonly property var entry: Array.from(catalog.entries).find(function(version) { return version.id === bible.versionId })
+                text: "Version details & permissions ↗"; visible: !!entry; compact: true
+                onClicked: desktop.openExternal(entry.detailsUrl)
+            }
             Label { text: desktop.appName + " " + desktop.version + " · Application code licensed under MIT\nNo account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             QuietButton { text: "Open local data folder ↗"; compact: true; onClicked: desktop.openExternal("file://" + bible.dataDirectory()) }
         }
@@ -2776,20 +2818,33 @@ ApplicationWindow {
         id: importGuide
         objectName: "importGuide"
         property bool choosePending: false
+        readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 360))
         height: Math.min(650 * app.scale, app.height - 48)
-        onOpened: { importGuideScroll.contentItem.contentY = 0; importChoose.forceActiveFocus() }
+        onOpened: { catalogSearch.text = ""; catalogSearch.forceActiveFocus() }
         onClosed: {
             const choose = choosePending
             choosePending = false
             if (choose) Qt.callLater(function() {
-                if (app.flushNote()) importDialog.open()
+                if (!app.closingWindow && !bible.busy && !catalog.busy && app.flushNote()) importDialog.open()
                 else app.restorePanelFocus()
             })
             else app.restorePanelFocus()
         }
         contentItem: ColumnLayout {
-            spacing: 16 * app.scale
-            Label { text: "Add version"; color: desktop.foreground; font.pixelSize: 24 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            spacing: 12 * importGuide.uiScale
+            Label { text: "Add version"; color: desktop.foreground; font.pixelSize: 24 * importGuide.uiScale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            TextField {
+                id: catalogSearch
+                objectName: "catalogSearch"
+                Layout.fillWidth: true
+                implicitHeight: 42 * importGuide.uiScale
+                font.pixelSize: 15 * importGuide.uiScale
+                selectByMouse: true
+                padding: 10 * importGuide.uiScale
+                background: Rectangle { color: desktop.surface; border.color: catalogSearch.activeFocus ? desktop.accent : desktop.border }
+                placeholderText: "Search versions"
+                Accessible.name: "Search versions"
+            }
             OverlayScrollView {
                 id: importGuideScroll
                 objectName: "importGuideScroll"
@@ -2800,48 +2855,96 @@ ApplicationWindow {
                 ColumnLayout {
                     width: importGuideScroll.availableWidth
                     spacing: 16 * app.scale
-                    Label {
-                        objectName: "importSupported"
-                        text: "Verse-tagged Bible EPUBs. NET format and Haiola/eBible markup supported; ordinary ebook/OCR may lack chapter/verse anchors. Support depends on the file's structure, not an exact edition or filename."
-                        color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
+                    Label { objectName: "importSupported"; text: "Install a USFM ZIP directly from eBible.org, or import a local file. The catalog is available offline; installing requires a connection."; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Repeater {
+                        id: catalogResults
+                        objectName: "catalogResults"
+                        model: Array.from(catalog.entries).filter(function(entry) {
+                            const query = catalogSearch.text.trim().toLowerCase()
+                            return !query || (entry.name + " " + entry.abbreviation).toLowerCase().includes(query)
+                        })
+                        delegate: ColumnLayout {
+                            id: catalogRow
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: 6 * app.scale
+                            Label { text: catalogRow.modelData.abbreviation + " · " + catalogRow.modelData.name; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label { objectName: "catalogInstalled:" + catalogRow.modelData.id; visible: app.installedVersion(catalogRow.modelData.id); text: "Installed"; color: desktop.accent; font.pixelSize: 12 * app.scale }
+                                Item { Layout.fillWidth: true }
+                                QuietButton { objectName: "catalogDetails:" + catalogRow.modelData.id; text: "Details & Attribution"; font.pixelSize: 12 * importGuide.uiScale; compact: true; onClicked: { catalogDetails.entry = catalogRow.modelData; catalogDetails.open() } }
+                                QuietButton {
+                                    objectName: "catalogInstall:" + catalogRow.modelData.id
+                                    text: "Install"; compact: true; emphasized: true
+                                    font.pixelSize: 12 * importGuide.uiScale
+                                    enabled: !bible.busy && !catalog.busy
+                                    onClicked: app.installVersion(catalogRow.modelData.id)
+                                }
+                            }
+                            FineRule { Layout.fillWidth: true }
+                        }
                     }
+                    Label { visible: catalogResults.count === 0; text: "No matching versions"; color: desktop.muted; Layout.fillWidth: true }
                     Label {
                         objectName: "importReplacement"
                         visible: bible.ready
                         text: "Importing the same edition replaces its Bible data and preserves your notes, bookmarks, highlights, and settings. Adding another supported version keeps the installed editions. Annotations belong to their own version."
                         color: desktop.accent; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
-                    FineRule { Layout.fillWidth: true }
-                    Label { objectName: "importOcr"; text: "Reliable structured metadata and verse anchors are required. OCR or ordinary ebook layouts without those anchors cannot be imported as Scripture. Study notes are not assumed to be Bible verses."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    Label { text: "1. Obtain a verse-tagged Bible EPUB. Bible.org and eBible.org offer examples of supported structured layouts."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    QuietButton {
-                        objectName: "importDownloadLink"
-                        property url downloadUrl: "https://bible.org/downloads"
-                        text: "Bible.org/downloads ↗"
-                        compact: true
-                        Layout.fillWidth: true
-                        onClicked: desktop.openExternal(downloadUrl)
-                    }
-                    QuietButton { objectName: "importKjvLink"; text: "eBible.org KJV 2006 ↗"; compact: true; Layout.fillWidth: true; onClicked: desktop.openExternal("https://ebible.org/eng-kjv2006/") }
-                    Label { objectName: "importSteps"; text: "2. Download an EPUB with NET-format or Haiola/eBible chapter and verse markup.\n\n3. Choose EPUB… below, then select the downloaded .epub file.\n\n4. " + desktop.appName + " validates the file and imports the Bible into its own local SQLite database, then activates that version."; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { objectName: "importDataPath"; text: bible.dataDirectory(); textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
-                    Label { objectName: "importOffline"; text: "After a successful import, you can move or delete the source EPUB. No internet connection is needed for normal use."; color: desktop.muted; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { objectName: "importOffline"; text: "After a successful import, you can move or delete the source USFM ZIP. No connection is needed to read or use your annotations."; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
+            }
+            ProgressBar { objectName: "catalogProgress"; visible: catalog.busy; Layout.fillWidth: true; from: 0; to: 1; value: Math.max(0, Math.min(1, catalog.progress)); indeterminate: catalog.progress <= 0 }
+            Label { objectName: "catalogStatus"; visible: catalog.busy; text: "Downloading USFM ZIP… " + (catalog.progress > 0 ? Math.round(catalog.progress * 100) + "%" : ""); color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { objectName: "catalogError"; text: catalog.error || app.downloadMessage || bible.error; visible: text.length > 0; textFormat: Text.PlainText; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap; Accessible.role: Accessible.AlertMessage }
+            RowLayout {
+                visible: catalog.busy || ((catalog.error.length > 0 || app.downloadMessage.length > 0) && app.downloadId.length > 0)
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton { objectName: "catalogCancel"; text: "Cancel"; onClicked: app.cancelDownload() }
+                QuietButton { objectName: "catalogRetry"; text: "Retry"; visible: !catalog.busy; enabled: !bible.busy; onClicked: { if (app.pendingDownload.toString().length) app.importDownloaded(); else app.installVersion(app.downloadId) } }
             }
             FineRule { Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                QuietButton { objectName: "importCancel"; text: "Cancel"; onClicked: importGuide.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { objectName: "importCancel"; text: "Close"; font.pixelSize: 14 * importGuide.uiScale; onClicked: importGuide.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
                 QuietButton {
                     id: importChoose
                     objectName: "importChoose"
-                    text: "Choose EPUB…"
+                    text: "Import USFM ZIP…"
+                    font.pixelSize: 14 * importGuide.uiScale
                     emphasized: true
-                    onClicked: { if (!app.flushNote()) return; importGuide.choosePending = true; importGuide.close() }
+                    enabled: !bible.busy && !catalog.busy
+                    onClicked: { if (bible.busy || catalog.busy || !app.flushNote()) return; importGuide.choosePending = true; importGuide.close() }
                     Keys.onReturnPressed: clicked()
                     Keys.onEnterPressed: clicked()
                 }
+            }
+        }
+    }
+
+    ModalCard {
+        id: catalogDetails
+        objectName: "catalogDetails"
+        property var entry: null
+        onClosed: { if (importGuide.visible) catalogSearch.forceActiveFocus(); else app.restorePanelFocus() }
+        contentItem: OverlayScrollView {
+            id: detailsScroll
+            implicitHeight: Math.min(detailsContent.implicitHeight, app.height - 110)
+            contentWidth: availableWidth
+            clip: true
+            ColumnLayout {
+                id: detailsContent
+                width: detailsScroll.availableWidth
+                spacing: 16 * app.scale
+                Label { text: "Details & Attribution"; color: desktop.foreground; font.pixelSize: 22 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Label { text: catalogDetails.entry ? catalogDetails.entry.name : ""; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Label { objectName: "catalogCopyright"; text: catalogDetails.entry ? catalogDetails.entry.copyright : ""; textFormat: Text.PlainText; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                QuietButton { objectName: "catalogProvider"; text: "eBible.org version & permissions ↗"; compact: true; onClicked: desktop.openExternal(catalogDetails.entry.detailsUrl) }
+                QuietButton { text: "Close"; Layout.alignment: Qt.AlignRight; onClicked: catalogDetails.close() }
             }
         }
     }
@@ -2851,8 +2954,8 @@ ApplicationWindow {
         objectName: "importDialog"
         title: "Add version"
         fileMode: FileDialog.OpenFile
-        nameFilters: ["Supported Bible EPUB (*.epub)"]
-        onAccepted: { if (!app.flushNote()) return; bible.clearError(); bible.importEpub(selectedFile) }
+        nameFilters: ["USFM ZIP (*.zip)", "USFM files (*.usfm *.sfm)"]
+        onAccepted: { if (app.closingWindow || bible.busy || catalog.busy || !app.flushNote()) return; bible.clearError(); bible.importUsfm(selectedFile) }
         onVisibleChanged: { if (!visible) app.restorePanelFocus() }
     }
     FolderDialog {
@@ -2896,7 +2999,7 @@ ApplicationWindow {
                     width: backupScopeScroll.availableWidth
                     text: "This backup includes only " + bible.edition + " (" + bible.versionAbbreviation + ") bookmarks, highlights, notes, and reading location.\n\n"
                         + "Other editions are excluded. Switch to each edition to back it up separately. To back up retained annotations from a removed edition, reimport that edition first.\n\n"
-                        + "Bible text, source EPUBs, and global preferences are not included."
+                        + "Bible text, source USFM files, and global preferences are not included."
                     textFormat: Text.PlainText; color: desktop.foreground
                     font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap
                 }
@@ -3038,7 +3141,7 @@ ApplicationWindow {
             spacing: 20
             BusyIndicator { running: bible.busy; Layout.alignment: Qt.AlignHCenter; implicitWidth: 36; implicitHeight: 36 }
             Label { text: "Preparing your library"; color: desktop.foreground; font.pixelSize: 21 * app.scale; font.weight: Font.Medium; Layout.alignment: Qt.AlignHCenter }
-            Label { text: bible.status || "Reading and validating your EPUB…"; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
+            Label { text: bible.status || "Reading and validating your USFM…"; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
             ProgressBar {
                 id: importProgressBar
                 Layout.fillWidth: true
@@ -3089,13 +3192,28 @@ ApplicationWindow {
         }
     }
     Connections {
+        target: catalog
+        function onDownloadFinished(file) {
+            if (app.closingWindow || !app.downloadId.length) return
+            app.pendingDownload = file
+            app.importDownloaded()
+        }
+    }
+    Connections {
         target: bible
         function onVersionChanged() { app.invalidateDeleteSaved() }
         function onCollectionChanged() {
             if (deleteConfirmation.visible && !app.deleteScopeValid()) app.invalidateDeleteSaved()
         }
         function onErrorChanged() { Qt.callLater(app.showFocusedError) }
-        function onBusyChanged() { if (!bible.busy) Qt.callLater(app.showFocusedError) }
+        function onBusyChanged() {
+            if (!bible.busy) {
+                if (app.importingCatalogId.length && bible.ready && !bible.error.length && bible.versionId === app.importingCatalogId)
+                    app.notify((app.replacingCatalogVersion ? "Reimported " : "Installed ") + bible.versionAbbreviation, true)
+                app.importingCatalogId = ""
+                Qt.callLater(app.showFocusedError)
+            }
+        }
         function onVersesChanged() {
             app.clearTextSelection()
             app.draggingText = false
@@ -3115,7 +3233,11 @@ ApplicationWindow {
         }
     }
     Component.onCompleted: { readerInitialized = true; syncNote(); restorePosition() }
-    onClosing: function(close) { close.accepted = flushNote(); savePosition() }
+    onClosing: function(close) {
+        close.accepted = flushNote()
+        savePosition()
+        if (close.accepted) { closingWindow = true; cancelDownload() }
+    }
 
     Instantiator {
         model: app.actions.filter(function(action) { return !!action.sequences })
