@@ -13,9 +13,13 @@
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <cmath>
+#include <limits>
 #include <fontconfig/fontconfig.h>
 
-Desktop::Desktop(QObject *parent) : QObject(parent) {
+Desktop::Desktop(QObject *parent, const QString &hyprctlCommand) : QObject(parent) {
     const QString state = qEnvironmentVariable("XDG_STATE_HOME", QDir::homePath() + QStringLiteral("/.local/state"));
     m_themePath = state + QStringLiteral("/omarchy/current/theme/colors.toml");
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, &Desktop::refresh);
@@ -25,11 +29,83 @@ Desktop::Desktop(QObject *parent) : QObject(parent) {
     // requiring modifications to the user's Omarchy hooks.
     connect(&m_poll, &QTimer::timeout, this, &Desktop::refresh);
     m_poll.start(2000);
+    // Query the compositor's effective value, independently of theme polling.
+    m_roundingProcess.setProgram(hyprctlCommand);
+    m_roundingProcess.setArguments({QStringLiteral("getoption"), QStringLiteral("decoration:rounding"), QStringLiteral("-j")});
+    m_roundingProcess.setStandardInputFile(QProcess::nullDevice());
+    m_roundingProcess.setStandardErrorFile(QProcess::nullDevice());
+    m_roundingTimeout.setSingleShot(true);
+    m_roundingTimeout.setInterval(1000);
+    connect(&m_roundingTimeout, &QTimer::timeout, this, &Desktop::failRoundingQuery);
+    connect(&m_roundingProcess, &QProcess::readyReadStandardOutput, this, &Desktop::readRoundingOutput);
+    connect(&m_roundingProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+        failRoundingQuery();
+        if (m_roundingProcess.state() == QProcess::NotRunning) m_roundingTimeout.stop();
+    });
+    connect(&m_roundingProcess, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+        m_roundingTimeout.stop();
+        readRoundingOutput();
+        qreal radius = 0;
+        if (!m_roundingFailed && code == 0 && status == QProcess::NormalExit &&
+            !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) {
+            const auto document = QJsonDocument::fromJson(m_roundingOutput);
+            const auto value = document.object().value(QStringLiteral("int"));
+            const double number = value.toDouble(-1);
+            if (document.isObject() && value.isDouble() && std::isfinite(number) &&
+                number >= 0 && number <= std::numeric_limits<int>::max() && std::floor(number) == number)
+                radius = number;
+        }
+        setCornerRadius(radius);
+    });
+    connect(&m_roundingPoll, &QTimer::timeout, this, &Desktop::refreshCornerRadius);
+    m_roundingPoll.start(5000);
     QDBusConnection::sessionBus().connect(QString(), QStringLiteral("/org/freedesktop/portal/desktop"),
         QStringLiteral("org.freedesktop.portal.Settings"), QStringLiteral("SettingChanged"),
         this, SLOT(settingChanged(QString,QString,QDBusVariant)));
     refresh();
+    refreshCornerRadius();
     requestScale();
+}
+
+Desktop::~Desktop() {
+    // QProcess may emit signals while its destructor reaps a running child.
+    // Disconnect before the output buffer and other members are destroyed.
+    m_roundingProcess.disconnect(this);
+    if (m_roundingProcess.state() != QProcess::NotRunning) m_roundingProcess.kill();
+}
+
+void Desktop::refreshCornerRadius() {
+    if (qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) {
+        failRoundingQuery();
+        return;
+    }
+    if (m_roundingProcess.state() != QProcess::NotRunning) return;
+    m_roundingOutput.clear();
+    m_roundingFailed = false;
+    m_roundingTimeout.start();
+    m_roundingProcess.start(QIODevice::ReadOnly);
+}
+
+void Desktop::readRoundingOutput() {
+    if (m_roundingFailed) return;
+    // Read at most one byte beyond the limit, even if a child floods stdout.
+    m_roundingOutput += m_roundingProcess.read(8193 - m_roundingOutput.size());
+    if (m_roundingOutput.size() > 8192) failRoundingQuery();
+}
+
+void Desktop::failRoundingQuery() {
+    m_roundingFailed = true;
+    m_roundingTimeout.stop();
+    m_roundingOutput.clear();
+    m_roundingProcess.closeReadChannel(QProcess::StandardOutput);
+    setCornerRadius(0);
+    if (m_roundingProcess.state() != QProcess::NotRunning) m_roundingProcess.kill();
+}
+
+void Desktop::setCornerRadius(qreal radius) {
+    if (m_cornerRadius == radius) return;
+    m_cornerRadius = radius;
+    emit changed();
 }
 
 void Desktop::refresh() {
