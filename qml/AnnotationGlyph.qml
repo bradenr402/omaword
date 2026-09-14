@@ -34,24 +34,17 @@ Item {
             ctx.beginPath()
             if (kind === "note") {
                 if (filled) {
-                    // A folded sheet with two readable lines, even at 14px.
-                    ctx.moveTo(3, 2); ctx.lineTo(12, 2); ctx.lineTo(17, 7)
-                    ctx.lineTo(17, 22); ctx.lineTo(3, 22); ctx.closePath()
-                    ctx.fill()
+                    // The same square and pencil as the outline, with a clear
+                    // 1.5-unit transparent halo on either side of the pencil.
+                    ctx.fillRect(3, 4, 17, 17)
                     ctx.globalCompositeOperation = "destination-out"
                     ctx.beginPath()
-                    ctx.moveTo(11, 2); ctx.lineTo(11, 8); ctx.lineTo(17, 8)
-                    ctx.closePath()
-                    // Separate the solid pencil from the paper underneath it.
-                    ctx.moveTo(12, 9); ctx.lineTo(21, 0); ctx.lineTo(24, 6)
-                    ctx.lineTo(17, 13); ctx.lineTo(11, 14); ctx.closePath()
+                    ctx.moveTo(10, 11); ctx.lineTo(18, 3); ctx.lineTo(21, 6)
+                    ctx.lineTo(13, 14); ctx.lineTo(9, 15); ctx.closePath()
                     ctx.fill()
-                    ctx.fillRect(6, 15, 8, 2)
-                    ctx.fillRect(6, 19, 6, 2)
+                    ctx.lineWidth = 3
+                    ctx.stroke()
                     ctx.globalCompositeOperation = "source-over"
-                    ctx.beginPath()
-                    ctx.moveTo(16, 8); ctx.lineTo(21, 3); ctx.lineTo(23, 5)
-                    ctx.lineTo(18, 10); ctx.lineTo(15, 11); ctx.closePath()
                     ctx.fill()
                     return
                 }

@@ -18,6 +18,11 @@
 #include <QClipboard>
 #include <QMimeData>
 #include <QFontMetricsF>
+#include <QGlyphRun>
+#include <QAbstractTextDocumentLayout>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPainterPathStroker>
 #include "blockdocument.h"
 
 // Standalone, loads the real BlockReader and QTextDocument without Main or a
@@ -47,6 +52,44 @@ class BlockAnnotationsTest : public QObject
     QVariantMap navigatedScope() const {
         const auto value = backend->property("navigatedScope");
         return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+    }
+    static QRectF bracketRect(const QVariantMap &marker) {
+        const bool opening = marker["edge"] != "close";
+        const double stroke = qMax(1.0,marker["height"].toDouble()/18);
+        const double width = marker["paintWidth"].toDouble();
+        const double origin = marker["bracketX"].toDouble();
+        double left = origin + (opening ? width*0.78-stroke/2 : 0);
+        double right = origin + (opening ? width : width*0.65+stroke/2);
+        if (marker["rtl"].toBool()) {
+            const double cellWidth = marker["width"].toDouble();
+            const double oldLeft = left;
+            left = cellWidth-right; right = cellWidth-oldLeft;
+        }
+        return QRectF(marker["x"].toDouble()+left,marker["y"].toDouble()+marker["bracketTop"].toDouble(),
+                      right-left,marker["bracketHeight"].toDouble());
+    }
+    static QList<QRectF> textInkRects(QTextDocument *doc, int start, int end) {
+        QList<QRectF> rects;
+        for (auto block = doc->findBlock(start); block.isValid() && block.position() < end; block = block.next()) {
+            const QPointF origin = doc->documentLayout()->blockBoundingRect(block).topLeft();
+            const int first = qMax(0,start-block.position());
+            const int count = qMin(end-block.position(),block.length()-1)-first;
+            for (const auto &run : block.layout()->glyphRuns(first,count)) {
+                const auto indexes = run.glyphIndexes();
+                const auto positions = run.positions();
+                for (int i = 0; i < indexes.size(); ++i) {
+                    const auto rect = run.rawFont().boundingRect(indexes[i]).translated(origin+positions[i]);
+                    if (!rect.isEmpty()) rects.append(rect);
+                }
+            }
+        }
+        return rects;
+    }
+    static QImage onBackground(const QImage &image, const QColor &background) {
+        QImage result(image.size(),QImage::Format_ARGB32_Premultiplied);
+        result.fill(background);
+        QPainter painter(&result); painter.drawImage(0,0,image);
+        return result;
     }
     static QVariantMap note(QString ref, int start, int end, int chapter = 1, int endChapter = 1) {
         return {{"reference",ref},{"book",1},{"chapter",chapter},{"start",start},
@@ -550,6 +593,9 @@ ApplicationWindow {
             const int endpoint = marker["edge"] == "open" ? span["textStart"].toInt() : span["textEnd"].toInt()-1;
             QCOMPARE(line.lineNumber(),block.layout()->lineForTextPosition(endpoint-block.position()).lineNumber());
             const QRectF cell(marker["x"].toDouble(),marker["y"].toDouble(),marker["width"].toDouble(),marker["height"].toDouble());
+            const auto bracket = bracketRect(marker);
+            for (const auto &ink : textInkRects(doc,span["textStart"].toInt(),span["textEnd"].toInt()))
+                QVERIFY2(!bracket.intersects(ink),qPrintable("Bracket intersects bidi text: " + QString::fromUtf8(QJsonDocument::fromVariant(marker).toJson())));
             for (const auto &r : mapping->rectangles(span["textStart"].toInt(),span["textEnd"].toInt())) {
                 const auto rect = r.toMap();
                 const QRectF textRect(rect["x"].toDouble(),rect["y"].toDouble(),rect["width"].toDouble(),rect["height"].toDouble());
@@ -675,22 +721,24 @@ ApplicationWindow {
         QTest::addColumn<int>("size");
         QTest::addColumn<double>("scale");
         QTest::addColumn<double>("leading");
+        QTest::addColumn<bool>("rtl");
         for (int size : {8,18,40})
             for (double scale : {1.0,1.6})
                 for (double leading : {1.0,3.0})
-                    QTest::newRow(qPrintable(QString("%1px-%2x-leading%3").arg(size).arg(scale).arg(leading)))
-                        << size << scale << leading;
+                    for (bool rtl : {false,true})
+                        QTest::newRow(qPrintable(QString("%1px-%2x-leading%3-%4").arg(size).arg(scale).arg(leading).arg(rtl ? "rtl" : "ltr")))
+                            << size << scale << leading << rtl;
     }
     void bracketFontGeometry() {
-        QFETCH(int,size); QFETCH(double,scale); QFETCH(double,leading);
+        QFETCH(int,size); QFETCH(double,scale); QFETCH(double,leading); QFETCH(bool,rtl);
         controller->setProperty("readerSize",size);
         controller->setProperty("scale",scale);
         backend->setProperty("lineHeight",leading);
         backend->setProperty("showVerseNumbers",false);
-        const QString text = "Agjp Éy";
+        const QString text = rtl ? QString::fromUtf8("אבג שלום") : QString("Agjp Éy");
         backend->setProperty("verses",QVariantList{
             QVariantMap{{"number",1},{"text",text},{"noteRanges",QVariantList{noteRange("A",true,true)}}},
-            QVariantMap{{"number",2},{"text",text},{"paragraphStart",true},
+            QVariantMap{{"number",2},{"text",text},{"paragraphStart",true},{"heading","Section"},
                 {"noteRanges",QVariantList{noteRange("B",true,true)}}}});
         item("reader")->setProperty("mode","paragraph");
         QTRY_COMPARE(list("inlineMarkers").size(),4);
@@ -713,7 +761,22 @@ ApplicationWindow {
             QVERIFY(marker["bracketHeight"].toDouble() > ink.height());
             QVERIFY(marker["bracketHeight"].toDouble() <= metrics.height()+3);
             QVERIFY(marker["cellHeight"].toDouble() <= metrics.height()+2);
-            QVERIFY(marker["width"].toDouble() < size*scale);
+            QCOMPARE(marker["width"].toDouble(),marker["paintWidth"].toDouble()+marker["textGap"].toDouble());
+            QCOMPARE(marker["rtl"].toBool(),rtl);
+            const auto bracket = bracketRect(marker);
+            const auto span = mapping->spans()[marker["verse"].toInt()-1].toMap();
+            const auto inkRects = textInkRects(doc,span["textStart"].toInt(),span["textEnd"].toInt());
+            QVERIFY(!inkRects.isEmpty());
+            const bool textOnRight = (marker["edge"] != "close") != rtl;
+            double gap = 1e6;
+            for (const auto &rect : inkRects) {
+                QVERIFY(!bracket.intersects(rect));
+                gap = qMin(gap,textOnRight ? rect.left()-bracket.right() : bracket.left()-rect.right());
+            }
+            QVERIFY2(gap > 0,qPrintable(QString("Text gap %1; %2").arg(gap).arg(QString::fromUtf8(QJsonDocument::fromVariant(marker).toJson()))));
+            if (size == 18 && scale == 1) QVERIFY(gap >= 1);
+            if (leading == 1 && scale == 1 && marker["verse"].toInt() == 1)
+                qInfo("%dpx %s %s ink gap: %.2fpx",size,rtl ? "RTL" : "LTR",qPrintable(marker["edge"].toString()),gap);
             if (marker["verse"].toInt() == 1) firstBottom = qMax(firstBottom,bottom);
             else QVERIFY2(top >= firstBottom-0.5,qPrintable(QString("Brackets overlap: top %1 previous bottom %2; %3")
                 .arg(top).arg(firstBottom).arg(QString::fromUtf8(QJsonDocument::fromVariant(marker).toJson()))));
@@ -723,10 +786,24 @@ ApplicationWindow {
             QVERIFY(top >= caret.top()-2);
             QVERIFY(bottom <= caret.bottom()+2);
         }
+        QCOMPARE(mapping->selectionText(0,doc->characterCount()),text+"\nSection\n"+text);
+        QVERIFY(QMetaObject::invokeMethod(body,"selectAll"));
+        QVERIFY(QMetaObject::invokeMethod(body,"copy"));
+        QCOMPARE(QGuiApplication::clipboard()->text(),text+"\nSection\n"+text);
+        QVERIFY(!QGuiApplication::clipboard()->mimeData()->hasHtml());
+        QVERIFY(QMetaObject::invokeMethod(body,"deselect"));
+        if (!qEnvironmentVariableIsEmpty("OMAWORD_ANNOTATION_SCREENSHOT")) {
+            QTest::qWait(80);
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWORD_ANNOTATION_SCREENSHOT")
+                + QString(".%1.png").arg(QString::fromLatin1(QTest::currentDataTag()))));
+        }
         // Only the two-pixel ink padding may contribute to line height.
+        backend->setProperty("showHeadings",false);
+        QTRY_COMPARE(doc->blockCount(),2);
+        const double withoutHeadingHeight = body->height();
         backend->setProperty("focusMode",true);
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
-        QVERIFY2(qAbs(body->height()-annotatedHeight) <= 4*leading+1,
+        QVERIFY2(qAbs(body->height()-withoutHeadingHeight) <= 4*leading+1,
                  qPrintable(QString("annotated %1, plain %2, font ascent %3; line %4/%5 plain %6/%7").arg(annotatedHeight).arg(body->height()).arg(metrics.ascent())
                             .arg(annotatedAscent).arg(annotatedDescent).arg(doc->begin().layout()->lineAt(0).ascent()).arg(doc->begin().layout()->lineAt(0).descent())));
     }
@@ -809,6 +886,87 @@ ApplicationWindow {
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
         QVERIFY(!item("blockInlineGlyph:note:Genesis 1:1–3"));
     }
+    void filledNoteSquareAndTransparentHalo_data() {
+        QTest::addColumn<int>("size");
+        QTest::addColumn<QColor>("color");
+        for (int size : {14,24,96})
+            for (const QColor &color : {QColor("#8db5d4"),QColor("#813245")})
+                QTest::newRow(qPrintable(QString::number(size)+color.name())) << size << color;
+    }
+    void filledNoteSquareAndTransparentHalo() {
+        QFETCH(int,size); QFETCH(QColor,color);
+        auto shared = item("sharedGlyph");
+        shared->setWidth(size); shared->setHeight(size);
+        shared->setProperty("filled",true); shared->setProperty("ink",color);
+        QTest::qWait(80);
+        auto grab = shared->grabToImage(); QVERIFY(grab);
+        QTRY_VERIFY(!grab->image().isNull());
+        const auto image = grab->image();
+        if (!qEnvironmentVariableIsEmpty("OMAWORD_ANNOTATION_SCREENSHOT")) {
+            const auto path = qEnvironmentVariable("OMAWORD_ANNOTATION_SCREENSHOT")+QString(".glyph%1%2.png").arg(size).arg(color.name());
+            QVERIFY(image.save(path));
+            for (const auto &background : {QColor("#181c21"),QColor("#eee5d1")})
+                QVERIFY(onBackground(image,background).scaled(288,288,Qt::IgnoreAspectRatio,Qt::FastTransformation)
+                    .save(path+background.name()+".zoom.png"));
+        }
+        // Independent path-boolean oracle: a full square minus an expanded
+        // pencil, then the original solid pencil (including its exposed cap).
+        QPainterPath square; square.addRect(3,4,17,17);
+        QPainterPath pencil;
+        pencil.moveTo(10,11); pencil.lineTo(18,3); pencil.lineTo(21,6);
+        pencil.lineTo(13,14); pencil.lineTo(9,15); pencil.closeSubpath();
+        QPainterPathStroker stroker; stroker.setWidth(3); stroker.setJoinStyle(Qt::MiterJoin);
+        const auto silhouette = square.subtracted(pencil.united(stroker.createStroke(pencil))).united(pencil);
+        QImage expected(image.size()*3,QImage::Format_ARGB32_Premultiplied);
+        expected.fill(Qt::transparent);
+        {
+            QPainter painter(&expected);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.scale(expected.width()/24.0,expected.height()/24.0);
+            painter.fillPath(silhouette,color);
+        }
+        expected = expected.scaled(image.size(),Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+        qint64 error = 0;
+        int haloPixels = 0, pencilPixels = 0, squarePixels = 0, exposedPixels = 0;
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x) {
+                const auto actual = image.pixelColor(x,y);
+                const auto reference = expected.pixelColor(x,y);
+                error += qAbs(actual.alpha()-reference.alpha());
+                const QPointF p((x+0.5)*24/image.width(),(y+0.5)*24/image.height());
+                if (square.contains(p) && reference.alpha() < 30) {
+                    QVERIFY2(actual.alpha() < 100,"Pencil halo must cut through to transparency");
+                }
+                // At 14px a 1.5-unit band is subpixel: count low-alpha samples
+                // within the geometric halo, rather than require opaque-grid holes.
+                if (square.contains(p) && !silhouette.contains(p) && actual.alpha() < 100) ++haloPixels;
+                if (reference.alpha() > 240) {
+                    QVERIFY(actual.alpha() > 180);
+                    QVERIFY(qAbs(actual.red()-color.red()) < 5);
+                    QVERIFY(qAbs(actual.green()-color.green()) < 5);
+                    QVERIFY(qAbs(actual.blue()-color.blue()) < 5);
+                    if (pencil.contains(p)) ++pencilPixels;
+                    else if (square.contains(p)) ++squarePixels;
+                }
+                if (!square.contains(p) && pencil.contains(p) && actual.alpha() > 80) ++exposedPixels;
+            }
+        QVERIFY2(error/double(image.width()*image.height()) < 20,"Filled note differs from square-and-pencil silhouette");
+        QVERIFY(haloPixels >= 2); QVERIFY(pencilPixels >= 2); QVERIFY(squarePixels >= 10);
+        // The one-unit overhang is subpixel at 14px; resolve it at 24px and up.
+        if (size >= 24) QVERIFY(exposedPixels > 0);
+        if (size == 96) {
+            // Both diagonal sides retain a ~1.5-unit band before solid square
+            // resumes; the original pencil interior must be filled, not hollow.
+            const auto alpha = [&](double x, double y) { return image.pixelColor(qFloor(x*size/24),qFloor(y*size/24)).alpha(); };
+            QVERIFY(alpha(14,9) > 240);
+            QVERIFY(alpha(13.5,6.5) < 30);
+            QVERIFY(alpha(15.5,11.5) < 30);
+            QVERIFY(alpha(12.5,5.5) > 240);
+            QVERIFY(alpha(16.5,12.5) > 240);
+            QVERIFY(alpha(18.2,3.7) > 180); // Pencil above the square's top.
+            QVERIFY(alpha(20.2,6) > 180); // Pencil beyond its right edge.
+        }
+    }
     void screenshot() {
         populate(true);
         QTRY_COMPARE(list("annotationRanges").size(),4);
@@ -825,7 +983,7 @@ ApplicationWindow {
         auto glyph = shared->grabToImage(); QVERIFY(glyph);
         QTRY_VERIFY(!glyph->image().isNull());
         QVERIFY(glyph->image().save(path + ".note14.png"));
-        QVERIFY(glyph->image().scaled(280,280,Qt::IgnoreAspectRatio,Qt::FastTransformation).save(path + ".note14-zoom.png"));
+        QVERIFY(onBackground(glyph->image(),QColor("#181c21")).scaled(280,280,Qt::IgnoreAspectRatio,Qt::FastTransformation).save(path + ".note14-zoom.png"));
         for (double leading : {1.0,3.0}) {
             backend->setProperty("lineHeight",leading);
             QTest::qWait(100);

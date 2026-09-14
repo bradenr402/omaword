@@ -241,7 +241,7 @@ Item {
         }
     }
     // Each delegate occupies an image cell reserved by QTextDocument. The icon
-    // sits to the left of the opening bracket, in the cell's superscript area.
+    // sits outside the opening bracket, in the cell's superscript area.
     Repeater {
         model: root.inlineMarkers
         delegate: Item {
@@ -270,8 +270,14 @@ Item {
                 property color accent: root.theme.accent
                 property real bracketTop: inlineMarker.modelData.bracketTop
                 property real bracketHeight: inlineMarker.modelData.bracketHeight
+                property real bracketX: inlineMarker.modelData.bracketX
+                property real paintWidth: inlineMarker.modelData.paintWidth
+                property bool rtl: inlineMarker.modelData.rtl
                 onBracketTopChanged: requestPaint()
                 onBracketHeightChanged: requestPaint()
+                onBracketXChanged: requestPaint()
+                onPaintWidthChanged: requestPaint()
+                onRtlChanged: requestPaint()
                 onAccentChanged: requestPaint()
                 onWidthChanged: requestPaint()
                 onHeightChanged: requestPaint()
@@ -281,9 +287,11 @@ Item {
                     ctx.strokeStyle = accent
                     ctx.fillStyle = accent
                     ctx.lineWidth = Math.max(1, height / 18)
+                    if (rtl) { ctx.translate(width, 0); ctx.scale(-1, 1) }
+                    ctx.translate(bracketX, 0)
                     const opening = inlineMarker.opening
-                    const bx = opening ? width * 0.78 : width * 0.65
-                    const tip = opening ? width * 0.97 : width * 0.1
+                    const bx = opening ? paintWidth * 0.78 : paintWidth * 0.65
+                    const tip = opening ? paintWidth - ctx.lineWidth / 2 : ctx.lineWidth / 2
                     const top = bracketTop + ctx.lineWidth / 2
                     const bottom = bracketTop + bracketHeight - ctx.lineWidth / 2
                     ctx.beginPath()
@@ -307,9 +315,10 @@ Item {
                 kind: inlineMarker.modelData.kind
                 filled: true
                 ink: root.theme.accent
-                x: parent.width * 0.05
+                x: inlineMarker.modelData.rtl ? parent.width - inlineMarker.modelData.paintWidth * 0.05 - width
+                                             : inlineMarker.modelData.paintWidth * 0.05
                 y: parent.height * 0.03
-                width: Math.min(parent.width * 0.64, parent.height * 0.64)
+                width: Math.min(inlineMarker.modelData.paintWidth * 0.64, parent.height * 0.64)
                 height: width
             }
             MouseArea {

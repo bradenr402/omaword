@@ -196,7 +196,11 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
                 if (!opening) cursor.insertText(QString(QChar(0x2060)), joiner);
                 marker["position"] = cursor.position();
                 marker["verse"] = verse.value("number");
-                marker["cellWidth"] = qMax(1, qRound(em * (opening ? 0.92 : 0.32)));
+                marker["paintWidth"] = qMax(1, qRound(em * (opening ? 0.92 : 0.32)));
+                // Reserve breathing room inside the image, not as text or as
+                // extra height. Joiners and clipboard offsets stay identical.
+                marker["textGap"] = qMax(1, qRound(em * 0.15));
+                marker["cellWidth"] = marker.value("paintWidth").toInt() + marker.value("textGap").toInt();
                 // Qt's baseline image box includes the font descent. Reserve
                 // the font height plus two pixels, not an extra em of ascent.
                 marker["cellHeight"] = bodyMetrics.height() + 2;
@@ -304,6 +308,9 @@ QVariantList BlockDocument::inlineDecorations() const
         marker["x"] = origin.x() + qMin(a, b);
         marker["y"] = paintY;
         marker["width"] = qAbs(b - a);
+        marker["rtl"] = a > b;
+        // Logical paint origin; the QML canvas mirrors it for an RTL cell.
+        marker["bracketX"] = marker.value("edge") == "close" ? marker.value("textGap").toDouble() : 0.0;
         marker["height"] = bracketBottom - paintY;
         marker["textTop"] = textTop;
         marker["textBottom"] = textBottom;

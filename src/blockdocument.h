@@ -28,7 +28,8 @@ public:
     Q_INVOKABLE void copySelection(int start, int end, bool primary = false) const;
     // Paint bounds plus reserved cellWidth/cellHeight and canonical scope.
     // textTop/textBottom are document ink coordinates; bracketTop is relative
-    // to y, bracketHeight excludes proportional line leading.
+    // to y, bracketHeight excludes proportional line leading. paintWidth excludes
+    // the reserved textGap; bracketX is its logical origin, mirrored when rtl.
     Q_INVOKABLE QVariantList inlineDecorations() const;
     // Union of cursor-containing bookmark/note/tag ranges, excluding selected verses.
     Q_INVOKABLE QVariantList contextRanges(const QVariantList &verses, int cursorVerse,
