@@ -16,7 +16,8 @@ QML and the seven-entry `resources/catalog.json` metadata catalog.
 | `src/windowmanager.*` | A backend, catalog object, QML engine, and window per reader; lifecycle and request routing |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing layouts, verse/document mapping, selection and annotation geometry |
 | `qml/Main.qml` | Reader, passage/command palettes, notes, Annotations, Visual action completion, settings, catalog, and attribution |
-| `qml/TagsPanel.qml` | Reusable tag UI: pinned exact-range picker, embedded Annotations browser, Related side panel, and global management |
+| `qml/TagsPanel.qml` | Embedded Annotations exact-range editor, discovery-only Related drawer, global management, and standalone picker fallback |
+| `qml/AnnotationGlyph.qml` | Shared bookmark, left-pointing tag, and footer-style note glyphs for reader indicators and annotation controls |
 | `src/desktop.*`, `qml/AppToolTip.qml` | Shared fonts/scaling, live Omarchy theme, asynchronous compositor corners, themed tooltips, external links |
 
 ## Import and catalog lifecycle
@@ -179,78 +180,109 @@ if necessary, and opens the complete endpoint range in the requesting reader.
 The backend `collection` unions annotations and tag-only ranges, deduplicating exact
 endpoints within the active source. Annotations has **Bookmarks**, **Highlights**,
 **Notes**, and **Tags** tabs in one row, with no **All** tab. The first three filter
-the collection by their mark/note type; tag-only ranges are browsed through Tags.
+the collection by their mark/note type; Tags edits the focused exact range, while
+Related discovers tagged passages.
 Deleting an Annotations entry atomically removes its bookmark, highlight, note,
 and all tag assignments for that exact range, leaving overlapping entries and global
-definitions intact. `deleteAnnotation(reference, expectedVersionId)` guards the
-confirmation's source identity and rejects absent exact entries.
+definitions intact. Main confirms a captured scope through `deleteAnnotationScope(scope)`;
+the reference-based `deleteAnnotation(reference, expectedVersionId)` also guards
+source identity and rejects absent exact entries.
 
 Verse rows expose `hasTags` and `tagRanges`, carrying full scopes/tags plus
-`tagStart`, `tagEnd`, `continuesBefore`, and `continuesAfter`. Verse-layout rails
-preserve exact scopes and offer choices for overlapping tag ranges.
+`tagStart`, `tagEnd`, `continuesBefore`, and `continuesAfter`. `noteRanges` also
+carry the source ID and complete endpoints, with `noteStart`/`noteEnd` and
+continuation flags. Bookmarks, tags, and notes share a kind-icon-plus-range-bracket
+language. Verse places them in separate row rails, ordered bookmark, tag, note
+before the verse number; adjacent rail segments meet across rows and headings.
+Tag/note rails offer choices for overlapping ranges. Note actions open the exact
+captured scope through `openTaggedPassage` before opening Notes; failed draft
+flushes or navigation preserve the current editing context.
 
 Paragraph and Block share a continuous `BlockReader` text layout. `BlockDocument`
-reserves transparent inline image cells and word joiners at bookmark/tag endpoints;
+reserves transparent inline image cells and word joiners at bookmark/note/tag endpoints;
 QML paints opening/closing brackets within those cells, with a superscript icon
 to the left of each opening bracket. Tag icons are horizontally mirrored to point
-left. Each exact tagged range has one marker pair regardless of its tag count.
+left. `AnnotationGlyph` supplies all three kinds; the superscript note uses the
+same pencil-in-an-open-square path as the Notes footer control. Each exact tagged
+range has one marker pair regardless of its tag count. Source-order extents put
+outer openings first and inner closings first, reversing equal-range kind order
+at the closing edge.
 A range entering the chapter has a continuation chevron instead of a false start;
-a range continuing beyond it has no false closing bracket. Notes remain in the
-margin, with nearby note anchors grouped into a range chooser.
+a range continuing beyond it has no false closing bracket. Notes now use these
+inline cells too; Paragraph/Block has no margin-note rail or grouped note chooser.
 
 `inlineDecorations()` supplies cell geometry and captured scopes; verse spans keep
 `textStart`/`textEnd` separate from decorated endpoints. `selectionText()` omits
 only generated decoration segments, preserving original Unicode, brackets, joiners,
 and object characters in copied text. Hit testing maps cells and text to their
-owning verse. `contextRanges()` unions bookmark/tag ranges containing the cursor
+owning verse. `contextRanges()` unions bookmark/note/tag ranges containing the cursor
 verse and subtly shades their other visible members, excluding the cursor and
 selected verses. It clears when the cursor leaves those ranges. Focus mode removes
-inline cells, margin markers, and context shading; selection and highlight painting
+inline cells, row indicators, and context shading; selection and highlight painting
 remain independent. Width, font, and layout changes recalculate the shared geometry.
 
-### Picker, browser, and Related
+### Embedded editor, Related, and management
 
 `TagsPanel` receives explicit `app`, `bible`, and `desktop` properties plus an
-`embeddedHost`. A single reusable `tagsBody` is reparented by `hostKind` into the
-picker's modal popup, Annotations' `annotationsTagsHost`, or Related's full-height
-right-edge drawer. Management uses the current host with Back navigation.
-`browserRequested`/`browserClosed` let Main select the Tags tab and open/close
-Annotations. `browserVisible` tracks embedded content; `visibleModal` covers the
-picker and Related, and `contentVisible` combines them for peer refreshes.
-`scopePinned` tracks a visible picker editing scope. `open(scope)` copies
-the scope; later selection/version changes do not retarget picker writes. Checked
-tags reflect only that exact range. Other overlapping ranges are listed separately:
-**Open** navigates and closes the picker; **Edit tags** navigates and pins that full
-range for editing.
+`embeddedHost`. Main always supplies Annotations' `annotationsTagsHost`:
+`open(scope)` uses `hostKind: "browser"` with `page: "picker"`, selects Tags via
+`browserRequested`, and opens Annotations. The legacy browser names describe
+hosting, not a passage-results browser. `browserClosed` closes Annotations;
+`embeddedClosed()` releases the editing scope. The standalone modal `tagsSurface`
+is a fallback only when no embedded host is supplied. Main's tag editing and
+management stay embedded, with management using Back navigation in the same body.
+Related reparents `tagsBody` into a full-height right-edge modal drawer with
+`24 * desktop.textScale` padding on all four sides.
 
-`t` opens **Tag passage**. Each click or Space/Enter in the tag list saves immediately;
+`browserVisible` tracks embedded content; `visibleModal` covers the standalone
+popup and Related, not the surrounding Annotations drawer. `contentVisible`
+combines them for peer refreshes. `scopePinned` covers a visible standalone or
+embedded editing scope. `open(scope)` copies the exact endpoints; marker scopes
+do not navigate or collapse to the clicked verse. In Main, selection identity
+changes call `followSelection()` so an empty embedded editor can acquire its first
+valid scope after a successful draft flush. A captured scope remains pinned until
+reopening, including across host selection changes. Removed source versions block writes.
+Checked tags reflect exact membership; **Other overlapping ranges** lists separate
+assignments. **Open** navigates and closes the editor; **Edit tags** navigates and
+opens that complete scope for editing.
+
+`t` / **Tag passage**, Annotations → **Tags**, and Commands → **Tags** open the same
+edit-focused surface for adding/removing flat named tags. Without a selection it
+prompts **Select a passage to add or remove tags.** and disables assignment.
+Each click or Space/Enter in the tag list saves immediately;
 Enter in search or **Create / assign** atomically creates/reuses and applies the
 typed name. Space in the search field remains text input. Esc cancels a pending
 management confirmation first, otherwise clears a nonempty query, then closes.
 **Done** closes without undoing committed toggles. User labels render as plain text.
 
 `Ctrl a` toggles Annotations in reader/panel navigation contexts; editable fields
-retain Select All. Its fourth **Tags** tab and Commands → **Tags** open the browser
-inside Annotations, below the tab divider. A new browser starts with no filters
-and two exclusive pairs: **Any** / **All**, then a vertical divider, then
-**\<abbr\> only** / **All versions**. The abbreviation follows the active version in
-the browser; all-version queries include installed sources only. Enter/click opens
-a full result and closes Annotations.
+retain Select All. Its fourth **Tags** tab embeds the editor below the tab divider.
+The editor's **Find or create a tag…** field searches names for assignment; it has
+no passage results or Any/All/version filters.
 
 `Shift H` toggles headings; `Shift L`, Commands → **Related passages**, or the
-bottom-left button beside the mode control opens Related's right-side panel.
+bottom-right overlapping-passages icon opens Related's right-side panel.
 It pins the source and initially selects the union of tags on every overlapping
-range. Its version pair uses the pinned source abbreviation, even after opening
+range. Only Related exposes discovery search (**Filter tags…**), passage results,
+and two exclusive pairs: **Any** / **All**, a vertical divider, then
+**\<abbr\> only** / **All versions**. It starts with Any and the source version;
+All requires every chosen tag on one exact range, and all-version queries include
+installed sources only. Search covers all global tag names, so discovery works
+even when the source has no tags. Toggling a tag changes query filters, never
+assignments. Its version pair uses the pinned source abbreviation, even after opening
 a result in another version. Opening results keeps the panel/source pinned;
-**Use current** explicitly captures the new source and resets the tag filters.
-Focus mode closes tag surfaces and hides the floating controls.
+**Use current** explicitly captures the new source, clears search, and replaces
+the selected source-tag union while preserving the Any/All and version choices.
+Related exposes no creation or management controls,
+and `manage()` rejects the Related page. Focus mode closes tag surfaces and hides
+the floating controls.
 
-**Manage** is available in each tag host; **Manage tags** in Commands opens management
-inside Annotations' Tags tab. Rename, delete, and merge each require confirmation
-with global scope. Peer edits refresh visible lists, prune deleted IDs, and
-invalidate confirmations if a source
+**Manage** is available in Annotations → Tags (and the standalone picker fallback);
+the separate **Manage tags** command opens management inside that same tab.
+Rename, delete, and merge each require confirmation with global scope. Peer edits
+refresh visible lists, prune deleted IDs, and invalidate confirmations if a source
 or target tag disappears or changes name. Missing source versions disable pinned
-picker actions and empty Related results; backend validation also rejects stale
+editor actions and empty Related results; backend validation also rejects stale
 endpoints. Busy-library and note-flush guards protect editing/navigation actions.
 
 ## Visual action completion
@@ -289,8 +321,15 @@ corners, and width bounded by both 360 scaled pixels and the available window.
 
 ## User interface and verification
 
+The footer's left group is **?** (Keybindings) followed by Normal/Visual mode;
+passage/version controls remain centered. The right group is **Related** (two
+overlapping passages joined by shared lines), **Annotations**, then **Notes**.
+Center width accounts for both side groups. The Notes footer and reader note
+indicators share `AnnotationGlyph` rather than independent drawings.
+
 The empty view uses the application name, catalog/local-import guidance, and local
-privacy text. Ready-only Annotations/Notes footer controls avoid empty reader actions.
+privacy text. Related, Annotations, Notes, and mode controls require a ready reader;
+Related additionally requires a selection.
 About & Attribution shows dynamic source name/rights, source details links, local
 storage information, and **No version installed** when empty.
 

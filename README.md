@@ -26,19 +26,21 @@ Internet is needed only to download a version. Once installed, reading and annot
 - `j` / `k` moves between verses; `h` / `l` moves between chapters. Arrow keys work too.
 - `v` starts visual selection; `j` / `k` extends it. `J` / `K` starts and extends a range immediately.
 - `4j` moves four verses; `20g` goes to verse 20.
-- `m` bookmarks; `x` highlights; `n` writes a note; `t` tags a passage.
-- In the tag list, `Space` / `Enter` toggles a tag; Enter in picker search creates and applies it.
+- `m` bookmarks; `x` highlights; `n` writes a note; `t` opens the passage tag editor in Annotations → Tags.
+- In the tag editor, `Space` / `Enter` toggles a tag; Enter in search creates and applies it.
 - `Ctrl n` toggles Notes; `Ctrl a` toggles Annotations (Bookmarks, Highlights, Notes, Tags).
 - `y` copies a quotation; `Y` copies plain text. `Ctrl c` copies selected text, or the passage when no text is selected.
 - `b` cycles Paragraph, Verse, and Block layouts; `f` toggles focus mode.
 - `Shift V` switches versions; `Shift R` opens Reading settings; `Shift H` toggles headings.
-- `Shift L` opens Related passages. Annotations → Tags filters by any or all chosen tags, in the current or all installed versions.
+- `Shift L` opens Related passages: search tags, match Any/All, and choose the source version or all installed versions. The source stays pinned until **Use current**.
 - `Ctrl Shift N` opens another reader window.
 - `?` or `F1` opens the searchable keybindings list, where Enter performs the selected action.
 
 Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
 
-Tag names are shared across versions; assignments belong to exact passage ranges in one version. Manage tags lets you rename, delete, or merge names. See the [tag contract](TAGS.md) for details.
+Annotations → Tags adds, removes, or creates flat named tags for the focused exact range. Names are shared across versions; assignments belong to one version. **Manage** there, or Commands → **Manage tags**, renames, deletes, or merges names; Related is discovery-only. See the [tag contract](TAGS.md).
+
+The footer puts `?` before mode on the left and Related (overlapping passages), Annotations, and Notes on the right. Bookmarks, tags, and notes share kind icons and range brackets: row rails in Verse, inline in Paragraph/Block, with superscript icons and subtle cursor-range shading.
 
 All your Bible versions, highlights, bookmarks, notes, and tags stay on this device. Personal data lives in `~/.local/share/omaword/`; backup and Markdown export are available in Commands.
 
