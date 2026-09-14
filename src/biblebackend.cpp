@@ -3,6 +3,7 @@
 #include "biblebooks.h"
 
 #include <QClipboard>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -431,6 +432,264 @@ bool BibleBackend::validateScope(const QVariantMap &scope, QVariantMap *canonica
     if (!bible.scope(scope,&result)) return false;
     if (canonical) *canonical = result;
     return true;
+}
+
+bool BibleBackend::rangeEditScope(const QVariantMap &scope, QVariantMap *canonical) const
+{
+    const auto id = scope.value("versionId");
+    if (!m_ready || id.metaType().id() != QMetaType::QString || id.toString().size() > 128
+        || id.toString() != m_versionId || !safeString(id.toString())
+        || installedPath(m_versionId) != m_bible.databaseName()) return false;
+    return validateScope(scope,canonical);
+}
+
+QVariantMap BibleBackend::readRangeSnapshot(const QVariantMap &scope) const
+{
+    auto fail = [](const QString &error) { return QVariantMap{{"ok",false},{"error",error}}; };
+    QVariantMap canonical;
+    if (!rangeEditScope(scope,&canonical)) return fail("The Bible version or passage changed. Choose the source again.");
+    QVariantMap state{{"scope",publicRange(canonical)},{"bookmark",false},{"highlight",false},
+                      {"note",QString("")},{"tags",QVariantList()}};
+    QSqlQuery q(m_store);
+    q.prepare("SELECT bookmark,highlight,note FROM annotations WHERE " + scopeWhere);
+    bindScope(q,canonical);
+    if (!q.exec()) return fail("Cannot read annotations: " + q.lastError().text());
+    bool exists = false;
+    if (q.next()) {
+        state["bookmark"] = q.value(0).toBool(); state["highlight"] = q.value(1).toBool();
+        state["note"] = q.value(2).toString();
+        exists = state.value("bookmark").toBool() || state.value("highlight").toBool() || !state.value("note").toString().isEmpty();
+    }
+    if (q.lastError().isValid()) return fail("Cannot read annotations: " + q.lastError().text());
+    if (state.value("note").toString().size() > MaximumNoteSize || !safeString(state.value("note").toString()))
+        return fail("The saved note is too large or contains unsupported characters.");
+    q.prepare("SELECT t.id,t.name FROM tag_assignments a JOIN tags t ON t.id=a.tag_id WHERE "
+              "a.version_id=? AND a.book=? AND a.chapter=? AND a.start=? AND a.endBook=? AND a.endChapter=? AND a.end=? ORDER BY t.id");
+    bindScope(q,canonical);
+    if (!q.exec()) return fail("Cannot read tags: " + q.lastError().text());
+    QVariantList tags;
+    while (q.next()) {
+        const QString id = q.value(0).toString(), name = q.value(1).toString();
+        if (tags.size() >= 10000 || id.isEmpty() || id.size() > 128 || !safeString(id)
+            || name.size() > 4096 || !safeString(name)) return fail("Invalid saved tags.");
+        tags.append(QVariantMap{{"id",id},{"name",name}});
+    }
+    if (q.lastError().isValid()) return fail("Cannot read tags: " + q.lastError().text());
+    state["tags"] = tags;
+    // Immutable installed filenames distinguish replacement/reimport generations.
+    auto fingerprint = state;
+    auto identity = publicRange(canonical); identity.remove("reference");
+    fingerprint["scope"] = identity;
+    fingerprint["generation"] = m_bible.databaseName();
+    state["token"] = QString::fromLatin1(QCryptographicHash::hash(
+        QJsonDocument::fromVariant(fingerprint).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256).toHex());
+    state["exists"] = exists || !tags.isEmpty(); state["ok"] = true; state["error"] = QString();
+    return state;
+}
+
+QVariantMap BibleBackend::annotationSnapshot(QVariantMap scope)
+{
+    auto snapshot = readRangeSnapshot(scope);
+    if (snapshot.value("ok").toBool() && !snapshot.value("exists").toBool()) {
+        snapshot["ok"] = false; snapshot["error"] = "No saved annotation exists for that exact range.";
+    }
+    return snapshot;
+}
+
+QVariantList BibleBackend::annotationRanges(QVariantMap aroundScope)
+{
+    QVariantMap around;
+    if (!rangeEditScope(aroundScope,&around)) return {};
+    QSqlQuery q(m_store);
+    q.prepare("SELECT book,chapter,start,endBook,endChapter,end FROM annotations WHERE version_id=? AND (bookmark<>0 OR highlight<>0 OR note<>'') "
+              "UNION SELECT book,chapter,start,endBook,endChapter,end FROM tag_assignments WHERE version_id=?");
+    q.addBindValue(m_versionId); q.addBindValue(m_versionId);
+    if (!q.exec()) return {};
+    QVariantList result;
+    while (q.next()) {
+        QVariantMap scope{{"versionId",m_versionId}}, canonical;
+        for (int i = 0; i < scopeFields.size(); ++i) scope[scopeFields[i]] = q.value(i);
+        if (!rangeEditScope(scope,&canonical)) return {};
+        if (!rangesOverlap(around,canonical)) continue;
+        const auto snapshot = readRangeSnapshot(canonical);
+        if (!snapshot.value("ok").toBool()) return {};
+        auto row = canonical;
+        for (const auto &key : {"bookmark","highlight","note","tags"}) row[key] = snapshot.value(key);
+        result.append(row);
+    }
+    if (q.lastError().isValid()) return {};
+    std::sort(result.begin(),result.end(),[](const QVariant &a, const QVariant &b) {
+        const auto x = a.toMap(), y = b.toMap();
+        return std::make_pair(x.value("_order").toLongLong(),x.value("_endOrder").toLongLong())
+            < std::make_pair(y.value("_order").toLongLong(),y.value("_endOrder").toLongLong());
+    });
+    for (auto &row : result) row = publicRange(row.toMap());
+    return result;
+}
+
+QVariantMap BibleBackend::prepareRangeChange(const QVariantMap &snapshot, const QVariantMap &destination,
+                                            const QVariantMap &components, QVariantMap *source, QVariantMap *target) const
+{
+    QVariantMap result{{"ok",false},{"error",QString()},{"needsNoteMerge",false},
+                       {"sourceNote",QString()},{"destinationNote",QString()},{"destinationToken",QString()},
+                       {"combinedNote",QString()},{"message",QString()}};
+    auto fail = [&](const QString &error) { result["error"] = error; return result; };
+    if (snapshot.value("scope").metaType().id() != QMetaType::QVariantMap
+        || snapshot.value("token").metaType().id() != QMetaType::QString
+        || snapshot.value("token").toString().size() != 64)
+        return fail("Invalid source snapshot. Choose the annotation again.");
+    *source = readRangeSnapshot(snapshot.value("scope").toMap());
+    if (!source->value("ok").toBool()) return fail(source->value("error").toString());
+    if (!source->value("exists").toBool() || source->value("token") != snapshot.value("token"))
+        return fail("The source annotation changed. Choose the annotation again.");
+    // Never trust caller-supplied note text, flags or tag assignments as write data.
+    for (const auto &key : {"bookmark","highlight","note","tags"}) {
+        if (snapshot.value(key).metaType() != source->value(key).metaType() || snapshot.value(key) != source->value(key))
+            return fail("The source snapshot does not match the saved annotation.");
+    }
+    bool chosen = false;
+    for (auto it = components.cbegin(); it != components.cend(); ++it)
+        if (it.key() != "bookmark" && it.key() != "highlight" && it.key() != "note" && it.key() != "tags")
+            return fail("Unknown annotation component.");
+    for (const auto &key : {"bookmark","highlight","note"}) {
+        if (components.contains(key) && components.value(key).metaType().id() != QMetaType::Bool)
+            return fail("Invalid annotation component choice.");
+        if (!components.value(key).toBool()) continue;
+        chosen = true;
+        if (QString::fromLatin1(key) == "note" ? source->value(key).toString().isEmpty() : !source->value(key).toBool())
+            return fail("A chosen component is not present on the exact source range.");
+    }
+    if (components.contains("tags") && components.value("tags").metaType().id() != QMetaType::QVariantList)
+        return fail("Invalid tag selection.");
+    const auto selected = components.value("tags").toList();
+    if (selected.size() > 10000) return fail("Too many selected tags.");
+    QSet<QString> assigned;
+    for (const auto &tag : source->value("tags").toList()) assigned.insert(tag.toMap().value("id").toString());
+    for (const auto &tag : selected) {
+        if (tag.metaType().id() != QMetaType::QString || tag.toString().size() > 128 || !assigned.contains(tag.toString()))
+            return fail("A chosen tag is not assigned to the exact source range.");
+        chosen = true;
+    }
+    if (!chosen) return fail("Choose at least one annotation component to move.");
+    *target = readRangeSnapshot(destination);
+    if (!target->value("ok").toBool()) return fail(target->value("error").toString());
+    const QString sourceNote = source->value("note").toString(), destinationNote = target->value("note").toString();
+    const bool same = rangeKey(source->value("scope").toMap()) == rangeKey(target->value("scope").toMap());
+    const bool merge = !same && components.value("note").toBool() && !destinationNote.isEmpty() && sourceNote != destinationNote;
+    const QString combined = merge ? destinationNote + "\n\n" + sourceNote
+        : components.value("note").toBool() ? sourceNote : destinationNote;
+    if (combined.size() > MaximumNoteSize) return fail("The combined note is too large.");
+    result["ok"] = true; result["needsNoteMerge"] = merge;
+    result["sourceNote"] = sourceNote; result["destinationNote"] = destinationNote;
+    result["destinationToken"] = target->value("token"); result["combinedNote"] = combined;
+    result["message"] = merge ? "Combine the existing destination note first, then the moved source note, separated by a blank line." : QString();
+    return result;
+}
+
+QVariantMap BibleBackend::previewRangeChange(QVariantMap snapshot, QVariantMap destination, QVariantMap components)
+{
+    QVariantMap source, target;
+    return prepareRangeChange(snapshot,destination,components,&source,&target);
+}
+
+bool BibleBackend::changeAnnotationRange(QVariantMap snapshot, QVariantMap destination, QVariantMap components,
+                                        bool combineNotes, QString destinationToken)
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    if (destinationToken.size() > 64) return setError("Invalid destination confirmation token.");
+    QVariantMap source, target;
+    // An identical range is a true no-op, including pending drafts and publication.
+    QVariantMap sourceScopeCheck, targetScopeCheck;
+    if (rangeEditScope(snapshot.value("scope").toMap(),&sourceScopeCheck)
+        && rangeEditScope(destination,&targetScopeCheck) && rangeKey(sourceScopeCheck) == rangeKey(targetScopeCheck)) {
+        const auto preview = prepareRangeChange(snapshot,destination,components,&source,&target);
+        if (!preview.value("ok").toBool()) return setError(preview.value("error").toString());
+        clearError(); return true;
+    }
+    if (!flushDrafts()) return false;
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError("Cannot start range change: " + m_store.lastError().text());
+    const auto preview = prepareRangeChange(snapshot,destination,components,&source,&target);
+    if (!preview.value("ok").toBool()) return setError(preview.value("error").toString());
+    if ((!destinationToken.isEmpty() && destinationToken != target.value("token").toString())
+        || (preview.value("needsNoteMerge").toBool() && (!combineNotes || destinationToken.isEmpty())))
+        return setError("Preview and explicitly confirm combining the current destination note before saving.");
+    for (const auto &key : {"bookmark","highlight"}) if (components.value(key).toBool()) {
+        source[key] = false; target[key] = true;
+    }
+    if (components.value("note").toBool()) { source["note"] = QString(""); target["note"] = preview.value("combinedNote"); }
+    const auto sourceScope = source.value("scope").toMap(), targetScope = target.value("scope").toMap();
+    // Only the two exact annotation rows are touched. Other overlapping marks
+    // retain their independent coverage, notes and assignments.
+    if (components.value("bookmark").toBool() || components.value("highlight").toBool() || components.value("note").toBool()) {
+        for (const auto &state : {source,target}) {
+            const auto scope = state.value("scope").toMap();
+            QSqlQuery q(m_store);
+            q.prepare("DELETE FROM annotations WHERE " + scopeWhere); bindScope(q,scope);
+            if (!q.exec()) return setError("Cannot move annotation: " + q.lastError().text());
+            if (state.value("bookmark").toBool() || state.value("highlight").toBool() || !state.value("note").toString().isEmpty()) {
+                q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,bookmark,highlight,note) VALUES(?,?,?,?,?,?,?,?,?,?)");
+                bindScope(q,scope); q.addBindValue(state.value("bookmark")); q.addBindValue(state.value("highlight")); q.addBindValue(state.value("note"));
+                if (!q.exec()) return setError("Cannot move annotation: " + q.lastError().text());
+            }
+        }
+    }
+    QSet<QString> moved;
+    for (const auto &value : components.value("tags").toList()) moved.insert(value.toString());
+    auto sourceTags = source.value("tags").toList(), targetTags = target.value("tags").toList();
+    for (const auto &id : moved) {
+        if (!writeTagAssignment(sourceScope,id,false) || !writeTagAssignment(targetScope,id,true)) return false;
+        for (qsizetype i = sourceTags.size(); i-- > 0;) if (sourceTags[i].toMap().value("id").toString() == id) {
+            const bool present = std::any_of(targetTags.cbegin(),targetTags.cend(),[&](const QVariant &tag) { return tag.toMap().value("id").toString() == id; });
+            if (!present) targetTags.append(sourceTags[i]);
+            sourceTags.removeAt(i);
+        }
+    }
+    std::sort(targetTags.begin(),targetTags.end(),[](const QVariant &a, const QVariant &b) { return a.toMap().value("id").toString() < b.toMap().value("id").toString(); });
+    source["tags"] = sourceTags; target["tags"] = targetTags;
+    for (const auto &state : {source,target}) {
+        const auto actual = readRangeSnapshot(state.value("scope").toMap());
+        if (!actual.value("ok").toBool()) return setError(actual.value("error").toString());
+        for (const auto &key : {"bookmark","highlight","note","tags"})
+            if (actual.value(key) != state.value(key)) return setError("Cannot verify moved annotation components.");
+    }
+    if (!m_store.commit()) return setError("Cannot commit range change: " + m_store.lastError().text());
+    clearError(); publishTags();
+    return true;
+}
+
+bool BibleBackend::swapSelectionEnds()
+{
+    if (!requireReady()) return false;
+    if (!m_anchor || !m_cursor) return setError("Select a verse range first.");
+    const auto active = endpoint(m_anchor);
+    return goToSelection(active.book,active.chapter,m_cursor,m_anchor,
+                         active.book == m_book && active.chapter == m_chapter ? m_position : 0);
+}
+
+bool BibleBackend::restoreSelection(QVariantMap scope, bool reversed, double position)
+{
+    if (!m_ready || scope.value("versionId").toString() != m_versionId
+        || installedPath(m_versionId) != m_bible.databaseName())
+        return setError("The original reading version is no longer active.");
+    if (!std::isfinite(position) || (position != -1 && (position < 0 || position > 1)))
+        return setError("Invalid reading position.");
+    const double restoredPosition = position == -1 ? m_position : position;
+    if (scope.contains("start") && scope.contains("end")
+        && scope.value("start").toInt() == 0 && scope.value("end").toInt() == 0) {
+        const int book = scope.value("book").toInt(), chapter = scope.value("chapter").toInt();
+        if (!validRange(book,chapter,0,0)) return setError("The original reading chapter is no longer available.");
+        return goToSelection(book,chapter,0,0,restoredPosition);
+    }
+    QVariantMap canonical;
+    if (!rangeEditScope(scope,&canonical)) return setError("The original reading selection is no longer available.");
+    const int first = absoluteVerse(canonical.value("book").toInt(),canonical.value("chapter").toInt(),canonical.value("start").toInt());
+    const int last = absoluteVerse(canonical.value("endBook").toInt(),canonical.value("endChapter").toInt(),canonical.value("end").toInt());
+    if (!first || last < first) return setError("The original reading endpoints are no longer available.");
+    const int cursor = reversed ? first : last;
+    const auto active = endpoint(cursor);
+    return goToSelection(active.book,active.chapter,reversed ? last : first,cursor,restoredPosition);
 }
 
 QVariantList BibleBackend::tags() const

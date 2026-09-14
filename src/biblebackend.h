@@ -106,6 +106,24 @@ public:
     Q_INVOKABLE QVariantList relatedPassages(QVariantMap source, QVariantList tagIds,
                                            bool matchAll = false, bool allVersions = false);
     Q_INVOKABLE bool openTaggedPassage(QVariantMap scope);
+    // Exact saved ranges intersecting aroundScope, in installed USFM source order.
+    // Snapshot: {ok,error,scope,bookmark,highlight,note,tags:[{id,name}],token}.
+    // Tokens fingerprint all exact components and the installed Bible generation.
+    Q_INVOKABLE QVariantList annotationRanges(QVariantMap aroundScope);
+    Q_INVOKABLE QVariantMap annotationSnapshot(QVariantMap scope);
+    // components: {bookmark:bool,highlight:bool,note:bool,tags:[ids]}.
+    // Pure preview: {ok,error,needsNoteMerge,sourceNote,destinationNote,
+    // destinationToken,combinedNote,message}. Combined order is destination,
+    // two newlines, then source. Equal notes are deduplicated without confirmation.
+    Q_INVOKABLE QVariantMap previewRangeChange(QVariantMap sourceSnapshot, QVariantMap destination,
+                                             QVariantMap components);
+    Q_INVOKABLE bool changeAnnotationRange(QVariantMap sourceSnapshot, QVariantMap destination,
+                                          QVariantMap components, bool combineNotes = false,
+                                          QString destinationToken = QString());
+    Q_INVOKABLE bool swapSelectionEnds();
+    // Local reading-only restoration in the active version; never flushes peer drafts.
+    // An unselected chapter uses {versionId,book,chapter,start:0,end:0}.
+    Q_INVOKABLE bool restoreSelection(QVariantMap scope, bool reversed = false, double position = -1);
     QString noteText() const { return m_note; }
     bool selectionBookmarked() const { return m_bookmarked; }
     bool selectionHighlighted() const { return m_highlighted; }
@@ -237,6 +255,11 @@ private:
     bool saveAnnotations(const QVector<Annotation> &annotations);
     bool toggleFlag(bool highlight);
     bool validateScope(const QVariantMap &scope, QVariantMap *canonical = nullptr) const;
+    bool rangeEditScope(const QVariantMap &scope, QVariantMap *canonical) const;
+    QVariantMap readRangeSnapshot(const QVariantMap &scope) const;
+    QVariantMap prepareRangeChange(const QVariantMap &sourceSnapshot, const QVariantMap &destination,
+                                   const QVariantMap &components, QVariantMap *source,
+                                   QVariantMap *target) const;
     QVariantList tagRangeRows(const QString &versionId, bool excerpts) const;
     bool writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned);
     QString ensureTag(const QString &name);
