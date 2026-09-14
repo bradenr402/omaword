@@ -26,7 +26,9 @@ public:
     // Track the native TextEdit selection for clipboard and PRIMARY filtering.
     Q_INVOKABLE void trackSelection(int start, int end);
     Q_INVOKABLE void copySelection(int start, int end, bool primary = false) const;
-    // Reserved cell geometry plus kind/reference/scope/edge/verse/position.
+    // Paint bounds plus reserved cellWidth/cellHeight and canonical scope.
+    // textTop/textBottom are document ink coordinates; bracketTop is relative
+    // to y, bracketHeight excludes proportional line leading.
     Q_INVOKABLE QVariantList inlineDecorations() const;
     // Union of cursor-containing bookmark/note/tag ranges, excluding selected verses.
     Q_INVOKABLE QVariantList contextRanges(const QVariantList &verses, int cursorVerse,

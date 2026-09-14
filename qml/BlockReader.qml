@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 // Registered by blockdocument.cpp at application startup, without a QML plugin.
 // qmllint disable import
 import OmaWord.Reader 1.0
@@ -14,7 +15,7 @@ Item {
     property string mode: "block"
     property alias body: body
     property alias mapping: document
-    readonly property bool annotationMenuOpen: false
+    readonly property bool annotationMenuOpen: annotationMenu.visible
     property var annotationRanges: []
     property var inlineMarkers: []
     property var contextRanges: []
@@ -56,6 +57,7 @@ Item {
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
     function rebuild() {
         if (destroying) return
+        annotationMenu.close()
         controller.clearTextSelection()
         cancelDrag()
         document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight, mode,
@@ -222,6 +224,22 @@ Item {
             }
         }
     }
+    Menu {
+        id: annotationMenu
+        objectName: "blockAnnotationMenu"
+        property var entry: ({})
+        modal: true
+        MenuItem {
+            objectName: "blockAnnotationOpen"
+            text: "Open"
+            onTriggered: root.openAnnotation(annotationMenu.entry)
+        }
+        MenuItem {
+            objectName: "blockAnnotationEditRange"
+            text: "Edit range"
+            onTriggered: root.controller.openRangeEditor(annotationMenu.entry.scope, annotationMenu.entry.kind)
+        }
+    }
     // Each delegate occupies an image cell reserved by QTextDocument. The icon
     // sits to the left of the opening bracket, in the cell's superscript area.
     Repeater {
@@ -233,6 +251,7 @@ Item {
             readonly property string hint: (modelData.kind === "bookmark" ? "Bookmark" : modelData.kind === "note" ? "Note" : "Tag") + "\n"
                 + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
                 + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
+                + "\nShift-click to edit range"
             objectName: "blockInlineMarker:" + modelData.kind + ":" + modelData.edge + ":" + modelData.reference
             x: modelData.x; y: modelData.y
             width: modelData.width; height: modelData.height
@@ -249,6 +268,10 @@ Item {
                 id: inlinePaint
                 anchors.fill: parent
                 property color accent: root.theme.accent
+                property real bracketTop: inlineMarker.modelData.bracketTop
+                property real bracketHeight: inlineMarker.modelData.bracketHeight
+                onBracketTopChanged: requestPaint()
+                onBracketHeightChanged: requestPaint()
                 onAccentChanged: requestPaint()
                 onWidthChanged: requestPaint()
                 onHeightChanged: requestPaint()
@@ -261,17 +284,19 @@ Item {
                     const opening = inlineMarker.opening
                     const bx = opening ? width * 0.78 : width * 0.65
                     const tip = opening ? width * 0.97 : width * 0.1
+                    const top = bracketTop + ctx.lineWidth / 2
+                    const bottom = bracketTop + bracketHeight - ctx.lineWidth / 2
                     ctx.beginPath()
                     if (inlineMarker.modelData.edge === "continuation") {
                         // A chevron denotes a continued range, not a false start.
-                        ctx.moveTo(bx, height * 0.35)
-                        ctx.lineTo(tip, height * 0.62)
-                        ctx.lineTo(bx, height * 0.9)
+                        ctx.moveTo(bx, top)
+                        ctx.lineTo(tip, (top + bottom) / 2)
+                        ctx.lineTo(bx, bottom)
                     } else {
-                        ctx.moveTo(tip, height * 0.32)
-                        ctx.lineTo(bx, height * 0.32)
-                        ctx.lineTo(bx, height * 0.96)
-                        ctx.lineTo(tip, height * 0.96)
+                        ctx.moveTo(tip, top)
+                        ctx.lineTo(bx, top)
+                        ctx.lineTo(bx, bottom)
+                        ctx.lineTo(tip, bottom)
                     }
                     ctx.stroke()
                 }
@@ -291,8 +316,17 @@ Item {
                 id: inlineMouse
                 anchors.fill: parent
                 hoverEnabled: true
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.openAnnotation(inlineMarker.modelData)
+                onClicked: function(mouse) {
+                    if (mouse.button === Qt.RightButton) {
+                        annotationMenu.entry = inlineMarker.modelData
+                        const point = mapToItem(root, mouse.x, mouse.y)
+                        annotationMenu.popup(point.x, point.y)
+                    } else if (mouse.modifiers & Qt.ShiftModifier) {
+                        root.controller.openRangeEditor(inlineMarker.modelData.scope, inlineMarker.modelData.kind)
+                    } else root.openAnnotation(inlineMarker.modelData)
+                }
             }
             Accessible.role: Accessible.Button
             Accessible.name: hint

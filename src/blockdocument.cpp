@@ -107,12 +107,19 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     QImage cell(1, 1, QImage::Format_ARGB32_Premultiplied);
     cell.fill(Qt::transparent);
     m_document->addResource(QTextDocument::ImageResource, cellUrl, cell);
-    const double em = decorationSize > 0 ? decorationSize : QFontMetricsF(m_document->defaultFont()).height();
+    const QFontMetricsF bodyMetrics(m_document->defaultFont());
+    const double em = decorationSize > 0 ? decorationSize : bodyMetrics.height();
     QTextCursor cursor(m_document);
     QTextBlockFormat paragraph;
     paragraph.setLineHeight(lineHeight * 100, QTextBlockFormat::ProportionalHeight);
     cursor.setBlockFormat(paragraph);
     const QTextCharFormat normal;
+    // Invisible word joiners must not select a taller fallback font, which
+    // would enlarge every annotated line despite the image fitting its ascent.
+    QTextCharFormat joiner;
+    QFont joinerFont = m_document->defaultFont();
+    joinerFont.setStyleStrategy(QFont::NoFontMerging);
+    joiner.setFont(joinerFont);
     // Derive nesting from source-order membership, not reference spelling or
     // numeric book IDs (which need not follow the edition's book order).
     QMap<QString, QPair<int, int>> extents;
@@ -186,17 +193,21 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
             for (auto entry : entries) {
                 auto marker = entry.toMap();
                 const int segmentStart = cursor.position();
-                if (!opening) cursor.insertText(QString(QChar(0x2060)), normal);
+                if (!opening) cursor.insertText(QString(QChar(0x2060)), joiner);
                 marker["position"] = cursor.position();
                 marker["verse"] = verse.value("number");
                 marker["cellWidth"] = qMax(1, qRound(em * (opening ? 0.92 : 0.32)));
-                marker["cellHeight"] = qMax(1, qRound(em * 0.9));
+                // Qt's baseline image box includes the font descent. Reserve
+                // the font height plus two pixels, not an extra em of ascent.
+                marker["cellHeight"] = bodyMetrics.height() + 2;
                 QTextImageFormat format;
+                format.setFont(m_document->defaultFont());
                 format.setName(cellUrl.toString());
                 format.setWidth(marker.value("cellWidth").toDouble());
                 format.setHeight(marker.value("cellHeight").toDouble());
+                format.setVerticalAlignment(QTextCharFormat::AlignBaseline);
                 cursor.insertImage(format);
-                if (opening) cursor.insertText(QString(QChar(0x2060)), normal);
+                if (opening) cursor.insertText(QString(QChar(0x2060)), joiner);
                 m_decorationSegments.append({segmentStart, cursor.position()});
                 m_decorations.append(marker);
             }
@@ -264,10 +275,40 @@ QVariantList BlockDocument::inlineDecorations() const
         const auto origin = m_document->documentLayout()->blockBoundingRect(block).topLeft();
         const double a = line.cursorToX(position - block.position(), QTextLine::Leading);
         const double b = line.cursorToX(position - block.position() + 1, QTextLine::Leading);
+        const double baseline = origin.y() + line.y() + line.ascent();
+        // Use the original endpoint's font, not the image or superscript verse
+        // number. Proportional line leading must never stretch these brackets.
+        int neighbor = position;
+        for (const auto &value : m_spans) {
+            const auto span = value.toMap();
+            if (span.value("number") != marker.value("verse")) continue;
+            neighbor = marker.value("edge") == "close"
+                ? qMax(span.value("textStart").toInt(), span.value("textEnd").toInt() - 1)
+                : span.value("textStart").toInt();
+            break;
+        }
+        QTextCursor cursor(m_document);
+        cursor.setPosition(neighbor);
+        cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+        const QFontMetricsF metrics(cursor.charFormat().font().resolve(m_document->defaultFont()));
+        QString letters = block.text().mid(line.textStart(), line.textLength());
+        letters.remove(QChar::ObjectReplacementCharacter);
+        letters.remove(QChar(0x2060));
+        const QRectF ink = metrics.tightBoundingRect(letters);
+        const double textTop = baseline - qMax(metrics.capHeight(), -ink.top());
+        const double textBottom = baseline + qMax(0.0, ink.bottom());
+        const double bracketY = textTop - 1;
+        const double bracketBottom = qMax(baseline + metrics.descent(), textBottom + 1);
+        const double cellY = baseline - metrics.ascent();
+        const double paintY = qMin(cellY, bracketY);
         marker["x"] = origin.x() + qMin(a, b);
-        marker["y"] = origin.y() + line.y() + line.ascent() - marker.value("cellHeight").toDouble();
+        marker["y"] = paintY;
         marker["width"] = qAbs(b - a);
-        marker["height"] = marker.value("cellHeight");
+        marker["height"] = bracketBottom - paintY;
+        marker["textTop"] = textTop;
+        marker["textBottom"] = textBottom;
+        marker["bracketTop"] = bracketY - paintY;
+        marker["bracketHeight"] = bracketBottom - bracketY;
         result.append(marker);
     }
     return result;

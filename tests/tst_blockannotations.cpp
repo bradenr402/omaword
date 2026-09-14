@@ -17,6 +17,7 @@
 #include <QJsonDocument>
 #include <QClipboard>
 #include <QMimeData>
+#include <QFontMetricsF>
 #include "blockdocument.h"
 
 // Standalone, loads the real BlockReader and QTextDocument without Main or a
@@ -129,6 +130,8 @@ ApplicationWindow {
         property string openedBookmark: ""
         property var openedBookmarkScope: ({})
         property var openedTags: ({})
+        property var editedScope: ({})
+        property string editedKind: ""
         property string calls: ""
         property bool canFlush: true
         property string copied: ""
@@ -139,6 +142,7 @@ ApplicationWindow {
         function openNotes(edit) { calls += edit ? "edit;" : "preview;" }
         function openBookmark(scope) { openedBookmarkScope = scope; openedBookmark = typeof scope === "string" ? scope : scope.reference }
         function openPassageTags(scope) { openedTags = scope }
+        function openRangeEditor(scope, kind) { editedScope = scope; editedKind = kind; calls += "range;" }
         function copyFreeText() { copied = freeSelectedText }
         function copyPassage(plain) { calls += "passage:" + plain + ";" }
         function selectVerse(verse, extend) { backend.cursorVerse = verse }
@@ -361,7 +365,7 @@ ApplicationWindow {
         backend->setProperty("showVerseNumbers",false);
         QTRY_COMPARE(mapping->selectionText(mapping->positionFor(1),mapping->spans().first().toMap().value("textStart").toInt()),QString());
         controller->setProperty("scale",1.6);
-        QTRY_COMPARE(item("blockInlineMarker:note:open:Genesis 1:1–3")->height(),40.0);
+        QTRY_VERIFY(item("blockInlineMarker:note:open:Genesis 1:1–3")->height() > 44.0);
         backend->setProperty("focusMode",true);
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
         backend->setProperty("focusMode",false);
@@ -559,7 +563,7 @@ ApplicationWindow {
         const int dragEnd = dragSpan["textEnd"].toInt();
         QRectF caret;
         QVERIFY(QMetaObject::invokeMethod(body,"positionToRectangle",Q_RETURN_ARG(QRectF,caret),Q_ARG(int,dragEnd)));
-        const QPointF pointer = body->mapToItem(item("reader")->parentItem(),caret.center());
+        const QPointF pointer = body->mapToItem(item("reader")->parentItem(),QPointF(caret.left(),caret.center().y()));
         item("reader")->setProperty("anchor",0);
         item("reader")->setProperty("pointer",pointer);
         QVERIFY(QMetaObject::invokeMethod(item("reader"),"updateDrag"));
@@ -667,6 +671,104 @@ ApplicationWindow {
         QTest::newRow("block") << QString("block") << 1.0;
         QTest::newRow("paragraph-scaled") << QString("paragraph") << 1.6;
     }
+    void bracketFontGeometry_data() {
+        QTest::addColumn<int>("size");
+        QTest::addColumn<double>("scale");
+        QTest::addColumn<double>("leading");
+        for (int size : {8,18,40})
+            for (double scale : {1.0,1.6})
+                for (double leading : {1.0,3.0})
+                    QTest::newRow(qPrintable(QString("%1px-%2x-leading%3").arg(size).arg(scale).arg(leading)))
+                        << size << scale << leading;
+    }
+    void bracketFontGeometry() {
+        QFETCH(int,size); QFETCH(double,scale); QFETCH(double,leading);
+        controller->setProperty("readerSize",size);
+        controller->setProperty("scale",scale);
+        backend->setProperty("lineHeight",leading);
+        backend->setProperty("showVerseNumbers",false);
+        const QString text = "Agjp Éy";
+        backend->setProperty("verses",QVariantList{
+            QVariantMap{{"number",1},{"text",text},{"noteRanges",QVariantList{noteRange("A",true,true)}}},
+            QVariantMap{{"number",2},{"text",text},{"paragraphStart",true},
+                {"noteRanges",QVariantList{noteRange("B",true,true)}}}});
+        item("reader")->setProperty("mode","paragraph");
+        QTRY_COMPARE(list("inlineMarkers").size(),4);
+        auto body = item("blockBody");
+        auto doc = body->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        const QFontMetricsF metrics(doc->defaultFont());
+        const auto ink = metrics.tightBoundingRect(text);
+        const double annotatedHeight = body->height();
+        const auto firstLine = doc->begin().layout()->lineAt(0);
+        const double annotatedAscent = firstLine.ascent();
+        const double annotatedDescent = firstLine.descent();
+        const auto markers = list("inlineMarkers");
+        double firstBottom = 0;
+        for (const auto &entry : markers) {
+            const auto marker = entry.toMap();
+            const double top = marker["y"].toDouble()+marker["bracketTop"].toDouble();
+            const double bottom = top+marker["bracketHeight"].toDouble();
+            QVERIFY(top < marker["textTop"].toDouble());
+            QVERIFY(bottom > marker["textBottom"].toDouble());
+            QVERIFY(marker["bracketHeight"].toDouble() > ink.height());
+            QVERIFY(marker["bracketHeight"].toDouble() <= metrics.height()+3);
+            QVERIFY(marker["cellHeight"].toDouble() <= metrics.height()+2);
+            QVERIFY(marker["width"].toDouble() < size*scale);
+            if (marker["verse"].toInt() == 1) firstBottom = qMax(firstBottom,bottom);
+            else QVERIFY2(top >= firstBottom-0.5,qPrintable(QString("Brackets overlap: top %1 previous bottom %2; %3")
+                .arg(top).arg(firstBottom).arg(QString::fromUtf8(QJsonDocument::fromVariant(marker).toJson()))));
+            QRectF caret;
+            const int position = mapping->spans()[marker["verse"].toInt()-1].toMap()["textStart"].toInt();
+            QVERIFY(QMetaObject::invokeMethod(body,"positionToRectangle",Q_RETURN_ARG(QRectF,caret),Q_ARG(int,position)));
+            QVERIFY(top >= caret.top()-2);
+            QVERIFY(bottom <= caret.bottom()+2);
+        }
+        // Only the two-pixel ink padding may contribute to line height.
+        backend->setProperty("focusMode",true);
+        QTRY_VERIFY(list("inlineMarkers").isEmpty());
+        QVERIFY2(qAbs(body->height()-annotatedHeight) <= 4*leading+1,
+                 qPrintable(QString("annotated %1, plain %2, font ascent %3; line %4/%5 plain %6/%7").arg(annotatedHeight).arg(body->height()).arg(metrics.ascent())
+                            .arg(annotatedAscent).arg(annotatedDescent).arg(doc->begin().layout()->lineAt(0).ascent()).arg(doc->begin().layout()->lineAt(0).descent())));
+    }
+    void markerRangeEditing() {
+        auto scope = note("Cross-book",78,2,16,1);
+        scope.remove("note"); scope["book"] = 80; scope["endBook"] = 40; scope["versionId"] = "frozen-edition";
+        auto editedScope = [this]() {
+            const auto value = controller->property("editedScope");
+            return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+        };
+        for (const QString &kind : {QString("bookmark"),QString("note"),QString("tag")}) {
+            QVariantMap range{{"reference","Cross-book"},{"scope",scope}};
+            backend->setProperty("verses",QVariantList{QVariantMap{{"number",2},{"text","Endpoint."},
+                {kind+"Ranges",QVariantList{range}}}});
+            QTRY_COMPARE(list("inlineMarkers").size(),2);
+            QTRY_VERIFY(item("blockInlineMarker:"+kind+":open:Cross-book"));
+            auto marker = item("blockInlineMarker:"+kind+":open:Cross-book");
+            QVERIFY(marker);
+            QVERIFY(marker->property("hint").toString().contains("Shift-click"));
+            const QPoint point = marker->mapToScene(marker->boundingRect().center()).toPoint();
+            controller->setProperty("calls","");
+            QTest::mouseClick(window,Qt::LeftButton,Qt::ShiftModifier,point);
+            QCOMPARE(controller->property("calls").toString(),QString("range;"));
+            QCOMPARE(controller->property("editedKind").toString(),kind);
+            QCOMPARE(editedScope(),scope);
+            controller->setProperty("calls","");
+            QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,point);
+            QTRY_VERIFY(item("reader")->property("annotationMenuOpen").toBool());
+            QVERIFY(controller->property("calls").toString().isEmpty());
+            click(item("blockAnnotationEditRange"));
+            QTRY_VERIFY(!item("reader")->property("annotationMenuOpen").toBool());
+            QCOMPARE(controller->property("calls").toString(),QString("range;"));
+            QCOMPARE(editedScope(),scope);
+            controller->setProperty("calls","");
+            QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,point);
+            QTRY_VERIFY(item("reader")->property("annotationMenuOpen").toBool());
+            click(item("blockAnnotationOpen"));
+            QTRY_VERIFY(!item("reader")->property("annotationMenuOpen").toBool());
+            QVERIFY(!controller->property("calls").toString().contains("range;"));
+            if (kind == "note") QCOMPARE(controller->property("calls").toString(),QString("flush;scope;clear;sync;edit;"));
+        }
+    }
     void sharedNoteGlyphOutlineAndFilled() {
         QFETCH(QString,mode); QFETCH(double,scale);
         auto shared = item("sharedGlyph");
@@ -716,6 +818,20 @@ ApplicationWindow {
         QVERIFY(!image.isNull());
         const auto path = qEnvironmentVariable("OMAWORD_ANNOTATION_SCREENSHOT");
         QVERIFY(image.save(path));
+        auto shared = item("sharedGlyph");
+        shared->setProperty("filled",true);
+        shared->setWidth(14); shared->setHeight(14);
+        QTest::qWait(100);
+        auto glyph = shared->grabToImage(); QVERIFY(glyph);
+        QTRY_VERIFY(!glyph->image().isNull());
+        QVERIFY(glyph->image().save(path + ".note14.png"));
+        QVERIFY(glyph->image().scaled(280,280,Qt::IgnoreAspectRatio,Qt::FastTransformation).save(path + ".note14-zoom.png"));
+        for (double leading : {1.0,3.0}) {
+            backend->setProperty("lineHeight",leading);
+            QTest::qWait(100);
+            QVERIFY(window->grabWindow().save(path + QString(".leading%1.png").arg(leading)));
+        }
+        backend->setProperty("lineHeight",1.5);
         controller->setProperty("scale",1.6);
         item("reader")->setWidth(470);
         QTest::qWait(150);

@@ -9,7 +9,11 @@ Item {
     height: 18
 
     Canvas {
-        anchors.fill: parent
+        // Supersample filled silhouettes so cutouts survive small raster sizes.
+        width: root.width * (filled ? 3 : 1)
+        height: root.height * (filled ? 3 : 1)
+        scale: filled ? 1 / 3 : 1
+        transformOrigin: Item.TopLeft
         property string kind: root.kind
         property color ink: root.ink
         property bool filled: root.filled
@@ -30,15 +34,25 @@ Item {
             ctx.beginPath()
             if (kind === "note") {
                 if (filled) {
-                    // Solid sheet with a transparent pencil, on any background.
-                    ctx.rect(3, 3, 18, 18)
+                    // A folded sheet with two readable lines, even at 14px.
+                    ctx.moveTo(3, 2); ctx.lineTo(12, 2); ctx.lineTo(17, 7)
+                    ctx.lineTo(17, 22); ctx.lineTo(3, 22); ctx.closePath()
                     ctx.fill()
                     ctx.globalCompositeOperation = "destination-out"
                     ctx.beginPath()
-                    ctx.moveTo(8, 13); ctx.lineTo(16, 5); ctx.lineTo(19, 8)
-                    ctx.lineTo(11, 16); ctx.lineTo(7, 17); ctx.closePath()
+                    ctx.moveTo(11, 2); ctx.lineTo(11, 8); ctx.lineTo(17, 8)
+                    ctx.closePath()
+                    // Separate the solid pencil from the paper underneath it.
+                    ctx.moveTo(12, 9); ctx.lineTo(21, 0); ctx.lineTo(24, 6)
+                    ctx.lineTo(17, 13); ctx.lineTo(11, 14); ctx.closePath()
                     ctx.fill()
+                    ctx.fillRect(6, 15, 8, 2)
+                    ctx.fillRect(6, 19, 6, 2)
                     ctx.globalCompositeOperation = "source-over"
+                    ctx.beginPath()
+                    ctx.moveTo(16, 8); ctx.lineTo(21, 3); ctx.lineTo(23, 5)
+                    ctx.lineTo(18, 10); ctx.lineTo(15, 11); ctx.closePath()
+                    ctx.fill()
                     return
                 }
                 // Authoritative footer pencil in an open square.
