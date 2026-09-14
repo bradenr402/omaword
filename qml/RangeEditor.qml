@@ -219,17 +219,31 @@ Item {
     component RangeButton: Button {
         id: button
         property string hint: ""
+        property string keyHint: ""
+        property bool leftAligned: false
         font.family: editor.desktop.fontFamily
         font.pixelSize: 13 * editor.uiScale
         padding: 8 * editor.uiScale
+        hoverEnabled: true
+        implicitHeight: Math.max(38 * editor.uiScale, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: button.text; textFormat: Text.PlainText; font: button.font
             color: button.enabled ? editor.desktop.foreground : editor.desktop.muted
-            wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+            rightPadding: button.keyHint ? buttonKey.implicitWidth + 12 * editor.uiScale : 0
+            wrapMode: Text.Wrap; horizontalAlignment: button.leftAligned ? Text.AlignLeft : Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+            Text {
+                id: buttonKey
+                objectName: button.objectName + "Hint"
+                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                text: button.keyHint; textFormat: Text.PlainText
+                color: editor.desktop.muted; font.family: editor.desktop.fontFamily; font.pixelSize: 11 * editor.uiScale
+                visible: text.length > 0
+            }
         }
         background: Rectangle {
-            color: button.down || button.hovered ? editor.desktop.surface : editor.desktop.background
-            border.color: button.activeFocus ? editor.desktop.accent : editor.desktop.border
+            color: button.down || button.hovered ? editor.app.tint(editor.desktop.accent, 0.10) : "transparent"
+            border.width: button.activeFocus ? 1 : 0
+            border.color: editor.desktop.accent
             radius: editor.desktop.cornerRadius
         }
         Keys.onReturnPressed: clicked()
@@ -238,11 +252,14 @@ Item {
     }
     component RangeCheckBox: CheckBox {
         id: check
+        property string keyHint: ""
         Layout.fillWidth: true
         font.family: editor.desktop.fontFamily
         font.pixelSize: 14 * editor.uiScale
         padding: 8 * editor.uiScale
         spacing: 8 * editor.uiScale
+        hoverEnabled: true
+        implicitHeight: Math.max(indicator.implicitHeight, contentItem.implicitHeight) + topPadding + bottomPadding
         indicator: Rectangle {
             x: check.leftPadding; y: (check.height - height) / 2
             implicitWidth: 20 * editor.uiScale; implicitHeight: implicitWidth
@@ -254,21 +271,40 @@ Item {
         contentItem: Text {
             text: check.text; textFormat: Text.PlainText; font: check.font
             leftPadding: check.indicator.width + check.spacing
+            rightPadding: checkKey.implicitWidth + 12 * editor.uiScale
             color: check.enabled ? editor.desktop.foreground : editor.desktop.muted
             wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter
+            Text {
+                id: checkKey
+                objectName: check.objectName + "Hint"
+                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                text: check.keyHint; textFormat: Text.PlainText
+                color: editor.desktop.muted; font.family: editor.desktop.fontFamily; font.pixelSize: 11 * editor.uiScale
+            }
         }
         background: Rectangle {
             color: check.hovered ? editor.desktop.surface : "transparent"
             border.width: check.activeFocus ? 1 : 0; border.color: editor.desktop.accent
             radius: editor.desktop.cornerRadius
         }
+        AppToolTip {
+            theme: editor.desktop
+            text: "Space toggles this tag; t toggles all tags"
+            visible: check.keyHint === "t · all tags" && (check.hovered || check.activeFocus)
+            delay: 650
+        }
+    }
+    component FineRule: Rectangle {
+        color: editor.desktop.border
+        implicitHeight: 1
+        opacity: 0.65
     }
     component RangeDialog: Popup {
         parent: Overlay.overlay
         width: Math.min(600 * editor.desktop.textScale, editor.app.width - 32)
-        height: Math.min(contentItem.implicitHeight + 32, editor.app.height - 32)
+        height: Math.min(contentItem.implicitHeight + 2 * padding, editor.app.height - 32)
         anchors.centerIn: parent
-        padding: 16
+        padding: 24 * editor.uiScale
         modal: true
         focus: true
         closePolicy: Popup.NoAutoClose
@@ -288,7 +324,8 @@ Item {
             const y = row.mapToItem(choices, 0, 0).y
             const flick = choiceScroll.contentItem as Flickable
             if (!flick) return
-            if (y < flick.contentY) flick.contentY = y
+            if (focusedRow === 0) flick.contentY = editor.source && y + row.height > flick.height ? y : 0
+            else if (y < flick.contentY) flick.contentY = y
             else if (y + row.height > flick.contentY + flick.height)
                 flick.contentY = y + row.height - flick.height
         }
@@ -301,8 +338,8 @@ Item {
         // consume it. Arrow/Tab navigation stays within the selectable rows.
         Shortcut { sequences: ["Return", "Enter"]; enabled: chooser.visible; onActivated: chooser.continueChoice() }
         Shortcut { sequence: "Escape"; enabled: chooser.visible; onActivated: editor.cancel() }
-        Shortcut { sequences: ["Down", "Right", "Tab"]; enabled: chooser.visible; onActivated: chooser.focusRow(chooser.focusedRow + 1) }
-        Shortcut { sequences: ["Up", "Left", "Shift+Tab"]; enabled: chooser.visible; onActivated: chooser.focusRow(chooser.focusedRow - 1) }
+        Shortcut { sequences: ["J", "Down", "Right", "Tab"]; enabled: chooser.visible; onActivated: chooser.focusRow(chooser.focusedRow + 1) }
+        Shortcut { sequences: ["K", "Up", "Left", "Shift+Tab"]; enabled: chooser.visible; onActivated: chooser.focusRow(chooser.focusedRow - 1) }
         Shortcut {
             sequence: "Space"; enabled: chooser.visible && !!editor.source
             onActivated: {
@@ -315,29 +352,53 @@ Item {
         Shortcut { sequence: "N"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggle("note") }
         Shortcut { sequence: "T"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggle("tags") }
         Shortcut { sequence: "A"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggleAll() }
-        contentItem: ColumnLayout {
-            spacing: 10 * editor.uiScale
+        contentItem: Column {
+            id: chooserContent
+            spacing: 12 * editor.uiScale
+            // Measure the fixed sections first. Only the list gives up height in a
+            // small window; neither wrapped headings nor footer rows may stretch.
+            readonly property real fixedHeight: chooserHeader.height + chooserActions.height + chooserRule.height
+                + chooserKeys.height + (chooserMessage.visible ? chooserMessage.height : 0)
+                + spacing * (chooserMessage.visible ? 5 : 4)
             Keys.onEscapePressed: editor.cancel()
-            RangeText {
-                objectName: "rangeChooserTitle"
-                text: editor.source ? "Choose components · " + editor.source.scope.reference : "Choose an exact annotation range"
-                font.bold: true
-                Layout.fillHeight: false
-                Layout.preferredHeight: implicitHeight
+            Column {
+                id: chooserHeader
+                width: parent.width
+                spacing: 12 * editor.uiScale
+                RangeText {
+                    objectName: "rangeChooserTitle"
+                    width: parent.width
+                    text: editor.source ? "Choose components" : "Choose an exact annotation range"
+                    font.pixelSize: 20 * editor.uiScale
+                }
+                RangeText {
+                    objectName: "rangeChooserReference"
+                    width: parent.width
+                    text: (editor.source ? editor.source.scope.reference : editor.original ? editor.original.scope.reference : "") || ""
+                    visible: text.length > 0
+                    color: editor.desktop.muted
+                }
+                RangeText {
+                    objectName: "rangeChooserDescription"
+                    width: parent.width
+                    visible: !editor.source
+                    text: "Several annotations overlap this passage and may have different boundaries. Choose the exact range you want to change."
+                }
             }
             ScrollView {
                 id: choiceScroll
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumHeight: 50 * editor.uiScale
-                Layout.preferredHeight: Math.min(380, choices.implicitHeight)
-                implicitHeight: Math.min(380, choices.implicitHeight)
+                objectName: "rangeChoiceScroll"
+                width: parent.width
+                height: Math.max(0, Math.min(380 * editor.uiScale, choices.implicitHeight,
+                    editor.app.height - 32 - 2 * chooser.padding - chooserContent.fixedHeight))
                 contentWidth: availableWidth
+                contentHeight: choices.implicitHeight
                 clip: true
-                ColumnLayout {
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                Column {
                     id: choices
                     width: choiceScroll.availableWidth
-                    spacing: 6 * editor.uiScale
+                    spacing: 12 * editor.uiScale
                     Repeater {
                         id: sourceChoices
                         model: editor.source ? [] : editor.ranges
@@ -346,8 +407,9 @@ Item {
                             required property int index
                             objectName: "rangeChoice:" + modelData.reference
                             text: modelData.reference
-                            Layout.fillWidth: true
-                            Layout.fillHeight: false
+                            width: choices.width
+                            height: implicitHeight
+                            leftAligned: true
                             focusPolicy: Qt.ClickFocus
                             onActiveFocusChanged: if (activeFocus) chooser.focusedRow = index
                             onClicked: editor.choose(modelData)
@@ -357,8 +419,10 @@ Item {
                         objectName: "rangeSelectAll"
                         text: editor.allSelected ? "Deselect all components" : "Select all components"
                         visible: !!editor.source
-                        Layout.fillHeight: false
-                        Layout.preferredHeight: implicitHeight
+                        width: choices.width
+                        height: implicitHeight
+                        leftAligned: true
+                        keyHint: "a"
                         focusPolicy: Qt.NoFocus
                         hint: "a · " + text
                         onClicked: editor.toggleAll()
@@ -371,8 +435,9 @@ Item {
                             required property int index
                             objectName: modelData.kind === "tags" ? "rangeTag:" + modelData.id : "rangeComponent:" + modelData.kind
                             text: modelData.label
-                            Layout.fillHeight: false
-                            Layout.preferredHeight: implicitHeight
+                            width: choices.width
+                            height: implicitHeight
+                            keyHint: modelData.kind === "tags" ? "t · all tags" : ({bookmark: "m", highlight: "x", note: "n"})[modelData.kind]
                             focusPolicy: Qt.ClickFocus
                             checked: modelData.kind === "tags" ? editor.components.tags.indexOf(modelData.id) >= 0 : editor.components[modelData.kind]
                             onActiveFocusChanged: if (activeFocus) chooser.focusedRow = index
@@ -381,28 +446,37 @@ Item {
                     }
                 }
             }
-            RangeText { text: editor.message; visible: text.length > 0 }
+            RangeText { id: chooserMessage; width: parent.width; text: editor.message; visible: text.length > 0 }
             RowLayout {
-                Layout.fillHeight: false
+                id: chooserActions
+                objectName: "rangeChooserActions"
+                width: parent.width
+                height: implicitHeight
+                spacing: 12 * editor.uiScale
                 RangeButton { objectName: "rangeChooserCancel"; text: "Cancel"; focusPolicy: Qt.NoFocus; onClicked: editor.cancel() }
                 RangeButton {
+                    objectName: "rangeChooseAnother"
                     text: "Choose another range"; visible: !!editor.source && editor.ranges.length > 1; focusPolicy: Qt.NoFocus
                     onClicked: { editor.source = null; Qt.callLater(function() { chooser.focusRow(0) }) }
                 }
                 RangeButton { objectName: "rangeContinue"; text: "Continue"; visible: !!editor.source; focusPolicy: Qt.NoFocus; enabled: editor.hasComponents && !editor.bible.busy; onClicked: editor.begin() }
+                Item { Layout.fillWidth: true }
             }
+            FineRule { id: chooserRule; objectName: "rangeChooserRule"; width: parent.width }
             RangeText {
+                id: chooserKeys
                 objectName: "rangeChooserKeys"
-                Layout.fillHeight: false
-                Layout.preferredHeight: implicitHeight
+                width: parent.width
+                color: editor.desktop.muted
+                font.pixelSize: 11 * editor.uiScale
                 text: {
-                    if (!editor.source) return "Arrows move · Enter select range · Esc Cancel"
+                    if (!editor.source) return "j/k or arrows move    Enter select range    Esc Cancel"
                     const hints = []
                     if (editor.presentKinds.indexOf("bookmark") >= 0) hints.push("m bookmark")
                     if (editor.presentKinds.indexOf("highlight") >= 0) hints.push("x highlight")
                     if (editor.presentKinds.indexOf("tags") >= 0) hints.push("t tags")
                     if (editor.presentKinds.indexOf("note") >= 0) hints.push("n note")
-                    return hints.concat(["Arrows move", "Space toggle", editor.allSelected ? "a deselect all" : "a select all", "Enter Continue", "Esc Cancel"]).join(" · ")
+                    return hints.concat(["j/k or arrows move", "Space toggle", editor.allSelected ? "a deselect all" : "a select all", "Enter Continue", "Esc Cancel"]).join("    ")
                 }
             }
         }

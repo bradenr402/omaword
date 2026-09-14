@@ -1,6 +1,7 @@
 #include <QtTest/QTest>
 #include <QApplication>
 #include <QDir>
+#include <QImage>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -95,6 +96,57 @@ class RangesUiTest : public QObject
         }
         QSqlDatabase::removeDatabase("range-ui-sql");
     }
+    void capture(const QString &stage) {
+        const auto directory = qEnvironmentVariable("OMAWORD_RANGE_CHOOSER_SCREENSHOTS");
+        if (directory.isEmpty()) return;
+        QVERIFY(QDir(directory).exists());
+        const auto image = window->grabWindow();
+        QVERIFY(!image.isNull());
+        QVERIFY(image.save(QDir(directory).filePath(QString("rangechooser-%1-%2.png")
+            .arg(QString::fromLatin1(QTest::currentDataTag()), stage))));
+    }
+    static qreal top(QQuickItem *target) { return target->mapToScene(QPointF()).y(); }
+    static qreal bottom(QQuickItem *target) { return target->mapToScene(QPointF(0, target->height())).y(); }
+    void chooserBounds(bool components) {
+        auto title = item("rangeChooserTitle"), reference = item("rangeChooserReference");
+        auto description = item("rangeChooserDescription"), scroll = item("rangeChoiceScroll");
+        auto actions = item("rangeChooserActions"), rule = item("rangeChooserRule"), footer = item("rangeChooserKeys");
+        QVERIFY(title && reference && description && scroll && actions && rule && footer);
+        const auto gap = 12 * prop("uiScale").toDouble();
+        QVERIFY(top(title) >= 16 + 24 * prop("uiScale").toDouble() - 1);
+        QVERIFY(qAbs(top(reference) - bottom(title) - gap) <= 1);
+        QCOMPARE(description->isVisible(), !components);
+        if (!components) {
+            QCOMPARE(description->property("text").toString(), QString("Several annotations overlap this passage and may have different boundaries. Choose the exact range you want to change."));
+            QCOMPARE(description->property("textFormat").toInt(), 0);
+            QVERIFY(qAbs(top(description) - bottom(reference) - gap) <= 1);
+        }
+        QVERIFY(qAbs(top(scroll) - bottom(components ? reference : description) - gap) <= 1);
+        QVERIFY2(scroll->height() > 35, qPrintable(QString("list height %1").arg(scroll->height())));
+        QVERIFY(qAbs(top(actions) - bottom(scroll) - gap) <= 1);
+        QVERIFY(qAbs(top(rule) - bottom(actions) - gap) <= 1);
+        QVERIFY(qAbs(top(footer) - bottom(rule) - gap) <= 1);
+        QVERIFY(bottom(footer) <= window->height() - 16 - 24 * prop("uiScale").toDouble() + 1);
+        QCOMPARE(footer->property("color"), desktop->property("muted"));
+        QVERIFY(actions->width() <= scroll->width());
+        for (const auto &name : {"rangeChooserCancel", "rangeChooseAnother", "rangeContinue"}) {
+            auto button = item(name); QVERIFY(button);
+            if (!button->isVisible()) continue;
+            QVERIFY(button->height() >= button->implicitHeight());
+            QVERIFY(button->x() + button->width() <= actions->width() + 1);
+        }
+    }
+    void inlineHint(const QString &name, const QString &text) {
+        auto row = item(name), hint = item(name + "Hint"); QVERIFY(row && hint);
+        QVERIFY(hint->isVisible()); QCOMPARE(hint->property("text").toString(), text);
+        auto label = row->property("contentItem").value<QQuickItem *>(); QVERIFY(label);
+        const auto hintLeft = hint->mapToItem(row, QPointF()).x();
+        const auto labelRight = label->mapToItem(row, QPointF(label->width() - label->property("rightPadding").toReal(), 0)).x();
+        QVERIFY(hintLeft >= labelRight + 11 * prop("uiScale").toDouble());
+        QVERIFY(qAbs(hint->mapToItem(row, QPointF(hint->width(), 0)).x()
+            - (row->width() - row->property("rightPadding").toReal())) <= 1);
+        QVERIFY(row->height() >= label->implicitHeight() + row->property("topPadding").toReal() + row->property("bottomPadding").toReal());
+    }
 private slots:
     void initTestCase() {
         net = fixtures.filePath("engnet.zip"); kjv = fixtures.filePath("eng-kjv.zip");
@@ -164,7 +216,7 @@ private slots:
         const auto collection = bible->collection(); QSignalSpy commits(bible.get(), &BibleBackend::sharedCommitted);
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("visibleModal").toBool()); QTest::qWait(60);
         QCOMPARE(prop("ranges").toList().size(), 2); QVERIFY(prop("source").isNull());
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("Arrows move · Enter select range · Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("j/k or arrows move    Enter select range    Esc Cancel"));
         click("rangeChoice:" + second.value("reference").toString());
         QVERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool()); begin();
         QCOMPARE(bible->tagScope(), second); key(Qt::Key_J); key(Qt::Key_Escape);
@@ -195,6 +247,9 @@ private slots:
         QTRY_VERIFY(object("rangeNoteMerge")->property("visible").toBool());
         QCOMPARE(item("rangeSourceNote")->property("text").toString(), QString("Source <b>literal</b>"));
         QCOMPARE(item("rangeDestinationNote")->property("text").toString(), QString("Destination note"));
+        const auto selected = bible->tagScope();
+        key(Qt::Key_J); key(Qt::Key_K); QCOMPARE(bible->tagScope(), selected);
+        QVERIFY(object("rangeNoteMerge")->property("visible").toBool());
         click(combine ? "rangeMergeCombine" : "rangeMergeCancel"); QTRY_VERIFY(!prop("sessionOpen").toBool());
         QCOMPARE(bible->annotationSnapshot(destination).value("note").toString(), combine ? QString("Destination note\n\nSource <b>literal</b>") : QString("Destination note"));
         QCOMPARE(bible->annotationSnapshot(source).value("note").toString(), combine ? QString() : QString("Source <b>literal</b>"));
@@ -409,7 +464,7 @@ private slots:
         QCOMPARE(item("rangeSelectAll")->property("text").toString(), QString("Select all components"));
         key(Qt::Key_A); QVERIFY(prop("allSelected").toBool());
         QCOMPARE(item("rangeSelectAll")->property("text").toString(), QString("Deselect all components"));
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("m bookmark · x highlight · t tags · n note · Arrows move · Space toggle · a deselect all · Enter Continue · Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("m bookmark    x highlight    t tags    n note    j/k or arrows move    Space toggle    a deselect all    Enter Continue    Esc Cancel"));
         key(Qt::Key_A); QVERIFY(!prop("hasComponents").toBool()); QVERIFY(!item("rangeContinue")->isEnabled());
         key(Qt::Key_A); QVERIFY(prop("allSelected").toBool());
         click("rangeSelectAll"); QVERIFY(!prop("hasComponents").toBool()); QVERIFY(!item("rangeContinue")->isEnabled());
@@ -419,9 +474,11 @@ private slots:
             QTRY_VERIFY(item(rows[i])->hasActiveFocus());
             key(Qt::Key_Space);
             for (int j = 0; j < rows.size(); ++j) QCOMPARE(item(rows[j])->property("checked").toBool(), j <= i);
-            if (i + 1 < rows.size()) key(Qt::Key_Down);
+            if (i + 1 < rows.size()) key(i % 2 ? Qt::Key_Down : Qt::Key_J);
         }
         key(Qt::Key_Up); QVERIFY(item(rows[3])->hasActiveFocus());
+        key(Qt::Key_K); QVERIFY(item(rows[2])->hasActiveFocus());
+        key(Qt::Key_J); QVERIFY(item(rows[3])->hasActiveFocus());
         key(Qt::Key_Space); QCOMPARE(prop("components").toMap().value("tags").toList(), QVariantList{two});
         key(Qt::Key_T); QCOMPARE(prop("components").toMap().value("tags").toList().size(), 2);
         key(Qt::Key_T); QVERIFY(prop("components").toMap().value("tags").toList().isEmpty());
@@ -447,7 +504,10 @@ private slots:
         const auto snapshot = bible->annotationSnapshot(source);
         open(source, "highlight"); QVERIFY(prop("visibleModal").toBool());
         QVERIFY(!item("rangeComponent:bookmark")); QCOMPARE(prop("componentRows").toList().size(), 2);
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("x highlight · n note · Arrows move · Space toggle · a select all · Enter Continue · Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("x highlight    n note    j/k or arrows move    Space toggle    a select all    Enter Continue    Esc Cancel"));
+        inlineHint("rangeComponent:highlight", "x"); inlineHint("rangeComponent:note", "n"); inlineHint("rangeSelectAll", "a");
+        QVERIFY(!item("rangeComponent:bookmarkHint"));
+        QVERIFY(!item("rangeComponent:tagsHint"));
         const auto selected = prop("components");
         key(Qt::Key_M); key(Qt::Key_T); key(Qt::Key_Z); QCOMPARE(prop("components"), selected);
         auto target = item(cancelFocus ? "rangeChooserCancel" : "rangeComponent:highlight"); QVERIFY(target); target->forceActiveFocus();
@@ -465,7 +525,9 @@ private slots:
         QVERIFY(!item("rangeComponent:highlight")); QVERIFY(!item("rangeComponent:note"));
         QVERIFY(item("rangeComponent:bookmark")); QVERIFY(item("rangeTag:" + tag));
         QCOMPARE(prop("componentRows").toList().size(), 2);
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("m bookmark · t tags · Arrows move · Space toggle · a deselect all · Enter Continue · Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("m bookmark    t tags    j/k or arrows move    Space toggle    a deselect all    Enter Continue    Esc Cancel"));
+        inlineHint("rangeComponent:bookmark", "m"); inlineHint("rangeTag:" + tag, "t · all tags");
+        QVERIFY(!item("rangeComponent:highlightHint")); QVERIFY(!item("rangeComponent:noteHint"));
         const auto selected = prop("components"); key(Qt::Key_X); key(Qt::Key_N); QCOMPARE(prop("components"), selected);
         click("rangeChooserCancel"); QVERIFY(!prop("sessionOpen").toBool()); QCOMPARE(bible->tagScope(), source);
     }
@@ -483,9 +545,13 @@ private slots:
         navigate("John 3:3"); const auto initial = bible->tagScope(); const auto collection = bible->collection();
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("visibleModal").toBool()); QTest::qWait(60);
         QCOMPARE(prop("ranges").toList().size(), 2); QVERIFY(prop("source").isNull()); QVERIFY(!prop("active").toBool());
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("Arrows move · Enter select range · Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("j/k or arrows move    Enter select range    Esc Cancel"));
         auto firstRow = item("rangeChoice:" + first.value("reference").toString()); QVERIFY(firstRow); QVERIFY(firstRow->hasActiveFocus());
         key(Qt::Key_Down); auto secondRow = item("rangeChoice:" + second.value("reference").toString()); QVERIFY(secondRow); QVERIFY(secondRow->hasActiveFocus());
+        key(Qt::Key_K); QVERIFY(firstRow->hasActiveFocus());
+        key(Qt::Key_K); QVERIFY(secondRow->hasActiveFocus());
+        key(Qt::Key_J); QVERIFY(firstRow->hasActiveFocus());
+        key(Qt::Key_J); QVERIFY(secondRow->hasActiveFocus());
         key(Qt::Key_Return);
         if (mixed) {
             QVERIFY(prop("visibleModal").toBool()); QVERIFY(!prop("active").toBool());
@@ -517,29 +583,85 @@ private slots:
         key(Qt::Key_Escape); QVERIFY(!prop("sessionOpen").toBool());
     }
     void chooserGeometry_data() {
-        QTest::addColumn<double>("scale"); QTest::addColumn<QSize>("size");
-        QTest::newRow("normal") << 1.0 << QSize(1000, 760);
-        QTest::newRow("scaled-narrow") << 1.8 << QSize(640, 480);
+        QTest::addColumn<double>("scale"); QTest::addColumn<QSize>("size"); QTest::addColumn<int>("rangeCount");
+        QTest::newRow("normal-two") << 1.0 << QSize(1000, 760) << 2;
+        QTest::newRow("normal-many") << 1.0 << QSize(1000, 760) << 8;
+        QTest::newRow("scaled-narrow-two") << 1.8 << QSize(640, 480) << 2;
+        QTest::newRow("scaled-narrow-many") << 1.8 << QSize(640, 480) << 8;
     }
     void chooserGeometry() {
-        QFETCH(double, scale); QFETCH(QSize, size);
+        QFETCH(double, scale); QFETCH(QSize, size); QFETCH(int, rangeCount);
         desktop->setProperty("textScale", scale); window->setMinimumSize(QSize(0, 0)); window->resize(size);
         QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight()); bible->setNoteText("Note");
         const auto source = bible->tagScope();
-        for (int i = 0; i < 8; ++i) QVERIFY(!bible->createAndAssignTag(source, QString("Tag %1 with a descriptive name").arg(i)).isEmpty());
-        open(source); QVERIFY(prop("visibleModal").toBool()); QTest::qWait(100);
-        auto title = item("rangeChooserTitle"), all = item("rangeSelectAll"), footer = item("rangeChooserKeys");
-        QVERIFY(title && all && footer); QCOMPARE(window->size(), size);
-        const auto titleBottom = title->mapToScene(QPointF(0, title->height())).y();
-        const auto allTop = all->mapToScene(QPointF(0, 0)).y();
-        QVERIFY2(allTop >= titleBottom + 5, qPrintable(QString("title bottom %1, select-all top %2").arg(titleBottom).arg(allTop)));
-        QVERIFY(footer->mapToScene(QPointF(0, footer->height())).y() <= size.height() - 16);
-        QVERIFY(item("rangeContinue")->height() > 0); QVERIFY(all->height() >= all->implicitHeight());
+        for (int i = 0; i < 8; ++i) QVERIFY(!bible->createAndAssignTag(source, QString("Tag %1 with a very long descriptive name that wraps across multiple lines <b>literally</b>").arg(i)).isEmpty());
+        QVariantList ranges;
+        for (int i = 0; i < rangeCount; ++i) {
+            navigate(QString("John 3:2-%1").arg(4 + i));
+            if (i) { QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight()); }
+            auto scope = bible->tagScope();
+            // Keep real overlapping boundaries, stress the presentation with long references.
+            scope["reference"] = scope.value("reference").toString() + " · A long edition and passage reference with <b>literal</b> text";
+            ranges << scope;
+        }
+        navigate("John 3:3");
+        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("visibleModal").toBool());
+        QCOMPARE(prop("ranges").toList().size(), rangeCount);
+        QVERIFY(editor->setProperty("ranges", ranges));
+        QTest::qWait(100);
+        QVERIFY(QMetaObject::invokeMethod(object("rangeChooser"), "focusRow", Q_ARG(QVariant, 0)));
+        QTest::qWait(60);
+        QCOMPARE(window->size(), size); chooserBounds(false); capture("source");
+        auto scroll = item("rangeChoiceScroll");
+        for (int i = 0; i < ranges.size(); ++i) {
+            auto row = item("rangeChoice:" + ranges[i].toMap().value("reference").toString()); QVERIFY(row);
+            QCOMPARE(row->height(), row->implicitHeight());
+            auto label = row->property("contentItem").value<QQuickItem *>(); QVERIFY(label);
+            QCOMPARE(label->property("textFormat").toInt(), 0);
+            QCOMPARE(label->property("horizontalAlignment").toInt(), int(Qt::AlignLeft));
+            QVERIFY(row->height() >= label->implicitHeight() + row->property("topPadding").toReal() + row->property("bottomPadding").toReal());
+            if (i == 0) QVERIFY(qAbs(top(row) - top(scroll)) <= 1);
+            else {
+                auto previous = item("rangeChoice:" + ranges[i-1].toMap().value("reference").toString());
+                QVERIFY(qAbs(top(row) - bottom(previous) - 12 * prop("uiScale").toDouble()) <= 1);
+            }
+        }
+        key(Qt::Key_K); QTest::qWait(60);
+        auto lastSource = item("rangeChoice:" + ranges.last().toMap().value("reference").toString());
+        QVERIFY(lastSource->hasActiveFocus()); QVERIFY(bottom(lastSource) <= bottom(scroll) + 1);
+        key(Qt::Key_J); key(Qt::Key_Return); QTest::qWait(100);
+        QVERIFY(!prop("source").isNull());
+        auto snapshot = prop("source").toMap(), scope = snapshot.value("scope").toMap();
+        scope["reference"] = ranges.first().toMap().value("reference"); snapshot["scope"] = scope;
+        QVERIFY(editor->setProperty("source", snapshot)); QTest::qWait(100);
+        QVERIFY(QMetaObject::invokeMethod(object("rangeChooser"), "focusRow", Q_ARG(QVariant, 0)));
+        QTest::qWait(60);
+        chooserBounds(true); capture("components");
+        inlineHint("rangeSelectAll", "a");
+        inlineHint("rangeComponent:bookmark", "m"); inlineHint("rangeComponent:highlight", "x"); inlineHint("rangeComponent:note", "n");
+        auto bookmark = item("rangeComponent:bookmark");
+        QVERIFY(top(bookmark) >= top(scroll) - 1); QVERIFY(bottom(bookmark) <= bottom(scroll) + 1);
+        QVERIFY(top(item("rangeSelectAll")) <= top(scroll) + 1);
         const auto rows = prop("componentRows").toList();
-        for (int i = 1; i < rows.size(); ++i) key(Qt::Key_Down);
+        QQuickItem *previous = item("rangeSelectAll");
+        for (const auto &entry : rows) {
+            const auto row = entry.toMap();
+            const auto name = row.value("kind") == "tags" ? "rangeTag:" + row.value("id").toString() : "rangeComponent:" + row.value("kind").toString();
+            auto target = item(name); QVERIFY(target);
+            QVERIFY(qAbs(top(target) - bottom(previous) - 12 * prop("uiScale").toDouble()) <= 1);
+            if (row.value("kind") == "tags") inlineHint(name, "t · all tags");
+            previous = target;
+        }
+        for (int i = 1; i < rows.size(); ++i) key(Qt::Key_J);
+        QTest::qWait(60);
         const auto last = item("rangeTag:" + rows.last().toMap().value("id").toString()); QVERIFY(last && last->hasActiveFocus());
-        QVERIFY(last->mapToScene(QPointF(0, last->height())).y() <= item("rangeContinue")->mapToScene(QPointF()).y());
+        QVERIFY(bottom(last) <= bottom(scroll) + 1);
         key(Qt::Key_Space); QVERIFY(!last->property("checked").toBool());
+        click("rangeChooseAnother"); QTest::qWait(100);
+        QVERIFY(prop("source").isNull()); chooserBounds(false); capture("source-back");
+        auto first = item("rangeChoice:" + ranges.first().toMap().value("reference").toString());
+        QVERIFY(first && first->hasActiveFocus()); QVERIFY(qAbs(top(first) - top(scroll)) <= 1);
+        key(Qt::Key_Return); QTest::qWait(100); chooserBounds(true);
         key(Qt::Key_Escape); QVERIFY(!prop("sessionOpen").toBool());
     }
     void markerEntrypoints_data() {

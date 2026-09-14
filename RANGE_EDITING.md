@@ -14,11 +14,16 @@ implementation in `qml/RangeEditor.qml`, `qml/Main.qml`, and `src/biblebackend.*
    editing with that type selected (including all tags when tags are the only type).
    Otherwise, choose from the components actually present: bookmark, highlight,
    note, and individual tags. General entry preselects all; a marker or Annotations
-   tab preselects its kind. Arrow keys select a row and Space toggles it. `m`, `x`,
+   tab preselects its kind. `j`/`k` or arrow keys select a row and Space toggles it. `m`, `x`,
    `n`, and `t` toggle bookmark, highlight, note, and all tags respectively. `a`
    switches between **Select all components** and **Deselect all components**.
    Enter continues with a nonempty selection; Esc cancels. The footer lists only
    shortcuts relevant to the present annotation types.
+
+Both chooser states use a prominent title, padded list, quiet action buttons, and
+a separated keyboard-hint footer. The exact-range chooser explains that overlapping
+annotations can have different boundaries. Component rows show their shortcuts
+inline; tag rows identify that `t` toggles all tags together.
 3. Extend, shrink, or relocate the range using verse motions. `j` / `k`, Up/Down,
    counts such as `2j`, `J` / `K`, Shift+Up/Down, Ctrl+u/d, Ctrl+b/f, and
    PageUp/PageDown adjust the active endpoint. Chapter-edge motions and verse
