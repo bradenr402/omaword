@@ -34,6 +34,10 @@ Item {
             ctx.beginPath()
             if (kind === "note") {
                 if (filled) {
+                    // Slightly larger inside the same reserved annotation cell.
+                    ctx.translate(12, 12)
+                    ctx.scale(1.1, 1.1)
+                    ctx.translate(-12, -12)
                     // The same square and pencil as the outline, with a clear
                     // 1.5-unit transparent halo on either side of the pencil.
                     ctx.fillRect(3, 4, 17, 17)

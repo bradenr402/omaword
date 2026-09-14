@@ -916,7 +916,11 @@ ApplicationWindow {
         pencil.moveTo(10,11); pencil.lineTo(18,3); pencil.lineTo(21,6);
         pencil.lineTo(13,14); pencil.lineTo(9,15); pencil.closeSubpath();
         QPainterPathStroker stroker; stroker.setWidth(3); stroker.setJoinStyle(Qt::MiterJoin);
-        const auto silhouette = square.subtracted(pencil.united(stroker.createStroke(pencil))).united(pencil);
+        QTransform enlargement;
+        enlargement.translate(12,12); enlargement.scale(1.1,1.1); enlargement.translate(-12,-12);
+        const auto silhouette = enlargement.map(square.subtracted(pencil.united(stroker.createStroke(pencil))).united(pencil));
+        square = enlargement.map(square);
+        pencil = enlargement.map(pencil);
         QImage expected(image.size()*3,QImage::Format_ARGB32_Premultiplied);
         expected.fill(Qt::transparent);
         {
@@ -957,12 +961,15 @@ ApplicationWindow {
         if (size == 96) {
             // Both diagonal sides retain a ~1.5-unit band before solid square
             // resumes; the original pencil interior must be filled, not hollow.
-            const auto alpha = [&](double x, double y) { return image.pixelColor(qFloor(x*size/24),qFloor(y*size/24)).alpha(); };
+            const auto alpha = [&](double x, double y) {
+                const auto p = enlargement.map(QPointF(x,y));
+                return image.pixelColor(qFloor(p.x()*size/24),qFloor(p.y()*size/24)).alpha();
+            };
             QVERIFY(alpha(14,9) > 240);
             QVERIFY(alpha(13.5,6.5) < 30);
-            QVERIFY(alpha(15.5,11.5) < 30);
+            QVERIFY(alpha(15.5,12.5) < 30);
             QVERIFY(alpha(12.5,5.5) > 240);
-            QVERIFY(alpha(16.5,12.5) > 240);
+            QVERIFY(alpha(17,13) > 240);
             QVERIFY(alpha(18.2,3.7) > 180); // Pencil above the square's top.
             QVERIFY(alpha(20.2,6) > 180); // Pencil beyond its right edge.
         }
