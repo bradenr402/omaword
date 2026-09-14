@@ -7,6 +7,7 @@
 #include <QQmlError>
 #include <QJSValue>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QMetaProperty>
 #include <QQuickItem>
@@ -4133,6 +4134,9 @@ private slots:
         QFETCH(double,scale);
         reference("John 3:16");
         bible->setNoteText("Only the active edition");
+        const auto scope = bible->tagScope();
+        const auto tag = bible->createAndAssignTag(scope,"Backup <tag> 🌿");
+        QVERIFY(!tag.isEmpty());
         const auto collection = bible->collection();
         window->resize(640,480); QVERIFY(desktop->setProperty("textScale",scale));
         const auto openScope = [this] {
@@ -4182,8 +4186,18 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(object("backupDialog"),"accepted"));
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
         const auto backup = QJsonDocument::fromJson(file.readAll()).object();
-        QCOMPARE(backup.value("version").toInt(),3);
+        QCOMPARE(backup.value("version").toInt(),4);
         QCOMPARE(backup.value("versionId").toString(),QString("engnet"));
+        const auto tags = backup.value("tags").toArray();
+        QCOMPARE(tags.size(),1);
+        QCOMPARE(tags.first().toObject().value("id").toString(),tag);
+        QCOMPARE(tags.first().toObject().value("name").toString(),QString("Backup <tag> 🌿"));
+        const auto assignments = backup.value("tagAssignments").toArray();
+        QCOMPARE(assignments.size(),1);
+        const auto assignment = assignments.first().toObject();
+        QCOMPARE(assignment.value("tagId").toString(),tag);
+        for (const auto field : {"book","chapter","start","endBook","endChapter","end"})
+            QCOMPARE(assignment.value(field).toInt(),scope.value(field).toInt());
         QCOMPARE(prop("toast","text").toString(),QString("Saved NET annotation backup"));
         QVERIFY(prop("exportDialog","title").toString().contains("NET notes only"));
         QVERIFY(prop("restoreDialog","title").toString().contains("NET"));
@@ -4590,8 +4604,25 @@ private slots:
             QVERIFY(prop("savedDrawer","opened").toBool());
             key(Qt::Key_Right);
         }
+        // The fifth tab opens the tag browser and retains the last Saved filter.
+        QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QCOMPARE(prop("tagsUi","page").toString(),QString("browser"));
+        QCOMPARE(prop("tagList","count").toInt(),0);
+        QCOMPARE(prop("tagResults","count").toInt(),0);
+        QCOMPARE(window->property("collectionTab").toInt(),3);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
+        key(Qt::Key_L,Qt::ControlModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QCOMPARE(window->property("collectionTab").toInt(),3);
+        click(item("savedTab0")); QCOMPARE(window->property("collectionTab").toInt(),0);
+        key(Qt::Key_Left);
+        QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QCOMPARE(prop("tagsUi","page").toString(),QString("browser"));
         QCOMPARE(window->property("collectionTab").toInt(),0);
-        key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(),3);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
+        key(Qt::Key_L,Qt::ControlModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         key(Qt::Key_L,Qt::ControlModifier);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
     }
@@ -4627,7 +4658,10 @@ private slots:
         QCOMPARE(size.width() - bounds.right(),24 * scale);
         QVERIFY(qAbs(size.height() - bounds.bottom() - 24 * scale) < 0.1);
         auto tabs = item("savedTabs");
-        for (int index = 0; index < 4; ++index) {
+        QVERIFY(tabs);
+        QCOMPARE(tabs->property("columns").toInt(),tabs->width() < 350 * scale ? 2 : 3);
+        QList<QRectF> tabRects;
+        for (int index = 0; index < 5; ++index) {
             auto tab = item(qPrintable("savedTab" + QString::number(index)));
             QVERIFY(tab);
             const auto tabBounds = tab->mapRectToItem(tabs,tab->boundingRect());
@@ -4636,7 +4670,10 @@ private slots:
                     .arg(tabBounds.width()).arg(tabBounds.height()).arg(tabs->width()).arg(tabs->height())));
             const auto label = qvariant_cast<QQuickItem *>(tab->property("contentItem"));
             QVERIFY(label);
-            QVERIFY(label->width() >= label->implicitWidth());
+            QVERIFY2(label->width() + 0.5 >= label->implicitWidth(),
+                qPrintable(QString("Tab %1 label: %2 available, %3 required").arg(index).arg(label->width()).arg(label->implicitWidth())));
+            for (const auto &previous : tabRects) QVERIFY(!previous.intersects(tabBounds));
+            tabRects.append(tabBounds);
         }
         auto list = item("collectionList");
         QVERIFY(list->clip());

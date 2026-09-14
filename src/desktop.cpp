@@ -71,7 +71,10 @@ Desktop::~Desktop() {
     // QProcess may emit signals while its destructor reaps a running child.
     // Disconnect before the output buffer and other members are destroyed.
     m_roundingProcess.disconnect(this);
-    if (m_roundingProcess.state() != QProcess::NotRunning) m_roundingProcess.kill();
+    if (m_roundingProcess.state() != QProcess::NotRunning) {
+        m_roundingProcess.kill();
+        m_roundingProcess.waitForFinished(1000);
+    }
 }
 
 void Desktop::refreshCornerRadius() {

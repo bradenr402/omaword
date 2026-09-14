@@ -2627,7 +2627,7 @@ ApplicationWindow {
                 id: savedTabs
                 objectName: "savedTabs"
                 Layout.fillWidth: true
-                columns: width < 350 * app.scale ? 2 : 5
+                columns: width < 350 * app.scale ? 2 : 3
                 columnSpacing: 4 * app.scale
                 rowSpacing: 2 * app.scale
                 Repeater {
@@ -2639,6 +2639,7 @@ ApplicationWindow {
                         text: modelData
                         emphasized: app.collectionTab === index
                         compact: true
+                        implicitHeight: (savedDrawer.height < 350 * app.scale ? 24 : 32) * app.scale
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         Layout.preferredWidth: 1
