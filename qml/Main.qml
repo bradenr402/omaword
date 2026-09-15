@@ -1916,7 +1916,7 @@ ApplicationWindow {
                                 }
                                 Rectangle {
                                     objectName: "contextSegment" + verseRow.modelData.number
-                                    x: verseRow.gutter - 9
+                                    x: verseRow.gutter - 9 * app.scale
                                     y: verseHeading.height
                                     width: verseRow.width - x
                                     height: verseBody.height + 3
@@ -1929,7 +1929,7 @@ ApplicationWindow {
                                     delegate: Rectangle {
                                         required property var modelData
                                         objectName: "highlightSegment" + verseRow.modelData.number + ":" + modelData.reference
-                                        x: verseRow.gutter - 9
+                                        x: verseRow.gutter - 9 * app.scale
                                         y: modelData.highlightContinuesBefore ? 0 : verseHeading.height
                                         width: verseRow.width - x
                                         height: (modelData.highlightContinuesAfter ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
@@ -1945,7 +1945,7 @@ ApplicationWindow {
                                 }
                                 Rectangle {
                                     objectName: "selectionSegment" + verseRow.modelData.number
-                                    x: verseRow.gutter - 9
+                                    x: verseRow.gutter - 9 * app.scale
                                     y: verseRow.index > 0 && (bible.verses[verseRow.index - 1]?.number || 0) >= bible.selectedStart ? 0 : verseHeading.height
                                     width: parent.width - x
                                     height: (verseRow.modelData.number < bible.selectedEnd ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
@@ -1970,7 +1970,14 @@ ApplicationWindow {
                                         anchors.top: parent.top
                                         anchors.topMargin: Math.max(0, readerMetrics.ascent + readerMetrics.tightBoundingRect("H").y
                                             - numberMetrics.ascent - numberMetrics.tightBoundingRect("0").y)
-                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 4 * app.scale
+                                        // Three-digit labels must also fit between the
+                                        // packed annotation lane and highlight edge.
+                                        width: 16 * app.scale
+                                        horizontalAlignment: Text.AlignRight
+                                        fontSizeMode: Text.HorizontalFit
+                                        minimumPixelSize: 1
                                         text: verseRow.modelData.number
                                         font.pixelSize: 10 * app.scale
                                         font.weight: verseRow.selected ? Font.Bold : Font.Normal

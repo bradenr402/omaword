@@ -98,7 +98,13 @@ Item {
     Canvas {
         id: paint
         objectName: "blockRangeBackground"
-        anchors.fill: body
+        // Paint outside the first/continuation line without changing body layout
+        // or the right endpoint. The same inset is reserved at verse separators.
+        readonly property real leftInset: 5
+        x: body.x - leftInset
+        y: body.y
+        width: body.width + leftInset
+        height: body.height
         property var annotations: root.backend.verses
         property int first: root.backend.selectedStart
         property int last: root.backend.selectedEnd
@@ -119,6 +125,7 @@ Item {
             if (root.destroying) return
             const ctx = getContext("2d")
             ctx.reset()
+            ctx.translate(leftInset, 0)
             const spans = document.spans
             const ranges = {}
             for (let i = 0; i < spans.length; ++i) {
@@ -132,10 +139,10 @@ Item {
             function draw(start, end, selected) {
                 for (const r of document.rectangles(start, end)) {
                     ctx.fillStyle = root.controller.tint(accent, selected ? 0.22 : 0.16)
-                    ctx.fillRect(r.x, r.y, r.width, r.height)
+                    ctx.fillRect(r.x - leftInset, r.y, r.width + leftInset, r.height)
                     if (!selected && !focused) {
                         ctx.fillStyle = root.controller.tint(accent, 0.7)
-                        ctx.fillRect(r.x, r.y, 2, r.height)
+                        ctx.fillRect(r.x - leftInset, r.y, 2, r.height)
                     }
                 }
             }

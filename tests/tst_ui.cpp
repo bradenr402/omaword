@@ -2848,6 +2848,92 @@ private slots:
         QVERIFY(covered);
         capture("block-adjacent-highlights");
     }
+    void verseAccentSpacing_data() {
+        QTest::addColumn<int>("size");
+        QTest::addColumn<double>("scale");
+        for (int size : {8,18,40})
+            for (double scale : {1.0,1.8})
+                QTest::newRow(qPrintable(QString("%1px-%2x").arg(size).arg(scale))) << size << scale;
+    }
+    void verseAccentSpacing() {
+        QFETCH(int,size); QFETCH(double,scale);
+        // Keep this case independent of a full Psalms fixture.
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-accent-fixture");
+            db.setDatabaseName(installedPath()); QVERIFY(db.open());
+            QSqlQuery q(db);
+            q.prepare("UPDATE verses SET text=?,html=?,heading='' WHERE book=43 AND chapter=3 AND number IN (31,32)");
+            const QString text = QString("Agjp long verse wrapping safely across several lines. ").repeated(16).trimmed();
+            q.addBindValue(text); q.addBindValue(text);
+            QVERIFY(q.exec());
+        }
+        QSqlDatabase::removeDatabase("ui-accent-fixture");
+        bible->setFontSize(size);
+        desktop->setProperty("textScale",scale);
+        window->resize(700,900);
+        QVERIFY2(bible->navigate("John 3:31"),qPrintable(bible->error()));
+        bible->setShowHeadings(false);
+        bible->setNoteText("Closest packed marker");
+        QVERIFY(bible->toggleBookmark());
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Packed").isEmpty());
+        QTest::qWait(80);
+        auto geometry = [&]() {
+            QVariantList result;
+            for (int number : {31,32}) {
+                auto body = item(qPrintable(QString("verseBody%1").arg(number)));
+                result.append(body->x()); result.append(body->y());
+                result.append(body->width()); result.append(body->height());
+                auto doc = body->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+                for (int p = 0; p < doc->characterCount(); ++p) {
+                    QRectF caret;
+                    QMetaObject::invokeMethod(body,"positionToRectangle",Q_RETURN_ARG(QRectF,caret),Q_ARG(int,p));
+                    result.append(caret);
+                }
+            }
+            return result;
+        };
+        const auto before = geometry();
+        for (int number : {31,32}) {
+            bible->selectVerses(number,number);
+            bible->toggleHighlight();
+            QTest::qWait(60);
+            QCOMPARE(geometry(),before);
+            auto label = item(qPrintable(QString("verseNumberLabel%1").arg(number)));
+            auto hit = item(qPrintable(QString("verseNumber%1").arg(number)));
+            auto accent = item(qPrintable(QString("highlightAccent%1:John 3:%1").arg(number)));
+            QVERIFY(label && hit && accent);
+            // Exercise three digits on the real label without changing the
+            // edition's canonical verse keys or expanding the fixture.
+            if (number == 32) label->setProperty("text","119");
+            QTest::qWait(30);
+            QCOMPARE(label->property("text").toString(),number == 32 ? QString("119") : QString("31"));
+            QCOMPARE(hit->x(),54 * scale); QCOMPARE(hit->width(),17 * scale);
+            const auto bounds = label->mapRectToItem(hit->parentItem(),label->boundingRect());
+            QVERIFY(bounds.left() > 50 * scale);
+            const auto border = accent->mapRectToItem(hit->parentItem(),accent->boundingRect());
+            QCOMPARE(border.left(),67 * scale);
+            QVERIFY(bounds.right() <= border.left() + 0.01);
+            auto grab = label->grabToImage(); QVERIFY(grab);
+            QSignalSpy ready(grab.get(),&QQuickItemGrabResult::ready);
+            if (grab->image().isNull()) QVERIFY(ready.wait(2000));
+            const auto image = grab->image();
+            int ink = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    if (image.pixelColor(x,y).alpha() < 40) continue;
+                    ++ink;
+                    const double pixelX = label->mapToItem(hit->parentItem(),QPointF(x * label->width() / image.width(),0)).x();
+                    QVERIFY2(pixelX > 50 * scale && pixelX < border.left(),
+                        qPrintable(QString("label %1..%2 border %3 pixel %4/%5").arg(bounds.left()).arg(bounds.right()).arg(border.left()).arg(x).arg(image.width())));
+                }
+            QVERIFY(ink > 3);
+            bible->toggleHighlight();
+            QTest::qWait(60);
+            QCOMPARE(geometry(),before);
+        }
+        item("verseBody31")->forceActiveFocus();
+        QCOMPARE(geometry(),before);
+    }
     void focusedWorkflowErrors() {
         reference("John 3:16");
         bible->setFocusMode(true);

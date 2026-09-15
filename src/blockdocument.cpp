@@ -114,6 +114,12 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     paragraph.setLineHeight(lineHeight * 100, QTextBlockFormat::ProportionalHeight);
     cursor.setBlockFormat(paragraph);
     const QTextCharFormat normal;
+    // Keep the original separator (and native copy offsets), but permanently
+    // reserve room for a two-pixel accent plus three pixels of breathing room.
+    // Highlight/cursor/selection state must never participate in text layout.
+    QTextCharFormat separator;
+    separator.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+    separator.setFontLetterSpacing(5);
     // Invisible word joiners must not select a taller fallback font, which
     // would enlarge every annotated line despite the image fitting its ascent.
     QTextCharFormat joiner;
@@ -151,7 +157,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         } else if (cursor.position()) {
             if (mode == QStringLiteral("paragraph") && verse.value("paragraphStart").toBool())
                 cursor.insertBlock(paragraph, normal);
-            else cursor.insertText(" ", normal);
+            else cursor.insertText(" ", separator);
         }
         const int start = cursor.position();
         if (numbers) {

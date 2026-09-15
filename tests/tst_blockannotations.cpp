@@ -293,6 +293,123 @@ ApplicationWindow {
         QCOMPARE(navigatedScope()["end"].toInt(),5);
         QCOMPARE(controller->property("calls").toString(),QString("flush;scope;clear;sync;edit;"));
     }
+    void highlightSpacing_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::addColumn<int>("size");
+        QTest::addColumn<double>("scale");
+        for (const QString &mode : {QString("block"),QString("paragraph")})
+            for (int size : {8,18,40})
+                for (double scale : {1.0,1.8})
+                    QTest::newRow(qPrintable(QString("%1-%2px-%3x").arg(mode).arg(size).arg(scale))) << mode << size << scale;
+    }
+    void highlightSpacing() {
+        QFETCH(QString,mode); QFETCH(int,size); QFETCH(double,scale);
+        controller->setProperty("readerSize",size);
+        controller->setProperty("scale",scale);
+        backend->setProperty("showVerseNumbers",false);
+        backend->setProperty("showHeadings",false);
+        item("reader")->setProperty("mode",mode);
+        item("reader")->setWidth(240 * scale);
+        const QString longText = QString("Agjp words wrapping across many lines with a final glyph. ").repeated(12).trimmed();
+        QVariantList verses{QVariantMap{{"number",31},{"text","End."}},
+            QVariantMap{{"number",119},{"text",longText}},
+            QVariantMap{{"number",120},{"text","Next."},{"paragraphStart",true}}};
+        backend->setProperty("verses",verses);
+        QTRY_COMPARE(mapping->spans().size(),3);
+        QTest::qWait(60);
+        auto body = item("blockBody");
+        auto canvas = item("blockRangeBackground");
+        auto doc = body->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        const QString plain = "End. " + longText + (mode == "paragraph" ? "\nNext." : " Next.");
+        QCOMPARE(doc->toPlainText(),plain); // No synthetic cells, spaces or joiners.
+        QCOMPARE(mapping->selectionText(0,doc->characterCount()),plain);
+        QVERIFY(list("inlineMarkers").isEmpty());
+        auto geometry = [&]() {
+            QVariantList result;
+            for (int p = 0; p < doc->characterCount(); ++p) {
+                QRectF caret;
+                QMetaObject::invokeMethod(body,"positionToRectangle",Q_RETURN_ARG(QRectF,caret),Q_ARG(int,p));
+                result.append(caret);
+            }
+            return result;
+        };
+        const auto before = geometry();
+        const auto spans = mapping->spans();
+        const double height = body->height();
+        const auto span = spans[1].toMap();
+        const auto rects = mapping->rectangles(span["start"].toInt(),span["end"].toInt());
+        QVERIFY(rects.size() > 2);
+        QVERIFY(rects.first().toMap()["x"].toDouble() > 5); // Same-line boundary.
+        auto grab = [](QQuickItem *visual) {
+            auto capture = visual->grabToImage();
+            if (!capture) return QImage();
+            QSignalSpy ready(capture.get(),&QQuickItemGrabResult::ready);
+            if (capture->image().isNull()) ready.wait(2000);
+            return capture->image();
+        };
+        const auto empty = grab(canvas);
+        QVERIFY(!empty.isNull());
+        for (int y = 0; y < empty.height(); ++y)
+            for (int x = 0; x < empty.width(); ++x) QCOMPARE(empty.pixelColor(x,y).alpha(),0);
+        QSignalSpy rebuilt(mapping,&BlockDocument::spansChanged);
+        for (int state = 0; state < 5; ++state) {
+            backend->setProperty("cursorVerse",state % 2 ? 31 : 119);
+            backend->setProperty("selectedStart",state == 1 ? 119 : 0);
+            backend->setProperty("selectedEnd",state == 1 ? 120 : 0);
+            for (int i = 0; i < verses.size(); ++i) {
+                auto verse = verses[i].toMap();
+                verse["highlightRanges"] = state >= 2 && (state == 3 || i == 1)
+                    ? QVariantList{QVariantMap{{"reference",state == 4 ? QString::number(i) : "range"}}} : QVariantList{};
+                verses[i] = verse;
+            }
+            if (state == 4) {
+                auto verse = verses[0].toMap(); verse["highlightRanges"] = QVariantList{QVariantMap{{"reference","preceding"}}}; verses[0] = verse;
+            }
+            backend->setProperty("verses",verses);
+            body->forceActiveFocus();
+            QTest::qWait(60);
+            QCOMPARE(geometry(),before);
+            QCOMPARE(mapping->spans(),spans);
+            QCOMPARE(body->height(),height);
+            QCOMPARE(rebuilt.count(),0);
+            if (state < 2) continue;
+            const auto image = grab(canvas);
+            QVERIFY(!image.isNull());
+            const auto painted = state == 3 ? mapping->rectangles(0,spans.last().toMap()["end"].toInt()) : rects;
+            for (const auto &entry : painted) {
+                const auto r = entry.toMap();
+                // Canvas is shifted five pixels left. Sample actual pixels of
+                // the accent, then the three-pixel low-alpha gap before text.
+                const int x = qCeil(r["x"].toDouble());
+                const int y = qCeil(r["y"].toDouble()) + 2;
+                if (y >= image.height()) continue;
+                QVERIFY(image.pixelColor(x,y).alpha() > 150);
+                QVERIFY(image.pixelColor(x+3,y).alpha() > 0);
+                QVERIFY(image.pixelColor(x+3,y).alpha() < 100);
+                const QRectF accent(r["x"].toDouble()-5,r["y"].toDouble(),2,r["height"].toDouble());
+                for (const auto &ink : textInkRects(doc,0,doc->characterCount()-1))
+                    QVERIFY2(!accent.intersects(ink),"Accent overlaps original glyph ink");
+                if (state == 2) {
+                    const QRectF background(r["x"].toDouble()-5,r["y"].toDouble(),r["width"].toDouble()+5,r["height"].toDouble());
+                    for (const auto &ink : textInkRects(doc,0,spans[0].toMap()["end"].toInt()))
+                        QVERIFY2(!background.intersects(ink),"Highlight paints preceding verse ink");
+                }
+            }
+        }
+        // With numbers/headings/markers absent, focus mode also keeps the exact
+        // same spacing while suppressing the accent.
+        backend->setProperty("focusMode",true);
+        QTest::qWait(60);
+        QCOMPARE(geometry(),before);
+        backend->setProperty("focusMode",false);
+        QTest::qWait(60);
+        QCOMPARE(geometry(),before);
+        QVERIFY(QMetaObject::invokeMethod(body,"selectAll"));
+        QCOMPARE(controller->property("freeSelectedText").toString(),plain);
+        QVERIFY(QMetaObject::invokeMethod(body,"copy"));
+        QCOMPARE(QGuiApplication::clipboard()->text(),plain);
+        QCOMPARE(geometry(),before);
+    }
     void continuationAndSelectionGuard() {
         populate();
         auto verses = backend->property("verses").toList();
