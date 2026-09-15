@@ -1971,7 +1971,7 @@ ApplicationWindow {
                                         anchors.topMargin: Math.max(0, readerMetrics.ascent + readerMetrics.tightBoundingRect("H").y
                                             - numberMetrics.ascent - numberMetrics.tightBoundingRect("0").y)
                                         anchors.right: parent.right
-                                        anchors.rightMargin: 4 * app.scale
+                                        anchors.rightMargin: 8 * app.scale
                                         // Three-digit labels must also fit between the
                                         // packed annotation lane and highlight edge.
                                         width: 16 * app.scale
