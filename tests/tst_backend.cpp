@@ -224,6 +224,51 @@ private slots:
         QCOMPARE(bible->selectionReference(),QString("John 3:36–4:2"));
         bible->moveSelection(-3,true); QCOMPARE(bible->selectionReference(),QString("John 3:35–36"));
     }
+    void copyPreservesSourceLayoutAndUnicode() {
+        const QString path = fixtures.filePath("copy-engojb_usfm.zip");
+        QVERIFY(zip(path,{{"01-GENengojb.usfm",QStringLiteral(
+            "\\id GEN Copy Bible\n\\toc1 Bereshis\n\\toc2 Bereishis\n\\c 1\n\\p\n"
+            "\\v 1 Shalom   café 😀 é.\n"
+            "\\v 2 Same\t paragraph.\n\\p\n"
+            "\\v 3 New paragraph.\n\\q1\n"
+            "\\v 4 First   poetry line\n\\q2 Second line\n"
+            "\\v 5 Poetry continuation.\n\\p\n"
+            "\\v 6 Last paragraph.\n\\c 2\n\\p\n"
+            "\\v 1 Next chapter.\n").toUtf8()}}));
+        install(path);
+        QVERIFY(bible->navigate("GEN 1"));
+        const auto rows = bible->verses(); QCOMPARE(rows.size(),6);
+        QStringList text;
+        for (const auto &row : rows) text << row.toMap()["text"].toString();
+        // The importer normalizes lexical whitespace; stored source is the copy
+        // authority, including its internal poetry newline and Unicode units.
+        QVERIFY(text[0].contains(QStringLiteral("café 😀 é")));
+        QVERIFY(text[3].contains('\n'));
+        QVERIFY(rows[2].toMap()["paragraphStart"].toBool());
+        QVERIFY(rows[3].toMap()["poetry"].toBool());
+        QVERIFY(rows[4].toMap()["poetry"].toBool());
+        QVERIFY(!rows[4].toMap()["paragraphStart"].toBool());
+        QCOMPARE(bible->copyVerse(4,true),text[3]);
+        const QString expected = text[0]+' '+text[1]+"\n\n"+text[2]+"\n\n"+text[3]+'\n'+text[4]+"\n\n"+text[5];
+        bible->selectVerses(1,6);
+        QCOMPARE(bible->copySelection(true),expected);
+        const QString quotation = QStringLiteral("“¹ ")+text[0]+QStringLiteral(" ² ")+text[1]
+            +QStringLiteral("\n\n³ ")+text[2]+QStringLiteral("\n\n⁴ ")+text[3]
+            +QStringLiteral("\n⁵ ")+text[4]+QStringLiteral("\n\n⁶ ")+text[5]
+            +QStringLiteral("”\n\n—")+bible->selectionReference();
+        QCOMPARE(bible->copySelection(),quotation);
+        bible->setReadingMode("block"); bible->setFocusMode(true); bible->setShowVerseNumbers(false);
+        QCOMPARE(bible->copySelection(true),expected); QCOMPARE(bible->copySelection(),quotation);
+        bible->moveSelection(1,true);
+        const auto next = bible->verses().first().toMap()["text"].toString();
+        QCOMPARE(bible->copySelection(true),expected+"\n\n"+next);
+        QVERIFY(bible->copySelection().endsWith(QStringLiteral("\n\n¹ ")+next+QStringLiteral("”\n\n—")+bible->selectionReference()));
+        // A fixture with a paragraph before every verse must copy paragraph breaks.
+        const QString paragraphs = fixtures.filePath("copy-engnet_usfm.zip");
+        QVERIFY(zip(paragraphs,{{"01-GENengnet.usfm","\\id GEN Paragraph Bible\n\\c 1\n\\p\n\\v 1 One.\n\\p\n\\v 2 Two.\n"}}));
+        install(paragraphs); QVERIFY(bible->navigate("GEN 1:1-2"));
+        QCOMPARE(bible->copySelection(true),QString("One.\n\nTwo."));
+    }
     void schemaFourMigrationPreservesArchivesAndRollsBack() {
         const QString path = bible->dataDirectory()+"/personal.sqlite";
         bible.reset();

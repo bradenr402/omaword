@@ -2148,9 +2148,11 @@ QString BibleBackend::copyVerse(int number, bool plainText)
 
 QString BibleBackend::copyRange(int first, int last, const QString &label, bool plainText)
 {
-    QStringList lines;
+    QString body;
     const QString digits = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
     int b = 0, c = 0;
+    int previousBook = 0, previousChapter = 0;
+    bool previousPoetry = false;
     QVariantList rows;
     for (int i = first; i <= last; ++i) {
         const auto v = endpoint(i);
@@ -2161,15 +2163,22 @@ QString BibleBackend::copyRange(int first, int last, const QString &label, bool 
                 const auto map = row.toMap(); const int number = map.value("number").toInt();
                 const int index = absoluteVerse(b,c,number);
                 if (index >= first && index <= last) {
-                    const QString text = map.value("text").toString().simplified();
+                    const QString text = map.value("text").toString();
+                    const bool poetry = map.value("poetry").toBool();
+                    if (!body.isEmpty()) {
+                        if (previousBook != b || previousChapter != c || map.value("paragraphStart").toBool()) body += "\n\n";
+                        else if (poetry && previousPoetry) body += '\n';
+                        else body += ' ';
+                    }
                     QString superscript;
                     for (const QChar digit : QString::number(number)) superscript += digits[digit.digitValue()];
-                    lines << (plainText ? text : superscript + ' ' + text);
+                    body += plainText ? text : superscript + ' ' + text;
+                    previousBook = b; previousChapter = c; previousPoetry = poetry;
                 }
             }
         }
     }
-    return plainText ? lines.join(' ') : QStringLiteral("“") + lines.join(' ') + QStringLiteral("”\n\n—") + label;
+    return plainText ? body : QStringLiteral("“") + body + QStringLiteral("”\n\n—") + label;
 }
 
 void BibleBackend::copyText(QString text)
