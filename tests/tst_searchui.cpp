@@ -12,6 +12,8 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTextDocument>
+#include <QTextBlock>
+#include <QTextFragment>
 #include <archive.h>
 #include <archive_entry.h>
 #include "biblebackend.h"
@@ -131,6 +133,13 @@ private slots:
             key(Qt::Key_A, Qt::ControlModifier); type(prefix);
             QCOMPARE(object("referenceInput")->property("text").toString(), prefix + " ");
             QCOMPARE(object("referenceInput")->property("cursorPosition").toInt(), 2);
+            // Backspace on the keyboard-inserted empty mode returns to Passage.
+            key(Qt::Key_Backspace);
+            QCOMPARE(object("referenceInput")->property("text").toString(), QString());
+            QVERIFY(object("paletteBooks")->property("emphasized").toBool());
+            QVERIFY(item("referenceInput")->hasActiveFocus());
+            QVERIFY(object("passagePalette")->property("opened").toBool());
+            type(prefix);
             type("alpha beta");
             QCOMPARE(object("referenceInput")->property("text").toString(), prefix + " alpha beta");
             key(Qt::Key_Home); key(Qt::Key_Right); key(Qt::Key_Delete);
@@ -138,10 +147,144 @@ private slots:
             QCOMPARE(object("referenceInput")->property("cursorPosition").toInt(), 1);
             key(Qt::Key_End); type(" ");
             QCOMPARE(object("referenceInput")->property("text").toString(), prefix + "alpha beta ");
+            // Deleting the last query character must not recreate a separator.
+            const QString query = "alpha beta ";
+            for (int remaining = query.size() - 1; remaining >= 0; --remaining) {
+                key(Qt::Key_Backspace);
+                QCOMPARE(object("referenceInput")->property("text").toString(), prefix + query.left(remaining));
+                QCOMPARE(object("referenceInput")->property("cursorPosition").toInt(), remaining + 1);
+            }
+            key(Qt::Key_Backspace);
+            QCOMPARE(object("referenceInput")->property("text").toString(), QString());
+            QVERIFY(object("paletteBooks")->property("emphasized").toBool());
+            type(prefix); type("query");
+            key(Qt::Key_Home); key(Qt::Key_Delete);
+            QCOMPARE(object("referenceInput")->property("text").toString(), QString(" query"));
+            QCOMPARE(object("referenceInput")->property("cursorPosition").toInt(), 0);
+            QVERIFY(object("paletteBooks")->property("emphasized").toBool());
+            type("x");
+            QCOMPARE(object("referenceInput")->property("text").toString(), QString("x query"));
             // Programmatic updates must not trigger the user-edit normalization.
             object("referenceInput")->setProperty("text", prefix);
             QCOMPARE(object("referenceInput")->property("text").toString(), prefix);
         }
+    }
+    void palettePrefixPaint_data() {
+        QTest::addColumn<QString>("prefix");
+        QTest::newRow("search") << QString("/");
+        QTest::newRow("command") << QString(">");
+    }
+    void palettePrefixPaint() {
+        QFETCH(QString, prefix);
+        // Distinct opaque colors expose native foreground ink painted over the overlay.
+        const QColor foreground("#40f040"), muted("#e050a0");
+        desktop->setProperty("surface", QColor("#101010"));
+        desktop->setProperty("foreground", foreground);
+        desktop->setProperty("muted", muted);
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        auto input = item("referenceInput");
+        auto font = input->property("font").value<QFont>(); font.setPixelSize(32);
+        input->setProperty("font", font);
+        type(prefix); type("query");
+        QCOMPARE(input->property("text").toString(), prefix + " query");
+        auto overlay = item("palettePrefix"); QVERIFY(overlay); QVERIFY(overlay->isVisible());
+        QQuickItem *label = nullptr;
+        for (auto child : overlay->childItems()) if (child->property("text").toString() == prefix) label = child;
+        QVERIFY(label);
+        QCOMPARE(label->property("color"), desktop->property("muted"));
+        QCOMPARE(input->property("color"), desktop->property("foreground"));
+        QVERIFY(overlay->parentItem()->z() >= 10);
+        QTest::qWait(100);
+        const auto image = window->grabWindow(); QVERIFY(!image.isNull());
+        const qreal sx = qreal(image.width()) / window->width();
+        const qreal sy = qreal(image.height()) / window->height();
+        // Sample the input's painted glyph cells, independently of overlay geometry.
+        // TextInput cursor coordinates exclude the TextField's padding.
+        const qreal left = input->property("leftPadding").toDouble();
+        const auto prefixRect = input->mapRectToScene(QRectF(left, 0,
+            caret(input, 1).x() - caret(input, 0).x(), input->height()));
+        const auto queryRect = input->mapRectToScene(QRectF(left + caret(input, 2).x(), 0,
+            caret(input, 7).x() - caret(input, 2).x(), input->height()));
+        const auto ink = [&](const QRectF &bounds, const QColor &color) {
+            const QRect pixels = QRectF(bounds.x() * sx, bounds.y() * sy,
+                bounds.width() * sx, bounds.height() * sy).toAlignedRect().intersected(image.rect());
+            int count = 0;
+            for (int y = pixels.top(); y <= pixels.bottom(); ++y)
+                for (int x = pixels.left(); x <= pixels.right(); ++x) {
+                    const auto p = image.pixelColor(x, y);
+                    if (qAbs(p.red() - color.red()) <= 16 && qAbs(p.green() - color.green()) <= 16
+                            && qAbs(p.blue() - color.blue()) <= 16) ++count;
+                }
+            return count;
+        };
+        QVERIFY2(ink(queryRect, foreground) >= 5, "The query must retain normal foreground ink");
+        const int mutedPixels = ink(prefixRect, muted), foregroundPixels = ink(prefixRect, foreground);
+        QVERIFY2(mutedPixels >= 3, qPrintable(QString("The actual window must paint muted prefix ink; muted=%1, foreground=%2")
+            .arg(mutedPixels).arg(foregroundPixels)));
+        QCOMPARE(foregroundPixels, 0);
+        key(Qt::Key_Home); key(Qt::Key_Delete);
+        QCOMPARE(input->property("text").toString(), QString(" query"));
+        QVERIFY(!overlay->isVisible());
+        type("x"); QCOMPARE(input->property("text").toString(), QString("x query"));
+    }
+    void paletteTabCycle_data() {
+        QTest::addColumn<QString>("focus");
+        QTest::addColumn<int>("direction");
+        for (const auto &focus : {QString("referenceInput"), QString("paletteResults"), QString("currentItem"),
+                QString("paletteBooks"), QString("paletteSearch"), QString("paletteCommands")})
+            for (int direction : {1, -1})
+                QTest::newRow(qPrintable(focus + (direction > 0 ? "-tab" : "-shift-tab"))) << focus << direction;
+    }
+    void paletteTabCycle() {
+        QFETCH(QString, focus); QFETCH(int, direction);
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        auto popup = object("passagePalette");
+        QSignalSpy hiding(popup, SIGNAL(aboutToHide())), closed(popup, SIGNAL(closed())), visible(popup, SIGNAL(visibleChanged()));
+        QVERIFY(hiding.isValid()); QVERIFY(closed.isValid()); QVERIFY(visible.isValid());
+        const QStringList modes = {"", "/ ", "> "};
+        const QStringList tabs = {"paletteBooks", "paletteSearch", "paletteCommands"};
+        int mode = 0;
+        for (int step = 0; step < 6; ++step) {
+            // Populate Search too, so its result delegate can own focus.
+            if (mode == 1) {
+                type("alpha"); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
+            }
+            QQuickItem *target = focus == "currentItem"
+                ? object("paletteResults")->property("currentItem").value<QQuickItem *>() : item(focus);
+            QVERIFY(target); target->forceActiveFocus(); QTRY_VERIFY(target->hasActiveFocus());
+            key(Qt::Key_Tab, direction > 0 ? Qt::NoModifier : Qt::ShiftModifier);
+            mode = (mode + direction + 3) % 3;
+            QCOMPARE(object("referenceInput")->property("text").toString(), modes[mode]);
+            QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+            QVERIFY(popup->property("opened").toBool());
+            for (int index = 0; index < tabs.size(); ++index)
+                QCOMPARE(object(tabs[index])->property("emphasized").toBool(), index == mode);
+        }
+        QCOMPARE(hiding.count(), 0); QCOMPARE(closed.count(), 0); QCOMPARE(visible.count(), 0);
+    }
+    void paletteModeCommandsStayOpen_data() {
+        QTest::addColumn<QString>("command"); QTest::addColumn<QString>("text"); QTest::addColumn<QString>("tab");
+        QTest::newRow("search") << QString("Search Bible") << QString("/ ") << QString("paletteSearch");
+        QTest::newRow("passage") << QString("Navigate to a passage") << QString() << QString("paletteBooks");
+    }
+    void paletteModeCommandsStayOpen() {
+        QFETCH(QString, command); QFETCH(QString, text); QFETCH(QString, tab);
+        key(Qt::Key_Space, Qt::ControlModifier);
+        QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        QCOMPARE(object("referenceInput")->property("text").toString(), QString("> "));
+        type(command); QTRY_COMPARE(object("paletteResults")->property("count").toInt(), 1);
+        auto popup = object("passagePalette");
+        QSignalSpy hiding(popup, SIGNAL(aboutToHide())), closed(popup, SIGNAL(closed())), visible(popup, SIGNAL(visibleChanged()));
+        QVERIFY(hiding.isValid()); QVERIFY(closed.isValid()); QVERIFY(visible.isValid());
+        key(Qt::Key_Return);
+        QTRY_COMPARE(object("referenceInput")->property("text").toString(), text);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        QTest::qWait(250); // Include deferred close/reopen and popup transitions.
+        QVERIFY(popup->property("opened").toBool());
+        QVERIFY(object(tab)->property("emphasized").toBool());
+        QCOMPARE(hiding.count(), 0); QCOMPARE(closed.count(), 0); QCOMPARE(visible.count(), 0);
+        type("John"); QCOMPARE(object("referenceInput")->property("text").toString(), text + "John");
     }
     void plainSearchResultHighlight() {
         search("bright"); QCOMPARE(bible->searchResultCount(), 2);
@@ -161,6 +304,10 @@ private slots:
         QVERIFY(body->property("readOnly").toBool());
         QVERIFY(!body->property("activeFocusOnPress").toBool());
         QCOMPARE(body->property("color"), desktop->property("foreground"));
+        QVERIFY(overlay->property("outlined").toBool());
+        for (auto block = document(body)->begin(); block.isValid(); block = block.next())
+            for (auto it = block.begin(); !it.atEnd(); ++it)
+                QVERIFY(!it.fragment().charFormat().fontUnderline());
         const auto siblings = body->parentItem()->childItems();
         QVERIFY(siblings.indexOf(overlay) < siblings.indexOf(body));
         const auto segments = value(overlay->property("segments")).toList();
@@ -182,6 +329,29 @@ private slots:
         QVERIFY(qAbs(pixel.red() - accent.red()) <= 3);
         QVERIFY(qAbs(pixel.green() - accent.green()) <= 3);
         QVERIFY(qAbs(pixel.blue() - accent.blue()) <= 3);
+        // A filled rectangle or underline alone must not satisfy the border regression.
+        const auto bounds = rect.toRectF();
+        const QList<QPointF> edges = {
+            QPointF(bounds.center().x(), bounds.top() + 0.5),
+            QPointF(bounds.center().x(), bounds.bottom() - 0.5),
+            QPointF(bounds.left() + 0.5, bounds.center().y()),
+            QPointF(bounds.right() - 0.5, bounds.center().y())
+        };
+        for (const auto &edge : edges) {
+            int alpha = 0;
+            // Fractional glyph geometry can split the one-pixel stroke over two pixels.
+            for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+                const auto point = edge.toPoint() + QPoint(dx, dy);
+                if (!image.rect().contains(point)) continue;
+                const auto border = image.pixelColor(point);
+                if (border.alpha() <= alpha) continue;
+                alpha = border.alpha();
+                QVERIFY(qAbs(border.red() - accent.red()) <= 3);
+                QVERIFY(qAbs(border.green() - accent.green()) <= 3);
+                QVERIFY(qAbs(border.blue() - accent.blue()) <= 3);
+            }
+            QVERIFY2(alpha > pixel.alpha() + 50, "Every edge must have stronger accent ink than the fill");
+        }
     }
     void searchQueryStatus() {
         QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
@@ -366,9 +536,9 @@ private slots:
     void countedNavigationAndTypingGuards() {
         find("beta"); key(Qt::Key_Return); QCOMPARE(bible->cursorVerse(), 2);
         key(Qt::Key_3); key(Qt::Key_N); QCOMPARE(bible->cursorVerse(), 50); QCOMPARE(prop("verseCount").toString(), QString());
-        key(Qt::Key_N); QCOMPARE(bible->cursorVerse(), 50); QCOMPARE(object("toast")->property("text").toString(), QString("Last match"));
+        key(Qt::Key_N); QCOMPARE(bible->cursorVerse(), 50); QCOMPARE(object("toast")->property("text").toString(), QString("No matches after cursor"));
         key(Qt::Key_9); key(Qt::Key_N, Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(), 2);
-        QCOMPARE(object("toast")->property("text").toString(), QString("First match"));
+        QCOMPARE(object("toast")->property("text").toString(), QString("No matches before cursor"));
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); type("nw/s");
         QCOMPARE(object("noteEditor")->property("text").toString(), QString("nw/s"));
         QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!object("passagePalette")->property("visible").toBool());
@@ -408,10 +578,10 @@ private slots:
             QVERIFY(prop("searchError").toString().isEmpty());
             key(Qt::Key_N, Qt::ShiftModifier);
             QCOMPARE(bible->cursorVerse(), 2);
-            QCOMPARE(object("toast")->property("text").toString(), QString("First match"));
+            QCOMPARE(object("toast")->property("text").toString(), QString("No matches before cursor"));
             key(Qt::Key_9); key(Qt::Key_N); QCOMPARE(bible->cursorVerse(), 50);
             key(Qt::Key_N); QCOMPARE(bible->cursorVerse(), 50);
-            QCOMPARE(object("toast")->property("text").toString(), QString("Last match"));
+            QCOMPARE(object("toast")->property("text").toString(), QString("No matches after cursor"));
             return;
         }
         QVERIFY(prop("findPromptOpen").toBool()); QVERIFY(item("chapterFindInput")->hasActiveFocus());

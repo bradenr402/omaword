@@ -1383,7 +1383,7 @@ private slots:
         auto list = item("keybindingResults");
         auto bar = item("keybindingScrollbar");
         QVERIFY(list && bar && item("keybindingFooterRule"));
-        QCOMPARE(item("keybindingSearch for a passage")->width(),list->width());
+        QCOMPARE(item("keybindingNavigate to a passage")->width(),list->width());
         QCOMPARE(prop("keybindingFooterRule","height").toDouble(),1.0);
         QVERIFY(bar->width() >= 18);
         const int count = prop("keybindingResults","count").toInt();
@@ -1871,8 +1871,10 @@ private slots:
             const auto tabs = item("paletteSearch")->parentItem();
             QVERIFY(tabs->property("uniformCellSizes").toBool());
             const double tabWidth = (inputBounds.width() - 2 * tabs->property("spacing").toDouble()) / 3;
-            for (const auto name : {"paletteSearch","paletteBooks","paletteCommands"}) {
+            for (const auto name : {"paletteBooks","paletteSearch","paletteCommands"}) {
                 const auto button = item(name);
+                QCOMPARE(button->property("text").toString(),QString(name == QString("paletteBooks") ? "Passage"
+                    : name == QString("paletteSearch") ? "Search" : "Command"));
                 const auto bounds = button->mapRectToScene(button->boundingRect());
                 QVERIFY(bounds.top() > inputBounds.bottom());
                 QVERIFY(qAbs(bounds.width() - tabWidth) <= 1);
@@ -3900,7 +3902,7 @@ private slots:
             QVERIFY(action.value("title") != "Select text across verses");
         }
         const QList<QStringList> expected = {
-            {"books","Search for a passage","Ctrl k"},
+            {"books","Navigate to a passage","Ctrl k"},
             {"annotations","Annotations panel","Ctrl a"}, {"toggleNotes","Notes panel","Ctrl n"},
             {"selectVerse","Select verse","Click"},
             {"clickCopy","Copy passage as quotation","Right Click"},

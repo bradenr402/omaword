@@ -9,9 +9,11 @@
 - `n` / `N` navigates accepted matches; counts such as `3n` work without wrapping.
 - `w` writes a note. `Ctrl n` still toggles Notes.
 
-Search, Passage, and Commands occupy equal-width tabs below the palette input.
+Passage, Search, and Command occupy equal-width tabs below the palette input.
+Tab cycles them in that order; Shift Tab cycles backward and keeps input focus.
 Typing a bare `/` or `>` appends a space; the recognized prefix is dimmed.
-Result matches use the same accent-colored boxes as reader matches.
+Backspace removes an empty prefix and returns to Passage mode.
+Result matches use accent-colored boxes with an accent border.
 
 Search is offline, Scripture-only, and limited to the active version, including
 all its books. Each window owns its query, results, and current match.

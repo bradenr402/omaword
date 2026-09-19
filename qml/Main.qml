@@ -345,7 +345,7 @@ ApplicationWindow {
         const clamped = Math.max(0, Math.min(searchMatches.length - 1, target))
         if (!focusSearchMatch(searchMatches[clamped])) return
         searchMatchIndex = clamped
-        if (target !== clamped) notify(direction > 0 ? "Last match" : "First match", true)
+        if (target !== clamped) notify(direction > 0 ? "No matches after cursor" : "No matches before cursor", true)
         readerFocus()
     }
     function scrollSearchMatch(match) {
@@ -371,6 +371,13 @@ ApplicationWindow {
         openPalette(false)
         referenceInput.text = "/ "
         referenceInput.cursorPosition = 2
+    }
+    function cyclePaletteMode(direction) {
+        if (!bible.ready) return
+        const current = paletteTextMode ? 1 : referenceInput.text.trim().startsWith(">") ? 2 : 0
+        const next = (current + direction + 3) % 3
+        if (next === 1) openTextSearch()
+        else openPalette(next === 2)
     }
     function scheduleBibleSearch() {
         pendingSearchResume = null
@@ -1268,7 +1275,7 @@ ApplicationWindow {
     // One action catalog supplies shortcuts, searchable keybindings, and commands.
     // Context-only gestures are explanatory rows, never executable guesses.
     readonly property var actions: [
-        { id: "books", title: "Search for a passage", keys: "Ctrl k", sequences: ["Ctrl+K"], scope: "palette", command: true },
+        { id: "books", title: "Navigate to a passage", keys: "Ctrl k", sequences: ["Ctrl+K"], scope: "palette", command: true },
         { id: "bibleSearch", title: "Search Bible", keys: "s", sequences: ["S"], command: true },
         { id: "chapterFind", title: "Find in chapter", keys: "/", sequences: ["/"], command: true },
         { id: "centerVerse", title: "Center current verse", keys: "zz", sequences: ["Z, Z"], command: true },
@@ -1416,6 +1423,10 @@ ApplicationWindow {
         if (paletteTextMode) { acceptBibleResult(entry); return }
         if (entry.action) {
             if (!actionAvailable(entry.action) || !flushNote()) return
+            if (["books", "bibleSearch", "commands", "resume"].includes(entry.action)) {
+                runCommand(entry.action)
+                return
+            }
             passagePalette.pendingAction = entry.action
             passagePalette.close()
         } else if (entry.verse) jump(entry.title)
@@ -2926,6 +2937,8 @@ ApplicationWindow {
         width: Math.min(650 * app.scale, app.width - 48)
         height: Math.min(560 * app.scale, app.height - 48)
         padding: 16
+        Shortcut { sequence: "Tab"; enabled: passagePalette.visible; onActivated: app.cyclePaletteMode(1) }
+        Shortcut { sequence: "Shift+Tab"; enabled: passagePalette.visible; onActivated: app.cyclePaletteMode(-1) }
         onOpened: referenceInput.forceActiveFocus()
         onAboutToHide: { if (!app.paletteCleared) app.rememberPalette() }
         onClosed: {
@@ -2943,16 +2956,14 @@ ApplicationWindow {
                 event.accepted = !app.paletteTextMode && app.paletteBook > 0 && event.modifiers === Qt.NoModifier
                 if (event.accepted) app.backToBooks()
             }
-            RowLayout {
+            Item {
                 Layout.fillWidth: true
-                spacing: 4 * app.scale
+                implicitHeight: referenceInput.implicitHeight
                 TextField {
                     id: referenceInput
                     objectName: "referenceInput"
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
+                    anchors.fill: parent
                     implicitHeight: 38 * app.scale
-                    Layout.preferredHeight: implicitHeight
                     font.pixelSize: 15 * app.scale
                     color: desktop.foreground
                     placeholderText: app.paletteChapter ? app.paletteBookName + " " + app.paletteChapter + " — verse number"
@@ -2966,25 +2977,50 @@ ApplicationWindow {
                         app.paletteCleared = false; app.paletteArrowUsed = false
                         app.scheduleBibleSearch(); paletteResults.currentIndex = 0
                     }
-                    onTextEdited: {
-                        if (text === "/" || text === ">") { text += " "; cursorPosition = text.length }
+                    Keys.onPressed: function(event) {
+                        if ((event.text === "/" || event.text === ">")
+                                && (!text.length || selectedText === text)) {
+                            text = event.text + " "; cursorPosition = text.length
+                            event.accepted = true
+                        } else if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier
+                                && (text === "/ " || text === "> ") && cursorPosition === 2 && !selectedText.length) {
+                            text = ""; event.accepted = true
+                        }
                     }
                     // Dim only the recognized prefix, retaining native input,
                     // cursor movement, selection, and horizontal scrolling.
                     Item {
-                        anchors.fill: parent
+                        parent: referenceInput.parent
+                        z: 10
+                        // Paint above the native glyph node, clipped to the
+                        // padded input viewport as the text scrolls horizontally.
+                        anchors.fill: referenceInput
                         anchors.leftMargin: referenceInput.leftPadding
                         anchors.rightMargin: referenceInput.rightPadding
                         clip: true
                         Rectangle {
-                            readonly property rect prefixRect: referenceInput.positionToRectangle(0)
-                            x: prefixRect.x - referenceInput.leftPadding
-                            y: prefixRect.y
-                            width: referenceInput.positionToRectangle(1).x - prefixRect.x
+                            objectName: "palettePrefix"
+                            readonly property rect prefixRect: {
+                                const text = referenceInput.text
+                                const cursor = referenceInput.cursorRectangle
+                                return referenceInput.positionToRectangle(0)
+                            }
+                            x: prefixRect.x
+                            y: prefixRect.y + referenceInput.topPadding
+                            width: {
+                                const text = referenceInput.text
+                                const cursor = referenceInput.cursorRectangle
+                                return referenceInput.positionToRectangle(1).x - referenceInput.positionToRectangle(0).x
+                            }
                             height: prefixRect.height
-                            color: desktop.surface; opacity: 0.55
+                            color: desktop.surface
                             visible: (referenceInput.text.startsWith("/") || referenceInput.text.startsWith(">"))
                                 && referenceInput.selectionStart === referenceInput.selectionEnd
+                            Text {
+                                text: referenceInput.text.charAt(0)
+                                font: referenceInput.font
+                                color: desktop.muted
+                            }
                         }
                     }
                     onAccepted: app.acceptPalette()
@@ -3010,9 +3046,9 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 spacing: 4 * app.scale
                 uniformCellSizes: true
-                QuietButton { objectName: "paletteSearch"; text: "Search"; Layout.fillWidth: true; emphasized: app.paletteTextMode; enabled: bible.ready; onClicked: app.openTextSearch() }
                 QuietButton { objectName: "paletteBooks"; text: "Passage"; Layout.fillWidth: true; emphasized: !app.paletteTextMode && !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.openPalette(false) }
-                QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.fillWidth: true; emphasized: referenceInput.text.startsWith(">"); onClicked: app.openPalette(true) }
+                QuietButton { objectName: "paletteSearch"; text: "Search"; Layout.fillWidth: true; emphasized: app.paletteTextMode; enabled: bible.ready; onClicked: app.openTextSearch() }
+                QuietButton { objectName: "paletteCommands"; text: "Command"; Layout.fillWidth: true; emphasized: referenceInput.text.startsWith(">"); onClicked: app.openPalette(true) }
             }
             Label {
                 objectName: "referencePreview"
@@ -3085,6 +3121,7 @@ ApplicationWindow {
                             SearchHighlights {
                                 anchors.fill: resultText
                                 body: resultText; sourceText: resultText.text; theme: desktop
+                                outlined: true
                                 segments: paletteEntry.modelData.displaySegments || []
                             }
                             TextEdit {

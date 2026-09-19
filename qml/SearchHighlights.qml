@@ -9,6 +9,8 @@ Item {
     property var segments: []
     property string sourceText: ""
     property var theme
+    property bool outlined: false
+    onOutlinedChanged: refresh()
     property bool destroying: false
 
     function refresh() { if (!destroying) geometryTimer.restart() }
@@ -72,7 +74,7 @@ Item {
                     if (!!r.active !== !!active) continue
                     ctx.fillStyle = Qt.rgba(accent.r, accent.g, accent.b, active ? 0.55 : 0.28)
                     ctx.fillRect(r.x, r.y, r.width, r.height)
-                    if (active) {
+                    if (active || root.outlined) {
                         ctx.strokeStyle = accent
                         ctx.lineWidth = 1
                         ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(0, r.width - 1), Math.max(0, r.height - 1))
