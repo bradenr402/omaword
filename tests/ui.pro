@@ -10,3 +10,5 @@ HEADERS += ../src/biblebackend.h ../src/usfmimporter.h ../src/biblebooks.h ../sr
 RESOURCES += ../resources.qrc
 SOURCES += ../src/blockdocument.cpp
 HEADERS += ../src/blockdocument.h
+SOURCES += ../src/scripturesearch.cpp ../src/searchdocument.cpp
+HEADERS += ../src/scripturesearch.h ../src/searchdocument.h

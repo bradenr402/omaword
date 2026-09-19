@@ -9,6 +9,8 @@ HEADERS += src/singleinstance.h src/windowmanager.h src/desktop.h src/biblebacke
 RESOURCES += resources.qrc
 SOURCES += src/blockdocument.cpp
 HEADERS += src/blockdocument.h
+SOURCES += src/scripturesearch.cpp src/searchdocument.cpp
+HEADERS += src/scripturesearch.h src/searchdocument.h
 
 brand_desktop.input = $$PWD/assets/launcher.desktop.in
 brand_desktop.output = $$OUT_PWD/$${BRAND_ID}.desktop

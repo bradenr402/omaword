@@ -5,6 +5,7 @@
 #include <QQuickTextDocument>
 #include <QVariantList>
 #include <QClipboard>
+#include "searchdocument.h"
 
 // All offsets refer to the actual TextEdit QTextDocument, in UTF-16 units.
 // Decoration cells occupy real layout positions; selectionText removes only
@@ -38,6 +39,8 @@ public:
     Q_INVOKABLE int verseAtPoint(double x, double y) const;
     Q_INVOKABLE int positionFor(int verse) const;
     Q_INVOKABLE QVariantList rectangles(int start, int end) const;
+    Q_INVOKABLE QVariantList searchRectangles(const QVariantList &segments) const;
+    Q_INVOKABLE QRectF searchRect(const QVariantMap &segment) const;
     // One entry per logical annotation intersecting this chapter. Geometry is
     // in document coordinates, including reserved inline decoration cells.
     // Membership comes from per-verse bookmarkRanges/noteRanges/tagRanges in source order.
@@ -58,4 +61,5 @@ private:
     QVariantList m_spans;
     QVariantList m_decorations;
     QList<QPair<int, int>> m_decorationSegments;
+    QHash<int, SourcePositionMap> m_sourceMaps;
 };

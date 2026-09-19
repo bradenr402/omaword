@@ -53,6 +53,11 @@ class BibleBackend : public QObject
     Q_PROPERTY(QString readingMode READ readingMode WRITE setReadingMode NOTIFY preferencesChanged)
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
     Q_PROPERTY(bool hasParagraphs READ hasParagraphs NOTIFY versionChanged)
+    Q_PROPERTY(QVariantList searchResults READ searchResults NOTIFY searchChanged)
+    Q_PROPERTY(bool searchBusy READ searchBusy NOTIFY searchChanged)
+    Q_PROPERTY(QString searchError READ searchError NOTIFY searchChanged)
+    Q_PROPERTY(int searchResultCount READ searchResultCount NOTIFY searchChanged)
+    Q_PROPERTY(QString textGeneration READ textGeneration NOTIFY versionChanged)
 
 public:
     explicit BibleBackend(QObject *parent = nullptr);
@@ -140,6 +145,24 @@ public:
     QString readingMode() const { return m_readingMode; }
     int fontSize() const { return m_fontSize; }
     bool hasParagraphs() const { return m_hasParagraphs; }
+    // Records: versionId/versionAbbreviation, book/chapter/start/endBook/
+    // endChapter/end, reference, source-preserving text, score (exact-term count),
+    // segments[{verse,start,length}], displaySegments[{start,length}]. Segment
+    // positions are UTF-16; start/end endpoints are actual source verse IDs.
+    QVariantList searchResults() const { return m_searchResults; }
+    bool searchBusy() const { return m_searchBusy; }
+    QString searchError() const { return m_searchError; }
+    int searchResultCount() const { return int(m_allSearchResults.size()); }
+    QString textGeneration() const { return m_textGeneration; }
+    // Bible syntax: AND substrings in one verse, quoted phrases across adjacent
+    // source verses in a chapter. Quotes/backslashes can be backslash-escaped.
+    // Queries over 4096 UTF-16 units return an explicit error, never truncation.
+    Q_INVOKABLE void searchScripture(QString query);
+    Q_INVOKABLE void cancelScriptureSearch();
+    Q_INVOKABLE void loadMoreSearchResults();
+    // Pure cached-chapter scan; source UTF-16 segments, one semantic range per
+    // Bible match, individual occurrences for literal chapter find.
+    Q_INVOKABLE QVariantMap findInChapter(QString query, bool bibleSyntax = false) const;
     Q_INVOKABLE void setShowVerseNumbers(bool value);
     Q_INVOKABLE void setShowHeadings(bool value);
     Q_INVOKABLE void setVersePicker(bool value);
@@ -184,6 +207,7 @@ public:
     Q_INVOKABLE QString dataDirectory();
 
 signals:
+    void searchChanged();
     void booksChanged();
     void versionChanged();
     void versionsChanged();
@@ -297,4 +321,9 @@ private:
     std::shared_ptr<std::atomic<double>> m_importProgress;
     QFutureWatcher<UsfmImporter::Result> m_importWatcher;
     QTimer m_progressTimer;
+    QString m_textGeneration, m_searchError;
+    QVariantList m_searchResults, m_allSearchResults;
+    bool m_searchBusy = false;
+    quint64 m_searchRequest = 0;
+    std::shared_ptr<std::atomic_bool> m_searchCancellation;
 };

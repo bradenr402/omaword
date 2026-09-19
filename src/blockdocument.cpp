@@ -101,6 +101,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     m_spans.clear();
     m_decorations.clear();
     m_decorationSegments.clear();
+    m_sourceMaps.clear();
     // Qt Quick lays out image objects with their explicit dimensions. Painting
     // is done by the reader over these transparent cells, never over verse text.
     const QUrl cellUrl(m_cellName);
@@ -238,12 +239,39 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
             }
         }
         const int textEnd = cursor.position();
+        QTextCursor content(m_document);
+        content.setPosition(textStart);
+        content.setPosition(textEnd, QTextCursor::KeepAnchor);
+        m_sourceMaps[verse.value("number").toInt()].build(verse.value("text").toString(),
+                                                       content.selectedText(), textStart);
         decorate(false);
         m_spans.append(QVariantMap{{"number",verse.value("number")}, {"start",start},
                                   {"textStart",textStart}, {"textEnd",textEnd}, {"end",cursor.position()}});
     }
     emit spansChanged();
     emit geometryChanged();
+}
+
+QVariantList BlockDocument::searchRectangles(const QVariantList &segments) const
+{
+    QVariantList result;
+    for (const auto &value : segments) {
+        const auto segment = value.toMap();
+        const auto map = m_sourceMaps.constFind(segment.value("verse").toInt());
+        if (map == m_sourceMaps.cend()) continue;
+        const auto range = map->range(segment.value("start").toInt(), segment.value("length").toInt());
+        for (const auto &rect : SearchGeometry::rectangles(m_document, range.first, range.second)) {
+            auto entry = rect.toMap();
+            entry["active"] = segment.value("active").toBool();
+            result.append(entry);
+        }
+    }
+    return result;
+}
+
+QRectF BlockDocument::searchRect(const QVariantMap &segment) const
+{
+    return SearchGeometry::firstRect(searchRectangles({segment}));
 }
 
 QString BlockDocument::selectionText(int start, int end) const

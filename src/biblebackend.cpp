@@ -1,6 +1,7 @@
 #include "biblebackend.h"
 #include "brand.h"
 #include "biblebooks.h"
+#include "scripturesearch.h"
 
 #include <QClipboard>
 #include <QCryptographicHash>
@@ -309,6 +310,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 
 BibleBackend::~BibleBackend()
 {
+    if (m_searchCancellation) m_searchCancellation->store(true);
     readers.removeAll(this);
     disconnect(this, nullptr, nullptr, nullptr);
     // The worker captures only paths and shared progress, never this QObject.
@@ -389,6 +391,7 @@ void BibleBackend::refreshShared(const QString &id, bool library, bool preferenc
             if (!changeVersion(next, {}, {}, false, false, true)) {
                 // Never retain an obsolete generation or writable annotation scope.
                 closeBible(); m_ready = false; m_versionId.clear();
+                m_textGeneration.clear(); cancelScriptureSearch();
                 m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_hasParagraphs = false;
                 m_keys = {{0,0,0}}; m_keyIndices.clear(); m_books.clear(); m_chapters.clear(); m_bookAliases.clear();
                 m_anchor = m_cursor = m_start = m_end = 0;
@@ -1499,6 +1502,12 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     m_ready = !id.isEmpty(); m_verses = rows; m_annotations = annotations;
     m_collection = collectionRows(annotations); m_versions = versions;
     blocker.unblock();
+    const QString generation = id.isEmpty() ? QString() : QString::fromLatin1(
+        QCryptographicHash::hash((id + '\n' + path).toUtf8(),QCryptographicHash::Sha256).toHex());
+    if (m_textGeneration != generation) {
+        m_textGeneration = generation;
+        cancelScriptureSearch();
+    }
     // Direct delivery closes/reloads every peer before obsolete files are unlinked.
     if (!peerReload) { emit sharedCommitted(obsoleteId, true, false); publishTags(); }
     clearError();
@@ -1519,6 +1528,63 @@ void BibleBackend::closeBible()
 bool BibleBackend::requireReady()
 {
     return m_ready || setError("Import a USFM Bible first.");
+}
+
+void BibleBackend::cancelScriptureSearch()
+{
+    ++m_searchRequest;
+    if (m_searchCancellation) m_searchCancellation->store(true);
+    m_searchCancellation.reset();
+    m_searchBusy = false; m_searchError.clear();
+    m_searchResults.clear(); m_allSearchResults.clear();
+    emit searchChanged();
+}
+
+void BibleBackend::searchScripture(QString query)
+{
+    cancelScriptureSearch();
+    if (query.trimmed().isEmpty()) return;
+    if (!m_ready) { m_searchError = "Import a USFM Bible first."; emit searchChanged(); return; }
+    const quint64 request = m_searchRequest;
+    const QString generation = m_textGeneration, id = m_versionId;
+    const QString path = m_bible.databaseName(), abbreviation = m_abbreviation;
+    const auto cancel = std::make_shared<std::atomic_bool>(false);
+    m_searchCancellation = cancel; m_searchBusy = true;
+    auto *watcher = new QFutureWatcher<ScriptureSearch::Result>(this);
+    connect(watcher,&QFutureWatcher<ScriptureSearch::Result>::finished,this,
+        [this,watcher,request,generation,id,cancel] {
+            const auto result = watcher->result(); watcher->deleteLater();
+            if (cancel->load() || request != m_searchRequest || generation != m_textGeneration || id != m_versionId) return;
+            m_searchBusy = false; m_searchError = result.error;
+            m_allSearchResults = result.matches; m_searchResults = m_allSearchResults.mid(0,100);
+            emit searchChanged();
+        });
+    watcher->setFuture(QtConcurrent::run([path,id,abbreviation,query,cancel] {
+        return ScriptureSearch::search(path,id,abbreviation,query,cancel);
+    }));
+    emit searchChanged();
+}
+
+void BibleBackend::loadMoreSearchResults()
+{
+    if (m_searchResults.size() >= m_allSearchResults.size()) return;
+    m_searchResults.append(m_allSearchResults.mid(m_searchResults.size(),100));
+    emit searchChanged();
+}
+
+QVariantMap BibleBackend::findInChapter(QString query, bool bibleSyntax) const
+{
+    ScriptureSearch::Chapter chapter{m_book,m_chapter,{}, {}};
+    for (const auto &row : m_books) {
+        const auto map = row.toMap();
+        if (map.value("id").toInt() == m_book) { chapter.name = map.value("name").toString(); break; }
+    }
+    for (const auto &row : m_verses) {
+        const auto map = row.toMap();
+        chapter.verses.append({map.value("number").toInt(),map.value("text").toString()});
+    }
+    const auto result = ScriptureSearch::find(chapter,query,bibleSyntax);
+    return {{"error",result.error},{"matches",result.matches}};
 }
 QString BibleBackend::localPath(const QUrl &url)
 {

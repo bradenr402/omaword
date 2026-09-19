@@ -4,5 +4,5 @@ TEMPLATE = app
 include(../branding.pri)
 TARGET = tst_blockannotations
 INCLUDEPATH += ../src
-SOURCES += tst_blockannotations.cpp ../src/blockdocument.cpp
-HEADERS += ../src/blockdocument.h
+SOURCES += tst_blockannotations.cpp ../src/blockdocument.cpp ../src/searchdocument.cpp
+HEADERS += ../src/blockdocument.h ../src/searchdocument.h

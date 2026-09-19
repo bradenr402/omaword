@@ -1,0 +1,42 @@
+#pragma once
+
+#include <QObject>
+#include <QPointer>
+#include <QQuickTextDocument>
+#include <QRectF>
+#include <QVariantList>
+
+// Source offsets are UTF-16, before HTML serialization. Whitespace runs may
+// collapse or become Qt line/paragraph separators; all other codepoints must
+// agree. A failed alignment deliberately paints nothing rather than wrong text.
+class SourcePositionMap
+{
+public:
+    void build(const QString &source, const QString &rendered, int documentStart = 0);
+    QPair<int, int> range(int start, int length) const;
+private:
+    QList<QPair<int, int>> m_positions;
+};
+
+namespace SearchGeometry {
+QVariantList rectangles(QTextDocument *document, int start, int end);
+QRectF firstRect(const QVariantList &rectangles);
+}
+
+class SearchDocument : public QObject
+{
+    Q_OBJECT
+public:
+    explicit SearchDocument(QObject *parent = nullptr);
+    Q_INVOKABLE void attach(QQuickTextDocument *target, const QString &sourceText);
+    Q_INVOKABLE QVariantList rectangles(const QVariantList &segments) const;
+    Q_INVOKABLE QRectF rectFor(int start, int length) const;
+    Q_INVOKABLE QRectF cursorRect(int position) const;
+signals:
+    void geometryChanged();
+private:
+    void rebuildMap();
+    QPointer<QTextDocument> m_document;
+    QString m_source;
+    SourcePositionMap m_map;
+};
