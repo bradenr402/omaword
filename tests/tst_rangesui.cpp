@@ -288,7 +288,7 @@ private slots:
         QVERIFY(bible->annotationSnapshot(source).value("bookmark").toBool());
     }
     void notesEndCursorAndTagsTabNavigation() {
-        bible->setNoteText("Existing note"); key(Qt::Key_N); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        bible->setNoteText("Existing note"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QCOMPARE(item("noteEditor")->property("cursorPosition").toInt(), 13);
         key(Qt::Key_Left); key(Qt::Key_Left); const auto cursor = item("noteEditor")->property("cursorPosition").toInt();
         QTest::keyClick(window, 'z'); QCOMPARE(item("noteEditor")->property("cursorPosition").toInt(), cursor + 1);

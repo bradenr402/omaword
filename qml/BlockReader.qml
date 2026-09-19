@@ -19,6 +19,8 @@ Item {
     property var annotationRanges: []
     property var inlineMarkers: []
     property var contextRanges: []
+    readonly property var searchSegments: controller.searchSegments || []
+    onSearchSegmentsChanged: if (!destroying) searchPaint.requestPaint()
     readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
     function tagsPlainText(tags) { return Array.from(tags || []).map(function(t) { return t.name }).join(", ") }
     property real annotationScale: 0
@@ -69,12 +71,14 @@ Item {
             contextRanges = backend.focusMode ? [] : document.contextRanges(backend.verses, backend.cursorVerse,
                                                                            backend.selectedStart, backend.selectedEnd)
             paint.requestPaint()
+            searchPaint.requestPaint()
             updateAnnotations()
         }
     }
     function cancelDrag() { dragging = false; pressed = false; autoscroll.stop() }
     function clearSelection() { body.deselect() }
     function verseRect(number) { return body.positionToRectangle(document.positionFor(number)) }
+    function searchRect(segment) { return document.searchRect(segment) }
     function hit(x, y) { return document.verseAtPoint(x, y) }
     property bool pressed: false
     property bool dragging: false
@@ -154,6 +158,35 @@ Item {
             }
             const selected = Array.from(spans).filter(function(s) { return first > 0 && s.number >= first && s.number <= last })
             if (selected.length) draw(selected[0].start, selected[selected.length - 1].end, true)
+        }
+    }
+    // Search is a separate background above annotations and below native text.
+    Canvas {
+        id: searchPaint
+        objectName: "blockSearchBackground"
+        x: body.x; y: body.y
+        width: body.width; height: body.height
+        property color accent: root.theme.accent
+        onAccentChanged: requestPaint()
+        onWidthChanged: if (!root.destroying) geometryTimer.restart()
+        onHeightChanged: if (!root.destroying) geometryTimer.restart()
+        onPaint: {
+            if (root.destroying) return
+            const ctx = getContext("2d")
+            ctx.reset()
+            const rects = document.searchRectangles(root.searchSegments)
+            for (let active = 0; active < 2; ++active) {
+                for (const r of rects) {
+                    if (!!r.active !== !!active) continue
+                    ctx.fillStyle = Qt.rgba(accent.r, accent.g, accent.b, active ? 0.55 : 0.28)
+                    ctx.fillRect(r.x, r.y, r.width, r.height)
+                    if (active) {
+                        ctx.strokeStyle = accent
+                        ctx.lineWidth = 1
+                        ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(0, r.width - 1), Math.max(0, r.height - 1))
+                    }
+                }
+            }
         }
     }
     TextEdit {

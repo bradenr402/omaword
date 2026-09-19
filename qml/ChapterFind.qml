@@ -1,0 +1,67 @@
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Rectangle {
+    id: root
+    required property var theme
+    property real uiScale: 1
+    property bool opened: false
+    property int matchIndex: -1
+    property int matchCount: 0
+    property string error: ""
+    signal preview(string query)
+    signal accepted(string query)
+    signal canceled()
+    visible: opened
+    height: 40 * Math.min(uiScale, 1.4)
+    color: theme.background
+    border.color: theme.border
+    radius: Math.min(theme.cornerRadius, width / 2, height / 2)
+    function begin(query) {
+        debounce.stop()
+        input.text = query
+        opened = true
+        input.forceActiveFocus()
+        input.selectAll()
+    }
+    function cancelPending() { debounce.stop() }
+    RowLayout {
+        anchors.fill: parent
+        anchors.leftMargin: 12 * root.uiScale; anchors.rightMargin: 12 * root.uiScale
+        spacing: 8 * root.uiScale
+        Label { text: "/"; color: root.theme.accent; font.pixelSize: 16 * root.uiScale }
+        TextField {
+            id: input
+            objectName: "chapterFindInput"
+            Layout.fillWidth: true; Layout.minimumWidth: 0
+            color: root.theme.foreground
+            placeholderText: "Find in chapter"
+            placeholderTextColor: root.theme.muted
+            font.family: root.theme.fontFamily; font.pixelSize: 14 * root.uiScale
+            selectByMouse: true
+            padding: 0
+            background: Item {}
+            onTextEdited: debounce.restart()
+            onAccepted: { debounce.stop(); root.accepted(text) }
+            Keys.onEscapePressed: { debounce.stop(); root.canceled() }
+            Accessible.name: "Find literal text in this chapter"
+        }
+        Label {
+            objectName: "chapterFindCount"
+            text: root.error || (root.matchCount ? (root.matchIndex < 0
+                ? root.matchCount + " matches" : (root.matchIndex + 1) + " / " + root.matchCount) : input.text.length ? "No matches" : "")
+            color: root.theme.muted; font.pixelSize: 12 * root.uiScale
+            Layout.maximumWidth: root.width * 0.3
+            elide: Text.ElideRight
+        }
+        Label {
+            text: "Enter accept · Esc cancel"
+            visible: root.width > 600 * root.uiScale
+            color: root.theme.muted; font.pixelSize: 11 * root.uiScale
+        }
+    }
+    Timer { id: debounce; interval: 150; onTriggered: root.preview(input.text) }
+}
