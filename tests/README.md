@@ -11,6 +11,9 @@ filters, and `-functions`, require exactly one selected suite.
 | --- | --- | --- | --- |
 | `backend` | `tests/backend.pro` | `build/tests/` | `tst_backend` |
 | `ui` | `tests/ui.pro` | `build/ui-tests/` | `tst_ui` |
+| `search` | `tests/search.pro` | `build/search-tests/` | `tst_search` |
+| `searchui` | `tests/searchui.pro` | `build/searchui-tests/` | `tst_searchui` |
+| `searchrender` | `tests/searchrender.pro` | `build/searchrender-tests/` | `tst_searchrender` |
 | `tags` | `tests/tags.pro` | `build/tags-tests/` | `tst_tags` |
 | `tagsui` | `tests/tagsui.pro` | `build/tagsui-tests/` | `tst_tagsui` |
 | `ranges` | `tests/ranges.pro` | `build/ranges-tests/` | `tst_ranges` |

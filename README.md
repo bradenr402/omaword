@@ -23,12 +23,13 @@ Internet is needed only to download a version. Once installed, reading and annot
 
 ## Shortcuts
 
-- `s` or `Ctrl k` searches for a passage.
+- `s` searches Scripture across the current version; `Ctrl k` opens a passage by reference.
+- `/` finds text in the current chapter; `n` / `N` moves between matches (`3n` works). See [search](SEARCH.md).
 - `Ctrl Space` or `Ctrl Shift P` opens Commands. `Space` resumes the last palette.
 - `j` / `k` moves between verses; `h` / `l` moves between chapters. Arrow keys work too.
 - `v` starts visual selection; `j` / `k` extends it. `J` / `K` starts and extends a range immediately.
 - `4j` moves four verses; `20g` goes to verse 20.
-- `m` bookmarks; `x` highlights; `n` writes a note; `t` opens the modal passage tag picker.
+- `m` bookmarks; `x` highlights; `w` writes a note; `t` opens the modal passage tag picker.
 - `Shift E` edits an existing annotation range: choose components, adjust endpoints, `o` swaps, Enter saves, Esc restores. See [range editing](RANGE_EDITING.md).
 - In the tag editor, `Space` / `Enter` toggles a tag; Enter in search creates and applies it.
 - `Ctrl n` toggles Notes; `Ctrl a` toggles Annotations (Bookmarks, Highlights, Notes, Tags).
