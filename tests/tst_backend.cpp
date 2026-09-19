@@ -224,6 +224,59 @@ private slots:
         QCOMPARE(bible->selectionReference(),QString("John 3:36–4:2"));
         bible->moveSelection(-3,true); QCOMPARE(bible->selectionReference(),QString("John 3:35–36"));
     }
+    void quotationReferenceTypography_data() {
+        QTest::addColumn<QString>("input");
+        QTest::addColumn<QString>("label");
+        QTest::newRow("same-chapter") << "REV 3:14-22" << QStringLiteral("Revelation 3:14–22");
+        QTest::newRow("cross-chapter") << "REV 3:22-4:1" << QStringLiteral("Revelation 3:22–4:1");
+        QTest::newRow("cross-book") << "GEN 1:2-REV 3:14" << QStringLiteral("First-Book 1:2–Revelation 3:14");
+        QTest::newRow("hyphenated-book") << "GEN 1:1-2" << QStringLiteral("First-Book 1:1–2");
+        QTest::newRow("single-verse") << "REV 3:14" << QStringLiteral("Revelation 3:14");
+        QTest::newRow("whole-chapter") << "REV 3" << QStringLiteral("Revelation 3");
+    }
+    void quotationReferenceTypography() {
+        QFETCH(QString,input); QFETCH(QString,label);
+        const QString path = fixtures.filePath("quotation-engnet_usfm.zip");
+        QVERIFY(zip(path,{
+            {"01-GENengnet.usfm","\\id GEN Copy Bible\n\\toc2 First-Book\n\\c 1\n\\p\n\\v 1 First-word.\n\\v 2 Last-word.\n"},
+            {"02-REVengnet.usfm","\\id REV Copy Bible\n\\c 3\n\\p\n\\v 14 First-word.\n\\v 15 Middle-word.\n\\v 22 Last-word.\n\\c 4\n\\p\n\\v 1 Next-word.\n"}
+        }));
+        install(path); QVERIFY2(bible->navigate(input),qPrintable(bible->error()));
+        const QString quotation = bible->copySelection();
+        QVERIFY2(quotation.endsWith(QStringLiteral("”\n\n—")+label),qPrintable(quotation));
+        QCOMPARE(QGuiApplication::clipboard()->text(),quotation);
+        QVERIFY(quotation.contains("-word."));
+        const QString plain = bible->copySelection(true);
+        QVERIFY(plain.contains("-word.")); QVERIFY(!plain.contains(label));
+        if (input.contains(':')) {
+            // Copying a verse inside the range must use the same full-range label.
+            QCOMPARE(bible->copyVerse(bible->selectedEnd()),quotation);
+            QCOMPARE(QGuiApplication::clipboard()->text(),quotation);
+        }
+    }
+    void chapterOpeningHeadingsSurviveReload() {
+        const QString path = fixtures.filePath("headings-engnet_usfm.zip");
+        QVERIFY(zip(path,{{"01-REVengnet.usfm",
+            "\\id REV Heading Bible\n\\is1 Introduction\n\\ip Introductory text.\n"
+            "\\c 3\n\\s1 To the Church in Sardis\n\\p\n\\v 1 First.\n"
+            "\\s1 To the Church in Philadelphia\n\\p\n\\v 7 Later.\n"
+            "\\c 4\n\\s1 Revelation 4\n\\p\n\\v 1 Next chapter.\n"
+            "\\c 5\n\\p\n\\v 1 No source heading.\n"}}));
+        install(path);
+        for (int pass = 0; pass < 2; ++pass) {
+            QVERIFY(bible->navigate("REV 3"));
+            QCOMPARE(bible->verses().first().toMap()["heading"].toString(),QString("To the Church in Sardis"));
+            QCOMPARE(bible->verses().last().toMap()["heading"].toString(),QString("To the Church in Philadelphia"));
+            QVERIFY(bible->navigate("REV 4"));
+            QCOMPARE(bible->verses().first().toMap()["heading"].toString(),QString("Revelation 4"));
+            QVERIFY(bible->navigate("REV 5"));
+            QVERIFY(bible->verses().first().toMap()["heading"].toString().isEmpty());
+            if (!pass) {
+                bible.reset(); bible = std::make_unique<BibleBackend>();
+                QVERIFY2(bible->ready(),qPrintable(bible->error()));
+            }
+        }
+    }
     void copyPreservesSourceLayoutAndUnicode() {
         const QString path = fixtures.filePath("copy-engojb_usfm.zip");
         QVERIFY(zip(path,{{"01-GENengojb.usfm",QStringLiteral(
