@@ -2,12 +2,16 @@
 
 ## Entry points
 
-- `s` or the footer search icon opens the palette with `/` prefilled for text search.
+- `s` or the footer search icon opens the palette with `/ ` prefilled for text search.
 - `Ctrl k` or the current-passage button opens reference navigation.
 - `>` selects commands; Space resumes the last palette query, row, and scroll position.
 - `/` in the reader opens a temporary bottom command line in place of the footer.
 - `n` / `N` navigates accepted matches; counts such as `3n` work without wrapping.
 - `w` writes a note. `Ctrl n` still toggles Notes.
+
+Search, Passage, and Commands occupy equal-width tabs below the palette input.
+Typing a bare `/` or `>` appends a space; the recognized prefix is dimmed.
+Result matches use the same accent-colored boxes as reader matches.
 
 Search is offline, Scripture-only, and limited to the active version, including
 all its books. Each window owns its query, results, and current match.
@@ -36,8 +40,10 @@ Chapter find treats the entire input as literal consecutive text, including
 quotation marks. Previous chapter-find text is selected when the prompt opens.
 Preview begins at the focused verse and never falls back to earlier matches.
 Typing scrolls the preview without modifying the annotation selection. Enter
-accepts and focuses its verse/range; without an eligible match the prompt stays
-open. Escape restores the prior viewport and search state.
+accepts and focuses its verse/range. When matches exist only before the cursor,
+Enter accepts the first match in the chapter; this does not change the nonwrapping
+behavior of `n` / `N`. With no matches anywhere, the prompt stays open.
+Escape restores the prior viewport and search state.
 
 Opening `/` from Visual mode first collapses the range to its active endpoint and
 enters Normal mode. Cancelling does not restore Visual mode or that former range.
@@ -50,6 +56,7 @@ navigation; chapter searches remain literal. Starting a preview temporarily
 replaces those highlights; cancellation restores the prior accepted search.
 
 Accepted queries reapply on chapter/version changes without jumping the viewport.
+The accepted query appears above the footer on the left, with its counter on the right.
 Counted motions stop at the first/last available match. Escape in the reader
 clears search before exiting focus mode. The prompt and highlights are available
 in focus mode. Editing text retains ordinary typing keys. Annotation-range

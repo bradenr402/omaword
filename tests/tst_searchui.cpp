@@ -5,12 +5,17 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
+#include <QQuickItemGrabResult>
 #include <QQuickStyle>
+#include <QQuickTextDocument>
 #include <QQuickWindow>
+#include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTextDocument>
 #include <archive.h>
 #include <archive_entry.h>
 #include "biblebackend.h"
+#include "blockdocument.h"
 #include "desktop.h"
 #include "versioncatalog.h"
 
@@ -31,7 +36,7 @@ class SearchUiTest : public QObject
         if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
         QByteArray data = "\\id JHN Original search UI fixture\n\\h John\n\\toc1 John\n\\toc2 John\n";
         for (int chapter = 1; chapter <= 2; ++chapter) {
-            data += QString("\\c %1\n\\p\n").arg(chapter).toUtf8();
+            data += QString("\\c %1\n\\s First source heading\n\\p\n").arg(chapter).toUtf8();
             for (int verse = 1; verse <= 65; ++verse) {
                 QString text = QString("Common original fixture %1:%2. ").arg(chapter).arg(verse);
                 if (verse == 2) text += alternate ? "Changed edition without the word." : "ALPHA and beta with alphabet soup. A bridge begins";
@@ -59,6 +64,24 @@ class SearchUiTest : public QObject
     }
     QQuickItem *item(const QString &name) const { return qobject_cast<QQuickItem *>(object(name)); }
     QVariant prop(const char *name) const { return value(window->property(name)); }
+    static QRectF caret(QObject *body, int position) {
+        QRectF rect;
+        QMetaObject::invokeMethod(body, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, position));
+        return rect;
+    }
+    static QTextDocument *document(QObject *body) {
+        const auto quick = body->property("textDocument").value<QQuickTextDocument *>();
+        return quick ? quick->textDocument() : nullptr;
+    }
+    BlockDocument *blockMapping() const { return window->findChild<BlockDocument *>(); }
+    QRectF verseViewportRect(int verse) const {
+        if (prop("continuousReader").toBool()) {
+            auto body = item("blockBody");
+            return body->mapRectToItem(item("reading"), caret(body, blockMapping()->positionFor(verse)));
+        }
+        auto body = item("verseBody" + QString::number(verse));
+        return body->mapRectToItem(item("reading"), body->boundingRect());
+    }
     void call(const char *method) { QVERIFY(QMetaObject::invokeMethod(window, method)); QCoreApplication::processEvents(); }
     void key(Qt::Key key, Qt::KeyboardModifiers mods = Qt::NoModifier) { QTest::keyClick(window, key, mods); QCoreApplication::processEvents(); }
     void type(const QString &text) { for (const auto c : text) QTest::keyClick(window, c.toLatin1()); QCoreApplication::processEvents(); }
@@ -75,7 +98,7 @@ class SearchUiTest : public QObject
     }
     void search(const QString &query) {
         key(Qt::Key_S); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
-        QCOMPARE(object("referenceInput")->property("text").toString(), QString("/"));
+        QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
 private slots:
@@ -102,14 +125,202 @@ private slots:
         engine.reset(); window = nullptr; catalog.reset(); desktop.reset(); bible.reset(); session.reset();
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
     }
+    void palettePrefixEditing() {
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        for (const auto &prefix : {QString("/"), QString(">")}) {
+            key(Qt::Key_A, Qt::ControlModifier); type(prefix);
+            QCOMPARE(object("referenceInput")->property("text").toString(), prefix + " ");
+            QCOMPARE(object("referenceInput")->property("cursorPosition").toInt(), 2);
+            type("alpha beta");
+            QCOMPARE(object("referenceInput")->property("text").toString(), prefix + " alpha beta");
+            key(Qt::Key_Home); key(Qt::Key_Right); key(Qt::Key_Delete);
+            QCOMPARE(object("referenceInput")->property("text").toString(), prefix + "alpha beta");
+            QCOMPARE(object("referenceInput")->property("cursorPosition").toInt(), 1);
+            key(Qt::Key_End); type(" ");
+            QCOMPARE(object("referenceInput")->property("text").toString(), prefix + "alpha beta ");
+            // Programmatic updates must not trigger the user-edit normalization.
+            object("referenceInput")->setProperty("text", prefix);
+            QCOMPARE(object("referenceInput")->property("text").toString(), prefix);
+        }
+    }
+    void plainSearchResultHighlight() {
+        search("bright"); QCOMPARE(bible->searchResultCount(), 2);
+        QTRY_VERIFY(object("paletteResults")->property("currentItem").value<QQuickItem *>());
+        auto row = object("paletteResults")->property("currentItem").value<QQuickItem *>();
+        QTRY_VERIFY(visual(row, "searchHighlightsCanvas"));
+        auto canvas = visual(row, "searchHighlightsCanvas");
+        auto overlay = canvas->parentItem();
+        auto body = overlay->property("body").value<QQuickItem *>();
+        QVERIFY(body); QVERIFY(document(body));
+        const auto result = bible->searchResults().first().toMap();
+        const QString text = result.value("text").toString();
+        QVERIFY(text.contains("& <bright>"));
+        QCOMPARE(body->property("text").toString(), text);
+        QCOMPARE(document(body)->toPlainText(), text);
+        QCOMPARE(body->property("textFormat").toInt(), 0); // TextEdit.PlainText
+        QVERIFY(body->property("readOnly").toBool());
+        QVERIFY(!body->property("activeFocusOnPress").toBool());
+        QCOMPARE(body->property("color"), desktop->property("foreground"));
+        const auto siblings = body->parentItem()->childItems();
+        QVERIFY(siblings.indexOf(overlay) < siblings.indexOf(body));
+        const auto segments = value(overlay->property("segments")).toList();
+        QVERIFY(!segments.isEmpty());
+        const auto segment = segments.first().toMap();
+        QCOMPARE(text.mid(segment.value("start").toInt(), segment.value("length").toInt()), QString("bright"));
+        QVariant rect;
+        QVERIFY(QMetaObject::invokeMethod(overlay, "rectFor", Q_RETURN_ARG(QVariant, rect),
+            Q_ARG(QVariant, segment.value("start")), Q_ARG(QVariant, segment.value("length"))));
+        QVERIFY(rect.toRectF().width() > 0);
+        QTest::qWait(60);
+        auto grab = canvas->grabToImage(); QVERIFY(grab);
+        QSignalSpy ready(grab.get(), &QQuickItemGrabResult::ready);
+        if (grab->image().isNull()) QVERIFY(ready.wait(3000));
+        const auto image = grab->image(); QVERIFY(!image.isNull());
+        const auto pixel = image.pixelColor(rect.toRectF().center().toPoint());
+        const auto accent = desktop->property("accent").value<QColor>();
+        QVERIFY(pixel.alpha() > 0);
+        QVERIFY(qAbs(pixel.red() - accent.red()) <= 3);
+        QVERIFY(qAbs(pixel.green() - accent.green()) <= 3);
+        QVERIFY(qAbs(pixel.blue() - accent.blue()) <= 3);
+    }
+    void searchQueryStatus() {
+        QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
+        QVERIFY(!item("searchQueryLabel")->isVisible());
+        find("<bright>"); key(Qt::Key_Return);
+        QTRY_VERIFY(item("searchQueryLabel")->isVisible());
+        QCOMPARE(object("searchQueryLabel")->property("text").toString(), QString("/ <bright>"));
+        QCOMPARE(object("searchQueryLabel")->property("textFormat").toInt(), 0);
+        for (bool focus : {false, true}) {
+            bible->setFocusMode(focus); QCoreApplication::processEvents();
+            const auto query = item("searchQueryLabel")->mapRectToScene(item("searchQueryLabel")->boundingRect());
+            const auto count = item("searchMatchCount")->mapRectToScene(item("searchMatchCount")->boundingRect());
+            QVERIFY(query.left() < window->width() / 4);
+            QVERIFY(query.top() > window->height() / 2);
+            QVERIFY(query.right() < count.left());
+            QVERIFY(qAbs(query.top() - count.top()) <= 1);
+        }
+        call("readerFocus"); key(Qt::Key_Escape);
+        QVERIFY(!item("searchQueryLabel")->isVisible()); QVERIFY(bible->focusMode());
+    }
+    void alignVerseChords_data() { rendererNavigation_data(); }
+    void alignVerseChords() {
+        QFETCH(QString, mode); bible->setReadingMode(mode);
+        navigate("John 1:35");
+        const auto scope = bible->tagScope();
+        const double available = item("reading")->height() - prop("floatingSafety").toDouble();
+        for (const auto suffix : {Qt::Key_Z, Qt::Key_T, Qt::Key_B}) {
+            const double before = object("reading")->property("contentY").toDouble();
+            key(Qt::Key_Z);
+            QCOMPARE(object("reading")->property("contentY").toDouble(), before);
+            key(suffix);
+            const auto rect = verseViewportRect(35);
+            const double expected = suffix == Qt::Key_T ? 0 : suffix == Qt::Key_B
+                ? available - rect.height() : (available - rect.height()) / 2;
+            QVERIFY2(qAbs(rect.top() - expected) <= 1,
+                qPrintable(QString("%1: top %2, expected %3").arg(mode).arg(rect.top()).arg(expected)));
+            QCOMPARE(bible->tagScope(), scope); QCOMPARE(bible->cursorVerse(), 35);
+            QCOMPARE(bible->readingMode(), mode);
+            QVERIFY(!object("tagsUi")->property("visibleModal").toBool());
+            QVERIFY(!object("relatedDrawer")->property("visible").toBool());
+        }
+        // Single-key actions remain available after the chord has completed.
+        key(Qt::Key_B); QVERIFY(bible->readingMode() != mode);
+        key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+    }
+    void alignmentInputGuardsAndCatalog() {
+        navigate("John 1:35");
+        const auto scope = bible->tagScope();
+        for (const auto &context : {QString("notes"), QString("palette"), QString("find"), QString("keybindings")}) {
+            if (context == "notes") key(Qt::Key_W);
+            else if (context == "palette") key(Qt::Key_K, Qt::ControlModifier);
+            else if (context == "find") key(Qt::Key_Slash);
+            else key(Qt::Key_F1);
+            auto input = item(context == "notes" ? "noteEditor" : context == "palette" ? "referenceInput"
+                : context == "find" ? "chapterFindInput" : "keybindingSearch");
+            QTRY_VERIFY2(input->hasActiveFocus(), qPrintable(context));
+            const double y = object("reading")->property("contentY").toDouble();
+            type("zzztzb");
+            QCOMPARE(input->property("text").toString(), QString("zzztzb"));
+            QCOMPARE(object("reading")->property("contentY").toDouble(), y);
+            QCOMPARE(bible->tagScope(), scope); QCOMPARE(bible->readingMode(), QString("verse"));
+            key(Qt::Key_Escape);
+            if (context == "palette") key(Qt::Key_Escape);
+            if (context == "notes") QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+            else if (context == "palette") QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+            else if (context == "find") QTRY_VERIFY(!prop("findPromptOpen").toBool());
+            else QTRY_VERIFY(!object("helpDialog")->property("visible").toBool());
+        }
+        key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        for (const auto &title : {QString("Center current verse"), QString("Scroll current verse to top"), QString("Scroll current verse to bottom")}) {
+            key(Qt::Key_A, Qt::ControlModifier); type(title);
+            QTRY_VERIFY(item("keybinding" + title));
+            QVERIFY(item("keybinding" + title)->isEnabled());
+        }
+        key(Qt::Key_Return); QTRY_VERIFY(!object("helpDialog")->property("visible").toBool());
+        const auto rect = verseViewportRect(35);
+        QVERIFY(qAbs(rect.bottom() - (item("reading")->height() - prop("floatingSafety").toDouble())) <= 1);
+        QCOMPARE(bible->tagScope(), scope);
+    }
+    void firstSourceHeading_data() { rendererNavigation_data(); }
+    void firstSourceHeading() {
+        QFETCH(QString, mode); bible->setReadingMode(mode); bible->setShowHeadings(true);
+        navigate("John 1:1");
+        const auto heading = bible->verses().first().toMap().value("heading").toString();
+        QCOMPARE(heading, QString("First source heading"));
+        if (mode == "verse") {
+            QTRY_VERIFY(item("verseHeading1") && item("verseHeading1")->height() > 0);
+            QVERIFY(item("verseHeading1")->isVisible());
+            QQuickItem *text = nullptr;
+            for (auto child : item("verseHeading1")->childItems())
+                if (child->property("text").toString() == heading) text = child;
+            QVERIFY(text); QVERIFY(text->isVisible()); QVERIFY(text->height() > 0);
+        } else {
+            QTRY_VERIFY(blockMapping() && item("blockBody") && document(item("blockBody")));
+            QTRY_VERIFY(document(item("blockBody"))->toPlainText().startsWith(heading));
+            QVERIFY(blockMapping()->positionFor(1) >= heading.size());
+        }
+    }
+    void sourceOffsetNavigation_data() { rendererNavigation_data(); }
+    void sourceOffsetNavigation() {
+        QFETCH(QString, mode); bible->setReadingMode(mode); navigate("John 1:1");
+        find("<bright>"); key(Qt::Key_Return);
+        QCOMPARE(bible->cursorVerse(), 3);
+        const auto segments = prop("searchSegments").toList(); QCOMPARE(segments.size(), 1);
+        const auto segment = segments.first().toMap();
+        const auto source = bible->verses().at(2).toMap().value("text").toString();
+        const int start = source.indexOf("<bright>"); QVERIFY(start > 0);
+        QCOMPARE(segment.value("start").toInt(), start);
+        QCOMPARE(segment.value("length").toInt(), 8);
+        QQuickItem *body = item(mode == "verse" ? "verseBody3" : "blockBody");
+        QVERIFY(body); QVERIFY(document(body));
+        const auto plain = document(body)->toPlainText();
+        const int renderedStart = plain.indexOf("<bright>"); QVERIFY(renderedStart >= 0);
+        QRectF highlight;
+        if (mode == "verse") {
+            QVariant rect;
+            QVERIFY(QMetaObject::invokeMethod(item("verseSearch3"), "rectFor", Q_RETURN_ARG(QVariant, rect),
+                Q_ARG(QVariant, start), Q_ARG(QVariant, 8)));
+            highlight = rect.toRectF();
+        } else highlight = blockMapping()->searchRect(segment);
+        QVERIFY(highlight.width() > 0);
+        const auto native = caret(body, renderedStart);
+        QVERIFY(qAbs(highlight.x() - native.x()) <= 1);
+        QVERIFY(qAbs(highlight.y() - native.y()) <= 1);
+        const auto viewport = body->mapRectToItem(item("reading"), highlight);
+        QVERIFY(viewport.top() >= 0); QVERIFY(viewport.bottom() <= item("reading")->height());
+        const auto scope = bible->tagScope();
+        key(Qt::Key_N); QCOMPARE(bible->tagScope(), scope);
+        key(Qt::Key_N, Qt::ShiftModifier); QCOMPARE(bible->tagScope(), scope);
+        QCOMPARE(document(body)->toPlainText(), plain);
+    }
     void bibleQueriesAndResume() {
         const auto original = bible->tagScope();
         search("alpha beta"); QCOMPARE(bible->searchResultCount(), 8); QCOMPARE(bible->tagScope(), original);
         QVERIFY(!item("referencePreview")->isVisible());
         key(Qt::Key_Down); const int row = object("paletteResults")->property("currentIndex").toInt();
-        key(Qt::Key_Escape); QCOMPARE(object("referenceInput")->property("text").toString(), QString("/"));
+        key(Qt::Key_Escape); QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
-        key(Qt::Key_Space); QTRY_COMPARE(object("referenceInput")->property("text").toString(), QString("/alpha beta"));
+        key(Qt::Key_Space); QTRY_COMPARE(object("referenceInput")->property("text").toString(), QString("/ alpha beta"));
         QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
         QTRY_COMPARE(object("paletteResults")->property("currentIndex").toInt(), row);
         key(Qt::Key_Return); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
@@ -188,6 +399,21 @@ private slots:
         for (const auto &segment : prop("searchSegments").toList()) QVERIFY(!segment.toMap().value("active").toBool());
         if (matches) QCOMPARE(object("chapterFindCount")->property("text").toString(), QString("No matches after cursor"));
         key(Qt::Key_Return);
+        if (matches) {
+            QTRY_VERIFY(!prop("findPromptOpen").toBool());
+            QCOMPARE(bible->cursorVerse(), 2);
+            QCOMPARE(prop("searchMatchIndex").toInt(), 0);
+            QCOMPARE(prop("acceptedSearchQuery").toString(), query);
+            QCOMPARE(prop("chapterQueryHistory").toString(), query);
+            QVERIFY(prop("searchError").toString().isEmpty());
+            key(Qt::Key_N, Qt::ShiftModifier);
+            QCOMPARE(bible->cursorVerse(), 2);
+            QCOMPARE(object("toast")->property("text").toString(), QString("First match"));
+            key(Qt::Key_9); key(Qt::Key_N); QCOMPARE(bible->cursorVerse(), 50);
+            key(Qt::Key_N); QCOMPARE(bible->cursorVerse(), 50);
+            QCOMPARE(object("toast")->property("text").toString(), QString("Last match"));
+            return;
+        }
         QVERIFY(prop("findPromptOpen").toBool()); QVERIFY(item("chapterFindInput")->hasActiveFocus());
         QCOMPARE(bible->tagScope(), scope); QCOMPARE(bible->cursorVerse(), 60);
         QCOMPARE(object("reading")->property("contentY").toDouble(), y);
@@ -266,13 +492,21 @@ private slots:
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
         const auto scope = bible->tagScope(); key(Qt::Key_Slash); key(Qt::Key_S); key(Qt::Key_N);
         QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!object("passagePalette")->property("visible").toBool());
+        const auto y = object("reading")->property("contentY");
+        for (auto suffix : {Qt::Key_Z, Qt::Key_T, Qt::Key_B}) {
+            key(Qt::Key_Z); key(suffix);
+            QCOMPARE(object("reading")->property("contentY"), y);
+            QCOMPARE(bible->readingMode(), QString("verse"));
+            QCOMPARE(bible->tagScope(), scope);
+            QVERIFY(prop("rangeEditing").toBool());
+        }
         QCOMPARE(bible->tagScope(), scope); key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
         find("\"alpha\""); QCOMPARE(prop("searchMatches").toList().size(), 0); QVERIFY(prop("searchError").toString().isEmpty());
         key(Qt::Key_Escape);
         search("beta"); const auto original = bible->tagScope(); window->setProperty("noteConflict", true);
         object("noteEditor")->setProperty("text", "Unsaved conflict draft");
         key(Qt::Key_Return); QVERIFY(object("passagePalette")->property("visible").toBool());
-        QCOMPARE(bible->tagScope(), original); QCOMPARE(object("referenceInput")->property("text").toString(), QString("/beta"));
+        QCOMPARE(bible->tagScope(), original); QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ beta"));
         QCOMPARE(prop("acceptedSearchQuery").toString(), QString("ALPh"));
     }
 };

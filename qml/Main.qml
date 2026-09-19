@@ -289,6 +289,10 @@ ApplicationWindow {
     function acceptChapterFind(query) {
         if (!findPromptOpen || !flushNote()) return
         previewChapterFind(query)
+        if (searchMatchIndex < 0 && searchMatches.length) {
+            searchMatchIndex = 0
+            searchError = ""
+        }
         if (searchError.length) return
         const match = searchActiveMatch
         if (!query.trim().length || !match || !focusSearchMatch(match)) return
@@ -365,8 +369,8 @@ ApplicationWindow {
     function openTextSearch() {
         if (rangeEditing || !bible.ready || !flushNote()) return
         openPalette(false)
-        referenceInput.text = "/"
-        referenceInput.cursorPosition = 1
+        referenceInput.text = "/ "
+        referenceInput.cursorPosition = 2
     }
     function scheduleBibleSearch() {
         pendingSearchResume = null
@@ -414,20 +418,6 @@ ApplicationWindow {
         passagePalette.navigated = true; passagePalette.close(); readerFocus()
         positionTimer.stop(); restoringPosition = false
         Qt.callLater(function() { app.scrollSearchMatch(entry); app.savePosition() })
-    }
-    function searchResultHtml(entry) {
-        const text = entry.text || ""
-        const escape = function(value) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\n/g, "<br>") }
-        const ranges = Array.from(entry.displaySegments || []).sort(function(a, b) { return a.start - b.start })
-        let html = "", offset = 0
-        for (const range of ranges) {
-            const start = Math.max(offset, Math.min(text.length, range.start))
-            const end = Math.min(text.length, range.start + range.length)
-            if (end <= start) continue
-            html += escape(text.substring(offset, start)) + "<b><u>" + escape(text.substring(start, end)) + "</u></b>"
-            offset = end
-        }
-        return html + escape(text.substring(offset))
     }
     Timer { id: bibleSearchTimer; interval: 150; onTriggered: app.submitBibleSearch() }
     Timer { id: searchRefreshTimer; interval: 0; onTriggered: app.refreshAcceptedSearch() }
@@ -953,7 +943,7 @@ ApplicationWindow {
         let query = commands || textMode ? referenceInput.text.trim().substring(1).trim() : referenceInput.text.trim()
         if (query.length) {
             rememberPalette()
-            referenceInput.text = commands ? "> " : textMode ? "/" : ""
+            referenceInput.text = commands ? "> " : textMode ? "/ " : ""
             paletteCleared = true
         } else passagePalette.close()
     }
@@ -1043,6 +1033,23 @@ ApplicationWindow {
         if (alignTop || y < target + margin) target = y - margin
         else if (y + extent > target + available - margin) target = y + extent - available + margin
         reading.contentY = Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), target))
+    }
+    function alignCurrentVerse(alignment) {
+        positionTimer.stop()
+        restoringPosition = false
+        readerColumn.forceLayout()
+        const index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === bible.cursorVerse })
+        const row = verseRepeater.itemAt(index) as VerseItem
+        const block = blockLoader.item as BlockReader
+        if (!row && !block) return
+        const rect = block ? block.verseRect(bible.cursorVerse) : null
+        const y = block ? blockLoader.mapToItem(readerColumn, 0, rect.y).y
+            : row.mapToItem(readerColumn, 0, row.textOffset).y
+        const height = block ? rect.height : row.textHeight
+        const available = Math.max(1, reading.height - floatingSafety)
+        const offset = alignment === "top" ? 0 : alignment === "bottom" ? available - height : (available - height) / 2
+        reading.contentY = Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), y - Math.max(0, offset)))
+        savePosition()
     }
     function restorePosition(jumpToSelection) {
         restoringPosition = true
@@ -1264,6 +1271,9 @@ ApplicationWindow {
         { id: "books", title: "Search for a passage", keys: "Ctrl k", sequences: ["Ctrl+K"], scope: "palette", command: true },
         { id: "bibleSearch", title: "Search Bible", keys: "s", sequences: ["S"], command: true },
         { id: "chapterFind", title: "Find in chapter", keys: "/", sequences: ["/"], command: true },
+        { id: "centerVerse", title: "Center current verse", keys: "zz", sequences: ["Z, Z"], command: true },
+        { id: "topVerse", title: "Scroll current verse to top", keys: "zt", sequences: ["Z, T"], command: true },
+        { id: "bottomVerse", title: "Scroll current verse to bottom", keys: "zb", sequences: ["Z, B"], command: true },
         { id: "nextMatch", title: "Next search match", keys: "n", sequences: ["N"] },
         { id: "previousMatch", title: "Previous search match", keys: "Shift N", sequences: ["Shift+N"] },
         { id: "commands", title: "Open commands", keys: "Ctrl Space · Ctrl Shift P", sequences: ["Ctrl+Space", "Ctrl+Shift+P"], scope: "palette" },
@@ -1485,6 +1495,9 @@ ApplicationWindow {
         case "books": openPalette(false); break
         case "bibleSearch": openTextSearch(); break
         case "chapterFind": beginChapterFind(); break
+        case "centerVerse": alignCurrentVerse("center"); break
+        case "topVerse": alignCurrentVerse("top"); break
+        case "bottomVerse": alignCurrentVerse("bottom"); break
         case "nextMatch": navigateSearch(1, count); break
         case "previousMatch": navigateSearch(-1, count); break
         case "commands": openPalette(true); break
@@ -1809,8 +1822,8 @@ ApplicationWindow {
                     ctx.lineJoin = "miter"
                     ctx.beginPath()
                     if (glyph === "search") {
-                        ctx.arc(10, 10, 6, 0, 2 * Math.PI)
-                        ctx.moveTo(14.5, 14.5); ctx.lineTo(21, 21)
+                        ctx.arc(10.5, 10.5, 7, 0, 2 * Math.PI)
+                        ctx.moveTo(15.45, 15.45); ctx.lineTo(20, 20)
                     } else if (glyph === "help") {
                         ctx.moveTo(8, 7); ctx.bezierCurveTo(8, 1, 19, 2, 16, 9)
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
@@ -2069,7 +2082,6 @@ ApplicationWindow {
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
 
-                        SectionLabel { objectName: "editionLabel"; visible: !bible.focusMode; text: bible.edition.toUpperCase(); width: parent.width; wrapMode: Text.Wrap; leftPadding: app.verseGutter; bottomPadding: 12 }
                         Label {
                             objectName: "chapterTitle"
                             text: bible.passage
@@ -2697,6 +2709,7 @@ ApplicationWindow {
         onCanceled: app.cancelChapterFind()
     }
     Label {
+        id: searchMatchCount
         objectName: "searchMatchCount"
         anchors.right: parent.right; anchors.bottom: parent.bottom
         anchors.rightMargin: 20 * app.controlScale
@@ -2704,6 +2717,16 @@ ApplicationWindow {
         visible: !app.findPromptOpen && app.acceptedSearchQuery.length > 0
         text: app.searchError || (app.searchMatches.length ? (app.searchMatchIndex < 0
             ? app.searchMatches.length + " matches" : (app.searchMatchIndex + 1) + " / " + app.searchMatches.length) : "No matches")
+        color: desktop.muted; font.pixelSize: 12 * app.scale
+    }
+    Label {
+        objectName: "searchQueryLabel"
+        anchors.left: parent.left; anchors.right: searchMatchCount.left
+        anchors.leftMargin: 20 * app.controlScale; anchors.rightMargin: 16 * app.controlScale
+        anchors.baseline: searchMatchCount.baseline
+        visible: searchMatchCount.visible
+        text: "/ " + app.acceptedSearchQuery
+        textFormat: Text.PlainText; elide: Text.ElideRight
         color: desktop.muted; font.pixelSize: 12 * app.scale
     }
 
@@ -2943,6 +2966,27 @@ ApplicationWindow {
                         app.paletteCleared = false; app.paletteArrowUsed = false
                         app.scheduleBibleSearch(); paletteResults.currentIndex = 0
                     }
+                    onTextEdited: {
+                        if (text === "/" || text === ">") { text += " "; cursorPosition = text.length }
+                    }
+                    // Dim only the recognized prefix, retaining native input,
+                    // cursor movement, selection, and horizontal scrolling.
+                    Item {
+                        anchors.fill: parent
+                        anchors.leftMargin: referenceInput.leftPadding
+                        anchors.rightMargin: referenceInput.rightPadding
+                        clip: true
+                        Rectangle {
+                            readonly property rect prefixRect: referenceInput.positionToRectangle(0)
+                            x: prefixRect.x - referenceInput.leftPadding
+                            y: prefixRect.y
+                            width: referenceInput.positionToRectangle(1).x - prefixRect.x
+                            height: prefixRect.height
+                            color: desktop.surface; opacity: 0.55
+                            visible: (referenceInput.text.startsWith("/") || referenceInput.text.startsWith(">"))
+                                && referenceInput.selectionStart === referenceInput.selectionEnd
+                        }
+                    }
                     onAccepted: app.acceptPalette()
                     Keys.onDownPressed: app.movePalette(1)
                     Keys.onUpPressed: app.movePalette(-1)
@@ -2961,8 +3005,14 @@ ApplicationWindow {
                     Keys.onEscapePressed: app.escapePalette()
                     Accessible.name: "Passage reference, / Bible search, or > command"
                 }
-                QuietButton { objectName: "paletteBooks"; text: "Search"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.openPalette(false) }
-                QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.preferredHeight: referenceInput.implicitHeight; emphasized: referenceInput.text.startsWith(">"); onClicked: app.openPalette(true) }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 4 * app.scale
+                uniformCellSizes: true
+                QuietButton { objectName: "paletteSearch"; text: "Search"; Layout.fillWidth: true; emphasized: app.paletteTextMode; enabled: bible.ready; onClicked: app.openTextSearch() }
+                QuietButton { objectName: "paletteBooks"; text: "Passage"; Layout.fillWidth: true; emphasized: !app.paletteTextMode && !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.openPalette(false) }
+                QuietButton { objectName: "paletteCommands"; text: "Commands"; Layout.fillWidth: true; emphasized: referenceInput.text.startsWith(">"); onClicked: app.openPalette(true) }
             }
             Label {
                 objectName: "referencePreview"
@@ -3028,12 +3078,24 @@ ApplicationWindow {
                                 Layout.leftMargin: 8
                             }
                         }
-                        Label {
+                        Item {
                             visible: app.paletteTextMode
                             Layout.fillWidth: true
-                            text: app.paletteTextMode ? app.searchResultHtml(paletteEntry.modelData) : ""
-                            textFormat: Text.RichText; wrapMode: Text.Wrap
-                            color: desktop.foreground; font.pixelSize: 13 * app.scale
+                            implicitHeight: resultText.contentHeight
+                            SearchHighlights {
+                                anchors.fill: resultText
+                                body: resultText; sourceText: resultText.text; theme: desktop
+                                segments: paletteEntry.modelData.displaySegments || []
+                            }
+                            TextEdit {
+                                id: resultText
+                                width: parent.width; height: contentHeight
+                                text: app.paletteTextMode ? paletteEntry.modelData.text || "" : ""
+                                textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap
+                                readOnly: true; selectByMouse: false; activeFocusOnPress: false
+                                enabled: false
+                                color: desktop.foreground; font.pixelSize: 13 * app.scale
+                            }
                         }
                     }
                     background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: paletteEntry.highlighted ? app.tint(desktop.accent, 0.11) : paletteEntry.hovered ? desktop.surface : "transparent" }

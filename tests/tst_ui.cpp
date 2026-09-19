@@ -1863,20 +1863,31 @@ private slots:
                 QVERIFY(window->property("paletteTextMode").toBool());
                 QVERIFY(!item("referencePreview")->isVisible());
                 QVERIFY(!item("paletteBack")->isVisible());
-                QVERIFY(prop("paletteBooks","emphasized").toBool());
+                QCOMPARE(prop("referenceInput","text").toString(),QString("/ "));
+                QVERIFY(prop("paletteSearch","emphasized").toBool());
+                QVERIFY(!prop("paletteBooks","emphasized").toBool());
             }
-            auto previous = inputBounds;
-            for (const auto name : {"paletteBooks","paletteCommands"}) {
+            QRectF previous;
+            const auto tabs = item("paletteSearch")->parentItem();
+            QVERIFY(tabs->property("uniformCellSizes").toBool());
+            const double tabWidth = (inputBounds.width() - 2 * tabs->property("spacing").toDouble()) / 3;
+            for (const auto name : {"paletteSearch","paletteBooks","paletteCommands"}) {
                 const auto button = item(name);
                 const auto bounds = button->mapRectToScene(button->boundingRect());
-                QCOMPARE(bounds.height(),inputBounds.height());
-                QCOMPARE(bounds.top(),inputBounds.top());
-                QVERIFY(bounds.left() > previous.right());
+                QVERIFY(bounds.top() > inputBounds.bottom());
+                QVERIFY(qAbs(bounds.width() - tabWidth) <= 1);
+                if (previous.isNull()) QCOMPARE(bounds.left(),inputBounds.left());
+                else {
+                    QCOMPARE(bounds.top(),previous.top());
+                    QCOMPARE(bounds.height(),previous.height());
+                    QVERIFY(bounds.left() > previous.right());
+                }
                 QVERIFY(QRectF(16,16,608,448).contains(bounds));
                 const auto label = qvariant_cast<QQuickItem *>(button->property("contentItem"));
                 QVERIFY(label->width() >= label->implicitWidth());
                 previous = bounds;
             }
+            QVERIFY(qAbs(previous.right() - inputBounds.right()) <= 1);
             QVERIFY(QRectF(16,16,608,448).contains(inputBounds));
             QVERIFY(item("paletteResults")->height() >= 40);
             const auto hints = item("paletteHints");
@@ -2492,7 +2503,7 @@ private slots:
         QTRY_VERIFY(!doc->toPlainText().contains("A section title"));
         QVERIFY(doc->toPlainText().startsWith("Start café"));
         QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings());
-        QVERIFY(item("chapterTitle")->isVisible()); QVERIFY(!item("editionLabel")->isVisible());
+        QVERIFY(item("chapterTitle")->isVisible()); QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
         unloadUi(); loadUi();
         QVERIFY(bible->blockMode()); QVERIFY(bible->focusMode());
         QVERIFY2(bible->ready(),qPrintable(bible->error()));
@@ -2965,7 +2976,8 @@ private slots:
             QCOMPARE(prop("focusedErrorMessage","text").toString(),bible->error());
             QVERIFY(item("focusedErrorMessage")->isVisible());
             QVERIFY(bible->focusMode());
-            for (const auto name : {"errorMessage","floatingActions","editionLabel"}) QVERIFY(!item(name)->isVisible());
+            for (const auto name : {"errorMessage","floatingActions"}) QVERIFY(!item(name)->isVisible());
+            QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
             capture(importing ? "review-focused-import-error" : "review-focused-export-error");
             key(Qt::Key_Escape); QTRY_VERIFY(!prop("errorDialog","visible").toBool());
             QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
@@ -3150,7 +3162,8 @@ private slots:
         bible->setFocusMode(true);
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
-        for (const auto name : {"editionLabel","readingBottomFade","readerScrollbar","notesPanel","modeControl","passageControl","floatingActions","bookmarkMarker1","toast"})
+        QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
+        for (const auto name : {"readingBottomFade","readerScrollbar","notesPanel","modeControl","passageControl","floatingActions","bookmarkMarker1","toast"})
             QVERIFY2(!item(name)->isVisible(),name);
         QCOMPARE(item("reading")->width(),double(window->width()));
         QVERIFY(item("verseBody1")->isVisible());
@@ -3173,6 +3186,7 @@ private slots:
         QVERIFY(item("bookmarkMarker1")->isVisible());
     }
     void readerScrollbarAndHeader() {
+        QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
         reference("John 3:36");
         key(Qt::Key_J);
         QTRY_COMPARE(bible->chapter(),4);
@@ -3183,7 +3197,7 @@ private slots:
         auto bar = item("readerScrollbar");
         auto thumb = item("readerScrollbarThumb");
         QVERIFY(bar->isVisible());
-        QVERIFY(bar->y() + bar->height() < item("modeControl")->y());
+        QVERIFY(bar->mapRectToScene(bar->boundingRect()).bottom() < item("modeControl")->mapToScene(QPointF()).y());
         QTest::mouseMove(window,QPoint(2,2));
         QTRY_COMPARE(thumb->width(),4.0);
         QTest::mouseMove(window,bar->mapToScene(QPointF(bar->width()/2,20)).toPoint());
@@ -3254,7 +3268,7 @@ private slots:
         capture("omaword-refined-controls-" + QString::fromLatin1(QTest::currentDataTag()));
         click(search);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
-        QCOMPARE(prop("referenceInput","text").toString(),QString("/"));
+        QCOMPARE(prop("referenceInput","text").toString(),QString("/ "));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         click(passage);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
@@ -3483,7 +3497,7 @@ private slots:
         };
         key(Qt::Key_F); QVERIFY(bible->focusMode()); checkToast("Focus mode on");
         QVERIFY(item("chapterTitle")->isVisible());
-        QVERIFY(!item("editionLabel")->isVisible());
+        QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
         QVERIFY(!item("floatingActions")->isVisible());
         QVERIFY(!item("verseHeading1")->isVisible());
         QVERIFY(!item("verseNumberLabel1")->isVisible());
@@ -4222,7 +4236,7 @@ private slots:
         QVERIFY(bible->noteText().isEmpty()); QVERIFY(!bible->selectionBookmarked());
         QVERIFY(bodyText(16) != netText);
         QCOMPARE(prop("versionControl","text").toString(),QString("KJV"));
-        QCOMPARE(prop("editionLabel","text").toString(),bible->edition().toUpper());
+        QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
         QVERIFY(QFile::remove(source));
         QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"about")));
         QTRY_VERIFY(prop("aboutDialog","opened").toBool());
