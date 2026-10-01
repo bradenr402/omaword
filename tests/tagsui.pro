@@ -1,4 +1,4 @@
-QT += core gui widgets qml quick quickcontrols2 sql concurrent dbus network testlib
+QT += core gui widgets qml quick quickcontrols2 sql concurrent dbus network multimedia testlib
 CONFIG += c++17 testcase link_pkgconfig
 PKGCONFIG += libarchive fontconfig
 TEMPLATE = app
@@ -13,3 +13,5 @@ HEADERS += ../src/desktop.h ../src/versioncatalog.h ../src/blockdocument.h
 RESOURCES += ../resources.qrc
 SOURCES += ../src/scripturesearch.cpp ../src/searchdocument.cpp
 HEADERS += ../src/scripturesearch.h ../src/searchdocument.h
+SOURCES += ../src/soundeffects.cpp
+HEADERS += ../src/soundeffects.h

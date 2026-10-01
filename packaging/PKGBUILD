@@ -6,7 +6,7 @@ pkgrel=1
 pkgdesc='Offline Bible reader with USFM downloads, bookmarks, highlights, and Markdown notes'
 arch=('x86_64' 'aarch64')
 license=('MIT')
-depends=('qt6-base' 'qt6-declarative' 'libarchive' 'fontconfig')
+depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'libarchive' 'fontconfig')
 makedepends=('gcc' 'make' 'pkgconf')
 optdepends=('qt6-wayland: native Wayland support')
 # Sources are the enclosing checkout, including uncommitted changes. No remote

@@ -2,6 +2,7 @@
 #include "biblebackend.h"
 #include "brand.h"
 #include "desktop.h"
+#include "soundeffects.h"
 #include "versioncatalog.h"
 #include <QPointer>
 #include <QQmlApplicationEngine>
@@ -12,7 +13,7 @@
 #include <memory>
 
 WindowManager::WindowManager(Desktop *desktop, QObject *parent, QUrl source)
-    : QObject(parent), m_desktop(desktop), m_source(std::move(source)) {}
+    : QObject(parent), m_desktop(desktop), m_sounds(new SoundEffects(this)), m_source(std::move(source)) {}
 
 WindowManager::~WindowManager()
 {
@@ -37,6 +38,7 @@ WindowManager::Reader *WindowManager::createWindow()
     auto *catalog = new VersionCatalog(this);
     auto *engine = new QQmlApplicationEngine(this);
     engine->rootContext()->setContextProperty(QStringLiteral("desktop"), m_desktop);
+    engine->rootContext()->setContextProperty(QStringLiteral("sounds"), m_sounds);
     engine->rootContext()->setContextProperty(QStringLiteral("bible"), bible);
     engine->rootContext()->setContextProperty(QStringLiteral("catalog"), catalog);
     engine->rootContext()->setContextProperty(QStringLiteral("windows"), this);

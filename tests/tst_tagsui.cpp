@@ -16,6 +16,7 @@
 #include <archive_entry.h>
 #include "biblebackend.h"
 #include "desktop.h"
+#include "soundeffects.h"
 #include "versioncatalog.h"
 
 // Original miniature USFM editions, real personal.sqlite and real backend calls.
@@ -673,6 +674,7 @@ ApplicationWindow {
         QVERIFY(bible->switchVersion("engnet"));
         root.reset(); engine.reset(); window = nullptr; panel = nullptr;
         Desktop desktop;
+        SoundEffects sounds(nullptr, session->filePath("sound.ini"), false);
         VersionCatalog catalog;
         // QVERIFY/QCOMPARE can return early: destroy QML before its context objects.
         const auto cleanupQml = qScopeGuard([this] {
@@ -684,6 +686,7 @@ ApplicationWindow {
         });
         engine->rootContext()->setContextProperty("bible", bible.get());
         engine->rootContext()->setContextProperty("desktop", &desktop);
+        engine->rootContext()->setContextProperty("sounds", &sounds);
         engine->rootContext()->setContextProperty("catalog", &catalog);
         QQmlComponent component(engine.get(), QUrl("qrc:/qml/Main.qml"));
         root.reset(component.create());
@@ -760,6 +763,7 @@ ApplicationWindow {
     void mainIntegrationVisualCompletionAndDraft() {
         root.reset(); engine.reset(); window = nullptr; panel = nullptr;
         Desktop desktop;
+        SoundEffects sounds(nullptr, session->filePath("sound.ini"), false);
         VersionCatalog catalog;
         const auto cleanupQml = qScopeGuard([this] {
             root.reset(); engine.reset(); window = nullptr; panel = nullptr;
@@ -770,6 +774,7 @@ ApplicationWindow {
         });
         engine->rootContext()->setContextProperty("bible", bible.get());
         engine->rootContext()->setContextProperty("desktop", &desktop);
+        engine->rootContext()->setContextProperty("sounds", &sounds);
         engine->rootContext()->setContextProperty("catalog", &catalog);
         QQmlComponent component(engine.get(), QUrl("qrc:/qml/Main.qml"));
         root.reset(component.create());

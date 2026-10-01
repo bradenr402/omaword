@@ -15,6 +15,7 @@
 #include <archive_entry.h>
 #include "biblebackend.h"
 #include "desktop.h"
+#include "soundeffects.h"
 #include "versioncatalog.h"
 
 // Packaged Main, real backend transactions, two miniature original editions.
@@ -25,6 +26,7 @@ class RangesUiTest : public QObject
     std::unique_ptr<QTemporaryDir> session;
     std::unique_ptr<BibleBackend> bible;
     std::unique_ptr<Desktop> desktop;
+    std::unique_ptr<SoundEffects> sounds;
     std::unique_ptr<VersionCatalog> catalog;
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
@@ -155,11 +157,12 @@ private slots:
     void init() {
         session = std::make_unique<QTemporaryDir>(); qputenv("XDG_DATA_HOME", session->path().toUtf8());
         bible = std::make_unique<BibleBackend>(); install(net); bible->setReadingMode("verse");
-        desktop = std::make_unique<Desktop>(); catalog = std::make_unique<VersionCatalog>();
+        desktop = std::make_unique<Desktop>(); sounds = std::make_unique<SoundEffects>(nullptr, session->filePath("sound.ini"), false); catalog = std::make_unique<VersionCatalog>();
         engine = std::make_unique<QQmlApplicationEngine>(); warnings.clear();
         connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) { for (const auto &e : errors) warnings << e.toString(); });
         engine->rootContext()->setContextProperty("bible", bible.get());
         engine->rootContext()->setContextProperty("desktop", desktop.get());
+        engine->rootContext()->setContextProperty("sounds", sounds.get());
         engine->rootContext()->setContextProperty("catalog", catalog.get());
         engine->load(QUrl("qrc:/qml/Main.qml")); QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
         window = qobject_cast<QQuickWindow *>(engine->rootObjects().first()); QVERIFY(window);
@@ -169,7 +172,7 @@ private slots:
     }
     void cleanup() {
         if (editor && prop("sessionOpen").toBool()) call(editor, "cancel");
-        engine.reset(); window = nullptr; editor = nullptr; catalog.reset(); desktop.reset(); bible.reset(); session.reset();
+        engine.reset(); window = nullptr; editor = nullptr; catalog.reset(); sounds.reset(); desktop.reset(); bible.reset(); session.reset();
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
     }
     void componentSubsets_data() {

@@ -18,6 +18,7 @@ filters, and `-functions`, require exactly one selected suite.
 | `tagsui` | `tests/tagsui.pro` | `build/tagsui-tests/` | `tst_tagsui` |
 | `ranges` | `tests/ranges.pro` | `build/ranges-tests/` | `tst_ranges` |
 | `rangesui` | `tests/rangesui.pro` | `build/rangesui-tests/` | `tst_rangesui` |
+| `sound` | `tests/sound.pro` | `build/sound-tests/` | `tst_sound` |
 | `desktop` | `tests/desktop.pro` | `build/desktop-tests/` | `tst_desktop` |
 | `importer` | `tests/usfm.pro` | `build/usfm-tests/` | `tst_usfm` |
 | `catalog` | `tests/catalog.pro` | `build/catalog-tests/` | `tst_catalog` |

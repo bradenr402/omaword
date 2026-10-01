@@ -26,6 +26,7 @@
 #include "blockdocument.h"
 #include "biblebackend.h"
 #include "desktop.h"
+#include "soundeffects.h"
 #include "usfmimporter.h"
 #include "biblebooks.h"
 #include "versioncatalog.h"
@@ -85,6 +86,7 @@ class UiTest : public QObject
     std::unique_ptr<QTemporaryDir> session;
     std::unique_ptr<BibleBackend> bible;
     std::unique_ptr<Desktop> desktop;
+    std::unique_ptr<SoundEffects> sounds;
     std::unique_ptr<MockVersionCatalog> catalog;
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
@@ -305,6 +307,7 @@ class UiTest : public QObject
         if (verseFixture && !testName.startsWith("defaultParagraph") && testName != "fontControlsBeforeImport")
             bible->setReadingMode("verse");
         desktop = std::make_unique<Desktop>();
+        sounds = std::make_unique<SoundEffects>(nullptr, fixtures.filePath("sound.ini"), false);
         catalog = std::make_unique<MockVersionCatalog>();
         engine = std::make_unique<QQmlApplicationEngine>();
         connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
@@ -312,6 +315,7 @@ class UiTest : public QObject
         });
         engine->rootContext()->setContextProperty("bible", bible.get());
         engine->rootContext()->setContextProperty("desktop", desktop.get());
+        engine->rootContext()->setContextProperty("sounds", sounds.get());
         engine->rootContext()->setContextProperty("catalog", catalog.get());
         // Exercise the same bundled QML and standalone panels as the application.
         engine->load(QUrl("qrc:/qml/Main.qml"));
@@ -328,7 +332,7 @@ class UiTest : public QObject
     void unloadUi() {
         if (window) window->close();
         engine.reset(); window = nullptr;
-        catalog.reset(); desktop.reset(); bible.reset();
+        catalog.reset(); sounds.reset(); desktop.reset(); bible.reset();
     }
     QVariantMap saved(int verse) const {
         for (const auto &row : bible->collection()) {
@@ -3860,6 +3864,7 @@ private slots:
         QQmlApplicationEngine secondEngine;
         secondEngine.rootContext()->setContextProperty("bible",bible.get());
         secondEngine.rootContext()->setContextProperty("desktop",desktop.get());
+        secondEngine.rootContext()->setContextProperty("sounds",sounds.get());
         secondEngine.rootContext()->setContextProperty("catalog",&secondCatalog);
         connect(&secondEngine,&QQmlEngine::warnings,this,[this](const QList<QQmlError> &errors) {
             for (const auto &error : errors) qmlWarnings.append(error.toString());

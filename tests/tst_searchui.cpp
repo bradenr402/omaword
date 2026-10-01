@@ -19,6 +19,7 @@
 #include "biblebackend.h"
 #include "blockdocument.h"
 #include "desktop.h"
+#include "soundeffects.h"
 #include "versioncatalog.h"
 
 class SearchUiTest : public QObject
@@ -28,6 +29,7 @@ class SearchUiTest : public QObject
     std::unique_ptr<QTemporaryDir> session;
     std::unique_ptr<BibleBackend> bible;
     std::unique_ptr<Desktop> desktop;
+    std::unique_ptr<SoundEffects> sounds;
     std::unique_ptr<VersionCatalog> catalog;
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
@@ -111,11 +113,12 @@ private slots:
     void init() {
         session = std::make_unique<QTemporaryDir>(); qputenv("XDG_DATA_HOME", session->path().toUtf8());
         bible = std::make_unique<BibleBackend>(); install(first); bible->setReadingMode("verse");
-        desktop = std::make_unique<Desktop>(); catalog = std::make_unique<VersionCatalog>();
+        desktop = std::make_unique<Desktop>(); sounds = std::make_unique<SoundEffects>(nullptr, session->filePath("sound.ini"), false); catalog = std::make_unique<VersionCatalog>();
         engine = std::make_unique<QQmlApplicationEngine>(); warnings.clear();
         connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) { for (const auto &error : errors) warnings << error.toString(); });
         engine->rootContext()->setContextProperty("bible", bible.get());
         engine->rootContext()->setContextProperty("desktop", desktop.get());
+        engine->rootContext()->setContextProperty("sounds", sounds.get());
         engine->rootContext()->setContextProperty("catalog", catalog.get());
         engine->load(QUrl::fromLocalFile(QFINDTESTDATA("../qml/Main.qml")));
         QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
@@ -124,8 +127,30 @@ private slots:
         navigate("John 1:1");
     }
     void cleanup() {
-        engine.reset(); window = nullptr; catalog.reset(); desktop.reset(); bible.reset(); session.reset();
+        engine.reset(); window = nullptr; catalog.reset(); sounds.reset(); desktop.reset(); bible.reset(); session.reset();
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+    }
+    void soundEffectsCommandTitleFlips() {
+        const auto titles = [this] {
+            QVariant entries;
+            QMetaObject::invokeMethod(window, "paletteEntries", Q_RETURN_ARG(QVariant, entries));
+            QStringList result;
+            for (const auto &entry : value(entries).toList()) result << entry.toMap().value("title").toString();
+            return result;
+        };
+        QVERIFY(sounds->enabled());
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("> sound");
+        QTRY_COMPARE(titles(), QStringList{"Disable sound effects"});
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!sounds->enabled());
+        QVERIFY(!SoundEffects(nullptr, session->filePath("sound.ini"), false).enabled());
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("> sound");
+        QTRY_COMPARE(titles(), QStringList{"Enable sound effects"});
+        // Another window sharing the instance sees the change live.
+        sounds->setEnabled(true);
+        QTRY_COMPARE(titles(), QStringList{"Disable sound effects"});
     }
     void palettePrefixEditing() {
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());

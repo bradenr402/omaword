@@ -330,7 +330,7 @@ ApplicationWindow {
     function navigateSearch(direction, count) {
         if (rangeEditing || !acceptedSearchQuery.length) return
         if (searchRefreshTimer.running) { searchRefreshTimer.stop(); refreshAcceptedSearch() }
-        if (!searchMatches.length) { notify("No matches in this chapter", true); return }
+        if (!searchMatches.length) { notify("No matches in this chapter", true); sounds.play("boundary"); return }
         let current = searchMatchIdentity === selectionIdentity ? searchMatchIndex : -1
         let target
         if (current >= 0) target = current + direction * count
@@ -345,7 +345,10 @@ ApplicationWindow {
         const clamped = Math.max(0, Math.min(searchMatches.length - 1, target))
         if (!focusSearchMatch(searchMatches[clamped])) return
         searchMatchIndex = clamped
-        if (target !== clamped) notify(direction > 0 ? "No matches after cursor" : "No matches before cursor", true)
+        if (target !== clamped) {
+            notify(direction > 0 ? "No matches after cursor" : "No matches before cursor", true)
+            sounds.play("boundary")
+        } else sounds.play("tick")
         readerFocus()
     }
     function scrollSearchMatch(match) {
@@ -376,6 +379,7 @@ ApplicationWindow {
         if (!bible.ready) return
         const current = paletteTextMode ? 1 : referenceInput.text.trim().startsWith(">") ? 2 : 0
         const next = (current + direction + 3) % 3
+        sounds.play("tick")
         if (next === 1) openTextSearch()
         else openPalette(next === 2)
     }
@@ -637,6 +641,7 @@ ApplicationWindow {
             if (!inside) selectionAnchor = bible.cursorVerse
             syncNote()
             notify(reference + (plainText ? " copied as plain text" : " copied"))
+            sounds.play("chime")
         }
     }
     Timer {
@@ -1001,6 +1006,7 @@ ApplicationWindow {
         if (bible.copySelection(!!plainText).length > 0) {
             completeRangeAction(scope, false)
             notify(reference + (plainText ? " copied as plain text" : " copied"))
+            sounds.play("chime")
         }
     }
     function markPassage(highlight) {
@@ -1008,7 +1014,11 @@ ApplicationWindow {
         if (!hasSelection || !flushNote()) return
         const scope = actionScope()
         const success = highlight ? bible.toggleHighlight() : bible.toggleBookmark()
-        if (success) completeRangeAction(scope, false)
+        if (success) {
+            const added = highlight ? bible.selectionHighlighted : bible.selectionBookmarked
+            completeRangeAction(scope, false)
+            sounds.play(added ? "chime" : "remove")
+        } else sounds.play("error")
     }
     function savePosition() {
         if (!restoringPosition && bible.ready) {
@@ -1337,6 +1347,7 @@ ApplicationWindow {
         { id: "resume", title: "Resume last palette", keys: "Space", sequences: ["Space"] },
         { id: "help", title: "Keybindings", keys: "? · F1", sequences: ["?", "F1"], scope: "global", command: true },
         { id: "about", title: "About & Attribution", keys: "", scope: "global", command: true },
+        { id: "soundEffects", title: "Sound effects", keys: "", scope: "global", command: true },
         { id: "goToVerse", title: "Go to verse number", keys: "number then g (e.g. 20g)", explanation: true },
         { id: "dismiss", title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
     ]
@@ -1345,6 +1356,11 @@ ApplicationWindow {
         if (action.setting) return (bible[action.setting] ? "On" : "Off") + (action.keys ? " · " + action.keys : "")
         if (action.id === "lineHeight") return bible.lineHeight.toFixed(1)
         return action.keys
+    }
+    // Commands whose palette title describes the action it would take now.
+    function actionTitle(action) {
+        if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
+        return action.title
     }
     function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
     function shortcutEnabled(action) {
@@ -1355,7 +1371,7 @@ ApplicationWindow {
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         if (action.scope === "palette") return !modalOpen || passagePalette.opened
-        if (action.scope === "global") return !modalOpen && (bible.ready || ["newWindow", "help", "about", "import", "switchVersion", "removeVersion"].includes(action.id))
+        if (action.scope === "global") return !modalOpen && (bible.ready || ["newWindow", "help", "about", "soundEffects", "import", "switchVersion", "removeVersion"].includes(action.id))
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
         return readerKeys
     }
@@ -1366,7 +1382,7 @@ ApplicationWindow {
         if (action.id === "copyText") return bible.ready
         if (["bookmark", "highlight", "tags", "related"].includes(action.id)) return hasSelection
         return bible.ready || !!action.setting
-            || ["books", "commands", "newWindow", "help", "about", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
+            || ["books", "commands", "newWindow", "help", "about", "soundEffects", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
         if (action.explanation) return "Reader gesture"
@@ -1391,8 +1407,8 @@ ApplicationWindow {
         let query = referenceInput.text.trim().toLowerCase()
         if (query.startsWith(">")) {
             query = query.substring(1).trim()
-            return actions.filter(function(c) { return c.command && c.title.toLowerCase().indexOf(query) >= 0 })
-                .map(function(c) { return { title: c.title, hint: actionHint(c), action: c.id } })
+            return actions.filter(function(c) { return c.command && actionTitle(c).toLowerCase().indexOf(query) >= 0 })
+                .map(function(c) { return { title: actionTitle(c), hint: actionHint(c), action: c.id } })
         }
         if (paletteChapter > 0) {
             return Array.from(bible.chapterVerses(paletteBook, paletteChapter))
@@ -1567,6 +1583,11 @@ ApplicationWindow {
         case "removeVersion": openVersions(true); break
         case "help": helpDialog.open(); break
         case "about": aboutDialog.open(); break
+        case "soundEffects":
+            sounds.enabled = !sounds.enabled
+            notify("Sound effects " + (sounds.enabled ? "on" : "off"), true)
+            sounds.play("tick")
+            break
         }
         if (catalogAction.setting && bible[catalogAction.setting] !== previousSetting)
             notify(catalogAction.title + " " + (bible[catalogAction.setting] ? "on" : "off"), true)
@@ -3995,7 +4016,10 @@ ApplicationWindow {
         function onCollectionChanged() {
             if (deleteConfirmation.visible && !app.deleteScopeValid()) app.invalidateDeleteSaved()
         }
-        function onErrorChanged() { Qt.callLater(app.showFocusedError) }
+        function onErrorChanged() {
+            if (bible.error.length) sounds.play("error")
+            Qt.callLater(app.showFocusedError)
+        }
         function onBusyChanged() {
             if (!bible.busy) {
                 if (app.importingCatalogId.length && bible.ready && !bible.error.length && bible.versionId === app.importingCatalogId)

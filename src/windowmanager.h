@@ -4,6 +4,7 @@
 #include <QUrl>
 class BibleBackend;
 class Desktop;
+class SoundEffects;
 class VersionCatalog;
 class QQmlApplicationEngine;
 class QWindow;
@@ -22,6 +23,7 @@ public:
     void openRequest(const SingleInstance::Request &request, SingleInstance::Reply reply, bool activate = true);
     QWindow *windowAt(int index) const;
     BibleBackend *backendAt(int index) const;
+    SoundEffects *sounds() const { return m_sounds; }
 public slots:
     void newWindow();
 signals:
@@ -32,6 +34,7 @@ private:
     void retire(QWindow *window);
     static bool flush(QObject *root);
     Desktop *m_desktop;
+    SoundEffects *m_sounds; // Shared by every window; preference changes notify all.
     QUrl m_source;
     QList<Reader> m_readers;
     int m_serial = 0;

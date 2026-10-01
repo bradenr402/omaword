@@ -8,7 +8,7 @@ trap 'if [[ -n $running ]]; then kill "$running" 2>/dev/null || true; wait "$run
 export STATE="$workspace/state"
 mkdir -p "$workspace/checkout/bin" "$workspace/checkout/tests" "$workspace/tools" "$STATE"
 cp "$root/bin/test" "$workspace/checkout/bin/test"
-for project in backend ui search searchui searchrender tags tagsui ranges rangesui desktop usfm catalog blockannotations singleinstance windows; do
+for project in backend ui search searchui searchrender tags tagsui ranges rangesui sound desktop usfm catalog blockannotations singleinstance windows; do
     touch "$workspace/checkout/tests/$project.pro"
 done
 cat > "$workspace/tools/qmake6" <<'SH'
@@ -45,7 +45,7 @@ if [[ $phase == test ]]; then
         [[ -z ${!variable:-} || ${!variable} == "$USFM_FIXTURE" ]]
     done
     [[ -z ${OMAWORD_TEST_USFM_DIR:-} || $OMAWORD_TEST_USFM_DIR == "$USFM_DIRECTORY" ]]
-    [[ $QT_QPA_PLATFORM == offscreen && $QT_QUICK_BACKEND == software ]]
+    [[ $QT_QPA_PLATFORM == offscreen && $QT_QUICK_BACKEND == software && $OMAWORD_SOUND == 0 ]]
 fi
 if [[ ${HOLD:-0} == 1 ]]; then
     printf '%s\n' "$BASHPID" > "$STATE/held"
@@ -140,7 +140,7 @@ rm -f "$STATE"/*.test "$STATE"/*.build
 export JOBS=1 TEST_JOBS=8 EXPECTED_JOBS=1
 run_status
 [[ $status == 0 ]]
-for project in backend ui search searchui searchrender tags tagsui ranges rangesui desktop usfm catalog blockannotations singleinstance windows; do
+for project in backend ui search searchui searchrender tags tagsui ranges rangesui sound desktop usfm catalog blockannotations singleinstance windows; do
     [[ -f $STATE/$project.test ]]
 done
 assert_output '[windows] PASS'

@@ -52,7 +52,7 @@ All your Bible versions, highlights, bookmarks, notes, and tags stay on this dev
 ## Requirements
 
 - A C++17 compiler, `make`, `qmake6`, and `pkg-config`
-- Qt 6: `qt6-base`, `qt6-declarative`, and `qt6-wayland` for Wayland
+- Qt 6: `qt6-base`, `qt6-declarative`, `qt6-multimedia` (sound effects), and `qt6-wayland` for Wayland
 - `libarchive` and `fontconfig`
 
 Application code is [MIT licensed](LICENSE). See [tests/README.md](tests/README.md) for development checks.
