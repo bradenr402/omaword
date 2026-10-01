@@ -1179,7 +1179,7 @@ private slots:
         action("write a note");
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("Saved before dispatch");
-        action("search for a passage");
+        action("navigate to a passage");
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("John 4:2"); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());

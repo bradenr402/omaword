@@ -13,6 +13,7 @@ filters, and `-functions`, require exactly one selected suite.
 | `ui` | `tests/ui.pro` | `build/ui-tests/` | `tst_ui` |
 | `search` | `tests/search.pro` | `build/search-tests/` | `tst_search` |
 | `searchui` | `tests/searchui.pro` | `build/searchui-tests/` | `tst_searchui` |
+| `deskui` | `tests/deskui.pro` | `build/deskui-tests/` | `tst_deskui` |
 | `searchrender` | `tests/searchrender.pro` | `build/searchrender-tests/` | `tst_searchrender` |
 | `tags` | `tests/tags.pro` | `build/tags-tests/` | `tst_tags` |
 | `tagsui` | `tests/tagsui.pro` | `build/tagsui-tests/` | `tst_tagsui` |
@@ -217,6 +218,11 @@ working-tree updates. It describes assertions, not results from a test run.
   right-click **Edit range**. Notes open with the cursor at the end, subsequent
   editing/synchronization retains its position, Tags supports item/tab navigation,
   and tag-search fields retain typed `h`/`l`.
+- **Desk UI:** `d` add/remove with dynamic command title, Visual range completion
+  and consumed counts; `Shift D` panel with full passage text, keyboard selection,
+  Enter/click opening across versions, copy, × and `x`/Delete removal; Clean Desk
+  confirm/cancel from the panel and Commands; live peer updates; unavailable-version
+  items; version-removal Desk counts and notice; reader keys isolated while open.
 - **Desktop:** effective integer rounding, malformed/oversized output, process
   failure, missing session/command, timeout responsiveness, nonoverlapping queries,
   recovery and separate five-second polling; themed plain-text tooltip wrapping,

@@ -458,7 +458,7 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: rangeEditor.visibleModal || markerMenu.visible || tagsUi.visibleModal || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
+    readonly property bool modalOpen: rangeEditor.visibleModal || markerMenu.visible || tagsUi.visibleModal || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.visible || deskDrawer.visible || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -1020,6 +1020,95 @@ ApplicationWindow {
             sounds.play(added ? "chime" : "remove")
         } else sounds.play("error")
     }
+    // Desk: one global study list shared by every window and version.
+    property int deskSelectedId: -1
+    property int deskRow: 0
+    function toggleDeskPassage() {
+        if (rangeEditing) return
+        if (!hasSelection || !flushNote()) return
+        const scope = actionScope()
+        const reference = bible.selectionReference
+        if (bible.toggleDesk()) {
+            const added = bible.currentInDesk
+            completeRangeAction(scope, false)
+            notify(reference + (added ? " added to Desk" : " removed from Desk"))
+            sounds.play(added ? "chime" : "remove")
+        } else sounds.play("error")
+    }
+    function openDesk() {
+        if (rangeEditing) return
+        if (deskDrawer.opened) { deskDrawer.close(); return }
+        deskDrawer.open()
+    }
+    function moveDesk(delta) {
+        if (deskList.count > 0) {
+            deskList.currentIndex = Math.max(0, Math.min(deskList.count - 1, deskList.currentIndex + delta))
+            deskList.positionViewAtIndex(deskList.currentIndex, ListView.Contain)
+            deskRow = deskList.currentIndex
+            deskSelectedId = deskList.model[deskRow].id
+        } else { deskRow = 0; deskSelectedId = -1 }
+        deskList.forceActiveFocus()
+    }
+    function restoreDeskRow() {
+        const rows = Array.from(bible.desk)
+        let row = rows.findIndex(function(entry) { return entry.id === deskSelectedId })
+        if (row < 0) row = Math.min(deskRow, rows.length - 1)
+        deskList.currentIndex = row
+        deskRow = Math.max(0, row)
+        deskSelectedId = row >= 0 ? rows[row].id : -1
+    }
+    function deskEntry(id) { return Array.from(bible.desk).find(function(entry) { return entry.id === id }) }
+    function openDeskItem(id) {
+        if (rangeEditing || bible.busy) return
+        const entry = deskEntry(id)
+        if (!entry || !flushNote()) return
+        if (!entry.available) { sounds.play("error"); notify(entry.versionAbbreviation + " is not installed", true); return }
+        savePosition()
+        if (!bible.openDeskItem(id)) return
+        syncNote()
+        deskDrawer.close()
+        readerFocus()
+        Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
+    }
+    function copyDeskItem(id) {
+        if (rangeEditing || bible.busy) return
+        const entry = deskEntry(id)
+        if (!entry) return
+        if (bible.copyDeskItem(id).length > 0) {
+            notify(entry.reference + " · " + entry.versionAbbreviation + " copied", true)
+            sounds.play("chime")
+        }
+    }
+    function removeDeskItem(id) {
+        if (rangeEditing || bible.busy) return
+        const row = Array.from(bible.desk).findIndex(function(entry) { return entry.id === id })
+        if (row < 0) return
+        if (bible.removeFromDesk(id)) {
+            deskSelectedId = -1
+            deskRow = row
+            restoreDeskRow()
+            sounds.play("remove")
+        }
+        if (deskDrawer.opened) deskList.forceActiveFocus()
+    }
+    function removeCurrentDeskItem() {
+        const entry = deskList.model[deskList.currentIndex]
+        if (entry) removeDeskItem(entry.id)
+    }
+    function requestCleanDesk() {
+        if (rangeEditing || bible.busy) return
+        if (!bible.desk.length) { notify("The Desk is already clean", true); return }
+        cleanDeskConfirmation.open()
+    }
+    function confirmCleanDesk() {
+        if (rangeEditing || bible.busy || !flushNote()) return
+        const count = bible.desk.length
+        if (bible.cleanDesk()) {
+            cleanDeskConfirmation.close()
+            sounds.play("remove")
+            notify("Cleaned the Desk · " + count + (count === 1 ? " passage removed" : " passages removed"), true)
+        }
+    }
     function savePosition() {
         if (!restoringPosition && bible.ready) {
             let travel = Math.max(0, reading.contentHeight - reading.height)
@@ -1274,6 +1363,8 @@ ApplicationWindow {
     function confirmRemoveVersion() {
         if (rangeEditing) return
         if (!versionDialog.removing || versionDialog.step !== 2 || !versionDialog.chosen || bible.busy || !flushNote()) return
+        const deskRemoved = versionDialog.removeAnnotations ? bible.deskCountForVersion(versionDialog.chosen.id) : 0
+        const abbreviation = versionDialog.chosen.abbreviation
         if (!bible.removeVersion(versionDialog.chosen.id, versionDialog.removeAnnotations)) return
         clearTextSelection()
         selectionAnchor = 0
@@ -1281,6 +1372,8 @@ ApplicationWindow {
         if (bible.ready) restorePosition(hasSelection)
         else notesDrawer.close()
         versionDialog.close()
+        if (deskRemoved > 0)
+            notify("Removed " + abbreviation + " · " + deskRemoved + (deskRemoved === 1 ? " Desk item" : " Desk items") + " removed too", true)
     }
     // One action catalog supplies shortcuts, searchable keybindings, and commands.
     // Context-only gestures are explanatory rows, never executable guesses.
@@ -1296,6 +1389,9 @@ ApplicationWindow {
         { id: "commands", title: "Open commands", keys: "Ctrl Space · Ctrl Shift P", sequences: ["Ctrl+Space", "Ctrl+Shift+P"], scope: "palette" },
         { id: "newWindow", title: "New window", keys: "Ctrl Shift N", sequences: ["Ctrl+Shift+N"], scope: "global", command: true },
         { id: "annotations", title: "Annotations panel", keys: "Ctrl a", sequences: ["Ctrl+A"], command: true },
+        { id: "desk", title: "Open Desk", keys: "Shift D", sequences: ["Shift+D"], command: true },
+        { id: "toggleDesk", title: "Add to Desk", keys: "d", sequences: ["D"], command: true },
+        { id: "cleanDesk", title: "Clean Desk", keys: "", command: true },
         { id: "editRange", title: "Edit annotation range", keys: "Shift E", sequences: ["Shift+E"], command: true },
         { id: "toggleNotes", title: "Notes panel", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
         { id: "notes", title: "Write a note", keys: "w", sequences: ["W"], scope: "notes", command: true },
@@ -1359,6 +1455,7 @@ ApplicationWindow {
     }
     // Commands whose palette title describes the action it would take now.
     function actionTitle(action) {
+        if (action.id === "toggleDesk") return bible.currentInDesk ? "Remove from Desk" : "Add to Desk"
         if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
         return action.title
     }
@@ -1380,7 +1477,7 @@ ApplicationWindow {
         if (!action || action.explanation || bible.busy) return false
         if (rangeEditing && !["newWindow", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "larger", "smaller", "resetText"].includes(action.id)) return false
         if (action.id === "copyText") return bible.ready
-        if (["bookmark", "highlight", "tags", "related"].includes(action.id)) return hasSelection
+        if (["bookmark", "highlight", "tags", "related", "toggleDesk"].includes(action.id)) return hasSelection
         return bible.ready || !!action.setting
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
@@ -1567,6 +1664,9 @@ ApplicationWindow {
             else savedDrawer.open()
             break
         case "notes": openNotes(true); break
+        case "desk": openDesk(); break
+        case "toggleDesk": toggleDeskPassage(); break
+        case "cleanDesk": requestCleanDesk(); break
         case "bookmark": markPassage(false); break
         case "highlight": markPassage(true); break
         case "tags": openPassageTags(); break
@@ -1860,6 +1960,13 @@ ApplicationWindow {
                         ctx.moveTo(8, 7); ctx.bezierCurveTo(8, 1, 19, 2, 16, 9)
                         ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
                         ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
+                    } else if (glyph === "desk") {
+                        // Stacked pages resting in an open tray.
+                        ctx.moveTo(7, 4); ctx.lineTo(17, 4)
+                        ctx.moveTo(5, 8); ctx.lineTo(19, 8)
+                        ctx.moveTo(2, 13); ctx.lineTo(8, 13); ctx.lineTo(9.5, 16)
+                        ctx.lineTo(14.5, 16); ctx.lineTo(16, 13); ctx.lineTo(22, 13)
+                        ctx.lineTo(22, 21); ctx.lineTo(2, 21); ctx.closePath()
                     } else if (glyph === "visual") {
                         // The bracket and square handles span all three verse lines.
                         ctx.moveTo(8, 6); ctx.lineTo(21, 6)
@@ -2716,6 +2823,15 @@ ApplicationWindow {
             onClicked: app.runCommand("annotations")
         }
         FloatingButton {
+            objectName: "deskControl"
+            visible: bible.ready
+            glyph: "desk"
+            selected: deskDrawer.visible
+            tip: "Desk · Shift D"
+            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            onClicked: app.runCommand("desk")
+        }
+        FloatingButton {
             objectName: "notesControl"
             visible: bible.ready
             glyph: "notes"
@@ -2769,6 +2885,7 @@ ApplicationWindow {
         property int step: 0
         property var chosen: null
         property bool removeAnnotations: false
+        readonly property int deskCount: chosen && removeAnnotations && bible.desk.length >= 0 ? bible.deskCountForVersion(chosen.id) : 0
         property bool addPending: false
         readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 240))
         height: Math.min(540 * app.scale, app.height - 48)
@@ -2888,7 +3005,9 @@ ApplicationWindow {
                     objectName: "versionSummary"
                     width: versionSummaryScroll.availableWidth
                     text: versionDialog.chosen ? "Remove " + versionDialog.chosen.name + " (" + versionDialog.chosen.abbreviation + ") from this library?\n\n"
-                        + (versionDialog.removeAnnotations ? "Delete its notes, bookmarks, and highlights. This cannot be undone."
+                        + (versionDialog.removeAnnotations ? "Delete its notes, bookmarks, and highlights"
+                            + (versionDialog.deskCount > 0 ? ", and " + versionDialog.deskCount + (versionDialog.deskCount === 1 ? " Desk item" : " Desk items") : "")
+                            + ". This cannot be undone."
                             : "Keep its notes, bookmarks, and highlights. They will reconnect when the same version is reimported.")
                         + "\n\n" + (bible.versions.length === 1 ? "The library will be empty. You can add a version again at any time." : "Other installed versions remain available.")
                         + " Your settings and source USFM files are kept." : ""
@@ -3342,6 +3461,178 @@ ApplicationWindow {
                 QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked(); onClicked: { savedDrawer.close(); app.runCommand("export") } }
                 Item { Layout.fillWidth: true }
                 QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked(); onClicked: { savedDrawer.close(); app.runCommand("backup") } }
+            }
+        }
+    }
+
+    Drawer {
+        id: deskDrawer
+        objectName: "deskDrawer"
+        width: Math.min(520 * app.scale, app.width - 48)
+        height: app.height
+        edge: Qt.RightEdge
+        modal: true
+        focus: true
+        padding: 16 * app.controlScale
+        closePolicy: cleanDeskConfirmation.visible || errorDialog.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        readonly property bool listKeys: opened && !cleanDeskConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
+        background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
+        Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
+        onOpened: { app.restoreDeskRow(); app.moveDesk(0) }
+        onClosed: app.restorePanelFocus()
+        contentItem: ColumnLayout {
+            objectName: "deskContent"
+            spacing: 12 * app.scale
+            Shortcut { sequence: "Shift+D"; enabled: deskDrawer.listKeys; onActivated: deskDrawer.close() }
+            Shortcut { sequences: ["J", "Down"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-1) }
+            Shortcut { sequence: "Home"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-deskList.count) }
+            Shortcut { sequence: "End"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(deskList.count) }
+            Shortcut { sequences: ["Return", "Enter"]; enabled: deskDrawer.listKeys && app.activeFocusItem === deskList; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.openDeskItem(entry.id) } }
+            Shortcut { sequences: ["Y"]; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id) } }
+            Shortcut { sequences: ["X", "Delete", "Backspace"]; enabled: deskDrawer.listKeys; onActivated: app.removeCurrentDeskItem() }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { objectName: "deskTitle"; text: "Desk"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true }
+                Label { objectName: "deskCount"; text: deskList.count === 1 ? "1 passage" : deskList.count + " passages"; color: desktop.muted; font.pixelSize: 12 * app.scale }
+            }
+            FineRule { Layout.fillWidth: true }
+            ListView {
+                id: deskList
+                objectName: "deskList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 6 * app.scale
+                model: bible.desk
+                onModelChanged: Qt.callLater(app.restoreDeskRow)
+                ScrollBar.vertical: OverlayScrollbar { objectName: "deskScrollbar" }
+                delegate: ItemDelegate {
+                    id: deskEntry
+                    required property var modelData
+                    required property int index
+                    objectName: "deskEntry" + index
+                    width: deskList.width
+                    padding: 12 * app.scale
+                    height: deskEntryContent.implicitHeight + topPadding + bottomPadding
+                    focusPolicy: Qt.NoFocus
+                    highlighted: ListView.isCurrentItem
+                    onClicked: { deskList.currentIndex = index; app.moveDesk(0); app.openDeskItem(modelData.id) }
+                    contentItem: ColumnLayout {
+                        id: deskEntryContent
+                        spacing: 7 * app.scale
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6 * app.scale
+                            Label {
+                                objectName: "deskHeader" + deskEntry.index
+                                text: deskEntry.modelData.reference + " · " + deskEntry.modelData.versionAbbreviation
+                                textFormat: Text.PlainText
+                                color: deskEntry.modelData.available ? desktop.foreground : desktop.muted
+                                font.pixelSize: 16 * app.scale; font.weight: Font.Medium
+                                Layout.fillWidth: true; wrapMode: Text.Wrap
+                            }
+                            QuietButton {
+                                objectName: "deskCopy" + deskEntry.index
+                                text: "Copy"; compact: true; focusPolicy: Qt.NoFocus
+                                tip: "Copy quotation · y"
+                                enabled: deskEntry.modelData.available && !app.rangeEditing && !bible.busy
+                                onClicked: { deskList.currentIndex = deskEntry.index; app.moveDesk(0); app.copyDeskItem(deskEntry.modelData.id) }
+                            }
+                            QuietButton {
+                                objectName: "deskRemove" + deskEntry.index
+                                text: "×"; compact: true; focusPolicy: Qt.NoFocus
+                                tip: "Remove from Desk · x"
+                                Accessible.name: "Remove " + deskEntry.modelData.reference + " from Desk"
+                                font.pixelSize: 18 * app.scale
+                                enabled: !app.rangeEditing && !bible.busy
+                                onClicked: app.removeDeskItem(deskEntry.modelData.id)
+                            }
+                        }
+                        Label {
+                            objectName: "deskText" + deskEntry.index
+                            text: deskEntry.modelData.text || ""
+                            visible: text.length > 0
+                            textFormat: Text.PlainText
+                            color: deskEntry.modelData.available ? desktop.foreground : desktop.muted
+                            font.pixelSize: 14 * app.scale
+                            lineHeight: 1.25
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                        }
+                        Label {
+                            objectName: "deskUnavailable" + deskEntry.index
+                            visible: !deskEntry.modelData.available
+                            text: deskEntry.modelData.versionAbbreviation + " is not installed. Reimport it to open or copy this passage."
+                            color: desktop.muted; font.pixelSize: 12 * app.scale; font.italic: true
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                        }
+                    }
+                    background: Rectangle {
+                        color: deskEntry.highlighted ? app.tint(desktop.accent, 0.11) : deskEntry.hovered ? desktop.surface : "transparent"
+                        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                        border.width: deskEntry.highlighted && deskList.activeFocus ? 1 : 0
+                        border.color: desktop.accent
+                    }
+                }
+                Label {
+                    objectName: "deskEmpty"
+                    anchors.centerIn: parent
+                    width: parent.width - 24
+                    text: "The Desk is empty. Press d on a passage to add it."
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    color: desktop.muted
+                    font.pixelSize: 12 * app.scale
+                    visible: deskList.count === 0
+                }
+            }
+            Label { objectName: "deskError"; text: bible.error; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            FineRule { Layout.fillWidth: true }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "j k choose    Enter open    y copy    x remove    Esc close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                QuietButton {
+                    objectName: "deskClean"
+                    text: "Clean Desk"; compact: true
+                    enabled: deskList.count > 0 && !app.rangeEditing && !bible.busy
+                    onClicked: app.requestCleanDesk()
+                    Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
+                }
+            }
+        }
+    }
+
+    ModalCard {
+        id: cleanDeskConfirmation
+        objectName: "cleanDeskConfirmation"
+        closePolicy: Popup.CloseOnEscape
+        onOpened: cleanDeskCancel.forceActiveFocus()
+        onClosed: {
+            if (deskDrawer.opened) Qt.callLater(function() { if (!cleanDeskConfirmation.visible) app.moveDesk(0) })
+            else app.restorePanelFocus()
+        }
+        Shortcut {
+            sequences: ["Left", "Up", "Right", "Down"]
+            enabled: cleanDeskConfirmation.opened && !errorDialog.visible
+            onActivated: {
+                if (cleanDeskCancel.activeFocus) cleanDeskConfirm.forceActiveFocus()
+                else cleanDeskCancel.forceActiveFocus()
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: 18 * app.scale
+            Label { text: "Clean the Desk?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label {
+                objectName: "cleanDeskExplanation"
+                text: "Remove all " + bible.desk.length + (bible.desk.length === 1 ? " passage" : " passages") + " from the Desk in every window. Your notes, bookmarks, highlights, and tags are kept."
+                color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton { id: cleanDeskCancel; objectName: "cleanDeskCancel"; text: "Cancel"; onClicked: cleanDeskConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { id: cleanDeskConfirm; objectName: "cleanDeskConfirm"; text: "Clean Desk"; emphasized: true; onClicked: app.confirmCleanDesk(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
             }
         }
     }
