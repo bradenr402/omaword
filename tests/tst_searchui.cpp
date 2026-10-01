@@ -364,13 +364,16 @@ private slots:
         };
         for (const auto &edge : edges) {
             int alpha = 0;
-            // Fractional glyph geometry can split the one-pixel stroke over two pixels.
-            for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+            // Fractional glyph geometry and the inset hand-drawn pen can spread the
+            // stroke over neighbouring pixels.
+            for (int dy = -2; dy <= 2; ++dy) for (int dx = -2; dx <= 2; ++dx) {
                 const auto point = edge.toPoint() + QPoint(dx, dy);
                 if (!image.rect().contains(point)) continue;
                 const auto border = image.pixelColor(point);
                 if (border.alpha() <= alpha) continue;
                 alpha = border.alpha();
+                // The pen edge is antialiased; faint pixels carry rounding noise.
+                if (alpha < 128) continue;
                 QVERIFY(qAbs(border.red() - accent.red()) <= 3);
                 QVERIFY(qAbs(border.green() - accent.green()) <= 3);
                 QVERIFY(qAbs(border.blue() - accent.blue()) <= 3);

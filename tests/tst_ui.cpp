@@ -4869,6 +4869,31 @@ private slots:
                 }
             }
         }
+        // Hand-drawn rails are seeded per mark: identical across repaint and
+        // scrolling, inked, and confined to the marker's reserved column.
+        const auto railImage = [](QQuickItem *rail) {
+            auto grab = rail->grabToImage();
+            if (!grab) return QImage();
+            QSignalSpy ready(grab.get(),&QQuickItemGrabResult::ready);
+            if (grab->image().isNull()) ready.wait(2000);
+            return grab->image();
+        };
+        auto rail = item("bookmarkRail1"); QVERIFY(rail);
+        QCOMPARE(rail->size(),rail->parentItem()->size());
+        const auto railBefore = railImage(rail);
+        QVERIFY(!railBefore.isNull());
+        int railInk = 0;
+        for (int y = 0; y < railBefore.height(); ++y)
+            for (int x = 0; x < railBefore.width(); ++x) railInk += railBefore.pixelColor(x,y).alpha() > 0;
+        QVERIFY(railInk > 0);
+        auto readingView = item("bookmarkMarker1");
+        while (readingView && !readingView->inherits("QQuickFlickable")) readingView = readingView->parentItem();
+        QVERIFY(readingView);
+        const auto contentY = readingView->property("contentY");
+        readingView->setProperty("contentY",contentY.toReal() + 30); QTest::qWait(50);
+        readingView->setProperty("contentY",contentY); QTest::qWait(50);
+        QMetaObject::invokeMethod(rail,"requestPaint"); QTest::qWait(50);
+        QCOMPARE(railImage(rail),railBefore);
         const auto bookmark = item("bookmarkMarker1"), tag = item("verseTagMarker1"), note = item("verseNoteMarker1");
         QVERIFY(note->x() + note->width() <= tag->x());
         QVERIFY(tag->x() + tag->width() <= bookmark->x());

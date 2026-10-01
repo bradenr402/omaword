@@ -5,6 +5,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQml
+import "HandDrawn.js" as HandDrawn
 
 ApplicationWindow {
     id: app
@@ -2250,21 +2251,53 @@ ApplicationWindow {
                 else marker.openMarker()
             }
         }
+        readonly property int markSeed: HandDrawn.seed(kind, bible.versionId,
+            ranges.map(function(r) { return r.reference }).sort().join(","))
         contentItem: Item {
-            Rectangle {
+            // Geometry hooks for the rail and end cap; the ink is the
+            // hand-drawn pen stroke painted by railPaint inside this item.
+            Item {
+                id: railLine
                 objectName: marker.kind + "Line" + marker.number
                 x: 5 * app.scale
                 y: marker.continuesBefore ? 0 : marker.headingHeight + 8 * app.scale
                 width: app.scale
                 height: Math.max(0, (marker.continuesAfter ? parent.height : marker.headingHeight + marker.bodyHeight) - y)
-                color: desktop.accent; opacity: 0.65
             }
-            Rectangle {
+            Item {
+                id: railEndCap
                 objectName: marker.kind + "EndCap" + marker.number
                 x: 5 * app.scale; y: marker.headingHeight + marker.bodyHeight - app.scale
                 width: 7 * app.scale; height: app.scale
                 visible: marker.ends
-                color: desktop.accent
+            }
+            Canvas {
+                id: railPaint
+                objectName: marker.kind + "Rail" + marker.number
+                anchors.fill: parent
+                property color ink: desktop.accent
+                readonly property var paintKey: [railLine.y, railLine.height, railEndCap.y, railEndCap.visible,
+                    marker.continuesBefore, marker.continuesAfter, marker.markSeed, app.scale, width, height]
+                onPaintKeyChanged: requestPaint()
+                onInkChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    const k = app.scale
+                    const cx = railLine.x + railLine.width / 2
+                    if (railLine.height > 0) {
+                        ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.65)
+                        HandDrawn.wavyLine(ctx, cx, railLine.y, cx, railLine.y + railLine.height,
+                            HandDrawn.seed(marker.markSeed, "rail"), k,
+                            { width: k, joinStart: marker.continuesBefore, joinEnd: marker.continuesAfter })
+                    }
+                    if (railEndCap.visible) {
+                        const cy = railEndCap.y + railEndCap.height / 2
+                        ctx.fillStyle = ink
+                        HandDrawn.wavyLine(ctx, railEndCap.x, cy, railEndCap.x + railEndCap.width, cy,
+                            HandDrawn.seed(marker.markSeed, "cap"), k, { width: k, amp: 0.6 * k, roughStart: false })
+                    }
+                }
             }
             AnnotationGlyph {
                 objectName: marker.kind + "Glyph" + marker.number
@@ -2507,12 +2540,43 @@ ApplicationWindow {
                                         width: verseRow.width - x
                                         height: (modelData.highlightContinuesAfter ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
                                         radius: 0
-                                        color: app.tint(desktop.accent, 0.16)
-                                        Rectangle {
+                                        // Painted as a highlighter band by highlightPaint.
+                                        color: "transparent"
+                                        Item {
+                                            id: highlightAccent
                                             objectName: "highlightAccent" + verseRow.modelData.number + ":" + parent.modelData.reference
                                             width: 2; height: parent.height
-                                            color: desktop.accent; opacity: 0.7
                                             visible: !bible.focusMode
+                                        }
+                                        Canvas {
+                                            id: highlightPaint
+                                            objectName: "highlightPaint" + verseRow.modelData.number + ":" + parent.modelData.reference
+                                            anchors.fill: parent
+                                            readonly property var range: parent.modelData
+                                            property color ink: desktop.accent
+                                            readonly property var paintKey: [highlightAccent.visible, app.scale, width, height,
+                                                range.reference, range.highlightContinuesBefore, range.highlightContinuesAfter, bible.versionId]
+                                            onPaintKeyChanged: requestPaint()
+                                            onInkChanged: requestPaint()
+                                            onPaint: {
+                                                const ctx = getContext("2d")
+                                                ctx.reset()
+                                                const k = app.scale
+                                                const s = HandDrawn.seed("highlight", bible.versionId, range.reference)
+                                                const before = !!range.highlightContinuesBefore, after = !!range.highlightContinuesAfter
+                                                ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.16)
+                                                HandDrawn.highlighterBand(ctx, Qt.rect(0, 0, width, height),
+                                                    HandDrawn.seed(s, verseRow.modelData.number), k,
+                                                    { top: !before, bottom: !after })
+                                                if (!highlightAccent.visible) return
+                                                // Wobble stays right of the accent's left edge,
+                                                // inside its reserved three pixels before text.
+                                                const amp = 0.6 * k
+                                                ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.7)
+                                                HandDrawn.wavyLine(ctx, 1 + amp, 0, 1 + amp, height,
+                                                    HandDrawn.seed(s, "accent", verseRow.modelData.number), k,
+                                                    { width: 2, amp: amp, joinStart: before, joinEnd: after })
+                                            }
                                         }
                                     }
                                 }

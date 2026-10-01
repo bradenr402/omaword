@@ -62,6 +62,10 @@ Additional `rangesui` targets are `cancelIgnoresUnrelatedPeerDraftVeto`,
 `cancelReadingFailureKeepsSnapshotForRetry`, `cancelAfterVersionChangeEndsSafely`,
 `peerRemovesLastVersionEndsSession`, and `singletonEndpointTracksMotionAndSwap`.
 `bracketFontGeometry` and `markerRangeEditing` are additional `annotations` targets.
+`handDrawnHelper` (seeded `qml/HandDrawn.js` paths: determinism, bounded
+waviness, distinct seeds) and `handDrawnMarksDeterministicAndBounded` (identical
+pixels across repaint/scroll, bracket ink within bounds, unchanged layout/copy)
+cover the hand-drawn mark style in `annotations`.
 For example, `bin/test --suite ranges --suite rangesui` selects both complete
 suites; `bin/test --suite ranges noteConfirmationAndDestinationDrift` selects one
 function. Both new suites are included by default and by `--suite all`.

@@ -1,4 +1,5 @@
 import QtQuick
+import "HandDrawn.js" as HandDrawn
 // qmllint disable import
 import OmaWord.Reader 1.0
 // qmllint enable import
@@ -68,19 +69,8 @@ Item {
             const offset = root.body.mapToItem(paint, origin.x, origin.y)
             ctx.translate(offset.x, offset.y)
             const rects = document.rectangles(root.segments || [])
-            // Active paint wins when a match overlaps another occurrence.
-            for (let active = 0; active < 2; ++active) {
-                for (const r of rects) {
-                    if (!!r.active !== !!active) continue
-                    ctx.fillStyle = Qt.rgba(accent.r, accent.g, accent.b, active ? 0.55 : 0.28)
-                    ctx.fillRect(r.x, r.y, r.width, r.height)
-                    if (active || root.outlined) {
-                        ctx.strokeStyle = accent
-                        ctx.lineWidth = 1
-                        ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(0, r.width - 1), Math.max(0, r.height - 1))
-                    }
-                }
-            }
+            HandDrawn.searchMarks(ctx, rects, accent, root.outlined,
+                root.theme && root.theme.textScale > 0 ? root.theme.textScale : 1, root.sourceText)
         }
     }
     Timer {

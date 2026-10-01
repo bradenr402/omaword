@@ -240,6 +240,24 @@ ApplicationWindow {
         // Verify the canvas is in root coordinates, including TextEdit padding.
         const auto highlightRect = bodyRect.toRectF();
         QVERIFY(painted.pixelColor(qRound(highlightRect.center().x()), qRound(highlightRect.center().y())).alpha() > 0);
+        // Hand-drawn edges are seeded per match: repaints are pixel-identical,
+        // and the ink stays inside the match rectangle.
+        QMetaObject::invokeMethod(item("searchHighlightsCanvas"), "requestPaint");
+        QTest::qWait(40);
+        QCOMPARE(grab(item("searchHighlightsCanvas")), painted);
+        QList<QRectF> matchRects;
+        for (const auto &value : rectangles) {
+            const auto r = value.toMap();
+            matchRects.append(QRectF(r["x"].toDouble(), r["y"].toDouble(), r["width"].toDouble(), r["height"].toDouble())
+                .translated(nativeOrigin).adjusted(-1, -1, 1, 1));
+        }
+        for (int y = 0; y < painted.height(); ++y)
+            for (int x = 0; x < painted.width(); ++x) {
+                if (painted.pixelColor(x, y).alpha() == 0) continue;
+                bool inside = false;
+                for (const auto &r : matchRects) inside |= r.contains(QPointF(x + 0.5, y + 0.5));
+                QVERIFY(inside);
+            }
         root->setProperty("rowSegments", QVariantList{segment(1, start, needle.size(), true)});
         QTest::qWait(40);
         QVERIFY(grab(item("searchHighlightsCanvas")) != painted);
@@ -318,6 +336,9 @@ ApplicationWindow {
         QTest::qWait(50);
         const auto painted = grab(item("blockSearchBackground"));
         QVERIFY(ink(painted) > 0);
+        QMetaObject::invokeMethod(item("blockSearchBackground"), "requestPaint");
+        QTest::qWait(40);
+        QCOMPARE(grab(item("blockSearchBackground")), painted);
         controller->setProperty("searchSegments", QVariantList{segment(1, foldedStart, 6, true)});
         QTest::qWait(40);
         QVERIFY(grab(item("blockSearchBackground")) != painted);

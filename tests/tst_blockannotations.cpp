@@ -395,9 +395,13 @@ ApplicationWindow {
                 const int x = qCeil(r["x"].toDouble());
                 const int y = qCeil(r["y"].toDouble()) + 2;
                 if (y >= image.height()) continue;
-                QVERIFY(image.pixelColor(x,y).alpha() > 150);
-                QVERIFY(image.pixelColor(x+3,y).alpha() > 0);
-                QVERIFY(image.pixelColor(x+3,y).alpha() < 100);
+                // The pen accent wobbles inside its reserved left pixels.
+                int accentAlpha = 0;
+                for (int dy = 0; dy <= 2 && y + dy < image.height(); ++dy)
+                    for (int dx = -1; dx <= 2; ++dx) accentAlpha = qMax(accentAlpha,image.pixelColor(x+dx,y+dy).alpha());
+                QVERIFY(accentAlpha > 150);
+                QVERIFY(image.pixelColor(x+4,y).alpha() > 0);
+                QVERIFY(image.pixelColor(x+4,y).alpha() < 100);
                 const QRectF accent(r["x"].toDouble()-5,r["y"].toDouble(),2,r["height"].toDouble());
                 for (const auto &ink : textInkRects(doc,0,doc->characterCount()-1))
                     QVERIFY2(!accent.intersects(ink),"Accent overlaps original glyph ink");
@@ -1104,6 +1108,171 @@ ApplicationWindow {
             QVERIFY(alpha(18.2,3.7) > 180); // Pencil above the square's top.
             QVERIFY(alpha(20.2,6) > 180); // Pencil beyond its right edge.
         }
+    }
+    void handDrawnHelper_data() {
+        QTest::addColumn<double>("scale");
+        QTest::newRow("1x") << 1.0;
+        QTest::newRow("2x") << 2.0;
+    }
+    void handDrawnHelper() {
+        QFETCH(double,scale);
+        // The shared generator, loaded exactly as the reader files import it.
+        const QString helper = QFINDTESTDATA("../qml/HandDrawn.js");
+        QVERIFY(!helper.isEmpty());
+        QQmlComponent component(engine.get());
+        component.setData(R"(
+import QtQuick
+import ")" + QUrl::fromLocalFile(helper).toEncoded() + R"(" as HandDrawn
+QtObject {
+    function seed(a) { return HandDrawn.seed(a[0], a[1], a[2], a[3]) }
+    function line(a) { return HandDrawn.linePoints(0, 10, 200, 10, a[0], a[1], a[2]) }
+    function band(a) { return HandDrawn.bandPolygon(Qt.rect(4, 6, 120, 22), a[0], a[1], { top: true, bottom: true, left: true, right: true }) }
+    function rect(a) { return HandDrawn.wavyRect(null, 0, 0, 60, 24, a[0], a[1], { width: 1 }) }
+}
+)",QUrl::fromLocalFile(QFileInfo(helper).absolutePath() + "/HelperHarness.qml"));
+        std::unique_ptr<QObject> object(component.create());
+        QVERIFY2(object,qPrintable(component.errorString()));
+        auto call = [&](const char *name, QVariantList args) {
+            QVariant result;
+            QMetaObject::invokeMethod(object.get(),name,Q_RETURN_ARG(QVariant,result),Q_ARG(QVariant,QVariant(args)));
+            return result.canConvert<QJSValue>() ? result.value<QJSValue>().toVariant() : result;
+        };
+        const auto seedA = call("seed",{"bookmark","KJV","John 3:16",0}).toDouble();
+        QCOMPARE(call("seed",{"bookmark","KJV","John 3:16",0}).toDouble(),seedA); // Stable.
+        QSet<double> seeds{seedA};
+        seeds << call("seed",{"note","KJV","John 3:16",0}).toDouble()
+              << call("seed",{"bookmark","WEB","John 3:16",0}).toDouble()
+              << call("seed",{"bookmark","KJV","John 3:17",0}).toDouble()
+              << call("seed",{"bookmark","KJV","John 3:16",1}).toDouble();
+        QCOMPARE(seeds.size(),5); // Different marks, versions, scopes and segments.
+        const auto first = call("line",{seedA,scale,QVariantMap{}}).toList();
+        QCOMPARE(call("line",{seedA,scale,QVariantMap{}}).toList(),first); // Same seed, same path.
+        QVERIFY(call("line",{seedA + 1,scale,QVariantMap{}}).toList() != first);
+        QVERIFY(first.size() > 10);
+        double deviation = 0;
+        for (const auto &value : first) {
+            const auto p = value.toMap();
+            deviation = qMax(deviation,qAbs(p["y"].toDouble() - 10));
+            QVERIFY(p["x"].toDouble() >= 0 && p["x"].toDouble() <= 200); // Ends only shorten.
+            QVERIFY(p["w"].toDouble() > 0.6 * scale && p["w"].toDouble() < 1.2 * scale);
+        }
+        QVERIFY2(deviation > 0.25 * scale,qPrintable(QString::number(deviation))); // Visibly hand drawn...
+        QVERIFY2(deviation <= 1.2 * scale + 1e-9,qPrintable(QString::number(deviation))); // ...but subtle.
+        // Joined ends meet neighbours exactly with the base width.
+        const auto joined = call("line",{seedA,scale,QVariantMap{{"joinStart",true},{"joinEnd",true},{"width",2}}}).toList();
+        for (const auto &end : {joined.first().toMap(),joined.last().toMap()}) {
+            QCOMPARE(end["y"].toDouble(),10.0);
+            QCOMPARE(end["w"].toDouble(),2.0);
+        }
+        QCOMPARE(joined.first().toMap()["x"].toDouble(),0.0);
+        QCOMPARE(joined.last().toMap()["x"].toDouble(),200.0);
+        const auto band = call("band",{seedA,scale}).toList();
+        QVERIFY(band.size() > 8);
+        bool uneven = false;
+        for (const auto &value : band) {
+            const auto p = value.toMap();
+            QVERIFY(QRectF(4,6,120,22).adjusted(-1e-6,-1e-6,1e-6,1e-6).contains(QPointF(p["x"].toDouble(),p["y"].toDouble())));
+            uneven |= p["y"].toDouble() > 6.2 && p["y"].toDouble() < 6 + 22.0 / 3;
+        }
+        QVERIFY(uneven);
+        QCOMPARE(call("band",{seedA,scale}).toList(),band);
+        for (const auto &side : call("rect",{seedA,scale}).toList())
+            for (const auto &value : side.toList()) {
+                const auto p = value.toMap();
+                const double half = p["w"].toDouble() / 2;
+                QVERIFY(p["x"].toDouble() - half >= 0 && p["x"].toDouble() + half <= 60);
+                QVERIFY(p["y"].toDouble() - half >= 0 && p["y"].toDouble() + half <= 24);
+            }
+    }
+    void handDrawnMarksDeterministicAndBounded() {
+        backend->setProperty("showVerseNumbers",false);
+        const QString longText = QString("Agjp words wrapping across several lines here. ").repeated(5).trimmed();
+        QVariantList verses{
+            QVariantMap{{"number",1},{"text",longText},{"bookmarkRanges",QVariantList{bookmark("A",true,false)}},
+                {"noteRanges",QVariantList{noteRange("N",true,true)}},{"highlightRanges",QVariantList{QVariantMap{{"reference","H"}}}}},
+            QVariantMap{{"number",2},{"text",longText},{"bookmarkRanges",QVariantList{bookmark("A",false,true)}}},
+            QVariantMap{{"number",3},{"text","Plain tail."}}};
+        backend->setProperty("verses",verses);
+        backend->setProperty("cursorVerse",1);
+        QTRY_VERIFY(list("inlineMarkers").size() >= 4);
+        QTest::qWait(80);
+        auto body = item("blockBody");
+        auto doc = body->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        auto geometry = [&]() {
+            QVariantList result;
+            for (int p = 0; p < doc->characterCount(); ++p) {
+                QRectF caret;
+                QMetaObject::invokeMethod(body,"positionToRectangle",Q_RETURN_ARG(QRectF,caret),Q_ARG(int,p));
+                result.append(caret);
+            }
+            return result;
+        };
+        auto grab = [](QQuickItem *visual) {
+            auto capture = visual->grabToImage();
+            if (!capture) return QImage();
+            QSignalSpy ready(capture.get(),&QQuickItemGrabResult::ready);
+            if (capture->image().isNull()) ready.wait(2000);
+            return capture->image();
+        };
+        const auto before = geometry();
+        const QString copied = mapping->selectionText(0,doc->characterCount());
+        auto background = item("blockRangeBackground");
+        const auto paints = [&]() {
+            QList<QImage> images{grab(background)};
+            for (const auto &entry : list("inlineMarkers")) {
+                const auto m = entry.toMap();
+                auto paint = item("blockInlinePaint:"+m["kind"].toString()+':'+m["edge"].toString()+':'+m["reference"].toString());
+                if (paint) images.append(grab(paint));
+            }
+            return images;
+        };
+        const auto first = paints();
+        QVERIFY(first.size() >= 4);
+        int ink = 0;
+        for (int y = 0; y < first[0].height(); ++y)
+            for (int x = 0; x < first[0].width(); ++x) ink += first[0].pixelColor(x,y).alpha() > 0;
+        QVERIFY(ink > 0);
+        // Force repaints and scroll; the wobble must not jitter.
+        QMetaObject::invokeMethod(background,"requestPaint");
+        auto flick = item("reader")->parentItem()->parentItem();
+        flick->setProperty("contentY",40); QTest::qWait(60);
+        flick->setProperty("contentY",0); QTest::qWait(60);
+        for (auto paint : window->contentItem()->findChildren<QQuickItem *>())
+            if (paint->objectName().startsWith("blockInlinePaint:")) QMetaObject::invokeMethod(paint,"requestPaint");
+        QTest::qWait(80);
+        QCOMPARE(paints(),first);
+        QCOMPARE(geometry(),before); // Paint only: layout and copy are unchanged.
+        QCOMPARE(mapping->selectionText(0,doc->characterCount()),copied);
+        // Each bracket's ink stays inside its reserved bracket box.
+        for (const auto &entry : list("inlineMarkers")) {
+            const auto m = entry.toMap();
+            auto paint = item("blockInlinePaint:"+m["kind"].toString()+':'+m["edge"].toString()+':'+m["reference"].toString());
+            if (!paint) continue;
+            const auto image = grab(paint);
+            const qreal ratio = image.devicePixelRatio();
+            const auto box = bracketRect(m).translated(-m["x"].toDouble(),-m["y"].toDouble()).adjusted(-1,-1,1,1);
+            int bracketInk = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x) {
+                    if (image.pixelColor(x,y).alpha() < 60) continue;
+                    ++bracketInk;
+                    QVERIFY2(box.contains(QPointF((x + 0.5) / ratio,(y + 0.5) / ratio)),qPrintable(paint->objectName()));
+                }
+            QVERIFY(bracketInk > 2);
+        }
+        // Clearing every annotation paints nothing and still changes no layout.
+        for (auto &value : verses) {
+            auto v = value.toMap();
+            v.remove("bookmarkRanges"); v.remove("noteRanges"); v.remove("highlightRanges");
+            value = v;
+        }
+        backend->setProperty("verses",verses);
+        backend->setProperty("cursorVerse",0);
+        QTRY_VERIFY(list("inlineMarkers").isEmpty());
+        QTest::qWait(60);
+        const auto cleared = grab(background);
+        for (int y = 0; y < cleared.height(); ++y)
+            for (int x = 0; x < cleared.width(); ++x) QCOMPARE(cleared.pixelColor(x,y).alpha(),0);
     }
     void screenshot() {
         populate(true);

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import "HandDrawn.js" as HandDrawn
 // Registered by blockdocument.cpp at application startup, without a QML plugin.
 // qmllint disable import
 import OmaWord.Reader 1.0
@@ -138,24 +139,44 @@ Item {
                     else ranges[range.reference].end = span.end
                 }
             }
-            function draw(start, end, selected) {
-                for (const r of document.rectangles(start, end)) {
+            const k = root.controller.scale > 0 ? root.controller.scale : 1
+            const version = root.backend.versionId || ""
+            function draw(start, end, selected, reference) {
+                const rects = document.rectangles(start, end)
+                for (let i = 0; i < rects.length; ++i) {
+                    const r = rects[i]
                     ctx.fillStyle = root.controller.tint(accent, selected ? 0.22 : 0.16)
-                    ctx.fillRect(r.x - leftInset, r.y, r.width + leftInset, r.height)
-                    if (!selected && !focused) {
+                    if (selected) {
+                        // The active selection is not an annotation mark.
+                        ctx.fillRect(r.x - leftInset, r.y, r.width + leftInset, r.height)
+                        continue
+                    }
+                    const s = HandDrawn.seed("highlight", version, reference, i)
+                    HandDrawn.highlighterBand(ctx, Qt.rect(r.x - leftInset, r.y, r.width + leftInset, r.height), s, k,
+                        { top: true, bottom: true, right: i === rects.length - 1 })
+                    if (!focused) {
+                        // Pen accent inside its reserved two pixels plus gap.
+                        const amp = 0.6 * k
+                        const ax = r.x - leftInset + 1 + amp
                         ctx.fillStyle = root.controller.tint(accent, 0.7)
-                        ctx.fillRect(r.x - leftInset, r.y, 2, r.height)
+                        HandDrawn.wavyLine(ctx, ax, r.y, ax, r.y + r.height, HandDrawn.seed(s, "accent"), k,
+                            { width: 2, amp: amp, joinStart: i > 0, joinEnd: i < rects.length - 1 })
                     }
                 }
             }
-            for (const ref in ranges) draw(ranges[ref].start, ranges[ref].end, false)
+            for (const ref in ranges) draw(ranges[ref].start, ranges[ref].end, false, ref)
             if (!focused) {
                 ctx.fillStyle = root.controller.tint(accent, 0.06)
-                for (const range of contextRanges)
-                    for (const r of document.rectangles(range.start, range.end)) ctx.fillRect(r.x, r.y, r.width, r.height)
+                for (let c = 0; c < contextRanges.length; ++c) {
+                    const range = contextRanges[c]
+                    const rects = document.rectangles(range.start, range.end)
+                    for (let i = 0; i < rects.length; ++i)
+                        HandDrawn.highlighterBand(ctx, rects[i], HandDrawn.seed("context", version, range.start, range.end, i), k,
+                            { top: true, bottom: true, left: i === 0, right: i === rects.length - 1 })
+                }
             }
             const selected = Array.from(spans).filter(function(s) { return first > 0 && s.number >= first && s.number <= last })
-            if (selected.length) draw(selected[0].start, selected[selected.length - 1].end, true)
+            if (selected.length) draw(selected[0].start, selected[selected.length - 1].end, true, "")
         }
     }
     // Search is a separate background above annotations and below native text.
@@ -173,18 +194,7 @@ Item {
             const ctx = getContext("2d")
             ctx.reset()
             const rects = document.searchRectangles(root.searchSegments)
-            for (let active = 0; active < 2; ++active) {
-                for (const r of rects) {
-                    if (!!r.active !== !!active) continue
-                    ctx.fillStyle = Qt.rgba(accent.r, accent.g, accent.b, active ? 0.55 : 0.28)
-                    ctx.fillRect(r.x, r.y, r.width, r.height)
-                    if (active) {
-                        ctx.strokeStyle = accent
-                        ctx.lineWidth = 1
-                        ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(0, r.width - 1), Math.max(0, r.height - 1))
-                    }
-                }
-            }
+            HandDrawn.searchMarks(ctx, rects, accent, false, root.controller.scale, "block")
         }
     }
     TextEdit {
@@ -293,6 +303,7 @@ Item {
             }
             Canvas {
                 id: inlinePaint
+                objectName: "blockInlinePaint:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
                 anchors.fill: parent
                 property color accent: root.theme.accent
                 property real bracketTop: inlineMarker.modelData.bracketTop
@@ -311,29 +322,27 @@ Item {
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.reset()
-                    ctx.strokeStyle = accent
                     ctx.fillStyle = accent
-                    ctx.lineWidth = Math.max(1, height / 18)
+                    const lineWidth = Math.max(1, height / 18)
                     if (rtl) { ctx.translate(width, 0); ctx.scale(-1, 1) }
                     ctx.translate(bracketX, 0)
                     const opening = inlineMarker.opening
                     const bx = opening ? paintWidth * 0.78 : paintWidth * 0.65
-                    const tip = opening ? paintWidth - ctx.lineWidth / 2 : ctx.lineWidth / 2
-                    const top = bracketTop + ctx.lineWidth / 2
-                    const bottom = bracketTop + bracketHeight - ctx.lineWidth / 2
-                    ctx.beginPath()
-                    if (inlineMarker.modelData.edge === "continuation") {
+                    const tip = opening ? paintWidth - lineWidth / 2 : lineWidth / 2
+                    const k = root.controller.scale > 0 ? root.controller.scale : 1
+                    // Fold the wobble inward so ink stays in the bracket box.
+                    const amp = Math.min(0.8 * k, Math.abs(tip - bx) / 3, bracketHeight / 8)
+                    const top = bracketTop + lineWidth / 2 + amp
+                    const bottom = bracketTop + bracketHeight - lineWidth / 2 - amp
+                    const data = inlineMarker.modelData
+                    const s = HandDrawn.seed(data.kind, root.backend.versionId || "", data.reference, data.edge, data.verse, data.position)
+                    const pen = { width: lineWidth, amp: amp }
+                    if (data.edge === "continuation") {
                         // A chevron denotes a continued range, not a false start.
-                        ctx.moveTo(bx, top)
-                        ctx.lineTo(tip, (top + bottom) / 2)
-                        ctx.lineTo(bx, bottom)
+                        HandDrawn.wavyPolyline(ctx, [Qt.point(bx, top), Qt.point(tip, (top + bottom) / 2), Qt.point(bx, bottom)], s, k, pen)
                     } else {
-                        ctx.moveTo(tip, top)
-                        ctx.lineTo(bx, top)
-                        ctx.lineTo(bx, bottom)
-                        ctx.lineTo(tip, bottom)
+                        HandDrawn.wavyPolyline(ctx, [Qt.point(tip, top), Qt.point(bx, top), Qt.point(bx, bottom), Qt.point(tip, bottom)], s, k, pen)
                     }
-                    ctx.stroke()
                 }
             }
             AnnotationGlyph {
