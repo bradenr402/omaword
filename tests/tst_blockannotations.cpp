@@ -45,6 +45,7 @@ class BlockAnnotationsTest : public QObject
         return nullptr;
     }
     QQuickItem *item(const QString &name) const { return find(window->contentItem(),name); }
+    bool menuOpen() const { return root->findChild<QObject *>("contextMenu")->property("visible").toBool(); }
     QVariantList list(const char *property) const {
         const auto value = item("reader")->property(property);
         return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toList() : value.toList();
@@ -189,6 +190,15 @@ ApplicationWindow {
         function copyFreeText() { copied = freeSelectedText }
         function copyPassage(plain) { calls += "passage:" + plain + ";" }
         function selectVerse(verse, extend) { backend.cursorVerse = verse }
+        function openPassageMenu(verse, x, y) { calls += "menu:" + verse + ";" }
+        function openMarkerMenu(choices, kind, open, editScope, x, y) {
+            calls += "markerMenu:" + kind + ";"
+            contextMenu.show("marker", [
+                { id: "open", text: "Open", run: open },
+                { separator: true },
+                { id: "editRange", text: "Edit range", shortcut: "Shift E", run: function() { controller.openRangeEditor(editScope, kind) } }
+            ], x, y)
+        }
     }
     QtObject {
         id: theme
@@ -197,6 +207,7 @@ ApplicationWindow {
         property color accent: "#8db5d4"
         property color surface: "#222830"
         property color border: "#485563"
+        property color muted: "#8a96a3"
         property real textScale: 1
         property real cornerRadius: 8
         property string fontFamily: "DejaVu Sans"
@@ -210,6 +221,7 @@ ApplicationWindow {
             controller: controller; backend: backend; theme: theme; viewport: viewport
         }
     }
+    Reader.AppContextMenu { id: contextMenu; objectName: "contextMenu"; theme: theme }
     Reader.AnnotationGlyph { id: sharedGlyph; objectName: "sharedGlyph"; x: 600; y: 500 }
     Canvas {
         objectName: "footerNoteReference"; x: 650; y: 500
@@ -948,17 +960,19 @@ ApplicationWindow {
             QCOMPARE(editedScope(),scope);
             controller->setProperty("calls","");
             QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,point);
-            QTRY_VERIFY(item("reader")->property("annotationMenuOpen").toBool());
-            QVERIFY(controller->property("calls").toString().isEmpty());
-            click(item("blockAnnotationEditRange"));
-            QTRY_VERIFY(!item("reader")->property("annotationMenuOpen").toBool());
+            QTRY_VERIFY(menuOpen());
+            QCOMPARE(controller->property("calls").toString(),"markerMenu:" + kind + ";");
+            controller->setProperty("calls","");
+            click(item("contextMenuItem:editRange"));
+            QTRY_VERIFY(!menuOpen());
             QCOMPARE(controller->property("calls").toString(),QString("range;"));
             QCOMPARE(editedScope(),scope);
             controller->setProperty("calls","");
             QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,point);
-            QTRY_VERIFY(item("reader")->property("annotationMenuOpen").toBool());
-            click(item("blockAnnotationOpen"));
-            QTRY_VERIFY(!item("reader")->property("annotationMenuOpen").toBool());
+            QTRY_VERIFY(menuOpen());
+            controller->setProperty("calls","");
+            click(item("contextMenuItem:open"));
+            QTRY_VERIFY(!menuOpen());
             QVERIFY(!controller->property("calls").toString().contains("range;"));
             if (kind == "note") QCOMPARE(controller->property("calls").toString(),QString("flush;scope;clear;sync;edit;"));
         }

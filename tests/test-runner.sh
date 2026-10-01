@@ -8,7 +8,7 @@ trap 'if [[ -n $running ]]; then kill "$running" 2>/dev/null || true; wait "$run
 export STATE="$workspace/state"
 mkdir -p "$workspace/checkout/bin" "$workspace/checkout/tests" "$workspace/tools" "$STATE"
 cp "$root/bin/test" "$workspace/checkout/bin/test"
-for project in backend ui search searchui deskui searchrender tags tagsui ranges rangesui sound desktop usfm catalog blockannotations singleinstance windows; do
+for project in backend ui search searchui deskui contextmenu searchrender tags tagsui ranges rangesui sound desktop usfm catalog blockannotations singleinstance windows; do
     touch "$workspace/checkout/tests/$project.pro"
 done
 cat > "$workspace/tools/qmake6" <<'SH'
@@ -140,7 +140,7 @@ rm -f "$STATE"/*.test "$STATE"/*.build
 export JOBS=1 TEST_JOBS=8 EXPECTED_JOBS=1
 run_status
 [[ $status == 0 ]]
-for project in backend ui search searchui deskui searchrender tags tagsui ranges rangesui sound desktop usfm catalog blockannotations singleinstance windows; do
+for project in backend ui search searchui deskui contextmenu searchrender tags tagsui ranges rangesui sound desktop usfm catalog blockannotations singleinstance windows; do
     [[ -f $STATE/$project.test ]]
 done
 assert_output '[windows] PASS'

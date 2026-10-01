@@ -64,11 +64,11 @@ stale source must be chosen again by canceling and reopening.
 
 - **Annotations → Bookmarks / Highlights / Notes:** row **Edit range**, or
   `Shift E` on the focused row (falling back to the current list item).
-- **Reader bookmark, note, and tag markers:** right-click → **Open** / **Edit range**,
+- **Reader bookmark, note, and tag markers:** right-click context menu → **Open** / **Edit range**,
   or Shift-click to edit directly, in Verse, Paragraph, and Block layouts. Verse
   markers sharing coverage pass their exact choices to the chooser. Ordinary
-  left-click keeps the marker's Open behavior; right/middle-click copy gestures
-  on verse text remain separate from marker actions.
+  left-click keeps the marker's Open behavior; the verse-text context menu and
+  middle-click copy remain separate from marker actions.
 - **Annotations → Tags:** **Edit range** on exact tagged scopes, overlapping
   ranges, and related rows; `Shift E` uses the focused row's scope or the summary
   scope. This is an explicit new requirement allowing range-edit entry from the

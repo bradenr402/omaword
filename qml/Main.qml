@@ -52,7 +52,7 @@ ApplicationWindow {
         tagsUi.close()
         savedDrawer.close()
         verseTagMenu.close()
-        markerMenu.close()
+        contextMenu.close()
     }
     function editSavedRange() {
         let focused = activeFocusItem
@@ -458,7 +458,7 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: rangeEditor.visibleModal || markerMenu.visible || tagsUi.visibleModal || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.visible || deskDrawer.visible || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible || !!(blockLoader.item as BlockReader)?.annotationMenuOpen
+    readonly property bool modalOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.visibleModal || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.visible || deskDrawer.visible || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -626,6 +626,189 @@ ApplicationWindow {
     }
     function copyFreeText() {
         if (freeSelectedText.length) bible.copyText(freeSelectedText)
+    }
+    // Context menu: one themed menu for passages, markers, Desk items,
+    // annotation rows, and search results. Items reuse the catalog actions.
+    readonly property var menuDivider: ({ separator: true })
+    function menuAction(id, text, shortcut, action) {
+        return { id: id, text: text, shortcut: shortcut, enabled: actionAvailable(action),
+            run: function() { app.runCommand(action) } }
+    }
+    function passageMenuEntries() {
+        return [
+            menuAction("copy", "Copy quotation", "y", "copy"),
+            menuAction("copyPlain", "Copy plain text", "Shift Y", "copyPlain"),
+            menuDivider,
+            menuAction("bookmark", bible.selectionBookmarked ? "Remove bookmark" : "Bookmark", "m", "bookmark"),
+            menuAction("highlight", bible.selectionHighlighted ? "Remove highlight" : "Highlight", "x", "highlight"),
+            menuAction("note", bible.noteText.length ? "Edit note" : "Write note", "w", "notes"),
+            menuAction("tags", "Tags…", "t", "tags"),
+            menuDivider,
+            menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "d", "toggleDesk"),
+            menuDivider,
+            menuAction("related", "Related passages", "Shift L", "related"),
+            menuAction("chapterFind", "Find in chapter", "/", "chapterFind")
+        ]
+    }
+    // Right-click outside the selection selects that verse; inside keeps the range.
+    function openPassageMenu(number, sceneX, sceneY) {
+        if (!bible.ready || bible.busy) return
+        clearCount()
+        if (!rangeEditing && number > 0) {
+            const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
+            if (!inside) {
+                selectVerse(number, false)
+                if (bible.selectedStart !== number) return
+            }
+        }
+        contextMenu.show("passage", passageMenuEntries(), sceneX, sceneY)
+    }
+    function verseMenuPoint(number) {
+        const view = reading.mapToItem(null, 0, 0)
+        let point = Qt.point(view.x + reading.width / 3, view.y + reading.height / 3)
+        const block = blockLoader.item as BlockReader
+        if (block) {
+            const r = block.verseRect(number)
+            point = block.body.mapToItem(null, r.x, r.y + r.height)
+        } else {
+            const index = Array.from(bible.verses).findIndex(function(v) { return v.number === number })
+            const row = index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
+            if (row && row.body) point = row.body.mapToItem(null, 24 * scale, Math.min(row.body.height, readerLineHeight))
+        }
+        return Qt.point(point.x, Math.max(view.y, Math.min(view.y + reading.height - 24 * scale, point.y)))
+    }
+    function openPassageMenuAtCursor() {
+        if (!bible.ready || bible.busy) return
+        if (!hasSelection) {
+            const rows = Array.from(bible.verses)
+            const number = bible.cursorVerse > 0 ? bible.cursorVerse : rows.length ? rows[0].number : 0
+            if (number > 0) selectVerse(number, false)
+        }
+        const point = verseMenuPoint(bible.cursorVerse)
+        contextMenu.show("passage", passageMenuEntries(), point.x, point.y)
+    }
+    function sceneRowPoint(item) {
+        return item ? item.mapToItem(null, 24 * scale, Math.min(item.height, 28 * scale)) : Qt.point(width / 3, height / 3)
+    }
+    function deskRowFor(scope) {
+        return Array.from(bible.desk).find(function(entry) {
+            return entry.versionId === scope.versionId && ["book", "chapter", "start", "endBook", "endChapter", "end"].every(function(key) {
+                return entry[key] === scope[key]
+            })
+        })
+    }
+    function toggleScopeDesk(scope) {
+        if (rangeEditing || bible.busy || !scope) return
+        const existing = deskRowFor(scope)
+        if (existing ? bible.removeFromDesk(existing.id) : bible.addToDesk(scope)) {
+            const reference = (existing || {}).reference || scope.reference || "Passage"
+            notify(reference + (existing ? " removed from Desk" : " added to Desk"), true)
+            sounds.play(existing ? "remove" : "chime")
+        } else sounds.play("error")
+    }
+    function copyScope(scope, plainText) {
+        if (!scope || bible.busy) return
+        const copied = bible.copyScope(scope, !!plainText)
+        if (copied.length) {
+            notify((scope.reference || "Passage") + (plainText ? " copied as plain text" : " copied"), true)
+            sounds.play("chime")
+        } else sounds.play("error")
+    }
+    function removeMarkerAnnotation(scope, kind) {
+        if (rangeEditing || bible.busy || !scope || !flushNote()) return
+        if (kind === "bookmark") {
+            if (!bible.openTaggedPassage(scope)) { sounds.play("error"); return }
+            syncNote()
+            if (bible.selectionBookmarked) markPassage(false)
+        } else if (kind === "tag") {
+            const tags = Array.from(bible.tagsForScope(scope))
+            let removed = tags.length > 0
+            for (const tag of tags) removed = bible.setTag(scope, tag.id, false) && removed
+            if (removed) { notify((scope.reference || "Passage") + " tags removed", true); sounds.play("remove") }
+            else sounds.play("error")
+        } else requestDeleteScope(scope)
+    }
+    function requestDeleteScope(entry) {
+        if (rangeEditing || bible.busy || !entry || !flushNote()) return
+        const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
+            book: entry.book, chapter: entry.chapter, start: entry.start,
+            endBook: entry.endBook, endChapter: entry.endChapter, end: entry.end })
+        if (!savedScopeExists(scope)) { sounds.play("error"); return }
+        deleteConfirmation.scope = scope
+        deleteConfirmation.row = -1
+        deleteConfirmation.open()
+    }
+    // Bookmark, note, and tag markers in every layout. One choice targets
+    // that range; several overlapping ranges keep Open's chooser and Edit range.
+    function openMarkerMenu(choices, kind, openMarker, editScope, sceneX, sceneY) {
+        choices = Array.from(choices || [])
+        const scope = choices.length === 1 ? choices[0] : null
+        const ready = !rangeEditing && !bible.busy
+        contextMenu.show("marker", [
+            { id: "open", text: "Open", enabled: ready, run: openMarker },
+            menuDivider,
+            { id: "editRange", text: "Edit range", shortcut: "Shift E", enabled: ready,
+                run: function() { app.openRangeEditor(editScope, kind) } },
+            { id: "remove", text: kind === "bookmark" ? "Remove bookmark" : kind === "tag" ? "Remove tags" : "Delete note…",
+                enabled: ready && !!scope, run: function() { app.removeMarkerAnnotation(scope, kind) } },
+            menuDivider,
+            { id: "copy", text: "Copy passage", enabled: !bible.busy && !!scope, run: function() { app.copyScope(scope) } },
+            menuDivider,
+            { id: "desk", text: scope && deskRowFor(scope) ? "Remove from Desk" : "Add to Desk", enabled: ready && !!scope,
+                run: function() { app.toggleScopeDesk(scope) } }
+        ], sceneX, sceneY)
+    }
+    function openDeskMenu(row, sceneX, sceneY) {
+        const entry = deskList.model[row]
+        if (!entry) return
+        deskList.currentIndex = row
+        moveDesk(0)
+        const ready = !rangeEditing && !bible.busy
+        const id = entry.id
+        contextMenu.show("desk", [
+            { id: "open", text: "Open", shortcut: "Enter", enabled: ready && entry.available, run: function() { app.openDeskItem(id) } },
+            { id: "copy", text: "Copy", shortcut: "y", enabled: ready && entry.available, run: function() { app.copyDeskItem(id) } },
+            menuDivider,
+            { id: "remove", text: "Remove from Desk", shortcut: "x", enabled: ready, run: function() { app.removeDeskItem(id) } }
+        ], sceneX, sceneY)
+    }
+    function openSavedMenu(row, sceneX, sceneY) {
+        const entry = collectionList.model[row]
+        if (!entry) return
+        collectionList.currentIndex = row
+        collectionList.forceActiveFocus()
+        const ready = !rangeEditing && !bible.busy
+        const kind = ["bookmark", "highlight", "note"][collectionTab]
+        contextMenu.show("annotation", [
+            { id: "open", text: "Open", shortcut: "Enter", enabled: ready, run: function() { app.openSaved(entry) } },
+            { id: "editRange", text: "Edit range", shortcut: "Shift E", enabled: ready, run: function() { app.openRangeEditor(entry, kind) } },
+            menuDivider,
+            { id: "desk", text: deskRowFor(entry) ? "Remove from Desk" : "Add to Desk", enabled: ready, run: function() { app.toggleScopeDesk(entry) } },
+            menuDivider,
+            { id: "delete", text: "Delete…", shortcut: "Delete", enabled: ready, run: function() {
+                collectionList.currentIndex = row
+                collectionList.forceActiveFocus()
+                app.requestDeleteSaved()
+            } }
+        ], sceneX, sceneY)
+    }
+    function openSearchMenu(row, sceneX, sceneY) {
+        const entry = paletteResults.model[row]
+        if (!paletteTextMode || !entry) return
+        paletteResults.currentIndex = row
+        paletteArrowUsed = true
+        const ready = !rangeEditing && !bible.busy
+        contextMenu.show("search", [
+            { id: "open", text: "Open", shortcut: "Enter", enabled: ready, run: function() { app.acceptBibleResult(entry) } },
+            { id: "copy", text: "Copy", enabled: !bible.busy, run: function() { app.copyScope(entry) } },
+            menuDivider,
+            { id: "desk", text: deskRowFor(entry) ? "Remove from Desk" : "Add to Desk", enabled: ready, run: function() { app.toggleScopeDesk(entry) } }
+        ], sceneX, sceneY)
+    }
+    AppContextMenu {
+        id: contextMenu
+        objectName: "contextMenu"
+        theme: desktop
     }
     function copyClickedVerse(number, plainText) {
         if (rangeEditing) { bible.copySelection(plainText); return }
@@ -1402,8 +1585,9 @@ ApplicationWindow {
         { id: "copy", title: "Copy passage as quotation", keys: "y · Ctrl c", sequences: ["Y"], command: true },
         { id: "copyPlain", title: "Copy passage as plain text", keys: "Shift Y · Ctrl Shift C", sequences: ["Shift+Y", "Ctrl+Shift+C"], command: true },
         { id: "copyText", title: "Copy selected text", keys: "Ctrl c", sequences: ["Ctrl+C"] },
-        { id: "clickCopy", title: "Copy passage as quotation", keys: "Right Click", explanation: true },
-        { id: "middleCopy", title: "Copy passage as plain text", keys: "Middle Click", explanation: true },
+        { id: "contextMenu", title: "Open context menu", keys: "Menu · Shift F10", sequences: ["Menu", "Shift+F10"] },
+        { id: "clickMenu", title: "Open context menu", keys: "Right Click", explanation: true },
+        { id: "middleCopy", title: "Copy passage as quotation", keys: "Middle Click", explanation: true },
         { id: "previousChapter", title: "Previous chapter", keys: "h · Left · [", sequences: ["H", "Left", "["] },
         { id: "nextChapter", title: "Next chapter", keys: "l · Right · ]", sequences: ["L", "Right", "]"] },
         { id: "previousVerse", title: "Previous verse", keys: "k · Up", sequences: ["K", "Up"] },
@@ -1615,6 +1799,7 @@ ApplicationWindow {
         const previousReaderSize = readerSize
         switch (action) {
         case "editRange": openRangeEditor(); break
+        case "contextMenu": openPassageMenuAtCursor(); break
         case "newWindow": if (!modalOpen) newWindowRequested(); break
         case "books": openPalette(false); break
         case "bibleSearch": openTextSearch(); break
@@ -2053,8 +2238,8 @@ ApplicationWindow {
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: function(mouse) {
                 if (mouse.button === Qt.RightButton) {
-                    markerMenu.marker = marker
-                    markerMenu.popup()
+                    const p = mapToItem(null, mouse.x, mouse.y)
+                    app.openMarkerMenu(marker.choices, marker.kind, function() { marker.openMarker() }, marker.choices, p.x, p.y)
                 } else if (mouse.modifiers & Qt.ShiftModifier) app.openRangeEditor(marker.choices, marker.kind)
                 else marker.openMarker()
             }
@@ -2089,13 +2274,6 @@ ApplicationWindow {
             radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
         }
         AppToolTip { theme: desktop; visible: marker.visible && (marker.hovered || marker.activeFocus); text: marker.hint + "\nShift Click · Edit range · Shift E in reader" }
-    }
-    Menu {
-        id: markerMenu
-        objectName: "rangeMarkerMenu"
-        property var marker: null
-        MenuItem { objectName: "rangeMarkerOpen"; text: "Open"; onTriggered: { if (markerMenu.marker) markerMenu.marker.openMarker() } }
-        MenuItem { objectName: "rangeMarkerEdit"; text: "Edit range"; onTriggered: { if (markerMenu.marker) app.openRangeEditor(markerMenu.marker.choices, markerMenu.marker.kind) } }
     }
     component SectionLabel: Label {
         color: desktop.muted
@@ -2384,7 +2562,8 @@ ApplicationWindow {
                                         onPositionChanged: function(mouse) { if (pressedButtons & Qt.LeftButton) app.updateTextDrag(numberMouse, mouse) }
                                         onReleased: function(mouse) {
                                             if (mouse.button === Qt.LeftButton) app.finishTextDrag(verseRow.modelData.number, mouse)
-                                            else app.copyClickedVerse(verseRow.modelData.number, mouse.button === Qt.MiddleButton)
+                                            else if (mouse.button === Qt.MiddleButton) app.copyClickedVerse(verseRow.modelData.number, false)
+                                            else { const p = numberMouse.mapToItem(null, mouse.x, mouse.y); app.openPassageMenu(verseRow.modelData.number, p.x, p.y) }
                                         }
                                         onCanceled: { app.draggingText = false; app.dragAnchorRow = -1 }
                                         onDoubleClicked: function(mouse) {
@@ -2452,7 +2631,8 @@ ApplicationWindow {
                                         onPositionChanged: function(mouse) { if (pressedButtons & Qt.LeftButton) app.updateTextDrag(bodyMouse, mouse) }
                                         onReleased: function(mouse) {
                                             if (mouse.button === Qt.LeftButton) app.finishTextDrag(verseRow.modelData.number, mouse)
-                                            else app.copyClickedVerse(verseRow.modelData.number, mouse.button === Qt.MiddleButton)
+                                            else if (mouse.button === Qt.MiddleButton) app.copyClickedVerse(verseRow.modelData.number, false)
+                                            else { const p = bodyMouse.mapToItem(null, mouse.x, mouse.y); app.openPassageMenu(verseRow.modelData.number, p.x, p.y) }
                                         }
                                         onCanceled: { app.draggingText = false; app.dragAnchorRow = -1 }
                                     }
@@ -3077,8 +3257,13 @@ ApplicationWindow {
         width: Math.min(650 * app.scale, app.width - 48)
         height: Math.min(560 * app.scale, app.height - 48)
         padding: 16
-        Shortcut { sequence: "Tab"; enabled: passagePalette.visible; onActivated: app.cyclePaletteMode(1) }
-        Shortcut { sequence: "Shift+Tab"; enabled: passagePalette.visible; onActivated: app.cyclePaletteMode(-1) }
+        Shortcut { sequence: "Tab"; enabled: passagePalette.visible && !contextMenu.visible; onActivated: app.cyclePaletteMode(1) }
+        Shortcut { sequence: "Shift+Tab"; enabled: passagePalette.visible && !contextMenu.visible; onActivated: app.cyclePaletteMode(-1) }
+        Shortcut {
+            sequences: ["Menu", "Shift+F10"]
+            enabled: passagePalette.visible && app.paletteTextMode && !contextMenu.visible && paletteResults.currentIndex >= 0
+            onActivated: { const p = app.sceneRowPoint(paletteResults.currentItem); app.openSearchMenu(paletteResults.currentIndex, p.x, p.y) }
+        }
         onOpened: referenceInput.forceActiveFocus()
         onAboutToHide: { if (!app.paletteCleared) app.rememberPalette() }
         onClosed: {
@@ -3238,6 +3423,11 @@ ApplicationWindow {
                     highlighted: ListView.isCurrentItem
                     enabled: !modelData.action || app.actionAvailable(modelData.action)
                     onClicked: app.activatePaletteEntry(modelData)
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        enabled: app.paletteTextMode
+                        onTapped: function(eventPoint) { app.openSearchMenu(paletteEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                    }
                     contentItem: ColumnLayout {
                         id: searchResultContent
                         spacing: 6 * app.scale
@@ -3326,7 +3516,7 @@ ApplicationWindow {
         leftPadding: padding
         rightPadding: padding
         closePolicy: deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        readonly property bool tabKeys: opened && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
+        readonly property bool tabKeys: opened && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
         readonly property bool collectionKeys: tabKeys && app.collectionTab !== 3
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
@@ -3342,6 +3532,11 @@ ApplicationWindow {
             Shortcut { sequence: "Shift+E"; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.editSavedRange() }
             Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.opened && !deleteConfirmation.visible && app.activeFocusItem === collectionList; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
             Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.requestDeleteSaved() }
+            Shortcut {
+                sequences: ["Menu", "Shift+F10"]
+                enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0
+                onActivated: { const p = app.sceneRowPoint(collectionList.currentItem); app.openSavedMenu(collectionList.currentIndex, p.x, p.y) }
+            }
             spacing: (savedDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
             RowLayout {
                 Layout.fillWidth: true
@@ -3405,6 +3600,10 @@ ApplicationWindow {
                     clip: true
                     highlighted: ListView.isCurrentItem
                     onClicked: app.openSaved(modelData)
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: function(eventPoint) { app.openSavedMenu(savedEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                    }
                     Keys.onReturnPressed: clicked()
                     Keys.onEnterPressed: clicked()
                     contentItem: RowLayout {
@@ -3475,7 +3674,7 @@ ApplicationWindow {
         focus: true
         padding: 16 * app.controlScale
         closePolicy: cleanDeskConfirmation.visible || errorDialog.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        readonly property bool listKeys: opened && !cleanDeskConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
+        readonly property bool listKeys: opened && !contextMenu.visible && !cleanDeskConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
         onOpened: { app.restoreDeskRow(); app.moveDesk(0) }
@@ -3491,6 +3690,11 @@ ApplicationWindow {
             Shortcut { sequences: ["Return", "Enter"]; enabled: deskDrawer.listKeys && app.activeFocusItem === deskList; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.openDeskItem(entry.id) } }
             Shortcut { sequences: ["Y"]; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id) } }
             Shortcut { sequences: ["X", "Delete", "Backspace"]; enabled: deskDrawer.listKeys; onActivated: app.removeCurrentDeskItem() }
+            Shortcut {
+                sequences: ["Menu", "Shift+F10"]
+                enabled: deskDrawer.listKeys && deskList.currentIndex >= 0
+                onActivated: { const p = app.sceneRowPoint(deskList.currentItem); app.openDeskMenu(deskList.currentIndex, p.x, p.y) }
+            }
             RowLayout {
                 Layout.fillWidth: true
                 Label { objectName: "deskTitle"; text: "Desk"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true }
@@ -3518,6 +3722,10 @@ ApplicationWindow {
                     focusPolicy: Qt.NoFocus
                     highlighted: ListView.isCurrentItem
                     onClicked: { deskList.currentIndex = index; app.moveDesk(0); app.openDeskItem(modelData.id) }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: function(eventPoint) { app.openDeskMenu(deskEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                    }
                     contentItem: ColumnLayout {
                         id: deskEntryContent
                         spacing: 7 * app.scale

@@ -203,7 +203,8 @@ nearest available lane to the verse number. Each interval keeps that lane until
 its end, even when another lane becomes free, preserving straight continuity;
 later intervals reuse free lanes. Adjacent segments meet across rows and headings.
 All three kinds share `RangeMarker` and offer choices for overlapping ranges.
-Right-clicking a Verse or inline marker opens **Open** / **Edit range**;
+Right-clicking a Verse or inline marker opens the shared context menu (`AppContextMenu.qml`):
+**Open**, **Edit range**, **Remove**, **Copy passage**, and **Add to Desk**;
 Shift-click edits its captured range, with an exact-range chooser when needed.
 Note actions open the exact captured scope through `openTaggedPassage` before
 opening Notes; failed draft

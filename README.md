@@ -35,7 +35,8 @@ Internet is needed only to download a version. Once installed, reading and annot
 - In the tag editor, `Space` / `Enter` toggles a tag; Enter in search creates and applies it.
 - `Ctrl n` toggles Notes; `Ctrl a` toggles Annotations (Bookmarks, Highlights, Notes, Tags).
 - `d` adds or removes the passage on the Desk, a study list shared by all windows and versions; `Shift D` opens it.
-- `y` copies a quotation; `Y` copies plain text. `Ctrl c` copies selected text, or the passage when no text is selected.
+- `y` copies a quotation; `Y` copies plain text. `Ctrl c` copies selected text, or the passage when no text is selected. Middle-click copies the clicked verse or selection as a quotation.
+- Right-click (or `Menu` / `Shift F10`) opens a context menu for the passage, a marker, a Desk item, an annotation, or a search result.
 - `b` cycles Paragraph, Verse, and Block layouts; `f` toggles focus mode.
 - `Shift V` switches versions; `Shift R` opens Reading settings; `Shift H` toggles headings.
 - `Shift L` opens Related passages: search tags, match Any/All, and choose the source version or all installed versions. **Find related to current passage** explicitly replaces the pinned source.

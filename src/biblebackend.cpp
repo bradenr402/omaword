@@ -528,7 +528,7 @@ QVariantMap BibleBackend::readRangeSnapshot(const QVariantMap &scope) const
     if (state.value("note").toString().size() > MaximumNoteSize || !safeString(state.value("note").toString()))
         return fail("The saved note is too large or contains unsupported characters.");
     q.prepare("SELECT t.id,t.name FROM tag_assignments a JOIN tags t ON t.id=a.tag_id WHERE "
-              "a.version_id=? AND a.book=? AND a.chapter=? AND a.start=? AND a.endBook=? AND a.endChapter=? AND a.end=? ORDER BY t.id");
+              "a.version_id=? AND a.book=? AND a.chapter=? AND a.start=? AND a.endBook=? AND a.endChapter=? AND a.end=? ORDER BY t.name_key,t.id");
     bindScope(q,canonical);
     if (!q.exec()) return fail("Cannot read tags: " + q.lastError().text());
     QVariantList tags;
@@ -710,7 +710,11 @@ bool BibleBackend::changeAnnotationRange(QVariantMap snapshot, QVariantMap desti
             sourceTags.removeAt(i);
         }
     }
-    std::sort(targetTags.begin(),targetTags.end(),[](const QVariant &a, const QVariant &b) { return a.toMap().value("id").toString() < b.toMap().value("id").toString(); });
+    // Match readRangeSnapshot: name key (SQLite binary/UTF-8 order), then ID.
+    std::sort(targetTags.begin(),targetTags.end(),[](const QVariant &a, const QVariant &b) {
+        const auto ka = tagKey(a.toMap().value("name").toString()).toUtf8(), kb = tagKey(b.toMap().value("name").toString()).toUtf8();
+        return ka != kb ? ka < kb : a.toMap().value("id").toString() < b.toMap().value("id").toString();
+    });
     source["tags"] = sourceTags; target["tags"] = targetTags;
     for (const auto &state : {source,target}) {
         const auto actual = readRangeSnapshot(state.value("scope").toMap());
@@ -1185,6 +1189,21 @@ QString BibleBackend::copyDeskItem(int id)
         setError("That Desk passage's Bible version is not installed or no longer contains it."); return {};
     }
     const QString text = QStringLiteral("“") + body + QStringLiteral("”\n\n—") + canonical.value("reference").toString();
+    copyText(text); clearError(); return text;
+}
+
+QString BibleBackend::copyScope(QVariantMap scope, bool plainText)
+{
+    const QString versionId = scope.value("versionId").toString();
+    if (versionId.isEmpty()) { setError("Choose a passage to copy."); return {}; }
+    TagBible bible(installedPath(versionId),versionId);
+    QVariantMap canonical;
+    QString body;
+    if (!bible.scope(scope,&canonical) || !passageText(bible,canonical,!plainText,&body)) {
+        setError("That passage's Bible version is not installed or no longer contains it."); return {};
+    }
+    const QString text = plainText ? body
+        : QStringLiteral("\u201c") + body + QStringLiteral("\u201d\n\n\u2014") + canonical.value("reference").toString();
     copyText(text); clearError(); return text;
 }
 

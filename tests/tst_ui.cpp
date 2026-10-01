@@ -703,7 +703,7 @@ private slots:
         QVERIFY(!selected.isEmpty());
         key(Qt::Key_C,Qt::ControlModifier);
         QCOMPARE(QGuiApplication::clipboard()->text(),selected);
-        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,blockPoint(2,8));
+        QTest::mouseClick(window,Qt::MiddleButton,Qt::NoModifier,blockPoint(2,8));
         QVERIFY(QGuiApplication::clipboard()->text().contains("Genesis 1:2"));
         reference("Genesis 1:1");
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
@@ -2413,6 +2413,8 @@ private slots:
             const auto point = number->mapToScene(QPointF(8,12)).toPoint();
             QTest::mouseDClick(window,button,Qt::NoModifier,point);
             QTest::qWait(250);
+            // Right-click opens the context menu inside the selection; dismiss it.
+            if (prop("contextMenu","visible").toBool()) { key(Qt::Key_Escape); QTRY_VERIFY(!prop("contextMenu","visible").toBool()); }
             QCOMPARE(selection.count(),0);
             QCOMPARE(bible->selectionReference(),QString("John 3:3"));
             QCOMPARE(bible->collection(),savedRange);
@@ -2578,7 +2580,7 @@ private slots:
             const double origin = caret.x() - line.cursorToX(relative);
             return QPointF(origin + a + fraction * (b-a),caret.center().y());
         };
-        const auto checkClick = [this,&quoted,&plain](QPointF point, int verse) {
+        const auto checkClick = [this,&quoted](QPointF point, int verse) {
             for (auto button : {Qt::RightButton,Qt::MiddleButton}) {
                 bible->clearSelection();
                 // Selection/focus changes can queue viewport positioning. Settle
@@ -2589,13 +2591,17 @@ private slots:
                 const auto rounded = item("blockBody")->mapFromScene(scene);
                 QCOMPARE(blockMapping()->verseAtPoint(rounded.x(),rounded.y()),verse);
                 QTest::mouseClick(window,button,Qt::NoModifier,scene);
+                if (button == Qt::RightButton) {
+                    QTRY_VERIFY(prop("contextMenu","visible").toBool());
+                    key(Qt::Key_Escape); QTRY_VERIFY(!prop("contextMenu","visible").toBool());
+                }
                 QVERIFY2(bible->cursorVerse() == verse,qPrintable(QString("Expected %1, got %2 at %3,%4; local %5,%6; hit now %7; scroll %8")
                     .arg(verse).arg(bible->cursorVerse()).arg(scene.x()).arg(scene.y()).arg(point.x()).arg(point.y())
                     .arg(blockMapping()->verseAtPoint(item("blockBody")->mapFromScene(scene).x(),item("blockBody")->mapFromScene(scene).y()))
                     .arg(prop("reading","contentY").toDouble())));
-                QCOMPARE(QApplication::clipboard()->text(),button == Qt::RightButton ? quoted[verse-1] : plain[verse-1]);
-                QCOMPARE(prop("toast","text").toString(),QString("John 3:%1 copied").arg(verse)
-                    + (button == Qt::MiddleButton ? " as plain text" : ""));
+                if (button == Qt::RightButton) continue;
+                QCOMPARE(QApplication::clipboard()->text(),quoted[verse-1]);
+                QCOMPARE(prop("toast","text").toString(),QString("John 3:%1 copied").arg(verse));
             }
         };
         for (int v = 1; v <= 2; ++v) {
@@ -2663,8 +2669,10 @@ private slots:
         const auto annotations = bible->collection();
         const auto quoted = bible->copySelection();
         const auto plain = bible->copySelection(true);
-        QCOMPARE(plain,QString::fromUtf8("Start café — λόγος 🌿 and finish. Poetry sings softly. A second line — שלום. Final naïve résumé ends here."));
-        QCOMPARE(quoted,QString::fromUtf8("“¹ Start café — λόγος 🌿 and finish. ² Poetry sings softly. A second line — שלום. ³ Final naïve résumé ends here.”\n\n—John 3:1–3"));
+        // Copies preserve the source line break inside poetic verse 2 (995e30c);
+        // verses within one prose paragraph still join with a space.
+        QCOMPARE(plain,QString::fromUtf8("Start café — λόγος 🌿 and finish. Poetry sings softly.\nA second line — שלום. Final naïve résumé ends here."));
+        QCOMPARE(quoted,QString::fromUtf8("“¹ Start café — λόγος 🌿 and finish. ² Poetry sings softly.\nA second line — שלום. ³ Final naïve résumé ends here.”\n\n—John 3:1–3"));
         QTextCursor cursor(blockTextDocument());
         cursor.setPosition(blockOffset(1,6)); cursor.setPosition(blockOffset(3,18),QTextCursor::KeepAnchor);
         const auto documentSelection = cursor.selectedText();
@@ -2701,15 +2709,16 @@ private slots:
         key(Qt::Key_C,Qt::ControlModifier | Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),plain);
         QCOMPARE(window->property("freeSelectedText").toString(),expected);
         QCOMPARE(bible->collection(),annotations);
-        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,blockPoint(2,4));
+        QTest::mouseClick(window,Qt::MiddleButton,Qt::NoModifier,blockPoint(2,4));
         QCOMPARE(QApplication::clipboard()->text(),quoted);
         QCOMPARE(prop("toast","text").toString(),range + " copied");
         QCOMPARE(bible->selectionReference(),range);
         QCOMPARE(window->property("freeSelectedText").toString(),expected);
         bible->selectVerses(1,3);
-        QTest::mouseClick(window,Qt::MiddleButton,Qt::NoModifier,blockPoint(2,4));
-        QCOMPARE(QApplication::clipboard()->text(),plain);
-        QCOMPARE(prop("toast","text").toString(),range + " copied as plain text");
+        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,blockPoint(2,4));
+        QTRY_VERIFY(prop("contextMenu","visible").toBool());
+        QCOMPARE(bible->selectionReference(),range);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("contextMenu","visible").toBool());
         QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,blockPoint(1,4));
         QCOMPARE(bible->cursorVerse(),1);
         QVERIFY(window->property("freeSelectedText").toString().isEmpty());
@@ -2717,6 +2726,8 @@ private slots:
         QCOMPARE(bible->selectedStart(),1); QCOMPARE(bible->selectedEnd(),3);
         key(Qt::Key_C,Qt::ControlModifier); QCOMPARE(QApplication::clipboard()->text(),quoted);
         QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,blockPoint(2,4));
+        QTRY_VERIFY(prop("contextMenu","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("contextMenu","visible").toBool());
         QCOMPARE(window->property("selectionAnchor").toInt(),1);
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(bible->noteText(),QString("Keep this canonical range note"));
@@ -2786,7 +2797,7 @@ private slots:
         const auto range = bible->selectionReference();
         const auto all = bible->copySelection();
         QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
-        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,blockPoint(2,4));
+        QTest::mouseClick(window,Qt::MiddleButton,Qt::NoModifier,blockPoint(2,4));
         QCOMPARE(QApplication::clipboard()->text(),all);
         QCOMPARE(bible->selectionReference(),range);
         QCOMPARE(selection.count(),0);
@@ -2807,7 +2818,7 @@ private slots:
             QVERIFY(db.open());
             QSqlQuery query(db);
             QVERIFY(query.exec("CREATE TRIGGER reject_copy_state BEFORE UPDATE ON reading BEGIN SELECT RAISE(FAIL,'copy focus failure'); END"));
-            QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,blockPoint(2,4));
+            QTest::mouseClick(window,Qt::MiddleButton,Qt::NoModifier,blockPoint(2,4));
             QCOMPARE(bible->selectionReference(),range);
             QCOMPARE(QApplication::clipboard()->text(),QString("Keep clipboard on failed copy"));
             QCOMPARE(prop("toast","text"),toast);
@@ -3043,15 +3054,15 @@ private slots:
         QApplication::clipboard()->setText("replace again");
         key(Qt::Key_C,Qt::ControlModifier);
         QCOMPARE(QApplication::clipboard()->text(),expected);
-        // Right/middle clicks must not consume the free selection or alter the
+        // Middle clicks must not consume the free selection or alter the
         // canonical selection before deciding which passage to copy.
-        mouseCopy(2,Qt::RightButton);
+        mouseCopy(2,Qt::MiddleButton);
         QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(2));
         QCOMPARE(window->property("freeSelectedText").toString(),expected);
         QCOMPARE(bible->selectionReference(),QString("John 3:2"));
         QCOMPARE(saved(1).value("note").toString(),note);
         mouseCopy(3,Qt::MiddleButton);
-        QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(3,true));
+        QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(3));
         QCOMPARE(bible->selectionReference(),QString("John 3:3"));
         QCOMPARE(saved(1).value("note").toString(),note);
         QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,textPoint(2,4));
@@ -3066,19 +3077,18 @@ private slots:
         const auto range = bible->selectionReference();
         const auto text = bible->copySelection();
         QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
-        for (auto button : {Qt::RightButton,Qt::MiddleButton}) {
+        {
             bible->selectVerses(1,2);
-            const auto expected = bible->copySelection(button == Qt::MiddleButton);
-            mouseCopy(1,button);
+            const auto expected = bible->copySelection();
+            mouseCopy(1,Qt::MiddleButton);
             const auto copied = QApplication::clipboard()->text();
             QCOMPARE(copied,expected);
-            if (button == Qt::RightButton) QCOMPARE(copied,text);
-            else QVERIFY(!copied.contains(QChar(0x201c)) && !copied.contains(range));
+            QCOMPARE(copied,text);
             QCOMPARE(bible->selectionReference(),range);
-            mouseCopy(3,button);
+            mouseCopy(3,Qt::MiddleButton);
             const auto single = QApplication::clipboard()->text();
-            QCOMPARE(single,bible->copyVerse(3,button == Qt::MiddleButton));
-            QCOMPARE(single.contains("John 3:3"),button == Qt::RightButton);
+            QCOMPARE(single,bible->copyVerse(3));
+            QVERIFY(single.contains("John 3:3"));
             QVERIFY(!single.contains("John 3:1"));
             QCOMPARE(bible->selectionReference(),QString("John 3:3"));
             QCOMPARE(bible->collection().first().toMap().value("note").toString(),QString("Range note"));
@@ -3092,11 +3102,11 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(window,"scrollToVerse",Q_ARG(QVariant,2),Q_ARG(QVariant,true)));
         QTest::qWait(100);
         selection.clear();
-        mouseCopy(2,Qt::RightButton);
-        QCOMPARE(QApplication::clipboard()->text(),all);
-        const auto plain = bible->copySelection(true);
         mouseCopy(2,Qt::MiddleButton);
-        QCOMPARE(QApplication::clipboard()->text(),plain);
+        QCOMPARE(QApplication::clipboard()->text(),all);
+        mouseCopy(2,Qt::RightButton);
+        QTRY_VERIFY(prop("contextMenu","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("contextMenu","visible").toBool());
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:36–4:2"));
         QCOMPARE(selection.count(),0);
     }
@@ -3354,44 +3364,44 @@ private slots:
         bible->toggleBookmark(); bible->setNoteText("Second range note");
         reference("John 3:1-2");
         bible->setBlockMode(true);
-        QTRY_VERIFY(item("blockAnnotationMarker:note:John 3:1–2"));
         QTRY_VERIFY(!window->property("restoringPosition").toBool());
         const auto annotations = bible->collection();
-        const auto open = [this] {
-            click(item("blockAnnotationMarker:note:John 3:1–2"));
-            QTRY_VERIFY(prop("blockReader","annotationMenuOpen").toBool());
+        const char *markerName = "blockInlineMarker:note:open:John 3:1–2";
+        QTRY_VERIFY(item(markerName) && item(markerName)->isVisible());
+        const auto open = [this,markerName] {
+            auto marker = item(markerName);
+            QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,marker->mapToScene(QPointF(marker->width()/2,marker->height()/2)).toPoint());
+            QTRY_VERIFY(prop("contextMenu","visible").toBool());
+            QCOMPARE(prop("contextMenu","target").toString(),QString("marker"));
             QVERIFY(window->property("modalOpen").toBool());
             QVERIFY(!window->property("readerKeys").toBool());
-            QTRY_COMPARE(prop("blockAnnotationMenu","currentIndex").toInt(),0);
+            QTRY_COMPARE(prop("contextMenu","currentIndex").toInt(),0);
         };
         {
             open();
             const auto selected = bible->selectionReference();
             const auto isolatedKey = [this,&selected,&annotations](Qt::Key code, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
                 key(code,modifiers);
-                QVERIFY2(prop("blockReader","annotationMenuOpen").toBool(),qPrintable(QString("Menu closed on key %1 modifiers %2").arg(code).arg(int(modifiers))));
+                QVERIFY2(prop("contextMenu","visible").toBool(),qPrintable(QString("Menu closed on key %1 modifiers %2").arg(code).arg(int(modifiers))));
                 QCOMPARE(bible->selectionReference(),selected);
                 QCOMPARE(bible->collection(),annotations);
             };
             for (auto code : {Qt::Key_J,Qt::Key_M,Qt::Key_X,Qt::Key_F}) isolatedKey(code);
             for (auto code : {Qt::Key_M,Qt::Key_X,Qt::Key_K,Qt::Key_Space,Qt::Key_D}) isolatedKey(code,Qt::ControlModifier);
-            QCOMPARE(bible->selectionReference(),selected);
-            QCOMPARE(bible->collection(),annotations);
             QVERIFY(!bible->focusMode());
             QVERIFY(!prop("passagePalette","visible").toBool());
-            QVERIFY(prop("blockReader","annotationMenuOpen").toBool());
+            // Down skips the divider to Edit range; Up returns to Open.
             key(Qt::Key_Down);
-            QCOMPARE(prop("blockAnnotationMenu","currentIndex").toInt(),1);
+            QCOMPARE(prop("contextMenu","currentIndex").toInt(),2);
             QCOMPARE(bible->selectionReference(),selected);
             key(Qt::Key_Up);
-            QCOMPARE(prop("blockAnnotationMenu","currentIndex").toInt(),0);
-            key(Qt::Key_Down);
+            QCOMPARE(prop("contextMenu","currentIndex").toInt(),0);
             key(Qt::Key_Return);
-            QTRY_VERIFY(!prop("blockReader","annotationMenuOpen").toBool());
-            QCOMPARE(bible->selectionReference(),QString("John 3:1–4"));
+            QTRY_VERIFY(!prop("contextMenu","visible").toBool());
+            QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:1–2"));
             QCOMPARE(bible->collection(),annotations);
             QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-            QCOMPARE(prop("noteEditor","text").toString(),QString("Second range note"));
+            QCOMPARE(prop("noteEditor","text").toString(),QString("First range note"));
             key(Qt::Key_Escape);
             QTRY_VERIFY(!window->property("notesOpen").toBool());
             reference("John 3:1-2");
@@ -3399,7 +3409,7 @@ private slots:
         open();
         key(Qt::Key_Escape);
         QTRY_VERIFY(!window->property("modalOpen").toBool());
-        QCOMPARE(bible->selectionReference(),QString("John 3:1–2"));
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:1–2"));
     }
     void countedMotionsWithoutSelection() {
         for (bool block : {false,true}) {
@@ -3910,8 +3920,9 @@ private slots:
             {"books","Navigate to a passage","Ctrl k"},
             {"annotations","Annotations panel","Ctrl a"}, {"toggleNotes","Notes panel","Ctrl n"},
             {"selectVerse","Select verse","Click"},
-            {"clickCopy","Copy passage as quotation","Right Click"},
-            {"middleCopy","Copy passage as plain text","Middle Click"},
+            {"clickMenu","Open context menu","Right Click"},
+            {"middleCopy","Copy passage as quotation","Middle Click"},
+            {"contextMenu","Open context menu","Menu · Shift F10"},
             {"settings","Reading settings","Shift R"},
             {"commands","Open commands","Ctrl Space · Ctrl Shift P"},
             {"newWindow","New window","Ctrl Shift N"},
@@ -4367,7 +4378,10 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(object("backupDialog"),"accepted"));
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
         const auto backup = QJsonDocument::fromJson(file.readAll()).object();
-        QCOMPARE(backup.value("version").toInt(),4);
+        // Version 5 (Desk step) adds the global Desk list; empty here.
+        QCOMPARE(backup.value("version").toInt(),5);
+        QVERIFY(backup.value("desk").isArray());
+        QCOMPARE(backup.value("desk").toArray().size(),0);
         QCOMPARE(backup.value("versionId").toString(),QString("engnet"));
         const auto tags = backup.value("tags").toArray();
         QCOMPARE(tags.size(),1);

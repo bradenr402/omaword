@@ -15,7 +15,6 @@ Item {
     property string mode: "block"
     property alias body: body
     property alias mapping: document
-    readonly property bool annotationMenuOpen: annotationMenu.visible
     property var annotationRanges: []
     property var inlineMarkers: []
     property var contextRanges: []
@@ -59,7 +58,6 @@ Item {
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
     function rebuild() {
         if (destroying) return
-        annotationMenu.close()
         controller.clearTextSelection()
         cancelDrag()
         document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight, mode,
@@ -254,7 +252,12 @@ Item {
                 if (mouse.button === Qt.LeftButton) {
                     if (!root.dragging) root.controller.selectVerse(root.pressedVerse, !!(mouse.modifiers & Qt.ShiftModifier))
                     root.cancelDrag()
-                } else root.controller.copyClickedVerse(root.hit(mouse.x, mouse.y), mouse.button === Qt.MiddleButton)
+                } else if (mouse.button === Qt.MiddleButton) {
+                    root.controller.copyClickedVerse(root.hit(mouse.x, mouse.y), false)
+                } else {
+                    const point = mapToItem(null, mouse.x, mouse.y)
+                    root.controller.openPassageMenu(root.hit(mouse.x, mouse.y), point.x, point.y)
+                }
             }
             onCanceled: root.cancelDrag()
             onDoubleClicked: function(mouse) {
@@ -262,22 +265,6 @@ Item {
                 root.controller.selectVerse(root.hit(mouse.x, mouse.y), false)
                 root.controller.openNotes(true)
             }
-        }
-    }
-    Menu {
-        id: annotationMenu
-        objectName: "blockAnnotationMenu"
-        property var entry: ({})
-        modal: true
-        MenuItem {
-            objectName: "blockAnnotationOpen"
-            text: "Open"
-            onTriggered: root.openAnnotation(annotationMenu.entry)
-        }
-        MenuItem {
-            objectName: "blockAnnotationEditRange"
-            text: "Edit range"
-            onTriggered: root.controller.openRangeEditor(annotationMenu.entry.scope, annotationMenu.entry.kind)
         }
     }
     // Each delegate occupies an image cell reserved by QTextDocument. The icon
@@ -369,9 +356,10 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: function(mouse) {
                     if (mouse.button === Qt.RightButton) {
-                        annotationMenu.entry = inlineMarker.modelData
-                        const point = mapToItem(root, mouse.x, mouse.y)
-                        annotationMenu.popup(point.x, point.y)
+                        const entry = inlineMarker.modelData
+                        const point = mapToItem(null, mouse.x, mouse.y)
+                        root.controller.openMarkerMenu([entry.scope], entry.kind, function() { root.openAnnotation(entry) },
+                                                       entry.scope, point.x, point.y)
                     } else if (mouse.modifiers & Qt.ShiftModifier) {
                         root.controller.openRangeEditor(inlineMarker.modelData.scope, inlineMarker.modelData.kind)
                     } else root.openAnnotation(inlineMarker.modelData)

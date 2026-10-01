@@ -684,12 +684,13 @@ private slots:
         QTRY_VERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
         QVERIFY(prop("components").toMap().value("note").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("sessionOpen").toBool());
-        if (mode == "verse") {
-            QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, point);
-            QTRY_VERIFY(object("rangeMarkerMenu")->property("opened").toBool());
-            click("rangeMarkerEdit"); QTRY_VERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
-            key(Qt::Key_Escape); QTRY_VERIFY(!prop("sessionOpen").toBool());
-        }
+        // Every layout's marker opens the shared context menu with Edit range.
+        QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, point);
+        QTRY_VERIFY(object("contextMenu")->property("opened").toBool());
+        QCOMPARE(object("contextMenu")->property("target").toString(), QString("marker"));
+        QTest::qWait(50); // let the popup settle its final position
+        click("contextMenuItem:editRange"); QTRY_VERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("sessionOpen").toBool());
         click(marker); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QCOMPARE(item("noteEditor")->property("cursorPosition").toInt(), 11);
     }

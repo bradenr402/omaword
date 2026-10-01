@@ -14,6 +14,7 @@ filters, and `-functions`, require exactly one selected suite.
 | `search` | `tests/search.pro` | `build/search-tests/` | `tst_search` |
 | `searchui` | `tests/searchui.pro` | `build/searchui-tests/` | `tst_searchui` |
 | `deskui` | `tests/deskui.pro` | `build/deskui-tests/` | `tst_deskui` |
+| `contextmenu` | `tests/contextmenu.pro` | `build/contextmenu-tests/` | `tst_contextmenu` |
 | `searchrender` | `tests/searchrender.pro` | `build/searchrender-tests/` | `tst_searchrender` |
 | `tags` | `tests/tags.pro` | `build/tags-tests/` | `tst_tags` |
 | `tagsui` | `tests/tagsui.pro` | `build/tagsui-tests/` | `tst_tagsui` |
@@ -215,7 +216,7 @@ working-tree updates. It describes assertions, not results from a test run.
   and stale destination confirmation retain active editing without overwriting
   peer data. Entry checks cover `Shift E`, focused Annotations rows, Tags-summary
   **Edit range**, Shift-click note markers in all three layouts, and Verse marker
-  right-click **Edit range**. Notes open with the cursor at the end, subsequent
+  context-menu **Edit range** in all three layouts. Notes open with the cursor at the end, subsequent
   editing/synchronization retains its position, Tags supports item/tab navigation,
   and tag-search fields retain typed `h`/`l`.
 - **Desk UI:** `d` add/remove with dynamic command title, Visual range completion
@@ -223,6 +224,14 @@ working-tree updates. It describes assertions, not results from a test run.
   Enter/click opening across versions, copy, × and `x`/Delete removal; Clean Desk
   confirm/cancel from the panel and Commands; live peer updates; unavailable-version
   items; version-removal Desk counts and notice; reader keys isolated while open.
+- **Context menu:** right-click grouped items, dividers, and right-aligned muted
+  shortcuts for passages and markers in Verse, Paragraph, and Block; Desk,
+  Annotations, and search-result rows; inside/outside selection rule; middle-click
+  quotation copy without a PRIMARY paste; `Menu` / `Shift F10` near the cursor verse;
+  arrow/Home/End/Enter/Esc navigation and outside-click close with focus restored;
+  actions through the shared commands (copy, bookmark, Desk, notes, find, Edit
+  range, Visual completion); disabled items while range editing; theme colors and
+  corner radius.
 - **Desktop:** effective integer rounding, malformed/oversized output, process
   failure, missing session/command, timeout responsiveness, nonoverlapping queries,
   recovery and separate five-second polling; themed plain-text tooltip wrapping,
@@ -246,7 +255,7 @@ working-tree updates. It describes assertions, not results from a test run.
   `bracketFontGeometry` covers 8/18/40-pixel fonts, 1.0/1.6 scale, and 1.0/3.0
   leading: brackets enclose accented/descending ink without stretching to line
   height, neighboring brackets do not overlap, and reserved cells add only bounded
-  height. `markerRangeEditing` verifies Shift-click and right-click **Open** /
+  height. `markerRangeEditing` verifies Shift-click and context-menu **Open** /
   **Edit range** for bookmark/note/tag inline markers with full cross-book scopes.
   Optional screenshot output also captures the 14-pixel filled folded-note glyph,
   a zoom, and line-height extremes; captures do not establish visual review.

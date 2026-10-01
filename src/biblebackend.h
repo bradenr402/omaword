@@ -203,6 +203,8 @@ public:
     Q_INVOKABLE bool openDeskItem(int id);
     // Quotation format identical to copySelection(); also sets the clipboard.
     Q_INVOKABLE QString copyDeskItem(int id);
+    // Copies any canonical scope (marker, annotation, search result) without navigating.
+    Q_INVOKABLE QString copyScope(QVariantMap scope, bool plainText = false);
     Q_INVOKABLE int deskCountForVersion(QString versionId) const;
 
     Q_INVOKABLE void importUsfm(QUrl file);
