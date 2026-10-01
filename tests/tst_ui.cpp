@@ -1346,7 +1346,10 @@ private slots:
         key(Qt::Key_K,Qt::ControlModifier);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QTRY_VERIFY(item("paletteChevron0")->isVisible());
-        QCOMPARE(prop("paletteBooks","text").toString(),QString("Search"));
+        QCOMPARE(prop("paletteBooks","text").toString(),QString("Passage"));
+        QVERIFY(prop("paletteBooks","emphasized").toBool());
+        QCOMPARE(prop("paletteSearch","text").toString(),QString("Search"));
+        QVERIFY(!prop("paletteSearch","emphasized").toBool());
         type("John"); key(Qt::Key_Return);
         QTRY_VERIFY(item("paletteChevron0")->isVisible());
         type("3"); key(Qt::Key_Return);
@@ -2265,12 +2268,16 @@ private slots:
         const QString copied = QApplication::clipboard()->text();
         QVERIFY(copied.contains(span));
         const auto lines = copied.split('\n');
-        QCOMPARE(lines.size(),3);
+        // The chapter boundary is a source paragraph break, which the
+        // quotation preserves as a blank line between the two verses.
+        QCOMPARE(lines.size(),5);
         QVERIFY(lines[0].startsWith(QString::fromUtf8("“³⁶ ")));
-        QVERIFY(lines[0].contains(QString::fromUtf8(" ¹ ")));
-        QVERIFY(lines[0].endsWith(QChar(0x201d)));
+        QVERIFY(!lines[0].endsWith(QChar(0x201d)));
         QVERIFY(lines[1].isEmpty());
-        QCOMPARE(lines[2],QString::fromUtf8("—") + span);
+        QVERIFY(lines[2].startsWith(QString::fromUtf8("¹ ")));
+        QVERIFY(lines[2].endsWith(QChar(0x201d)));
+        QVERIFY(lines[3].isEmpty());
+        QCOMPARE(lines[4],QString::fromUtf8("—") + span);
         // Re-enter Visual for the same complete range before editing the note.
         reference(origin);
         key(direction,Qt::ShiftModifier);
@@ -4004,8 +4011,13 @@ private slots:
         auto passage = item("passageControl");
         auto version = item("versionControl");
         QCOMPARE(location->x() + location->width()/2,320.0);
-        QCOMPARE(version->x(),passage->width());
-        QVERIFY(passage->width() > 0 && version->width() > 0);
+        // Search, passage, and version controls sit flush left to right.
+        auto searchButton = item("searchControl");
+        QCOMPARE(searchButton->x(),0.0);
+        QCOMPARE(passage->x(),searchButton->width());
+        QCOMPARE(version->x(),searchButton->width() + passage->width());
+        QCOMPARE(location->width(),searchButton->width() + passage->width() + version->width());
+        QVERIFY(searchButton->width() > 0 && passage->width() > 0 && version->width() > 0);
         QVERIFY(location->x() > item("modeControl")->x() + item("modeControl")->width());
         QVERIFY(location->x() + location->width() < item("floatingActions")->x());
         QVERIFY(prop("passageControlLabel","truncated").toBool());
@@ -4657,10 +4669,14 @@ private slots:
         capture("bookmark");
         click(item("bookmarkMarker16"));
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
+        // A bookmark-only range has a single component type, so Shift-click
+        // skips the chooser and enters the visual range editor directly.
         click(item("bookmarkMarker16"),Qt::ShiftModifier);
-        QTRY_VERIFY(prop("rangeChooser","opened").toBool());
+        QTRY_VERIFY(prop("rangeEditor","active").toBool());
+        QVERIFY(!prop("rangeChooser","visible").toBool());
         QCOMPARE(prop("rangeEditor","components").value<QJSValue>().toVariant().toMap().value("bookmark").toBool(),true);
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeChooser","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditor","sessionOpen").toBool());
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
         // An overlapping range gets its own logical start, while shared rows
         // expose both references and a stable click target.
         reference("John 3:17-20"); key(Qt::Key_M);

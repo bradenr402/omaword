@@ -205,6 +205,10 @@ ApplicationWindow {
     }
     onVerseModeChanged: clearCount()
     property string verseCount: ""
+    // Pending z prefix for zz/zt/zb. Implemented as single-key shortcuts,
+    // since Qt's multi-key sequences stay in a partial-match state that
+    // swallows unrelated keys (digits, Ctrl+K) across focus changes.
+    property bool zPending: false
     onActiveFocusItemChanged: clearCount()
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
@@ -840,8 +844,9 @@ ApplicationWindow {
         }
     }
 
-    function clearCount() { verseCount = ""; if (countTimer) countTimer.stop() }
+    function clearCount() { verseCount = ""; zPending = false; if (countTimer) countTimer.stop() }
     function countDigit(digit) {
+        zPending = false
         if (verseCount.length < 6) verseCount += digit
         countTimer.restart()
     }
@@ -1647,6 +1652,7 @@ ApplicationWindow {
     function shortcutEnabled(action) {
         if (!actionAvailable(action)) return false
         if (findPromptOpen) return false
+        if (zPending && action.sequences.some(function(sequence) { return ["Z", "T", "B"].includes(sequence) })) return false
         // Keep the command globally available, but never consume a typed uppercase V.
         if (action.id === "switchVersion") return !modalOpen && !notesOpen && !textInputActive()
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
@@ -2540,8 +2546,9 @@ ApplicationWindow {
                                         anchors.right: parent.right
                                         anchors.rightMargin: 8 * app.scale
                                         // Three-digit labels must also fit between the
-                                        // packed annotation lane and highlight edge.
-                                        width: 16 * app.scale
+                                        // packed annotation lane (glyph ends at 50) and
+                                        // the 8px clearance before the highlight accent.
+                                        width: 12 * app.scale
                                         horizontalAlignment: Text.AlignRight
                                         fontSizeMode: Text.HorizontalFit
                                         minimumPixelSize: 1
@@ -4555,7 +4562,7 @@ ApplicationWindow {
     }
 
     Instantiator {
-        model: app.actions.filter(function(action) { return !!action.sequences })
+        model: app.actions.filter(function(action) { return !!action.sequences && !action.sequences.some(function(sequence) { return sequence.startsWith("Z, ") }) })
         delegate: Shortcut {
             required property var modelData
             // Application context reaches the notes drawer's popup focus scope;
@@ -4573,6 +4580,16 @@ ApplicationWindow {
             sequence: String(index)
             enabled: app.readerKeys
             onActivated: app.countDigit(String(index))
+        }
+    }
+    Shortcut { sequence: "Z"; enabled: app.active && app.readerKeys && !app.zPending; onActivated: { app.clearCount(); app.zPending = true; countTimer.restart() } }
+    Instantiator {
+        model: app.actions.filter(function(action) { return !!action.sequences && action.sequences.some(function(sequence) { return sequence.startsWith("Z, ") }) })
+        delegate: Shortcut {
+            required property var modelData
+            sequence: modelData.sequences.find(function(sequence) { return sequence.startsWith("Z, ") }).slice(3)
+            enabled: app.active && app.zPending && app.actionAvailable(modelData) && app.readerKeys
+            onActivated: app.runCommand(modelData.id)
         }
     }
     Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
