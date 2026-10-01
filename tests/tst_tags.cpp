@@ -195,9 +195,9 @@ private slots:
         bible->setNoteText("Saved note"); QVERIFY(bible->toggleBookmark());
         const QString unused = bible->createTag("Unused"); QVERIFY(!unused.isEmpty());
         const auto backup = QUrl::fromLocalFile(session->filePath("backup.json")); QVERIFY(bible->exportBackup(backup));
-        auto root = json(backup.toLocalFile()); QCOMPARE(root.value("version").toInt(),4);
+        auto root = json(backup.toLocalFile()); QCOMPARE(root.value("version").toInt(),5);
         QCOMPARE(root.value("tags").toArray().size(),1); QCOMPARE(root.value("tagAssignments").toArray().size(),1);
-        auto legacy = root; legacy["version"] = 3; legacy.remove("tags"); legacy.remove("tagAssignments");
+        auto legacy = root; legacy["version"] = 3; legacy.remove("tags"); legacy.remove("tagAssignments"); legacy.remove("desk");
         const auto old = QUrl::fromLocalFile(session->filePath("legacy.json")); QVERIFY(write(old.toLocalFile(),QJsonDocument(legacy).toJson()));
         install(kjv); QVERIFY(bible->navigate("TOB 1:3")); const auto other = bible->tagScope();
         QVERIFY(bible->setTag(other,id,true)); QVERIFY(bible->renameTag(id,"Renamed elsewhere"));

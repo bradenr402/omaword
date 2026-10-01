@@ -58,6 +58,8 @@ class BibleBackend : public QObject
     Q_PROPERTY(QString searchError READ searchError NOTIFY searchChanged)
     Q_PROPERTY(int searchResultCount READ searchResultCount NOTIFY searchChanged)
     Q_PROPERTY(QString textGeneration READ textGeneration NOTIFY versionChanged)
+    Q_PROPERTY(QVariantList desk READ desk NOTIFY deskChanged)
+    Q_PROPERTY(bool currentInDesk READ currentInDesk NOTIFY currentInDeskChanged)
 
 public:
     explicit BibleBackend(QObject *parent = nullptr);
@@ -172,6 +174,37 @@ public:
     Q_INVOKABLE void setReadingMode(QString value);
     Q_INVOKABLE void setFontSize(int value);
 
+    // Desk: one global, ordered study list in personal.sqlite (schema 6), shared
+    // live by every window of this data directory and kept across restarts.
+    // Identity is versionId + the six canonical endpoints (as tag scopes);
+    // adding an identical scope is a successful no-op. Items keep insertion
+    // order. desk rows: {id,versionId,versionAbbreviation,reference,book,chapter,
+    // start,endBook,endChapter,end,created,text,available}. text is the full
+    // passage laid out exactly like copySelection(true), read read-only from the
+    // item's own installed generation. available is false (text empty, reference
+    // from canonical names) when the version is not installed or its endpoints
+    // no longer exist; such items are retained so a re-import revives them.
+    // removeVersion(id,true) deletes that version's Desk items together with its
+    // annotations; removeVersion(id,false) keeps them (shown unavailable).
+    // deskCountForVersion lets confirmation UI report how many will be removed.
+    // Backups (format 5) carry the active version's Desk items; restoring one
+    // replaces that version's items (appended in backup order). Format 3/4
+    // backups leave the Desk untouched.
+    QVariantList desk() const { return m_desk; }
+    bool currentInDesk() const { return inDesk(tagScope()); }
+    // Empty scope means the current selection (tagScope()).
+    Q_INVOKABLE bool addToDesk(QVariantMap scope = QVariantMap());
+    Q_INVOKABLE bool removeFromDesk(int id);
+    // Adds the current selection, or removes it when already present.
+    Q_INVOKABLE bool toggleDesk();
+    Q_INVOKABLE bool inDesk(QVariantMap scope) const;
+    Q_INVOKABLE bool cleanDesk();
+    // Switches version when needed, then selects the range (openTaggedPassage).
+    Q_INVOKABLE bool openDeskItem(int id);
+    // Quotation format identical to copySelection(); also sets the clipboard.
+    Q_INVOKABLE QString copyDeskItem(int id);
+    Q_INVOKABLE int deskCountForVersion(QString versionId) const;
+
     Q_INVOKABLE void importUsfm(QUrl file);
     Q_INVOKABLE bool switchVersion(QString id);
     Q_INVOKABLE bool removeVersion(QString id, bool removeAnnotations);
@@ -226,6 +259,8 @@ signals:
     void navigationChanged();
     void annotationChanged();
     void preferencesChanged();
+    void deskChanged();
+    void currentInDeskChanged();
     void sharedCommitted(QString versionId, bool library, bool preferences);
 
 private:
@@ -289,6 +324,10 @@ private:
     QString ensureTag(const QString &name);
     bool commitTagMutation();
     void publishTags();
+    void reloadDesk();
+    void publishDesk();
+    QVariantMap deskItem(int id) const;
+    bool commitDeskMutation();
     bool requireReady();
     bool setError(const QString &error);
     void setStatus(const QString &status);
@@ -316,7 +355,7 @@ private:
     int m_fontSize = 18;
     bool m_hasParagraphs = false;
     double m_lineHeight = 1.5;
-    QVariantList m_verses, m_collection;
+    QVariantList m_verses, m_collection, m_desk;
     QVector<Annotation> m_annotations;
     std::shared_ptr<std::atomic<double>> m_importProgress;
     QFutureWatcher<UsfmImporter::Result> m_importWatcher;
