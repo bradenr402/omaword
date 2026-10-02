@@ -527,8 +527,8 @@ ApplicationWindow {
         draggingText = false
         dragAnchorRow = -1
     }
-    readonly property real floatingSafety: bible.focusMode ? 0 : Math.max(72 * scale, footerHeight + 2 * footerMargin)
-    readonly property real verseGutter: 76 * scale
+    readonly property real floatingSafety: bible.focusMode ? 0 : Math.max(72 * systemScale, footerHeight + 2 * footerMargin)
+    readonly property real verseGutter: 76 * readerScale
     // Source rows, rather than numeric verse labels, define chapter intervals.
     // Union each kind's continuous coverage: overlapping logical ranges already
     // share one rail. Allocate once per interval so later starts/ends never bend it.
@@ -792,9 +792,9 @@ ApplicationWindow {
         } else {
             const index = Array.from(bible.verses).findIndex(function(v) { return v.number === number })
             const row = index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
-            if (row && row.body) point = row.body.mapToItem(null, 24 * scale, Math.min(row.body.height, readerLineHeight))
+            if (row && row.body) point = row.body.mapToItem(null, 24 * readerScale, Math.min(row.body.height, readerLineHeight))
         }
-        return Qt.point(point.x, Math.max(view.y, Math.min(view.y + reading.height - 24 * scale, point.y)))
+        return Qt.point(point.x, Math.max(view.y, Math.min(view.y + reading.height - 24 * readerScale, point.y)))
     }
     function openPassageMenuAtCursor() {
         if (!bible.ready || bible.busy) return
@@ -958,7 +958,7 @@ ApplicationWindow {
         repeat: true
         running: app.draggingText
         onTriggered: {
-            let edge = 48 * app.scale
+            let edge = 48 * app.readerScale
             let bottom = reading.height - app.floatingSafety
             let speed = app.dragPoint.y < edge ? -Math.min(edge, edge - app.dragPoint.y)
                 : app.dragPoint.y > bottom - edge ? Math.min(edge, app.dragPoint.y - bottom + edge) : 0
@@ -1714,10 +1714,10 @@ ApplicationWindow {
         let y = rect ? blockLoader.mapToItem(readerColumn, 0, rect.y).y : row.mapToItem(readerColumn, 0, 0).y + row.textOffset
         let textHeight = rect ? rect.height : row.textHeight
         let available = Math.max(1, reading.height - floatingSafety)
-        let margin = Math.min(3 * readerLineHeight, Math.max(12 * scale, (available - textHeight) / 2))
+        let margin = Math.min(3 * readerLineHeight, Math.max(12 * readerScale, (available - textHeight) / 2))
         // A very long verse cannot fit. Keep its beginning and a useful context
         // margin visible rather than jumping to its end on every movement.
-        if (textHeight > available - 24 * scale)
+        if (textHeight > available - 24 * readerScale)
             margin = Math.min(3 * readerLineHeight, available * 0.2)
         let extent = Math.min(textHeight, Math.max(1, available - 2 * margin))
         let target = reading.contentY
@@ -2807,9 +2807,9 @@ ApplicationWindow {
         readonly property string hint: ranges.map(function(r) {
             return r.reference + (marker.kind === "tag" ? " · " + app.tagsPlainText(r.tags) : "")
         }).join("\n")
-        width: 16 * app.scale
+        width: 16 * app.readerScale
         readonly property int lane: (app.annotationLanes[rowIndex] || {})[kind] || 0
-        x: (36 - lane * 18) * app.scale
+        x: (36 - lane * 18) * app.readerScale
         padding: 0
         visible: ranges.length > 0 && !bible.focusMode
         Accessible.name: hint
@@ -2846,16 +2846,16 @@ ApplicationWindow {
             Item {
                 id: railLine
                 objectName: marker.kind + "Line" + marker.number
-                x: 5 * app.scale
-                y: marker.continuesBefore ? 0 : marker.headingHeight + 8 * app.scale
-                width: app.scale
+                x: 5 * app.readerScale
+                y: marker.continuesBefore ? 0 : marker.headingHeight + 8 * app.readerScale
+                width: app.readerScale
                 height: Math.max(0, (marker.continuesAfter ? parent.height : marker.headingHeight + marker.bodyHeight) - y)
             }
             Item {
                 id: railEndCap
                 objectName: marker.kind + "EndCap" + marker.number
-                x: 5 * app.scale; y: marker.headingHeight + marker.bodyHeight - app.scale
-                width: 7 * app.scale; height: app.scale
+                x: 5 * app.readerScale; y: marker.headingHeight + marker.bodyHeight - app.readerScale
+                width: 7 * app.readerScale; height: app.readerScale
                 visible: marker.ends
             }
             Canvas {
@@ -2864,13 +2864,13 @@ ApplicationWindow {
                 anchors.fill: parent
                 property color ink: desktop.accent
                 readonly property var paintKey: [railLine.y, railLine.height, railEndCap.y, railEndCap.visible,
-                    marker.continuesBefore, marker.continuesAfter, marker.markSeed, app.scale, width, height]
+                    marker.continuesBefore, marker.continuesAfter, marker.markSeed, app.readerScale, width, height]
                 onPaintKeyChanged: requestPaint()
                 onInkChanged: requestPaint()
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.reset()
-                    const k = app.scale
+                    const k = app.readerScale
                     const cx = railLine.x + railLine.width / 2
                     if (railLine.height > 0) {
                         ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.65)
@@ -2890,8 +2890,8 @@ ApplicationWindow {
                 objectName: marker.kind + "Glyph" + marker.number
                 kind: marker.kind; ink: desktop.accent
                 filled: true
-                y: marker.headingHeight + 5 * app.scale
-                width: 14 * app.scale; height: 16 * app.scale
+                y: marker.headingHeight + 5 * app.readerScale
+                width: 14 * app.readerScale; height: 16 * app.readerScale
                 visible: marker.starts || (marker.rowIndex === 0 && marker.continuesBefore)
             }
         }
@@ -3018,8 +3018,8 @@ ApplicationWindow {
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
-                        anchors.topMargin: 12 * app.scale
-                        anchors.bottomMargin: app.floatingSafety + 12 * app.scale
+                        anchors.topMargin: 12 * app.readerScale
+                        anchors.bottomMargin: app.floatingSafety + 12 * app.readerScale
                         visible: !bible.focusMode && size < 1
                         enabled: visible
                     }
@@ -3030,9 +3030,9 @@ ApplicationWindow {
                         // Centered, but clear of the footer's stacked right column.
                         readonly property real sideInset: reading.width < 700 ? 24 : 48
                         readonly property real rightInset: Math.max(sideInset, app.footerRightInset)
-                        width: Math.min(760 * app.scale, reading.width - sideInset - rightInset)
+                        width: Math.min(760 * app.readerScale, reading.width - sideInset - rightInset)
                         x: Math.min((reading.width - width) / 2, reading.width - rightInset - width)
-                        topPadding: 48 * app.scale
+                        topPadding: 48 * app.readerScale
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
 
@@ -3041,11 +3041,11 @@ ApplicationWindow {
                             opacity: app.focusDimmedOpacity
                             text: bible.passage
                             color: desktop.foreground
-                            font.pixelSize: 34 * app.scale
+                            font.pixelSize: 34 * app.readerScale
                             font.weight: Font.Medium
                             font.letterSpacing: -0.9
                             leftPadding: app.verseGutter
-                            bottomPadding: 24 * app.scale
+                            bottomPadding: 24 * app.readerScale
                             width: parent.width
                             wrapMode: Text.Wrap
                         }
@@ -3063,7 +3063,7 @@ ApplicationWindow {
                                 textOffset: verseHeading.height
                                 textHeight: verseBody.height
                                 width: readerColumn.width
-                                height: verseHeading.height + verseBody.height + 7 * app.scale
+                                height: verseHeading.height + verseBody.height + 7 * app.readerScale
                                 // Focus-mode dimming: paint-only, so layout and hit-testing are unchanged.
                                 readonly property bool dimmed: app.verseDimmed(modelData.number)
                                 opacity: modelData.number < app.focusFirst || modelData.number > app.focusLast ? app.focusDimmedOpacity : 1
@@ -3084,11 +3084,11 @@ ApplicationWindow {
                                     // visibility. First import creates rows inside a hidden
                                     // reader; Label height/implicitHeight/padding feedback
                                     // otherwise re-enters when that ancestor becomes visible.
-                                    height: hasHeading ? headingText.implicitHeight + 36 * app.scale : 0
+                                    height: hasHeading ? headingText.implicitHeight + 36 * app.readerScale : 0
                                     visible: hasHeading
                                     Text {
                                         objectName: "headingPrefix" + verseRow.modelData.number
-                                        x: -26 * app.scale
+                                        x: -26 * app.readerScale
                                         y: headingText.y
                                         text: "#"
                                         font: headingText.font
@@ -3098,14 +3098,14 @@ ApplicationWindow {
                                         id: headingText
                                         objectName: "headingText" + verseRow.modelData.number
                                         width: parent.width
-                                        y: 22 * app.scale
+                                        y: 22 * app.readerScale
                                         // An LRM keeps a Hebrew-first heading ("א Aleph")
                                         // in an LTR paragraph; display only.
                                         text: app.leftToRightText(verseRow.modelData.heading)
                                         horizontalAlignment: Text.AlignLeft
                                         textFormat: Text.PlainText
                                         font.family: desktop.fontFamily
-                                        font.pixelSize: 15 * app.scale
+                                        font.pixelSize: 15 * app.readerScale
                                         font.weight: Font.DemiBold
                                         wrapMode: Text.Wrap
                                         color: desktop.foreground
@@ -3128,7 +3128,7 @@ ApplicationWindow {
                                 }
                                 Rectangle {
                                     objectName: "contextSegment" + verseRow.modelData.number
-                                    x: verseRow.gutter - 9 * app.scale
+                                    x: verseRow.gutter - 9 * app.readerScale
                                     y: verseHeading.height
                                     width: verseRow.width - x
                                     height: verseBody.height + 3
@@ -3139,7 +3139,7 @@ ApplicationWindow {
                                 Rectangle {
                                     objectName: "jumpPulse" + verseRow.modelData.number
                                     readonly property bool target: verseRow.modelData.number >= app.pulseFirst && verseRow.modelData.number <= app.pulseLast
-                                    x: verseRow.gutter - 9 * app.scale
+                                    x: verseRow.gutter - 9 * app.readerScale
                                     y: verseHeading.height
                                     width: verseRow.width - x
                                     height: verseBody.height + 3
@@ -3150,7 +3150,7 @@ ApplicationWindow {
                                 Rectangle {
                                     objectName: "copyFlash" + verseRow.modelData.number
                                     readonly property bool target: verseRow.modelData.number >= app.flashFirst && verseRow.modelData.number <= app.flashLast
-                                    x: verseRow.gutter - 9 * app.scale
+                                    x: verseRow.gutter - 9 * app.readerScale
                                     y: verseHeading.height
                                     width: verseRow.width - x
                                     height: verseBody.height + 3
@@ -3163,7 +3163,7 @@ ApplicationWindow {
                                     delegate: Rectangle {
                                         required property var modelData
                                         objectName: "highlightSegment" + verseRow.modelData.number + ":" + modelData.reference
-                                        x: verseRow.gutter - 9 * app.scale
+                                        x: verseRow.gutter - 9 * app.readerScale
                                         y: modelData.highlightContinuesBefore ? 0 : verseHeading.height
                                         width: verseRow.width - x
                                         height: (modelData.highlightContinuesAfter ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
@@ -3210,7 +3210,7 @@ ApplicationWindow {
                                 }
                                 Rectangle {
                                     objectName: "selectionSegment" + verseRow.modelData.number
-                                    x: verseRow.gutter - 9 * app.scale
+                                    x: verseRow.gutter - 9 * app.readerScale
                                     y: verseRow.index > 0 && (bible.verses[verseRow.index - 1]?.number || 0) >= bible.selectedStart ? 0 : verseHeading.height
                                     width: parent.width - x
                                     height: (verseRow.modelData.number < bible.selectedEnd ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
@@ -3221,8 +3221,8 @@ ApplicationWindow {
                                 Item {
                                     id: verseNumber
                                     objectName: "verseNumber" + verseRow.modelData.number
-                                    x: 54 * app.scale
-                                    width: 17 * app.scale
+                                    x: 54 * app.readerScale
+                                    width: 17 * app.readerScale
                                     y: verseHeading.height
                                     height: Math.max(32, verseBody.height)
                                     Accessible.role: Accessible.Button
@@ -3236,16 +3236,16 @@ ApplicationWindow {
                                         anchors.topMargin: Math.max(0, readerMetrics.ascent + readerMetrics.tightBoundingRect("H").y
                                             - numberMetrics.ascent - numberMetrics.tightBoundingRect("0").y)
                                         anchors.right: parent.right
-                                        anchors.rightMargin: 8 * app.scale
+                                        anchors.rightMargin: 8 * app.readerScale
                                         // Three-digit labels must also fit between the
                                         // packed annotation lane (glyph ends at 50) and
                                         // the 8px clearance before the highlight accent.
-                                        width: 12 * app.scale
+                                        width: 12 * app.readerScale
                                         horizontalAlignment: Text.AlignRight
                                         fontSizeMode: Text.HorizontalFit
                                         minimumPixelSize: 1
                                         text: verseRow.modelData.number
-                                        font.pixelSize: 10 * app.scale
+                                        font.pixelSize: 10 * app.readerScale
                                         font.weight: verseRow.selected ? Font.Bold : Font.Normal
                                         color: verseRow.selected ? desktop.accent : desktop.muted
                                         FontMetrics { id: numberMetrics; font: numberLabel.font }

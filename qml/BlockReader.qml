@@ -25,6 +25,10 @@ Item {
     readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
     function tagsPlainText(tags) { return Array.from(tags || []).map(function(t) { return t.name }).join(", ") }
     property real annotationScale: 0
+    // Reader text and marks follow the desktop scale; a controller without
+    // readerScale (tests) falls back to its plain scale.
+    readonly property real readerScale: controller.readerScale > 0 ? controller.readerScale
+        : controller.scale > 0 ? controller.scale : 1
     readonly property string annotationKey: JSON.stringify(backend.verses) + JSON.stringify(backend.collection)
         + backend.book + ":" + backend.chapter
     onAnnotationKeyChanged: if (!destroying) geometryTimer.restart()
@@ -33,8 +37,8 @@ Item {
         const ranges = document.annotations(backend.verses, backend.collection, backend.book, backend.chapter)
         const markers = document.inlineDecorations()
         if (JSON.stringify(markers) !== JSON.stringify(inlineMarkers)) inlineMarkers = markers
-        if (JSON.stringify(ranges) === JSON.stringify(annotationRanges) && annotationScale === controller.readerScale) return
-        annotationScale = controller.readerScale
+        if (JSON.stringify(ranges) === JSON.stringify(annotationRanges) && annotationScale === root.readerScale) return
+        annotationScale = root.readerScale
         annotationRanges = ranges
     }
     function openAnnotation(entry) {
@@ -55,7 +59,7 @@ Item {
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart,
             bookmarkRanges: v.bookmarkRanges, noteRanges: v.noteRanges, tagRanges: v.tagRanges }
-    })) + numbers + headings + backend.lineHeight + mode + backend.focusMode + controller.readerSize + controller.readerScale + controller.scale
+    })) + numbers + headings + backend.lineHeight + mode + backend.focusMode + controller.readerSize + root.readerScale + controller.scale
     height: body.height
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
     function rebuild() {
@@ -63,7 +67,7 @@ Item {
         controller.clearTextSelection()
         cancelDrag()
         document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight, mode,
-                       !backend.focusMode, controller.readerSize * controller.readerScale)
+                       !backend.focusMode, controller.readerSize * root.readerScale)
         geometryTimer.restart()
     }
     function refreshGeometry() {
@@ -172,7 +176,7 @@ Item {
                     else ranges[range.reference].end = span.end
                 }
             }
-            const k = root.controller.readerScale > 0 ? root.controller.readerScale : 1
+            const k = root.readerScale > 0 ? root.readerScale : 1
             const version = root.backend.versionId || ""
             function draw(start, end, selected, reference) {
                 const rects = document.rectangles(start, end)
@@ -227,7 +231,7 @@ Item {
             const ctx = getContext("2d")
             ctx.reset()
             const rects = document.searchRectangles(root.searchSegments)
-            HandDrawn.searchMarks(ctx, rects, accent, false, root.controller.readerScale, "block")
+            HandDrawn.searchMarks(ctx, rects, accent, false, root.readerScale, "block")
         }
     }
     // Jump pulse and copy flash: translucent accent behind the text. Plain
@@ -284,7 +288,7 @@ Item {
         horizontalAlignment: TextEdit.AlignLeft
         textFormat: TextEdit.RichText
         font.family: root.theme.fontFamily
-        font.pixelSize: root.controller.readerSize * root.controller.readerScale
+        font.pixelSize: root.controller.readerSize * root.readerScale
         onFontChanged: if (!root.destroying) geometryTimer.restart()
         onWidthChanged: if (!root.destroying) geometryTimer.restart()
         color: root.theme.foreground
@@ -445,7 +449,7 @@ Item {
                     const opening = inlineMarker.opening
                     const bx = opening ? paintWidth * 0.78 : paintWidth * 0.65
                     const tip = opening ? paintWidth - lineWidth / 2 : lineWidth / 2
-                    const k = root.controller.readerScale > 0 ? root.controller.readerScale : 1
+                    const k = root.readerScale > 0 ? root.readerScale : 1
                     // Fold the wobble inward so ink stays in the bracket box.
                     const amp = Math.min(0.8 * k, Math.abs(tip - bx) / 3, bracketHeight / 8)
                     const top = bracketTop + lineWidth / 2 + amp
@@ -507,7 +511,7 @@ Item {
         interval: 16
         repeat: true
         onTriggered: {
-            const edge = 48 * root.controller.scale
+            const edge = 48 * root.readerScale
             const bottom = root.viewport.height - root.controller.floatingSafety
             const speed = root.pointer.y < edge ? -Math.min(edge, edge - root.pointer.y)
                 : root.pointer.y > bottom - edge ? Math.min(edge, root.pointer.y - bottom + edge) : 0
