@@ -25,7 +25,8 @@ Item {
     property string coincidentEndpoint: "end"
     property string pinnedVersion: ""
     property bool restoring: false
-    readonly property real uiScale: Math.min(desktop.textScale, 1.4)
+    readonly property real textScale: app && app.scale > 0 ? app.scale : desktop.textScale
+    readonly property real uiScale: Math.min(textScale, 1.4)
     readonly property string endpoint: {
         // Invokable results do not register dependencies, including the singleton branch.
         const start = bible.selectedStart, end = bible.selectedEnd
@@ -251,7 +252,7 @@ Item {
         }
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
-        AppToolTip { theme: editor.desktop; text: button.hint; visible: text.length > 0 && (button.hovered || button.activeFocus) }
+        AppToolTip { theme: editor.desktop; uiScale: editor.textScale; text: button.hint; visible: text.length > 0 && (button.hovered || button.activeFocus) }
     }
     component RangeCheckBox: CheckBox {
         id: check
@@ -293,6 +294,7 @@ Item {
         }
         AppToolTip {
             theme: editor.desktop
+            uiScale: editor.textScale
             text: KeyNotation.format("Space") + " toggles this tag; " + KeyNotation.format("T") + " toggles all tags"
             visible: check.allTagsHint && (check.hovered || check.activeFocus)
             delay: 650
@@ -305,7 +307,7 @@ Item {
     }
     component RangeDialog: Popup {
         parent: Overlay.overlay
-        width: Math.min(600 * editor.desktop.textScale, editor.app.width - 32)
+        width: Math.min(600 * editor.textScale, editor.app.width - 32)
         height: Math.min(contentItem.implicitHeight + 2 * padding, editor.app.height - 32)
         anchors.centerIn: parent
         padding: 24 * editor.uiScale

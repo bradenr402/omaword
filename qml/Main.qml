@@ -23,7 +23,7 @@ ApplicationWindow {
     title: bible.ready ? bible.passage + " — " + desktop.appName : desktop.appName
     color: desktop.background
     font.family: desktop.fontFamily
-    font.pixelSize: Math.round(14 * desktop.textScale)
+    font.pixelSize: Math.round(14 * app.scale)
     palette.window: desktop.background
     palette.windowText: desktop.foreground
     palette.base: desktop.background
@@ -479,7 +479,13 @@ ApplicationWindow {
             return { valid: true, reference: destination.entry.book ? "Browse " + destination.entry.title : destination.entry.title }
         return bible.resolveReference(destination.reference)
     }
-    readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
+    // The desktop text scale sizes the reader text. The Text size preference
+    // (bible.fontSize, default 18) also scales every other piece of UI text
+    // and its controls proportionally, so `scale` is the product of both.
+    readonly property real systemScale: desktop.textScale > 0 ? desktop.textScale : 1
+    readonly property real readerScale: systemScale
+    readonly property real fontScale: bible.fontSize > 0 ? bible.fontSize / 18 : 1
+    readonly property real scale: systemScale * fontScale
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
     readonly property bool contextMenuOpen: contextMenu.visible
     readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || historyDrawer.shown || tagsUi.visibleModal
@@ -511,6 +517,9 @@ ApplicationWindow {
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
     readonly property real observedLineHeight: bible.lineHeight
+    // Passage text in panels follows the reader's line height proportionally:
+    // 1.25 at the default 1.5, so the panels stay compact but track the setting.
+    readonly property real panelLineHeight: bible.lineHeight > 0 ? bible.lineHeight / 1.5 * 1.25 : 1.25
     onObservedLineHeightChanged: {
         // Replacing the rich document invalidates Qt's selection offsets.
         // Clear the shared clipboard source in the same update as the paint.
@@ -629,7 +638,7 @@ ApplicationWindow {
         NumberAnimation { target: app; property: "flashLevel"; from: 0; to: 1; duration: 90; easing.type: Easing.OutQuad }
         NumberAnimation { target: app; property: "flashLevel"; to: 0; duration: 260; easing.type: Easing.InQuad }
     }
-    FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.scale }
+    FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.readerScale }
     component VerseItem: Item {
         property real textOffset: 0
         property real textHeight: 0
@@ -921,6 +930,7 @@ ApplicationWindow {
     }
     AppContextMenu {
         id: contextMenu
+        uiScale: app.scale
         objectName: "contextMenu"
         theme: desktop
         fadeDuration: app.reduceMotion ? 0 : 120
@@ -2167,6 +2177,9 @@ ApplicationWindow {
     function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
     function shortcutEnabled(action) {
         if (!actionAvailable(action)) return false
+        // Text size and line height type nothing, so they work from anywhere:
+        // panels, the palette, modals, find, and text fields included.
+        if (textSizeActions.includes(action.id)) return !errorDialog.visible
         if (findPromptOpen) return false
         if (zPending && action.sequences.some(function(sequence) { return ["Z", "T", "B"].includes(sequence) })) return false
         // Typing owns every key, Ctrl and Alt included (ctrl v pastes); only the
@@ -2181,10 +2194,11 @@ ApplicationWindow {
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
         return readerKeys
     }
+    readonly property var textSizeActions: ["larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"]
     function actionAvailable(action) {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action || action.explanation || bible.busy) return false
-        if (rangeEditing && !["newWindow", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "larger", "smaller", "resetText"].includes(action.id)) return false
+        if (rangeEditing && !["newWindow", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)) return false
         if (action.id === "copyText") return bible.ready
         if (["bookmark", "highlight", "tags", "related", "toggleDesk"].includes(action.id)) return hasSelection
         return bible.ready || !!action.setting
@@ -2195,6 +2209,7 @@ ApplicationWindow {
         if (action.scope === "history") return "History panel only"
         if (action.scope === "versions") return "Versions dialog"
         if (action.explanation) return "Reader gesture"
+        if (textSizeActions.includes(action.id)) return "Anywhere in this window · panels, dialogs, and while typing"
         if (action.scope === "global") return "This window · also with the Notes panel open, but not while typing"
         if (action.scope === "palette") return "This window · passage and command search"
         if (action.scope === "notes") return "Reader or notes preview"
@@ -2356,7 +2371,8 @@ ApplicationWindow {
         if (action === "first" || action === "last") { countedVerse(action === "last"); return }
         const count = Math.max(1, Math.min(999999, Number(verseCount) || 1))
         clearCount()
-        if (!flushNote()) return
+        // Text size never touches a Notes draft, so typing in Notes keeps going.
+        if (!textSizeActions.includes(action) && !flushNote()) return
         const catalogAction = actions.find(function(entry) { return entry.id === action })
         const previousSetting = catalogAction.setting ? bible[catalogAction.setting] : null
         const previousLineHeight = bible.lineHeight
@@ -2530,7 +2546,7 @@ ApplicationWindow {
             border.width: button.activeFocus ? 1 : 0
             border.color: desktop.accent
         }
-        AppToolTip { theme: desktop; visible: (button.hovered || button.activeFocus) && button.tip.length > 0; text: button.tip; delay: 650 }
+        AppToolTip { theme: desktop; uiScale: app.scale; visible: (button.hovered || button.activeFocus) && button.tip.length > 0; text: button.tip; delay: 650 }
         Accessible.name: text
     }
     component FineRule: Rectangle {
@@ -2686,7 +2702,7 @@ ApplicationWindow {
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
         Accessible.name: tip
-        AppToolTip { theme: desktop; visible: floatingButton.hovered || floatingButton.activeFocus; text: floatingButton.tip; delay: 500 }
+        AppToolTip { theme: desktop; uiScale: app.scale; visible: floatingButton.hovered || floatingButton.activeFocus; text: floatingButton.tip; delay: 500 }
         background: Rectangle {
             color: floatingButton.down ? app.tint(desktop.accent, 0.18)
                 : floatingButton.hovered ? app.tint(desktop.accent, 0.09) : "transparent"
@@ -2917,7 +2933,7 @@ ApplicationWindow {
             color: marker.hovered || marker.activeFocus ? app.tint(desktop.accent, 0.12) : "transparent"
             radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
         }
-        AppToolTip { theme: desktop; visible: marker.visible && (marker.hovered || marker.activeFocus); text: marker.hint + "\n" + KeyNotation.format("Shift+Click") + " · Edit range · " + app.menuKey("editRange") + " in reader" }
+        AppToolTip { theme: desktop; uiScale: app.scale; visible: marker.visible && (marker.hovered || marker.activeFocus); text: marker.hint + "\n" + KeyNotation.format("Shift+Click") + " · Edit range · " + app.menuKey("editRange") + " in reader" }
     }
     component SectionLabel: Label {
         color: desktop.muted
@@ -3191,14 +3207,14 @@ ApplicationWindow {
                                             anchors.fill: parent
                                             readonly property var range: parent.modelData
                                             property color ink: desktop.accent
-                                            readonly property var paintKey: [highlightAccent.visible, app.scale, width, height,
+                                            readonly property var paintKey: [highlightAccent.visible, app.readerScale, width, height,
                                                 range.reference, range.highlightContinuesBefore, range.highlightContinuesAfter, bible.versionId]
                                             onPaintKeyChanged: requestPaint()
                                             onInkChanged: requestPaint()
                                             onPaint: {
                                                 const ctx = getContext("2d")
                                                 ctx.reset()
-                                                const k = app.scale
+                                                const k = app.readerScale
                                                 const s = HandDrawn.seed("highlight", bible.versionId, range.reference)
                                                 const before = !!range.highlightContinuesBefore, after = !!range.highlightContinuesAfter
                                                 ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.16)
@@ -3282,6 +3298,7 @@ ApplicationWindow {
                                     }
                                     AppToolTip {
                                         theme: desktop
+                                        uiScale: app.scale
                                         visible: numberMouse.containsMouse && !bible.focusMode
                                         delay: 700
                                         text: "Select verse " + verseRow.modelData.number + " · " + KeyNotation.format("Shift+Click") + " for a range" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "") + (verseRow.modelData.hasTags ? "\nTagged" : "")
@@ -3290,6 +3307,7 @@ ApplicationWindow {
                                 SearchHighlights {
                                     id: verseSearch
                                     objectName: "verseSearch" + verseRow.modelData.number
+                                    markScale: app.readerScale
                                     x: verseBody.x; y: verseBody.y
                                     width: verseBody.width; height: verseBody.height
                                     body: verseBody
@@ -3310,7 +3328,7 @@ ApplicationWindow {
                                     textFormat: Text.RichText
                                     horizontalAlignment: TextEdit.AlignLeft
                                     font.family: desktop.fontFamily
-                                    font.pixelSize: app.readerSize * app.scale
+                                    font.pixelSize: app.readerSize * app.readerScale
                                     color: desktop.foreground
                                     selectionColor: app.tint(desktop.accent, 0.35)
                                     selectedTextColor: desktop.foreground
@@ -4271,7 +4289,7 @@ ApplicationWindow {
                             implicitHeight: resultText.contentHeight
                             SearchHighlights {
                                 anchors.fill: resultText
-                                body: resultText; sourceText: resultText.text; theme: desktop
+                                body: resultText; sourceText: resultText.text; theme: desktop; markScale: app.scale
                                 outlined: true
                                 segments: paletteEntry.modelData.displaySegments || []
                             }
@@ -4685,7 +4703,7 @@ ApplicationWindow {
                             horizontalAlignment: Text.AlignLeft
                             color: deskEntry.modelData.available ? desktop.foreground : desktop.muted
                             font.pixelSize: 14 * app.scale
-                            lineHeight: 1.25
+                            lineHeight: app.panelLineHeight
                             Layout.fillWidth: true; wrapMode: Text.Wrap
                         }
                         Label {
@@ -4900,6 +4918,7 @@ ApplicationWindow {
                                 horizontalAlignment: Text.AlignLeft
                                 color: desktop.muted
                                 font.pixelSize: 13 * app.scale
+                                lineHeight: app.panelLineHeight
                                 maximumLineCount: 2
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -5102,7 +5121,7 @@ ApplicationWindow {
                     height: keybindingContent.implicitHeight + 20 * app.scale
                     rightPadding: leftPadding + (keybindingScrollbar.visible ? 12 * app.scale : 0)
                     enabled: app.actionAvailable(modelData)
-                    AppToolTip { theme: desktop; visible: keybindingRow.hovered; text: app.scopeTitle(keybindingRow.modelData); delay: 650 }
+                    AppToolTip { theme: desktop; uiScale: app.scale; visible: keybindingRow.hovered; text: app.scopeTitle(keybindingRow.modelData); delay: 650 }
                     highlighted: ListView.isCurrentItem
                     onClicked: app.activateKeybinding(modelData)
                     Keys.onReturnPressed: clicked()

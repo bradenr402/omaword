@@ -377,6 +377,49 @@ private slots:
         QTRY_VERIFY(item("historyEmpty")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
     }
+    // Text size scales every UI text proportionally (the reader by size alone),
+    // and both size and line height keys work from panels, modals, and inputs.
+    void textSizeAndLineHeightWorkEverywhere() {
+        record("John 1:3"); navigate("John 1:2"); QVERIFY(bible->toggleDesk()); navigate("John 1:1");
+        QCOMPARE(prop("scale").toDouble(), 1.0);
+        const double readerFont = item("verseBody1")->property("font").value<QFont>().pixelSize();
+        QCOMPARE(readerFont, 18.0);
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
+        key(Qt::Key_Equal, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 19);
+        QVERIFY(qAbs(prop("scale").toDouble() - 19.0 / 18) < 1e-9);
+        QTRY_COMPARE(object("deskText0")->property("font").value<QFont>().pixelSize(), qRound(14 * 19.0 / 18));
+        QCOMPARE(item("verseBody1")->property("font").value<QFont>().pixelSize(), 19);
+        QCOMPARE(object("toast")->property("font").value<QFont>().pixelSize(), qRound(13 * 19.0 / 18));
+        key(Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.6);
+        QVERIFY(qAbs(object("deskText0")->property("lineHeight").toDouble() - 1.6 / 1.5 * 1.25) < 1e-6);
+        QVERIFY(object("deskDrawer")->property("opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
+        openHistory();
+        key(Qt::Key_Minus, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.5);
+        QVERIFY(qAbs(object("historyExcerpt0")->property("lineHeight").toDouble() - 1.25) < 1e-6);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        // In the palette's text field: the field keeps its text.
+        call("readerFocus"); key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus()); type("jo");
+        const auto typed = object("referenceInput")->property("text").toString();
+        key(Qt::Key_Minus, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 18);
+        key(Qt::Key_Minus, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 17);
+        key(Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.6);
+        QCOMPARE(object("referenceInput")->property("text").toString(), typed);
+        QVERIFY(object("passagePalette")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        // In a modal: keybindings, with its search field focused.
+        call("readerFocus"); run("help"); QTRY_VERIFY(object("helpDialog")->property("opened").toBool());
+        key(Qt::Key_0, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 18);
+        key(Qt::Key_0, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.5);
+        QVERIFY(object("helpDialog")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("helpDialog")->property("visible").toBool());
+        // Limits stay 8–40.
+        bible->setFontSize(40); call("readerFocus"); key(Qt::Key_Equal, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 40);
+        bible->setFontSize(8); key(Qt::Key_Minus, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 8);
+        QVERIFY(qAbs(prop("scale").toDouble() - 8.0 / 18) < 1e-9);
+        QCOMPARE(item("verseBody1")->property("font").value<QFont>().pixelSize(), 8);
+    }
     void panelSwitchingWithOtherPanels() {
         record("John 1:3"); navigate("John 1:1");
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());

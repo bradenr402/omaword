@@ -10,6 +10,7 @@ Item {
     property var segments: []
     property string sourceText: ""
     property var theme
+    property real markScale: theme && theme.textScale > 0 ? theme.textScale : 1
     property bool outlined: false
     onOutlinedChanged: refresh()
     property bool destroying: false
@@ -72,7 +73,7 @@ Item {
             ctx.translate(offset.x, offset.y)
             const rects = document.rectangles(root.segments || [])
             HandDrawn.searchMarks(ctx, rects, accent, root.outlined,
-                root.theme && root.theme.textScale > 0 ? root.theme.textScale : 1, root.sourceText)
+                root.markScale, root.sourceText)
         }
     }
     Timer {

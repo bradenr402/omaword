@@ -53,7 +53,7 @@ Item {
     readonly property var visibleOverlaps: overlaps.filter(function(entry) { return panel.summaryMatches(entry) })
     readonly property var visibleResults: results.filter(function(entry) { return panel.summaryMatches(entry) })
     function focusSummary() { body.forceActiveFocus() }
-    readonly property real uiScale: desktop.textScale
+    readonly property real uiScale: app && app.scale > 0 ? app.scale : desktop.textScale
     readonly property real controlScale: Math.min(uiScale, 1.4, Math.max(1, body.width / 440))
     readonly property var filteredTags: allTags.filter(function(tag) {
         return fold(tag.name).indexOf(fold(query)) !== -1
@@ -481,7 +481,7 @@ Item {
         }
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
-        AppToolTip { theme: panel.desktop; text: control.hint; visible: text.length > 0 && (control.hovered || control.activeFocus) }
+        AppToolTip { theme: panel.desktop; uiScale: panel.uiScale; text: control.hint; visible: text.length > 0 && (control.hovered || control.activeFocus) }
     }
     component TagInput: TextField {
         id: input
@@ -567,6 +567,7 @@ Item {
             Layout.fillWidth: true
             visible: text.length > 0
             text: range.entry.excerpt || ""
+            lineHeight: panel.bible.lineHeight > 0 ? panel.bible.lineHeight / 1.5 * 1.25 : 1.25
             maximumLineCount: 3
             elide: Text.ElideRight
             color: panel.desktop.muted
@@ -955,7 +956,7 @@ Item {
                         spacing: 4 * panel.uiScale
                         TagText { width: parent.width; text: resultDelegate.modelData.reference + " · " + resultDelegate.modelData.versionAbbreviation + " · " + resultDelegate.modelData.sharedCount + " shared" }
                         TagText { width: parent.width; text: panel.tagNames(resultDelegate.modelData.tags); color: panel.desktop.accent }
-                        TagText { width: parent.width; text: resultDelegate.modelData.excerpt || ""; maximumLineCount: 3; elide: Text.ElideRight; color: panel.desktop.muted }
+                        TagText { width: parent.width; text: resultDelegate.modelData.excerpt || ""; lineHeight: panel.bible.lineHeight > 0 ? panel.bible.lineHeight / 1.5 * 1.25 : 1.25; maximumLineCount: 3; elide: Text.ElideRight; color: panel.desktop.muted }
                     }
                 }
                 TagText { anchors.centerIn: parent; visible: resultList.count === 0 && panel.filterIds.length > 0; text: "No matching passages"; color: panel.desktop.muted }

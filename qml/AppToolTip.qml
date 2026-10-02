@@ -5,10 +5,11 @@ import QtQuick.Window
 ToolTip {
     id: control
     required property var theme
+    property real uiScale: theme.textScale > 0 ? theme.textScale : 1
 
     font.family: theme.fontFamily
-    font.pixelSize: 12 * theme.textScale
-    width: Math.min(implicitWidth, 360 * theme.textScale,
+    font.pixelSize: 12 * control.uiScale
+    width: Math.min(implicitWidth, 360 * control.uiScale,
                     Math.max(1, (Overlay.overlay ? Overlay.overlay.width : Screen.width) - 16))
 
     contentItem: Text {

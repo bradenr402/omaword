@@ -9,7 +9,7 @@ import QtQuick.Controls
 Popup {
     id: menu
     required property var theme
-    readonly property real uiScale: theme.textScale > 0 ? theme.textScale : 1
+    property real uiScale: theme.textScale > 0 ? theme.textScale : 1
     property string target: ""
     property var entries: []
     property int currentIndex: -1
