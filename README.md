@@ -179,7 +179,7 @@ Notes save as you type. Reader windows have independent passages and share the l
 
 Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related, or press `shift E` to move the assignments of the focused range. Use `t` to edit exact-range assignments and **Manage tags** (`ctrl t`) to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version.
 
-The footer puts `?` before mode on the left; search, passage, version, and layout in the center; and Annotations, Notes, Related, History, and Desk on the right. In narrow windows the center moves up a row, then the layout button hides, and finally the right group folds into a `…` menu. Annotations are drawn like pen and highlighter marks: hand-drawn Verse rails or inline Paragraph/Block brackets, with subtle cursor-range shading.
+The footer puts `?` before mode on the left; search, passage, version, and layout in the center; and Annotations, Notes, Related, History, and Desk on the right. In narrow windows the right group stacks into a column in the bottom-right corner (the reader text keeps clear of it), then the layout button hides, and finally the right group folds into a `…` menu. Annotations are drawn like pen and highlighter marks: hand-drawn Verse rails or inline Paragraph/Block brackets, with subtle cursor-range shading.
 
 All your Bible versions, highlights, bookmarks, notes, and tags stay on this device. Personal data lives in `~/.local/share/omaword/`; backup and Markdown export are available in Commands.
 

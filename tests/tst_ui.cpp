@@ -3311,22 +3311,21 @@ private slots:
         QCOMPARE(passage->x(),search->width());
         QCOMPARE(version->x(),search->width() + passage->width());
         const auto layout = item("layoutControl");
-        QVERIFY(layout->isVisible());
-        QCOMPARE(layout->x(),search->width() + passage->width() + version->width());
-        QCOMPARE(location->width(),search->width() + passage->width() + version->width() + layout->width());
+        // Cramped and scaled, the layout button gives way to the passage.
+        QCOMPARE(layout->isVisible(),!window->property("footerHideLayout").toBool());
+        QCOMPARE(layout->isVisible(),size.width() > 640 || scale < 1.5);
+        if (layout->isVisible()) QCOMPARE(layout->x(),search->width() + passage->width() + version->width());
+        QCOMPARE(location->width(),search->width() + passage->width() + version->width() + (layout->isVisible() ? layout->width() : 0));
         QCOMPARE(prop("searchControl","glyph").toString(),QString("search"));
         QCOMPARE(prop("versionControl","text").toString(),bible->versionAbbreviation());
         QVERIFY(passage->width() > 0);
         const auto actions = item("floatingActions");
-        if (window->property("footerTwoRows").toBool()) {
-            QVERIFY(location->y() + location->height() <= actions->y());
-            QVERIFY(location->y() + location->height() <= item("leftActions")->y());
-        } else {
-            QVERIFY(location->x() + location->width() < actions->x());
-            QVERIFY(location->x() > item("leftActions")->x() + item("leftActions")->width());
-        }
+        // Stacked or not, the center row sits between the corner groups.
+        QVERIFY(location->x() + location->width() < actions->x());
+        QVERIFY(location->x() > item("leftActions")->x() + item("leftActions")->width());
         for (const auto name : {"modeControl","searchControl","passageControl","versionControl","layoutControl","relatedControl","savedControl","notesControl","deskControl","helpControl"}) {
             auto control = item(name);
+            if (control == layout && !layout->isVisible()) continue;
             QVERIFY(control->isVisible());
             QVERIFY(QRectF(QPointF(),size).contains(control->mapRectToScene(QRectF(0,0,control->width(),control->height()))));
             const auto background = qvariant_cast<QQuickItem *>(control->property("background"));
@@ -4340,47 +4339,68 @@ private slots:
         const QStringList names = {"helpControl","modeControl","searchControl","passageControl","versionControl",
             "layoutControl","savedControl","notesControl","relatedControl","historyControl","deskControl","footerMore"};
         window->setMinimumWidth(320);
-        struct Case { int width; int height; double scale; bool twoRows; bool layout; bool collapsed; };
+        struct Case { int width; int height; double scale; bool stacked; bool layout; bool collapsed; };
         const QList<Case> cases = {{1120,820,1,false,true,false},{900,820,1.5,true,true,false},{700,820,1,true,true,false},
-            {700,820,1.5,true,true,false},{560,820,1.5,true,true,false},{560,820,2.4,true,false,false},{360,640,1.5,true,false,true}};
+            {700,820,1.5,true,true,false},{640,820,1.5,true,false,false},{560,820,1.5,true,false,true},{560,820,2.4,true,false,true},
+            {420,640,1,true,false,true},{360,640,1.5,true,false,true}};
         for (const auto &entry : cases) {
             window->resize(entry.width,entry.height);
             QVERIFY(desktop->setProperty("textScale",entry.scale));
             QTRY_COMPARE(window->width(),entry.width);
             QTest::qWait(120);
             const auto tag = QString("%1@%2").arg(entry.width).arg(entry.scale);
-            QCOMPARE(window->property("footerTwoRows").toBool(),entry.twoRows);
-            QCOMPARE(item("layoutControl")->isVisible(),entry.layout);
-            QCOMPARE(item("footerMore")->isVisible(),entry.collapsed);
+            QVERIFY2(window->property("footerStacked").toBool() == entry.stacked,qPrintable(tag));
+            QVERIFY2(item("layoutControl")->isVisible() == entry.layout,qPrintable(tag));
+            QVERIFY2(item("footerMore")->isVisible() == entry.collapsed,qPrintable(tag));
             QCOMPARE(item("helpControl")->isVisible(),!entry.collapsed);
             QCOMPARE(item("savedControl")->isVisible(),!entry.collapsed);
+            // The footer itself is always one row tall; only the right group stacks.
+            QCOMPARE(window->property("footerHeight").toDouble(),window->property("footerButton").toDouble());
+            const QStringList right = {"savedControl","notesControl","relatedControl","historyControl","deskControl","footerMore"};
             QList<QPair<QString,QRectF>> rects;
             for (const auto &name : names) {
                 auto button = item(qPrintable(name));
                 if (button && button->isVisible()) rects.append({name,button->mapRectToScene(button->boundingRect())});
             }
             const double band = window->height() - window->property("floatingSafety").toDouble();
+            const auto column = item("readerColumn")->mapRectToScene(item("readerColumn")->boundingRect());
+            const double modeBottom = item("modeControl")->mapRectToScene(item("modeControl")->boundingRect()).bottom();
             for (int i = 0; i < rects.size(); ++i) {
                 QVERIFY2(QRectF(0,0,entry.width,entry.height).contains(rects[i].second),qPrintable(tag + " " + rects[i].first));
-                // Inside the reader's reserved bottom band: never over the text column.
-                QVERIFY2(rects[i].second.top() >= band - 0.5,qPrintable(tag + " " + rects[i].first));
+                if (right.contains(rects[i].first) && entry.stacked && !entry.collapsed) {
+                    // The stacked column sits right of the reader text, never over it.
+                    QVERIFY2(rects[i].second.left() >= column.right(),qPrintable(tag + " " + rects[i].first));
+                } else {
+                    // Inside the reader's reserved bottom band: never over the text column.
+                    QVERIFY2(rects[i].second.top() >= band - 0.5,qPrintable(tag + " " + rects[i].first));
+                    QVERIFY2(qAbs(rects[i].second.bottom() - modeBottom) < 0.5,qPrintable(tag + " " + rects[i].first));
+                }
                 for (int j = i + 1; j < rects.size(); ++j)
                     QVERIFY2(!rects[i].second.intersects(rects[j].second),qPrintable(tag + " " + rects[i].first + " overlaps " + rects[j].first));
             }
             const auto location = item("locationControls")->mapRectToScene(item("locationControls")->boundingRect());
             QVERIFY2(qAbs(location.center().x() - entry.width / 2.0) <= 1,qPrintable(tag));
             const auto x = [this](const char *name) { return item(name)->mapToScene(QPointF()).x(); };
-            if (!entry.collapsed) {
+            const auto y = [this](const char *name) { return item(name)->mapToScene(QPointF()).y(); };
+            if (!entry.collapsed && !entry.stacked) {
                 QVERIFY(x("savedControl") < x("notesControl"));
                 QVERIFY(x("notesControl") < x("relatedControl"));
                 QVERIFY(x("relatedControl") < x("historyControl"));
                 QVERIFY(x("historyControl") < x("deskControl"));
+            } else if (!entry.collapsed) {
+                // A column in the same order, top to bottom, bottom-aligned with the row.
+                for (auto name : {"notesControl","relatedControl","historyControl","deskControl"}) QCOMPARE(x(name),x("savedControl"));
+                QVERIFY(y("savedControl") < y("notesControl"));
+                QVERIFY(y("notesControl") < y("relatedControl"));
+                QVERIFY(y("relatedControl") < y("historyControl"));
+                QVERIFY(y("historyControl") < y("deskControl"));
+                QCOMPARE(item("deskControl")->mapRectToScene(item("deskControl")->boundingRect()).bottom(),modeBottom);
+                QVERIFY(location.right() <= x("deskControl"));
             }
             QVERIFY(x("helpControl") < x("modeControl") || entry.collapsed);
             if (entry.layout) QVERIFY(x("versionControl") < x("layoutControl"));
             const auto passage = item("passageControl")->mapRectToScene(item("passageControl")->boundingRect());
-            if (!entry.twoRows) QCOMPARE(passage.top(),item("modeControl")->mapRectToScene(item("modeControl")->boundingRect()).top());
-            else QVERIFY(passage.bottom() <= item("modeControl")->mapToScene(QPointF()).y());
+            QCOMPARE(passage.top(),item("modeControl")->mapRectToScene(item("modeControl")->boundingRect()).top());
             capture("footer-" + tag);
         }
         // The "…" menu opens the folded panels.
@@ -4511,14 +4531,9 @@ private slots:
         const double layoutWidth = layoutButton->isVisible() ? layoutButton->width() : 0;
         QCOMPARE(location->width(),searchButton->width() + passage->width() + version->width() + layoutWidth);
         QVERIFY(searchButton->width() > 0 && passage->width() > 0 && version->width() > 0);
-        if (window->property("footerTwoRows").toBool()) {
-            // Cramped: the center row sits above the corner groups.
-            QVERIFY(location->y() + location->height() <= item("leftActions")->y());
-            QVERIFY(location->y() + location->height() <= item("floatingActions")->y());
-        } else {
-            QVERIFY(location->x() > item("modeControl")->x() + item("modeControl")->width());
-            QVERIFY(location->x() + location->width() < item("floatingActions")->x());
-        }
+        // Cramped or not, the center row sits between the corner groups.
+        QVERIFY(location->x() > item("modeControl")->x() + item("modeControl")->width());
+        QVERIFY(location->x() + location->width() < item("floatingActions")->x());
         QCOMPARE(prop("passageControlLabel","truncated").toBool(),passage->width() < passage->implicitWidth() - 1);
         QCOMPARE(prop("passageControl","tip").toString(),selected + " · Open passage · ctrl k");
         click(version);

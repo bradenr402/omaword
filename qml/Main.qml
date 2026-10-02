@@ -3055,8 +3055,12 @@ ApplicationWindow {
 
                     Column {
                         id: readerColumn
-                        width: Math.min(760 * app.scale, reading.width - (reading.width < 700 ? 48 : 96))
-                        anchors.horizontalCenter: parent.horizontalCenter
+                        objectName: "readerColumn"
+                        // Centered, but clear of the footer's stacked right column.
+                        readonly property real sideInset: reading.width < 700 ? 24 : 48
+                        readonly property real rightInset: Math.max(sideInset, app.footerRightInset)
+                        width: Math.min(760 * app.scale, reading.width - sideInset - rightInset)
+                        x: Math.min((reading.width - width) / 2, reading.width - rightInset - width)
                         topPadding: 48 * app.scale
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
@@ -3672,10 +3676,11 @@ ApplicationWindow {
 
     // Footer: ? and mode on the left; search, passage, version, and layout in
     // the center; Annotations, Notes, Related, History (while enabled), and Desk on the right. The center
-    // stays centered while it fits. When cramped, the side groups keep the
-    // bottom corners and the center moves to a row above; more cramped hides
-    // the layout button; really cramped folds the right group into "…" and
-    // hides ?. The reader keeps the whole footer inside floatingSafety.
+    // stays centered while it fits. When cramped, the right group stacks into a
+    // column at the bottom-right corner and the reader text keeps clear of it;
+    // the footer stays one row tall. More cramped hides the layout button;
+    // really cramped folds the right group into "…" and hides ?. The reader
+    // keeps the footer row inside floatingSafety.
     readonly property real footerMargin: 16 * controlScale
     readonly property real footerGap: 4 * controlScale
     readonly property real footerButton: 40 * controlScale
@@ -3686,10 +3691,21 @@ ApplicationWindow {
     readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
         + (bible.ready ? versionControl.implicitWidth + layoutControl.implicitWidth : 0)
     readonly property real footerAvailable: width - 2 * footerMargin
-    readonly property bool footerTwoRows: footerCenterFull + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap > footerAvailable
-    readonly property bool footerHideLayout: footerTwoRows && footerCenterFull > footerAvailable
-    readonly property bool footerCollapsed: footerTwoRows && footerLeftFull + footerRightFull + footerGroupGap > footerAvailable
-    readonly property real footerHeight: footerButton * (footerTwoRows ? 2 : 1) + (footerTwoRows ? footerGap : 0)
+    readonly property bool footerStacked: footerCenterFull + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap > footerAvailable
+    // With the right group stacked, the center keeps clear of the wider corner.
+    readonly property real footerSideReserve: Math.max(footerLeftFull, footerRightCount ? footerButton : 0) + footerGroupGap
+    readonly property real footerPassageMin: 96 * controlScale
+    // The passage elides first; the layout button goes only when the passage
+    // would drop below footerPassageMin, and the right group folds into "…"
+    // only when even that is not enough.
+    readonly property real footerCenterMin: searchControl.implicitWidth + footerPassageMin + (bible.ready ? versionControl.implicitWidth : 0)
+    readonly property bool footerHideLayout: footerStacked && bible.ready
+        && footerCenterMin + layoutControl.implicitWidth + 2 * footerSideReserve > footerAvailable
+    readonly property bool footerCollapsed: footerStacked && bible.ready && footerCenterMin + 2 * footerSideReserve > footerAvailable
+    readonly property real footerHeight: footerButton
+    // Room the reader text leaves at the right edge for the stacked column.
+    readonly property real footerRightInset: footerStacked && !footerCollapsed && footerRightCount && !bible.focusMode
+        ? footerButton + footerMargin + 2 * footerGap : 0
     function footerPanelEntries() {
         const ready = !rangeEditing && bible.ready && !bible.busy
         return [
@@ -3731,10 +3747,9 @@ ApplicationWindow {
         id: locationControls
         objectName: "locationControls"
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: app.footerMargin + (app.footerTwoRows ? app.footerButton + app.footerGap : 0)
+        anchors.bottomMargin: app.footerMargin
         x: app.width / 2 - width / 2
-        readonly property real availableWidth: app.footerTwoRows ? app.footerAvailable
-            : Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
+        readonly property real availableWidth: Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
         readonly property real fixedWidth: searchControl.width + (versionControl.visible ? versionControl.width : 0) + (layoutControl.visible ? layoutControl.width : 0)
         width: Math.min(fixedWidth + passageControl.implicitWidth, availableWidth)
         visible: !bible.focusMode && !app.findPromptOpen
@@ -3775,13 +3790,15 @@ ApplicationWindow {
             onClicked: app.runCommand("readingMode")
         }
     }
-    Row {
+    Grid {
         id: floatingActions
         objectName: "floatingActions"
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: app.footerMargin
         spacing: app.footerGap
+        // One row, or a column bottom-aligned in the corner when cramped.
+        columns: app.footerStacked ? 1 : 6
         visible: !bible.focusMode && !app.findPromptOpen
         readonly property bool expanded: bible.ready && !app.footerCollapsed
         FloatingButton {
@@ -3862,7 +3879,7 @@ ApplicationWindow {
         id: searchMatchCount
         objectName: "searchMatchCount"
         anchors.right: parent.right; anchors.bottom: parent.bottom
-        anchors.rightMargin: 20 * app.controlScale
+        anchors.rightMargin: 20 * app.controlScale + app.footerRightInset
         anchors.bottomMargin: bible.focusMode ? app.footerMargin : app.footerMargin + app.footerHeight + 6 * app.controlScale
         visible: !app.findPromptOpen && app.acceptedSearchQuery.length > 0
         text: app.searchError || (app.searchMatches.length ? (app.searchMatchIndex < 0
@@ -5635,7 +5652,7 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: bible.focusMode ? 68 : Math.max(68, app.footerMargin + app.footerHeight + 12 * app.controlScale)
-        width: Math.min(toast.implicitWidth + 36, app.width - 48)
+        width: Math.min(toast.implicitWidth + 36, app.width - 2 * Math.max(24, app.footerRightInset))
         height: toast.implicitHeight + 24
         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
         color: desktop.surface
