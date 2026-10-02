@@ -44,6 +44,7 @@ Rectangle {
             Layout.fillWidth: true; Layout.minimumWidth: 0
             color: root.theme.foreground
             placeholderText: "Find in chapter"
+            horizontalAlignment: TextInput.AlignLeft
             placeholderTextColor: root.theme.muted
             font.family: root.theme.fontFamily; font.pixelSize: 14 * root.uiScale
             selectByMouse: true

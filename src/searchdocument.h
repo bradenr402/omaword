@@ -21,6 +21,10 @@ private:
 namespace SearchGeometry {
 QVariantList rectangles(QTextDocument *document, int start, int end);
 QRectF firstRect(const QVariantList &rectangles);
+// Scripture is laid out left to right. A paragraph opening with a Hebrew
+// letter (Psalm 119's acrostic) must not switch its base direction; RTL runs
+// still render in place. Display-only: no characters are inserted.
+void forceLeftToRight(QTextDocument *document);
 }
 
 class SearchDocument : public QObject
@@ -32,6 +36,7 @@ public:
     Q_INVOKABLE QVariantList rectangles(const QVariantList &segments) const;
     Q_INVOKABLE QRectF rectFor(int start, int length) const;
     Q_INVOKABLE QRectF cursorRect(int position) const;
+    Q_INVOKABLE void leftToRight(QQuickTextDocument *target) const;
 signals:
     void geometryChanged();
 private:

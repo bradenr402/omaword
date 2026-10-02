@@ -28,7 +28,9 @@ Item {
         const origin = bodyOrigin()
         return Qt.rect(r.x + origin.x, r.y + origin.y, r.width, r.height)
     }
-    onBodyChanged: refresh()
+    // Scripture paragraphs are always LTR, even when they open with Hebrew.
+    function leftToRight() { if (!destroying && body) document.leftToRight(body.textDocument) }
+    onBodyChanged: { leftToRight(); refresh() }
     onSourceTextChanged: refresh()
     onSegmentsChanged: refresh()
     onXChanged: refresh()
@@ -43,7 +45,7 @@ Item {
     // qmllint enable import
     Connections {
         target: root.body
-        function onTextChanged() { root.refresh() }
+        function onTextChanged() { root.leftToRight(); root.refresh() }
         function onFontChanged() { root.refresh() }
         function onWidthChanged() { root.refresh() }
         function onHeightChanged() { root.refresh() }
@@ -81,6 +83,6 @@ Item {
             paint.requestPaint()
         }
     }
-    Component.onCompleted: refresh()
+    Component.onCompleted: { leftToRight(); refresh() }
     Component.onDestruction: { destroying = true; geometryTimer.stop() }
 }

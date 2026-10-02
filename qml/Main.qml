@@ -537,6 +537,11 @@ ApplicationWindow {
     // Focus mode keeps the selection, else the cursor verse, at full strength.
     readonly property int focusFirst: bible.selectedStart > 0 ? bible.selectedStart : bible.cursorVerse
     readonly property int focusLast: bible.selectedStart > 0 ? bible.selectedEnd : bible.cursorVerse
+    // Display-only LRM at each line start: plain Text has no base-direction
+    // setting, and a Hebrew-first line must stay an LTR paragraph.
+    function leftToRightText(text) {
+        return text ? String(text).split("\n").map(function(line) { return "\u200E" + line }).join("\n") : ""
+    }
     function verseDimmed(number) { return bible.focusMode && (number < focusFirst || number > focusLast) }
     // 0 → 1 as focus mode is entered: the only dimming that fades. Which verses
     // are dimmed follows the cursor instantly.
@@ -2628,9 +2633,13 @@ ApplicationWindow {
                                     }
                                     Text {
                                         id: headingText
+                                        objectName: "headingText" + verseRow.modelData.number
                                         width: parent.width
                                         y: 22 * app.scale
-                                        text: verseRow.modelData.heading || ""
+                                        // An LRM keeps a Hebrew-first heading ("א Aleph")
+                                        // in an LTR paragraph; display only.
+                                        text: app.leftToRightText(verseRow.modelData.heading)
+                                        horizontalAlignment: Text.AlignLeft
                                         textFormat: Text.PlainText
                                         font.family: desktop.fontFamily
                                         font.pixelSize: 15 * app.scale
@@ -2827,6 +2836,7 @@ ApplicationWindow {
                                     text: '<div style="line-height:' + (bible.lineHeight * 100) + '%">'
                                         + (verseRow.modelData.html || verseRow.modelData.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
                                     textFormat: Text.RichText
+                                    horizontalAlignment: TextEdit.AlignLeft
                                     font.family: desktop.fontFamily
                                     font.pixelSize: app.readerSize * app.scale
                                     color: desktop.foreground
@@ -3716,9 +3726,11 @@ ApplicationWindow {
                             }
                             TextEdit {
                                 id: resultText
+                                objectName: "searchResultText" + paletteEntry.index
                                 width: parent.width; height: contentHeight
                                 text: app.paletteTextMode ? paletteEntry.modelData.text || "" : ""
                                 textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap
+                                horizontalAlignment: TextEdit.AlignLeft
                                 readOnly: true; selectByMouse: false; activeFocusOnPress: false
                                 enabled: false
                                 color: desktop.foreground; font.pixelSize: 13 * app.scale
@@ -4072,9 +4084,11 @@ ApplicationWindow {
                         }
                         Label {
                             objectName: "deskText" + deskEntry.index
-                            text: deskEntry.modelData.text || ""
+                            // LRM: display-only LTR base direction (copy uses the backend).
+                            text: app.leftToRightText(deskEntry.modelData.text)
                             visible: text.length > 0
                             textFormat: Text.PlainText
+                            horizontalAlignment: Text.AlignLeft
                             color: deskEntry.modelData.available ? desktop.foreground : desktop.muted
                             font.pixelSize: 14 * app.scale
                             lineHeight: 1.25

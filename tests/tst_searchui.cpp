@@ -472,7 +472,7 @@ private slots:
             QVERIFY(item("verseHeading1")->isVisible());
             QQuickItem *text = nullptr;
             for (auto child : item("verseHeading1")->childItems())
-                if (child->property("text").toString() == heading) text = child;
+                if (child->property("text").toString().remove(QChar(0x200e)) == heading) text = child;
             QVERIFY(text); QVERIFY(text->isVisible()); QVERIFY(text->height() > 0);
         } else {
             QTRY_VERIFY(blockMapping() && item("blockBody") && document(item("blockBody")));

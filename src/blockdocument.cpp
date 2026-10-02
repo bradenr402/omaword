@@ -98,6 +98,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     m_selectionStart = m_selectionEnd = 0;
     m_document->clear();
     m_document->setDocumentMargin(0);
+    SearchGeometry::forceLeftToRight(m_document);
     m_spans.clear();
     m_decorations.clear();
     m_decorationSegments.clear();
@@ -113,6 +114,8 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     QTextCursor cursor(m_document);
     QTextBlockFormat paragraph;
     paragraph.setLineHeight(lineHeight * 100, QTextBlockFormat::ProportionalHeight);
+    // Hebrew-first paragraphs and headings stay in an LTR paragraph.
+    paragraph.setLayoutDirection(Qt::LeftToRight);
     cursor.setBlockFormat(paragraph);
     const QTextCharFormat normal;
     // Keep the original separator (and native copy offsets), but permanently

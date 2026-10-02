@@ -107,6 +107,32 @@ class DeskUiTest : public QObject
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
     QVariantList desk() const { return bible->desk(); }
+    static bool psalm(const QString &path) {
+        auto zip = archive_write_new(); archive_write_set_format_zip(zip);
+        if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
+        const QByteArray data = QString("\\id PSA Acrostic fixture\n\\h Psalms\n\\toc1 Psalms\n\\toc2 Psalms\n\\c 119\n\\s \u05d0 Aleph\n\\p\n"
+            "\\v 1 \u05d0\u05e9\u05e8\u05d9 Blessed are those whose way is blameless.\n"
+            "\\v 2 Blessed are those who keep his testimonies.\n"
+            "\\s \u05d1 Beth\n\\p\n\\v 3 \u05d1 Beth begins with Hebrew too.\n").toUtf8();
+        auto entry = archive_entry_new();
+        archive_entry_set_pathname(entry, "19-PSAengpsa.usfm"); archive_entry_set_filetype(entry, AE_IFREG);
+        archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, data.size());
+        bool ok = archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, data.constData(), data.size()) == data.size();
+        archive_entry_free(entry); ok = archive_write_close(zip) == ARCHIVE_OK && ok; archive_write_free(zip); return ok;
+    }
+    // A Hebrew-first paragraph stays LTR: its Hebrew opens at the left, and the
+    // following Latin word lies to its right.
+    void expectLeftToRight(QObject *body, const QString &hebrew, const QString &latin) {
+        auto doc = document(body); QVERIFY(doc);
+        const auto text = doc->toPlainText();
+        const int h = text.indexOf(hebrew), l = text.indexOf(latin, h);
+        QVERIFY2(h >= 0 && l > h, qPrintable(text));
+        const auto block = doc->findBlock(h);
+        QCOMPARE(block.textDirection(), Qt::LeftToRight);
+        QVERIFY(!block.layout()->textOption().textDirection() || block.layout()->textOption().textDirection() == Qt::LeftToRight);
+        QVERIFY2(caret(body, l).x() > caret(body, h).x(), qPrintable(QString("%1 %2").arg(caret(body, l).x()).arg(caret(body, h).x())));
+        QCOMPARE(body->property("effectiveHorizontalAlignment").toInt(), int(Qt::AlignLeft));
+    }
     QString toast() const { return object("toast")->property("text").toString(); }
     bool deskOpen() const { return object("deskDrawer")->property("opened").toBool(); }
     void openDesk() { key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(deskOpen()); QTRY_VERIFY(item("deskList")->hasActiveFocus()); }
@@ -183,7 +209,7 @@ private slots:
         QVERIFY(item("deskControl")->property("selected").toBool());
         const auto firstItem = desk().first().toMap();
         QCOMPARE(object("deskHeader0")->property("text").toString(), firstItem["reference"].toString() + " · " + firstItem["versionAbbreviation"].toString());
-        QCOMPARE(object("deskText0")->property("text").toString(), firstItem["text"].toString());
+        QCOMPARE(object("deskText0")->property("text").toString().remove(QChar(0x200e)), firstItem["text"].toString());
         QVERIFY(firstItem["text"].toString().contains("ALPHA and beta"));
         QVERIFY(firstItem["text"].toString().contains("here across verses"));
         QCOMPARE(object("deskList")->property("currentIndex").toInt(), 0);
@@ -233,6 +259,55 @@ private slots:
         QCOMPARE(remove->x() - (copy->x() + copy->width()), item("savedTabs") ? item("savedTabs")->property("spacing").toReal() : 0.0);
         // The title starts at the drawer's padding, just like Annotations.
         QCOMPARE(item("deskTitle")->mapToItem(content, QPointF()).y(), item("savedTitle")->mapToItem(savedContent, QPointF()).y());
+        key(Qt::Key_Escape);
+    }
+    void hebrewFirstTextStaysLeftToRight_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << QString("verse");
+        QTest::newRow("paragraph") << QString("paragraph");
+        QTest::newRow("block") << QString("block");
+    }
+    void hebrewFirstTextStaysLeftToRight() {
+        QFETCH(QString, mode);
+        const QString aleph = QString::fromUtf8("\u05d0"), word = QString::fromUtf8("\u05d0\u05e9\u05e8\u05d9");
+        const auto path = fixtures.filePath("engpsa.zip"); QVERIFY(psalm(path)); install(path);
+        bible->setReadingMode(mode);
+        QTRY_COMPARE(prop("continuousReader").toBool(), mode != "verse");
+        navigate("PSA 119:1");
+        QCOMPARE(bible->verses().first().toMap()["heading"].toString(), aleph + " Aleph");
+        if (mode == "verse") {
+            auto heading = item("headingText1"); QVERIFY(heading && heading->isVisible());
+            const auto shown = heading->property("text").toString();
+            QVERIFY(QString(aleph + " Aleph").isRightToLeft());
+            QVERIFY(!shown.isRightToLeft()); QCOMPARE(QString(shown).remove(QChar(0x200e)), aleph + " Aleph");
+            QCOMPARE(heading->property("effectiveHorizontalAlignment").toInt(), int(Qt::AlignLeft));
+            expectLeftToRight(item("verseBody1"), word, "Blessed");
+            expectLeftToRight(item("verseBody3"), QString::fromUtf8("\u05d1"), "Beth");
+        } else {
+            QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() == bible->verses().size());
+            auto body = item("blockBody");
+            expectLeftToRight(body, aleph + " Aleph", "Aleph");
+            expectLeftToRight(body, word, "Blessed");
+            expectLeftToRight(body, QString::fromUtf8("\u05d1 Beth begins"), "Beth begins");
+        }
+        // Copy output is unchanged: no direction marks.
+        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(word + " Blessed"));
+        const auto copied = QGuiApplication::clipboard()->text();
+        for (auto mark : {0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x2066, 0x2067, 0x2068, 0x2069}) QVERIFY(!copied.contains(QChar(mark)));
+        QCOMPARE(copied, bible->copySelection());
+        if (mode != "verse") return;
+        // Search results and the Desk use the same LTR paragraph.
+        search("blessed blameless"); QTRY_VERIFY(item("searchResultText0"));
+        expectLeftToRight(item("searchResultText0"), word, "Blessed");
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        call("readerFocus"); navigate("PSA 119:1"); key(Qt::Key_D); openDesk();
+        const auto shown = object("deskText0")->property("text").toString();
+        QVERIFY(!shown.isRightToLeft()); QCOMPARE(QString(shown).remove(QChar(0x200e)), desk().first().toMap()["text"].toString());
+        QCOMPARE(item("deskText0")->property("effectiveHorizontalAlignment").toInt(), int(Qt::AlignLeft));
+        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
+        QTRY_VERIFY(!QGuiApplication::clipboard()->text().isEmpty());
+        QVERIFY(!QGuiApplication::clipboard()->text().contains(QChar(0x200e)));
         key(Qt::Key_Escape);
     }
     void copyAndRemove() {

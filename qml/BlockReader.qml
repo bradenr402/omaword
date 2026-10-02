@@ -279,6 +279,8 @@ Item {
         objectName: "blockBody"
         width: parent.width
         height: contentHeight
+        // Explicit, so Hebrew-first text cannot mirror the alignment.
+        horizontalAlignment: TextEdit.AlignLeft
         textFormat: TextEdit.RichText
         font.family: root.theme.fontFamily
         font.pixelSize: root.controller.readerSize * root.controller.scale

@@ -895,12 +895,14 @@ ApplicationWindow {
             QVERIFY(marker["bracketHeight"].toDouble() <= metrics.height()+3);
             QVERIFY(marker["cellHeight"].toDouble() <= metrics.height()+2);
             QCOMPARE(marker["width"].toDouble(),marker["paintWidth"].toDouble()+marker["textGap"].toDouble());
-            QCOMPARE(marker["rtl"].toBool(),rtl);
+            // Scripture paragraphs are always LTR; Hebrew text renders in place
+            // inside them, so brackets keep their LTR sides.
+            QVERIFY(!marker["rtl"].toBool());
             const auto bracket = bracketRect(marker);
             const auto span = mapping->spans()[marker["verse"].toInt()-1].toMap();
             const auto inkRects = textInkRects(doc,span["textStart"].toInt(),span["textEnd"].toInt());
             QVERIFY(!inkRects.isEmpty());
-            const bool textOnRight = (marker["edge"] != "close") != rtl;
+            const bool textOnRight = marker["edge"] != "close";
             double gap = 1e6;
             for (const auto &rect : inkRects) {
                 QVERIFY(!bracket.intersects(rect));

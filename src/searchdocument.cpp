@@ -5,6 +5,8 @@
 #include <QCoreApplication>
 #include <QQmlEngine>
 #include <QTextBlock>
+#include <QTextDocument>
+#include <QTextOption>
 #include <QTextLayout>
 #include <algorithm>
 
@@ -107,6 +109,21 @@ QRectF SearchGeometry::firstRect(const QVariantList &rectangles)
 }
 
 SearchDocument::SearchDocument(QObject *parent) : QObject(parent) {}
+
+void SearchGeometry::forceLeftToRight(QTextDocument *document)
+{
+    if (!document) return;
+    auto option = document->defaultTextOption();
+    if (option.textDirection() != Qt::LeftToRight) {
+        option.setTextDirection(Qt::LeftToRight);
+        document->setDefaultTextOption(option);
+    }
+}
+
+void SearchDocument::leftToRight(QQuickTextDocument *target) const
+{
+    if (target) SearchGeometry::forceLeftToRight(target->textDocument());
+}
 
 void SearchDocument::attach(QQuickTextDocument *target, const QString &sourceText)
 {
