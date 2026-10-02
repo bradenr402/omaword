@@ -220,6 +220,12 @@ private slots:
         QVERIFY(firstItem["text"].toString().contains("here across verses"));
         QCOMPARE(object("deskList")->property("currentIndex").toInt(), 0);
         key(Qt::Key_J); QCOMPARE(object("deskList")->property("currentIndex").toInt(), 1);
+        {
+            auto *current = qvariant_cast<QQuickItem *>(object("deskList")->property("currentItem")); QVERIFY(current);
+            auto *rowBackground = qvariant_cast<QQuickItem *>(current->property("background")); QVERIFY(rowBackground);
+            QVERIFY(rowBackground->property("color").value<QColor>().alpha() > 0);
+            QCOMPARE(qvariant_cast<QObject *>(rowBackground->property("border"))->property("width").toReal(), 0.0);
+        }
         key(Qt::Key_Down); QCOMPARE(object("deskList")->property("currentIndex").toInt(), 1);
         key(Qt::Key_K); QCOMPARE(object("deskList")->property("currentIndex").toInt(), 0);
         key(Qt::Key_J); key(Qt::Key_Return);

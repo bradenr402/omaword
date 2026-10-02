@@ -3957,8 +3957,8 @@ ApplicationWindow {
                     background: Rectangle {
                         color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"
                         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                        border.width: savedEntry.highlighted || savedEntry.activeFocus ? 1 : 0
-                        border.color: desktop.accent
+                        // The current row is shown by its tinted fill alone, never an accent border.
+                        border.width: 0
                         Canvas {
                             // The reader's hand-drawn highlight accent: same pen and seed.
                             objectName: "savedHighlight" + savedEntry.modelData.reference
@@ -4142,8 +4142,8 @@ ApplicationWindow {
                     background: Rectangle {
                         color: deskEntry.highlighted ? app.tint(desktop.accent, 0.11) : deskEntry.hovered ? desktop.surface : "transparent"
                         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                        border.width: deskEntry.highlighted && deskList.activeFocus ? 1 : 0
-                        border.color: desktop.accent
+                        // The current row is shown by its tinted fill alone, never an accent border.
+                        border.width: 0
                     }
                 }
                 Label {

@@ -794,8 +794,11 @@ Item {
                     enabled: panel.page !== "picker" || (panel.scopeValid && !panel.bible.busy)
                     onClicked: { tagList.currentIndex = index; panel.toggleTag(modelData.id) }
                     background: Rectangle {
-                        color: tagDelegate.chosen || tagDelegate.hovered ? panel.desktop.surface : "transparent"
-                        border.color: tagDelegate.activeFocus || (tagList.activeFocus && tagList.currentIndex === tagDelegate.index) ? panel.desktop.accent : "transparent"
+                        // Like the app's other lists: the current row is a tinted fill, never an accent border.
+                        color: tagDelegate.activeFocus || (tagList.activeFocus && tagList.currentIndex === tagDelegate.index)
+                            ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
+                            : tagDelegate.chosen || tagDelegate.hovered ? panel.desktop.surface : "transparent"
+                        border.width: 0
                         radius: panel.desktop.cornerRadius
                     }
                 }

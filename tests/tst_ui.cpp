@@ -5101,6 +5101,7 @@ private slots:
         const auto background = qvariant_cast<QQuickItem *>(current->property("background"));
         QVERIFY(background);
         QVERIFY(background->property("color").value<QColor>().alpha() > 0);
+        QCOMPARE(qvariant_cast<QObject *>(background->property("border"))->property("width").toReal(),0.0);
         key(Qt::Key_L); QCOMPARE(window->property("collectionTab").toInt(),1);
         QCOMPARE(prop("collectionList","count").toInt(),1);
         key(Qt::Key_Right); QCOMPARE(window->property("collectionTab").toInt(),2);

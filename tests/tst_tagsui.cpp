@@ -319,6 +319,11 @@ ApplicationWindow {
         const auto id = prop("filteredTags").toList()[30].toMap()["id"].toString();
         auto delegate = item("tag:" + id); QVERIFY(delegate);
         delegate->forceActiveFocus();
+        {
+            auto *rowBackground = delegate->property("background").value<QQuickItem *>(); QVERIFY(rowBackground);
+            QCOMPARE(rowBackground->property("border").value<QObject *>()->property("width").toReal(), 0.0);
+            QTRY_VERIFY(rowBackground->property("color").value<QColor>().alpha() > 0);
+        }
         const auto scroll = list->property("contentY").toReal();
         QVERIFY(scroll > 0);
         BibleBackend peer;
