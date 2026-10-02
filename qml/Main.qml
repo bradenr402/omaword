@@ -3950,7 +3950,6 @@ ApplicationWindow {
                             Label { text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
                             Label { text: savedEntry.modelData.note.replace(/\s+/g, " "); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
                             Label { objectName: "savedTags" + savedEntry.modelData.reference; text: app.tagsPlainText(savedEntry.modelData.tags); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                            QuietButton { objectName: "savedEditRange:" + savedEntry.modelData.reference; text: "Edit range"; compact: true; enabled: !app.rangeEditing && !bible.busy; onClicked: app.openRangeEditor(savedEntry.modelData, ["bookmark", "highlight", "note"][app.collectionTab]) }
                         }
                     }
                     background: Rectangle {

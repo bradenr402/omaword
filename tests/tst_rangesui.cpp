@@ -313,7 +313,9 @@ private slots:
         QVERIFY(bible->toggleBookmark()); const auto source = bible->tagScope();
         navigate("John 3:8"); QVERIFY(bible->toggleBookmark());
         key(Qt::Key_A, Qt::ControlModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
-        item("savedEditRange:" + source.value("reference").toString())->forceActiveFocus();
+        // Bookmarks are listed in source order; the first row is the John 3:2 source.
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        QCOMPARE(object("collectionList")->property("currentIndex").toInt(), 0);
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("active").toBool());
         QVERIFY(!prop("visibleModal").toBool());
         QCOMPARE(prop("source").toMap().value("scope").toMap().value("start").toInt(), 2);
