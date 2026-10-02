@@ -4046,7 +4046,8 @@ ApplicationWindow {
         }
         // While closing, a drawer must not keep its Escape grab: the next Escape
         // belongs to the reader (or range editor) immediately.
-        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent(); else app.clearSavedQuery() }
+        // A fresh open (not one interrupting the exit animation) starts without a query.
+        onAboutToShow: { const reopening = visible; if (!closing) app.clearSavedQuery(); closing = false; if (reopening) focusContent() }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.focusSavedList() }
         onVisibleChanged: if (visible && !closing) focusContent()
