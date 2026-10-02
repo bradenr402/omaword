@@ -573,7 +573,7 @@ private slots:
         QCOMPARE(object("noteEditor")->property("text").toString(), QString("nw/s"));
         QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!object("passagePalette")->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
-        key(Qt::Key_N, Qt::ControlModifier); QTRY_VERIFY(object("notesDrawer")->property("visible").toBool());
+        key(Qt::Key_W); QTRY_VERIFY(object("notesDrawer")->property("visible").toBool());
     }
     void chapterFindWithoutForwardMatch_data() {
         QTest::addColumn<QString>("query");

@@ -744,7 +744,7 @@ private slots:
         QVERIFY(!bible->ready());
         QSignalSpy newWindow(window,SIGNAL(newWindowRequested()));
         QVERIFY(newWindow.isValid());
-        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        key(Qt::Key_N,Qt::ControlModifier);
         QCOMPARE(newWindow.count(),1);
         QCOMPARE(window->title(),QString("OmaWord"));
         QVERIFY(item("setupScroll")->isVisible());
@@ -991,7 +991,7 @@ private slots:
         const auto width = item("reading")->width();
         const auto height = item("verseBody16")->height();
         const auto position = prop("reading","contentY");
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_W);
         QVERIFY(prop("notesDrawer","visible").toBool());
         QVERIFY(prop("notesDrawer","position").toDouble() < 1);
         QTRY_VERIFY(prop("notesDrawer","opened").toBool());
@@ -1001,7 +1001,7 @@ private slots:
         QCOMPARE(prop("reading","contentY"),position);
         type("A guarded draft");
         capture("phase-b-notes-editor");
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_Escape);
         QVERIFY(prop("notesDrawer","visible").toBool()); // Exit animates too.
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QCOMPARE(bible->noteText(),QString("A guarded draft"));
@@ -1009,7 +1009,16 @@ private slots:
         click(item("previewButton"));
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(!window->property("notePreview").toBool());
-        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        {
+            // Ctrl n opens a new window from the note editor without touching the note.
+            QSignalSpy opened(window,SIGNAL(newWindowRequested()));
+            const auto text = prop("noteEditor","text").toString();
+            key(Qt::Key_N,Qt::ControlModifier);
+            QCOMPARE(opened.count(),1);
+            QCOMPARE(prop("noteEditor","text").toString(),text);
+            QVERIFY(item("noteEditor")->hasActiveFocus());
+            QVERIFY(prop("notesDrawer","opened").toBool());
+        };
         key(Qt::Key_Left,Qt::AltModifier); key(Qt::Key_Right,Qt::AltModifier);
         QCOMPARE(bible->chapter(),3);
         QVERIFY(prop("notesDrawer","opened").toBool());
@@ -1026,7 +1035,7 @@ private slots:
             QVERIFY(newWindow.isValid());
             for (int dismissal = 0; dismissal < 9; ++dismissal) {
                 if (dismissal == 0) key(Qt::Key_Escape);
-                if (dismissal == 1) key(Qt::Key_N,Qt::ControlModifier);
+                if (dismissal == 1) QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"toggleNotes")));
                 if (dismissal == 2) QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,QPoint(30,200));
                 if (dismissal == 3) {
                     QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"focus")));
@@ -1049,7 +1058,7 @@ private slots:
                     QVERIFY(bible->error().contains("test note failure"));
                 }
                 if (dismissal == 8) {
-                    key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+                    key(Qt::Key_N,Qt::ControlModifier);
                     QCOMPARE(newWindow.count(),0);
                 }
                 QTest::qWait(250);
@@ -1106,7 +1115,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(window,"flushNote",Q_RETURN_ARG(QVariant,flushed)));
         QVERIFY(!flushed.toBool());
         QSignalSpy requested(window,SIGNAL(newWindowRequested()));
-        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        key(Qt::Key_N,Qt::ControlModifier);
         QCOMPARE(requested.count(),0);
         key(Qt::Key_Escape); QVERIFY(prop("notesDrawer","visible").toBool());
         QCOMPARE(peer.noteText(),QString("Newer peer text"));
@@ -1184,7 +1193,9 @@ private slots:
         type("John 4:2"); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         QCOMPARE(saved(16).value("note").toString(),QString("Saved before dispatch"));
-        key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        // Esc from the reader closes an open Notes drawer too.
+        QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("notesDrawer","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         action("previous chapter"); QCOMPARE(bible->chapter(),3);
         action("next chapter"); QCOMPARE(bible->chapter(),4);
         action("open commands");
@@ -2312,7 +2323,7 @@ private slots:
         QVERIFY(bible->crossChapterSelection());
         QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->selectionBookmarked());
         QCOMPARE(prop("noteEditor","text").toString(),note);
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),copied);
         reference("John 3:36"); QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->noteText().isEmpty());
@@ -2336,7 +2347,7 @@ private slots:
         key(Qt::Key_K); QCOMPARE(bible->selectedStart(),16);
         key(Qt::Key_X); QVERIFY(bible->selectionHighlighted());
         key(Qt::Key_M); QVERIFY(bible->selectionBookmarked());
-        key(Qt::Key_N, Qt::ControlModifier);
+        key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         const QString first = "# John 3\nj k h l x m v y g are note text, not reader commands.";
         type(first);
@@ -2354,7 +2365,7 @@ private slots:
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_J); QCOMPARE(bible->selectedStart(),17);
         QCOMPARE(prop("noteEditor", "text").toString(),QString());
-        key(Qt::Key_N, Qt::ControlModifier);
+        key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         const QString second = "A different note for the next verse.";
         type(second);
@@ -3183,7 +3194,7 @@ private slots:
         QVERIFY(item("verseNumberLabel1")->isVisible());
         bible->setLineHeight(1.5);
         QTRY_COMPARE(item("verseBody2")->height(),height);
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         bible->setFocusMode(true);
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
@@ -3341,7 +3352,7 @@ private slots:
         reference("John 3:16");
         window->resize(width,900);
         QVERIFY(desktop->setProperty("textScale",scale));
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_W);
         QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QTest::qWait(100);
         auto passage = item("passageControl");
@@ -3540,8 +3551,8 @@ private slots:
             QTRY_VERIFY(!window->property("restoringPosition").toBool());
         }
         const auto previousToast = prop("toast","text");
-        key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(prop("notesDrawer","opened").toBool()); QCOMPARE(prop("toast","text"),previousToast);
-        key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(!prop("notesDrawer","visible").toBool()); QCOMPARE(prop("toast","text"),previousToast);
+        key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool()); QCOMPARE(prop("toast","text"),previousToast);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool()); QCOMPARE(prop("toast","text"),previousToast);
         key(Qt::Key_BracketRight,Qt::ControlModifier); checkToast("Line height 1.6");
         key(Qt::Key_Backslash,Qt::ControlModifier); checkToast("Line height 1.5");
         QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
@@ -3565,16 +3576,16 @@ private slots:
             QVERIFY(!bible->blockMode()); QVERIFY(!bible->focusMode());
             QVERIFY(query.exec("DROP TRIGGER reject_preferences"));
             key(Qt::Key_R); checkToast("Show verse numbers off");
-            key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+            key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
             QTRY_VERIFY(prop("notesDrawer","opened").toBool());
             QCOMPARE(prop("toast","text").toString(),QString("Show verse numbers off"));
             QVERIFY(query.exec("CREATE TRIGGER reject_note BEFORE INSERT ON annotations BEGIN SELECT RAISE(FAIL,'test note failure'); END"));
             type("An unsaved draft");
-            key(Qt::Key_N,Qt::ControlModifier);
+            key(Qt::Key_Escape);
             QVERIFY(prop("notesDrawer","opened").toBool());
             QCOMPARE(prop("toast","text").toString(),QString("Show verse numbers off"));
             QVERIFY(query.exec("DROP TRIGGER reject_note"));
-            key(Qt::Key_N,Qt::ControlModifier); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
             QCOMPARE(prop("toast","text").toString(),QString("Show verse numbers off"));
             QCOMPARE(bible->noteText(),QString("An unsaved draft"));
         }
@@ -3758,7 +3769,7 @@ private slots:
         key(Qt::Key_R,Qt::ShiftModifier);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(!item("toast")->isVisible());
         type("notes s "); key(Qt::Key_R,Qt::ShiftModifier);
@@ -3781,7 +3792,7 @@ private slots:
         key(Qt::Key_R,Qt::ShiftModifier); key(Qt::Key_S);
         QVERIFY(!prop("settingsDialog","visible").toBool());
         QVERIFY(!prop("passagePalette","visible").toBool());
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(!item("toast")->isVisible());
         QCOMPARE(bible->noteText(),QString("notes s r"));
@@ -3822,21 +3833,21 @@ private slots:
         const auto selected = bible->selectionReference();
         QSignalSpy requested(window,SIGNAL(newWindowRequested()));
         QVERIFY(requested.isValid());
-        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        key(Qt::Key_N,Qt::ControlModifier);
         QCOMPARE(requested.count(),1);
         QVERIFY(!window->property("notesOpen").toBool());
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(window->setProperty("syncingNote",true));
         QVERIFY(object("noteEditor")->setProperty("text","Save before opening a window"));
         QVERIFY(window->setProperty("syncingNote",false));
-        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        key(Qt::Key_N,Qt::ControlModifier);
         QCOMPARE(requested.count(),2);
         QCOMPARE(bible->noteText(),QString("Save before opening a window"));
         QVERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("new window");
-        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        key(Qt::Key_N,Qt::ControlModifier);
         QCOMPARE(requested.count(),2); // A modal owns its keyboard until closed.
         QCOMPARE(prop("paletteResults","count").toInt(),1);
         key(Qt::Key_Return);
@@ -3898,16 +3909,16 @@ private slots:
         second->show(); second->requestActivate();
         QVERIFY(QTest::qWaitForWindowExposed(second));
         QTRY_VERIFY(second->isActive());
-        QTest::keyClick(second,Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QTest::keyClick(second,Qt::Key_N,Qt::ControlModifier);
         QTRY_COMPARE(other.count(),1);
         QCOMPARE(first.count(),0);
         window->requestActivate(); QTRY_VERIFY(window->isActive());
-        key(Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        key(Qt::Key_N,Qt::ControlModifier);
         QCOMPARE(first.count(),1); QCOMPARE(other.count(),1);
         key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
         QVERIFY(!second->property("modalOpen").toBool());
         second->requestActivate(); QTRY_VERIFY(second->isActive());
-        QTest::keyClick(second,Qt::Key_N,Qt::ControlModifier | Qt::ShiftModifier);
+        QTest::keyClick(second,Qt::Key_N,Qt::ControlModifier);
         QTRY_COMPARE(other.count(),2);
         QCOMPARE(first.count(),1);
         second->close();
@@ -3928,14 +3939,14 @@ private slots:
         }
         const QList<QStringList> expected = {
             {"books","Navigate to a passage","Ctrl k"},
-            {"annotations","Annotations panel","Ctrl a"}, {"toggleNotes","Notes panel","Ctrl n"},
+            {"annotations","Annotations panel","Ctrl a"}, {"toggleNotes","Notes panel",""},
             {"selectVerse","Select verse","Click"},
             {"clickMenu","Open context menu","Right Click"},
             {"middleCopy","Copy passage as quotation","Middle Click"},
             {"contextMenu","Open context menu","Menu · Shift F10"},
             {"settings","Reading settings","Shift R"},
             {"commands","Open commands","Ctrl Space · Ctrl Shift P"},
-            {"newWindow","New window","Ctrl Shift N"},
+            {"newWindow","New window","Ctrl n"},
             {"switchVersion","Switch version","Shift V"},
             {"removeVersion","Remove version",""},
             {"import","Add version",""}
@@ -5322,7 +5333,7 @@ private slots:
     void narrowLayoutAndSystemScale() {
         reference("John 3:16");
         window->resize(640,480);
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QTRY_VERIFY(item("verseNumber16")->mapToItem(item("reading"),QPointF()).y() >= 0);
         QTRY_VERIFY(item("verseNumber16")->mapToItem(item("reading"),QPointF()).y() <= window->property("readerLineHeight").toDouble() * 3 + 1);
@@ -5342,7 +5353,7 @@ private slots:
         QCOMPARE(window->property("font").value<QFont>().family(),desktop->property("fontFamily").toString());
         reference("Jn 4:1");
         QCOMPARE(bible->chapter(),4);
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(item("noteEditor")->height() >= 100);
         QVERIFY(prop("notesScroll","contentHeight").toDouble() > item("notesScroll")->height());
@@ -5357,7 +5368,7 @@ private slots:
         reference("John 3:16-18");
         key(Qt::Key_H,Qt::ControlModifier);
         key(Qt::Key_M,Qt::ControlModifier);
-        key(Qt::Key_N,Qt::ControlModifier);
+        key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("# A love that gives\nRead the whole conversation.\n\n- Notice the movement from love to life.\n- Return to this passage slowly.");
         key(Qt::Key_Escape);

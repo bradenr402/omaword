@@ -198,7 +198,7 @@ private slots:
         const auto destination = bible->tagScope();
         key(Qt::Key_M); key(Qt::Key_N); key(Qt::Key_V, Qt::ShiftModifier);
         QCOMPARE(bible->annotationSnapshot(source), unchanged); QVERIFY(!object("notesDrawer")->property("visible").toBool());
-        QSignalSpy newWindow(window, SIGNAL(newWindowRequested())); key(Qt::Key_N, Qt::ControlModifier | Qt::ShiftModifier); QCOMPARE(newWindow.count(), 1);
+        QSignalSpy newWindow(window, SIGNAL(newWindowRequested())); key(Qt::Key_N, Qt::ControlModifier); QCOMPARE(newWindow.count(), 1);
         commits.clear();
         key(Qt::Key_Return); QTRY_VERIFY(!prop("sessionOpen").toBool());
         QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error())); QTRY_COMPARE(commits.count(), 1);

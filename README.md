@@ -70,7 +70,7 @@ Press `?` or `F1` in the app for the full, searchable list; Enter there performs
 
 - `m`: bookmark
 - `x`: highlight
-- `w`: write a note
+- `w`: write a note in the Notes panel (Esc closes it)
 - `t`: tag the passage (in the tag editor, `Space` / `Enter` toggles a tag; Enter in search creates and applies one)
 - `Shift E`: edit an existing annotation's range (`o` swaps ends, Enter saves, Esc restores)
 - `d`: add the passage to the Desk, or remove it
@@ -86,12 +86,11 @@ Press `?` or `F1` in the app for the full, searchable list; Enter there performs
 
 ### Panels and windows
 
-- `Ctrl n`: Notes
 - `Ctrl a`: Annotations (Bookmarks, Highlights, Notes, Tags)
 - `Shift D`: Desk, a study list shared by all windows and versions (in the Desk, `x` removes a passage and `Shift X` cleans it)
 - `Shift V`: switch versions
 - `Shift R`: Reading settings
-- `Ctrl Shift N`: new reader window
+- `Ctrl n`: new reader window
 
 ### Reading
 

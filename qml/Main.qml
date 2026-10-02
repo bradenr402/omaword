@@ -469,6 +469,7 @@ ApplicationWindow {
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
     readonly property bool modalOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.visibleModal || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.shown || deskDrawer.shown || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool notesClosableFromReader: notesOpen && bible.ready && !bible.busy && !modalOpen && !findPromptOpen && !textInputActive()
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -1735,14 +1736,14 @@ ApplicationWindow {
         { id: "nextMatch", title: "Next search match", keys: "n", sequences: ["N"] },
         { id: "previousMatch", title: "Previous search match", keys: "Shift N", sequences: ["Shift+N"] },
         { id: "commands", title: "Open commands", keys: "Ctrl Space · Ctrl Shift P", sequences: ["Ctrl+Space", "Ctrl+Shift+P"], scope: "palette" },
-        { id: "newWindow", title: "New window", keys: "Ctrl Shift N", sequences: ["Ctrl+Shift+N"], scope: "global", command: true },
+        { id: "newWindow", title: "New window", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
         { id: "annotations", title: "Annotations panel", keys: "Ctrl a", sequences: ["Ctrl+A"], command: true },
         { id: "desk", title: "Open Desk", keys: "Shift D", sequences: ["Shift+D"], command: true },
         { id: "toggleDesk", title: "Add to Desk", keys: "d", sequences: ["D"], command: true },
         // Desk-only: documented here, bound by deskDrawer (no sequences, so never global).
         { id: "cleanDesk", title: "Clean Desk", keys: "Shift X", scope: "desk", command: true },
         { id: "editRange", title: "Edit annotation range", keys: "Shift E", sequences: ["Shift+E"], command: true },
-        { id: "toggleNotes", title: "Notes panel", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
+        { id: "toggleNotes", title: "Notes panel", keys: "", command: true },
         { id: "notes", title: "Write a note", keys: "w", sequences: ["W"], scope: "notes", command: true },
         { id: "tags", title: "Tag passage", keys: "t", sequences: ["T"], command: true },
         { id: "tagsBrowser", title: "Tags", keys: "", command: true },
@@ -3311,7 +3312,7 @@ ApplicationWindow {
             visible: bible.ready
             glyph: "notes"
             selected: app.notesOpen
-            tip: "Notes · Ctrl n"
+            tip: "Notes · w"
             enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.toggleNotes()
         }
@@ -4957,6 +4958,16 @@ ApplicationWindow {
     Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
     Shortcut { sequences: ["Return", "Enter"]; enabled: app.readerKeys && rangeEditor.active; onActivated: rangeEditor.accept() }
     Shortcut { sequence: "O"; enabled: app.readerKeys && rangeEditor.active; onActivated: rangeEditor.swap() }
+    // Escape closes the Notes drawer while focus sits outside the editor (the
+    // editor and preview close it themselves). Application context reaches past
+    // the drawer's popup focus scope, so only the active window may enable it.
+    Shortcut {
+        objectName: "closeNotesShortcut"
+        context: Qt.ApplicationShortcut
+        sequence: "Escape"
+        enabled: app.active && app.notesClosableFromReader && !rangeEditor.sessionOpen
+        onActivated: if (app.closeNotes()) app.readerFocus()
+    }
     Shortcut {
         sequence: "Escape"
         enabled: app.readerKeys || (rangeEditor.sessionOpen && !app.modalOpen && !app.textInputActive())
