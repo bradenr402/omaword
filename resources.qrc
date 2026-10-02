@@ -9,6 +9,7 @@
     <file>qml/AppToolTip.qml</file>
     <file>qml/AnnotationGlyph.qml</file>
     <file>qml/AppContextMenu.qml</file>
+    <file>qml/ListMotionKeys.qml</file>
     <file>qml/HandDrawn.js</file>
     <file>qml/KeyNotation.js</file>
     <file>resources/catalog.json</file>

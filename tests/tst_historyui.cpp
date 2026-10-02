@@ -464,6 +464,71 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
         Q_UNUSED(beta)
     }
+    // g, shift G, ctrl d/u (5), ctrl f/b and pgdn/pgup (10) in every list panel;
+    // never while typing in a panel's search field.
+    void panelListMotions() {
+        const auto expectMotions = [&](QObject *list, const QString &panel) {
+            const auto at = [&]() { return list->property("currentIndex").toInt(); };
+            const int last = list->property("count").toInt() - 1;
+            QVERIFY2(last >= 20, qPrintable(panel));
+            key(Qt::Key_G, Qt::ShiftModifier); QVERIFY2(at() == last, qPrintable(panel));
+            key(Qt::Key_G); QVERIFY2(at() == 0, qPrintable(panel));
+            key(Qt::Key_D, Qt::ControlModifier); QVERIFY2(at() == 5, qPrintable(panel));
+            key(Qt::Key_F, Qt::ControlModifier); QVERIFY2(at() == 15, qPrintable(panel));
+            key(Qt::Key_PageDown); QVERIFY2(at() == qMin(25, last), qPrintable(panel));
+            key(Qt::Key_PageDown); key(Qt::Key_PageDown); QVERIFY2(at() == last, qPrintable(panel));
+            key(Qt::Key_G); key(Qt::Key_PageDown); QVERIFY2(at() == 10, qPrintable(panel));
+            key(Qt::Key_U, Qt::ControlModifier); QVERIFY2(at() == 5, qPrintable(panel));
+            key(Qt::Key_B, Qt::ControlModifier); QVERIFY2(at() == 0, qPrintable(panel));
+            key(Qt::Key_D, Qt::ControlModifier); key(Qt::Key_D, Qt::ControlModifier); key(Qt::Key_PageUp); QVERIFY2(at() == 0, qPrintable(panel));
+            key(Qt::Key_G, Qt::ShiftModifier); key(Qt::Key_PageUp); QVERIFY2(at() == last - 10, qPrintable(panel));
+        };
+        QStringList refs;
+        for (int v = 1; v <= 24; ++v) refs << QString("John 1:%1").arg(v * 2);
+        navigate("John 2:1"); const auto tag = bible->createAndAssignTag(bible->tagScope(), "Alpha");
+        for (const auto &r : refs) {
+            navigate(r); QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleDesk()); QVERIFY(bible->recordHistory());
+            QVERIFY(bible->setTag(bible->tagScope(), tag, true));
+        }
+        navigate("John 2:1");
+        // Desk.
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool()); QTRY_VERIFY(item("deskList")->hasActiveFocus());
+        expectMotions(object("deskList"), "desk");
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
+        // History.
+        call("readerFocus"); openHistory(); expectMotions(object("historyList"), "history");
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        // Annotations (Bookmarks), then not while typing in its search field.
+        call("readerFocus"); key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        auto saved = object("collectionList"); expectMotions(saved, "annotations");
+        key(Qt::Key_G); key(Qt::Key_Slash); QTRY_VERIFY(item("savedSearch")->hasActiveFocus());
+        key(Qt::Key_G, Qt::ShiftModifier); key(Qt::Key_PageDown); key(Qt::Key_D, Qt::ControlModifier);
+        QCOMPARE(object("savedSearch")->property("text").toString().toLower(), QString("g")); // Typed, not a motion.
+        QVERIFY(item("savedSearch")->hasActiveFocus());
+        object("savedSearch")->setProperty("text", QString()); key(Qt::Key_Escape); QTRY_VERIFY(!item("savedSearch")->hasActiveFocus());
+        // Annotations · Tags tab: g and shift G reach the first and last range.
+        key(Qt::Key_H); QTRY_COMPARE(prop("collectionTab").toInt(), 3);
+        QTRY_VERIFY(item("summaryMotionKeys")->property("active").toBool());
+        key(Qt::Key_G, Qt::ShiftModifier);
+        auto lastFocus = window->activeFocusItem(); QVERIFY(lastFocus); const auto lastName = lastFocus->objectName();
+        key(Qt::Key_G); auto firstFocus = window->activeFocusItem(); QVERIFY(firstFocus && firstFocus != lastFocus);
+        key(Qt::Key_D, Qt::ControlModifier); QVERIFY(window->activeFocusItem() != firstFocus);
+        key(Qt::Key_U, Qt::ControlModifier); QCOMPARE(window->activeFocusItem(), firstFocus);
+        key(Qt::Key_PageDown); key(Qt::Key_PageDown); key(Qt::Key_PageDown); key(Qt::Key_PageDown); key(Qt::Key_PageDown);
+        QCOMPARE(window->activeFocusItem()->objectName(), lastName);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        // Related: the results.
+        call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+        QTRY_COMPARE(object("tagResults")->property("count").toInt(), 24); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        expectMotions(object("tagResults"), "related");
+        key(Qt::Key_Slash); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        key(Qt::Key_G); QCOMPARE(object("tagSearch")->property("text").toString(), QString("g"));
+        key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        // The reader keeps its own meanings once the panels are closed.
+        call("readerFocus"); navigate("John 1:20"); key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(bible->cursorVerse(), 25);
+    }
     void panelSwitchingWithOtherPanels() {
         record("John 1:3"); navigate("John 1:1");
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());

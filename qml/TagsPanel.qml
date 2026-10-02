@@ -683,6 +683,19 @@ Item {
             Shortcut { sequence: "Shift+E"; enabled: panel.relatedKeys && resultList.currentIndex >= 0; onActivated: panel.app.openRangeEditor(panel.listScope(), "tag") }
             Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveRelated(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveRelated(-1) }
+            // g, shift G, ctrl d/u, ctrl f/b, pgdn/pgup: the Tags tab's ranges, Related's results.
+            ListMotionKeys {
+                objectName: "summaryMotionKeys"
+                active: panel.browserVisible && panel.page === "summary" && !panel.visibleModal && !panel.app.rangeEditing && !panel.app.contextMenuOpen && !panel.textInputActive()
+                count: 1000
+                onMove: function(delta) { panel.moveSummary(delta) }
+            }
+            ListMotionKeys {
+                objectName: "relatedMotionKeys"
+                active: panel.relatedMoveKeys
+                count: resultList.count
+                onMove: function(delta) { if (resultList.currentIndex < 0) resultList.currentIndex = 0; panel.moveResult(delta) }
+            }
             Shortcut { sequence: "/"; enabled: panel.relatedShown && !panel.pickerVisible && !panel.app.contextMenuOpen && !panel.textInputActive(); onActivated: panel.focusSearch() }
             RowLayout {
                 Layout.fillWidth: true

@@ -138,6 +138,12 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 - `j` · `↓`: Next item
 - `k` · `↑`: Previous item
+- `g`: First item
+- `shift G`: Last item
+- `ctrl d`: Down 5 items
+- `ctrl u`: Up 5 items
+- `ctrl f` · `pgdn`: Down 10 items
+- `ctrl b` · `pgup`: Up 10 items
 - `enter`: Open item
 - `y`: Copy item as quotation
 - `shift Y`: Copy item as plain text
