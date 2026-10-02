@@ -2782,8 +2782,8 @@ private slots:
         QTest::mouseMove(window,bottom,100);
         QTRY_VERIFY(prop("reading","contentY").toDouble() > 100);
         const auto before = window->property("freeSelectedText").toString();
-        QTest::qWait(180);
-        QVERIFY(window->property("freeSelectedText").toString().size() > before.size());
+        // Autoscroll keeps extending the drag selection (frame rate varies under software rendering).
+        QTRY_VERIFY(window->property("freeSelectedText").toString().size() > before.size());
         QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,bottom);
         const auto selected = window->property("freeSelectedText").toString();
         key(Qt::Key_C,Qt::ControlModifier); QCOMPARE(QApplication::clipboard()->text(),selected);

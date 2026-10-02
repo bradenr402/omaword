@@ -71,9 +71,11 @@ Item {
                                                                            backend.selectedStart, backend.selectedEnd)
             paint.requestPaint()
             searchPaint.requestPaint()
-            updateDimRects()
-            pulseRects = verseRangeRects(pulseFirst, pulseLast)
-            flashRects = verseRangeRects(flashFirst, flashLast)
+            // Motion geometry is computed only while it can be seen, keeping
+            // drag-autoscroll refreshes as cheap as before.
+            if (backend.focusMode) updateDimRects()
+            pulseRects = pulseActive ? verseRangeRects(pulseFirst, pulseLast) : []
+            flashRects = flashActive ? verseRangeRects(flashFirst, flashLast) : []
             updateAnnotations()
         }
     }
@@ -246,6 +248,12 @@ Item {
     readonly property int pulseLast: controller.pulseLast || 0
     readonly property int flashFirst: controller.flashFirst || 0
     readonly property int flashLast: controller.flashLast || 0
+    readonly property bool pulseActive: !!controller.pulseActive
+    readonly property bool flashActive: !!controller.flashActive
+    readonly property bool dimShown: backend.focusMode
+    onPulseActiveChanged: if (!destroying && pulseActive) geometryTimer.restart()
+    onFlashActiveChanged: if (!destroying && flashActive) geometryTimer.restart()
+    onDimShownChanged: if (!destroying && dimShown) geometryTimer.restart()
     onPulseFirstChanged: if (!destroying) geometryTimer.restart()
     onPulseLastChanged: if (!destroying) geometryTimer.restart()
     onFlashFirstChanged: if (!destroying) geometryTimer.restart()
