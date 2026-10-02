@@ -74,14 +74,23 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
 ## Persistence
 
 - Data root: Qt app-data for storage ID `omaword` (`~/.local/share/omaword/`).
-- `personal.sqlite`: `PRAGMA user_version` **6**, WAL, `synchronous=FULL`.
+- `personal.sqlite`: `PRAGMA user_version` **7**, WAL, `synchronous=FULL`.
   Newer versions refuse to open. Migrations run in one transaction in
   `BibleBackend` (2: cross-chapter endpoints; 3: version scoping + library;
-  4: MRU; 5: 80 books / 999 limits; 6: Desk). `tags`/`tag_assignments` are
+  4: MRU; 5: 80 books / 999 limits; 6: Desk; 7: History). `tags`/`tag_assignments` are
   created `IF NOT EXISTS` independent of the version number.
 - Tables: `annotations`, `reading` (per `version_id`); `tags(id,name,name_key)`;
   `tag_assignments` (PK version + both endpoints + tag); `desk` (global ordered
-  list, each item version-scoped); `preferences` (global); `installed`, `library`.
+  list, each item version-scoped); `history` (global, newest first by `seq`,
+  unique per version + endpoints, start/end 0 = a whole chapter, scroll
+  position, visit time; capped at 500) and `recent_queries` (last 5 Bible
+  searches); `preferences` (global, incl. `historyEnabled`); `installed`, `library`.
+- History: each window keeps an in-memory jump stack in QML (`[`/`]` browser
+  semantics, `-` swaps with the previous location; never saved). Jumps
+  (palette, search, panel opens, `g`/`G`/counts, version switches) push it; verse
+  and chapter steps do not. A location enters the shared `history` list only
+  after the window stays on that chapter for `historyDwellMs` (5 s). Disabling
+  History clears both tables and stops recording; it is excluded from backups.
 - Removal keeps annotations/tags/Desk by default (hidden until reimport);
   `removeVersion(id, true)` drops them. Global tag definitions always survive.
 - Backups: JSON `format: "omaword-backup"`, version **5** (3 = annotations,
@@ -91,7 +100,7 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
   definitions are never renamed/deleted. Preferences and text are excluded.
 - Markdown export: `omaword-notes.md`, includes tag-only ranges, escapes tag names.
 - Sound/reduce-motion settings live in a separate `QSettings` file, global to all windows.
-- Peer sync: readers in one process share committed annotations, tags, Desk,
+- Peer sync: readers in one process share committed annotations, tags, Desk, History,
   prefs, and library; each keeps its own version, passage, selection, scroll.
   Commits publish to peers without navigating them. Imports use a shared busy
   guard; replace/remove/restore flush affected note drafts, and a failed flush
