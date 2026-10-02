@@ -64,8 +64,10 @@ Rectangle {
             elide: Text.ElideRight
         }
         Label {
-            text: "Enter accept · Esc cancel"
+            text: "Enter accept    Esc cancel"
             visible: root.width > 600 * root.uiScale
+            // Same gap between the counter and the hints as between hint pairs.
+            Layout.leftMargin: 16 * root.uiScale
             color: root.theme.muted; font.pixelSize: 11 * root.uiScale
         }
     }
