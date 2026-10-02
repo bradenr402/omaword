@@ -1497,6 +1497,9 @@ private slots:
         QVERIFY(bookmark && note && bookmark->isVisible() && note->isVisible());
         QVERIFY(note->mapToScene(QPointF()).y() >= bookmark->mapToScene(QPointF(0,bookmark->height())).y());
         QVERIFY(item("savedHighlightJohn 3:16")->isVisible());
+        QVERIFY(item("savedHighlightJohn 3:16")->inherits("QQuickCanvasItem"));
+        if (qEnvironmentVariableIsSet("OMAWORD_SAVED_SCREENSHOT"))
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWORD_SAVED_SCREENSHOT")));
         const auto before = bible->collection();
         const auto selection = bible->selectionReference();
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());

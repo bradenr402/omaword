@@ -3959,12 +3959,29 @@ ApplicationWindow {
                         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
                         border.width: savedEntry.highlighted || savedEntry.activeFocus ? 1 : 0
                         border.color: desktop.accent
-                        Rectangle {
+                        Canvas {
+                            // The reader's hand-drawn highlight accent: same pen and seed.
                             objectName: "savedHighlight" + savedEntry.modelData.reference
                             visible: !!savedEntry.modelData.highlight
                             width: 3 * app.scale
                             height: parent.height
-                            color: desktop.accent
+                            property color ink: desktop.accent
+                            readonly property var paintKey: [visible, app.scale, width, height,
+                                savedEntry.modelData.reference, savedEntry.modelData.versionId, bible.versionId]
+                            onPaintKeyChanged: requestPaint()
+                            onInkChanged: requestPaint()
+                            onPaint: {
+                                const ctx = getContext("2d")
+                                ctx.reset()
+                                if (!visible) return
+                                const k = app.scale
+                                const amp = 0.6 * k
+                                const s = HandDrawn.seed("highlight", savedEntry.modelData.versionId || bible.versionId,
+                                    savedEntry.modelData.reference)
+                                ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.7)
+                                HandDrawn.wavyLine(ctx, 1 + amp, 0, 1 + amp, height, HandDrawn.seed(s, "accent"), k,
+                                    { width: 2, amp: amp })
+                            }
                         }
                     }
                 }
