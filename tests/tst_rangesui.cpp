@@ -304,7 +304,8 @@ private slots:
         key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(), 2);
         key(Qt::Key_Right); QCOMPARE(window->property("collectionTab").toInt(), 3);
         key(Qt::Key_L); QCOMPARE(window->property("collectionTab").toInt(), 0);
-        key(Qt::Key_H); QTest::qWait(80); click("summaryEditRange"); begin();
+        key(Qt::Key_H); QTest::qWait(80);
+        QVERIFY(!item("summaryEditRange")); key(Qt::Key_E, Qt::ShiftModifier); begin();
         QVERIFY(prop("components").toMap().value("tags").toList().size() == 1); QVERIFY(!prop("components").toMap().value("note").toBool());
         key(Qt::Key_Escape); key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QTest::keyClick(window, 'h'); QTest::keyClick(window, 'l'); QCOMPARE(item("tagSearch")->property("text").toString(), QString("hl"));

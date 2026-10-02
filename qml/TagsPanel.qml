@@ -509,12 +509,6 @@ Item {
             wrapText: true
             onClicked: panel.openTagged(range.entry)
         }
-        TagButton {
-            objectName: range.prefix + "editRange:" + range.entry.reference
-            text: "Edit range"
-            enabled: !panel.app.rangeEditing && !panel.bible.busy
-            onClicked: panel.app.openRangeEditor(range.entry, "tag")
-        }
         SummaryChips {
             Layout.fillWidth: true
             tags: range.entry.tags
@@ -655,13 +649,6 @@ Item {
                         visible: panel.exactTags.length > 0
                         tags: panel.exactTags
                         prefix: "summaryTag:"
-                    }
-                    TagButton {
-                        objectName: "summaryEditRange"
-                        visible: panel.exactTags.length > 0
-                        text: "Edit range"
-                        enabled: !panel.app.rangeEditing && !panel.bible.busy
-                        onClicked: panel.app.openRangeEditor(panel.summaryScope, "tag")
                     }
                     TagText {
                         Layout.fillWidth: true
