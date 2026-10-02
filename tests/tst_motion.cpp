@@ -384,7 +384,11 @@ private slots:
         QVERIFY(object("savedDrawer")->property("visible").toBool());
         QVERIFY(item("collectionList")->hasActiveFocus());
         QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        // While it slides out, reader shortcuts already work (no modal blocking).
+        key(Qt::Key_Escape); QVERIFY(object("savedDrawer")->property("visible").toBool());
+        QVERIFY(!object("savedDrawer")->property("modal").toBool());
+        { const auto verse = bible->cursorVerse(); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), verse + 1); }
+        QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
         // Notes: the editor is focused while the drawer fades in.
         key(Qt::Key_W);
         QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(prop("notesOpen").toBool());

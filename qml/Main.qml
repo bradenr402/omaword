@@ -2936,7 +2936,11 @@ ApplicationWindow {
         width: app.notesWidth
         height: app.height
         edge: Qt.RightEdge
-        modal: true
+        // Qt blocks window shortcuts behind any visible modal popup, including
+        // one in its exit transition; a closing drawer stops being modal so the
+        // reader's keys (Escape, t, …) work immediately.
+        modal: !closing
+        dim: true
         focus: true
         interactive: false
         padding: 0
@@ -2954,6 +2958,8 @@ ApplicationWindow {
             SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
             NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
         }
+        // While closing, a drawer must not keep its Escape grab: the next Escape
+        // belongs to the reader (or range editor) immediately.
         onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         // Keyboard focus is available as soon as the drawer starts fading in.
@@ -2967,6 +2973,7 @@ ApplicationWindow {
         Overlay.modal: Rectangle {
             color: app.tint(desktop.background, 0.65)
         }
+        Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
         onClosed: { closing = false; app.editingPanelClosed(); app.restorePanelFocus() }
         contentItem: Rectangle {
                 id: notesPanel
@@ -3747,18 +3754,23 @@ ApplicationWindow {
         width: Math.min(520 * app.scale, app.width - 48)
         height: app.height
         edge: Qt.RightEdge
-        modal: true
+        // Qt blocks window shortcuts behind any visible modal popup, including
+        // one in its exit transition; a closing drawer stops being modal so the
+        // reader's keys (Escape, t, …) work immediately.
+        modal: !closing
+        dim: true
         focus: true
         padding: 16 * app.controlScale
         topPadding: padding
         bottomPadding: padding
         leftPadding: padding
         rightPadding: padding
-        closePolicy: deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: closing || deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
         readonly property bool tabKeys: shown && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
         readonly property bool collectionKeys: tabKeys && app.collectionTab !== 3
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
+        Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
         // Slide plus a short fade. A closing drawer no longer counts as open
         // (`shown`), so reader keys and a reopen work during its exit animation.
         property bool closing: false
@@ -3771,6 +3783,8 @@ ApplicationWindow {
             SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
             NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
         }
+        // While closing, a drawer must not keep its Escape grab: the next Escape
+        // belongs to the reader (or range editor) immediately.
         onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.moveSaved(0) }
@@ -3924,13 +3938,18 @@ ApplicationWindow {
         width: Math.min(520 * app.scale, app.width - 48)
         height: app.height
         edge: Qt.RightEdge
-        modal: true
+        // Qt blocks window shortcuts behind any visible modal popup, including
+        // one in its exit transition; a closing drawer stops being modal so the
+        // reader's keys (Escape, t, …) work immediately.
+        modal: !closing
+        dim: true
         focus: true
         padding: 16 * app.controlScale
-        closePolicy: cleanDeskConfirmation.visible || errorDialog.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: closing || cleanDeskConfirmation.visible || errorDialog.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
         readonly property bool listKeys: shown && !contextMenu.visible && !cleanDeskConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
+        Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
         // Slide plus a short fade. A closing drawer no longer counts as open
         // (`shown`), so reader keys and a reopen work during its exit animation.
         property bool closing: false
@@ -3943,6 +3962,8 @@ ApplicationWindow {
             SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
             NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
         }
+        // While closing, a drawer must not keep its Escape grab: the next Escape
+        // belongs to the reader (or range editor) immediately.
         onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.restoreDeskRow(); app.moveDesk(0) }
