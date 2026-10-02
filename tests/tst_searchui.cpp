@@ -540,7 +540,7 @@ private slots:
         object("paletteResults")->setProperty("currentIndex", 115);
         QVERIFY(QMetaObject::invokeMethod(object("paletteResults"), "positionViewAtIndex", Q_ARG(int, 115), Q_ARG(int, 2)));
         QTRY_VERIFY(object("paletteResults")->property("contentY").toDouble() > 0);
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         key(Qt::Key_Space); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
         QTRY_COMPARE(object("paletteResults")->property("currentIndex").toInt(), 115);
         QTRY_VERIFY(object("paletteResults")->property("contentY").toDouble() > 0);

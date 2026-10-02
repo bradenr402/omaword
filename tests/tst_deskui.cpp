@@ -318,7 +318,7 @@ private slots:
         // Search results and the Desk use the same LTR paragraph.
         search("blessed blameless"); QTRY_VERIFY(item("searchResultText0"));
         expectLeftToRight(item("searchResultText0"), word, "Blessed");
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         call("readerFocus"); navigate("PSA 119:1"); key(Qt::Key_D); openDesk();
         const auto shown = object("deskText0")->property("text").toString();
         QVERIFY(!shown.isRightToLeft()); QCOMPARE(QString(shown).remove(QChar(0x200e)), desk().first().toMap()["text"].toString());
@@ -399,7 +399,7 @@ private slots:
         key(Qt::Key_T); QTRY_VERIFY(object("tagsSurface")->property("opened").toBool());
         key(Qt::Key_X, Qt::ShiftModifier); QTest::qWait(100);
         QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsSurface")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsSurface")->property("visible").toBool());
         // Range editor.
         QVERIFY(bible->toggleBookmark());
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
@@ -471,7 +471,7 @@ private slots:
         navigate("John 1:5"); key(Qt::Key_D);
         openDesk();
         const auto reference = bible->selectionReference(); const auto chapter = bible->chapter();
-        for (auto k : {Qt::Key_D, Qt::Key_M, Qt::Key_H, Qt::Key_L, Qt::Key_V, Qt::Key_W, Qt::Key_T, Qt::Key_S, Qt::Key_Slash, Qt::Key_G, Qt::Key_3})
+        for (auto k : {Qt::Key_D, Qt::Key_M, Qt::Key_H, Qt::Key_L, Qt::Key_V, Qt::Key_T, Qt::Key_S, Qt::Key_Slash, Qt::Key_G, Qt::Key_3})
             key(k);
         QVERIFY(deskOpen());
         QCOMPARE(bible->selectionReference(), reference); QCOMPARE(bible->chapter(), chapter);
@@ -480,7 +480,9 @@ private slots:
         QVERIFY(!object("passagePalette")->property("visible").toBool());
         QCOMPARE(prop("verseCount").toString(), QString());
         QVERIFY(prop("modalOpen").toBool()); QVERIFY(!prop("readerKeys").toBool());
-        key(Qt::Key_D, Qt::ShiftModifier);
+        // Its own key does nothing; esc closes.
+        key(Qt::Key_D, Qt::ShiftModifier); QTest::qWait(50); QVERIFY(deskOpen());
+        key(Qt::Key_Escape);
         QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_J); QVERIFY(bible->selectionReference() != reference);

@@ -1390,7 +1390,7 @@ private slots:
         QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
         QTRY_VERIFY(item("paletteChevron0"));
         QVERIFY(!item("paletteChevron0")->isVisible());
-        type("headings"); key(Qt::Key_Escape); key(Qt::Key_Escape);
+        type("headings"); key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
@@ -3329,7 +3329,7 @@ private slots:
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QVERIFY(!item("notesControl")->isEnabled());
         capture("omaword-refined-saved-" + QString::fromLatin1(QTest::currentDataTag()));
-        key(Qt::Key_A,Qt::ShiftModifier);
+        key(Qt::Key_A,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         click(item("notesControl"));
         QTRY_VERIFY(prop("notesDrawer","opened").toBool());
@@ -3624,7 +3624,7 @@ private slots:
             type("20"); QCOMPARE(window->property("verseCount").toString(),QString("20"));
             key(action);
             QVERIFY(window->property("verseCount").toString().isEmpty());
-            if (action == Qt::Key_Space) { key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool()); }
+            if (action == Qt::Key_Space) { key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool()); }
         }
         type("20"); key(Qt::Key_Escape);
         QVERIFY(!window->property("verseMode").toBool()); // The successful mark completed Visual mode.
@@ -3633,12 +3633,12 @@ private slots:
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         QVERIFY(window->property("verseCount").toString().isEmpty());
         type("12"); QCOMPARE(prop("referenceInput","text").toString(),QString("12"));
-        key(Qt::Key_Escape);
+        QTRY_VERIFY(prop("passagePalette","visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         type("20"); key(Qt::Key_A,Qt::ShiftModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         type("12g"); QVERIFY(window->property("verseCount").toString().isEmpty());
-        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_A,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         type("20"); key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(window->property("verseCount").toString().isEmpty());
@@ -4047,6 +4047,129 @@ private slots:
         QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         type("5"); key(Qt::Key_G,Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(),5);
+    }
+    void paletteModeKeysSwitchAndOneEscapeCloses() {
+        reference("John 3:16");
+        key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John");
+        // The current mode's key does nothing.
+        key(Qt::Key_K,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("John"));
+        key(Qt::Key_Slash,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("/ "));
+        QVERIFY(window->property("paletteTextMode").toBool());
+        type("love");
+        key(Qt::Key_Slash,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("/ love"));
+        key(Qt::Key_Space,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
+        type("headings");
+        key(Qt::Key_Space,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
+        key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
+        QCOMPARE(plainHint(prop("paletteHints","text").toString()),QString::fromUtf8("↑ ↓ choose    enter select    esc close"));
+        // One esc closes with a query; space resumes it.
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
+        key(Qt::Key_K,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        // Plain s no longer searches.
+        key(Qt::Key_S); QTest::qWait(50); QVERIFY(!prop("passagePalette","visible").toBool());
+        key(Qt::Key_Slash,Qt::ControlModifier); QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QCOMPARE(prop("referenceInput","text").toString(),QString("/ "));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+    }
+    void singleEscapeClosesModalsAndPanels() {
+        reference("John 3:16");
+        key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("draft");
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QCOMPARE(bible->noteText(),QString("draft"));
+        key(Qt::Key_Question); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        type("bookmark");
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
+        key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        type("Unsaved query");
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsSurface","visible").toBool());
+        QVERIFY(bible->tags().isEmpty());
+        key(Qt::Key_Slash); QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus());
+        type("love");
+        key(Qt::Key_Escape); QTRY_VERIFY(!window->property("findPromptOpen").toBool());
+        // The whole multi-step Remove version flow closes with one esc.
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,QString("removeVersion"))));
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        key(Qt::Key_Return); QTRY_COMPARE(prop("versionDialog","step").toInt(),1);
+        key(Qt::Key_Return); QTRY_COMPARE(prop("versionDialog","step").toInt(),2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QVERIFY(bible->ready());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+    }
+    void relatedSlashSearchAndTwoEscapes() {
+        reference("John 3:16");
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Love").isEmpty());
+        reference("John 3:17");
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Love").isEmpty());
+        reference("John 3:16");
+        key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        QVERIFY(!item("tagSearch")->hasActiveFocus());
+        key(Qt::Key_Slash); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        type("lo"); QCOMPARE(prop("tagSearch","text").toString(),QString("lo"));
+        key(Qt::Key_Escape);
+        QTRY_VERIFY(!item("tagSearch")->hasActiveFocus());
+        QVERIFY(prop("relatedDrawer","visible").toBool());
+        QCOMPARE(prop("tagSearch","text").toString(),QString("lo"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+    }
+    void sidePanelKeysSwitchPanels() {
+        reference("John 3:16");
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Switch").isEmpty());
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(prop("deskDrawer","opened").toBool());
+        // The same panel's key does nothing.
+        key(Qt::Key_D, Qt::ShiftModifier); QTest::qWait(50);
+        QVERIFY(prop("deskDrawer","visible").toBool()); QVERIFY(prop("deskDrawer","opened").toBool());
+        key(Qt::Key_A, Qt::ShiftModifier);
+        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
+        QCOMPARE(window->property("sidePanel").toString(),QString("annotations"));
+        key(Qt::Key_A, Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_L, Qt::ShiftModifier);
+        QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_W);
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        // While typing, panel keys type.
+        QTest::sendKeyEvent(QTest::Click,window,Qt::Key_D,QString("D"),Qt::ShiftModifier);
+        QCOMPARE(prop("noteEditor","text").toString(),QString("D"));
+        QVERIFY(!prop("deskDrawer","visible").toBool());
+        // Outside the editor, a draft that cannot save cancels the switch.
+        auto db = QSqlDatabase::addDatabase("QSQLITE","ui-panel-switch");
+        db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(query.exec("CREATE TRIGGER reject_switch_note BEFORE UPDATE ON annotations BEGIN SELECT RAISE(FAIL,'switch note failure'); END"));
+        QVERIFY(query.exec("CREATE TRIGGER reject_switch_insert BEFORE INSERT ON annotations BEGIN SELECT RAISE(FAIL,'switch note failure'); END"));
+        type(" more");
+        item("notesPanel")->forceActiveFocus();
+        key(Qt::Key_D, Qt::ShiftModifier); QTest::qWait(80);
+        QVERIFY(prop("notesDrawer","visible").toBool());
+        QVERIFY(!prop("deskDrawer","visible").toBool());
+        QVERIFY(bible->noteText() != QString("D more"));
+        QVERIFY(query.exec("DROP TRIGGER reject_switch_note"));
+        QVERIFY(query.exec("DROP TRIGGER reject_switch_insert"));
+        db.close();
+        key(Qt::Key_D, Qt::ShiftModifier);
+        QTRY_VERIFY(prop("deskDrawer","opened").toBool());
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QCOMPARE(bible->noteText(),QString("D more"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
     }
     void keyNotation() {
         const QList<QPair<QStringList,QString>> cases = {
@@ -4836,7 +4959,7 @@ private slots:
             QVERIFY(body); body->forceActiveFocus();
             key(Qt::Key_A,Qt::ShiftModifier);
             QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-            key(Qt::Key_A,Qt::ShiftModifier);
+            key(Qt::Key_A,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
             QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         }
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
@@ -4848,7 +4971,7 @@ private slots:
         type("John"); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("referenceInput","selectedText").toString(),QString("John"));
         QVERIFY(!prop("savedDrawer","visible").toBool());
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         window->resize(640,640);
         desktop->setProperty("textScale",1.8);
@@ -4869,7 +4992,7 @@ private slots:
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
         key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_A,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QVERIFY(prop("tagsUi","visibleModal").toBool());
         QVERIFY(prop("tagsUi","scopePinned").toBool());
@@ -5245,7 +5368,7 @@ private slots:
         QVERIFY(!window->property("verseMode").toBool());
         QVERIFY(!window->property("notesOpen").toBool());
         QVERIFY(!prop("passagePalette","visible").toBool());
-        key(Qt::Key_A,Qt::ShiftModifier);
+        key(Qt::Key_A,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         QVERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_A,Qt::ShiftModifier);
@@ -5303,7 +5426,7 @@ private slots:
         key(Qt::Key_A,Qt::ShiftModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         item("tagsBody")->forceActiveFocus();
-        key(Qt::Key_A,Qt::ShiftModifier);
+        key(Qt::Key_A,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
     }
     void savedPanelGeometry_data() {

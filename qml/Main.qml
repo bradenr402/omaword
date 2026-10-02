@@ -469,8 +469,30 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.visibleModal || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.shown || deskDrawer.shown || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool contextMenuOpen: contextMenu.visible
+    readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || tagsUi.visibleModal
+    // Everything modal except the side panels (Annotations, Desk, Related).
+    readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool notesClosableFromReader: notesOpen && bible.ready && !bible.busy && !modalOpen && !findPromptOpen && !textInputActive()
+    // One side panel at a time. Its opening key does nothing while it is open;
+    // another panel's key switches to that panel.
+    readonly property string sidePanel: notesOpen ? "notes" : savedDrawer.shown ? "annotations"
+        : deskDrawer.shown ? "desk" : tagsUi.relatedShown ? "related" : ""
+    readonly property var panelActions: ["notes", "annotations", "desk", "related"]
+    readonly property bool panelSwitchKeys: sidePanel.length > 0 && bible.ready && !bible.busy && !dialogOpen
+        && !findPromptOpen && !rangeEditing && !textInputActive()
+    // Closes the open side panel before another opens. A Notes draft must
+    // save first; when it cannot, Notes stays open with its error.
+    function leaveSidePanel(target) {
+        const current = sidePanel
+        if (current === target) return false
+        if (!flushNote()) return false
+        if (current === "notes") return closeNotes()
+        if (current === "annotations") savedDrawer.close()
+        else if (current === "desk") deskDrawer.close()
+        else if (current === "related") tagsUi.close()
+        return true
+    }
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -1288,15 +1310,15 @@ ApplicationWindow {
             name: paletteBookName, row: paletteResults.currentIndex, arrow: paletteArrowUsed,
             position: paletteResults.contentY, generation: bible.textGeneration }
     }
-    function escapePalette() {
-        let commands = referenceInput.text.trim().startsWith(">")
-        const textMode = paletteTextMode
-        let query = commands || textMode ? referenceInput.text.trim().substring(1).trim() : referenceInput.text.trim()
-        if (query.length) {
-            rememberPalette()
-            referenceInput.text = commands ? "> " : textMode ? "/ " : ""
-            paletteCleared = true
-        } else passagePalette.close()
+    // One esc closes the palette in any mode; space resumes it, query and all.
+    function escapePalette() { passagePalette.close() }
+    function paletteMode() { return referenceInput.text.trim().startsWith(">") ? "commands" : paletteTextMode ? "search" : "passage" }
+    // A different mode's key switches the open palette; its own key does nothing.
+    function showPaletteMode(mode) {
+        if (passagePalette.visible && paletteMode() === mode) return
+        sounds.play("tick")
+        if (mode === "search") openTextSearch()
+        else openPalette(mode === "commands")
     }
     function openNotes(focusEditor) {
         if (rangeEditing) return
@@ -1377,8 +1399,7 @@ ApplicationWindow {
         } else sounds.play("error")
     }
     function openDesk() {
-        if (rangeEditing) return
-        if (deskDrawer.shown) { deskDrawer.close(); return }
+        if (rangeEditing || deskDrawer.shown) return
         deskDrawer.open()
     }
     function moveDesk(delta) {
@@ -1840,6 +1861,7 @@ ApplicationWindow {
         // Typing owns every key, Ctrl and Alt included (ctrl v pastes); only the
         // palette's own mode keys still switch modes from its input.
         if (textInputActive() && !(action.scope === "palette" && passagePalette.visible)) return false
+        if (sidePanel.length && panelActions.includes(action.id)) return panelSwitchKeys
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         // visible, not opened: the palette accepts keys during its fade-in.
@@ -1994,15 +2016,15 @@ ApplicationWindow {
         case "editRange": openRangeEditor(); break
         case "contextMenu": openPassageMenuAtCursor(); break
         case "newWindow": if (!modalOpen) newWindowRequested(); break
-        case "books": openPalette(false); break
-        case "bibleSearch": openTextSearch(); break
+        case "books": showPaletteMode("passage"); break
+        case "bibleSearch": showPaletteMode("search"); break
         case "chapterFind": beginChapterFind(); break
         case "centerVerse": alignCurrentVerse("center"); break
         case "topVerse": alignCurrentVerse("top"); break
         case "bottomVerse": alignCurrentVerse("bottom"); break
         case "nextMatch": navigateSearch(1, count); break
         case "previousMatch": navigateSearch(-1, count); break
-        case "commands": openPalette(true); break
+        case "commands": showPaletteMode("commands"); break
         case "resume": openPalette(false, true); break
         case "previousChapter": chapterStep(-count); break
         case "nextChapter": chapterStep(count); break
@@ -2036,12 +2058,13 @@ ApplicationWindow {
         case "lineHeight": settingsDialog.lineOnly = true; settingsDialog.open(); break
         case "settings": settingsDialog.lineOnly = false; settingsDialog.open(); break
         case "annotations":
+            if (!leaveSidePanel("annotations")) break
             bible.refreshCollection()
             if (collectionTab === 3) openTagsBrowser()
             else savedDrawer.open()
             break
-        case "notes": openNotes(true); break
-        case "desk": openDesk(); break
+        case "notes": if (sidePanel === "notes" || leaveSidePanel("notes")) openNotes(true); break
+        case "desk": if (leaveSidePanel("desk")) openDesk(); break
         case "toggleDesk": toggleDeskPassage(); break
         case "cleanDesk": requestCleanDesk(); break
         case "bookmark": markPassage(false); break
@@ -2049,7 +2072,7 @@ ApplicationWindow {
         case "tags": openPassageTags(); break
         case "tagsBrowser": openTagsBrowser(); break
         case "manageTags": openTagsBrowser(true); break
-        case "related": if (flushNote()) tagsUi.openRelated(); break
+        case "related": if (leaveSidePanel("related")) tagsUi.openRelated(); break
         case "copy": if (bible.ready) copyPassage(); break
         case "copyPlain": if (bible.ready) copyPassage(true); break
         case "export": exportDialog.open(); break
@@ -3635,6 +3658,9 @@ ApplicationWindow {
                         app.scheduleBibleSearch(); paletteResults.currentIndex = 0
                     }
                     Keys.onPressed: function(event) {
+                        const mode = event.modifiers === Qt.ControlModifier
+                            ? ({ [Qt.Key_K]: "books", [Qt.Key_Slash]: "bibleSearch", [Qt.Key_Space]: "commands" })[event.key] : undefined
+                        if (mode) { event.accepted = true; app.runCommand(mode); return }
                         if ((event.text === "/" || event.text === ">")
                                 && (!text.length || selectedText === text)) {
                             text = event.text + " "; cursorPosition = text.length
@@ -3828,7 +3854,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Label {
                     objectName: "paletteHints"
-                    text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "select"], app.paletteBook > 0 ? ["Left", "back"] : null, ["Escape", "clear / close"]])
+                    text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "select"], app.paletteBook > 0 ? ["Left", "back"] : null, ["Escape", "close"]])
                     textFormat: Text.StyledText
                     color: desktop.muted
                     font.pixelSize: 11 * app.scale
@@ -3883,7 +3909,6 @@ ApplicationWindow {
         onClosed: { closing = false; tagsUi.embeddedClosed(); app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "savedContent"
-            Shortcut { sequence: "Shift+A"; enabled: savedDrawer.shown && !deleteConfirmation.visible && !tagsUi.visibleModal && !bible.busy && !app.textInputActive(); onActivated: savedDrawer.close() }
             Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(-1) }
             Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(-1) }
@@ -4083,7 +4108,6 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             objectName: "deskContent"
             spacing: (deskDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
-            Shortcut { sequence: "Shift+D"; enabled: deskDrawer.listKeys; onActivated: deskDrawer.close() }
             Shortcut { sequences: ["J", "Down"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-1) }
             Shortcut { sequence: "Home"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-deskList.count) }

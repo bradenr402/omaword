@@ -409,7 +409,7 @@ private slots:
         type("John 1:3"); QCOMPARE(object("referenceInput")->property("text").toString(), QString("John 1:3"));
         QTRY_COMPARE(palette->property("opacity").toDouble(), 1.0);
         // Closing releases keys immediately; a ghost fades without input.
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape);
         QVERIFY(!palette->property("visible").toBool());
         QVERIFY(item("paletteGhost")->isVisible());
         QCOMPARE(item("paletteGhost")->acceptedMouseButtons(), Qt::NoButton);

@@ -17,6 +17,8 @@ Item {
     property string hostKind: "none"
     readonly property bool browserVisible: hostKind === "browser" && !!embeddedHost && embeddedHost.visible
     readonly property bool visibleModal: surface.visible || relatedDrawer.visible
+    readonly property bool pickerVisible: surface.visible
+    readonly property bool relatedShown: relatedDrawer.visible && !relatedDrawer.closing && hostKind === "related"
     readonly property bool contentVisible: visibleModal || browserVisible
     readonly property bool scopePinned: hostKind === "picker" && surface.visible && editingScope !== null
     property var editingScope: null
@@ -178,7 +180,8 @@ Item {
         if (id) filterIds = [id]
         refresh()
         relatedDrawer.open()
-        Qt.callLater(function() { search.forceActiveFocus() })
+        // The list, not the search field, takes focus: / searches.
+        Qt.callLater(function() { panel.focusResults() })
         return true
     }
     function resetSourceTags() {
@@ -388,9 +391,18 @@ Item {
         if (tagById(managedId)) renameInput.text = tagById(managedId).name
         search.forceActiveFocus()
     }
+    function focusResults() {
+        if (resultList.count && resultList.currentIndex < 0) resultList.currentIndex = 0
+        resultList.forceActiveFocus()
+    }
+    function focusSearch() {
+        if (page === "related" && hostKind === "related") search.forceActiveFocus()
+    }
+    // One esc closes the picker. In Related, esc first leaves the search
+    // field (keeping its query); the next esc closes the panel.
     function handleEscape() {
         if (confirmation) { confirmation = null; search.forceActiveFocus() }
-        else if (query.length) query = ""
+        else if (page === "related" && search.activeFocus) focusResults()
         else close()
     }
     Connections {
@@ -545,6 +557,9 @@ Item {
         leftPadding: padding
         rightPadding: padding
         closePolicy: Popup.CloseOnPressOutside
+        property bool closing: false
+        onAboutToShow: closing = false
+        onAboutToHide: closing = true
         enter: Transition { NumberAnimation { property: "position"; duration: 220; easing.type: Easing.OutCubic } }
         exit: Transition { NumberAnimation { property: "position"; duration: 180; easing.type: Easing.InCubic } }
         background: Rectangle {
@@ -600,6 +615,7 @@ Item {
             Shortcut { sequence: "Shift+E"; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.app.openRangeEditor(panel.focusedSummaryScope(), "tag") }
             Shortcut { sequences: ["J", "Down"]; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.moveSummary(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.moveSummary(-1) }
+            Shortcut { sequence: "/"; enabled: panel.relatedShown && !panel.pickerVisible && !panel.app.contextMenuOpen && !panel.textInputActive(); onActivated: panel.focusSearch() }
             RowLayout {
                 Layout.fillWidth: true
                 TagText {
@@ -920,8 +936,9 @@ Item {
                 visible: panel.page !== "summary"
                 objectName: "tagsHints"
                 textFormat: Text.StyledText
-                text: KeyNotation.hint(panel.page === "picker" ? [["Space", "toggle"], ["Return", "toggle / create"], ["Escape", "clear / close"]]
-                    : [["Return", "open"], ["Escape", "clear / close"]], panel.desktop.foreground, panel.desktop.muted)
+                text: KeyNotation.hint(panel.page === "picker" ? [["Space", "toggle"], ["Return", "toggle / create"], ["Escape", "close"]]
+                    : panel.page === "related" ? [["/", "search"], ["Return", "open"], ["Escape", "close"]]
+                    : [["Return", "open"], ["Escape", "close"]], panel.desktop.foreground, panel.desktop.muted)
                 font.pixelSize: 11 * panel.controlScale
                 color: panel.desktop.muted
             }
