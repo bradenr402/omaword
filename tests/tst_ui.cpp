@@ -4519,7 +4519,7 @@ private slots:
         key(Qt::Key_F1);
         QTRY_VERIFY(prop("helpDialog","opened").toBool());
         QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
-        QCOMPARE(prop("keybindingSearch","placeholderText").toString(),QString("Keybindings..."));
+        QCOMPARE(prop("keybindingSearch","placeholderText").toString(),QString::fromUtf8("Search keybindings…"));
         const int total = prop("keybindingResults","count").toInt();
         QVERIFY(total > 10);
         capture("help");

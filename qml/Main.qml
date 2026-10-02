@@ -2517,7 +2517,7 @@ ApplicationWindow {
                 spacing: 2
                 Label {
                     Layout.fillWidth: true
-                    text: "Edit range · " + rangeEditor.endpoint + " · o swaps · Enter saves · Esc cancels"
+                    text: "Edit range · " + rangeEditor.endpoint + "    o swap    Enter save    Esc cancel"
                     color: desktop.accent
                     wrapMode: Text.Wrap
                     font.pixelSize: 13 * app.scale
@@ -3377,7 +3377,7 @@ ApplicationWindow {
                 objectName: "versionTitle"
                 text: !versionDialog.removing ? "Switch version" : versionDialog.step === 0 ? "Remove version"
                     : versionDialog.step === 1 ? "Remove annotations too?" : "Confirm removal"
-                color: desktop.foreground; font.pixelSize: 20 * versionDialog.uiScale
+                color: desktop.foreground; font.pixelSize: 22 * versionDialog.uiScale
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
             RowLayout {
@@ -3462,7 +3462,7 @@ ApplicationWindow {
                     width: parent.width
                     text: bible.busy ? "Please wait…" : bible.versions.length ? "No matching versions" : "No versions installed. Add version to begin."
                     visible: versionResults.count === 0 || bible.busy
-                    color: desktop.muted; font.pixelSize: 14 * versionDialog.uiScale
+                    color: desktop.muted; font.pixelSize: 13 * versionDialog.uiScale
                     horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
                 }
             }
@@ -3722,6 +3722,8 @@ ApplicationWindow {
                     required property int index
                     width: paletteResults.width
                     height: app.paletteTextMode ? searchResultContent.implicitHeight + 20 * app.scale : 44 * app.scale
+                    // Keep right-aligned hints clear of the overlay scrollbar.
+                    rightPadding: leftPadding + (paletteResults.ScrollBar.vertical.visible ? 12 * app.scale : 0)
                     highlighted: ListView.isCurrentItem
                     enabled: !modelData.action || app.actionAvailable(modelData.action)
                     onClicked: app.activatePaletteEntry(modelData)
@@ -3974,7 +3976,7 @@ ApplicationWindow {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     color: desktop.muted
-                    font.pixelSize: 12 * app.scale
+                    font.pixelSize: 13 * app.scale
                     lineHeight: 1.2
                     visible: collectionList.count === 0
                 }
@@ -4135,13 +4137,14 @@ ApplicationWindow {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     color: desktop.muted
-                    font.pixelSize: 12 * app.scale
+                    font.pixelSize: 13 * app.scale
                     visible: deskList.count === 0
                 }
             }
             Label { objectName: "deskError"; text: bible.error; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             FineRule { Layout.fillWidth: true }
-            Label { text: "j k choose    Enter open    y copy    x remove    Esc close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            // No-break spaces keep each key with its verb when the row wraps.
+            Label { text: "↑\u00a0↓\u00a0choose    Enter\u00a0open    y\u00a0copy    x\u00a0remove    Esc\u00a0close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
         }
     }
 
@@ -4249,7 +4252,7 @@ ApplicationWindow {
                 objectName: "keybindingSearch"
                 Layout.fillWidth: true
                 implicitHeight: 42 * app.scale
-                placeholderText: "Keybindings..."
+                placeholderText: "Search keybindings…"
                 font.pixelSize: 15 * app.scale
                 selectByMouse: true
                 padding: 10 * app.scale
@@ -4293,6 +4296,7 @@ ApplicationWindow {
                     objectName: "keybinding" + modelData.title
                     width: keybindingResults.width
                     height: keybindingContent.implicitHeight + 20 * app.scale
+                    rightPadding: leftPadding + (keybindingScrollbar.visible ? 12 * app.scale : 0)
                     enabled: app.actionAvailable(modelData)
                     AppToolTip { theme: desktop; visible: keybindingRow.hovered; text: app.scopeTitle(keybindingRow.modelData); delay: 650 }
                     highlighted: ListView.isCurrentItem
@@ -4323,7 +4327,7 @@ ApplicationWindow {
                     text: "No matching keybindings"
                     visible: keybindingResults.count === 0
                     horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-                    color: desktop.muted; font.pixelSize: 14 * app.scale
+                    color: desktop.muted; font.pixelSize: 13 * app.scale
                 }
             }
             FineRule { objectName: "keybindingFooterRule"; Layout.fillWidth: true }
@@ -4349,7 +4353,7 @@ ApplicationWindow {
             width: settingsScroll.availableWidth
             spacing: 12 * app.scale
             RowLayout {
-                Label { text: settingsDialog.lineOnly ? "Line height" : "Reading settings"; color: desktop.foreground; font.pixelSize: 20 * app.scale; Layout.fillWidth: true }
+                Label { text: settingsDialog.lineOnly ? "Line height" : "Reading settings"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true }
             }
             Repeater {
                 model: app.actions.filter(function(action) { return !!action.setting })
@@ -4370,15 +4374,18 @@ ApplicationWindow {
                 visible: !settingsDialog.lineOnly
                 Layout.fillWidth: true
                 spacing: 4 * app.scale
+                uniformCellSizes: true
                 Repeater {
                     model: ["paragraph", "verse", "block"]
-                    delegate: Button {
+                    delegate: QuietButton {
                         required property string modelData
                         objectName: "readingMode:" + modelData
                         text: app.readingModeName(modelData)
                         checkable: true
                         autoExclusive: true
                         checked: bible.readingMode === modelData
+                        emphasized: checked
+                        compact: true
                         Layout.fillWidth: true
                         onClicked: bible.setReadingMode(modelData)
                         Accessible.name: text + " reading mode"
@@ -4476,7 +4483,7 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 12 * importGuide.uiScale
-            Label { text: "Add version"; color: desktop.foreground; font.pixelSize: 24 * importGuide.uiScale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: "Add version"; color: desktop.foreground; font.pixelSize: 22 * importGuide.uiScale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             TextField {
                 id: catalogSearch
                 objectName: "catalogSearch"
@@ -4486,7 +4493,7 @@ ApplicationWindow {
                 selectByMouse: true
                 padding: 10 * importGuide.uiScale
                 background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: catalogSearch.activeFocus ? desktop.accent : desktop.border }
-                placeholderText: "Search versions"
+                placeholderText: "Search versions…"
                 Accessible.name: "Search versions"
             }
             OverlayScrollView {
@@ -4628,7 +4635,7 @@ ApplicationWindow {
             spacing: 12 * app.scale
             Label {
                 text: "Save " + bible.versionAbbreviation + " annotation backup"
-                color: desktop.foreground; font.pixelSize: 20 * app.scale
+                color: desktop.foreground; font.pixelSize: 22 * app.scale
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
             OverlayScrollView {
@@ -4703,8 +4710,7 @@ ApplicationWindow {
             Label {
                 text: "Restore this backup?"
                 color: desktop.foreground
-                font.pixelSize: 23 * app.scale
-                font.weight: Font.Medium
+                font.pixelSize: 22 * app.scale
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
             }
@@ -4763,7 +4769,7 @@ ApplicationWindow {
         onClosed: app.restorePanelFocus()
         contentItem: ColumnLayout {
             spacing: 16 * app.scale
-            Label { text: "Unable to complete action"; color: desktop.foreground; font.pixelSize: 20 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { text: "Unable to complete action"; color: desktop.foreground; font.pixelSize: 22 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Label { objectName: "focusedErrorMessage"; text: errorDialog.message; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; Accessible.role: Accessible.AlertMessage }
             QuietButton { id: errorDismiss; text: "Dismiss"; Layout.alignment: Qt.AlignRight; onClicked: errorDialog.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
         }
