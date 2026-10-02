@@ -2,6 +2,7 @@
 #include "biblebackend.h"
 #include "biblebooks.h"
 #include <QClipboard>
+#include <QDateTime>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -155,7 +156,7 @@ private slots:
         QVERIFY(bible->focusMode()); QCOMPARE(bible->readingMode(),QString("block"));
         QCOMPARE(bible->fontSize(),23); QCOMPARE(bible->lineHeight(),2.3);
         QSqlQuery q(store());
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),6); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),7); q.finish();
         QVERIFY(q.exec("CREATE TRIGGER reject_preferences BEFORE UPDATE ON preferences BEGIN SELECT RAISE(ABORT,'preference failure'); END"));
         bible->setFontSize(19); QCOMPARE(bible->fontSize(),23); QVERIFY(bible->error().contains("preference failure"));
     }
@@ -334,7 +335,8 @@ private slots:
         const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("migration"); });
         auto db = QSqlDatabase::addDatabase("QSQLITE","migration"); db.setDatabaseName(path); QVERIFY(db.open());
         QSqlQuery q(db);
-        QVERIFY(q.exec("DROP TABLE desk")); // Schema 4 stores predate the Desk.
+        QVERIFY(q.exec("DROP TABLE desk")); // Schema 4 stores predate the Desk and History.
+        QVERIFY(q.exec("DROP TABLE history")); QVERIFY(q.exec("DROP TABLE recent_queries"));
         QVERIFY(q.exec("DROP TABLE annotations"));
         QVERIFY(q.exec("CREATE TABLE annotations(book INTEGER,chapter INTEGER,start INTEGER,end INTEGER,bookmark INTEGER,highlight INTEGER,note TEXT,endBook INTEGER,endChapter INTEGER,version_id TEXT,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(book BETWEEN 1 AND 66),CHECK(chapter BETWEEN 1 AND 150),CHECK(start BETWEEN 1 AND 176)) WITHOUT ROWID"));
         QVERIFY(q.exec("INSERT INTO annotations VALUES(1,1,1,1,1,0,'Archived note',1,1,'net-2.1')"));
@@ -352,7 +354,7 @@ private slots:
         QVERIFY(q.exec("SELECT note,version_id FROM annotations")); QVERIFY(q.next());
         QCOMPARE(q.value(0).toString(),QString("Archived note")); QCOMPARE(q.value(1).toString(),QString("net-2.1")); q.finish();
         QVERIFY(q.exec("SELECT position FROM reading WHERE version_id='net-2.1'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toDouble(),0.42); q.finish();
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),6);
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),7);
     }
     void schemaFiveDeskMigrationRollsBack() {
         install(net); QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Pre-desk note");
@@ -361,7 +363,8 @@ private slots:
         const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("desk-migration"); });
         auto db = QSqlDatabase::addDatabase("QSQLITE","desk-migration"); db.setDatabaseName(path); QVERIFY(db.open());
         QSqlQuery q(db);
-        QVERIFY(q.exec("DROP TABLE desk")); QVERIFY(q.exec("PRAGMA user_version=5"));
+        QVERIFY(q.exec("DROP TABLE desk")); QVERIFY(q.exec("DROP TABLE history")); QVERIFY(q.exec("DROP TABLE recent_queries"));
+        QVERIFY(q.exec("PRAGMA user_version=5"));
         // A conflicting object makes the schema 6 step fail; nothing may change.
         QVERIFY(q.exec("CREATE VIEW desk AS SELECT 1 AS id"));
         bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->error().isEmpty()); QVERIFY(bible->desk().isEmpty()); bible.reset();
@@ -370,8 +373,118 @@ private slots:
         QVERIFY(q.exec("DROP VIEW desk"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
         QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-desk note"));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),6); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),7); q.finish();
         QVERIFY(bible->desk().isEmpty()); QVERIFY(bible->addToDesk()); QCOMPARE(bible->desk().size(),1);
+    }
+    void schemaSixHistoryMigrationRollsBack() {
+        install(net); QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Pre-history note");
+        QVERIFY(bible->addToDesk());
+        const QString path = bible->dataDirectory()+"/personal.sqlite";
+        bible.reset();
+        const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("history-migration"); });
+        auto db = QSqlDatabase::addDatabase("QSQLITE","history-migration"); db.setDatabaseName(path); QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec("DROP TABLE history")); QVERIFY(q.exec("DROP TABLE recent_queries"));
+        QVERIFY(q.exec("PRAGMA user_version=6"));
+        // recent_queries is created after history: a conflict there must roll back both.
+        QVERIFY(q.exec("CREATE VIEW recent_queries AS SELECT 'x' AS query"));
+        bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->error().isEmpty()); QVERIFY(bible->history().isEmpty()); bible.reset();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),6); q.finish();
+        QVERIFY(q.exec("SELECT COUNT(*) FROM sqlite_master WHERE name='history'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
+        QVERIFY(q.exec("SELECT note FROM annotations")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("Pre-history note")); q.finish();
+        QVERIFY(q.exec("DROP VIEW recent_queries"));
+        bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-history note")); QCOMPARE(bible->desk().size(),1);
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),7); q.finish();
+        QVERIFY(bible->historyEnabled()); QVERIFY(bible->history().isEmpty()); QVERIFY(bible->recentQueries().isEmpty());
+        QVERIFY(bible->recordHistory()); QCOMPARE(bible->history().size(),1);
+    }
+    void historyUpsertOrderCapAndRemoval() {
+        install(net);
+        QSignalSpy changed(bible.get(),&BibleBackend::historyChanged);
+        QVERIFY(bible->navigate("GEN 1:2")); bible->setReadingPosition(0.25); QVERIFY(bible->recordHistory());
+        QVERIFY(bible->navigate("John 3")); QVERIFY(!bible->tagScope().size());
+        const auto chapter = bible->currentLocation();
+        QCOMPARE(chapter["start"].toInt(),0); QCOMPARE(chapter["end"].toInt(),0);
+        QCOMPARE(chapter["endChapter"].toInt(),3); QVERIFY(bible->recordHistory());
+        QVERIFY(bible->navigate("John 3:16-17")); QVERIFY(bible->recordHistory());
+        QCOMPARE(changed.count(),3);
+        auto refs = [this] { QStringList r; for (const auto &row : bible->history()) r << row.toMap()["reference"].toString(); return r; };
+        QCOMPARE(refs(),QStringList({"John 3:16–17","John 3","Genesis 1:2"}));
+        auto top = bible->history().first().toMap();
+        QCOMPARE(top["versionAbbreviation"].toString(),bible->versionAbbreviation()); QVERIFY(top["available"].toBool());
+        QVERIFY(!top["excerpt"].toString().isEmpty()); QVERIFY(top["excerpt"].toString().size() <= 160);
+        QVERIFY(QDateTime::fromString(top["visitedAt"].toString(),Qt::ISODateWithMs).isValid());
+        QVERIFY(!bible->history()[1].toMap()["excerpt"].toString().isEmpty());
+        // A repeat visit moves to the top without duplicating, refreshing the position.
+        auto genesis = bible->history().last().toMap(); QCOMPARE(genesis["position"].toDouble(),0.25);
+        genesis["position"] = 0.5; QVERIFY(bible->recordHistory(genesis));
+        QCOMPARE(refs(),QStringList({"Genesis 1:2","John 3:16–17","John 3"}));
+        QCOMPARE(bible->history().first().toMap()["position"].toDouble(),0.5);
+        QCOMPARE(bible->history().first().toMap()["id"],genesis["id"]);
+        // Restoring a location brings back the range and position.
+        QVERIFY(bible->openLocation(genesis)); QCOMPARE(bible->selectionReference(),QString("Genesis 1:2"));
+        QCOMPARE(bible->readingPosition(),0.5);
+        QVERIFY(bible->openLocation(chapter)); QCOMPARE(bible->selectedStart(),0); QCOMPARE(bible->passage(),QString("John 3"));
+        // Invalid locations are rejected.
+        auto broken = genesis; broken["book"] = 81; QVERIFY(!bible->recordHistory(broken));
+        broken = genesis; broken["position"] = 2; QVERIFY(!bible->recordHistory(broken));
+        QCOMPARE(bible->history().size(),3); bible->clearError();
+        // Removing one entry.
+        QVERIFY(bible->removeHistoryItem(genesis["id"].toInt())); QCOMPARE(refs(),QStringList({"John 3:16–17","John 3"}));
+        QVERIFY(!bible->removeHistoryItem(genesis["id"].toInt())); bible->clearError();
+        // The cap keeps the newest HistoryLimit entries.
+        QVariantMap location = bible->currentLocation();
+        for (int i = 0; i < BibleBackend::HistoryLimit + 5; ++i) {
+            location["start"] = location["end"] = 1 + i % 900;
+            location["chapter"] = location["endChapter"] = 1 + i / 900 + 10;
+            QVERIFY(bible->recordHistory(location));
+        }
+        QCOMPARE(bible->history().size(),BibleBackend::HistoryLimit);
+        QCOMPARE(bible->history().first().toMap()["start"].toInt(),1 + (BibleBackend::HistoryLimit + 4) % 900);
+        QVERIFY(!refs().contains("John 3"));
+        // Persistent across restarts.
+        const auto saved = bible->history();
+        bible.reset(); bible = std::make_unique<BibleBackend>(); QCOMPARE(bible->history(),saved);
+    }
+    void historyPeersDisableAndRecentQueries() {
+        install(net); BibleBackend peer;
+        QSignalSpy peerChanged(&peer,&BibleBackend::historyChanged);
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->recordHistory());
+        QCOMPARE(peerChanged.count(),1); QCOMPARE(peer.history(),bible->history());
+        QVERIFY(peer.navigate("GEN 1:1")); QVERIFY(peer.recordHistory()); QCOMPARE(bible->history().size(),2);
+        // Recent queries: newest first, deduplicated, capped.
+        for (const QString query : {"light","love","light","grace","faith","hope","peace"}) QVERIFY(bible->recordQuery(query));
+        QVERIFY(!bible->recordQuery("   "));
+        QCOMPARE(bible->recentQueries(),QStringList({"peace","hope","faith","grace","light"}));
+        QCOMPARE(peer.recentQueries(),bible->recentQueries());
+        // Clear removes both lists everywhere.
+        QVERIFY(peer.clearHistory()); QVERIFY(bible->history().isEmpty()); QVERIFY(bible->recentQueries().isEmpty());
+        QVERIFY(bible->recordHistory()); QVERIFY(bible->recordQuery("light"));
+        // Disabling clears and stops recording in every window; persisted.
+        QVERIFY(bible->setHistoryEnabled(false));
+        QVERIFY(!bible->historyEnabled()); QVERIFY(!peer.historyEnabled());
+        QVERIFY(peer.history().isEmpty()); QVERIFY(peer.recentQueries().isEmpty());
+        QVERIFY(!peer.recordHistory()); QVERIFY(!bible->recordQuery("love")); QVERIFY(bible->error().isEmpty());
+        QVERIFY(bible->history().isEmpty()); QVERIFY(bible->recentQueries().isEmpty());
+        BibleBackend later; QVERIFY(!later.historyEnabled());
+        QVERIFY(peer.setHistoryEnabled(true)); QVERIFY(bible->historyEnabled()); QVERIFY(later.historyEnabled());
+        QVERIFY(bible->recordHistory()); QCOMPARE(later.history().size(),1);
+    }
+    void historyIsNotBackedUp() {
+        install(net); QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->addToDesk());
+        const auto before = QUrl::fromLocalFile(session->filePath("before.json")); QVERIFY(bible->exportBackup(before));
+        QVERIFY(bible->recordHistory()); QVERIFY(bible->recordQuery("light"));
+        const auto after = QUrl::fromLocalFile(session->filePath("after.json")); QVERIFY(bible->exportBackup(after));
+        auto read = [](const QUrl &url) { QFile f(url.toLocalFile()); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); };
+        const auto a = read(before), b = read(after);
+        auto withoutStamp = [](const QByteArray &bytes) { auto o = QJsonDocument::fromJson(bytes).object(); o.remove("created"); return o; };
+        QVERIFY(!a.isEmpty()); QCOMPARE(withoutStamp(b),withoutStamp(a)); // Only the export time differs.
+        const auto root = QJsonDocument::fromJson(b).object();
+        QCOMPARE(root["version"].toInt(),5); QVERIFY(!root.contains("history")); QVERIFY(!b.contains("light"));
+        // Restoring a backup leaves History alone.
+        QVERIFY2(bible->importBackup(after),qPrintable(bible->error())); QCOMPARE(bible->history().size(),1);
+        QCOMPARE(bible->recentQueries(),QStringList({"light"}));
     }
     void deskOrderToggleCleanAndPersistence() {
         install(net);

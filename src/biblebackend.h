@@ -60,6 +60,9 @@ class BibleBackend : public QObject
     Q_PROPERTY(QString textGeneration READ textGeneration NOTIFY versionChanged)
     Q_PROPERTY(QVariantList desk READ desk NOTIFY deskChanged)
     Q_PROPERTY(bool currentInDesk READ currentInDesk NOTIFY currentInDeskChanged)
+    Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
+    Q_PROPERTY(QStringList recentQueries READ recentQueries NOTIFY historyChanged)
+    Q_PROPERTY(bool historyEnabled READ historyEnabled NOTIFY historyChanged)
 
 public:
     explicit BibleBackend(QObject *parent = nullptr);
@@ -207,6 +210,34 @@ public:
     Q_INVOKABLE QString copyScope(QVariantMap scope, bool plainText = false);
     Q_INVOKABLE int deskCountForVersion(QString versionId) const;
 
+    // History: one global, most-recent-first list of visited passages in
+    // personal.sqlite (schema 7), shared live by every window and never part of
+    // backups. Identity is versionId + six endpoints; a chapter without a
+    // selection uses start=end=0 with endBook/endChapter equal to book/chapter.
+    // Recording an existing location moves it to the top (refreshing position
+    // and visitedAt); the list keeps the newest HistoryLimit entries. Rows:
+    // {id,versionId,versionAbbreviation,reference,book,chapter,start,endBook,
+    // endChapter,end,position,visitedAt,excerpt,available}; available chapter rows
+    // also carry firstVerse/lastVerse so the whole chapter can be copied or added. Recent Bible search
+    // queries (newest first, at most RecentQueryLimit) live beside the list and
+    // are cleared with it. While disabled (a shared preference) nothing is
+    // recorded; disabling clears both lists. Windows decide when a visit counts.
+    static constexpr int HistoryLimit = 500;
+    static constexpr int RecentQueryLimit = 5;
+    QVariantList history() const { return m_history; }
+    QStringList recentQueries() const { return m_recentQueries; }
+    bool historyEnabled() const { return m_historyEnabled; }
+    // {versionId,book,chapter,start,endBook,endChapter,end,position} for this window.
+    Q_INVOKABLE QVariantMap currentLocation() const;
+    // Empty location means currentLocation(). False (without an error) when disabled.
+    Q_INVOKABLE bool recordHistory(QVariantMap location = QVariantMap());
+    Q_INVOKABLE bool removeHistoryItem(int id);
+    Q_INVOKABLE bool clearHistory();
+    Q_INVOKABLE bool setHistoryEnabled(bool enabled);
+    Q_INVOKABLE bool recordQuery(QString query);
+    // Switches version when needed, then restores the range and reading position.
+    Q_INVOKABLE bool openLocation(QVariantMap location);
+
     Q_INVOKABLE void importUsfm(QUrl file);
     Q_INVOKABLE bool switchVersion(QString id);
     Q_INVOKABLE bool removeVersion(QString id, bool removeAnnotations);
@@ -266,6 +297,7 @@ signals:
     void preferencesChanged();
     void deskChanged();
     void currentInDeskChanged();
+    void historyChanged();
     void sharedCommitted(QString versionId, bool library, bool preferences);
 
 private:
@@ -333,6 +365,9 @@ private:
     void publishDesk();
     QVariantMap deskItem(int id) const;
     bool commitDeskMutation();
+    void reloadHistory();
+    void publishHistory();
+    bool validLocation(const QVariantMap &location) const;
     bool requireReady();
     bool setError(const QString &error);
     void setStatus(const QString &status);
@@ -360,7 +395,9 @@ private:
     int m_fontSize = 18;
     bool m_hasParagraphs = false;
     double m_lineHeight = 1.5;
-    QVariantList m_verses, m_collection, m_desk;
+    QVariantList m_verses, m_collection, m_desk, m_history;
+    QStringList m_recentQueries;
+    bool m_historyEnabled = true;
     QVector<Annotation> m_annotations;
     std::shared_ptr<std::atomic<double>> m_importProgress;
     QFutureWatcher<UsfmImporter::Result> m_importWatcher;

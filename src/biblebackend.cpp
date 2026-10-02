@@ -366,6 +366,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
     const QString id = active.value(0).toString(); active.finish();
     if (!id.isEmpty()) changeVersion(id,{}, {},false,true);
     reloadDesk();
+    reloadHistory();
     if (!m_ready) setStatus("Import a USFM Bible to begin.");
 }
 
@@ -1215,6 +1216,198 @@ int BibleBackend::deskCountForVersion(QString versionId) const
     return q.exec() && q.next() ? q.value(0).toInt() : 0;
 }
 
+QVariantMap BibleBackend::currentLocation() const
+{
+    if (!m_ready) return {};
+    QVariantMap location = tagScope();
+    location.remove("reference");
+    if (location.isEmpty())
+        location = {{"versionId",m_versionId},{"book",m_book},{"chapter",m_chapter},{"start",0},
+                    {"endBook",m_book},{"endChapter",m_chapter},{"end",0}};
+    location["position"] = m_position;
+    return location;
+}
+
+bool BibleBackend::validLocation(const QVariantMap &location) const
+{
+    const QString id = location.value("versionId").toString();
+    if (id.isEmpty() || id.size() > 128) return false;
+    for (const auto &key : scopeFields) {
+        const auto value = QJsonValue::fromVariant(location.value(key));
+        const bool book = key == "book" || key == "endBook";
+        if (!integer(value,(key == "start" || key == "end") ? 0 : 1,book ? 80 : 999)) return false;
+    }
+    const double position = location.value("position",0).toDouble();
+    return std::isfinite(position) && position >= 0 && position <= 1;
+}
+
+void BibleBackend::reloadHistory()
+{
+    QVariantList rows;
+    QStringList queries;
+    if (m_storeReady) {
+        QSqlQuery q(m_store);
+        QHash<QString,QString> abbreviations;
+        if (q.exec("SELECT version_id,abbreviation FROM installed"))
+            while (q.next()) abbreviations.insert(q.value(0).toString(),q.value(1).toString());
+        if (q.exec("SELECT id,version_id,book,chapter,start,endBook,endChapter,end,position,visited FROM history ORDER BY seq DESC")) {
+            std::map<QString,std::unique_ptr<TagBible>> bibles;
+            while (q.next()) {
+                const QString id = q.value(1).toString();
+                QVariantMap row{{"versionId",id}};
+                for (int i = 0; i < scopeFields.size(); ++i) row[scopeFields[i]] = q.value(i + 2).toInt();
+                row["id"] = q.value(0).toInt(); row["position"] = q.value(8).toDouble();
+                row["visitedAt"] = q.value(9).toString();
+                row["versionAbbreviation"] = abbreviations.value(id,id);
+                const bool chapterOnly = !row["start"].toInt();
+                const int book = row["book"].toInt(), chapter = row["chapter"].toInt();
+                QString reference = chapterOnly
+                    ? QString("%1 %2").arg(book <= BibleBooks::canon().size() ? QString::fromUtf8(BibleBooks::canon()[book - 1].name) : QString::number(book)).arg(chapter)
+                    : canonicalReference(row);
+                QString excerpt;
+                bool available = false;
+                if (abbreviations.contains(id)) {
+                    auto &bible = bibles[id];
+                    if (!bible) bible = std::make_unique<TagBible>(installedPath(id),id);
+                    if (bible->db.isOpen()) {
+                        if (chapterOnly) {
+                            QSqlQuery v(bible->db);
+                            v.prepare("SELECT b.name,substr(v.text,1,512) FROM verses v JOIN books b ON b.id=v.book "
+                                      "WHERE v.book=? AND v.chapter=? ORDER BY v.number LIMIT 2");
+                            v.addBindValue(book); v.addBindValue(chapter);
+                            if (v.exec()) while (v.next()) {
+                                if (!available) reference = QString("%1 %2").arg(v.value(0).toString()).arg(chapter);
+                                available = true;
+                                if (!excerpt.isEmpty()) excerpt += ' ';
+                                excerpt += v.value(1).toString().simplified();
+                            }
+                            v.prepare("SELECT MIN(number),MAX(number) FROM verses WHERE book=? AND chapter=?");
+                            v.addBindValue(book); v.addBindValue(chapter);
+                            if (available && v.exec() && v.next()) {
+                                row["firstVerse"] = v.value(0).toInt(); row["lastVerse"] = v.value(1).toInt();
+                            }
+                        } else {
+                            QVariantMap canonical;
+                            if (bible->scope(row,&canonical)) {
+                                available = true;
+                                reference = canonical.value("reference").toString();
+                                excerpt = bible->excerpt(canonical);
+                            }
+                        }
+                    }
+                }
+                if (excerpt.size() > 160) excerpt = excerpt.left(159).trimmed() + QChar(0x2026);
+                row["reference"] = reference; row["excerpt"] = excerpt; row["available"] = available;
+                rows.append(row);
+            }
+        }
+        if (q.exec("SELECT query FROM recent_queries ORDER BY seq DESC"))
+            while (q.next()) queries << q.value(0).toString();
+    }
+    m_history = rows;
+    m_recentQueries = queries;
+}
+
+void BibleBackend::publishHistory()
+{
+    QList<QPointer<BibleBackend>> snapshot;
+    for (auto *peer : readers) if (peer->m_directory == m_directory) snapshot.append(peer);
+    for (const auto &peer : snapshot) if (peer) { peer->reloadHistory(); emit peer->historyChanged(); }
+}
+
+bool BibleBackend::recordHistory(QVariantMap location)
+{
+    if (location.isEmpty()) location = currentLocation();
+    if (!m_historyEnabled || !m_storeReady || location.isEmpty() || sharedMutationBusy()) return false;
+    if (!validLocation(location)) return setError("That reading location is invalid.");
+    const double position = std::clamp(location.value("position",0).toDouble(),0.0,1.0);
+    if (!m_store.transaction()) return false;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); });
+    QSqlQuery q(m_store);
+    q.prepare("INSERT INTO history(seq,version_id,book,chapter,start,endBook,endChapter,end,position,visited) "
+              "VALUES((SELECT COALESCE(MAX(seq),0)+1 FROM history),?,?,?,?,?,?,?,?,?) "
+              "ON CONFLICT(version_id,book,chapter,start,endBook,endChapter,end) DO UPDATE SET "
+              "seq=(SELECT COALESCE(MAX(seq),0)+1 FROM history),position=excluded.position,visited=excluded.visited");
+    bindScope(q,location); q.addBindValue(position);
+    q.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    if (!q.exec()) return setError("Cannot save History: " + q.lastError().text());
+    q.prepare("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY seq DESC LIMIT ?)");
+    q.addBindValue(HistoryLimit);
+    if (!q.exec()) return setError("Cannot trim History: " + q.lastError().text());
+    if (!m_store.commit()) return setError("Cannot save History: " + m_store.lastError().text());
+    publishHistory(); return true;
+}
+
+bool BibleBackend::recordQuery(QString query)
+{
+    query = query.trimmed();
+    if (!m_historyEnabled || !m_storeReady || query.isEmpty() || sharedMutationBusy()) return false;
+    if (query.size() > 4096 || !safeString(query)) return false;
+    if (!m_store.transaction()) return false;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); });
+    QSqlQuery q(m_store);
+    q.prepare("INSERT INTO recent_queries(query,seq) VALUES(?,(SELECT COALESCE(MAX(seq),0)+1 FROM recent_queries)) "
+              "ON CONFLICT(query) DO UPDATE SET seq=(SELECT COALESCE(MAX(seq),0)+1 FROM recent_queries)");
+    q.addBindValue(query);
+    if (!q.exec()) return setError("Cannot save recent searches: " + q.lastError().text());
+    q.prepare("DELETE FROM recent_queries WHERE query NOT IN (SELECT query FROM recent_queries ORDER BY seq DESC LIMIT ?)");
+    q.addBindValue(RecentQueryLimit);
+    if (!q.exec()) return setError("Cannot trim recent searches: " + q.lastError().text());
+    if (!m_store.commit()) return setError("Cannot save recent searches: " + m_store.lastError().text());
+    publishHistory(); return true;
+}
+
+bool BibleBackend::removeHistoryItem(int id)
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    const auto guard = qScopeGuard([this] { m_store.rollback(); });
+    QSqlQuery q(m_store);
+    q.prepare("DELETE FROM history WHERE id=?"); q.addBindValue(id);
+    if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot remove the History entry: " + q.lastError().text());
+    if (!m_store.commit()) return setError("Cannot save History: " + m_store.lastError().text());
+    clearError(); publishHistory(); return true;
+}
+
+bool BibleBackend::clearHistory()
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    const auto guard = qScopeGuard([this] { m_store.rollback(); });
+    QSqlQuery q(m_store);
+    if (!q.exec("DELETE FROM history") || !q.exec("DELETE FROM recent_queries"))
+        return setError("Cannot clear History: " + q.lastError().text());
+    if (!m_store.commit()) return setError("Cannot clear History: " + m_store.lastError().text());
+    clearError(); publishHistory(); return true;
+}
+
+bool BibleBackend::setHistoryEnabled(bool enabled)
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    const auto guard = qScopeGuard([this] { m_store.rollback(); });
+    QSqlQuery q(m_store);
+    if (!enabled && (!q.exec("DELETE FROM history") || !q.exec("DELETE FROM recent_queries")))
+        return setError("Cannot clear History: " + q.lastError().text());
+    q.prepare("INSERT INTO preferences(key,value) VALUES('historyEnabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    q.addBindValue(int(enabled));
+    if (!q.exec()) return setError("Cannot save the History preference: " + q.lastError().text());
+    if (!m_store.commit()) return setError("Cannot save the History preference: " + m_store.lastError().text());
+    m_historyEnabled = enabled;
+    emit sharedCommitted({}, false, true);
+    emit preferencesChanged();
+    clearError(); publishHistory(); return true;
+}
+
+bool BibleBackend::openLocation(QVariantMap location)
+{
+    if (!validLocation(location)) return setError("That reading location is invalid.");
+    const QString id = location.value("versionId").toString();
+    if (installedPath(id).isEmpty()) return setError("That passage's Bible version is not installed.");
+    if (id != m_versionId && !switchVersion(id)) return false;
+    return restoreSelection(location,false,std::clamp(location.value("position",0).toDouble(),0.0,1.0));
+}
+
 QString BibleBackend::reference(int b, int c, int start, int end) const
 {
     if (b < 1 || b > BibleBooks::canon().size()) return {};
@@ -1276,7 +1469,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 6) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
+    if (version > 7) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -1336,6 +1529,12 @@ bool BibleBackend::initializeStore()
     if (version < 6) schema <<
         "CREATE TABLE desk(id INTEGER PRIMARY KEY AUTOINCREMENT,position INTEGER NOT NULL UNIQUE CHECK(position>=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),created TEXT NOT NULL,UNIQUE(version_id,book,chapter,start,endBook,endChapter,end))" <<
         "PRAGMA user_version=6";
+    // Schema 7: reading History (global, most recent first by seq) and recent
+    // Bible search queries. Neither is part of backups. start/end 0 = a chapter.
+    if (version < 7) schema <<
+        "CREATE TABLE history(id INTEGER PRIMARY KEY AUTOINCREMENT,seq INTEGER NOT NULL UNIQUE CHECK(seq>=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 0 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 0 AND 999),position REAL NOT NULL CHECK(position BETWEEN 0 AND 1),visited TEXT NOT NULL,UNIQUE(version_id,book,chapter,start,endBook,endChapter,end))" <<
+        "CREATE TABLE recent_queries(query TEXT PRIMARY KEY CHECK(length(query) BETWEEN 1 AND 4096),seq INTEGER NOT NULL UNIQUE CHECK(seq>=1)) WITHOUT ROWID" <<
+        "PRAGMA user_version=7";
     schema << "CREATE TABLE IF NOT EXISTS tags(id TEXT PRIMARY KEY,name TEXT NOT NULL,name_key TEXT NOT NULL UNIQUE) WITHOUT ROWID"
            << "CREATE TABLE IF NOT EXISTS tag_assignments(version_id TEXT NOT NULL,book INTEGER NOT NULL,chapter INTEGER NOT NULL,start INTEGER NOT NULL,endBook INTEGER NOT NULL,endChapter INTEGER NOT NULL,end INTEGER NOT NULL,tag_id TEXT NOT NULL,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end,tag_id)) WITHOUT ROWID"
            << "CREATE INDEX IF NOT EXISTS tag_assignments_tag ON tag_assignments(tag_id,version_id)";
@@ -1365,6 +1564,7 @@ bool BibleBackend::loadPreferences()
     m_showHeadings = boolean("showHeadings",true);
     m_versePicker = boolean("versePicker",true);
     m_focusMode = boolean("focusMode",false);
+    m_historyEnabled = boolean("historyEnabled",true);
     const QString mode = values.value("readingMode").toString();
     m_readingMode = mode == "block" || mode == "verse" ? mode : "paragraph";
     const auto size = values.value("fontSize");
