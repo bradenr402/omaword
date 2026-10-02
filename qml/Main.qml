@@ -3945,6 +3945,10 @@ ApplicationWindow {
         dim: true
         focus: true
         padding: 16 * app.controlScale
+        topPadding: padding
+        bottomPadding: padding
+        leftPadding: padding
+        rightPadding: padding
         closePolicy: closing || cleanDeskConfirmation.visible || errorDialog.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
         readonly property bool listKeys: shown && !contextMenu.visible && !cleanDeskConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
@@ -3971,7 +3975,7 @@ ApplicationWindow {
         onClosed: { closing = false; app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "deskContent"
-            spacing: 12 * app.scale
+            spacing: (deskDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
             Shortcut { sequence: "Shift+D"; enabled: deskDrawer.listKeys; onActivated: deskDrawer.close() }
             Shortcut { sequences: ["J", "Down"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-1) }
@@ -3987,7 +3991,7 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Label { objectName: "deskTitle"; text: "Desk"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true }
+                Label { objectName: "deskTitle"; text: "Desk"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
                 Label { objectName: "deskCount"; text: deskList.count === 1 ? "1 passage" : deskList.count + " passages"; color: desktop.muted; font.pixelSize: 12 * app.scale }
             }
             FineRule { Layout.fillWidth: true }
@@ -4021,7 +4025,7 @@ ApplicationWindow {
                         spacing: 7 * app.scale
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: 6 * app.scale
+                            spacing: 12 * app.scale
                             Label {
                                 objectName: "deskHeader" + deskEntry.index
                                 text: deskEntry.modelData.reference + " · " + deskEntry.modelData.versionAbbreviation
@@ -4030,21 +4034,26 @@ ApplicationWindow {
                                 font.pixelSize: 16 * app.scale; font.weight: Font.Medium
                                 Layout.fillWidth: true; wrapMode: Text.Wrap
                             }
-                            QuietButton {
-                                objectName: "deskCopy" + deskEntry.index
-                                text: "Copy"; compact: true; focusPolicy: Qt.NoFocus
-                                tip: "Copy quotation · y"
-                                enabled: deskEntry.modelData.available && !app.rangeEditing && !bible.busy
-                                onClicked: { deskList.currentIndex = deskEntry.index; app.moveDesk(0); app.copyDeskItem(deskEntry.modelData.id) }
-                            }
-                            QuietButton {
-                                objectName: "deskRemove" + deskEntry.index
-                                text: "×"; compact: true; focusPolicy: Qt.NoFocus
-                                tip: "Remove from Desk · x"
-                                Accessible.name: "Remove " + deskEntry.modelData.reference + " from Desk"
-                                font.pixelSize: 18 * app.scale
-                                enabled: !app.rangeEditing && !bible.busy
-                                onClicked: app.removeDeskItem(deskEntry.modelData.id)
+                            RowLayout {
+                                objectName: "deskButtons" + deskEntry.index
+                                Layout.alignment: Qt.AlignTop
+                                spacing: 4 * app.controlScale
+                                QuietButton {
+                                    objectName: "deskCopy" + deskEntry.index
+                                    text: "Copy"; compact: true; focusPolicy: Qt.NoFocus
+                                    tip: "Copy quotation · y"
+                                    enabled: deskEntry.modelData.available && !app.rangeEditing && !bible.busy
+                                    onClicked: { deskList.currentIndex = deskEntry.index; app.moveDesk(0); app.copyDeskItem(deskEntry.modelData.id) }
+                                }
+                                QuietButton {
+                                    objectName: "deskRemove" + deskEntry.index
+                                    text: "×"; compact: true; focusPolicy: Qt.NoFocus
+                                    tip: "Remove from Desk · x"
+                                    Accessible.name: "Remove " + deskEntry.modelData.reference + " from Desk"
+                                    font.pixelSize: 18 * app.scale
+                                    enabled: !app.rangeEditing && !bible.busy
+                                    onClicked: app.removeDeskItem(deskEntry.modelData.id)
+                                }
                             }
                         }
                         Label {

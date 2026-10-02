@@ -203,6 +203,38 @@ private slots:
         QCOMPARE(bible->selectionReference(), firstItem["reference"].toString());
         key(Qt::Key_Escape);
     }
+    void panelSpacingMatchesAnnotations() {
+        for (auto r : {"John 1:1", "John 1:4"}) { navigate(r); key(Qt::Key_D); }
+        const auto saved = object("savedDrawer");
+        QVERIFY(QMetaObject::invokeMethod(saved, "open")); QTRY_VERIFY(saved->property("opened").toBool());
+        const auto savedContent = item("savedContent");
+        const QPointF savedOrigin = savedContent->position();
+        const auto savedSpacing = savedContent->property("spacing").toReal();
+        const auto savedListSpacing = item("collectionList")->property("spacing").toReal();
+        QVERIFY(QMetaObject::invokeMethod(saved, "close")); QTRY_VERIFY(!saved->property("visible").toBool());
+        openDesk();
+        const auto drawer = object("deskDrawer");
+        for (auto side : {"topPadding", "bottomPadding", "leftPadding", "rightPadding"})
+            QCOMPARE(drawer->property(side).toReal(), saved->property(side).toReal());
+        QVERIFY(saved->property("topPadding").toReal() > 0);
+        const auto content = item("deskContent");
+        QCOMPARE(content->position(), savedOrigin);
+        QCOMPARE(content->property("spacing").toReal(), savedSpacing);
+        const auto list = item("deskList");
+        QCOMPARE(list->property("spacing").toReal(), savedListSpacing);
+        // Rows are separated by the list spacing, with padded content.
+        auto first = item("deskEntry0"), second = item("deskEntry1");
+        QVERIFY(first && second);
+        QTRY_COMPARE(second->y() - (first->y() + first->height()), savedListSpacing);
+        QVERIFY(first->property("topPadding").toReal() > 0);
+        const auto header = item("deskHeader0");
+        QCOMPARE(header->mapToItem(first, QPointF()).x(), first->property("leftPadding").toReal());
+        const auto copy = item("deskCopy0"), remove = item("deskRemove0");
+        QCOMPARE(remove->x() - (copy->x() + copy->width()), item("savedTabs") ? item("savedTabs")->property("spacing").toReal() : 0.0);
+        // The title starts at the drawer's padding, just like Annotations.
+        QCOMPARE(item("deskTitle")->mapToItem(content, QPointF()).y(), item("savedTitle")->mapToItem(savedContent, QPointF()).y());
+        key(Qt::Key_Escape);
+    }
     void copyAndRemove() {
         for (auto r : {"John 1:1", "John 1:4", "John 1:6", "John 1:7"}) { navigate(r); key(Qt::Key_D); }
         QCOMPARE(desk().size(), 4);
