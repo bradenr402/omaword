@@ -125,7 +125,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt p`: Verse picker
 - `alt l`: Reading mode
 - `alt s`: Sound effects
-- `alt m`: Reduce motion
+- `alt m`: Animations
 - `ctrl +` · `ctrl =`: Larger text
 - `ctrl -`: Smaller text
 - `ctrl 0`: Reset text size
@@ -171,7 +171,7 @@ These also work, but stay out of the in-app list:
 
 <!-- shortcuts:end -->
 
-**Reduce motion** (`alt m`) turns off pulses, flashes, and fades; **Disable sound effects** (`alt s`) silences the subtle sounds. Both are also in Commands and apply to all windows.
+**Disable animations** (`alt m`) turns off pulses, flashes, fades, and slides; **Disable sound effects** (`alt s`) silences the subtle sounds. Both are also in Commands and apply to all windows.
 
 `[` and `]` step back and forward through the passages you jumped to in this window, and `-` swaps with the previous one. History (`shift H`) lists passages you stayed on for a few seconds, shared by every window; it never goes into backups, and Commands can clear or disable it.
 

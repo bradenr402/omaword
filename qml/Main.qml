@@ -2070,7 +2070,7 @@ ApplicationWindow {
         { id: "versePicker", group: "Reading", title: "Verse picker", sequences: ["Alt+P"], setting: "versePicker", command: true },
         { id: "readingMode", group: "Reading", title: "Reading mode", sequences: ["Alt+L"], command: true },
         { id: "soundEffects", group: "Reading", title: "Sound effects", sequences: ["Alt+S"], scope: "global", command: true },
-        { id: "reduceMotion", group: "Reading", title: "Reduce motion", sequences: ["Alt+M"], scope: "global", command: true },
+        { id: "reduceMotion", group: "Reading", title: "Animations", sequences: ["Alt+M"], scope: "global", command: true },
         { id: "larger", group: "Reading", title: "Larger text", sequences: ["Ctrl++", "Ctrl+="] },
         { id: "smaller", group: "Reading", title: "Smaller text", sequences: ["Ctrl+-"] },
         { id: "resetText", group: "Reading", title: "Reset text size", sequences: ["Ctrl+0"] },
@@ -2127,7 +2127,7 @@ ApplicationWindow {
     function actionTitle(action) {
         if (action.id === "toggleDesk") return bible.currentInDesk ? "Remove from Desk" : "Add to Desk"
         if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
-        if (action.id === "reduceMotion") return sounds.reduceMotion ? "Allow motion" : "Reduce motion"
+        if (action.id === "reduceMotion") return sounds.reduceMotion ? "Enable animations" : "Disable animations"
         if (action.id === "toggleHistory") return bible.historyEnabled ? "Disable History" : "Enable History"
         return action.title
     }
@@ -2421,7 +2421,7 @@ ApplicationWindow {
             break
         case "reduceMotion":
             sounds.reduceMotion = !sounds.reduceMotion
-            notify(sounds.reduceMotion ? "Reduce motion on" : "Motion allowed", true)
+            notify(sounds.reduceMotion ? "Animations off" : "Animations on", true)
             sounds.play("tick")
             break
         }

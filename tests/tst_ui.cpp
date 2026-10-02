@@ -3999,7 +3999,7 @@ private slots:
             {"bibleSearch","Search Bible","ctrl /"}, {"help","Keybindings","?"},
             {"numbers","Show verse numbers","alt n"}, {"headings","Show headings","alt h"},
             {"versePicker","Verse picker","alt p"}, {"readingMode","Reading mode","alt l"},
-            {"soundEffects","Sound effects","alt s"}, {"reduceMotion","Reduce motion","alt m"},
+            {"soundEffects","Sound effects","alt s"}, {"reduceMotion","Animations","alt m"},
             {"lineMore","Increase line height","ctrl alt ="}, {"lineLess","Decrease line height","ctrl alt -"},
             {"lineReset","Reset line height","ctrl alt 0"}, {"manageTags","Manage tags","ctrl t"},
             {"previousChapter","Previous chapter",QString::fromUtf8("h · ←")}, {"bookmark","Bookmark selection","m"},

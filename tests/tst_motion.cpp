@@ -510,14 +510,15 @@ private slots:
         QTRY_VERIFY(!toast->isVisible());
     }
     void reduceMotionCommand() {
-        QCOMPARE(commandTitle("reduce motion"), QString("Reduce motion"));
+        QCOMPARE(commandTitle("animations"), QString("Disable animations"));
         key(Qt::Key_Escape);
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         object("referenceInput")->setProperty("text", "");
-        type("> reduce motion"); key(Qt::Key_Return);
+        type("> disable animations"); key(Qt::Key_Return);
         QTRY_VERIFY(sounds->reduceMotion());
+        QCOMPARE(object("toast")->property("text").toString(), QString("Animations off"));
         QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
-        QCOMPARE(commandTitle("allow motion"), QString("Allow motion"));
+        QCOMPARE(commandTitle("enable animations"), QString("Enable animations"));
         QVERIFY(SoundEffects(nullptr, session->filePath("sound.ini"), false).reduceMotion());
         QVERIFY(prop("reduceMotion").toBool()); QCOMPARE(prop("fadeMs").toInt(), 0);
         QCOMPARE(item("chapterFind")->property("fadeDuration").toInt(), 0);
@@ -554,13 +555,14 @@ private slots:
         QTest::qWait(30);
         QCOMPARE(dim(9), 0.0); QVERIFY(std::abs(dim(8) - (1 - prop("focusDimOpacity").toDouble())) < 1e-6);
         key(Qt::Key_Escape); QTRY_VERIFY(!bible->focusMode());
-        // Allow motion flips back and persists.
-        QCOMPARE(commandTitle("motion"), QString("Allow motion"));
+        // Enable animations flips back and persists.
+        QCOMPARE(commandTitle("animations"), QString("Enable animations"));
         key(Qt::Key_Escape); call("readerFocus");
         QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, "reduceMotion")));
         QVERIFY(!sounds->reduceMotion());
+        QCOMPARE(object("toast")->property("text").toString(), QString("Animations on"));
         QVERIFY(!SoundEffects(nullptr, session->filePath("sound.ini"), false).reduceMotion());
-        QCOMPARE(commandTitle("reduce motion"), QString("Reduce motion"));
+        QCOMPARE(commandTitle("animations"), QString("Disable animations"));
     }
 };
 
