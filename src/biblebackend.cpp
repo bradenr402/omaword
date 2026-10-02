@@ -2431,6 +2431,34 @@ bool BibleBackend::deleteAnnotationScope(QVariantMap scope)
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
 }
 
+bool BibleBackend::deleteNoteScope(QVariantMap scope)
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError("Cannot start note deletion: " + m_store.lastError().text());
+    QVariantMap canonical;
+    if (!validateScope(scope,&canonical)) return setError("That Bible version or passage is no longer available.");
+    QSqlQuery q(m_store);
+    // Same semantics as saving an empty note: a row with nothing else goes.
+    q.prepare("DELETE FROM annotations WHERE " + scopeWhere + " AND NOT bookmark AND NOT highlight AND note<>''"); bindScope(q,canonical);
+    if (!q.exec()) return setError("Cannot delete note: " + q.lastError().text());
+    qint64 changed = q.numRowsAffected();
+    q.prepare("UPDATE annotations SET note='' WHERE " + scopeWhere + " AND note<>''"); bindScope(q,canonical);
+    if (!q.exec()) return setError("Cannot delete note: " + q.lastError().text());
+    changed += q.numRowsAffected();
+    if (!changed) return setError("No saved note exists for that exact range.");
+    q.prepare("SELECT COUNT(*) FROM annotations WHERE " + scopeWhere + " AND note<>''"); bindScope(q,canonical);
+    if (!q.exec() || !q.next() || q.value(0).toLongLong()) return setError("Cannot verify note deletion.");
+    q.finish();
+    QVector<Annotation> saved;
+    if (!loadAnnotations(&saved)) return false;
+    if (!m_store.commit()) return setError("Cannot commit note deletion: " + m_store.lastError().text());
+    m_annotations = saved; m_collection = collectionRows(saved);
+    emit sharedCommitted(canonical.value("versionId").toString(),false,false);
+    clearError(); emit collectionChanged(); updateAnnotations(); return true;
+}
+
 QString BibleBackend::copySelection(bool plainText)
 {
     if (!requireReady()) return {};

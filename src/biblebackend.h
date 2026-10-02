@@ -232,6 +232,9 @@ public:
     // Deletes exact marks/note/tags in scope.versionId without navigating.
     Q_INVOKABLE bool deleteAnnotationScope(QVariantMap scope);
     Q_INVOKABLE bool deleteAnnotation(QString reference, QString expectedVersionId = QString());
+    // Clears only the note on this exact range, keeping marks and tags; a row
+    // left with no bookmark, highlight, or note is removed.
+    Q_INVOKABLE bool deleteNoteScope(QVariantMap scope);
     Q_INVOKABLE QString copySelection(bool plainText = false);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
     Q_INVOKABLE void copyText(QString text);

@@ -785,9 +785,11 @@ ApplicationWindow {
             for (const tag of tags) removed = bible.setTag(scope, tag.id, false) && removed
             if (removed) { notify((scope.reference || "Passage") + " tags removed", true); sounds.play("remove") }
             else sounds.play("error")
-        } else requestDeleteScope(scope)
+        } else requestDeleteScope(scope, true)
     }
-    function requestDeleteScope(entry) {
+    // noteOnly deletes just the note on this exact range (marker menu);
+    // otherwise every mark, the note, and tags go (Annotations panel).
+    function requestDeleteScope(entry, noteOnly) {
         if (rangeEditing || bible.busy || !entry || !flushNote()) return
         const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
             book: entry.book, chapter: entry.chapter, start: entry.start,
@@ -795,6 +797,7 @@ ApplicationWindow {
         if (!savedScopeExists(scope)) { sounds.play("error"); return }
         deleteConfirmation.scope = scope
         deleteConfirmation.row = -1
+        deleteConfirmation.noteOnly = noteOnly === true
         deleteConfirmation.open()
     }
     // Bookmark, note, and tag markers in every layout. One choice targets
@@ -1533,6 +1536,14 @@ ApplicationWindow {
         if (!flushNote() || bible.busy) return
         if (!deleteScopeValid() || deleteConfirmation.scope !== scope) {
             invalidateDeleteSaved()
+            return
+        }
+        if (deleteConfirmation.noteOnly) {
+            if (!bible.deleteNoteScope(scope)) { sounds.play("error"); return }
+            syncNote()
+            notify((scope.reference || "Passage") + " note deleted", true)
+            sounds.play("remove")
+            deleteConfirmation.close()
             return
         }
         if (!bible.deleteAnnotationScope(scope)) return
@@ -4151,6 +4162,7 @@ ApplicationWindow {
         readonly property string reference: scope ? scope.reference : ""
         readonly property string versionId: scope ? scope.versionId : ""
         property int row: -1
+        property bool noteOnly: false
         closePolicy: Popup.CloseOnEscape
         onOpened: deleteCancel.forceActiveFocus()
         Shortcut {
@@ -4164,13 +4176,15 @@ ApplicationWindow {
         onClosed: {
             scope = null
             row = -1
+            noteOnly = false
             deleteFocusTimer.restart()
         }
         contentItem: ColumnLayout {
             spacing: 18 * app.scale
-            Label { text: "Delete annotations?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { objectName: "deleteTitle"; text: deleteConfirmation.noteOnly ? "Delete note?" : "Delete annotations?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { objectName: "deleteReference"; text: deleteConfirmation.reference; textFormat: Text.PlainText; color: desktop.accent; font.pixelSize: 16 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { objectName: "deleteExplanation"; text: "This deletes all marks (bookmark and highlight), the note, and tags for this exact reference."; color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { objectName: "deleteExplanation"; text: deleteConfirmation.noteOnly ? "This deletes the note for this exact reference. Bookmarks, highlights, and tags stay."
+                : "This deletes all marks (bookmark and highlight), the note, and tags for this exact reference."; color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }
             RowLayout {
                 Layout.fillWidth: true

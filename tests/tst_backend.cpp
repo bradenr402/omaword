@@ -408,6 +408,33 @@ private slots:
         QVERIFY(bible->cleanDesk()); QVERIFY(bible->desk().isEmpty());
         bible.reset(); bible = std::make_unique<BibleBackend>(); QVERIFY(bible->desk().isEmpty());
     }
+    void deleteNoteScopeKeepsMarksAndTags() {
+        install(net); BibleBackend peer;
+        QVERIFY(bible->navigate("MRK 7:15")); bible->moveSelection(2,true);
+        const auto scope = bible->tagScope();
+        bible->setNoteText("A long thought"); QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight());
+        QVERIFY(!bible->createAndAssignTag(scope,"Kept").isEmpty());
+        // A note on an overlapping, different range survives.
+        bible->selectVerses(15,15); bible->setNoteText("Other range");
+        bible->selectVerses(15,17);
+        QSignalSpy peerChanged(&peer,&BibleBackend::collectionChanged);
+        QVERIFY2(bible->deleteNoteScope(scope),qPrintable(bible->error()));
+        QVERIFY(bible->noteText().isEmpty());
+        QVERIFY(bible->selectionBookmarked()); QVERIFY(bible->selectionHighlighted());
+        QCOMPARE(bible->tagsForScope(scope).size(),1);
+        QVERIFY(peerChanged.count() > 0);
+        QVariantMap row;
+        for (const auto &v : peer.collection()) if (v.toMap()["reference"] == scope["reference"]) row = v.toMap();
+        QVERIFY(row["bookmark"].toBool()); QVERIFY(row["highlight"].toBool()); QVERIFY(row["note"].toString().isEmpty());
+        bible->selectVerses(15,15); QCOMPARE(bible->noteText(),QString("Other range"));
+        // No note left on the exact range: nothing to delete.
+        QVERIFY(!bible->deleteNoteScope(scope)); QVERIFY(!bible->error().isEmpty());
+        // A row with only a note is removed entirely.
+        const auto single = bible->tagScope();
+        QVERIFY2(bible->deleteNoteScope(single),qPrintable(bible->error()));
+        for (const auto &v : bible->collection()) QVERIFY(v.toMap()["reference"] != single["reference"]);
+        QCOMPARE(bible->collection().size(),1);
+    }
     void deskCrossVersionPeersAndRemoval() {
         install(net); BibleBackend peer; QVERIFY(peer.desk().isEmpty());
         QSignalSpy peerChanged(&peer,&BibleBackend::deskChanged);

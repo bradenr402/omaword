@@ -437,6 +437,36 @@ private slots:
         clickEntry("remove");
         QTRY_VERIFY(bible->collection().isEmpty());
     }
+    void deleteNoteKeepsMarks_data() { layouts(); }
+    void deleteNoteKeepsMarks() {
+        QFETCH(QString, mode);
+        bible->selectVerses(2, 3);
+        bible->setNoteText("A long note worth confirming"); QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight());
+        const auto scope = bible->tagScope(); const auto reference = bible->selectionReference();
+        QVERIFY(!bible->createAndAssignTag(scope, "Kept").isEmpty());
+        bible->selectVerses(1, 1); call("syncNote");
+        setLayout(mode);
+        const auto name = markerName("note", 2, reference);
+        QTRY_VERIFY(item(name) && item(name)->isVisible());
+        rightClick(item(name)); QTRY_VERIFY(menuOpen());
+        QCOMPARE(entry("remove").value("text").toString(), QString("Delete note…"));
+        clickEntry("remove");
+        const auto confirm = object("deleteConfirmation");
+        QTRY_VERIFY(confirm->property("opened").toBool());
+        QCOMPARE(object("deleteTitle")->property("text").toString(), QString("Delete note?"));
+        QVERIFY(object("deleteExplanation")->property("text").toString().contains("deletes the note"));
+        QTRY_VERIFY(item("deleteConfirm"));
+        QTest::mouseClick(window, Qt::LeftButton, {}, item("deleteConfirm")->mapToScene(QPointF(4, 4)).toPoint());
+        QTRY_VERIFY(!confirm->property("visible").toBool());
+        QCOMPARE(bible->collection().size(), 1);
+        const auto row = bible->collection().first().toMap();
+        QCOMPARE(row.value("reference").toString(), reference);
+        QVERIFY(row.value("bookmark").toBool()); QVERIFY(row.value("highlight").toBool());
+        QVERIFY(row.value("note").toString().isEmpty());
+        QCOMPARE(bible->tagsForScope(scope).size(), 1);
+        QTRY_VERIFY(!item(name) || !item(name)->isVisible());
+        QVERIFY(object("toast")->property("text").toString().contains("note deleted"));
+    }
     void deskAnnotationAndSearchMenus() {
         navigate("John 1:1"); key(Qt::Key_D); QCOMPARE(bible->desk().size(), 1);
         openDesk();
