@@ -296,6 +296,32 @@ private slots:
         QCOMPARE(geometry(), rects);
     }
     void dimmingInstantOnCursorMove_data() { layouts(); }
+    void heldVerseMotionRepeatsWithoutPlatformDelay_data() {
+        QTest::addColumn<int>("key"); QTest::addColumn<int>("direction");
+        QTest::newRow("j") << int(Qt::Key_J) << 1;
+        QTest::newRow("down") << int(Qt::Key_Down) << 1;
+        QTest::newRow("k") << int(Qt::Key_K) << -1;
+        QTest::newRow("up") << int(Qt::Key_Up) << -1;
+    }
+    void heldVerseMotionRepeatsWithoutPlatformDelay() {
+        QFETCH(int, key); QFETCH(int, direction);
+        navigate("John 1:20");
+        const int start = bible->cursorVerse();
+        // A tap moves exactly one verse.
+        QTest::keyClick(window, Qt::Key(key)); QTest::qWait(250);
+        QCOMPARE(bible->cursorVerse(), start + direction);
+        // Holding (no platform auto-repeat events at all) keeps moving well
+        // before a typical ~600 ms platform repeat delay would elapse.
+        QTest::keyPress(window, Qt::Key(key));
+        QTest::qWait(400);
+        const int held = bible->cursorVerse();
+        QVERIFY2((held - start) * direction >= 4, qPrintable(QString("moved %1").arg(held - start)));
+        // Releasing stops it immediately.
+        QTest::keyRelease(window, Qt::Key(key));
+        const int released = bible->cursorVerse();
+        QTest::qWait(250);
+        QCOMPARE(bible->cursorVerse(), released);
+    }
     void dimmingInstantOnCursorMove() {
         QFETCH(QString, mode);
         setLayout(mode); navigate("John 1:5");
