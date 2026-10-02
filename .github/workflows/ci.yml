@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Build and fast tests
+    runs-on: ubuntu-latest
+    # OmaWord targets Omarchy (Arch Linux); Arch's current Qt 6 matches it.
+    container: archlinux:latest
+    timeout-minutes: 30
+    env:
+      JOBS: 4
+      TEST_JOBS: 2
+      QT_QPA_PLATFORM: offscreen
+      OMAWORD_SOUND: "0"
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git qt6-base qt6-declarative \
+            qt6-multimedia libarchive fontconfig ttf-dejavu
+      - uses: actions/checkout@v4
+      - name: Build
+        run: bin/build
+      - name: Test runner checks
+        run: bash tests/test-runner.sh
+      - name: Fast test suites
+        run: >
+          bin/test --suite backend --suite search --suite tags --suite ranges
+          --suite importer --suite catalog --suite sound
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: build/test-logs/
+          if-no-files-found: ignore
