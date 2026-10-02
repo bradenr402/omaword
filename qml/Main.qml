@@ -3879,7 +3879,8 @@ ApplicationWindow {
         property bool addPending: false
         readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 240))
         height: Math.min(540 * app.scale, app.height - 48)
-        onOpened: versionSearch.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { versionSearch.forceActiveFocus() }
         onClosed: {
             const add = addPending
             addPending = false
@@ -4078,7 +4079,8 @@ ApplicationWindow {
             onActivated: { const p = app.sceneRowPoint(paletteResults.currentItem); app.openSearchMenu(paletteResults.currentIndex, p.x, p.y) }
         }
         // Fades in with input focus already live (ModalCard); closes at once.
-        onOpened: referenceInput.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { referenceInput.forceActiveFocus() }
         onAboutToHide: {
             if (!app.paletteCleared) app.rememberPalette()
         }
@@ -4742,7 +4744,8 @@ ApplicationWindow {
         id: cleanDeskConfirmation
         objectName: "cleanDeskConfirmation"
         closePolicy: Popup.CloseOnEscape
-        onOpened: cleanDeskCancel.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { cleanDeskCancel.forceActiveFocus() }
         onClosed: {
             if (deskDrawer.shown) Qt.callLater(function() { if (!cleanDeskConfirmation.visible) app.moveDesk(0) })
             else app.restorePanelFocus()
@@ -4969,7 +4972,8 @@ ApplicationWindow {
         id: clearHistoryConfirmation
         objectName: "clearHistoryConfirmation"
         closePolicy: Popup.CloseOnEscape
-        onOpened: clearHistoryCancel.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { clearHistoryCancel.forceActiveFocus() }
         onClosed: {
             if (historyDrawer.shown) Qt.callLater(function() { if (!clearHistoryConfirmation.visible) app.moveHistory(0) })
             else app.restorePanelFocus()
@@ -5009,7 +5013,8 @@ ApplicationWindow {
         property int row: -1
         property bool noteOnly: false
         closePolicy: Popup.CloseOnEscape
-        onOpened: deleteCancel.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { deleteCancel.forceActiveFocus() }
         Shortcut {
             sequences: ["Left", "Up", "Right", "Down"]
             enabled: deleteConfirmation.opened && !errorDialog.visible
@@ -5045,7 +5050,8 @@ ApplicationWindow {
         objectName: "helpDialog"
         property string pendingAction: ""
         height: Math.min(660 * app.scale, app.height - 48)
-        onOpened: { keybindingSearch.text = ""; keybindingSearch.forceActiveFocus() }
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { keybindingSearch.text = ""; keybindingSearch.forceActiveFocus() }
         onClosed: {
             let action = pendingAction
             pendingAction = ""
@@ -5158,7 +5164,8 @@ ApplicationWindow {
         property bool lineOnly: false
         width: Math.min(480 * app.scale, app.width - 48)
         height: Math.min(settingsContent.implicitHeight + 48, app.height - 48)
-        onOpened: lineHeightSlider.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { lineHeightSlider.forceActiveFocus() }
         onClosed: app.restorePanelFocus()
         contentItem: OverlayScrollView {
             id: settingsScroll
@@ -5288,7 +5295,8 @@ ApplicationWindow {
         property bool choosePending: false
         readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 360))
         height: Math.min(650 * app.scale, app.height - 48)
-        onOpened: { catalogSearch.text = ""; catalogSearch.forceActiveFocus() }
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { catalogSearch.text = ""; catalogSearch.forceActiveFocus() }
         onClosed: {
             const choose = choosePending
             choosePending = false
@@ -5438,7 +5446,8 @@ ApplicationWindow {
         objectName: "backupScope"
         property bool choosePending: false
         height: Math.min(470 * app.scale, app.height - 48)
-        onOpened: { backupScopeScroll.contentItem.contentY = 0; backupChoose.forceActiveFocus() }
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { backupScopeScroll.contentItem.contentY = 0; backupChoose.forceActiveFocus() }
         onClosed: {
             const choose = choosePending
             choosePending = false
@@ -5520,7 +5529,8 @@ ApplicationWindow {
         objectName: "restoreConfirmation"
         property url backupFile
         closePolicy: Popup.CloseOnEscape
-        onOpened: restoreCancel.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { restoreCancel.forceActiveFocus() }
         onClosed: { backupFile = ""; app.restorePanelFocus() }
         contentItem: ColumnLayout {
             spacing: 18
@@ -5582,7 +5592,8 @@ ApplicationWindow {
         id: errorDialog
         objectName: "errorDialog"
         property string message: ""
-        onOpened: errorDismiss.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { errorDismiss.forceActiveFocus() }
         onClosed: app.restorePanelFocus()
         contentItem: ColumnLayout {
             spacing: 16 * app.scale

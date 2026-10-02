@@ -342,7 +342,8 @@ Item {
             if (editor.source) editor.begin()
             else if (editor.ranges.length) editor.choose(editor.ranges[focusedRow])
         }
-        onOpened: focusRow(0)
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { focusRow(0) }
         // Shortcuts intercept Return before a focused checkbox or Cancel button can
         // consume it. Arrow/Tab navigation stays within the selectable rows.
         Shortcut { sequences: ["Return", "Enter"]; enabled: chooser.visible; onActivated: chooser.continueChoice() }
@@ -497,7 +498,8 @@ Item {
     RangeDialog {
         id: merge
         objectName: "rangeNoteMerge"
-        onOpened: contentItem.forceActiveFocus()
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { contentItem.forceActiveFocus() }
         contentItem: ColumnLayout {
             Keys.onEscapePressed: editor.cancel()
             RangeText { text: "Combine notes?"; font.pixelSize: 20 * editor.uiScale }

@@ -769,7 +769,7 @@ ApplicationWindow {
         QVERIFY(bible->switchVersion("eng-kjv"));
         const auto otherVersion = scope(8, 9);
         QCOMPARE(prop("editingScope").toMap(), changed);
-        QVERIFY(picker->property("opened").toBool());
+        QTRY_VERIFY(picker->property("opened").toBool()); // After its fade-in.
         QVERIFY(prop("scopePinned").toBool());
         QVERIFY(!annotations->property("visible").toBool());
         QVERIFY(prop("scopeValid").toBool());
