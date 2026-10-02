@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "KeyNotation.js" as KeyNotation
 
 Rectangle {
     id: root
@@ -64,7 +65,9 @@ Rectangle {
             elide: Text.ElideRight
         }
         Label {
-            text: "Enter accept    Esc cancel"
+            objectName: "chapterFindHints"
+            text: KeyNotation.hint([["Return", "accept"], ["Escape", "cancel"]], root.theme.foreground, root.theme.muted)
+            textFormat: Text.StyledText
             visible: root.width > 600 * root.uiScale
             // Same gap between the counter and the hints as between hint pairs.
             Layout.leftMargin: 16 * root.uiScale

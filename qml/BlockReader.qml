@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import "HandDrawn.js" as HandDrawn
+import "KeyNotation.js" as KeyNotation
 // Registered by blockdocument.cpp at application startup, without a QML plugin.
 // qmllint disable import
 import OmaWord.Reader 1.0
@@ -403,7 +404,7 @@ Item {
             readonly property string hint: (modelData.kind === "bookmark" ? "Bookmark" : modelData.kind === "note" ? "Note" : "Tag") + "\n"
                 + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
                 + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
-                + "\nShift-click to edit range"
+                + "\n" + KeyNotation.format("Shift+Click") + " to edit range"
             objectName: "blockInlineMarker:" + modelData.kind + ":" + modelData.edge + ":" + modelData.reference
             x: modelData.x; y: modelData.y
             width: modelData.width; height: modelData.height

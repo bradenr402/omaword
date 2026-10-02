@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "KeyNotation.js" as KeyNotation
 
 Item {
     id: panel
@@ -917,8 +918,10 @@ Item {
             TagText {
                 Layout.fillWidth: true
                 visible: panel.page !== "summary"
-                text: panel.page === "picker" ? "Space toggle    Enter toggle / create    Esc clear / close"
-                    : "Enter open    Esc clear / close"
+                objectName: "tagsHints"
+                textFormat: Text.StyledText
+                text: KeyNotation.hint(panel.page === "picker" ? [["Space", "toggle"], ["Return", "toggle / create"], ["Escape", "clear / close"]]
+                    : [["Return", "open"], ["Escape", "clear / close"]], panel.desktop.foreground, panel.desktop.muted)
                 font.pixelSize: 11 * panel.controlScale
                 color: panel.desktop.muted
             }

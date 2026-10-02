@@ -486,7 +486,7 @@ private slots:
         call("readerFocus");
         // No default key binding.
         QVariantList actions = prop("actions").toList(); bool found = false;
-        for (const auto &a : actions) if (a.toMap()["id"] == "reduceMotion") { found = true; QVERIFY(a.toMap()["keys"].toString().isEmpty()); QVERIFY(a.toMap()["sequences"].isNull() || a.toMap()["sequences"].toList().isEmpty()); }
+        for (const auto &a : actions) if (a.toMap()["id"] == "reduceMotion") { found = true; QVERIFY(!a.toMap().contains("keys")); QVERIFY(a.toMap()["sequences"].isNull() || a.toMap()["sequences"].toList().isEmpty()); }
         QVERIFY(found);
         // Jumps and copies produce no pulse/flash objects.
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());

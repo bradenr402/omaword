@@ -196,7 +196,7 @@ ApplicationWindow {
             contextMenu.show("marker", [
                 { id: "open", text: "Open", run: open },
                 { separator: true },
-                { id: "editRange", text: "Edit range", shortcut: "Shift E", run: function() { controller.openRangeEditor(editScope, kind) } }
+                { id: "editRange", text: "Edit range", shortcut: "shift E", run: function() { controller.openRangeEditor(editScope, kind) } }
             ], x, y)
         }
     }
@@ -957,7 +957,7 @@ ApplicationWindow {
             QTRY_VERIFY(item("blockInlineMarker:"+kind+":open:Cross-book"));
             auto marker = item("blockInlineMarker:"+kind+":open:Cross-book");
             QVERIFY(marker);
-            QVERIFY(marker->property("hint").toString().contains("Shift-click"));
+            QVERIFY(marker->property("hint").toString().contains("shift click to edit range"));
             const QPoint point = marker->mapToScene(marker->boundingRect().center()).toPoint();
             controller->setProperty("calls","");
             QTest::mouseClick(window,Qt::LeftButton,Qt::ShiftModifier,point);

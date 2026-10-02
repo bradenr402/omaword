@@ -10,6 +10,7 @@
     <file>qml/AnnotationGlyph.qml</file>
     <file>qml/AppContextMenu.qml</file>
     <file>qml/HandDrawn.js</file>
+    <file>qml/KeyNotation.js</file>
     <file>resources/catalog.json</file>
     <file alias="branding/icon.svg">assets/app.svg</file>
   </qresource>

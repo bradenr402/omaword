@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "KeyNotation.js" as KeyNotation
 
 Item {
     id: editor
@@ -172,7 +173,7 @@ Item {
         const restored = bible.restoreSelection(scope, initial.reversed, initial.position)
         restoring = false
         if (!restored) {
-            message = (bible.error || "Could not restore the original reading selection.") + " Press Esc to retry cancellation."
+            message = (bible.error || "Could not restore the original reading selection.") + " Press " + KeyNotation.format("Escape") + " to retry cancellation."
             pending = null
             merge.close()
             app.restorePanelFocus()
@@ -255,6 +256,7 @@ Item {
     component RangeCheckBox: CheckBox {
         id: check
         property string keyHint: ""
+        property bool allTagsHint: false
         Layout.fillWidth: true
         font.family: editor.desktop.fontFamily
         font.pixelSize: 14 * editor.uiScale
@@ -291,8 +293,8 @@ Item {
         }
         AppToolTip {
             theme: editor.desktop
-            text: "Space toggles this tag; t toggles all tags"
-            visible: check.keyHint === "t · all tags" && (check.hovered || check.activeFocus)
+            text: KeyNotation.format("Space") + " toggles this tag; " + KeyNotation.format("T") + " toggles all tags"
+            visible: check.allTagsHint && (check.hovered || check.activeFocus)
             delay: 650
         }
     }
@@ -424,9 +426,9 @@ Item {
                         width: choices.width
                         height: implicitHeight
                         leftAligned: true
-                        keyHint: "a"
+                        keyHint: KeyNotation.format("A")
                         focusPolicy: Qt.NoFocus
-                        hint: "a · " + text
+                        hint: KeyNotation.format("A") + " · " + text
                         onClicked: editor.toggleAll()
                     }
                     Repeater {
@@ -439,7 +441,8 @@ Item {
                             text: modelData.label
                             width: choices.width
                             height: implicitHeight
-                            keyHint: modelData.kind === "tags" ? "t · all tags" : ({bookmark: "m", highlight: "x", note: "n"})[modelData.kind]
+                            keyHint: modelData.kind === "tags" ? KeyNotation.format("T") + " · all tags" : KeyNotation.format(({bookmark: "M", highlight: "X", note: "N"})[modelData.kind])
+                            allTagsHint: modelData.kind === "tags"
                             focusPolicy: Qt.ClickFocus
                             checked: modelData.kind === "tags" ? editor.components.tags.indexOf(modelData.id) >= 0 : editor.components[modelData.kind]
                             onActiveFocusChanged: if (activeFocus) chooser.focusedRow = index
@@ -472,15 +475,16 @@ Item {
                 color: editor.desktop.muted
                 font.pixelSize: 11 * editor.uiScale
                 // No-break spaces keep each key with its verb when the row wraps.
-                text: keyHints.split("    ").map(function(pair) { return pair.replace(/ /g, "\u00a0") }).join("    ")
-                readonly property string keyHints: {
-                    if (!editor.source) return "↑ ↓ choose    Enter select    Esc cancel"
+                textFormat: Text.StyledText
+                text: KeyNotation.hint(keyHints, editor.desktop.foreground, editor.desktop.muted)
+                readonly property var keyHints: {
+                    if (!editor.source) return [[["Up", "Down"], "choose"], ["Return", "select"], ["Escape", "cancel"]]
                     const hints = []
-                    if (editor.presentKinds.indexOf("bookmark") >= 0) hints.push("m bookmark")
-                    if (editor.presentKinds.indexOf("highlight") >= 0) hints.push("x highlight")
-                    if (editor.presentKinds.indexOf("tags") >= 0) hints.push("t tags")
-                    if (editor.presentKinds.indexOf("note") >= 0) hints.push("n note")
-                    return hints.concat(["↑ ↓ choose", "Space toggle", editor.allSelected ? "a deselect all" : "a select all", "Enter continue", "Esc cancel"]).join("    ")
+                    if (editor.presentKinds.indexOf("bookmark") >= 0) hints.push(["M", "bookmark"])
+                    if (editor.presentKinds.indexOf("highlight") >= 0) hints.push(["X", "highlight"])
+                    if (editor.presentKinds.indexOf("tags") >= 0) hints.push(["T", "tags"])
+                    if (editor.presentKinds.indexOf("note") >= 0) hints.push(["N", "note"])
+                    return hints.concat([[["Up", "Down"], "choose"], ["Space", "toggle"], ["A", editor.allSelected ? "deselect all" : "select all"], ["Return", "continue"], ["Escape", "cancel"]])
                 }
             }
         }

@@ -18,6 +18,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
+#include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QTextBlock>
 #include <QTextDocument>
@@ -131,6 +132,16 @@ class UiTest : public QObject
         return found ? found : visualItem(window->contentItem(),QString::fromUtf8(name));
     }
     QQuickItem *item(const char *name) const { return qobject_cast<QQuickItem *>(object(name)); }
+    // Hint rows and key lists are rich text (KeyNotation.js); compare their plain reading.
+    static QString plainHint(const QString &rich) {
+        QTextDocument document; document.setHtml(rich);
+        return document.toPlainText().replace(QChar(0x00a0), QChar(' '));
+    }
+    QString formatKeys(const QStringList &sequences) const {
+        QVariant result;
+        QMetaObject::invokeMethod(window,"formatKeys",Q_RETURN_ARG(QVariant,result),Q_ARG(QVariant,QVariant(sequences)));
+        return result.toString();
+    }
     QVariant prop(const char *name, const char *property) const {
         const auto obj = object(name);
         return obj ? obj->property(property) : QVariant();
@@ -1915,13 +1926,13 @@ private slots:
             QVERIFY(item("paletteResults")->height() >= 40);
             const auto hints = item("paletteHints");
             QVERIFY(QRectF(16,16,608,448).contains(hints->mapRectToScene(hints->boundingRect())));
-            const auto text = hints->property("text").toString();
+            const auto text = plainHint(hints->property("text").toString());
             if (mode == "commands") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    Enter select    Esc clear / close"));
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    esc clear / close"));
                 QVERIFY(!item("paletteBack")->isVisible());
             } else if (mode == "chapters") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    Enter select    ← back    Esc clear / close"));
-            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    Enter select    Esc clear / close"));
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    ← back    esc clear / close"));
+            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    esc clear / close"));
         }
     }
     void normalVisualAndShiftedSelection() {
@@ -3938,22 +3949,23 @@ private slots:
             QVERIFY(action.value("title") != "Select text across verses");
         }
         const QList<QStringList> expected = {
-            {"books","Navigate to a passage","Ctrl k"},
-            {"annotations","Annotations panel","Ctrl a"}, {"toggleNotes","Notes panel",""},
-            {"selectVerse","Select verse","Click"},
-            {"clickMenu","Open context menu","Right Click"},
-            {"middleCopy","Copy passage as quotation","Middle Click"},
-            {"contextMenu","Open context menu","Menu · Shift F10"},
-            {"settings","Reading settings","Shift R"},
-            {"commands","Open commands","Ctrl Space · Ctrl Shift P"},
-            {"newWindow","New window","Ctrl n"},
-            {"switchVersion","Switch version","Shift V"},
+            {"books","Navigate to a passage","ctrl k"},
+            {"annotations","Annotations panel","ctrl a"}, {"toggleNotes","Notes panel",""},
+            {"selectVerse","Select verse","click"},
+            {"clickMenu","Open context menu","right click"},
+            {"middleCopy","Copy passage as quotation","middle click"},
+            {"contextMenu","Open context menu","menu · shift F10"},
+            {"settings","Reading settings","shift R"},
+            {"commands","Open commands","ctrl space · ctrl shift P"},
+            {"newWindow","New window","ctrl n"},
+            {"switchVersion","Switch version","shift V"},
             {"removeVersion","Remove version",""},
             {"import","Add version",""}
         };
         for (const auto &record : expected) {
             QCOMPARE(byId[record[0]].value("title").toString(),record[1]);
-            QCOMPARE(byId[record[0]].value("keys").toString(),record[2]);
+            QVERIFY(!byId[record[0]].contains("keys"));
+            QCOMPARE(formatKeys(byId[record[0]].value("sequences").toStringList()),record[2]);
         }
         for (const auto &pair : QList<QStringList>{{"books","toggleNotes"},{"notes","copy"},
                 {"copyPlain","previousChapter"},{"previousChapter","previousVerse"},
@@ -3968,9 +3980,46 @@ private slots:
             if (!action.contains("sequences") && !action.value("explanation").toBool()) continue;
             const auto name = "keybindingHint" + action.value("id").toString();
             QTRY_VERIFY(object(qPrintable(name)));
-            QCOMPARE(prop(qPrintable(name),"text").toString(),action.value("keys").toString());
+            const auto keys = formatKeys(action.value("sequences").toStringList());
+            QCOMPARE(plainHint(prop(qPrintable(name),"text").toString()),keys);
+            // Keys in the foreground; the "·" separator muted.
+            const auto rich = prop(qPrintable(name),"text").toString();
+            if (keys.contains(QString::fromUtf8(" · ")))
+                QVERIFY(rich.contains(QString::fromUtf8("<font color=\"%1\"> · </font>").arg(desktop->property("muted").value<QColor>().name())));
         }
         capture("revision-keybindings");
+    }
+    void keyNotation() {
+        const QList<QPair<QStringList,QString>> cases = {
+            {{"Shift+D"},"shift D"}, {{"Ctrl+K"},"ctrl k"}, {{"Alt+H"},"alt h"}, {{"X"},"x"},
+            {{"Up"},QString::fromUtf8("↑")}, {{"Shift+Down"},QString::fromUtf8("shift ↓")},
+            {{"Left","Right"},QString::fromUtf8("← · →")}, {{"PgUp"},"pgup"}, {{"PgDown"},"pgdn"},
+            {{"Escape"},"esc"}, {{"Return"},"enter"}, {{"Delete"},"delete"}, {{"Shift+Del"},"shift delete"},
+            {{"Backspace"},"backspace"}, {{"Space"},"space"}, {{"Tab"},"tab"}, {{"Home","End"},QString::fromUtf8("home · end")},
+            {{"Z, Z"},"zz"}, {{"2, 0, G"},"20g"}, {{"2, 0, Shift+G"},"20G"}, {{"?"},"?"}, {{"/"},"/"},
+            {{"Ctrl++","Ctrl+="},QString::fromUtf8("ctrl + · ctrl =")}, {{"Ctrl+-"},"ctrl -"},
+            {{"Ctrl+Alt+="},"ctrl alt ="}, {{"Ctrl+Shift+C"},"ctrl shift C"}, {{"Shift+F10"},"shift F10"},
+            {{"F1"},"F1"}, {{"Menu"},"menu"}, {{"RightClick"},"right click"}, {{"MiddleClick"},"middle click"},
+            {{"Click"},"click"}, {{"Shift+Click"},"shift click"}};
+        for (const auto &entry : cases) QCOMPARE(formatKeys(entry.first),entry.second);
+        // Every catalog key reads in the shared notation: lowercase except a
+        // shifted letter or function key, arrows as glyphs, muted separators.
+        const QRegularExpression notation(QString::fromUtf8(
+            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]]+|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|[A-Z])$"));
+        const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
+        for (const auto &record : records) {
+            const auto action = record.toMap();
+            for (const auto &list : {action.value("sequences").toStringList(),action.value("aliases").toStringList()}) {
+                for (const auto &sequence : list) {
+                    const auto text = formatKeys({sequence});
+                    QVERIFY2(notation.match(text).hasMatch(),qPrintable(sequence + " -> " + text));
+                    const bool shifted = text.startsWith("shift ") || text.contains(" shift ");
+                    const auto last = text.section(' ',-1);
+                    if (last.size() == 1 && last.at(0).isLetter())
+                        QVERIFY2(last.at(0).isUpper() == shifted,qPrintable(text));
+                }
+            }
+        }
     }
     void textSizeFeedbackOnlyOnChange() {
         const auto change = [this](const QString &action, int expected) {
@@ -4035,7 +4084,7 @@ private slots:
         QVERIFY(location->x() > item("modeControl")->x() + item("modeControl")->width());
         QVERIFY(location->x() + location->width() < item("floatingActions")->x());
         QVERIFY(prop("passageControlLabel","truncated").toBool());
-        QCOMPARE(prop("passageControl","tip").toString(),selected + " · Open passage · Ctrl k");
+        QCOMPARE(prop("passageControl","tip").toString(),selected + " · Open passage · ctrl k");
         click(version);
         QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
         QVERIFY(!item("versionClose"));

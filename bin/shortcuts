@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Regenerate README's shortcut section from the action catalog in qml/Main.qml.
+
+The catalog is a plain array of object literals; display text follows the same
+notation as qml/KeyNotation.js. `bin/shortcuts --check` exits nonzero when README is stale.
+"""
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+MAIN = ROOT / "qml" / "Main.qml"
+README = ROOT / "README.md"
+START = "<!-- shortcuts:start -->"
+END = "<!-- shortcuts:end -->"
+GROUPS = ["Navigate", "History", "Select", "Search", "Annotate", "Copy", "Panels",
+          "Palettes and windows", "Reading", "Lists", "Commands only"]
+NAMED = {
+    "escape": "esc", "esc": "esc", "return": "enter", "enter": "enter",
+    "delete": "delete", "del": "delete", "backspace": "backspace", "space": "space",
+    "tab": "tab", "backtab": "tab", "pgup": "pgup", "pageup": "pgup", "pgdown": "pgdn",
+    "pagedown": "pgdn", "pgdn": "pgdn", "home": "home", "end": "end", "menu": "menu",
+    "up": "↑", "down": "↓", "left": "←", "right": "→",
+    "click": "click", "rightclick": "right click", "middleclick": "middle click",
+}
+
+
+def format_key(token, shifted):
+    lower = token.lower()
+    if lower in NAMED:
+        return NAMED[lower]
+    if re.fullmatch(r"f\d{1,2}", lower):
+        return token.upper()
+    if re.fullmatch(r"[a-z]", token, re.I):
+        return token.upper() if shifted else token.lower()
+    return token
+
+
+def format_sequence(sequence):
+    """Mirror of KeyNotation.format() in qml/KeyNotation.js."""
+    if sequence.find(", ") > 0:
+        return "".join(part[-1].upper() if re.fullmatch(r"Shift\+[A-Za-z]", part) else format_sequence(part)
+                       for part in sequence.split(", "))
+    key, modifiers = sequence, []
+    if len(sequence) > 1 and sequence.endswith("++"):
+        key, modifiers = "+", sequence[:-2].split("+")
+    elif sequence.find("+") > 0:
+        *modifiers, key = sequence.split("+")
+    modifiers = [modifier.lower() for modifier in modifiers if modifier]
+    return " ".join(modifiers + [format_key(key, "shift" in modifiers)])
+
+
+def load_actions(text):
+    match = re.search(r"readonly property var actions: \[\n(.*?)\n    \]\n", text, re.S)
+    if not match:
+        sys.exit("bin/shortcuts: actions catalog not found in qml/Main.qml")
+    actions = []
+    for line in match.group(1).splitlines():
+        line = line.strip()
+        if not line or line.startswith("//"):
+            continue
+        literal = re.sub(r'([{,]\s*)([A-Za-z_]\w*):', r'\1"\2":', line.rstrip(","))
+        try:
+            actions.append(json.loads(literal))
+        except json.JSONDecodeError as error:
+            sys.exit(f"bin/shortcuts: catalog entries must be plain literals ({error}): {line}")
+    return actions
+
+
+def code(sequences):
+    return " · ".join(f"`{format_sequence(sequence)}`" for sequence in sequences)
+
+
+def render(actions):
+    help_keys = next(action["sequences"] for action in actions if action["id"] == "help")
+    lines = [START, "",
+             f"Press {code(help_keys)} in the app for the full, searchable list; "
+             f"`{format_sequence('Return')}` there performs the selected action.",
+             "Generated from the action catalog by `bin/shortcuts`; alternatives are separated by ·."]
+    groups = GROUPS + sorted({action.get("group", "Other") for action in actions} - set(GROUPS))
+    for group in groups:
+        rows = []
+        for action in actions:
+            if action.get("group", "Other") != group:
+                continue
+            sequences = action.get("sequences") or []
+            existing = next((row for row in rows if row[0] == action["title"]), None)
+            if existing:
+                existing[1].extend(sequences)
+            else:
+                rows.append((action["title"], list(sequences)))
+        if not rows:
+            continue
+        lines += ["", f"### {group}", ""]
+        for title, sequences in rows:
+            lines.append(f"- {code(sequences)}: {title}" if sequences else f"- {title}")
+    aliases = [action for action in actions if action.get("aliases")]
+    if aliases:
+        lines += ["", "### Aliases", "",
+                  "These also work, but stay out of the in-app list:", ""]
+        for action in aliases:
+            lines.append(f"- {code(action['aliases'])} ({action['title']}): {action.get('aliasReason', '')}".rstrip(": "))
+    lines += ["", END]
+    return "\n".join(lines)
+
+
+def main():
+    check = sys.argv[1:] == ["--check"]
+    if sys.argv[1:] and not check:
+        sys.exit("Usage: bin/shortcuts [--check]")
+    readme = README.read_text(encoding="utf-8")
+    if START not in readme or END not in readme:
+        sys.exit(f"bin/shortcuts: README.md needs {START} and {END} markers")
+    before, rest = readme.split(START, 1)
+    _, after = rest.split(END, 1)
+    updated = before + render(load_actions(MAIN.read_text(encoding="utf-8"))) + after
+    if check:
+        if updated != readme:
+            print("README.md shortcuts are stale; run bin/shortcuts", file=sys.stderr)
+            return 1
+        return 0
+    if updated != readme:
+        README.write_text(updated, encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

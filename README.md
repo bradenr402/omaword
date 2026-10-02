@@ -38,71 +38,116 @@ Search results follow your Omarchy theme, light or dark:
 
 ## Shortcuts
 
-Press `?` or `F1` in the app for the full, searchable list; Enter there performs the selected action.
+<!-- shortcuts:start -->
+
+Press `?` · `F1` in the app for the full, searchable list; `enter` there performs the selected action.
+Generated from the action catalog by `bin/shortcuts`; alternatives are separated by ·.
 
 ### Navigate
 
-- `j` / `k` or `Down` / `Up`: next / previous verse (hold to keep moving)
-- `h` / `l`: previous / next chapter
-- `4j`: move four verses (any count works)
-- `20g`: go to verse 20
-- `zz` / `zt` / `zb`: center the current verse, or scroll it to the top / bottom
-- `Ctrl k`: navigate to a passage by reference
-
-### Search
-
-- `s`: search Scripture in the current version
-- `/`: find text in the current chapter
-- `n` / `N`: next / previous match (`3n` works)
-
-### Palette
-
-- `Ctrl Space` or `Ctrl Shift P`: open Commands
-- `Space`: resume the last palette
-- `Tab` / `Shift Tab`: switch between Passage, Search, and Command
+- `zz`: Center current verse
+- `zt`: Scroll current verse to top
+- `zb`: Scroll current verse to bottom
+- `h` · `←` · `[`: Previous chapter
+- `l` · `→` · `]`: Next chapter
+- `k` · `↑`: Previous verse
+- `j` · `↓`: Next verse
+- `ctrl u`: Previous 5 verses
+- `ctrl d`: Next 5 verses
+- `ctrl b` · `pgup`: Previous 10 verses
+- `ctrl f` · `pgdn`: Next 10 verses
+- `g` · `home`: Select chapter beginning
+- `shift G` · `end`: Select chapter end
+- `20g`: Go to verse number
 
 ### Select
 
-- `v`: start visual selection, then `j` / `k` to extend it
-- `J` / `K`: start and extend a range immediately
+- `click`: Select verse
+- `shift click`: Select a range
+- `v`: Toggle visual selection
+- `shift K` · `shift ↑`: Extend to previous verse
+- `shift J` · `shift ↓`: Extend to next verse
+
+### Search
+
+- `s`: Search Bible
+- `/`: Find in chapter
+- `n`: Next search match
+- `shift N`: Previous search match
 
 ### Annotate
 
-- `m`: bookmark
-- `x`: highlight
-- `w`: write a note in the Notes panel (Esc closes it)
-- `t`: tag the passage (in the tag editor, `Space` / `Enter` toggles a tag; Enter in search creates and applies one)
-- `Shift E`: edit an existing annotation's range (`o` swaps ends, Enter saves, Esc restores)
-- `d`: add the passage to the Desk, or remove it
-- `Shift L`: Related passages that share tags
+- `d`: Add to Desk
+- `shift E`: Edit annotation range
+- `w`: Write a note
+- `t`: Tag passage
+- `m` · `ctrl m`: Bookmark selection
+- `x` · `ctrl h`: Highlight selection
 
 ### Copy
 
-- `y`: copy as a quotation
-- `Y`: copy as plain text
-- `Ctrl c`: copy selected text, or the passage when no text is selected
-- Middle-click: copy the clicked verse or selection as a quotation
-- Right-click, `Menu`, or `Shift F10`: context menu for whatever you clicked
+- `y` · `middle click`: Copy passage as quotation
+- `shift Y` · `ctrl shift C`: Copy passage as plain text
+- `ctrl c`: Copy selected text
+- `menu` · `shift F10` · `right click`: Open context menu
 
-### Panels and windows
+### Panels
 
-- `Ctrl a`: Annotations (Bookmarks, Highlights, Notes, Tags)
-- `Shift D`: Desk, a study list shared by all windows and versions (in the Desk, `x` removes a passage and `Shift X` cleans it)
-- `Shift V`: switch versions
-- `Shift R`: Reading settings
-- `Ctrl n`: new reader window
+- `ctrl a`: Annotations panel
+- `shift D`: Open Desk
+- Notes panel
+- `shift L`: Related passages
+
+### Palettes and windows
+
+- `ctrl k`: Navigate to a passage
+- `ctrl space` · `ctrl shift P`: Open commands
+- `ctrl n`: New window
+- `shift R`: Reading settings
+- `shift V`: Switch version
+- `space`: Resume last palette
+- `?` · `F1`: Keybindings
 
 ### Reading
 
-- `b`: cycle Paragraph, Verse, and Block layouts
-- `f`: focus mode, which dims everything except the current verse or selection
-- `Shift H`: show or hide headings
+- `ctrl +` · `ctrl =`: Larger text
+- `ctrl -`: Smaller text
+- `ctrl 0`: Reset text size
+- `r`: Show verse numbers
+- `shift H`: Show headings
+- `p`: Verse picker
+- `b`: Reading mode
+- `f`: Focus mode
+- `ctrl [`: Decrease line height
+- `ctrl ]`: Increase line height
+- `ctrl \`: Reset line height
+- `esc`: Dismiss current panel or selection
+
+### Lists
+
+- `shift X`: Clean Desk
+
+### Commands only
+
+- Tags
+- Manage tags
+- Export notes as Markdown
+- Save annotation backup
+- Restore annotation backup
+- Line height
+- Remove version
+- Add version
+- About & Attribution
+- Sound effects
+- Reduce motion
+
+<!-- shortcuts:end -->
 
 Commands → **Reduce motion** turns off pulses, flashes, and fades; **Disable sound effects** silences the subtle sounds. Both apply to all windows.
 
 Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
 
-Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related, or press `Shift E` to move the assignments of the focused range. Use `t` to edit exact-range assignments and Commands → **Manage tags** to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version.
+Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related, or press `shift E` to move the assignments of the focused range. Use `t` to edit exact-range assignments and Commands → **Manage tags** to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version.
 
 The footer puts `?` before mode on the left, search, passage, and version in the center, and Related, Annotations, Desk, and Notes on the right. Annotations are drawn like pen and highlighter marks: hand-drawn Verse rails or inline Paragraph/Block brackets, with subtle cursor-range shading.
 

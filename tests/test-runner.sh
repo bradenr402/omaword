@@ -171,3 +171,20 @@ done
 ! kill -0 "$worker" 2>/dev/null
 assert_idle
 printf 'PASS interruption terminates active worker process groups\n'
+
+# The README shortcut section is generated from the QML action catalog.
+docs="$workspace/docs"
+mkdir -p "$docs/bin" "$docs/qml"
+cp "$root/bin/shortcuts" "$docs/bin/shortcuts"
+cp "$root/qml/Main.qml" "$docs/qml/Main.qml"
+cp "$root/README.md" "$docs/README.md"
+python3 "$docs/bin/shortcuts" --check
+printf -- '- stale line\n' >> "$docs/README.md"
+sed -i 's/<!-- shortcuts:end -->/- `q`: Stale entry\n<!-- shortcuts:end -->/' "$docs/README.md"
+! python3 "$docs/bin/shortcuts" --check 2>/dev/null
+python3 "$docs/bin/shortcuts"
+python3 "$docs/bin/shortcuts" --check
+grep -q -- '- stale line' "$docs/README.md"
+! grep -q 'Stale entry' "$docs/README.md"
+grep -q -- '- `j` · `↓`: Next verse' "$docs/README.md"
+printf 'PASS README shortcuts match the action catalog\n'

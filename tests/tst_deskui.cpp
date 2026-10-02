@@ -502,7 +502,7 @@ private slots:
         QVERIFY(titles.contains("Open Desk")); QVERIFY(titles.contains("Add to Desk"));
         QVERIFY(titles.contains("Clean Desk"));
         for (const auto &r : value(rows).toList())
-            if (r.toMap()["id"] == "cleanDesk") { QCOMPARE(r.toMap()["keys"].toString(), QString("Shift X")); QVERIFY(!r.toMap().contains("sequences")); }
+            if (r.toMap()["id"] == "cleanDesk") { QCOMPARE(r.toMap()["sequences"].toStringList(), QStringList{"Shift+X"}); QCOMPARE(r.toMap()["scope"].toString(), QString("desk")); }
         key(Qt::Key_Escape);
     }
 };

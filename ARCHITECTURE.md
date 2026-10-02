@@ -140,7 +140,7 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
 - Bible search: unquoted terms AND within a verse; quoted phrases may span
   adjacent verses; mixed queries anchor on the minimal phrase range. Never
   crosses chapters. Max 4096 units; unbalanced quotes error.
-- Chapter find (`/`) is literal; `n`/`N` never wrap.
+- Chapter find (`/`) is literal; `n`/`shift N` never wrap.
 - `ScriptureSearch` keeps grapheme-safe maps to original UTF-16 offsets; one
   shared corpus cache (one generation, ≤ 64 MiB); stale requests dropped by token.
   `SearchDocument`/`BlockDocument` map those offsets into each layout, skipping

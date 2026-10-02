@@ -228,8 +228,8 @@ private slots:
         QCOMPARE(bible->selectionReference(), QString("John 1:3"));
         QCOMPARE(ids(), passageIds);
         QVERIFY(prop("modalOpen").toBool()); QVERIFY(!prop("readerKeys").toBool());
-        const QHash<QString, QString> shortcuts = {{"copy", "y"}, {"copyPlain", "Shift Y"}, {"bookmark", "m"}, {"highlight", "x"},
-            {"note", "w"}, {"tags", "t"}, {"desk", "d"}, {"related", "Shift L"}, {"chapterFind", "/"}};
+        const QHash<QString, QString> shortcuts = {{"copy", "y"}, {"copyPlain", "shift Y"}, {"bookmark", "m"}, {"highlight", "x"},
+            {"note", "w"}, {"tags", "t"}, {"desk", "d"}, {"related", "shift L"}, {"chapterFind", "/"}};
         for (auto it = shortcuts.cbegin(); it != shortcuts.cend(); ++it) {
             QCOMPARE(entry(it.key()).value("shortcut").toString(), it.value());
             auto label = item("contextMenuShortcut:" + it.key());
@@ -410,7 +410,7 @@ private slots:
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("marker"));
         QCOMPARE(ids(), markerIds);
-        QCOMPARE(entry("editRange").value("shortcut").toString(), QString("Shift E"));
+        QCOMPARE(entry("editRange").value("shortcut").toString(), QString("shift E"));
         QCOMPARE(entry("remove").value("text").toString(), QString("Remove bookmark"));
         QCOMPARE(entry("desk").value("text").toString(), QString("Add to Desk"));
         // Copy passage copies the marker's range without moving the reader.
