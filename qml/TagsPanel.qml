@@ -426,8 +426,10 @@ Item {
         }
         background: Rectangle {
             color: control.down || control.chosen || control.hovered ? panel.desktop.surface : "transparent"
-            border.color: control.activeFocus || control.chosen ? panel.desktop.accent : panel.desktop.border
-            radius: panel.desktop.cornerRadius
+            // Quiet like the app's other buttons: a border only marks focus or a chosen toggle.
+            border.width: control.activeFocus || control.chosen ? 1 : 0
+            border.color: panel.desktop.accent
+            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
@@ -581,8 +583,9 @@ Item {
         background: Rectangle {
             color: panel.desktop.background
             border.color: panel.desktop.border
-            radius: panel.desktop.cornerRadius
+            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
+        Overlay.modal: Rectangle { color: Qt.rgba(panel.desktop.background.r, panel.desktop.background.g, panel.desktop.background.b, 0.72) }
         contentItem: Item { id: pickerHost }
     }
         ColumnLayout {
@@ -793,7 +796,7 @@ Item {
                     width: tagList.width
                     chosen: panel.page === "manage" ? panel.managedId === modelData.id
                         : (panel.page === "picker" ? panel.exactIds : panel.filterIds).indexOf(modelData.id) >= 0
-                    text: (chosen ? "✓  " : "    ") + modelData.name + "  · " + modelData.count
+                    text: (chosen ? "✓  " : "    ") + modelData.name + " · " + modelData.count
                     hint: modelData.name
                     enabled: panel.page !== "picker" || (panel.scopeValid && !panel.bible.busy)
                     onClicked: { tagList.currentIndex = index; panel.toggleTag(modelData.id) }
@@ -908,11 +911,18 @@ Item {
             }
             Item { Layout.fillHeight: true; visible: panel.confirmation !== null }
             TagText { objectName: "tagMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.message }
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 1
+                visible: panel.page !== "summary"
+                color: panel.desktop.border
+                opacity: 0.65
+            }
             TagText {
                 Layout.fillWidth: true
                 visible: panel.page !== "summary"
-                text: panel.page === "picker" ? "Space / Enter toggles · Enter in search creates / assigns · Esc clears, then closes"
-                    : "Enter opens a passage · Esc clears, then closes"
+                text: panel.page === "picker" ? "Space toggle    Enter toggle / create    Esc clear / close"
+                    : "Enter open    Esc clear / close"
                 font.pixelSize: 11 * panel.controlScale
                 color: panel.desktop.muted
             }
