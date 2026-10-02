@@ -235,9 +235,8 @@ ApplicationWindow {
             }
         }
         QVERIFY(literalLabels > 0);
-        search("query"); key(Qt::Key_Escape);
-        QVERIFY(prop("visibleModal").toBool()); QCOMPARE(prop("query").toString(), QString());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("visibleModal").toBool());
+        // One esc closes the picker, query and all.
+        search("query"); key(Qt::Key_Escape); QTRY_VERIFY(!prop("visibleModal").toBool());
         QVERIFY(!prop("scopePinned").toBool()); QCOMPARE(root->property("closed").toInt(), 1);
         QCOMPARE(ids(bible->tagsForScope(other)), QStringList{overlapId});
     }
@@ -606,7 +605,9 @@ ApplicationWindow {
         QVERIFY(invoke("openRelated").toBool());
         auto drawer = panel->findChild<QObject *>("relatedDrawer"); QVERIFY(drawer);
         QTRY_VERIFY(drawer->property("opened").toBool());
-        QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        // Results, not the search field, take focus; / searches.
+        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        key(Qt::Key_Slash); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(drawer->property("edge").toInt(), int(Qt::RightEdge));
         QCOMPARE(drawer->property("height").toReal(), window->height());
         const auto bounds = item("tagsBody")->mapRectToScene(item("tagsBody")->boundingRect());

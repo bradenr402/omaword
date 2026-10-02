@@ -161,11 +161,11 @@ These also work, but stay out of the in-app list:
 
 <!-- shortcuts:end -->
 
-Commands → **Reduce motion** turns off pulses, flashes, and fades; **Disable sound effects** silences the subtle sounds. Both apply to all windows.
+**Reduce motion** (`alt m`) turns off pulses, flashes, and fades; **Disable sound effects** (`alt s`) silences the subtle sounds. Both are also in Commands and apply to all windows.
 
 Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
 
-Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related, or press `shift E` to move the assignments of the focused range. Use `t` to edit exact-range assignments and Commands → **Manage tags** to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version.
+Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related, or press `shift E` to move the assignments of the focused range. Use `t` to edit exact-range assignments and **Manage tags** (`ctrl t`) to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version.
 
 The footer puts `?` before mode on the left, search, passage, and version in the center, and Related, Annotations, Desk, and Notes on the right. Annotations are drawn like pen and highlighter marks: hand-drawn Verse rails or inline Paragraph/Block brackets, with subtle cursor-range shading.
 

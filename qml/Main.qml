@@ -1552,6 +1552,8 @@ ApplicationWindow {
     }
     // Annotations search: reference, note, and tag names, case-insensitive.
     property string savedQuery: ""
+    // Typing replaces the field's text binding, so clear both.
+    function clearSavedQuery() { savedQuery = ""; savedSearch.text = "" }
     function savedMatches(entry, query) {
         if (!query.length) return true
         return [entry.reference, entry.note || "", tagsPlainText(entry.tags), entry.excerpt || ""]
@@ -1585,9 +1587,9 @@ ApplicationWindow {
     }
     function filterSaved(delta) {
         const tab = (collectionTab + delta + 4) % 4
-        if (tab === 3) { savedQuery = ""; openTagsBrowser(); return }
+        if (tab === 3) { clearSavedQuery(); openTagsBrowser(); return }
         tagsUi.embeddedClosed()
-        savedQuery = ""
+        clearSavedQuery()
         collectionTab = tab
         collectionList.currentIndex = collectionList.count > 0 ? 0 : -1
         moveSaved(0)
@@ -3966,7 +3968,7 @@ ApplicationWindow {
         }
         // While closing, a drawer must not keep its Escape grab: the next Escape
         // belongs to the reader (or range editor) immediately.
-        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent(); else app.savedQuery = "" }
+        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent(); else app.clearSavedQuery() }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.focusSavedList() }
         onVisibleChanged: if (visible && !closing) focusContent()
@@ -4043,7 +4045,12 @@ ApplicationWindow {
                 selectByMouse: true
                 leftPadding: 10 * app.controlScale; rightPadding: 10 * app.controlScale
                 text: app.savedQuery
-                onTextEdited: { app.savedQuery = text; collectionList.currentIndex = collectionList.count ? 0 : -1 }
+                onTextEdited: {
+                    app.savedQuery = text
+                    collectionList.currentIndex = collectionList.count ? 0 : -1
+                    // Clearing a short tab's query hides the field: keep the keyboard in the list.
+                    if (!app.savedSearchVisible) Qt.callLater(app.focusSavedList)
+                }
                 background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: savedSearch.activeFocus ? desktop.accent : desktop.border }
                 Keys.onDownPressed: app.focusSavedList()
                 Keys.onReturnPressed: app.focusSavedList()

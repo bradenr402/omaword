@@ -29,6 +29,7 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths |
 | `qml/AppContextMenu.qml`, `qml/AppToolTip.qml` | Shared context menu and themed tooltip |
 | `qml/ChapterFind.qml`, `qml/SearchHighlights.qml` | `/` chapter find; match overlay painting |
+| `qml/KeyNotation.js`, `bin/shortcuts` | One key notation for every displayed key; README shortcuts generated from Main's `actions` catalog (`--check` in CI) |
 
 ## USFM import and catalog lifecycle
 

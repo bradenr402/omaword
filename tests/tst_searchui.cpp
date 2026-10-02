@@ -518,7 +518,7 @@ private slots:
         search("alpha beta"); QCOMPARE(bible->searchResultCount(), 8); QCOMPARE(bible->tagScope(), original);
         QVERIFY(!item("referencePreview")->isVisible());
         key(Qt::Key_Down); const int row = object("paletteResults")->property("currentIndex").toInt();
-        key(Qt::Key_Escape); QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
+        // One esc closes with the query; space resumes it.
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         key(Qt::Key_Space); QTRY_COMPARE(object("referenceInput")->property("text").toString(), QString("/ alpha beta"));
         QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
@@ -534,7 +534,7 @@ private slots:
     void incompleteQuoteAndPagination() {
         search("\"unfinished"); QVERIFY(!bible->searchError().isEmpty()); QVERIFY(bible->error().isEmpty());
         QVERIFY(!object("errorDialog")->property("visible").toBool());
-        key(Qt::Key_Escape); type("common"); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
+        key(Qt::Key_A, Qt::ControlModifier); type("/common"); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
         QCOMPARE(bible->searchResultCount(), 130); QCOMPARE(bible->searchResults().size(), 100);
         bible->loadMoreSearchResults(); QTRY_COMPARE(object("paletteResults")->property("count").toInt(), 130);
         object("paletteResults")->setProperty("currentIndex", 115);

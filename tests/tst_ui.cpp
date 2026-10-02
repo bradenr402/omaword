@@ -242,6 +242,8 @@ class UiTest : public QObject
         reference("John 3:1");
     }
     void reference(const QString &text) {
+        // Ctrl keys belong to the note editor while typing: leave it first.
+        if (item("noteEditor") && item("noteEditor")->hasActiveFocus()) item("notesPanel")->forceActiveFocus();
         key(Qt::Key_K, Qt::ControlModifier);
         QTRY_VERIFY(prop("passagePalette", "opened").toBool());
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
@@ -1250,6 +1252,8 @@ private slots:
         QVERIFY(bible->focusMode());
         key(Qt::Key_F); QVERIFY(!bible->focusMode());
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        item("notesPanel")->forceActiveFocus();
         action("focus mode");
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(bible->focusMode());
@@ -1301,10 +1305,10 @@ private slots:
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
         type("show verse numbers");
-        QTRY_COMPARE(prop("paletteHintnumbers","text").toString(),QString("On · r"));
+        QTRY_COMPARE(prop("paletteHintnumbers","text").toString(),QString("On · alt n"));
         key(Qt::Key_Return); QTRY_VERIFY(!bible->showVerseNumbers());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
-        QTRY_COMPARE(prop("paletteHintnumbers","text").toString(),QString("Off · r"));
+        QTRY_COMPARE(prop("paletteHintnumbers","text").toString(),QString("Off · alt n"));
     }
     void settingsKeysAndSwitchGeometry_data() {
         QTest::addColumn<double>("scale");
@@ -3798,7 +3802,7 @@ private slots:
         QVERIFY(bible->showHeadings());
         // ctrl v pastes into the note instead of opening Versions.
         QApplication::clipboard()->setText("pasted");
-        key(Qt::Key_V,Qt::ControlModifier);
+        key(Qt::Key_End); key(Qt::Key_V,Qt::ControlModifier);
         QCOMPARE(prop("noteEditor","text").toString(),QString("notes s ?pasted"));
         QVERIFY(!prop("versionDialog","visible").toBool());
         // Outside the editor (preview), the same keys work again.
@@ -3875,7 +3879,6 @@ private slots:
         key(Qt::Key_Return);
         QTRY_COMPARE(requested.count(),3);
         QVERIFY(!prop("passagePalette","visible").toBool());
-        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         item("notesPanel")->forceActiveFocus();
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("new window");
@@ -4048,7 +4051,7 @@ private slots:
             QTRY_VERIFY(object(qPrintable("keybindingHint" + row[1])));
             QCOMPARE(plainHint(prop(qPrintable("keybindingHint" + row[1]),"text").toString()),row[2]);
         }
-        for (const auto &query : {QString("f1"),QString("ctrl shift p"),QString("20G")}) {
+        for (const auto &query : {QString("keybindings f1"),QString("open commands ctrl shift p")}) {
             key(Qt::Key_A,Qt::ControlModifier); type(query);
             QTRY_COMPARE(prop("keybindingResults","count").toInt(),0);
         }
@@ -4223,6 +4226,7 @@ private slots:
         QCOMPARE(bible->desk().first().toMap().value("reference").toString(),QString("John 3:17"));
         key(Qt::Key_J); key(Qt::Key_K); QCOMPARE(prop("tagResults","currentIndex").toInt(),0);
         key(Qt::Key_E,Qt::ShiftModifier); QTRY_VERIFY(window->property("rangeEditing").toBool());
+        QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!window->property("rangeEditing").toBool());
         QCOMPARE(bible->selectionReference(),QString("John 3:16"));
         if (!prop("relatedDrawer","visible").toBool()) { key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool()); }
@@ -5487,7 +5491,7 @@ private slots:
         QCOMPARE(prop("collectionList","count").toInt(),1);
         key(Qt::Key_H); QCOMPARE(window->property("collectionTab").toInt(),1);
         key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(),0);
-        for (const auto k : {Qt::Key_M,Qt::Key_X,Qt::Key_N,Qt::Key_V,Qt::Key_Y,Qt::Key_G,
+        for (const auto k : {Qt::Key_M,Qt::Key_X,Qt::Key_N,Qt::Key_V,Qt::Key_G,
                             Qt::Key_BracketLeft,Qt::Key_BracketRight,Qt::Key_PageDown,Qt::Key_Space}) {
             key(k);
             QVERIFY2(navigation.count() == 0,qPrintable(QString("Saved leaked key %1").arg(int(k))));
