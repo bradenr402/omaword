@@ -387,7 +387,7 @@ private slots:
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
         key(Qt::Key_Equal, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 19);
         QVERIFY(qAbs(prop("scale").toDouble() - 19.0 / 18) < 1e-9);
-        QTRY_COMPARE(object("deskText0")->property("font").value<QFont>().pixelSize(), qRound(14 * 19.0 / 18));
+        QTRY_COMPARE(object("deskText0")->property("font").value<QFont>().pixelSize(), qRound(13 * 19.0 / 18));
         QCOMPARE(item("verseBody1")->property("font").value<QFont>().pixelSize(), 19);
         QCOMPARE(object("toast")->property("font").value<QFont>().pixelSize(), qRound(13 * 19.0 / 18));
         key(Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.6);

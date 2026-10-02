@@ -217,6 +217,10 @@ private slots:
         QCOMPARE(object("deskHeader0")->property("text").toString(), firstItem["reference"].toString() + " · " + firstItem["versionAbbreviation"].toString());
         QCOMPARE(object("deskText0")->property("text").toString().remove(QChar(0x200e)), firstItem["text"].toString());
         QVERIFY(firstItem["text"].toString().contains("ALPHA and beta"));
+        // Styled like History excerpts: muted, 13 px at scale 1, the panel line height.
+        QCOMPARE(object("deskText0")->property("color").value<QColor>(), desktop->property("muted").value<QColor>());
+        QCOMPARE(object("deskText0")->property("font").value<QFont>().pixelSize(), 13);
+        QCOMPARE(object("deskText0")->property("lineHeight").toDouble(), window->property("panelLineHeight").toDouble());
         QVERIFY(firstItem["text"].toString().contains("here across verses"));
         QCOMPARE(object("deskList")->property("currentIndex").toInt(), 0);
         key(Qt::Key_J); QCOMPARE(object("deskList")->property("currentIndex").toInt(), 1);

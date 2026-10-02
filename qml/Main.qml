@@ -4701,8 +4701,9 @@ ApplicationWindow {
                             visible: text.length > 0
                             textFormat: Text.PlainText
                             horizontalAlignment: Text.AlignLeft
-                            color: deskEntry.modelData.available ? desktop.foreground : desktop.muted
-                            font.pixelSize: 14 * app.scale
+                            // Matches History excerpts: muted, the same size and line height.
+                            color: desktop.muted
+                            font.pixelSize: 13 * app.scale
                             lineHeight: app.panelLineHeight
                             Layout.fillWidth: true; wrapMode: Text.Wrap
                         }
