@@ -515,7 +515,7 @@ ApplicationWindow {
         draggingText = false
         dragAnchorRow = -1
     }
-    readonly property real floatingSafety: bible.focusMode ? 0 : 72 * scale
+    readonly property real floatingSafety: bible.focusMode ? 0 : Math.max(72 * scale, footerHeight + 2 * footerMargin)
     readonly property real verseGutter: 76 * scale
     // Source rows, rather than numeric verse labels, define chapter intervals.
     // Union each kind's continuous coverage: overlapping logical ranges already
@@ -2438,6 +2438,25 @@ ApplicationWindow {
                         ctx.moveTo(2, 13); ctx.lineTo(8, 13); ctx.lineTo(9.5, 16)
                         ctx.lineTo(14.5, 16); ctx.lineTo(16, 13); ctx.lineTo(22, 13)
                         ctx.lineTo(22, 21); ctx.lineTo(2, 21); ctx.closePath()
+                    } else if (glyph === "layout-verse") {
+                        // Verse: separate short rows, each with a small number tick.
+                        for (const y of [5, 12, 19]) {
+                            ctx.moveTo(3, y - 1.5); ctx.lineTo(3, y + 1.5)
+                            ctx.moveTo(8, y); ctx.lineTo(y === 12 ? 17 : 21, y)
+                        }
+                    } else if (glyph === "layout-paragraph") {
+                        // Paragraph: two text blocks, each first line indented.
+                        ctx.moveTo(8, 3); ctx.lineTo(21, 3)
+                        ctx.moveTo(3, 7); ctx.lineTo(21, 7)
+                        ctx.moveTo(3, 11); ctx.lineTo(14, 11)
+                        ctx.moveTo(8, 17); ctx.lineTo(21, 17)
+                        ctx.moveTo(3, 21); ctx.lineTo(17, 21)
+                    } else if (glyph === "layout-block") {
+                        // Block: one solid run of lines.
+                        for (const y of [4, 8.5, 13, 17.5]) { ctx.moveTo(3, y); ctx.lineTo(21, y) }
+                        ctx.moveTo(3, 22); ctx.lineTo(12, 22)
+                    } else if (glyph === "more") {
+                        ctx.fillRect(4, 11, 3, 3); ctx.fillRect(10.5, 11, 3, 3); ctx.fillRect(17, 11, 3, 3)
                     } else if (glyph === "visual") {
                         // The bracket and square handles span all three verse lines.
                         ctx.moveTo(8, 6); ctx.lineTo(21, 6)
@@ -3052,15 +3071,20 @@ ApplicationWindow {
                 // A continuous fade keeps floating controls legible without a
                 // footer surface, divider, or shortening the reading viewport.
                 Rectangle {
+                    id: readingBottomFade
                     objectName: "readingBottomFade"
                     visible: !bible.focusMode
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     height: app.floatingSafety + 24 * app.scale
+                    // Fully opaque from just above the footer's top row, so reader
+                    // text never shows through the footer controls.
+                    readonly property real opaqueFrom: Math.min(0.6, Math.max(0.05,
+                        (height - app.footerHeight - app.footerMargin - 8 * app.controlScale) / Math.max(1, height)))
                     gradient: Gradient {
                         GradientStop { position: 0; color: app.tint(desktop.background, 0) }
-                        GradientStop { position: 0.6; color: desktop.background }
+                        GradientStop { position: readingBottomFade.opaqueFrom; color: desktop.background }
                         GradientStop { position: 1; color: desktop.background }
                     }
                 }
@@ -3321,18 +3345,48 @@ ApplicationWindow {
         onClicked: app.closeNotes()
     }
 
+    // Footer: ? and mode on the left; search, passage, version, and layout in
+    // the center; Annotations, Notes, Related, and Desk on the right. The center
+    // stays centered while it fits. When cramped, the side groups keep the
+    // bottom corners and the center moves to a row above; more cramped hides
+    // the layout button; really cramped folds the right group into "…" and
+    // hides ?. The reader keeps the whole footer inside floatingSafety.
+    readonly property real footerMargin: 16 * controlScale
+    readonly property real footerGap: 4 * controlScale
+    readonly property real footerButton: 40 * controlScale
+    readonly property real footerGroupGap: 24 * controlScale
+    readonly property int footerRightCount: bible.ready ? 4 : 0
+    readonly property real footerLeftFull: bible.ready ? 2 * footerButton + footerGap : footerButton
+    readonly property real footerRightFull: footerRightCount ? footerRightCount * footerButton + (footerRightCount - 1) * footerGap : 0
+    readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
+        + (bible.ready ? versionControl.implicitWidth + layoutControl.implicitWidth : 0)
+    readonly property real footerAvailable: width - 2 * footerMargin
+    readonly property bool footerTwoRows: footerCenterFull + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap > footerAvailable
+    readonly property bool footerHideLayout: footerTwoRows && footerCenterFull > footerAvailable
+    readonly property bool footerCollapsed: footerTwoRows && footerLeftFull + footerRightFull + footerGroupGap > footerAvailable
+    readonly property real footerHeight: footerButton * (footerTwoRows ? 2 : 1) + (footerTwoRows ? footerGap : 0)
+    function footerPanelEntries() {
+        const ready = !rangeEditing && bible.ready && !bible.busy
+        return [
+            { id: "annotations", text: "Annotations", shortcut: menuKey("annotations"), enabled: ready, run: function() { app.runCommand("annotations") } },
+            { id: "notes", text: "Notes", shortcut: menuKey("notes"), enabled: ready, run: function() { app.toggleNotes() } },
+            { id: "related", text: "Related passages", shortcut: menuKey("related"), enabled: ready && hasSelection, run: function() { app.runCommand("related") } },
+            { id: "desk", text: "Desk", shortcut: menuKey("desk"), enabled: ready, run: function() { app.runCommand("desk") } }
+        ]
+    }
     Row {
         id: leftActions
         objectName: "leftActions"
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        anchors.margins: 16 * app.controlScale
-        spacing: 4 * app.controlScale
+        anchors.margins: app.footerMargin
+        spacing: app.footerGap
         visible: !bible.focusMode && !app.findPromptOpen
         FloatingButton {
             objectName: "helpControl"
             glyph: "help"
             tip: "Keybindings · " + app.keyText("help")
+            visible: !app.footerCollapsed
             enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: helpDialog.open()
         }
@@ -3351,24 +3405,25 @@ ApplicationWindow {
         id: locationControls
         objectName: "locationControls"
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 16 * app.controlScale
+        anchors.bottomMargin: app.footerMargin + (app.footerTwoRows ? app.footerButton + app.footerGap : 0)
         x: app.width / 2 - width / 2
-        readonly property real availableWidth: Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + 24 * app.controlScale))
-        width: Math.min(searchControl.width + passageControl.implicitWidth + (versionControl.visible ? versionControl.width : 0), availableWidth)
+        readonly property real availableWidth: app.footerTwoRows ? app.footerAvailable
+            : Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
+        readonly property real fixedWidth: searchControl.width + (versionControl.visible ? versionControl.width : 0) + (layoutControl.visible ? layoutControl.width : 0)
+        width: Math.min(fixedWidth + passageControl.implicitWidth, availableWidth)
         visible: !bible.focusMode && !app.findPromptOpen
         FloatingButton {
             id: searchControl
             objectName: "searchControl"
             glyph: "search"
-            width: Math.min(implicitWidth, locationControls.availableWidth * 0.2)
             tip: "Search Bible · " + app.keyText("bibleSearch")
             enabled: bible.ready && !app.rangeEditing && !bible.busy && !app.modalOpen
-            onClicked: app.openTextSearch()
+            onClicked: app.showPaletteMode("search")
         }
         FloatingButton {
             id: passageControl
             objectName: "passageControl"
-            width: Math.max(0, locationControls.width - searchControl.width - (versionControl.visible ? versionControl.width : 0))
+            width: Math.max(0, locationControls.width - locationControls.fixedWidth)
             text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
             tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · " + app.keyText("books")
             enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
@@ -3384,34 +3439,54 @@ ApplicationWindow {
             enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.openVersions(false)
         }
+        FloatingButton {
+            id: layoutControl
+            objectName: "layoutControl"
+            glyph: "layout-" + bible.readingMode
+            tip: "Layout · " + app.readingModeName(bible.readingMode) + " · " + app.keyText("readingMode")
+            visible: bible.ready && !app.footerHideLayout
+            enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
+            onClicked: app.runCommand("readingMode")
+        }
     }
     Row {
         id: floatingActions
         objectName: "floatingActions"
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.margins: 16 * app.controlScale
-        spacing: 4 * app.controlScale
+        anchors.margins: app.footerMargin
+        spacing: app.footerGap
         visible: !bible.focusMode && !app.findPromptOpen
-        FloatingButton {
-            objectName: "relatedControl"
-            glyph: "related"
-            visible: bible.ready
-            enabled: !app.rangeEditing && app.hasSelection && !bible.busy && !app.modalOpen
-            tip: "Related passages · " + app.keyText("related")
-            onClicked: app.runCommand("related")
-        }
+        readonly property bool expanded: bible.ready && !app.footerCollapsed
         FloatingButton {
             objectName: "savedControl"
-            visible: bible.ready
+            visible: floatingActions.expanded
             glyph: "saved"
+            selected: savedDrawer.visible
             tip: "Annotations · " + app.keyText("annotations")
             enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("annotations")
         }
         FloatingButton {
+            objectName: "notesControl"
+            visible: floatingActions.expanded
+            glyph: "notes"
+            selected: app.notesOpen
+            tip: "Notes · " + app.keyText("notes")
+            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            onClicked: app.toggleNotes()
+        }
+        FloatingButton {
+            objectName: "relatedControl"
+            glyph: "related"
+            visible: floatingActions.expanded
+            enabled: !app.rangeEditing && app.hasSelection && !bible.busy && !app.modalOpen
+            tip: "Related passages · " + app.keyText("related")
+            onClicked: app.runCommand("related")
+        }
+        FloatingButton {
             objectName: "deskControl"
-            visible: bible.ready
+            visible: floatingActions.expanded
             glyph: "desk"
             selected: deskDrawer.visible
             tip: "Desk · " + app.keyText("desk")
@@ -3419,13 +3494,16 @@ ApplicationWindow {
             onClicked: app.runCommand("desk")
         }
         FloatingButton {
-            objectName: "notesControl"
-            visible: bible.ready
-            glyph: "notes"
-            selected: app.notesOpen
-            tip: "Notes · " + app.keyText("notes")
+            id: footerMore
+            objectName: "footerMore"
+            visible: bible.ready && app.footerCollapsed
+            glyph: "more"
+            tip: "Panels"
             enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
-            onClicked: app.toggleNotes()
+            onClicked: {
+                const p = footerMore.mapToItem(null, 0, 0)
+                contextMenu.show("footer", app.footerPanelEntries(), p.x, p.y - 4 * 30 * app.scale - 8 * app.scale)
+            }
         }
     }
 
@@ -3449,7 +3527,7 @@ ApplicationWindow {
         objectName: "searchMatchCount"
         anchors.right: parent.right; anchors.bottom: parent.bottom
         anchors.rightMargin: 20 * app.controlScale
-        anchors.bottomMargin: bible.focusMode ? 16 * app.controlScale : 62 * app.controlScale
+        anchors.bottomMargin: bible.focusMode ? app.footerMargin : app.footerMargin + app.footerHeight + 6 * app.controlScale
         visible: !app.findPromptOpen && app.acceptedSearchQuery.length > 0
         text: app.searchError || (app.searchMatches.length ? (app.searchMatchIndex < 0
             ? app.searchMatches.length + " matches" : (app.searchMatchIndex + 1) + " / " + app.searchMatches.length) : "No matches")
@@ -4992,7 +5070,7 @@ ApplicationWindow {
         parent: Overlay.overlay
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 68
+        anchors.bottomMargin: bible.focusMode ? 68 : Math.max(68, app.footerMargin + app.footerHeight + 12 * app.controlScale)
         width: Math.min(toast.implicitWidth + 36, app.width - 48)
         height: toast.implicitHeight + 24
         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)

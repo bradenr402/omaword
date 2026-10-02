@@ -3296,14 +3296,22 @@ private slots:
         QVERIFY(search->width() > 0);
         QCOMPARE(passage->x(),search->width());
         QCOMPARE(version->x(),search->width() + passage->width());
-        QCOMPARE(location->width(),search->width() + passage->width() + version->width());
+        const auto layout = item("layoutControl");
+        QVERIFY(layout->isVisible());
+        QCOMPARE(layout->x(),search->width() + passage->width() + version->width());
+        QCOMPARE(location->width(),search->width() + passage->width() + version->width() + layout->width());
         QCOMPARE(prop("searchControl","glyph").toString(),QString("search"));
         QCOMPARE(prop("versionControl","text").toString(),bible->versionAbbreviation());
         QVERIFY(passage->width() > 0);
         const auto actions = item("floatingActions");
-        QVERIFY(location->x() + location->width() < actions->x());
-        QVERIFY(location->x() > item("leftActions")->x() + item("leftActions")->width());
-        for (const auto name : {"modeControl","searchControl","passageControl","versionControl","relatedControl","savedControl","notesControl","helpControl"}) {
+        if (window->property("footerTwoRows").toBool()) {
+            QVERIFY(location->y() + location->height() <= actions->y());
+            QVERIFY(location->y() + location->height() <= item("leftActions")->y());
+        } else {
+            QVERIFY(location->x() + location->width() < actions->x());
+            QVERIFY(location->x() > item("leftActions")->x() + item("leftActions")->width());
+        }
+        for (const auto name : {"modeControl","searchControl","passageControl","versionControl","layoutControl","relatedControl","savedControl","notesControl","deskControl","helpControl"}) {
             auto control = item(name);
             QVERIFY(control->isVisible());
             QVERIFY(QRectF(QPointF(),size).contains(control->mapRectToScene(QRectF(0,0,control->width(),control->height()))));
@@ -4310,6 +4318,87 @@ private slots:
         QVERIFY(!plainHint(prop("versionHints","text").toString()).contains("ctrl i"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
     }
+    void footerOrderAndResponsiveLayout() {
+        reference("1 Thessalonians 5:16-18");
+        const QStringList names = {"helpControl","modeControl","searchControl","passageControl","versionControl",
+            "layoutControl","savedControl","notesControl","relatedControl","deskControl","footerMore"};
+        window->setMinimumWidth(320);
+        struct Case { int width; int height; double scale; bool twoRows; bool layout; bool collapsed; };
+        const QList<Case> cases = {{1120,820,1,false,true,false},{900,820,1.5,true,true,false},{700,820,1,true,true,false},
+            {700,820,1.5,true,true,false},{560,820,1.5,true,true,false},{560,820,2.4,true,false,false},{360,640,1.5,true,false,true}};
+        for (const auto &entry : cases) {
+            window->resize(entry.width,entry.height);
+            QVERIFY(desktop->setProperty("textScale",entry.scale));
+            QTRY_COMPARE(window->width(),entry.width);
+            QTest::qWait(120);
+            const auto tag = QString("%1@%2").arg(entry.width).arg(entry.scale);
+            QCOMPARE(window->property("footerTwoRows").toBool(),entry.twoRows);
+            QCOMPARE(item("layoutControl")->isVisible(),entry.layout);
+            QCOMPARE(item("footerMore")->isVisible(),entry.collapsed);
+            QCOMPARE(item("helpControl")->isVisible(),!entry.collapsed);
+            QCOMPARE(item("savedControl")->isVisible(),!entry.collapsed);
+            QList<QPair<QString,QRectF>> rects;
+            for (const auto &name : names) {
+                auto button = item(qPrintable(name));
+                if (button && button->isVisible()) rects.append({name,button->mapRectToScene(button->boundingRect())});
+            }
+            const double band = window->height() - window->property("floatingSafety").toDouble();
+            for (int i = 0; i < rects.size(); ++i) {
+                QVERIFY2(QRectF(0,0,entry.width,entry.height).contains(rects[i].second),qPrintable(tag + " " + rects[i].first));
+                // Inside the reader's reserved bottom band: never over the text column.
+                QVERIFY2(rects[i].second.top() >= band - 0.5,qPrintable(tag + " " + rects[i].first));
+                for (int j = i + 1; j < rects.size(); ++j)
+                    QVERIFY2(!rects[i].second.intersects(rects[j].second),qPrintable(tag + " " + rects[i].first + " overlaps " + rects[j].first));
+            }
+            const auto location = item("locationControls")->mapRectToScene(item("locationControls")->boundingRect());
+            QVERIFY2(qAbs(location.center().x() - entry.width / 2.0) <= 1,qPrintable(tag));
+            const auto x = [this](const char *name) { return item(name)->mapToScene(QPointF()).x(); };
+            if (!entry.collapsed) {
+                QVERIFY(x("savedControl") < x("notesControl"));
+                QVERIFY(x("notesControl") < x("relatedControl"));
+                QVERIFY(x("relatedControl") < x("deskControl"));
+            }
+            QVERIFY(x("helpControl") < x("modeControl") || entry.collapsed);
+            if (entry.layout) QVERIFY(x("versionControl") < x("layoutControl"));
+            const auto passage = item("passageControl")->mapRectToScene(item("passageControl")->boundingRect());
+            if (!entry.twoRows) QCOMPARE(passage.top(),item("modeControl")->mapRectToScene(item("modeControl")->boundingRect()).top());
+            else QVERIFY(passage.bottom() <= item("modeControl")->mapToScene(QPointF()).y());
+            capture("footer-" + tag);
+        }
+        // The "…" menu opens the folded panels.
+        click(item("footerMore")); QTRY_VERIFY(prop("contextMenu","visible").toBool());
+        QCOMPARE(prop("contextMenu","target").toString(),QString("footer"));
+        QVERIFY(QMetaObject::invokeMethod(object("contextMenu"),"triggerId",Q_ARG(QVariant,QString("desk"))));
+        QTRY_VERIFY(prop("deskDrawer","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
+    }
+    void layoutButtonCyclesWithDistinctIcons() {
+        reference("John 3:16");
+        auto layout = item("layoutControl"); QVERIFY(layout && layout->isVisible());
+        QVERIFY(layout->property("tip").toString().contains("alt l"));
+        const QStringList cycle = {"paragraph","verse","block"};
+        QMap<QString,QImage> icons;
+        for (int step = 0; step < 3; ++step) {
+            const auto mode = bible->readingMode();
+            QCOMPARE(layout->property("glyph").toString(),"layout-" + mode);
+            QVERIFY(layout->property("tip").toString().contains(mode,Qt::CaseInsensitive));
+            QSignalSpy frames(window,&QQuickWindow::frameSwapped);
+            window->update(); QTRY_VERIFY(frames.count() > 0); QTest::qWait(80);
+            icons.insert(mode,window->grabWindow().copy(layout->mapRectToScene(layout->boundingRect()).toRect()));
+            capture("layout-icon-" + mode);
+            click(layout);
+            QTRY_COMPARE(bible->readingMode(),cycle[(cycle.indexOf(mode) + 1) % 3]);
+            QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        }
+        QCOMPARE(icons.size(),3);
+        QVERIFY(icons["verse"] != icons["paragraph"]); QVERIFY(icons["paragraph"] != icons["block"]);
+        QVERIFY(icons["verse"] != icons["block"]);
+        capture("layout-icons");
+        // alt l cycles too.
+        const auto before = bible->readingMode();
+        key(Qt::Key_L,Qt::AltModifier); QTRY_COMPARE(bible->readingMode(),cycle[(cycle.indexOf(before) + 1) % 3]);
+        QCOMPARE(layout->property("glyph").toString(),"layout-" + bible->readingMode());
+    }
     void keyNotation() {
         const QList<QPair<QStringList,QString>> cases = {
             {{"Shift+D"},"shift D"}, {{"Ctrl+K"},"ctrl k"}, {{"Alt+H"},"alt h"}, {{"X"},"x"},
@@ -4400,11 +4489,19 @@ private slots:
         QCOMPARE(searchButton->x(),0.0);
         QCOMPARE(passage->x(),searchButton->width());
         QCOMPARE(version->x(),searchButton->width() + passage->width());
-        QCOMPARE(location->width(),searchButton->width() + passage->width() + version->width());
+        const auto layoutButton = item("layoutControl");
+        const double layoutWidth = layoutButton->isVisible() ? layoutButton->width() : 0;
+        QCOMPARE(location->width(),searchButton->width() + passage->width() + version->width() + layoutWidth);
         QVERIFY(searchButton->width() > 0 && passage->width() > 0 && version->width() > 0);
-        QVERIFY(location->x() > item("modeControl")->x() + item("modeControl")->width());
-        QVERIFY(location->x() + location->width() < item("floatingActions")->x());
-        QVERIFY(prop("passageControlLabel","truncated").toBool());
+        if (window->property("footerTwoRows").toBool()) {
+            // Cramped: the center row sits above the corner groups.
+            QVERIFY(location->y() + location->height() <= item("leftActions")->y());
+            QVERIFY(location->y() + location->height() <= item("floatingActions")->y());
+        } else {
+            QVERIFY(location->x() > item("modeControl")->x() + item("modeControl")->width());
+            QVERIFY(location->x() + location->width() < item("floatingActions")->x());
+        }
+        QCOMPARE(prop("passageControlLabel","truncated").toBool(),passage->width() < passage->implicitWidth() - 1);
         QCOMPARE(prop("passageControl","tip").toString(),selected + " · Open passage · ctrl k");
         click(version);
         QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
@@ -5155,9 +5252,11 @@ private slots:
         QVERIFY(relatedBounds.left() > window->width() / 2);
         const auto helpBounds = item("helpControl")->mapRectToScene(item("helpControl")->boundingRect());
         QVERIFY(helpBounds.right() < modeBounds.left());
-        QVERIFY(relatedBounds.right() < item("savedControl")->mapToScene(QPointF()).x());
+        // Right group order: Annotations, Notes, Related, Desk.
         QVERIFY(item("savedControl")->mapToScene(QPointF(item("savedControl")->width(),0)).x()
             < item("notesControl")->mapToScene(QPointF()).x());
+        QVERIFY(item("notesControl")->mapToScene(QPointF(item("notesControl")->width(),0)).x() < relatedBounds.left());
+        QVERIFY(relatedBounds.right() < item("deskControl")->mapToScene(QPointF()).x());
         QCOMPARE(related->property("glyph").toString(),QString("related"));
         QCOMPARE(prop("relatedControlGlyph","kind").toString(),QString("tag"));
         QVERIFY(!prop("relatedControlGlyph","filled").toBool());
