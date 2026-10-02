@@ -4553,7 +4553,7 @@ private slots:
         QCOMPARE(prop("versionResults","count").toInt(),0);
         QVERIFY(item("versionEmpty")->isVisible());
         key(Qt::Key_Home); key(Qt::Key_End); key(Qt::Key_Return);
-        QVERIFY(prop("versionDialog","opened").toBool());
+        QVERIFY(prop("versionDialog","visible").toBool()); // Still up (it may still be fading in).
         QCOMPARE(bible->selectionReference(),selected);
         key(Qt::Key_A,Qt::ControlModifier); type("net");
         QCOMPARE(prop("versionResults","count").toInt(),1);
@@ -4563,7 +4563,7 @@ private slots:
         }
         key(Qt::Key_Return,Qt::ShiftModifier);
         key(Qt::Key_Enter,Qt::ShiftModifier);
-        QVERIFY(prop("versionDialog","opened").toBool());
+        QVERIFY(prop("versionDialog","visible").toBool()); // Still up (it may still be fading in).
         QVERIFY(!window->property("verseMode").toBool());
         QTest::qWait(100);
         for (auto name : {"versionSearch","versionAdd","versionResults","versionCancel","versionNext"}) {
@@ -4619,7 +4619,7 @@ private slots:
         else {
             key(Qt::Key_Tab); QTRY_VERIFY(item("versionAdd")->hasActiveFocus());
             key(Qt::Key_Return,Qt::ShiftModifier);
-            QVERIFY(prop("versionDialog","opened").toBool());
+            QVERIFY(prop("versionDialog","visible").toBool()); // Still up (it may still be fading in).
             QVERIFY(!prop("importGuide","visible").toBool());
             key(activation == 1 ? Qt::Key_Return : Qt::Key_Enter);
         }
@@ -4725,13 +4725,13 @@ private slots:
             QVERIFY(object("noteEditor")->setProperty("text","Unsaved version draft"));
             QVERIFY(window->setProperty("syncingNote",false));
             QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"engnet")));
-            QVERIFY(prop("versionDialog","opened").toBool());
+            QVERIFY(prop("versionDialog","visible").toBool()); // Still up (it may still be fading in).
             QVERIFY(bible->error().contains("version draft failure"));
             QVERIFY(QMetaObject::invokeMethod(window,"confirmRemoveVersion"));
             QCOMPARE(bible->versions(),versions);
             QCOMPARE(prop("noteEditor","text").toString(),QString("Unsaved version draft"));
             QVERIFY(bible->noteText().isEmpty());
-            QVERIFY(prop("versionDialog","opened").toBool());
+            QVERIFY(prop("versionDialog","visible").toBool()); // Still up (it may still be fading in).
             key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
             QVERIFY(QMetaObject::invokeMethod(window,"openVersions",Q_ARG(QVariant,false)));
             QVERIFY(!prop("versionDialog","visible").toBool());
@@ -4741,7 +4741,7 @@ private slots:
             QVERIFY(QMetaObject::invokeMethod(object("versionDialog"),"open"));
             QTRY_VERIFY(prop("versionDialog","opened").toBool());
             click(item("versionAdd"));
-            QVERIFY(prop("versionDialog","opened").toBool());
+            QVERIFY(prop("versionDialog","visible").toBool()); // Still up (it may still be fading in).
             QVERIFY(!prop("importGuide","visible").toBool());
             QVERIFY(!prop("versionDialog","addPending").toBool());
             QCOMPARE(prop("noteEditor","text").toString(),QString("Unsaved version draft"));
@@ -4754,7 +4754,7 @@ private slots:
         QCOMPARE(bible->noteText(),QString("Unsaved version draft"));
         // Backend rejection must leave the picker open too.
         QVERIFY(QMetaObject::invokeMethod(window,"switchVersion",Q_ARG(QVariant,"missing-version")));
-        QVERIFY(prop("versionDialog","opened").toBool());
+        QVERIFY(prop("versionDialog","visible").toBool()); // Still up (it may still be fading in).
         QCOMPARE(bible->versions(),versions);
         key(Qt::Key_Return); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
     }
