@@ -591,8 +591,9 @@ Item {
         property bool closing: false
         onAboutToShow: closing = false
         onAboutToHide: closing = true
-        enter: Transition { NumberAnimation { property: "position"; duration: 220; easing.type: Easing.OutCubic } }
-        exit: Transition { NumberAnimation { property: "position"; duration: 180; easing.type: Easing.InCubic } }
+        // A side panel: slides in and out, unless Reduce motion is on.
+        enter: Transition { NumberAnimation { property: "position"; duration: panel.app.reduceMotion ? 0 : 220; easing.type: Easing.OutCubic } }
+        exit: Transition { NumberAnimation { property: "position"; duration: panel.app.reduceMotion ? 0 : 180; easing.type: Easing.InCubic } }
         background: Rectangle {
             color: panel.desktop.background
             border.color: panel.desktop.border
@@ -619,6 +620,9 @@ Item {
         modal: true
         focus: true
         closePolicy: Popup.NoAutoClose
+        // A modal: fades in, closes at once.
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: panel.app.fadeMs || 0; easing.type: Easing.OutQuad } }
+        exit: null
         onClosed: {
             if (panel.hostKind !== "picker") return
             panel.hostKind = "none"

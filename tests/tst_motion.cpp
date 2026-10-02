@@ -408,17 +408,31 @@ private slots:
         QVERIFY(palette->property("opacity").toDouble() < 1.0);
         type("John 1:3"); QCOMPARE(object("referenceInput")->property("text").toString(), QString("John 1:3"));
         QTRY_COMPARE(palette->property("opacity").toDouble(), 1.0);
-        // Closing releases keys immediately; a ghost fades without input.
+        // Closing is immediate: no exit fade and no ghost; keys go back at once.
         key(Qt::Key_Escape);
         QVERIFY(!palette->property("visible").toBool());
-        QVERIFY(item("paletteGhost")->isVisible());
-        QCOMPARE(item("paletteGhost")->acceptedMouseButtons(), Qt::NoButton);
+        QVERIFY(!object("paletteGhost")); QVERIFY(!object("paletteScrimGhost"));
         const auto before = bible->cursorVerse(); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), before + 1);
-        // Reopen while the ghost is still fading.
-        key(Qt::Key_K, Qt::ControlModifier);
-        QVERIFY(palette->property("visible").toBool()); QVERIFY(item("referenceInput")->hasActiveFocus());
-        QVERIFY(!item("paletteGhost")->isVisible());
-        key(Qt::Key_Escape); QTRY_VERIFY(!palette->property("visible").toBool());
+        // Reopen at once: it fades in again, in every palette mode.
+        for (auto mode : {Qt::Key_K, Qt::Key_Slash}) {
+            key(mode, Qt::ControlModifier);
+            QVERIFY(palette->property("visible").toBool()); QVERIFY(item("referenceInput")->hasActiveFocus());
+            QVERIFY(palette->property("opacity").toDouble() < 1.0);
+            key(Qt::Key_Escape); QVERIFY(!palette->property("visible").toBool());
+        }
+        // Other modals: Help, Reading settings, Versions fade in and close at once.
+        for (auto command : {"help", "settings", "switchVersion", "about"}) {
+            QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QString(command))));
+            const auto name = QString(command) == "help" ? "helpDialog" : QString(command) == "settings" ? "settingsDialog"
+                : QString(command) == "about" ? "aboutDialog" : "versionDialog";
+            auto dialog = object(name); QVERIFY2(dialog, name);
+            QVERIFY2(dialog->property("visible").toBool(), name);
+            QVERIFY2(dialog->property("opacity").toDouble() < 1.0, name);
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QCOMPARE(dialog->property("opacity").toDouble(), 1.0);
+            key(Qt::Key_Escape); QVERIFY2(!dialog->property("visible").toBool(), name);
+            call("readerFocus");
+        }
         // Desk: list focus while sliding/fading in; reopen during close.
         navigate("John 1:2"); key(Qt::Key_D);
         auto desk = object("deskDrawer");
@@ -452,7 +466,22 @@ private slots:
         QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(prop("notesOpen").toBool());
         QVERIFY(item("noteEditor")->hasActiveFocus());
         QTRY_VERIFY(object("notesDrawer")->property("opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        // Side panels animate out as well as in.
+        key(Qt::Key_Escape); QVERIFY(object("notesDrawer")->property("visible").toBool());
+        QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        call("readerFocus"); key(Qt::Key_H, Qt::ShiftModifier);
+        QVERIFY(object("historyDrawer")->property("visible").toBool()); QVERIFY(!object("historyDrawer")->property("opened").toBool());
+        QTRY_VERIFY(object("historyDrawer")->property("opened").toBool());
+        key(Qt::Key_Escape); QVERIFY(object("historyDrawer")->property("visible").toBool());
+        QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier);
+        QTRY_VERIFY(object("relatedDrawer")->property("visible").toBool());
+        QVERIFY(object("relatedDrawer")->property("position").toDouble() < 1.0);
+        QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(object("relatedDrawer"), "close"));
+        QVERIFY(object("relatedDrawer")->property("visible").toBool());
+        QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        call("readerFocus");
         // Chapter find prompt fades; input is immediate; closing releases keys.
         key(Qt::Key_Slash);
         QVERIFY(item("chapterFindInput")->hasActiveFocus());
@@ -461,14 +490,24 @@ private slots:
         key(Qt::Key_Escape); QVERIFY(!prop("findPromptOpen").toBool());
         QVERIFY(item("chapterFind")->isVisible()); QVERIFY(!item("chapterFind")->isEnabled());
         QTRY_VERIFY(!item("chapterFind")->isVisible());
-        // Context menu fades in with keyboard focus; closes at once.
+        // Context menu: no motion at all, in or out, and no ghost.
         call("openPassageMenuAtCursor");
         QVERIFY(menu()->property("visible").toBool());
-        QVERIFY(menu()->property("opacity").toDouble() < 1.0);
+        QCOMPARE(menu()->property("opacity").toDouble(), 1.0);
+        QVERIFY(menu()->property("opened").toBool());
         QTRY_VERIFY(item("contextMenuContent")->hasActiveFocus());
         key(Qt::Key_Escape); QVERIFY(!menu()->property("visible").toBool());
-        QVERIFY(item("contextMenuGhost")->isVisible());
-        QTRY_VERIFY(!item("contextMenuGhost")->isVisible());
+        QVERIFY(!object("contextMenuGhost"));
+        // Toasts fade in and out.
+        QVERIFY(QMetaObject::invokeMethod(window, "notify", Q_ARG(QVariant, QString("Hello")), Q_ARG(QVariant, true)));
+        auto toast = item("toastFrame");
+        QVERIFY(toast->isVisible()); QVERIFY(toast->opacity() < 1.0);
+        QTRY_COMPARE(toast->opacity(), 1.0);
+        QVERIFY(QMetaObject::invokeMethod(object("toastTimer"), "stop"));
+        QCoreApplication::processEvents();
+        QVERIFY(toast->isVisible()); QVERIFY(!toast->property("shown").toBool());
+        QTRY_VERIFY(toast->opacity() < 1.0);
+        QTRY_VERIFY(!toast->isVisible());
     }
     void reduceMotionCommand() {
         QCOMPARE(commandTitle("reduce motion"), QString("Reduce motion"));
@@ -481,7 +520,6 @@ private slots:
         QCOMPARE(commandTitle("allow motion"), QString("Allow motion"));
         QVERIFY(SoundEffects(nullptr, session->filePath("sound.ini"), false).reduceMotion());
         QVERIFY(prop("reduceMotion").toBool()); QCOMPARE(prop("fadeMs").toInt(), 0);
-        QCOMPARE(object("contextMenu")->property("fadeDuration").toInt(), 0);
         QCOMPARE(item("chapterFind")->property("fadeDuration").toInt(), 0);
         call("readerFocus");
         // Bound to alt m, which toggles it back.
@@ -495,10 +533,17 @@ private slots:
         QCOMPARE(object("passagePalette")->property("opacity").toDouble(), 1.0);
         type("John 1:9"); key(Qt::Key_Return);
         QTRY_COMPARE(bible->cursorVerse(), 9);
-        QVERIFY(!object("paletteGhost")->property("visible").toBool());
         for (int i = 0; i < 6; ++i) { QTest::qWait(20); QVERIFY(!prop("pulseActive").toBool()); QVERIFY(!item("jumpPulse9")->isVisible()); }
         key(Qt::Key_Y);
         for (int i = 0; i < 6; ++i) { QTest::qWait(20); QVERIFY(!prop("flashActive").toBool()); QVERIFY(!item("copyFlash9")->isVisible()); }
+        // Modals and toasts appear at full strength at once.
+        call("readerFocus"); QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QString("help"))));
+        QTRY_VERIFY(object("helpDialog")->property("opened").toBool());
+        QCOMPARE(object("helpDialog")->property("opacity").toDouble(), 1.0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("helpDialog")->property("visible").toBool()); call("readerFocus");
+        QVERIFY(QMetaObject::invokeMethod(window, "notify", Q_ARG(QVariant, QString("Hello")), Q_ARG(QVariant, true)));
+        QCoreApplication::processEvents(); QTest::qWait(20);
+        QCOMPARE(item("toastFrame")->opacity(), 1.0);
         // Drawers open without transitions; focus mode dims instantly.
         key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(object("deskDrawer")->property("visible").toBool());
         QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());

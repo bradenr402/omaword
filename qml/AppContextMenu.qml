@@ -30,12 +30,10 @@ Popup {
     focus: true
     padding: 4 * uiScale
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    // Fade in only; input and focus are live from the first frame. Closing is
-    // immediate so actions and focus restoration never wait on animation.
-    property int fadeDuration: 120
-    enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: menu.fadeDuration; easing.type: Easing.OutQuad }
-    }
+    // No motion, ever: the menu appears and disappears at once, so actions and
+    // focus restoration never wait on animation.
+    enter: null
+    exit: null
     width: Math.ceil(rowWidth + leftPadding + rightPadding)
     readonly property real rowWidth: {
         let widest = 180 * uiScale

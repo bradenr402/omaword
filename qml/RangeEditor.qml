@@ -315,6 +315,9 @@ Item {
         focus: true
         closePolicy: Popup.NoAutoClose
         background: Rectangle { color: editor.desktop.background; border.color: editor.desktop.border; radius: editor.desktop.cornerRadius }
+        // A modal: fades in, closes at once.
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: editor.app.fadeMs || 0; easing.type: Easing.OutQuad } }
+        exit: null
     }
     RangeDialog {
         id: chooser

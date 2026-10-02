@@ -933,49 +933,6 @@ ApplicationWindow {
         uiScale: app.scale
         objectName: "contextMenu"
         theme: desktop
-        fadeDuration: app.reduceMotion ? 0 : 120
-        onAboutToShow: contextMenuGhost.hide()
-        onAboutToHide: contextMenuGhost.show(background)
-    }
-    // Popups that close instantly (input and focus move at once) leave a
-    // content-free ghost of their card/scrim that fades out; it takes no input.
-    // Parented to the content item, never the popup overlay: any overlay child
-    // keeps the overlay visible and changes its event handling.
-    component FadeGhost: Rectangle {
-        id: ghost
-        opacity: 0
-        visible: opacity > 0
-        z: 10000
-        function show(item) {
-            if (app.fadeMs <= 0 || !item || !parent) return
-            const p = item.mapToItem(parent, 0, 0)
-            x = p.x; y = p.y; width = item.width; height = item.height
-            ghostFade.restart()
-        }
-        function hide() { ghostFade.stop(); opacity = 0 }
-        NumberAnimation { id: ghostFade; target: ghost; property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
-    }
-    FadeGhost {
-        id: contextMenuGhost
-        objectName: "contextMenuGhost"
-        parent: app.contentItem
-        color: desktop.surface
-        border.color: desktop.border
-        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-    }
-    FadeGhost {
-        id: paletteScrimGhost
-        objectName: "paletteScrimGhost"
-        parent: app.contentItem
-        color: app.tint(desktop.background, 0.72)
-    }
-    FadeGhost {
-        id: paletteGhost
-        objectName: "paletteGhost"
-        parent: app.contentItem
-        color: desktop.background
-        border.color: desktop.border
-        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
     }
     function copyClickedVerse(number, plainText) {
         if (rangeEditing) { bible.copySelection(plainText); return }
@@ -2953,6 +2910,11 @@ ApplicationWindow {
             border.color: desktop.border
         }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.72) }
+        // Every modal fades in and closes at once: no exit motion.
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+        }
+        exit: null
     }
 
     ColumnLayout {
@@ -4106,16 +4068,10 @@ ApplicationWindow {
             enabled: passagePalette.visible && app.paletteTextMode && app.paletteTextQuery.length > 0 && !contextMenu.visible && paletteResults.currentIndex >= 0
             onActivated: { const p = app.sceneRowPoint(paletteResults.currentItem); app.openSearchMenu(paletteResults.currentIndex, p.x, p.y) }
         }
-        // Fades in with input focus already live; closes at once behind a ghost.
-        enter: Transition {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
-        }
-        onAboutToShow: { paletteGhost.hide(); paletteScrimGhost.hide() }
+        // Fades in with input focus already live (ModalCard); closes at once.
         onOpened: referenceInput.forceActiveFocus()
         onAboutToHide: {
             if (!app.paletteCleared) app.rememberPalette()
-            paletteScrimGhost.show(app.contentItem)
-            paletteGhost.show(background)
         }
         onClosed: {
             let action = pendingAction
@@ -5657,10 +5613,17 @@ ApplicationWindow {
         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
         color: desktop.surface
         border.color: desktop.border
-        visible: toastTimer.running && (!bible.focusMode || app.toastInFocus)
+        // Toasts fade and rise in, then fade and sink out (paint-only).
+        id: toastFrame
+        objectName: "toastFrame"
+        readonly property bool shown: toastTimer.running && (!bible.focusMode || app.toastInFocus)
+        opacity: shown ? 1 : 0
+        visible: shown || opacity > 0
+        Behavior on opacity { NumberAnimation { duration: app.fadeMs; easing.type: Easing.OutQuad } }
+        transform: Translate { y: (1 - toastFrame.opacity) * 8 * app.scale }
         Label { id: toast; objectName: "toast"; anchors.centerIn: parent; width: parent.width - 36; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: desktop.foreground; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
     }
-    Timer { id: toastTimer; interval: 3000 }
+    Timer { id: toastTimer; objectName: "toastTimer"; interval: 3000 }
     Timer { id: countTimer; interval: 2000; onTriggered: app.clearCount() }
     Timer { id: positionSaveTimer; interval: 350; onTriggered: app.savePosition() }
     Timer { id: historyDwellTimer; objectName: "historyDwellTimer"; interval: app.historyDwellMs; onTriggered: app.recordVisit() }

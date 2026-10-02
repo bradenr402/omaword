@@ -185,6 +185,9 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
   - Highlights, cursor-range context shading, search matches.
   - Focus-mode dimming: follows the cursor instantly; only entering/leaving fades.
   - Jump pulse and copy flash rects. Reduce motion disables pulses/flashes/fades.
+  - Popup motion: the context menu never animates; modals (palette, dialogs,
+    tag picker, range dialogs) fade in and close at once; side panels and
+    toasts animate both in and out.
 - Focus mode hides decoration cells, rails, and context shading.
 - Desktop corners come from async `hyprctl` polling; failure resets to 0.
   Highlight segments stay square.
