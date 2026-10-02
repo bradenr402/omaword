@@ -219,7 +219,7 @@ private slots:
         const auto collection = bible->collection(); QSignalSpy commits(bible.get(), &BibleBackend::sharedCommitted);
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("visibleModal").toBool()); QTest::qWait(60);
         QCOMPARE(prop("ranges").toList().size(), 2); QVERIFY(prop("source").isNull());
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("j/k or arrows move    Enter select range    Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString().replace(QChar(0x00a0), QChar(' ')), QString::fromUtf8("↑ ↓ choose    Enter select    Esc cancel"));
         click("rangeChoice:" + second.value("reference").toString());
         QVERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool()); begin();
         QCOMPARE(bible->tagScope(), second); key(Qt::Key_J); key(Qt::Key_Escape);
@@ -469,7 +469,7 @@ private slots:
         QCOMPARE(item("rangeSelectAll")->property("text").toString(), QString("Select all components"));
         key(Qt::Key_A); QVERIFY(prop("allSelected").toBool());
         QCOMPARE(item("rangeSelectAll")->property("text").toString(), QString("Deselect all components"));
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("m bookmark    x highlight    t tags    n note    j/k or arrows move    Space toggle    a deselect all    Enter Continue    Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString().replace(QChar(0x00a0), QChar(' ')), QString("m bookmark    x highlight    t tags    n note    ↑ ↓ choose    Space toggle    a deselect all    Enter continue    Esc cancel"));
         key(Qt::Key_A); QVERIFY(!prop("hasComponents").toBool()); QVERIFY(!item("rangeContinue")->isEnabled());
         key(Qt::Key_A); QVERIFY(prop("allSelected").toBool());
         click("rangeSelectAll"); QVERIFY(!prop("hasComponents").toBool()); QVERIFY(!item("rangeContinue")->isEnabled());
@@ -509,7 +509,7 @@ private slots:
         const auto snapshot = bible->annotationSnapshot(source);
         open(source, "highlight"); QVERIFY(prop("visibleModal").toBool());
         QVERIFY(!item("rangeComponent:bookmark")); QCOMPARE(prop("componentRows").toList().size(), 2);
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("x highlight    n note    j/k or arrows move    Space toggle    a select all    Enter Continue    Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString().replace(QChar(0x00a0), QChar(' ')), QString("x highlight    n note    ↑ ↓ choose    Space toggle    a select all    Enter continue    Esc cancel"));
         inlineHint("rangeComponent:highlight", "x"); inlineHint("rangeComponent:note", "n"); inlineHint("rangeSelectAll", "a");
         QVERIFY(!item("rangeComponent:bookmarkHint"));
         QVERIFY(!item("rangeComponent:tagsHint"));
@@ -530,7 +530,7 @@ private slots:
         QVERIFY(!item("rangeComponent:highlight")); QVERIFY(!item("rangeComponent:note"));
         QVERIFY(item("rangeComponent:bookmark")); QVERIFY(item("rangeTag:" + tag));
         QCOMPARE(prop("componentRows").toList().size(), 2);
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("m bookmark    t tags    j/k or arrows move    Space toggle    a deselect all    Enter Continue    Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString().replace(QChar(0x00a0), QChar(' ')), QString("m bookmark    t tags    ↑ ↓ choose    Space toggle    a deselect all    Enter continue    Esc cancel"));
         inlineHint("rangeComponent:bookmark", "m"); inlineHint("rangeTag:" + tag, "t · all tags");
         QVERIFY(!item("rangeComponent:highlightHint")); QVERIFY(!item("rangeComponent:noteHint"));
         const auto selected = prop("components"); key(Qt::Key_X); key(Qt::Key_N); QCOMPARE(prop("components"), selected);
@@ -550,7 +550,7 @@ private slots:
         navigate("John 3:3"); const auto initial = bible->tagScope(); const auto collection = bible->collection();
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("visibleModal").toBool()); QTest::qWait(60);
         QCOMPARE(prop("ranges").toList().size(), 2); QVERIFY(prop("source").isNull()); QVERIFY(!prop("active").toBool());
-        QCOMPARE(item("rangeChooserKeys")->property("text").toString(), QString("j/k or arrows move    Enter select range    Esc Cancel"));
+        QCOMPARE(item("rangeChooserKeys")->property("text").toString().replace(QChar(0x00a0), QChar(' ')), QString::fromUtf8("↑ ↓ choose    Enter select    Esc cancel"));
         auto firstRow = item("rangeChoice:" + first.value("reference").toString()); QVERIFY(firstRow); QVERIFY(firstRow->hasActiveFocus());
         key(Qt::Key_Down); auto secondRow = item("rangeChoice:" + second.value("reference").toString()); QVERIFY(secondRow); QVERIFY(secondRow->hasActiveFocus());
         key(Qt::Key_K); QVERIFY(firstRow->hasActiveFocus());

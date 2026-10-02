@@ -221,6 +221,7 @@ Item {
         property string hint: ""
         property string keyHint: ""
         property bool leftAligned: false
+        property bool emphasized: false
         font.family: editor.desktop.fontFamily
         font.pixelSize: 13 * editor.uiScale
         padding: 8 * editor.uiScale
@@ -228,7 +229,7 @@ Item {
         implicitHeight: Math.max(38 * editor.uiScale, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
             text: button.text; textFormat: Text.PlainText; font: button.font
-            color: button.enabled ? editor.desktop.foreground : editor.desktop.muted
+            color: !button.enabled ? editor.desktop.muted : button.emphasized ? editor.desktop.accent : editor.desktop.foreground
             rightPadding: button.keyHint ? buttonKey.implicitWidth + 12 * editor.uiScale : 0
             wrapMode: Text.Wrap; horizontalAlignment: button.leftAligned ? Text.AlignLeft : Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
             Text {
@@ -241,7 +242,8 @@ Item {
             }
         }
         background: Rectangle {
-            color: button.down || button.hovered ? editor.app.tint(editor.desktop.accent, 0.10) : "transparent"
+            color: button.down ? editor.app.tint(editor.desktop.accent, 0.16) : button.emphasized ? editor.app.tint(editor.desktop.accent, 0.10)
+                : button.hovered ? editor.desktop.surface : "transparent"
             border.width: button.activeFocus ? 1 : 0
             border.color: editor.desktop.accent
             radius: editor.desktop.cornerRadius
@@ -453,14 +455,14 @@ Item {
                 width: parent.width
                 height: implicitHeight
                 spacing: 12 * editor.uiScale
+                Item { Layout.fillWidth: true }
                 RangeButton { objectName: "rangeChooserCancel"; text: "Cancel"; focusPolicy: Qt.NoFocus; onClicked: editor.cancel() }
                 RangeButton {
                     objectName: "rangeChooseAnother"
                     text: "Choose another range"; visible: !!editor.source && editor.ranges.length > 1; focusPolicy: Qt.NoFocus
                     onClicked: { editor.source = null; Qt.callLater(function() { chooser.focusRow(0) }) }
                 }
-                RangeButton { objectName: "rangeContinue"; text: "Continue"; visible: !!editor.source; focusPolicy: Qt.NoFocus; enabled: editor.hasComponents && !editor.bible.busy; onClicked: editor.begin() }
-                Item { Layout.fillWidth: true }
+                RangeButton { objectName: "rangeContinue"; text: "Continue"; emphasized: true; visible: !!editor.source; focusPolicy: Qt.NoFocus; enabled: editor.hasComponents && !editor.bible.busy; onClicked: editor.begin() }
             }
             FineRule { id: chooserRule; objectName: "rangeChooserRule"; width: parent.width }
             RangeText {
@@ -469,14 +471,16 @@ Item {
                 width: parent.width
                 color: editor.desktop.muted
                 font.pixelSize: 11 * editor.uiScale
-                text: {
-                    if (!editor.source) return "j/k or arrows move    Enter select range    Esc Cancel"
+                // No-break spaces keep each key with its verb when the row wraps.
+                text: keyHints.split("    ").map(function(pair) { return pair.replace(/ /g, "\u00a0") }).join("    ")
+                readonly property string keyHints: {
+                    if (!editor.source) return "↑ ↓ choose    Enter select    Esc cancel"
                     const hints = []
                     if (editor.presentKinds.indexOf("bookmark") >= 0) hints.push("m bookmark")
                     if (editor.presentKinds.indexOf("highlight") >= 0) hints.push("x highlight")
                     if (editor.presentKinds.indexOf("tags") >= 0) hints.push("t tags")
                     if (editor.presentKinds.indexOf("note") >= 0) hints.push("n note")
-                    return hints.concat(["j/k or arrows move", "Space toggle", editor.allSelected ? "a deselect all" : "a select all", "Enter Continue", "Esc Cancel"]).join("    ")
+                    return hints.concat(["↑ ↓ choose", "Space toggle", editor.allSelected ? "a deselect all" : "a select all", "Enter continue", "Esc cancel"]).join("    ")
                 }
             }
         }
@@ -487,7 +491,7 @@ Item {
         onOpened: contentItem.forceActiveFocus()
         contentItem: ColumnLayout {
             Keys.onEscapePressed: editor.cancel()
-            RangeText { text: "Combine notes?"; font.bold: true }
+            RangeText { text: "Combine notes?"; font.pixelSize: 20 * editor.uiScale }
             RangeText { text: "Both ranges have notes. Combine keeps both, separated by a blank line." }
             ScrollView {
                 Layout.fillWidth: true
@@ -504,8 +508,10 @@ Item {
                 }
             }
             RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
                 RangeButton { objectName: "rangeMergeCancel"; text: "Cancel"; onClicked: editor.cancel() }
-                RangeButton { objectName: "rangeMergeCombine"; text: "Combine and save"; enabled: !editor.bible.busy; onClicked: editor.commit(true) }
+                RangeButton { objectName: "rangeMergeCombine"; text: "Combine and save"; emphasized: true; enabled: !editor.bible.busy; onClicked: editor.commit(true) }
             }
         }
     }
