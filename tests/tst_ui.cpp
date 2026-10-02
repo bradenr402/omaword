@@ -5281,15 +5281,23 @@ private slots:
         const auto relatedBounds = related->mapRectToScene(related->boundingRect());
         const auto modeBounds = item("modeControl")->mapRectToScene(item("modeControl")->boundingRect());
         QVERIFY(relatedBounds.left() > modeBounds.right());
-        QCOMPARE(relatedBounds.bottom(),modeBounds.bottom());
         QVERIFY(relatedBounds.left() > window->width() / 2);
         const auto helpBounds = item("helpControl")->mapRectToScene(item("helpControl")->boundingRect());
         QVERIFY(helpBounds.right() < modeBounds.left());
-        // Right group order: Annotations, Notes, Related, Desk.
-        QVERIFY(item("savedControl")->mapToScene(QPointF(item("savedControl")->width(),0)).x()
-            < item("notesControl")->mapToScene(QPointF()).x());
-        QVERIFY(item("notesControl")->mapToScene(QPointF(item("notesControl")->width(),0)).x() < relatedBounds.left());
-        QVERIFY(relatedBounds.right() < item("deskControl")->mapToScene(QPointF()).x());
+        // Right group order: Annotations, Notes, Related, Desk; a column when cramped.
+        const auto scene = [this](const char *name) { return item(name)->mapRectToScene(item(name)->boundingRect()); };
+        if (window->property("footerStacked").toBool()) {
+            QVERIFY(relatedBounds.bottom() < modeBounds.bottom());
+            QCOMPARE(scene("deskControl").bottom(),modeBounds.bottom());
+            QVERIFY(scene("savedControl").bottom() < scene("notesControl").top());
+            QVERIFY(scene("notesControl").bottom() < relatedBounds.top());
+            QVERIFY(relatedBounds.bottom() < scene("deskControl").top());
+        } else {
+            QCOMPARE(relatedBounds.bottom(),modeBounds.bottom());
+            QVERIFY(scene("savedControl").right() < scene("notesControl").left());
+            QVERIFY(scene("notesControl").right() < relatedBounds.left());
+            QVERIFY(relatedBounds.right() < scene("deskControl").left());
+        }
         QCOMPARE(related->property("glyph").toString(),QString("related"));
         QCOMPARE(prop("relatedControlGlyph","kind").toString(),QString("tag"));
         QVERIFY(!prop("relatedControlGlyph","filled").toBool());
