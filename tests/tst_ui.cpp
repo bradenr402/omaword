@@ -1450,6 +1450,20 @@ private slots:
         bible->setLineHeight(2.0);
         key(Qt::Key_Return); QTRY_COMPARE(bible->lineHeight(),1.5);
     }
+    // The current row lies wholly on the page; when page boundaries split
+    // every row, it is the row with the most of itself showing.
+    bool onPage(QQuickItem *list, const QRectF &rect) const {
+        auto inside = [list](const QRectF &r) { return r.top() >= -1 && r.bottom() <= list->height() + 1; };
+        if (inside(rect)) return true;
+        auto visible = [list](const QRectF &r) { return qMin(r.bottom(),list->height()) - qMax(r.top(),0.0); };
+        const auto content = qvariant_cast<QQuickItem *>(list->property("contentItem"));
+        for (auto child : content->childItems()) {
+            if (!child->isVisible() || child->height() <= 0) continue;
+            const auto r = child->mapRectToItem(list,child->boundingRect());
+            if (inside(r) || visible(r) > visible(rect) + 1) return false;
+        }
+        return visible(rect) > 0;
+    }
     void keybindingGeometricPages() {
         window->resize(640,480);
         QVERIFY(desktop->setProperty("textScale",1.8));
@@ -1471,7 +1485,7 @@ private slots:
             QVERIFY(prop("keybindingResults","currentIndex").toInt() >= row);
             QVERIFY(current());
             const auto rect = current()->mapRectToItem(list,current()->boundingRect());
-            QVERIFY2(rect.top() >= -1 && rect.bottom() <= list->height() + 1,qPrintable(QString("Row outside page: %1..%2 / %3").arg(rect.top()).arg(rect.bottom()).arg(list->height())));
+            QVERIFY2(onPage(list,rect),qPrintable(QString("Row outside page: %1..%2 / %3").arg(rect.top()).arg(rect.bottom()).arg(list->height())));
             if (top >= end - 1) break;
         }
         key(Qt::Key_End); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),count - 1);
@@ -1481,7 +1495,7 @@ private slots:
             QVERIFY(qAbs(prop("keybindingResults","contentY").toDouble() - qMax(first,top - list->height())) < 1);
             QVERIFY(current());
             const auto rect = current()->mapRectToItem(list,current()->boundingRect());
-            QVERIFY(rect.top() >= -1 && rect.bottom() <= list->height() + 1);
+            QVERIFY(onPage(list,rect));
             if (top <= first + 1) break;
         }
         // Use executable panel rows for the dispatch check; their order/height

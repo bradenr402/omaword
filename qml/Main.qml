@@ -2184,14 +2184,24 @@ ApplicationWindow {
         const top = Math.max(view.originY, Math.min(view.originY + Math.max(0, view.contentHeight - view.height),
             view.contentY + direction * view.height))
         const target = top + offset
-        let row = view.currentIndex
+        // Lay out the destination page first: its rows may not exist yet.
+        view.contentY = top
+        view.forceLayout()
+        let row = -1
         let distance = Infinity
+        let fallback = view.currentIndex
+        let shown = 0
         for (let i = 0; i < view.count; ++i) {
             const item = view.itemAtIndex(i)
-            if (!item || item.y < top || item.y + item.height > top + view.height) continue
+            if (!item) continue
+            // Without a fully visible row, keep the one most visible on the page.
+            const visible = Math.min(item.y + item.height, top + view.height) - Math.max(item.y, top)
+            if (visible > shown) { shown = visible; fallback = i }
+            if (item.y < top || item.y + item.height > top + view.height) continue
             const gap = Math.abs(item.y + item.height / 2 - target)
             if (gap < distance) { distance = gap; row = i }
         }
+        if (row < 0) row = fallback
         view.currentIndex = row
         view.contentY = top
     }
