@@ -411,6 +411,31 @@ Item {
         if (page === "related") return results[resultList.currentIndex] || null
         return focusedSummaryScope()
     }
+    // Related: j/k and the arrows walk the source tags and then the results as
+    // one list. The tags (above) used to swallow the keys: they had no j/k,
+    // and relatedKeys stood down while they held focus, so nothing moved.
+    readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen
+        && !textInputActive() && !relatedDrawer.closing
+    function moveRelated(delta) {
+        const tags = tagList.visible ? tagList.count : 0
+        if (tagList.activeFocus) {
+            const next = (tagList.currentIndex < 0 ? (delta > 0 ? -1 : 0) : tagList.currentIndex) + delta
+            if (next < 0) { search.forceActiveFocus(); return }
+            if (next >= tags) {
+                if (resultList.count) { resultList.currentIndex = 0; resultList.positionViewAtIndex(0, ListView.Contain); resultList.forceActiveFocus() }
+                return
+            }
+            tagList.currentIndex = next
+            tagList.forceActiveFocus()
+            return
+        }
+        if (delta < 0 && resultList.currentIndex <= 0 && tags) {
+            tagList.currentIndex = tags - 1
+            tagList.forceActiveFocus()
+            return
+        }
+        moveResult(delta)
+    }
     function moveResult(delta) {
         if (!resultList.count) return
         resultList.currentIndex = Math.max(0, Math.min(resultList.count - 1, resultList.currentIndex + delta))
@@ -656,8 +681,8 @@ Item {
             Shortcut { sequence: "D"; enabled: panel.listKeys; onActivated: panel.app.toggleScopeDesk(panel.listScope()) }
             Shortcut { sequences: ["Delete", "Backspace"]; enabled: panel.listKeys; onActivated: panel.app.removeMarkerAnnotation(panel.listScope(), "tag") }
             Shortcut { sequence: "Shift+E"; enabled: panel.relatedKeys && resultList.currentIndex >= 0; onActivated: panel.app.openRangeEditor(panel.listScope(), "tag") }
-            Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedKeys; onActivated: panel.moveResult(1) }
-            Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedKeys; onActivated: panel.moveResult(-1) }
+            Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveRelated(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveRelated(-1) }
             Shortcut { sequence: "/"; enabled: panel.relatedShown && !panel.pickerVisible && !panel.app.contextMenuOpen && !panel.textInputActive(); onActivated: panel.focusSearch() }
             RowLayout {
                 Layout.fillWidth: true

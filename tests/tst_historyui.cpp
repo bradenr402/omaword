@@ -421,6 +421,49 @@ private slots:
         QVERIFY(qAbs(prop("scale").toDouble() - 8.0 / 18) < 1e-9);
         QCOMPARE(item("verseBody1")->property("font").value<QFont>().pixelSize(), 8);
     }
+    // Related: j/k and the arrows walk the source tags and the results as one
+    // list, from wherever the panel's keyboard focus is.
+    void relatedListKeys() {
+        navigate("John 1:2"); const auto alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
+        const auto beta = bible->createAndAssignTag(bible->tagScope(), "Beta");
+        for (auto r : {"John 1:5", "John 1:8", "John 1:12", "John 1:20", "John 2:3"}) { navigate(r); QVERIFY(bible->setTag(bible->tagScope(), alpha, true)); }
+        navigate("John 1:2");
+        auto results = object("tagResults"), tags = object("tagList");
+        const auto openRelated = [&]() {
+            call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+            QTRY_COMPARE(results->property("count").toInt(), 5); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        };
+        openRelated();
+        QCOMPARE(tags->property("count").toInt(), 2);
+        QCOMPARE(results->property("currentIndex").toInt(), 0);
+        key(Qt::Key_J); QCOMPARE(results->property("currentIndex").toInt(), 1);
+        key(Qt::Key_Down); QCOMPARE(results->property("currentIndex").toInt(), 2);
+        key(Qt::Key_K); QCOMPARE(results->property("currentIndex").toInt(), 1);
+        key(Qt::Key_Up); QCOMPARE(results->property("currentIndex").toInt(), 0);
+        for (int i = 0; i < 8; ++i) key(Qt::Key_J);
+        QCOMPARE(results->property("currentIndex").toInt(), 4); QVERIFY(item("tagResults")->hasActiveFocus());
+        for (int i = 0; i < 4; ++i) key(Qt::Key_K);
+        QCOMPARE(results->property("currentIndex").toInt(), 0);
+        // Above the first result: the source tags, bottom up, then the search field.
+        key(Qt::Key_K); QVERIFY(item("tagList")->hasActiveFocus()); QCOMPARE(tags->property("currentIndex").toInt(), 1);
+        key(Qt::Key_Up); QCOMPARE(tags->property("currentIndex").toInt(), 0); QVERIFY(item("tagList")->hasActiveFocus());
+        key(Qt::Key_J); QCOMPARE(tags->property("currentIndex").toInt(), 1);
+        key(Qt::Key_Down); QVERIFY(item("tagResults")->hasActiveFocus()); QCOMPARE(results->property("currentIndex").toInt(), 0);
+        key(Qt::Key_K); key(Qt::Key_K); key(Qt::Key_K); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        // Typing owns j and k in the search field.
+        type("jk"); QCOMPARE(item("tagSearch")->property("text").toString(), QString("jk"));
+        key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        // A clicked tag holds focus; j/k still move (the original failure).
+        openRelated();
+        QTest::mouseClick(window, Qt::LeftButton, {}, item("tag:" + alpha)->mapToScene(QPointF(10, 10)).toPoint());
+        QTRY_VERIFY(item("tagList")->hasActiveFocus());
+        const int from = tags->property("currentIndex").toInt();
+        key(Qt::Key_J);
+        QVERIFY(tags->property("currentIndex").toInt() != from || item("tagResults")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        Q_UNUSED(beta)
+    }
     void panelSwitchingWithOtherPanels() {
         record("John 1:3"); navigate("John 1:1");
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
