@@ -1708,6 +1708,11 @@ ApplicationWindow {
         if (versionResults.count) versionResults.positionViewAtIndex(versionResults.currentIndex, ListView.Contain)
     }
     function versionKey(event) {
+        if (event.key === Qt.Key_I && event.modifiers === Qt.ControlModifier) {
+            event.accepted = true
+            if (!versionDialog.removing && versionDialog.step === 0) addVersionFromPicker()
+            return
+        }
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             event.accepted = true
             if (event.modifiers === Qt.NoModifier) acceptVersion()
@@ -1836,6 +1841,8 @@ ApplicationWindow {
         { id: "switchVersion", group: "Palettes and windows", title: "Switch version", sequences: ["Ctrl+V"], scope: "global", command: true },
         { id: "help", group: "Palettes and windows", title: "Keybindings", sequences: ["?"], aliases: ["F1"], aliasReason: "the help key in most desktop apps.", scope: "global", command: true },
         { id: "newWindow", group: "Palettes and windows", title: "New window", sequences: ["Ctrl+N"], scope: "global", command: true },
+        // Bound by the Versions dialog itself.
+        { id: "addVersion", group: "Palettes and windows", title: "Add version from Versions", sequences: ["Ctrl+I"], scope: "versions", explanation: true },
         { id: "focus", group: "Reading", title: "Focus mode", sequences: ["F"], setting: "focusMode", command: true },
         { id: "numbers", group: "Reading", title: "Show verse numbers", sequences: ["Alt+N"], setting: "showVerseNumbers", command: true },
         { id: "headings", group: "Reading", title: "Show headings", sequences: ["Alt+H"], setting: "showHeadings", command: true },
@@ -1872,7 +1879,7 @@ ApplicationWindow {
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
-    function globallyBound(action) { return !!action.sequences && !action.explanation && action.scope !== "desk" && action.scope !== "list" }
+    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions"].includes(action.scope) }
     function actionById(id) { return actions.find(function(entry) { return entry.id === id }) }
     function actionKeys(action) {
         if (typeof action === "string") action = actionById(action)
@@ -1926,6 +1933,7 @@ ApplicationWindow {
     }
     function scopeTitle(action) {
         if (action.scope === "list") return "List panels · Annotations, Desk, Related"
+        if (action.scope === "versions") return "Versions dialog"
         if (action.explanation) return "Reader gesture"
         if (action.scope === "global") return "This window · also with the Notes panel open, but not while typing"
         if (action.scope === "palette") return "This window · passage and command search"
@@ -3500,7 +3508,7 @@ ApplicationWindow {
                     id: versionAdd
                     objectName: "versionAdd"
                     text: "+"
-                    tip: "Add version"
+                    tip: "Add version · " + app.keyText("addVersion")
                     Accessible.name: tip
                     visible: !versionDialog.removing
                     enabled: !bible.busy
@@ -3595,7 +3603,7 @@ ApplicationWindow {
             Label {
                 objectName: "versionHints"
                 text: app.hintRow(versionDialog.step === 2 ? [[["Left", "Right"], "choose"], ["Return", "select"], ["Escape", "cancel"]]
-                    : !versionDialog.removing ? [[["Up", "Down"], "choose"], ["Tab", "to +"], ["Return", "select"], ["Escape", "cancel"]]
+                    : !versionDialog.removing ? [[["Up", "Down"], "choose"], [app.actionKeys("addVersion")[0], "add"], ["Return", "select"], ["Escape", "cancel"]]
                     : [[["Up", "Down"], "choose"], [["Home", "End"], "jump"], ["Return", "select"], ["Escape", "cancel"]])
                 textFormat: Text.StyledText
                 color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale

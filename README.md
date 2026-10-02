@@ -108,6 +108,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl v`: Switch version
 - `?`: Keybindings
 - `ctrl n`: New window
+- `ctrl i`: Add version from Versions
 
 ### Reading
 

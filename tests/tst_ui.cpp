@@ -4273,6 +4273,28 @@ private slots:
         QCOMPARE(prop("savedSearch","text").toString(),QString());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
     }
+    void versionsCtrlIAddsVersion() {
+        reference("John 3:16");
+        key(Qt::Key_V,Qt::ControlModifier); QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+        type("kj");
+        key(Qt::Key_I,Qt::ControlModifier);
+        QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        QTRY_VERIFY(prop("importGuide","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
+        // Tab, then enter, still reaches +.
+        key(Qt::Key_V,Qt::ControlModifier); QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
+        key(Qt::Key_Tab); QTRY_VERIFY(item("versionAdd")->hasActiveFocus());
+        key(Qt::Key_Return);
+        QTRY_VERIFY(prop("importGuide","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
+        // Remove version has no add step.
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,QString("removeVersion"))));
+        QTRY_VERIFY(prop("versionDialog","opened").toBool());
+        key(Qt::Key_I,Qt::ControlModifier); QTest::qWait(60);
+        QVERIFY(prop("versionDialog","visible").toBool()); QVERIFY(!prop("importGuide","visible").toBool());
+        QVERIFY(!plainHint(prop("versionHints","text").toString()).contains("ctrl i"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+    }
     void keyNotation() {
         const QList<QPair<QStringList,QString>> cases = {
             {{"Shift+D"},"shift D"}, {{"Ctrl+K"},"ctrl k"}, {{"Alt+H"},"alt h"}, {{"X"},"x"},
@@ -4380,7 +4402,8 @@ private slots:
         QCOMPARE(add->y(),search->y());
         QVERIFY(add->x() > search->x() + search->width());
         QCOMPARE(add->x() + add->width(),item("versionResults")->width());
-        QCOMPARE(prop("versionAdd","tip").toString(),QString("Add version"));
+        QCOMPARE(prop("versionAdd","tip").toString(),QString("Add version · ctrl i"));
+        QCOMPARE(plainHint(prop("versionHints","text").toString()),QString::fromUtf8("↑ ↓ choose    ctrl i add    enter select    esc cancel"));
         type("no such version");
         QCOMPARE(prop("versionResults","count").toInt(),0);
         QVERIFY(item("versionEmpty")->isVisible());
