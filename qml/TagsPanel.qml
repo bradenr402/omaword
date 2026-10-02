@@ -411,8 +411,10 @@ Item {
         property bool chosen: false
         property string hint: ""
         property bool wrapText: false
+        // Tag chips: one step smaller with a visible resting outline and tint.
+        property bool chip: false
         font.family: panel.desktop.fontFamily
-        font.pixelSize: 13 * panel.controlScale
+        font.pixelSize: (chip ? 12 : 13) * panel.controlScale
         padding: 8 * panel.controlScale
         implicitHeight: Math.max(34 * panel.controlScale, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
@@ -425,10 +427,13 @@ Item {
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            color: control.down || control.chosen || control.hovered ? panel.desktop.surface : "transparent"
-            // Quiet like the app's other buttons: a border only marks focus or a chosen toggle.
-            border.width: control.activeFocus || control.chosen ? 1 : 0
-            border.color: panel.desktop.accent
+            color: control.down || control.chosen || control.hovered ? panel.desktop.surface
+                : control.chip ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.08) : "transparent"
+            // Quiet like the app's other buttons: a border only marks focus or a chosen toggle;
+            // chips keep a resting desktop border so they read as tags before hover.
+            border.width: control.activeFocus || control.chosen || control.chip ? 1 : 0
+            border.color: control.activeFocus || control.chosen ? panel.desktop.accent
+                : control.chip && (control.hovered || control.down) ? panel.desktop.muted : panel.desktop.border
             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
         Keys.onReturnPressed: clicked()
@@ -492,6 +497,7 @@ Item {
                 text: modelData.name
                 width: Math.min(implicitWidth, chips.width)
                 wrapText: true
+                chip: true
                 onClicked: panel.openRelatedForTag(modelData.id, panel.summaryScope)
             }
         }

@@ -426,6 +426,34 @@ ApplicationWindow {
         for (const auto &name : {"tagSearch", "tagRenameInput", "tagFilters", "tagList", "createPassageTag", "manageTags", "tagsDone"})
             QVERIFY2(!item(name)->isVisible(), name);
         QTRY_VERIFY(item("summaryTag:" + a) && item("summaryTag:" + a)->isVisible());
+        {
+            QQuickItem *chip = item("summaryTag:" + a);
+            QCOMPARE(chip->property("font").value<QFont>().pixelSize(), 12);
+            auto *chipBackground = chip->property("background").value<QQuickItem *>(); QVERIFY(chipBackground);
+            QObject *chipBorder = chipBackground->property("border").value<QObject *>(); QVERIFY(chipBorder);
+            QCOMPARE(chipBorder->property("width").toReal(), 1.0);
+            QCOMPARE(chipBorder->property("color").value<QColor>(), QColor("#555555"));
+            QVERIFY(chipBackground->property("color").value<QColor>().alpha() > 0);
+            if (qEnvironmentVariableIsSet("OMAWORD_TAGS_SCREENSHOT")) {
+                const QString path = qEnvironmentVariable("OMAWORD_TAGS_SCREENSHOT");
+                window->setColor(QColor("#202020"));
+                QTest::qWait(50);
+                QVERIFY(window->grabWindow().save(path + ".dark.png"));
+                QObject *theme = root->findChild<QObject *>("testTheme");
+                theme->setProperty("background", QColor("#fafafa")); theme->setProperty("foreground", QColor("#202020"));
+                theme->setProperty("surface", QColor("#e8e8e8")); theme->setProperty("muted", QColor("#666666"));
+                theme->setProperty("accent", QColor("#2266cc")); theme->setProperty("border", QColor("#c8c8c8"));
+                theme->setProperty("cornerRadius", 6);
+                window->setColor(QColor("#fafafa"));
+                QTest::qWait(50);
+                QVERIFY(window->grabWindow().save(path + ".light.png"));
+                window->setColor(QColor("#202020"));
+                theme->setProperty("background", QColor("#202020")); theme->setProperty("foreground", QColor("#eeeeee"));
+                theme->setProperty("surface", QColor("#303030")); theme->setProperty("muted", QColor("#aaaaaa"));
+                theme->setProperty("accent", QColor("#88bbff")); theme->setProperty("border", QColor("#555555"));
+                theme->setProperty("cornerRadius", 0);
+            }
+        }
         QVERIFY(item("summaryOverlap:" + overlap["reference"].toString())->isVisible());
         QVERIFY(item("summaryPassage:" + target["reference"].toString())->isVisible());
         invoke("toggleTag", a); invoke("manage"); invoke("createFromQuery");
