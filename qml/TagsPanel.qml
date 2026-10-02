@@ -411,9 +411,10 @@ Item {
         if (page === "related") return results[resultList.currentIndex] || null
         return focusedSummaryScope()
     }
-    // Related: j/k and the arrows walk the source tags and then the results as
-    // one list. The tags (above) used to swallow the keys: they had no j/k,
-    // and relatedKeys stood down while they held focus, so nothing moved.
+    // Related: j/k and the arrows move within the focused list. In the source
+    // tags they step down into the results and up into the search field. The
+    // tags used to swallow the keys: they had no j/k, and relatedKeys stood
+    // down while they held focus, so nothing moved.
     readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen
         && !textInputActive() && !relatedDrawer.closing
     function moveRelated(delta) {
@@ -426,11 +427,6 @@ Item {
                 return
             }
             tagList.currentIndex = next
-            tagList.forceActiveFocus()
-            return
-        }
-        if (delta < 0 && resultList.currentIndex <= 0 && tags) {
-            tagList.currentIndex = tags - 1
             tagList.forceActiveFocus()
             return
         }

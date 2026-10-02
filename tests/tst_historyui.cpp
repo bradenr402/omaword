@@ -444,12 +444,16 @@ private slots:
         QCOMPARE(results->property("currentIndex").toInt(), 4); QVERIFY(item("tagResults")->hasActiveFocus());
         for (int i = 0; i < 4; ++i) key(Qt::Key_K);
         QCOMPARE(results->property("currentIndex").toInt(), 0);
-        // Above the first result: the source tags, bottom up, then the search field.
-        key(Qt::Key_K); QVERIFY(item("tagList")->hasActiveFocus()); QCOMPARE(tags->property("currentIndex").toInt(), 1);
-        key(Qt::Key_Up); QCOMPARE(tags->property("currentIndex").toInt(), 0); QVERIFY(item("tagList")->hasActiveFocus());
-        key(Qt::Key_J); QCOMPARE(tags->property("currentIndex").toInt(), 1);
-        key(Qt::Key_Down); QVERIFY(item("tagResults")->hasActiveFocus()); QCOMPARE(results->property("currentIndex").toInt(), 0);
-        key(Qt::Key_K); key(Qt::Key_K); key(Qt::Key_K); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        key(Qt::Key_K); QCOMPARE(results->property("currentIndex").toInt(), 0); QVERIFY(item("tagResults")->hasActiveFocus());
+        // In the source tags: j/k step through them, down into the results, up into search.
+        item("tagList")->forceActiveFocus(); tags->setProperty("currentIndex", 0);
+        key(Qt::Key_J); QCOMPARE(tags->property("currentIndex").toInt(), 1); QVERIFY(item("tagList")->hasActiveFocus());
+        key(Qt::Key_K); QCOMPARE(tags->property("currentIndex").toInt(), 0);
+        key(Qt::Key_Down); QCOMPARE(tags->property("currentIndex").toInt(), 1);
+        key(Qt::Key_J); QVERIFY(item("tagResults")->hasActiveFocus()); QCOMPARE(results->property("currentIndex").toInt(), 0);
+        item("tagList")->forceActiveFocus(); tags->setProperty("currentIndex", 1);
+        key(Qt::Key_Up); QCOMPARE(tags->property("currentIndex").toInt(), 0);
+        key(Qt::Key_K); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         // Typing owns j and k in the search field.
         type("jk"); QCOMPARE(item("tagSearch")->property("text").toString(), QString("jk"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
