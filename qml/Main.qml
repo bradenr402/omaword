@@ -4894,13 +4894,18 @@ ApplicationWindow {
         onActivated: {
             if (rangeEditor.sessionOpen) { rangeEditor.cancel(); return }
             if (app.acceptedSearchQuery.length) { app.clearSearch(); app.readerFocus(); return }
-            if (bible.focusMode) { app.runCommand("focus"); app.readerFocus(); return }
             if (app.freeSelectedText.length) { app.clearTextSelection(); app.readerFocus(); return }
             if (app.verseCount.length) { app.clearCount(); return }
-            if (!app.flushNote()) return
-            if (app.verseMode) app.setVisualMode(false)
-            else if (app.hasSelection) app.setVisualMode(false)
-            app.readerFocus()
+            // Visual mode or a multi-verse range collapses to the cursor before
+            // Escape leaves focus mode; a single-verse selection does not block it.
+            const range = app.verseMode || (app.hasSelection && bible.selectedStart !== bible.selectedEnd)
+            if (range || !bible.focusMode) {
+                if (!app.flushNote()) return
+                if (app.verseMode || app.hasSelection) app.setVisualMode(false)
+                app.readerFocus()
+                return
+            }
+            app.runCommand("focus"); app.readerFocus()
         }
     }
 }

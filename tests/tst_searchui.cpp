@@ -653,7 +653,10 @@ private slots:
         key(Qt::Key_Escape);
         QVERIFY(bible->focusMode()); QVERIFY(prop("acceptedSearchQuery").toString().isEmpty());
         QVERIFY(prop("searchSegments").toList().isEmpty()); QCOMPARE(bible->tagScope(), scope);
-        key(Qt::Key_Escape); QVERIFY(!bible->focusMode()); QCOMPARE(bible->tagScope(), scope);
+        // The accepted multi-verse match collapses to the cursor next, then
+        // Escape leaves focus mode.
+        key(Qt::Key_Escape); QVERIFY(bible->focusMode()); QCOMPARE(bible->selectedStart(), bible->selectedEnd());
+        key(Qt::Key_Escape); QVERIFY(!bible->focusMode());
     }
     void focusEscapeAndVersionInvalidation() {
         find("alpha"); key(Qt::Key_Return); bible->setFocusMode(true); call("readerFocus");

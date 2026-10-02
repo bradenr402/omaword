@@ -247,6 +247,31 @@ private slots:
         if (mode != "verse") QTRY_VERIFY(!item("blockFocusDim")->isVisible());
         else QCOMPARE(item("chapterTitle")->opacity(), 1.0);
     }
+    void escapeCollapsesRangeBeforeLeavingFocus() {
+        navigate("John 1:5");
+        key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
+        // Visual mode: the first Escape leaves Visual at the cursor.
+        key(Qt::Key_V); key(Qt::Key_J); key(Qt::Key_J);
+        QVERIFY(prop("verseMode").toBool()); QCOMPARE(bible->selectedStart(), 5); QCOMPARE(bible->selectedEnd(), 7);
+        key(Qt::Key_Escape);
+        QVERIFY(bible->focusMode()); QVERIFY(!prop("verseMode").toBool());
+        QCOMPARE(bible->selectedStart(), 7); QCOMPARE(bible->selectedEnd(), 7); QCOMPARE(bible->cursorVerse(), 7);
+        key(Qt::Key_Escape); QVERIFY(!bible->focusMode());
+        // A multi-verse selection outside Visual mode collapses first, too.
+        key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
+        QVERIFY(bible->navigate("John 1:2-4")); call("readerFocus");
+        QVERIFY(!prop("verseMode").toBool()); QCOMPARE(bible->selectedEnd() - bible->selectedStart(), 2);
+        key(Qt::Key_Escape);
+        QVERIFY(bible->focusMode()); QCOMPARE(bible->selectedStart(), bible->selectedEnd());
+        // A collapsed single-verse selection never blocks leaving focus mode.
+        key(Qt::Key_Escape); QVERIFY(!bible->focusMode());
+        // A pending count is still cleared before the range.
+        key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
+        key(Qt::Key_V); key(Qt::Key_J); type("3");
+        key(Qt::Key_Escape); QCOMPARE(prop("verseCount").toString(), QString()); QVERIFY(prop("verseMode").toBool());
+        key(Qt::Key_Escape); QVERIFY(!prop("verseMode").toBool()); QVERIFY(bible->focusMode());
+        key(Qt::Key_Escape); QVERIFY(!bible->focusMode());
+    }
     void dimmingKeepsGeometryCopyAndHits_data() { layouts(); }
     void dimmingKeepsGeometryCopyAndHits() {
         QFETCH(QString, mode);
