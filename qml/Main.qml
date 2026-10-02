@@ -2222,7 +2222,9 @@ ApplicationWindow {
         })
             .map(function(b) { return { title: b.name, hint: b.chapters + " chapters", book: b.id, chapter: 0 } }))
     }
-    // Up to three History passages, never the one being read.
+    // Up to five History passages, never the one being read. The last one
+    // carries a rule that separates the group from the rest of the list.
+    readonly property int paletteRecentLimit: 5
     function recentPassages() {
         // Read notifying properties so the palette model follows the reader.
         const here = bible.ready && (bible.passage + bible.selectionReference + bible.versionId).length ? bible.currentLocation() : null
@@ -2230,8 +2232,9 @@ ApplicationWindow {
             if (!entry.available || !here) return !!entry.available
             const sameChapter = entry.versionId === here.versionId && entry.book === here.book && entry.chapter === here.chapter
             return !app.sameLocation(entry, here) && !(sameChapter && (!entry.start || !here.start))
-        }).slice(0, 3).map(function(entry) {
-            return { title: entry.reference, hint: "Recent · " + entry.versionAbbreviation, recent: entry }
+        }).slice(0, paletteRecentLimit).map(function(entry, index, recents) {
+            return { title: entry.reference, hint: "Recent · " + entry.versionAbbreviation, recent: entry,
+                lastRecent: index === recents.length - 1 }
         })
     }
     function openRecentPassage(entry) {
@@ -4280,6 +4283,14 @@ ApplicationWindow {
                         }
                     }
                     background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: paletteEntry.highlighted ? app.tint(desktop.accent, 0.11) : paletteEntry.hovered ? desktop.surface : "transparent" }
+                    // A thin rule below the recent passages, before the books.
+                    FineRule {
+                        objectName: "paletteRecentRule"
+                        visible: !!paletteEntry.modelData.lastRecent && paletteEntry.index < paletteResults.count - 1
+                        parent: paletteEntry
+                        x: 0; width: paletteEntry.width
+                        y: paletteEntry.height + Math.floor(paletteResults.spacing / 2)
+                    }
                 }
                 Label {
                     anchors.centerIn: parent

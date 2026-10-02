@@ -18,6 +18,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QDateTime>
+#include <functional>
 #include <archive.h>
 #include <archive_entry.h>
 #include "biblebackend.h"
@@ -481,19 +482,36 @@ private slots:
         key(Qt::Key_Escape);
     }
     void paletteRecentPassagesAndQueries() {
-        record("John 1:3"); record("John 1:9"); record("John 2:4"); record("John 2:7"); record("John 1:20");
+        for (auto r : {"John 1:3", "John 1:9", "John 2:4", "John 2:7", "John 2:9", "John 2:11", "John 1:30", "John 1:20"}) record(r);
         navigate("John 1:20");
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
         auto rows = paletteRows();
         QStringList recents; for (const auto &r : rows) if (r.toMap().contains("recent")) recents << r.toMap()["title"].toString();
-        QCOMPARE(recents, QStringList({"John 2:7", "John 2:4", "John 1:9"})); // Max 3, never the current passage.
-        QCOMPARE(rows.first().toMap()["title"].toString(), QString("John 2:7"));
+        // Max 5, never the current passage.
+        QCOMPARE(recents, QStringList({"John 1:30", "John 2:11", "John 2:9", "John 2:7", "John 2:4"}));
+        for (int i = 0; i < rows.size(); ++i) QCOMPARE(rows[i].toMap()["lastRecent"].toBool(), i == 4);
+        QCOMPARE(rows.first().toMap()["title"].toString(), QString("John 1:30"));
+        // One thin rule (the border color) under the recent group, before the books.
+        QTRY_VERIFY(item("paletteRecentRule"));
+        QList<QQuickItem *> rules; std::function<void(QQuickItem *)> walk = [&](QQuickItem *node) {
+            if (node->objectName() == "paletteRecentRule" && node->isVisible()) rules << node;
+            for (auto child : node->childItems()) walk(child);
+        };
+        walk(item("paletteResults"));
+        QCOMPARE(rules.size(), 1);
+        QCOMPARE(rules.first()->height(), 1.0);
+        QCOMPARE(rules.first()->property("color").value<QColor>(), desktop->property("border").value<QColor>());
+        auto list = item("paletteResults");
+        const double ruleY = rules.first()->mapToItem(list, QPointF()).y();
+        QCOMPARE(rules.first()->parentItem()->property("index").toInt(), 4);
+        QVERIFY(ruleY >= rules.first()->parentItem()->mapToItem(list, QPointF()).y() + rules.first()->parentItem()->height());
+        QCOMPARE(rows[5].toMap()["title"].toString(), QString("John"));
         QVERIFY(rows.first().toMap()["hint"].toString().startsWith("Recent"));
         type("jo"); QVERIFY(paletteRows().first().toMap()["title"].toString() == "John");
         key(Qt::Key_Backspace); key(Qt::Key_Backspace);
         key(Qt::Key_Down); key(Qt::Key_Return);
         QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
-        QCOMPARE(here(), QString("John 2:4")); QCOMPARE(stack().last(), QString("2:4:engnet"));
+        QCOMPARE(here(), QString("John 2:11")); QCOMPARE(stack().last(), QString("2:11:engnet"));
         // Search palette: recent queries, newest first, at most five.
         for (const QString q : {"one", "two", "three", "four", "five", "alpha"}) QVERIFY(bible->recordQuery(q));
         key(Qt::Key_Slash, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
