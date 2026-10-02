@@ -42,6 +42,17 @@ Item {
     property string managedId: ""
     property string mergeTarget: ""
     property var confirmation: null
+    // Annotations → Tags search (Main owns the field): filters the summary's
+    // overlapping ranges and related passages.
+    property string summaryQuery: ""
+    readonly property int summaryTotal: overlaps.length + results.length
+    function summaryMatches(entry) {
+        const query = summaryQuery.trim().toLowerCase()
+        return !query.length || [entry.reference, tagNames(entry.tags), entry.excerpt || ""].join("\n").toLowerCase().indexOf(query) >= 0
+    }
+    readonly property var visibleOverlaps: overlaps.filter(function(entry) { return panel.summaryMatches(entry) })
+    readonly property var visibleResults: results.filter(function(entry) { return panel.summaryMatches(entry) })
+    function focusSummary() { body.forceActiveFocus() }
     readonly property real uiScale: desktop.textScale
     readonly property real controlScale: Math.min(uiScale, 1.4, Math.max(1, body.width / 440))
     readonly property var filteredTags: allTags.filter(function(tag) {
@@ -707,7 +718,7 @@ Item {
                         text: "Tags on overlapping ranges"
                     }
                     Repeater {
-                        model: panel.page === "summary" ? panel.overlaps : []
+                        model: panel.page === "summary" ? panel.visibleOverlaps : []
                         delegate: SummaryRange {
                             required property var modelData
                             Layout.fillWidth: true
@@ -721,7 +732,7 @@ Item {
                         text: "Other passages with these tags"
                     }
                     Repeater {
-                        model: panel.page === "summary" ? panel.results : []
+                        model: panel.page === "summary" ? panel.visibleResults : []
                         delegate: SummaryRange {
                             required property var modelData
                             Layout.fillWidth: true
@@ -731,7 +742,7 @@ Item {
                     }
                     TagText {
                         Layout.fillWidth: true
-                        visible: panel.summaryIds.length > 0 && panel.results.length === 0
+                        visible: panel.summaryIds.length > 0 && panel.visibleResults.length === 0
                         text: "No other passages in this version."
                         color: panel.desktop.muted
                     }

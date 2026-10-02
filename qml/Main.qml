@@ -214,6 +214,7 @@ ApplicationWindow {
         objectName: "tagsUi"
         app: app; bible: app.tagBackend; desktop: app.tagDesktop
         embeddedHost: annotationsTagsHost
+        summaryQuery: app.savedQuery
         onBrowserRequested: { app.collectionTab = 3; savedDrawer.open() }
         onBrowserClosed: savedDrawer.close()
     }
@@ -1534,11 +1535,35 @@ ApplicationWindow {
         positionJumpToSelection = !!jumpToSelection
         positionTimer.restart()
     }
-    function filteredCollection() {
+    function collectionForTab() {
         return Array.from(bible.collection).filter(function(entry) {
             return (collectionTab === 0 && entry.bookmark)
                 || (collectionTab === 1 && entry.highlight) || (collectionTab === 2 && entry.note.length > 0)
         })
+    }
+    // Annotations search: reference, note, and tag names, case-insensitive.
+    property string savedQuery: ""
+    function savedMatches(entry, query) {
+        if (!query.length) return true
+        return [entry.reference, entry.note || "", tagsPlainText(entry.tags), entry.excerpt || ""]
+            .join("\n").toLowerCase().indexOf(query.toLowerCase()) >= 0
+    }
+    function filteredCollection() {
+        const query = savedQuery.trim()
+        return collectionForTab().filter(function(entry) { return app.savedMatches(entry, query) })
+    }
+    // The search field appears once a tab holds more than ten items, and stays
+    // while it has a query.
+    readonly property int savedTabTotal: collectionTab === 3 ? tagsUi.summaryTotal : collectionForTab().length
+    readonly property bool savedSearchVisible: savedTabTotal > 10 || savedQuery.length > 0
+    function focusSavedSearch() { if (savedSearchVisible) savedSearch.forceActiveFocus() }
+    function focusSavedList() {
+        if (collectionTab === 3) tagsUi.focusSummary()
+        else moveSaved(0)
+    }
+    function escapeSaved() {
+        if (savedSearch.activeFocus) focusSavedList()
+        else savedDrawer.close()
     }
     function moveSaved(delta) {
         if (collectionTab === 3) return
@@ -1551,8 +1576,9 @@ ApplicationWindow {
     }
     function filterSaved(delta) {
         const tab = (collectionTab + delta + 4) % 4
-        if (tab === 3) { openTagsBrowser(); return }
+        if (tab === 3) { savedQuery = ""; openTagsBrowser(); return }
         tagsUi.embeddedClosed()
+        savedQuery = ""
         collectionTab = tab
         collectionList.currentIndex = collectionList.count > 0 ? 0 : -1
         moveSaved(0)
@@ -3902,7 +3928,8 @@ ApplicationWindow {
         bottomPadding: padding
         leftPadding: padding
         rightPadding: padding
-        closePolicy: closing || deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        // Esc is handled below: it first leaves the search field.
+        closePolicy: closing || deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnPressOutside
         readonly property bool tabKeys: shown && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
         readonly property bool collectionKeys: tabKeys && app.collectionTab !== 3
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
@@ -3922,13 +3949,19 @@ ApplicationWindow {
         }
         // While closing, a drawer must not keep its Escape grab: the next Escape
         // belongs to the reader (or range editor) immediately.
-        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
+        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent(); else app.savedQuery = "" }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.moveSaved(0) }
         onVisibleChanged: if (visible && !closing) focusContent()
         onClosed: { closing = false; tagsUi.embeddedClosed(); app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "savedContent"
+            Shortcut {
+                sequence: "Escape"
+                enabled: savedDrawer.shown && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal
+                onActivated: app.escapeSaved()
+            }
+            Shortcut { sequence: "/"; enabled: savedDrawer.tabKeys && app.savedSearchVisible; onActivated: app.focusSavedSearch() }
             Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(-1) }
             Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(-1) }
@@ -3980,6 +4013,26 @@ ApplicationWindow {
                 }
             }
             FineRule { Layout.fillWidth: true }
+            TextField {
+                id: savedSearch
+                objectName: "savedSearch"
+                Layout.fillWidth: true
+                visible: app.savedSearchVisible
+                implicitHeight: 36 * app.controlScale
+                font.pixelSize: 14 * app.controlScale
+                color: desktop.foreground
+                placeholderText: "Search " + ["bookmarks", "highlights", "notes", "tagged passages"][app.collectionTab] + "…"
+                placeholderTextColor: desktop.muted
+                selectByMouse: true
+                leftPadding: 10 * app.controlScale; rightPadding: 10 * app.controlScale
+                text: app.savedQuery
+                onTextEdited: { app.savedQuery = text; collectionList.currentIndex = collectionList.count ? 0 : -1 }
+                background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: savedSearch.activeFocus ? desktop.accent : desktop.border }
+                Keys.onDownPressed: app.focusSavedList()
+                Keys.onReturnPressed: app.focusSavedList()
+                Keys.onEnterPressed: app.focusSavedList()
+                Accessible.name: "Search annotations"
+            }
             Item {
                 id: annotationsTagsHost
                 objectName: "annotationsTagsHost"
@@ -4069,7 +4122,8 @@ ApplicationWindow {
                     objectName: "savedEmpty"
                     anchors.centerIn: parent
                     width: parent.width - 24
-                    text: ["No bookmarks yet.", "No highlights yet.", "No notes yet."][app.collectionTab] || ""
+                    text: app.savedQuery.trim().length && app.collectionForTab().length ? "No matching annotations."
+                        : ["No bookmarks yet.", "No highlights yet.", "No notes yet."][app.collectionTab] || ""
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     color: desktop.muted

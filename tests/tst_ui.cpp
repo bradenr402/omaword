@@ -4221,6 +4221,58 @@ private slots:
         QTRY_COMPARE(prop("tagResults","count").toInt(),0);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
     }
+    void annotationsSearchVisibilityAndEscapes() {
+        for (int verse = 1; verse <= 10; ++verse) { reference(QString("John 3:%1").arg(verse)); QVERIFY(bible->toggleBookmark()); }
+        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QCOMPARE(prop("collectionList","count").toInt(),10);
+        QVERIFY(!item("savedSearch")->isVisible());
+        key(Qt::Key_Slash); QTest::qWait(50); QVERIFY(!item("savedSearch")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        reference("John 3:11"); QVERIFY(bible->toggleBookmark());
+        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        // Visible past ten items, but never focused on open.
+        QTRY_VERIFY(item("savedSearch")->isVisible());
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        key(Qt::Key_Slash); QTRY_VERIFY(item("savedSearch")->hasActiveFocus());
+        type("3:1"); QTRY_COMPARE(prop("collectionList","count").toInt(),3); // 3:1, 3:10, 3:11
+        type("1"); QTRY_COMPARE(prop("collectionList","count").toInt(),1);
+        // First esc leaves the field and keeps the query; the next closes.
+        key(Qt::Key_Escape);
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        QVERIFY(prop("savedDrawer","visible").toBool());
+        QCOMPARE(prop("savedSearch","text").toString(),QString("3:11"));
+        // A query keeps the field even when the tab drops to ten items.
+        QVERIFY(bible->toggleBookmark());
+        QTRY_COMPARE(prop("collectionList","count").toInt(),0);
+        QVERIFY(item("savedSearch")->isVisible());
+        QVERIFY(item("savedEmpty")->isVisible());
+        key(Qt::Key_Slash); QTRY_VERIFY(item("savedSearch")->hasActiveFocus());
+        key(Qt::Key_A,Qt::ControlModifier); key(Qt::Key_Backspace);
+        QTRY_VERIFY(!item("savedSearch")->isVisible());
+        QTRY_COMPARE(prop("collectionList","count").toInt(),10);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        // Tags tab: the summary's tagged passages count and filter too.
+        for (int verse = 1; verse <= 12; ++verse) {
+            reference(QString("John 4:%1").arg(verse));
+            QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Water").isEmpty());
+        }
+        reference("John 4:1");
+        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_H); QTRY_COMPARE(window->property("collectionTab").toInt(),3);
+        QTRY_VERIFY(item("savedSearch")->isVisible());
+        QVERIFY(!item("savedSearch")->hasActiveFocus());
+        QTRY_VERIFY(item("summaryPassage:John 4:12"));
+        key(Qt::Key_Slash); QTRY_VERIFY(item("savedSearch")->hasActiveFocus());
+        type("4:12");
+        QTRY_VERIFY(!item("summaryPassage:John 4:11"));
+        QVERIFY(item("summaryPassage:John 4:12"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("savedSearch")->hasActiveFocus());
+        QVERIFY(prop("savedDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QCOMPARE(prop("savedSearch","text").toString(),QString());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+    }
     void keyNotation() {
         const QList<QPair<QStringList,QString>> cases = {
             {{"Shift+D"},"shift D"}, {{"Ctrl+K"},"ctrl k"}, {{"Alt+H"},"alt h"}, {{"X"},"x"},
