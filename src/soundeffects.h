@@ -14,6 +14,10 @@ class QBuffer;
 class SoundEffects : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
+    // App-wide "Reduce motion" preference (QSettings motion/reduced), shared by
+    // every window with the sound preference; it lives here so one object owns
+    // all persisted feedback preferences.
+    Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY reduceMotionChanged)
 public:
     // settingsPath: optional INI file (tests); empty uses the application's QSettings.
     // audioOutput: false keeps all logic but never touches an audio device.
@@ -22,6 +26,8 @@ public:
 
     bool enabled() const { return m_enabled; }
     void setEnabled(bool enabled);
+    bool reduceMotion() const { return m_reduceMotion; }
+    void setReduceMotion(bool reduce);
     // OMAWORD_SOUND=0 (exported by bin/test) makes play() a no-op; the offscreen
     // platform only suppresses the audio device.
     bool silenced() const { return m_silenced; }
@@ -33,11 +39,13 @@ public:
 
 signals:
     void enabledChanged();
+    void reduceMotionChanged();
 
 private:
     bool ensureOutput();
     QString m_settingsPath;
     bool m_enabled = true;
+    bool m_reduceMotion = false;
     bool m_silenced = false;
     bool m_audioOutput = true;
     bool m_outputFailed = false;

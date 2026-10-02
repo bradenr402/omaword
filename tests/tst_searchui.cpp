@@ -163,7 +163,8 @@ private slots:
             QCOMPARE(object("referenceInput")->property("text").toString(), QString());
             QVERIFY(object("paletteBooks")->property("emphasized").toBool());
             QVERIFY(item("referenceInput")->hasActiveFocus());
-            QVERIFY(object("passagePalette")->property("opened").toBool());
+            // Input is live during the fade-in; opened follows when it completes.
+            QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
             type(prefix);
             type("alpha beta");
             QCOMPARE(object("referenceInput")->property("text").toString(), prefix + " alpha beta");
@@ -219,6 +220,7 @@ private slots:
         QCOMPARE(label->property("color"), desktop->property("muted"));
         QCOMPARE(input->property("color"), desktop->property("foreground"));
         QVERIFY(overlay->parentItem()->z() >= 10);
+        QTRY_COMPARE(object("passagePalette")->property("opacity").toDouble(), 1.0); // fade-in done
         QTest::qWait(100);
         const auto image = window->grabWindow(); QVERIFY(!image.isNull());
         const qreal sx = qreal(image.width()) / window->width();

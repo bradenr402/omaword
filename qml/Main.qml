@@ -34,7 +34,7 @@ ApplicationWindow {
     palette.toolTipBase: desktop.surface
     palette.toolTipText: desktop.foreground
 
-    readonly property bool notesOpen: notesDrawer.visible
+    readonly property bool notesOpen: notesDrawer.shown
     readonly property alias rangeEditor: rangeEditor
     readonly property bool rangeEditing: rangeEditor.sessionOpen
     RangeEditor {
@@ -355,6 +355,7 @@ ApplicationWindow {
             sounds.play("boundary")
         } else sounds.play("tick")
         readerFocus()
+        pulseDestination()
     }
     function scrollSearchMatch(match) {
         const segment = match && match.segments[0]
@@ -433,6 +434,7 @@ ApplicationWindow {
         searchMatchIdentity = selectionIdentity; verseMode = false; syncNote()
         passagePalette.navigated = true; passagePalette.close(); readerFocus()
         positionTimer.stop(); restoringPosition = false
+        pulseDestination()
         Qt.callLater(function() { app.scrollSearchMatch(entry); app.savePosition() })
     }
     Timer { id: bibleSearchTimer; interval: 150; onTriggered: app.submitBibleSearch() }
@@ -463,7 +465,7 @@ ApplicationWindow {
     }
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
-    readonly property bool modalOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.visibleModal || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.visible || deskDrawer.visible || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool modalOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.visibleModal || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || savedDrawer.shown || deskDrawer.shown || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
@@ -526,6 +528,57 @@ ApplicationWindow {
         }
     }
     readonly property real controlScale: Math.min(scale, 1.4)
+    // Motion feedback is paint-only: opacity and translucent layers never change
+    // layout, text, selection, copy output, or hit-testing. Reduce motion (shared
+    // app-wide on `sounds`) collapses every duration to an instant change.
+    readonly property bool reduceMotion: sounds.reduceMotion
+    readonly property int fadeMs: reduceMotion ? 0 : 140
+    readonly property real focusDimOpacity: 0.32
+    // Focus mode keeps the selection, else the cursor verse, at full strength.
+    readonly property int focusFirst: bible.selectedStart > 0 ? bible.selectedStart : bible.cursorVerse
+    readonly property int focusLast: bible.selectedStart > 0 ? bible.selectedEnd : bible.cursorVerse
+    function verseDimmed(number) { return bible.focusMode && (number < focusFirst || number > focusLast) }
+    property int pulseFirst: 0
+    property int pulseLast: 0
+    property real pulseLevel: 0
+    property int flashFirst: 0
+    property int flashLast: 0
+    property real flashLevel: 0
+    readonly property bool pulseActive: pulseAnimation.running
+    readonly property bool flashActive: flashAnimation.running
+    onReduceMotionChanged: if (reduceMotion) { pulseAnimation.stop(); flashAnimation.stop(); pulseLevel = 0; flashLevel = 0 }
+    // Deferred so the pulse marks the final selection after navigation settles.
+    function pulseDestination() { Qt.callLater(app.startPulse) }
+    function startPulse() {
+        if (reduceMotion || !bible.ready || focusFirst <= 0) return
+        pulseFirst = focusFirst
+        pulseLast = focusLast
+        pulseAnimation.restart()
+    }
+    function flashVerses(first, last) {
+        if (reduceMotion || first <= 0) return
+        flashFirst = first
+        flashLast = Math.max(first, last)
+        flashAnimation.restart()
+    }
+    function flashChapter() {
+        const rows = Array.from(bible.verses)
+        if (rows.length) flashVerses(rows[0].number, rows[rows.length - 1].number)
+    }
+    function flashScope(scope) {
+        if (scope && scope.book === bible.book && scope.chapter === bible.chapter && (scope.endBook || scope.book) === bible.book
+                && (scope.endChapter || scope.chapter) === bible.chapter) flashVerses(scope.start, scope.end)
+    }
+    SequentialAnimation {
+        id: pulseAnimation
+        NumberAnimation { target: app; property: "pulseLevel"; from: 0; to: 1; duration: 180; easing.type: Easing.OutQuad }
+        NumberAnimation { target: app; property: "pulseLevel"; to: 0; duration: 420; easing.type: Easing.InOutQuad }
+    }
+    SequentialAnimation {
+        id: flashAnimation
+        NumberAnimation { target: app; property: "flashLevel"; from: 0; to: 1; duration: 90; easing.type: Easing.OutQuad }
+        NumberAnimation { target: app; property: "flashLevel"; to: 0; duration: 260; easing.type: Easing.InQuad }
+    }
     FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.scale }
     component VerseItem: Item {
         property real textOffset: 0
@@ -715,6 +768,7 @@ ApplicationWindow {
         if (!scope || bible.busy) return
         const copied = bible.copyScope(scope, !!plainText)
         if (copied.length) {
+            flashScope(scope)
             notify((scope.reference || "Passage") + (plainText ? " copied as plain text" : " copied"), true)
             sounds.play("chime")
         } else sounds.play("error")
@@ -814,17 +868,62 @@ ApplicationWindow {
         id: contextMenu
         objectName: "contextMenu"
         theme: desktop
+        fadeDuration: app.reduceMotion ? 0 : 120
+        onAboutToShow: contextMenuGhost.hide()
+        onAboutToHide: contextMenuGhost.show(background)
+    }
+    // Popups that close instantly (input and focus move at once) leave a
+    // content-free ghost of their card/scrim that fades out; it takes no input.
+    // Parented to the content item, never the popup overlay: any overlay child
+    // keeps the overlay visible and changes its event handling.
+    component FadeGhost: Rectangle {
+        id: ghost
+        opacity: 0
+        visible: opacity > 0
+        z: 10000
+        function show(item) {
+            if (app.fadeMs <= 0 || !item || !parent) return
+            const p = item.mapToItem(parent, 0, 0)
+            x = p.x; y = p.y; width = item.width; height = item.height
+            ghostFade.restart()
+        }
+        function hide() { ghostFade.stop(); opacity = 0 }
+        NumberAnimation { id: ghostFade; target: ghost; property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+    }
+    FadeGhost {
+        id: contextMenuGhost
+        objectName: "contextMenuGhost"
+        parent: app.contentItem
+        color: desktop.surface
+        border.color: desktop.border
+        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+    }
+    FadeGhost {
+        id: paletteScrimGhost
+        objectName: "paletteScrimGhost"
+        parent: app.contentItem
+        color: app.tint(desktop.background, 0.72)
+    }
+    FadeGhost {
+        id: paletteGhost
+        objectName: "paletteGhost"
+        parent: app.contentItem
+        color: desktop.background
+        border.color: desktop.border
+        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
     }
     function copyClickedVerse(number, plainText) {
         if (rangeEditing) { bible.copySelection(plainText); return }
         if (!flushNote()) return
         const scope = actionScope()
         const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
+        const first = inside ? bible.selectedStart : number, last = inside ? bible.selectedEnd : number
         const reference = inside ? bible.selectionReference : bible.passage + ":" + number
         // The selection API preserves an inside-hit range. copyVerse focuses an
         // outside hit only after the backend has successfully read/copied it.
         const copied = inside ? bible.copySelection(plainText) : bible.copyVerse(number, plainText)
         if (copied.length) {
+            flashVerses(first, last)
             if (inside) completeRangeAction(scope, false)
             if (!inside) selectionAnchor = bible.cursorVerse
             syncNote()
@@ -862,6 +961,7 @@ ApplicationWindow {
         }
         selectVerse(number, false)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, false) })
+        pulseDestination()
     }
 
     function tint(color, alpha) { return Qt.rgba(color.r, color.g, color.b, alpha) }
@@ -977,7 +1077,7 @@ ApplicationWindow {
         // new modal already. Never steal its focus from a delayed close signal.
         Qt.callLater(function() {
             if (app.modalOpen || bible.busy) return
-            if (notesDrawer.opened) {
+            if (notesDrawer.shown) {
                 if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
                 else notesPanel.forceActiveFocus()
             } else app.readerFocus()
@@ -1091,6 +1191,7 @@ ApplicationWindow {
             passagePalette.navigated = true
             passagePalette.close()
             readerFocus()
+            pulseDestination()
         }
     }
     function openChapter(book, chapter) {
@@ -1158,7 +1259,7 @@ ApplicationWindow {
         if (loadedNoteReference !== bible.selectionReference) syncNote()
         if (focusEditor && hasSelection) {
             notePreview = false
-            if (notesDrawer.opened) focusNoteEnd()
+            if (notesDrawer.shown) focusNoteEnd()
         }
     }
     function focusNoteEnd() { noteEditor.forceActiveFocus(); noteEditor.cursorPosition = noteEditor.length }
@@ -1192,7 +1293,9 @@ ApplicationWindow {
         if (!flushNote()) return
         const scope = actionScope()
         const reference = hasSelection ? bible.selectionReference : bible.passage
+        const first = hasSelection ? bible.selectedStart : 0, last = bible.selectedEnd
         if (bible.copySelection(!!plainText).length > 0) {
+            if (first > 0) flashVerses(first, last); else flashChapter()
             completeRangeAction(scope, false)
             notify(reference + (plainText ? " copied as plain text" : " copied"))
             sounds.play("chime")
@@ -1226,7 +1329,7 @@ ApplicationWindow {
     }
     function openDesk() {
         if (rangeEditing) return
-        if (deskDrawer.opened) { deskDrawer.close(); return }
+        if (deskDrawer.shown) { deskDrawer.close(); return }
         deskDrawer.open()
     }
     function moveDesk(delta) {
@@ -1258,6 +1361,7 @@ ApplicationWindow {
         deskDrawer.close()
         readerFocus()
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
+        pulseDestination()
     }
     function copyDeskItem(id) {
         if (rangeEditing || bible.busy) return
@@ -1278,7 +1382,7 @@ ApplicationWindow {
             restoreDeskRow()
             sounds.play("remove")
         }
-        if (deskDrawer.opened) deskList.forceActiveFocus()
+        if (deskDrawer.shown) deskList.forceActiveFocus()
     }
     function removeCurrentDeskItem() {
         const entry = deskList.model[deskList.currentIndex]
@@ -1383,6 +1487,7 @@ ApplicationWindow {
         savedDrawer.close()
         if (entry.note.length > 0) openNotes(false)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
+        pulseDestination()
     }
     function requestDeleteSaved() {
         if (rangeEditing) return
@@ -1439,7 +1544,7 @@ ApplicationWindow {
         if (rangeEditing) return
         if (!flushNote()) return
         savePosition()
-        if (typeof scope === "string" ? bible.navigate(scope) : bible.openTaggedPassage(scope)) { syncNote(); readerFocus() }
+        if (typeof scope === "string" ? bible.navigate(scope) : bible.openTaggedPassage(scope)) { syncNote(); readerFocus(); pulseDestination() }
     }
     function openNoteScope(scope) {
         if (rangeEditing) return
@@ -1449,6 +1554,7 @@ ApplicationWindow {
         syncNote()
         openNotes(true)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
+        pulseDestination()
     }
     // Row metadata already represents range membership, including chapter
     // continuations. Match canonical identities rather than source display names.
@@ -1634,6 +1740,7 @@ ApplicationWindow {
         { id: "help", title: "Keybindings", keys: "? · F1", sequences: ["?", "F1"], scope: "global", command: true },
         { id: "about", title: "About & Attribution", keys: "", scope: "global", command: true },
         { id: "soundEffects", title: "Sound effects", keys: "", scope: "global", command: true },
+        { id: "reduceMotion", title: "Reduce motion", keys: "", scope: "global", command: true },
         { id: "goToVerse", title: "Go to verse number", keys: "number then g (e.g. 20g)", explanation: true },
         { id: "dismiss", title: "Dismiss current panel or selection", keys: "Esc", explanation: true }
     ]
@@ -1647,6 +1754,7 @@ ApplicationWindow {
     function actionTitle(action) {
         if (action.id === "toggleDesk") return bible.currentInDesk ? "Remove from Desk" : "Add to Desk"
         if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
+        if (action.id === "reduceMotion") return sounds.reduceMotion ? "Allow motion" : "Reduce motion"
         return action.title
     }
     function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
@@ -1658,8 +1766,9 @@ ApplicationWindow {
         if (action.id === "switchVersion") return !modalOpen && !notesOpen && !textInputActive()
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
-        if (action.scope === "palette") return !modalOpen || passagePalette.opened
-        if (action.scope === "global") return !modalOpen && (bible.ready || ["newWindow", "help", "about", "soundEffects", "import", "switchVersion", "removeVersion"].includes(action.id))
+        // visible, not opened: the palette accepts keys during its fade-in.
+        if (action.scope === "palette") return !modalOpen || passagePalette.visible
+        if (action.scope === "global") return !modalOpen && (bible.ready || ["newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion"].includes(action.id))
         if (action.scope === "notes") return bible.ready && !modalOpen && !textInputActive()
         return readerKeys
     }
@@ -1670,7 +1779,7 @@ ApplicationWindow {
         if (action.id === "copyText") return bible.ready
         if (["bookmark", "highlight", "tags", "related", "toggleDesk"].includes(action.id)) return hasSelection
         return bible.ready || !!action.setting
-            || ["books", "commands", "newWindow", "help", "about", "soundEffects", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
+            || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
         if (action.explanation) return "Reader gesture"
@@ -1878,6 +1987,11 @@ ApplicationWindow {
         case "soundEffects":
             sounds.enabled = !sounds.enabled
             notify("Sound effects " + (sounds.enabled ? "on" : "off"), true)
+            sounds.play("tick")
+            break
+        case "reduceMotion":
+            sounds.reduceMotion = !sounds.reduceMotion
+            notify(sounds.reduceMotion ? "Reduce motion on" : "Motion allowed", true)
             sounds.play("tick")
             break
         }
@@ -2440,6 +2554,8 @@ ApplicationWindow {
 
                         Label {
                             objectName: "chapterTitle"
+                            opacity: bible.focusMode ? app.focusDimOpacity : 1
+                            Behavior on opacity { NumberAnimation { duration: app.fadeMs } }
                             text: bible.passage
                             color: desktop.foreground
                             font.pixelSize: 34 * app.scale
@@ -2465,6 +2581,10 @@ ApplicationWindow {
                                 textHeight: verseBody.height
                                 width: readerColumn.width
                                 height: verseHeading.height + verseBody.height + 7 * app.scale
+                                // Focus-mode dimming: paint-only, so layout and hit-testing are unchanged.
+                                readonly property bool dimmed: app.verseDimmed(modelData.number)
+                                opacity: dimmed ? app.focusDimOpacity : 1
+                                Behavior on opacity { NumberAnimation { duration: app.fadeMs; easing.type: Easing.InOutQuad } }
                                 RangeMarker {
                                     objectName: "bookmarkMarker" + verseRow.modelData.number
                                     kind: "bookmark"; number: verseRow.modelData.number; rowIndex: verseRow.index
@@ -2529,6 +2649,28 @@ ApplicationWindow {
                                     visible: !verseRow.selected && !verseRow.modelData.highlighted && app.rowInCursorContext(verseRow.modelData)
                                     color: app.tint(desktop.accent, 0.06)
                                     radius: 0
+                                }
+                                Rectangle {
+                                    objectName: "jumpPulse" + verseRow.modelData.number
+                                    readonly property bool target: verseRow.modelData.number >= app.pulseFirst && verseRow.modelData.number <= app.pulseLast
+                                    x: verseRow.gutter - 9 * app.scale
+                                    y: verseHeading.height
+                                    width: verseRow.width - x
+                                    height: verseBody.height + 3
+                                    color: desktop.accent
+                                    opacity: target && app.pulseActive ? 0.24 * app.pulseLevel : 0
+                                    visible: opacity > 0
+                                }
+                                Rectangle {
+                                    objectName: "copyFlash" + verseRow.modelData.number
+                                    readonly property bool target: verseRow.modelData.number >= app.flashFirst && verseRow.modelData.number <= app.flashLast
+                                    x: verseRow.gutter - 9 * app.scale
+                                    y: verseHeading.height
+                                    width: verseRow.width - x
+                                    height: verseBody.height + 3
+                                    color: desktop.accent
+                                    opacity: target && app.flashActive ? 0.3 * app.flashLevel : 0
+                                    visible: opacity > 0
                                 }
                                 Repeater {
                                     model: verseRow.modelData.highlightRanges || []
@@ -2800,16 +2942,32 @@ ApplicationWindow {
         padding: 0
         // Auto-close cannot veto a failed save. All dismissals use closeNotes().
         closePolicy: Popup.NoAutoClose
-        background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
-        Overlay.modal: Rectangle {
-            color: app.tint(desktop.background, 0.65)
+        // Slide plus a short fade. A closing drawer no longer counts as open
+        // (`shown`), so reader keys and a reopen work during its exit animation.
+        property bool closing: false
+        readonly property bool shown: visible && !closing
+        enter: Transition {
+            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
         }
-        onOpened: {
+        exit: Transition {
+            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+        }
+        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
+        onAboutToHide: { closing = true; app.restorePanelFocus() }
+        // Keyboard focus is available as soon as the drawer starts fading in.
+        function focusContent() {
             if (app.modalOpen) return
             if (focusEditor && app.hasSelection) app.focusNoteEnd()
             else notesPanel.forceActiveFocus()
         }
-        onClosed: { app.editingPanelClosed(); app.restorePanelFocus() }
+        onVisibleChanged: if (visible && !closing) focusContent()
+        background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
+        Overlay.modal: Rectangle {
+            color: app.tint(desktop.background, 0.65)
+        }
+        onClosed: { closing = false; app.editingPanelClosed(); app.restorePanelFocus() }
         contentItem: Rectangle {
                 id: notesPanel
                 objectName: "notesPanel"
@@ -3096,6 +3254,7 @@ ApplicationWindow {
     ChapterFind {
         id: chapterFind
         objectName: "chapterFind"
+        fadeDuration: app.reduceMotion ? 0 : 120
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
         anchors.margins: 16 * app.controlScale
         theme: desktop
@@ -3335,8 +3494,17 @@ ApplicationWindow {
             enabled: passagePalette.visible && app.paletteTextMode && !contextMenu.visible && paletteResults.currentIndex >= 0
             onActivated: { const p = app.sceneRowPoint(paletteResults.currentItem); app.openSearchMenu(paletteResults.currentIndex, p.x, p.y) }
         }
+        // Fades in with input focus already live; closes at once behind a ghost.
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+        }
+        onAboutToShow: { paletteGhost.hide(); paletteScrimGhost.hide() }
         onOpened: referenceInput.forceActiveFocus()
-        onAboutToHide: { if (!app.paletteCleared) app.rememberPalette() }
+        onAboutToHide: {
+            if (!app.paletteCleared) app.rememberPalette()
+            paletteScrimGhost.show(app.contentItem)
+            paletteGhost.show(background)
+        }
         onClosed: {
             let action = pendingAction
             pendingAction = ""
@@ -3587,21 +3755,36 @@ ApplicationWindow {
         leftPadding: padding
         rightPadding: padding
         closePolicy: deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        readonly property bool tabKeys: opened && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
+        readonly property bool tabKeys: shown && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
         readonly property bool collectionKeys: tabKeys && app.collectionTab !== 3
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
-        onOpened: app.moveSaved(0)
-        onClosed: { tagsUi.embeddedClosed(); app.restorePanelFocus() }
+        // Slide plus a short fade. A closing drawer no longer counts as open
+        // (`shown`), so reader keys and a reopen work during its exit animation.
+        property bool closing: false
+        readonly property bool shown: visible && !closing
+        enter: Transition {
+            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+        }
+        exit: Transition {
+            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+        }
+        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
+        onAboutToHide: { closing = true; app.restorePanelFocus() }
+        function focusContent() { app.moveSaved(0) }
+        onVisibleChanged: if (visible && !closing) focusContent()
+        onClosed: { closing = false; tagsUi.embeddedClosed(); app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "savedContent"
-            Shortcut { sequence: "Ctrl+A"; enabled: savedDrawer.opened && !deleteConfirmation.visible && !tagsUi.visibleModal && !bible.busy && !app.textInputActive(); onActivated: savedDrawer.close() }
+            Shortcut { sequence: "Ctrl+A"; enabled: savedDrawer.shown && !deleteConfirmation.visible && !tagsUi.visibleModal && !bible.busy && !app.textInputActive(); onActivated: savedDrawer.close() }
             Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(-1) }
             Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(-1) }
             Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(1) }
             Shortcut { sequence: "Shift+E"; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.editSavedRange() }
-            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.opened && !deleteConfirmation.visible && app.activeFocusItem === collectionList; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
+            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.shown && !deleteConfirmation.visible && app.activeFocusItem === collectionList; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
             Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.requestDeleteSaved() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
@@ -3745,11 +3928,26 @@ ApplicationWindow {
         focus: true
         padding: 16 * app.controlScale
         closePolicy: cleanDeskConfirmation.visible || errorDialog.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        readonly property bool listKeys: opened && !contextMenu.visible && !cleanDeskConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
+        readonly property bool listKeys: shown && !contextMenu.visible && !cleanDeskConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
-        onOpened: { app.restoreDeskRow(); app.moveDesk(0) }
-        onClosed: app.restorePanelFocus()
+        // Slide plus a short fade. A closing drawer no longer counts as open
+        // (`shown`), so reader keys and a reopen work during its exit animation.
+        property bool closing: false
+        readonly property bool shown: visible && !closing
+        enter: Transition {
+            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+        }
+        exit: Transition {
+            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+        }
+        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
+        onAboutToHide: { closing = true; app.restorePanelFocus() }
+        function focusContent() { app.restoreDeskRow(); app.moveDesk(0) }
+        onVisibleChanged: if (visible && !closing) focusContent()
+        onClosed: { closing = false; app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "deskContent"
             spacing: 12 * app.scale
@@ -3887,7 +4085,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         onOpened: cleanDeskCancel.forceActiveFocus()
         onClosed: {
-            if (deskDrawer.opened) Qt.callLater(function() { if (!cleanDeskConfirmation.visible) app.moveDesk(0) })
+            if (deskDrawer.shown) Qt.callLater(function() { if (!cleanDeskConfirmation.visible) app.moveDesk(0) })
             else app.restorePanelFocus()
         }
         Shortcut {
@@ -4555,7 +4753,7 @@ ApplicationWindow {
         interval: 0
         onTriggered: {
             if (deleteConfirmation.visible) return
-            if (savedDrawer.opened) app.moveSaved(0)
+            if (savedDrawer.shown) app.moveSaved(0)
             else app.restorePanelFocus()
         }
     }

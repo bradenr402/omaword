@@ -14,6 +14,7 @@ filters, and `-functions`, require exactly one selected suite.
 | `search` | `tests/search.pro` | `build/search-tests/` | `tst_search` |
 | `searchui` | `tests/searchui.pro` | `build/searchui-tests/` | `tst_searchui` |
 | `deskui` | `tests/deskui.pro` | `build/deskui-tests/` | `tst_deskui` |
+| `motion` | `tests/motion.pro` | `build/motion-tests/` | `tst_motion` |
 | `contextmenu` | `tests/contextmenu.pro` | `build/contextmenu-tests/` | `tst_contextmenu` |
 | `searchrender` | `tests/searchrender.pro` | `build/searchrender-tests/` | `tst_searchrender` |
 | `tags` | `tests/tags.pro` | `build/tags-tests/` | `tst_tags` |

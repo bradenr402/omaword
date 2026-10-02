@@ -71,6 +71,9 @@ Item {
                                                                            backend.selectedStart, backend.selectedEnd)
             paint.requestPaint()
             searchPaint.requestPaint()
+            updateDimRects()
+            pulseRects = verseRangeRects(pulseFirst, pulseLast)
+            flashRects = verseRangeRects(flashFirst, flashLast)
             updateAnnotations()
         }
     }
@@ -79,6 +82,44 @@ Item {
     function verseRect(number) { return body.positionToRectangle(document.positionFor(number)) }
     function searchRect(segment) { return document.searchRect(segment) }
     function hit(x, y) { return document.verseAtPoint(x, y) }
+    // Line rectangles of verses first..last in the shared layout (paint only).
+    function verseRangeRects(first, last) {
+        if (first <= 0) return []
+        const spans = Array.from(document.spans).filter(function(s) { return s.number >= first && s.number <= last })
+        return spans.length ? document.rectangles(spans[0].start, spans[spans.length - 1].end) : []
+    }
+    // Focus-mode dimming cross-fades from the previous focus to the new one.
+    // Controllers without motion state (tests, embedders) get static defaults.
+    readonly property int focusFirst: controller.focusFirst || 0
+    readonly property int focusLast: controller.focusLast || 0
+    readonly property int fadeMs: controller.fadeMs || 0
+    readonly property real dimOpacity: controller.focusDimOpacity === undefined ? 0.32 : controller.focusDimOpacity
+    property int dimFirst: 0
+    property int dimLast: 0
+    property int dimPreviousFirst: 0
+    property int dimPreviousLast: 0
+    property real dimProgress: 1
+    onFocusFirstChanged: if (!destroying) focusTimer.restart()
+    onFocusLastChanged: if (!destroying) focusTimer.restart()
+    function focusMoved() {
+        if (destroying || (dimFirst === focusFirst && dimLast === focusLast)) return
+        dimPreviousFirst = dimFirst; dimPreviousLast = dimLast
+        dimFirst = focusFirst; dimLast = focusLast
+        dimFade.stop()
+        dimProgress = 0
+        updateDimRects()
+        if (fadeMs > 0) dimFade.start(); else dimProgress = 1
+    }
+    // Overlay alpha (0 = undimmed) currently painted over a verse; for tests.
+    function dimLevel(number) {
+        if (!backend.focusMode) return 0
+        const inside = function(first, last) { return number >= first && number <= last }
+        const full = 1 - dimOpacity
+        if (inside(dimFirst, dimLast)) return full * (1 - dimProgress)
+        if (inside(dimPreviousFirst, dimPreviousLast)) return full * dimProgress
+        return full
+    }
+    NumberAnimation { id: dimFade; target: root; property: "dimProgress"; from: 0; to: 1; duration: root.fadeMs; easing.type: Easing.InOutQuad }
     property bool pressed: false
     property bool dragging: false
     property point origin
@@ -197,6 +238,45 @@ Item {
             HandDrawn.searchMarks(ctx, rects, accent, false, root.controller.scale, "block")
         }
     }
+    // Jump pulse and copy flash: translucent accent behind the text. Plain
+    // rectangles with animated opacity; nothing repaints per frame.
+    property var pulseRects: []
+    property var flashRects: []
+    readonly property int pulseFirst: controller.pulseFirst || 0
+    readonly property int pulseLast: controller.pulseLast || 0
+    readonly property int flashFirst: controller.flashFirst || 0
+    readonly property int flashLast: controller.flashLast || 0
+    onPulseFirstChanged: if (!destroying) geometryTimer.restart()
+    onPulseLastChanged: if (!destroying) geometryTimer.restart()
+    onFlashFirstChanged: if (!destroying) geometryTimer.restart()
+    onFlashLastChanged: if (!destroying) geometryTimer.restart()
+    Item {
+        id: motionLayer
+        objectName: "blockMotionBackground"
+        x: body.x; y: body.y
+        width: body.width; height: body.height
+        readonly property real pulse: root.controller.pulseActive ? root.controller.pulseLevel : 0
+        readonly property real flash: root.controller.flashActive ? root.controller.flashLevel : 0
+        visible: pulse > 0 || flash > 0
+        Repeater {
+            model: motionLayer.pulse > 0 ? root.pulseRects : []
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x; y: modelData.y; width: modelData.width; height: modelData.height
+                color: root.theme.accent
+                opacity: 0.24 * motionLayer.pulse
+            }
+        }
+        Repeater {
+            model: motionLayer.flash > 0 ? root.flashRects : []
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x; y: modelData.y; width: modelData.width; height: modelData.height
+                color: root.theme.accent
+                opacity: 0.3 * motionLayer.flash
+            }
+        }
+    }
     TextEdit {
         id: body
         objectName: "blockBody"
@@ -274,6 +354,68 @@ Item {
                 if (mouse.button !== Qt.LeftButton) return
                 root.controller.selectVerse(root.hit(mouse.x, mouse.y), false)
                 root.controller.openNotes(true)
+            }
+        }
+    }
+    // Focus-mode dimming: a background-colored veil over unfocused text, above
+    // the text but without input handling, so layout, copy, and hits are unchanged.
+    // The canvas repaints once per focus change; the cross-fade animates only the
+    // opacity of the previous/new focus rectangles.
+    property var dimNewRects: []
+    property var dimOldRects: []
+    function updateDimRects() {
+        dimNewRects = verseRangeRects(dimFirst, dimLast)
+        let old = []
+        for (let verse = dimPreviousFirst; verse > 0 && verse <= dimPreviousLast; ++verse)
+            if (verse < dimFirst || verse > dimLast) old = old.concat(verseRangeRects(verse, verse))
+        dimOldRects = old
+    }
+    Item {
+        id: dimLayer
+        objectName: "blockFocusDim"
+        x: body.x; y: body.y
+        width: body.width; height: body.height
+        z: 1
+        opacity: root.backend.focusMode ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: root.fadeMs } }
+        readonly property color veil: root.theme.background
+        readonly property real full: 1 - root.dimOpacity
+        Canvas {
+            id: dimPaint
+            anchors.fill: parent
+            property var holes: root.dimNewRects.concat(root.dimOldRects)
+            onHolesChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onVisibleChanged: if (visible) requestPaint()
+            property color veil: dimLayer.veil
+            onVeilChanged: requestPaint()
+            onPaint: {
+                if (root.destroying) return
+                const ctx = getContext("2d")
+                ctx.reset()
+                ctx.fillStyle = Qt.rgba(veil.r, veil.g, veil.b, dimLayer.full)
+                ctx.fillRect(0, 0, width, height)
+                for (const r of holes) ctx.clearRect(r.x, r.y, r.width, r.height)
+            }
+        }
+        Repeater {
+            model: root.dimOldRects
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x; y: modelData.y; width: modelData.width; height: modelData.height
+                color: dimLayer.veil
+                opacity: dimLayer.full * root.dimProgress
+            }
+        }
+        Repeater {
+            model: root.dimNewRects
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x; y: modelData.y; width: modelData.width; height: modelData.height
+                color: dimLayer.veil
+                opacity: dimLayer.full * (1 - root.dimProgress)
             }
         }
     }
@@ -401,11 +543,14 @@ Item {
     // global callLater callback can outlive the QML context on window teardown.
     Timer { id: rebuildTimer; interval: 0; onTriggered: root.rebuild() }
     Timer { id: geometryTimer; interval: 0; onTriggered: root.refreshGeometry() }
-    Component.onCompleted: rebuild()
+    Timer { id: focusTimer; interval: 0; onTriggered: root.focusMoved() }
+    Component.onCompleted: { dimFirst = focusFirst; dimLast = focusLast; rebuild() }
     Component.onDestruction: {
         destroying = true
         rebuildTimer.stop()
         geometryTimer.stop()
+        focusTimer.stop()
+        dimFade.stop()
         autoscroll.stop()
     }
 }

@@ -15,7 +15,12 @@ Rectangle {
     signal preview(string query)
     signal accepted(string query)
     signal canceled()
-    visible: opened
+    // Fade only: closed prompts take no input while fading out.
+    property int fadeDuration: 120
+    visible: opacity > 0
+    enabled: opened
+    opacity: opened ? 1 : 0
+    Behavior on opacity { NumberAnimation { duration: root.fadeDuration } }
     height: 40 * Math.min(uiScale, 1.4)
     color: theme.background
     border.color: theme.border

@@ -12,6 +12,7 @@
 namespace {
 constexpr int sampleRate = 44100;
 const char *settingsKey = "sound/effectsEnabled";
+const char *motionKey = "motion/reduced";
 
 struct Note { double startHz, endHz, ms, gain; };
 
@@ -50,6 +51,7 @@ SoundEffects::SoundEffects(QObject *parent, const QString &settingsPath, bool au
     if (QGuiApplication::platformName() == QStringLiteral("offscreen")) m_audioOutput = false;
     std::unique_ptr<QSettings> settings(openSettings(m_settingsPath));
     m_enabled = settings->value(settingsKey, true).toBool();
+    m_reduceMotion = settings->value(motionKey, false).toBool();
     m_tones.insert(QStringLiteral("tick"), synthesize({{1900, 1700, 18, 0.10}}));
     m_tones.insert(QStringLiteral("boundary"), synthesize({{420, 380, 60, 0.12}}));
     m_tones.insert(QStringLiteral("chime"), synthesize({{880, 880, 70, 0.09}, {1320, 1320, 110, 0.08}}));
@@ -76,6 +78,16 @@ void SoundEffects::setEnabled(bool enabled)
     settings->sync();
     if (!enabled && m_sink) m_sink->stop();
     emit enabledChanged();
+}
+
+void SoundEffects::setReduceMotion(bool reduce)
+{
+    if (m_reduceMotion == reduce) return;
+    m_reduceMotion = reduce;
+    std::unique_ptr<QSettings> settings(openSettings(m_settingsPath));
+    settings->setValue(motionKey, reduce);
+    settings->sync();
+    emit reduceMotionChanged();
 }
 
 bool SoundEffects::ensureOutput()
