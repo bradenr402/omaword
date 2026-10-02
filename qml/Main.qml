@@ -1739,7 +1739,8 @@ ApplicationWindow {
         { id: "annotations", title: "Annotations panel", keys: "Ctrl a", sequences: ["Ctrl+A"], command: true },
         { id: "desk", title: "Open Desk", keys: "Shift D", sequences: ["Shift+D"], command: true },
         { id: "toggleDesk", title: "Add to Desk", keys: "d", sequences: ["D"], command: true },
-        { id: "cleanDesk", title: "Clean Desk", keys: "", command: true },
+        // Desk-only: documented here, bound by deskDrawer (no sequences, so never global).
+        { id: "cleanDesk", title: "Clean Desk", keys: "Shift X", scope: "desk", command: true },
         { id: "editRange", title: "Edit annotation range", keys: "Shift E", sequences: ["Shift+E"], command: true },
         { id: "toggleNotes", title: "Notes panel", keys: "Ctrl n", sequences: ["Ctrl+N"], scope: "global", command: true },
         { id: "notes", title: "Write a note", keys: "w", sequences: ["W"], scope: "notes", command: true },
@@ -1840,12 +1841,14 @@ ApplicationWindow {
         if (action.scope === "global") return "This window · also available while writing notes"
         if (action.scope === "palette") return "This window · passage and command search"
         if (action.scope === "notes") return "Reader or notes preview"
+        if (action.scope === "desk") return "Desk panel only"
         return "Reader · outside text editing and dialogs"
     }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
         return actions.filter(function(binding) {
-            if (!binding.sequences && !binding.explanation) return false
+            // Desk-scoped keys are bound by the Desk drawer, so they list without catalog sequences.
+            if (!binding.sequences && !binding.explanation && binding.scope !== "desk") return false
             // Single-letter searches match a key, rather than every action containing it.
             return !query || (query.length === 1
                 ? binding.keys.split(/\s*[·/]\s*/).some(function(key) { return key.toLowerCase() === query })
@@ -4060,6 +4063,8 @@ ApplicationWindow {
             Shortcut { sequences: ["Return", "Enter"]; enabled: deskDrawer.listKeys && app.activeFocusItem === deskList; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.openDeskItem(entry.id) } }
             Shortcut { sequences: ["Y"]; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id) } }
             Shortcut { sequences: ["X", "Delete", "Backspace"]; enabled: deskDrawer.listKeys; onActivated: app.removeCurrentDeskItem() }
+            // x removes one passage; Shift X asks to clean the whole Desk.
+            Shortcut { sequence: "Shift+X"; enabled: deskDrawer.listKeys && deskList.count > 0; onActivated: app.requestCleanDesk() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
                 enabled: deskDrawer.listKeys && deskList.currentIndex >= 0
@@ -4161,7 +4166,7 @@ ApplicationWindow {
             Label { objectName: "deskError"; text: bible.error; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             FineRule { Layout.fillWidth: true }
             // No-break spaces keep each key with its verb when the row wraps.
-            Label { text: "↑\u00a0↓\u00a0choose    Enter\u00a0open    y\u00a0copy    x\u00a0remove    Esc\u00a0close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: "↑\u00a0↓\u00a0choose    Enter\u00a0open    y\u00a0copy    x\u00a0remove    Shift\u00a0x\u00a0clean    Esc\u00a0close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
         }
     }
 

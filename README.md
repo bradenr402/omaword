@@ -88,7 +88,7 @@ Press `?` or `F1` in the app for the full, searchable list; Enter there performs
 
 - `Ctrl n`: Notes
 - `Ctrl a`: Annotations (Bookmarks, Highlights, Notes, Tags)
-- `Shift D`: Desk, a study list shared by all windows and versions
+- `Shift D`: Desk, a study list shared by all windows and versions (in the Desk, `x` removes a passage and `Shift X` cleans it)
 - `Shift V`: switch versions
 - `Shift R`: Reading settings
 - `Ctrl Shift N`: new reader window

@@ -383,6 +383,41 @@ private slots:
         QVERIFY(toast().contains("Cleaned the Desk"));
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
     }
+    void cleanDeskShiftXOnlyInDesk() {
+        for (auto r : {"John 1:1", "John 1:4"}) { navigate(r); key(Qt::Key_D); }
+        QCOMPARE(desk().size(), 2);
+        auto confirmation = object("cleanDeskConfirmation");
+        // Reader: Shift X is unbound.
+        key(Qt::Key_X, Qt::ShiftModifier); QTest::qWait(100);
+        QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
+        // Annotations panel.
+        key(Qt::Key_A, Qt::ControlModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        key(Qt::Key_X, Qt::ShiftModifier); QTest::qWait(100);
+        QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        // Tag panel.
+        key(Qt::Key_T); QTRY_VERIFY(object("tagsSurface")->property("opened").toBool());
+        key(Qt::Key_X, Qt::ShiftModifier); QTest::qWait(100);
+        QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsSurface")->property("visible").toBool());
+        // Range editor.
+        QVERIFY(bible->toggleBookmark());
+        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
+        key(Qt::Key_X, Qt::ShiftModifier); QTest::qWait(100);
+        QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        // Desk: Shift X asks to clean everything; plain x still removes one.
+        openDesk();
+        key(Qt::Key_X, Qt::ShiftModifier);
+        QTRY_VERIFY(confirmation->property("opened").toBool());
+        QTRY_VERIFY(item("cleanDeskCancel")->hasActiveFocus());
+        QCOMPARE(desk().size(), 2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!confirmation->property("visible").toBool());
+        QVERIFY(deskOpen()); QCOMPARE(desk().size(), 2);
+        QTRY_VERIFY(item("deskList")->hasActiveFocus());
+        key(Qt::Key_X); QCOMPARE(desk().size(), 1);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
+    }
     void liveUpdateFromPeer() {
         openDesk();
         QCOMPARE(item("deskList")->property("count").toInt(), 0);
@@ -465,6 +500,9 @@ private slots:
         QVariant rows; QMetaObject::invokeMethod(window, "filteredKeybindings", Q_RETURN_ARG(QVariant, rows));
         QStringList titles; for (const auto &r : value(rows).toList()) titles << r.toMap()["title"].toString();
         QVERIFY(titles.contains("Open Desk")); QVERIFY(titles.contains("Add to Desk"));
+        QVERIFY(titles.contains("Clean Desk"));
+        for (const auto &r : value(rows).toList())
+            if (r.toMap()["id"] == "cleanDesk") { QCOMPARE(r.toMap()["keys"].toString(), QString("Shift X")); QVERIFY(!r.toMap().contains("sequences")); }
         key(Qt::Key_Escape);
     }
 };
