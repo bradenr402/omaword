@@ -90,38 +90,27 @@ Item {
         const spans = Array.from(document.spans).filter(function(s) { return s.number >= first && s.number <= last })
         return spans.length ? document.rectangles(spans[0].start, spans[spans.length - 1].end) : []
     }
-    // Focus-mode dimming cross-fades from the previous focus to the new one.
-    // Controllers without motion state (tests, embedders) get static defaults.
+    // Focus-mode dimming follows the cursor instantly; only entering or leaving
+    // focus mode as a whole fades. Controllers without motion state (tests,
+    // embedders) get static defaults.
     readonly property int focusFirst: controller.focusFirst || 0
     readonly property int focusLast: controller.focusLast || 0
     readonly property int fadeMs: controller.fadeMs || 0
     readonly property real dimOpacity: controller.focusDimOpacity === undefined ? 0.32 : controller.focusDimOpacity
     property int dimFirst: 0
     property int dimLast: 0
-    property int dimPreviousFirst: 0
-    property int dimPreviousLast: 0
-    property real dimProgress: 1
     onFocusFirstChanged: if (!destroying) focusTimer.restart()
     onFocusLastChanged: if (!destroying) focusTimer.restart()
     function focusMoved() {
         if (destroying || (dimFirst === focusFirst && dimLast === focusLast)) return
-        dimPreviousFirst = dimFirst; dimPreviousLast = dimLast
         dimFirst = focusFirst; dimLast = focusLast
-        dimFade.stop()
-        dimProgress = 0
         updateDimRects()
-        if (fadeMs > 0) dimFade.start(); else dimProgress = 1
     }
     // Overlay alpha (0 = undimmed) currently painted over a verse; for tests.
     function dimLevel(number) {
         if (!backend.focusMode) return 0
-        const inside = function(first, last) { return number >= first && number <= last }
-        const full = 1 - dimOpacity
-        if (inside(dimFirst, dimLast)) return full * (1 - dimProgress)
-        if (inside(dimPreviousFirst, dimPreviousLast)) return full * dimProgress
-        return full
+        return number >= dimFirst && number <= dimLast ? 0 : 1 - dimOpacity
     }
-    NumberAnimation { id: dimFade; target: root; property: "dimProgress"; from: 0; to: 1; duration: root.fadeMs; easing.type: Easing.InOutQuad }
     property bool pressed: false
     property bool dragging: false
     property point origin
@@ -367,17 +356,9 @@ Item {
     }
     // Focus-mode dimming: a background-colored veil over unfocused text, above
     // the text but without input handling, so layout, copy, and hits are unchanged.
-    // The canvas repaints once per focus change; the cross-fade animates only the
-    // opacity of the previous/new focus rectangles.
-    property var dimNewRects: []
-    property var dimOldRects: []
-    function updateDimRects() {
-        dimNewRects = verseRangeRects(dimFirst, dimLast)
-        let old = []
-        for (let verse = dimPreviousFirst; verse > 0 && verse <= dimPreviousLast; ++verse)
-            if (verse < dimFirst || verse > dimLast) old = old.concat(verseRangeRects(verse, verse))
-        dimOldRects = old
-    }
+    // The canvas repaints once per focus change, with no cross-fade.
+    property var dimRects: []
+    function updateDimRects() { dimRects = verseRangeRects(dimFirst, dimLast) }
     Item {
         id: dimLayer
         objectName: "blockFocusDim"
@@ -392,7 +373,7 @@ Item {
         Canvas {
             id: dimPaint
             anchors.fill: parent
-            property var holes: root.dimNewRects.concat(root.dimOldRects)
+            property var holes: root.dimRects
             onHolesChanged: requestPaint()
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
@@ -406,24 +387,6 @@ Item {
                 ctx.fillStyle = Qt.rgba(veil.r, veil.g, veil.b, dimLayer.full)
                 ctx.fillRect(0, 0, width, height)
                 for (const r of holes) ctx.clearRect(r.x, r.y, r.width, r.height)
-            }
-        }
-        Repeater {
-            model: root.dimOldRects
-            delegate: Rectangle {
-                required property var modelData
-                x: modelData.x; y: modelData.y; width: modelData.width; height: modelData.height
-                color: dimLayer.veil
-                opacity: dimLayer.full * root.dimProgress
-            }
-        }
-        Repeater {
-            model: root.dimNewRects
-            delegate: Rectangle {
-                required property var modelData
-                x: modelData.x; y: modelData.y; width: modelData.width; height: modelData.height
-                color: dimLayer.veil
-                opacity: dimLayer.full * (1 - root.dimProgress)
             }
         }
     }
@@ -558,7 +521,6 @@ Item {
         rebuildTimer.stop()
         geometryTimer.stop()
         focusTimer.stop()
-        dimFade.stop()
         autoscroll.stop()
     }
 }

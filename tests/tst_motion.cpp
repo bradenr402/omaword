@@ -295,23 +295,30 @@ private slots:
         settle(); QCOMPARE(dim(7), 0.0); QVERIFY(dim(4) > 0.5);
         QCOMPARE(geometry(), rects);
     }
-    void dimmingFadesOnCursorMove_data() { layouts(); }
-    void dimmingFadesOnCursorMove() {
+    void dimmingInstantOnCursorMove_data() { layouts(); }
+    void dimmingInstantOnCursorMove() {
         QFETCH(QString, mode);
         setLayout(mode); navigate("John 1:5");
         key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
         if (mode != "verse") QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() == bible->verses().size());
         settle(); call("readerFocus");
-        key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), 6);
-        // Mid-fade: the new verse is still partially dimmed, then clears.
-        QTRY_VERIFY(dim(6) > 0.05);
-        QTRY_COMPARE(dim(6), 0.0);
-        QTRY_VERIFY(dim(5) > 0.5);
-        // Reduce motion makes the same change instant.
-        sounds->setReduceMotion(true);
-        key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), 7);
-        QTest::qWait(30);
-        QCOMPARE(dim(7), 0.0); QVERIFY(dim(6) > 0.5);
+        QTRY_VERIFY_WITH_TIMEOUT(!prop("pulseActive").toBool(), 3000);
+        const auto full = 1 - prop("focusDimOpacity").toDouble();
+        // j, k, Down, and Up re-dim at once: never a partial (fading) level,
+        // no pulse, and no flash.
+        const QList<QPair<Qt::Key, int>> moves = {{Qt::Key_J, 6}, {Qt::Key_Down, 7}, {Qt::Key_K, 6}, {Qt::Key_Up, 5}};
+        for (const auto &move : moves) {
+            const int previous = bible->cursorVerse();
+            key(move.first); QCOMPARE(bible->cursorVerse(), move.second);
+            QTest::qWait(1);
+            for (int sample = 0; sample < 8; ++sample) {
+                QCOMPARE(dim(move.second), 0.0);
+                QVERIFY(std::abs(dim(previous) - full) < 1e-6);
+                QVERIFY(!prop("pulseActive").toBool()); QVERIFY(!prop("flashActive").toBool());
+                QTest::qWait(20);
+            }
+        }
+        if (mode == "verse") QCOMPARE(item("chapterTitle")->opacity(), prop("focusDimOpacity").toDouble());
     }
     void pulseAfterJumps() {
         // Palette jump.

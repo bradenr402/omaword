@@ -538,6 +538,11 @@ ApplicationWindow {
     readonly property int focusFirst: bible.selectedStart > 0 ? bible.selectedStart : bible.cursorVerse
     readonly property int focusLast: bible.selectedStart > 0 ? bible.selectedEnd : bible.cursorVerse
     function verseDimmed(number) { return bible.focusMode && (number < focusFirst || number > focusLast) }
+    // 0 → 1 as focus mode is entered: the only dimming that fades. Which verses
+    // are dimmed follows the cursor instantly.
+    property real focusDimLevel: bible.focusMode ? 1 : 0
+    Behavior on focusDimLevel { NumberAnimation { duration: app.fadeMs } }
+    readonly property real focusDimmedOpacity: 1 - (1 - focusDimOpacity) * focusDimLevel
     property int pulseFirst: 0
     property int pulseLast: 0
     property real pulseLevel: 0
@@ -2565,8 +2570,7 @@ ApplicationWindow {
 
                         Label {
                             objectName: "chapterTitle"
-                            opacity: bible.focusMode ? app.focusDimOpacity : 1
-                            Behavior on opacity { NumberAnimation { duration: app.fadeMs } }
+                            opacity: app.focusDimmedOpacity
                             text: bible.passage
                             color: desktop.foreground
                             font.pixelSize: 34 * app.scale
@@ -2594,8 +2598,7 @@ ApplicationWindow {
                                 height: verseHeading.height + verseBody.height + 7 * app.scale
                                 // Focus-mode dimming: paint-only, so layout and hit-testing are unchanged.
                                 readonly property bool dimmed: app.verseDimmed(modelData.number)
-                                opacity: dimmed ? app.focusDimOpacity : 1
-                                Behavior on opacity { NumberAnimation { duration: app.fadeMs; easing.type: Easing.InOutQuad } }
+                                opacity: modelData.number < app.focusFirst || modelData.number > app.focusLast ? app.focusDimmedOpacity : 1
                                 RangeMarker {
                                     objectName: "bookmarkMarker" + verseRow.modelData.number
                                     kind: "bookmark"; number: verseRow.modelData.number; rowIndex: verseRow.index
