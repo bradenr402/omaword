@@ -4061,8 +4061,11 @@ private slots:
             }
         }
         for (const auto &removed : {"S","Ctrl+P","Ctrl+M","Ctrl+H","Ctrl+A","Shift+R","Shift+V","Shift+X","Ctrl+Shift+N",
-                                    "[","]","R","P","B","Shift+H","Ctrl+[","Ctrl+]","Ctrl+\\","-"})
+                                    "R","P","B","Ctrl+[","Ctrl+]","Ctrl+\\"})
             QVERIFY2(!owners.contains("app:" + QKeySequence(QString(removed)).toString()),removed);
+        // [ ] - and shift H moved from chapters/headings to History.
+        for (const auto &[sequence,id] : QList<QPair<QString,QString>>{{"[","historyBack"},{"]","historyForward"},{"-","historySwap"},{"Shift+H","history"}})
+            QCOMPARE(owners.value("app:" + QKeySequence(sequence).toString()),id);
     }
     void aliasesWorkButStayHidden() {
         reference("John 3:16");
@@ -4335,7 +4338,7 @@ private slots:
     void footerOrderAndResponsiveLayout() {
         reference("1 Thessalonians 5:16-18");
         const QStringList names = {"helpControl","modeControl","searchControl","passageControl","versionControl",
-            "layoutControl","savedControl","notesControl","relatedControl","deskControl","footerMore"};
+            "layoutControl","savedControl","notesControl","relatedControl","historyControl","deskControl","footerMore"};
         window->setMinimumWidth(320);
         struct Case { int width; int height; double scale; bool twoRows; bool layout; bool collapsed; };
         const QList<Case> cases = {{1120,820,1,false,true,false},{900,820,1.5,true,true,false},{700,820,1,true,true,false},
@@ -4370,7 +4373,8 @@ private slots:
             if (!entry.collapsed) {
                 QVERIFY(x("savedControl") < x("notesControl"));
                 QVERIFY(x("notesControl") < x("relatedControl"));
-                QVERIFY(x("relatedControl") < x("deskControl"));
+                QVERIFY(x("relatedControl") < x("historyControl"));
+                QVERIFY(x("historyControl") < x("deskControl"));
             }
             QVERIFY(x("helpControl") < x("modeControl") || entry.collapsed);
             if (entry.layout) QVERIFY(x("versionControl") < x("layoutControl"));

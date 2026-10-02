@@ -434,10 +434,12 @@ ApplicationWindow {
         })
     }
     function acceptBibleResult(entry) {
-        if (!paletteSearchCurrent || bible.searchBusy || !entry || !flushNote()) return
+        if (!paletteSearchCurrent || bible.searchBusy || !entry || entry.recentQuery || !flushNote()) return
         const query = submittedSearchQuery
-        savePosition()
+        const from = beginJump()
         if (!bible.openTaggedPassage(entry)) return
+        endJump(from)
+        bible.recordQuery(query)
         acceptedSearchQuery = query; acceptedSearchBibleSyntax = true
         searchRefreshTimer.stop(); localSearch(query, true)
         searchMatchIndex = searchMatches.findIndex(function(match) {
@@ -454,7 +456,7 @@ ApplicationWindow {
     Timer { id: bibleSearchTimer; interval: 150; onTriggered: app.submitBibleSearch() }
     Timer { id: searchRefreshTimer; interval: 0; onTriggered: app.refreshAcceptedSearch() }
     readonly property var paletteDestination: {
-        if (paletteTextMode) return { entry: paletteSearchCurrent ? paletteResults.model[paletteResults.currentIndex] : null, reference: "" }
+        if (paletteTextMode) return { entry: paletteSearchCurrent || !paletteTextQuery.length ? paletteResults.model[paletteResults.currentIndex] : null, reference: "" }
         let query = referenceInput.text.trim()
         let entry = paletteResults.model[paletteResults.currentIndex]
         if (entry && (paletteArrowUsed || !query || query.startsWith(">")
@@ -480,15 +482,15 @@ ApplicationWindow {
     readonly property real scale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
     readonly property bool contextMenuOpen: contextMenu.visible
-    readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || tagsUi.visibleModal
+    readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || historyDrawer.shown || tagsUi.visibleModal
     // Everything modal except the side panels (Annotations, Desk, Related).
-    readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool notesClosableFromReader: notesOpen && bible.ready && !bible.busy && !modalOpen && !findPromptOpen && !textInputActive()
     // One side panel at a time. Its opening key does nothing while it is open;
     // another panel's key switches to that panel.
     readonly property string sidePanel: notesOpen ? "notes" : savedDrawer.shown ? "annotations"
-        : deskDrawer.shown ? "desk" : tagsUi.relatedShown ? "related" : ""
-    readonly property var panelActions: ["notes", "annotations", "desk", "related"]
+        : deskDrawer.shown ? "desk" : historyDrawer.shown ? "history" : tagsUi.relatedShown ? "related" : ""
+    readonly property var panelActions: ["notes", "annotations", "desk", "related", "history"]
     readonly property bool panelSwitchKeys: sidePanel.length > 0 && bible.ready && !bible.busy && !dialogOpen
         && !findPromptOpen && !rangeEditing && !textInputActive()
     // Closes the open side panel before another opens. A Notes draft must
@@ -500,6 +502,7 @@ ApplicationWindow {
         if (current === "notes") return closeNotes()
         if (current === "annotations") savedDrawer.close()
         else if (current === "desk") deskDrawer.close()
+        else if (current === "history") historyDrawer.close()
         else if (current === "related") tagsUi.close()
         return true
     }
@@ -1011,7 +1014,9 @@ ApplicationWindow {
             notify("Verse " + number + " is not available in " + bible.passage)
             return
         }
+        const from = beginJump()
         selectVerse(number, false)
+        endJump(from)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, false) })
         pulseDestination()
     }
@@ -1136,6 +1141,7 @@ ApplicationWindow {
             // A side panel that replaced another keeps the keyboard.
             if (savedDrawer.shown) { if (!app.focusWithin(savedDrawer.contentItem)) savedDrawer.focusContent(); return }
             if (deskDrawer.shown) { if (!app.focusWithin(deskDrawer.contentItem)) deskDrawer.focusContent(); return }
+            if (historyDrawer.shown) { if (!app.focusWithin(historyDrawer.contentItem)) historyDrawer.focusContent(); return }
             if (tagsUi.relatedShown) { if (!tagsUi.focusInBody()) tagsUi.focusResults(); return }
             if (app.modalOpen || bible.busy) return
             if (notesDrawer.shown) {
@@ -1252,7 +1258,9 @@ ApplicationWindow {
         clearCount()
         if (!flushNote() || bible.verses.length === 0) return
         let number = bible.verses[last ? bible.verses.length - 1 : 0].number
+        const from = beginJump()
         selectVerse(number, false)
+        endJump(from)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, false) })
     }
     function chapterStep(delta) {
@@ -1276,8 +1284,9 @@ ApplicationWindow {
     function jump(reference) {
         if (rangeEditing) return
         if (!flushNote()) return
-        savePosition()
+        const from = beginJump()
         if (bible.navigate(reference)) {
+            endJump(from)
             passagePalette.navigated = true
             passagePalette.close()
             readerFocus()
@@ -1287,12 +1296,13 @@ ApplicationWindow {
     function openChapter(book, chapter) {
         if (rangeEditing) return
         if (!flushNote()) return
-        savePosition()
+        const from = beginJump()
         bible.openChapter(book, chapter)
         positionTimer.stop()
         reading.contentY = 0
         restoringPosition = false
         savePosition()
+        endJump(from)
         passagePalette.navigated = true
         passagePalette.close()
         readerFocus()
@@ -1444,8 +1454,9 @@ ApplicationWindow {
         const entry = deskEntry(id)
         if (!entry || !flushNote()) return
         if (!entry.available) { sounds.play("error"); notify(entry.versionAbbreviation + " is not installed", true); return }
-        savePosition()
+        const from = beginJump()
         if (!bible.openDeskItem(id)) return
+        endJump(from)
         syncNote()
         deskDrawer.close()
         readerFocus()
@@ -1490,6 +1501,231 @@ ApplicationWindow {
             sounds.play("remove")
             notify("Cleaned the Desk · " + count + (count === 1 ? " passage removed" : " passages removed"), true)
         }
+    }
+    // History. Each window keeps an in-memory jump stack (never saved): every
+    // jump records instantly; verse and chapter steps do not. [ and ] travel it
+    // like a browser; - swaps with the previous jump. The shared, persistent
+    // History list only records a location once it is kept for historyDwellMs.
+    property var jumpStack: []
+    property int jumpIndex: -1
+    // Where this window was before its latest jump or travel: - returns there.
+    property int jumpPrevious: -1
+    property int historyDwellMs: 5000
+    property string dwellChapterKey: ""
+    property bool dwellPending: false
+    property int historySelectedId: -1
+    property int historyRow: 0
+    readonly property var locationKeys: ["versionId", "book", "chapter", "start", "endBook", "endChapter", "end"]
+    function sameLocation(a, b) {
+        return !!a && !!b && locationKeys.every(function(key) { return a[key] === b[key] })
+    }
+    function locationNow() {
+        if (!bible.ready) return null
+        savePosition()
+        const location = bible.currentLocation()
+        return location && location.versionId ? location : null
+    }
+    function beginJump() { return locationNow() }
+    function endJump(from) {
+        const to = bible.ready ? bible.currentLocation() : null
+        if (!from || !to || !to.versionId || sameLocation(from, to)) return
+        let stack = jumpStack.slice(0, jumpIndex + 1)
+        if (stack.length) stack[stack.length - 1] = from
+        else stack.push(from)
+        stack.push(to)
+        if (stack.length > 200) stack = stack.slice(stack.length - 200)
+        jumpStack = stack
+        jumpIndex = stack.length - 1
+        jumpPrevious = jumpIndex - 1
+        restartDwell()
+    }
+    function restartDwell() {
+        dwellChapterKey = bible.ready ? bible.versionId + ":" + bible.book + ":" + bible.chapter : ""
+        dwellPending = bible.ready
+        if (bible.ready && bible.historyEnabled) historyDwellTimer.restart()
+        else historyDwellTimer.stop()
+    }
+    function recordVisit() {
+        if (!bible.ready || !bible.historyEnabled || bible.busy) return
+        dwellPending = false
+        savePosition()
+        bible.recordHistory()
+    }
+    // Opens a saved location (jump stack or History row) with its scroll position.
+    function openLocation(location) {
+        if (!location || !flushNote()) return false
+        if (!bible.openLocation(location)) {
+            sounds.play("error")
+            notify(bible.error || "That passage is no longer available", true)
+            return false
+        }
+        clearTextSelection()
+        selectionAnchor = bible.crossChapterSelection ? 0 : bible.selectedStart
+        syncNote()
+        restorePosition(false)
+        readerFocus()
+        pulseDestination()
+        restartDwell()
+        return true
+    }
+    function travelJump(target) {
+        if (rangeEditing || target < 0 || target >= jumpStack.length || target === jumpIndex) return false
+        if (!flushNote()) return false
+        const stack = jumpStack.slice()
+        const here = locationNow()
+        if (here) stack[jumpIndex] = here
+        if (!openLocation(stack[target])) return false
+        jumpStack = stack
+        jumpPrevious = jumpIndex
+        jumpIndex = target
+        return true
+    }
+    function historyStep(delta) {
+        const target = Math.max(0, Math.min(jumpStack.length - 1, jumpIndex + delta))
+        if (!jumpStack.length || target === jumpIndex) {
+            notify(delta < 0 ? "No earlier jump" : "No later jump", true)
+            return
+        }
+        travelJump(target)
+    }
+    // Swaps with the location before the latest jump or [ ] step; repeating flips back.
+    function historySwap() {
+        if (jumpPrevious < 0 || jumpPrevious >= jumpStack.length || jumpPrevious === jumpIndex) { notify("No previous jump", true); return }
+        travelJump(jumpPrevious)
+    }
+    // The jump stack position as a History row: the newest saved visit of the
+    // current stack location.
+    readonly property int historyCurrentId: {
+        const here = jumpIndex >= 0 ? jumpStack[jumpIndex] : null
+        const rows = Array.from(bible.history)
+        const current = here ? rows.find(function(row) { return app.sameLocation(row, here) }) : null
+        return current ? current.id : -1
+    }
+    function openHistory() {
+        if (rangeEditing || historyDrawer.shown) return
+        if (!bible.historyEnabled) { notify("History is disabled · enable it in Commands", true); sounds.play("error"); return }
+        historyDrawer.open()
+    }
+    function historyEntry(id) { return Array.from(bible.history).find(function(entry) { return entry.id === id }) }
+    function moveHistory(delta) {
+        if (historyList.count > 0) {
+            historyList.currentIndex = Math.max(0, Math.min(historyList.count - 1, historyList.currentIndex + delta))
+            historyList.positionViewAtIndex(historyList.currentIndex, ListView.Contain)
+            historyRow = historyList.currentIndex
+            historySelectedId = historyList.model[historyRow].id
+        } else { historyRow = 0; historySelectedId = -1 }
+        historyList.forceActiveFocus()
+    }
+    function restoreHistoryRow() {
+        const rows = Array.from(bible.history)
+        let row = rows.findIndex(function(entry) { return entry.id === historySelectedId })
+        if (row < 0) row = Math.min(historyRow, rows.length - 1)
+        historyList.currentIndex = row
+        historyRow = Math.max(0, row)
+        historySelectedId = row >= 0 ? rows[row].id : -1
+    }
+    function openHistoryItem(id) {
+        if (rangeEditing || bible.busy) return
+        const entry = historyEntry(id)
+        if (!entry || !flushNote()) return
+        if (!entry.available) { sounds.play("error"); notify(entry.versionAbbreviation + " is not installed", true); return }
+        const from = beginJump()
+        if (!openLocation(entry)) return
+        endJump(from)
+        historyDrawer.close()
+        readerFocus()
+    }
+    function copyHistoryItem(id, plainText) {
+        if (rangeEditing || bible.busy) return
+        const entry = historyEntry(id)
+        if (!entry) return
+        const scope = historyScope(entry)
+        if (!scope) { sounds.play("error"); return }
+        if (bible.copyScope(scope, !!plainText).length > 0) {
+            notify(entry.reference + " · " + entry.versionAbbreviation + (plainText ? " copied as plain text" : " copied"), true)
+            sounds.play("chime")
+        } else sounds.play("error")
+    }
+    function historyScope(entry) {
+        if (!entry || entry.start) return entry
+        return entry.available && entry.firstVerse ? Object.assign({}, entry, { start: entry.firstVerse, end: entry.lastVerse }) : null
+    }
+    function toggleHistoryDesk(id) {
+        if (rangeEditing || bible.busy) return
+        const entry = historyEntry(id)
+        const scope = historyScope(entry)
+        if (!scope || !entry.available) { sounds.play("error"); return }
+        toggleScopeDesk(scope)
+        if (historyDrawer.shown) historyList.forceActiveFocus()
+    }
+    function removeHistoryItem(id) {
+        if (rangeEditing || bible.busy) return
+        const row = Array.from(bible.history).findIndex(function(entry) { return entry.id === id })
+        if (row < 0) return
+        if (bible.removeHistoryItem(id)) {
+            historySelectedId = -1
+            historyRow = row
+            restoreHistoryRow()
+            sounds.play("remove")
+        }
+        if (historyDrawer.shown) historyList.forceActiveFocus()
+    }
+    function currentHistoryEntry() { return historyList.model[historyList.currentIndex] }
+    function requestClearHistory() {
+        if (rangeEditing || bible.busy) return
+        if (!bible.history.length && !bible.recentQueries.length) { notify("History is already empty", true); return }
+        clearHistoryConfirmation.open()
+    }
+    function confirmClearHistory() {
+        if (rangeEditing || bible.busy) return
+        const count = bible.history.length
+        if (bible.clearHistory()) {
+            clearHistoryConfirmation.close()
+            sounds.play("remove")
+            notify("Cleared History · " + count + (count === 1 ? " passage removed" : " passages removed"), true)
+        }
+    }
+    function toggleHistoryEnabled() {
+        const enable = !bible.historyEnabled
+        if (!enable && historyDrawer.shown) historyDrawer.close()
+        if (!bible.setHistoryEnabled(enable)) { sounds.play("error"); return }
+        restartDwell()
+        notify(enable ? "History enabled" : "History disabled · cleared", true)
+        sounds.play("tick")
+    }
+    // Today, Yesterday, Earlier by local calendar day.
+    function historyGroup(visitedAt) {
+        const visited = new Date(visitedAt)
+        const today = new Date(); today.setHours(0, 0, 0, 0)
+        const day = new Date(visited); day.setHours(0, 0, 0, 0)
+        const days = Math.round((today - day) / 86400000)
+        return days <= 0 ? "Today" : days === 1 ? "Yesterday" : "Earlier"
+    }
+    function historyTime(visitedAt) {
+        const visited = new Date(visitedAt)
+        return historyGroup(visitedAt) === "Earlier"
+            ? visited.toLocaleDateString(Qt.locale(), "MMM d") + " · " + visited.toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
+            : visited.toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
+    }
+    readonly property var historyRows: Array.from(bible.history).map(function(entry) {
+        return Object.assign({ group: app.historyGroup(entry.visitedAt) }, entry)
+    })
+    function openHistoryMenu(row, sceneX, sceneY) {
+        const entry = historyList.model[row]
+        if (!entry) return
+        historyList.currentIndex = row
+        moveHistory(0)
+        const ready = !rangeEditing && !bible.busy
+        const id = entry.id
+        const scope = historyScope(entry)
+        contextMenu.show("history", [
+            { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready && entry.available, run: function() { app.openHistoryItem(id) } },
+            { id: "copy", text: "Copy", shortcut: KeyNotation.format("Y"), enabled: ready && entry.available, run: function() { app.copyHistoryItem(id) } },
+            menuDivider,
+            { id: "desk", text: scope && deskRowFor(scope) ? "Remove from Desk" : "Add to Desk", shortcut: KeyNotation.format("D"), enabled: ready && !!scope, run: function() { app.toggleHistoryDesk(id) } },
+            menuDivider,
+            { id: "remove", text: "Remove from History", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeHistoryItem(id) } }
+        ], sceneX, sceneY)
     }
     function savePosition() {
         if (!restoringPosition && bible.ready) {
@@ -1597,8 +1833,9 @@ ApplicationWindow {
     function openSaved(entry) {
         if (rangeEditing) return
         if (!entry || !flushNote()) return
-        savePosition()
+        const from = beginJump()
         if (!bible.openTaggedPassage(entry)) return
+        endJump(from)
         syncNote()
         savedDrawer.close()
         if (entry.note.length > 0) openNotes(false)
@@ -1667,14 +1904,15 @@ ApplicationWindow {
     function openBookmark(scope) {
         if (rangeEditing) return
         if (!flushNote()) return
-        savePosition()
-        if (typeof scope === "string" ? bible.navigate(scope) : bible.openTaggedPassage(scope)) { syncNote(); readerFocus(); pulseDestination() }
+        const from = beginJump()
+        if (typeof scope === "string" ? bible.navigate(scope) : bible.openTaggedPassage(scope)) { endJump(from); syncNote(); readerFocus(); pulseDestination() }
     }
     function openNoteScope(scope) {
         if (rangeEditing) return
         if (!scope || !flushNote()) return
-        savePosition()
+        const from = beginJump()
         if (!bible.openTaggedPassage(scope)) return
+        endJump(from)
         syncNote()
         openNotes(true)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
@@ -1775,8 +2013,9 @@ ApplicationWindow {
         if (rangeEditing) return
         if (bible.busy || !flushNote()) return
         const selected = hasSelection
-        savePosition()
+        const from = beginJump()
         if (!bible.switchVersion(id)) return
+        endJump(from)
         clearTextSelection()
         selectionAnchor = 0
         syncNote()
@@ -1820,6 +2059,9 @@ ApplicationWindow {
         { id: "bottomVerse", group: "Navigate", title: "Scroll current verse to bottom", sequences: ["Z, B"], command: true },
         { id: "previousChapter", group: "Navigate", title: "Previous chapter", sequences: ["H", "Left"] },
         { id: "nextChapter", group: "Navigate", title: "Next chapter", sequences: ["L", "Right"] },
+        { id: "historyBack", group: "History", title: "Back to the previous jump", sequences: ["["] },
+        { id: "historyForward", group: "History", title: "Forward to the next jump", sequences: ["]"] },
+        { id: "historySwap", group: "History", title: "Swap with the previous jump", sequences: ["-"] },
         { id: "selectVerse", group: "Select", title: "Select verse", sequences: ["Click"], explanation: true },
         { id: "selectRange", group: "Select", title: "Select a range", sequences: ["Shift+Click"], explanation: true },
         { id: "visual", group: "Select", title: "Toggle visual selection", sequences: ["V"] },
@@ -1845,6 +2087,7 @@ ApplicationWindow {
         { id: "annotations", group: "Panels", title: "Annotations panel", sequences: ["Shift+A"], command: true },
         { id: "desk", group: "Panels", title: "Open Desk", sequences: ["Shift+D"], command: true },
         { id: "related", group: "Panels", title: "Related passages", sequences: ["Shift+L"], command: true },
+        { id: "history", group: "Panels", title: "History", sequences: ["Shift+H"], command: true },
         { id: "books", group: "Palettes and windows", title: "Navigate to a passage", sequences: ["Ctrl+K"], scope: "palette", command: true },
         { id: "commands", group: "Palettes and windows", title: "Open commands", sequences: ["Ctrl+Space"], aliases: ["Ctrl+Shift+P"], aliasReason: "the command palette key in VS Code and its kin.", scope: "palette" },
         { id: "resume", group: "Palettes and windows", title: "Resume last palette", sequences: ["Space"] },
@@ -1881,12 +2124,16 @@ ApplicationWindow {
         { id: "listSearch", group: "Lists", title: "Search the list (Annotations, Related)", sequences: ["/"], scope: "list", explanation: true },
         // Desk-only: bound by deskDrawer, never globally.
         { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+Del", "Shift+Backspace"], scope: "desk", command: true },
+        // Bound by the History panel; the command itself is Commands-only.
+        { id: "historyClearKeys", group: "Lists", title: "Clear History", sequences: ["Shift+Del", "Shift+Backspace"], scope: "history", explanation: true },
         { id: "tagsBrowser", group: "Commands only", title: "Tags", command: true },
         { id: "import", group: "Commands only", title: "Add version", scope: "global", command: true },
         { id: "removeVersion", group: "Commands only", title: "Remove version", scope: "global", command: true },
         { id: "export", group: "Commands only", title: "Export notes as Markdown", command: true },
         { id: "backup", group: "Commands only", title: "Save annotation backup", command: true },
         { id: "restore", group: "Commands only", title: "Restore annotation backup", command: true },
+        { id: "clearHistory", group: "Commands only", title: "Clear History", command: true },
+        { id: "toggleHistory", group: "Commands only", title: "Disable / Enable History", command: true },
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
@@ -1914,6 +2161,7 @@ ApplicationWindow {
         if (action.id === "toggleDesk") return bible.currentInDesk ? "Remove from Desk" : "Add to Desk"
         if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
         if (action.id === "reduceMotion") return sounds.reduceMotion ? "Allow motion" : "Reduce motion"
+        if (action.id === "toggleHistory") return bible.historyEnabled ? "Disable History" : "Enable History"
         return action.title
     }
     function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
@@ -1943,7 +2191,8 @@ ApplicationWindow {
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
-        if (action.scope === "list") return "List panels · Annotations, Desk, Related"
+        if (action.scope === "list") return "List panels · Annotations, Desk, History, Related"
+        if (action.scope === "history") return "History panel only"
         if (action.scope === "versions") return "Versions dialog"
         if (action.explanation) return "Reader gesture"
         if (action.scope === "global") return "This window · also with the Notes panel open, but not while typing"
@@ -1964,7 +2213,13 @@ ApplicationWindow {
         })
     }
     function paletteEntries() {
-        if (paletteTextMode) return paletteSearchCurrent ? Array.from(bible.searchResults) : []
+        if (paletteTextMode) {
+            // An empty search lists recent queries (History) to search again.
+            if (!paletteTextQuery.length) return Array.from(bible.recentQueries).slice(0, 5).map(function(query) {
+                return { title: query, hint: "Recent search", recentQuery: query }
+            })
+            return paletteSearchCurrent ? Array.from(bible.searchResults) : []
+        }
         let query = referenceInput.text.trim().toLowerCase()
         if (query.startsWith(">")) {
             query = query.substring(1).trim()
@@ -1988,16 +2243,45 @@ ApplicationWindow {
         }
         // Resolve exact canonical/source aliases without changing the displayed source name.
         const resolved = query && !/\d\s*$/.test(query) ? bible.resolveReference(query) : null
-        return Array.from(bible.books).filter(function(b) {
+        return (query ? [] : recentPassages()).concat(Array.from(bible.books).filter(function(b) {
             return !query || b.name.toLowerCase().indexOf(query) >= 0
                 || b.code.toLowerCase().indexOf(query) >= 0 || b.abbreviation.toLowerCase().indexOf(query) >= 0
                 || (resolved && resolved.valid && resolved.reference === b.name + " " + b.chapterNumbers[0])
         })
-            .map(function(b) { return { title: b.name, hint: b.chapters + " chapters", book: b.id, chapter: 0 } })
+            .map(function(b) { return { title: b.name, hint: b.chapters + " chapters", book: b.id, chapter: 0 } }))
+    }
+    // Up to three History passages, never the one being read.
+    function recentPassages() {
+        // Read notifying properties so the palette model follows the reader.
+        const here = bible.ready && (bible.passage + bible.selectionReference + bible.versionId).length ? bible.currentLocation() : null
+        return Array.from(bible.history).filter(function(entry) {
+            if (!entry.available || !here) return !!entry.available
+            const sameChapter = entry.versionId === here.versionId && entry.book === here.book && entry.chapter === here.chapter
+            return !app.sameLocation(entry, here) && !(sameChapter && (!entry.start || !here.start))
+        }).slice(0, 3).map(function(entry) {
+            return { title: entry.reference, hint: "Recent · " + entry.versionAbbreviation, recent: entry }
+        })
+    }
+    function openRecentPassage(entry) {
+        if (rangeEditing || !flushNote()) return
+        const from = beginJump()
+        if (!openLocation(entry)) return
+        endJump(from)
+        passagePalette.navigated = true
+        passagePalette.close()
+        readerFocus()
     }
     function activatePaletteEntry(entry) {
         if (!entry) return
-        if (paletteTextMode) { acceptBibleResult(entry); return }
+        if (paletteTextMode) {
+            if (entry.recentQuery) {
+                referenceInput.text = "/ " + entry.recentQuery
+                referenceInput.cursorPosition = referenceInput.text.length
+                referenceInput.forceActiveFocus()
+            } else acceptBibleResult(entry)
+            return
+        }
+        if (entry.recent) { openRecentPassage(entry.recent); return }
         if (entry.action) {
             if (!actionAvailable(entry.action) || !flushNote()) return
             if (["books", "bibleSearch", "commands", "resume"].includes(entry.action)) {
@@ -2138,6 +2422,15 @@ ApplicationWindow {
         case "tagsBrowser": openTagsBrowser(); break
         case "manageTags": openTagsBrowser(true); break
         case "related": if (leaveSidePanel("related")) tagsUi.openRelated(); break
+        case "history":
+            if (!bible.historyEnabled) { openHistory(); break }
+            if (leaveSidePanel("history")) openHistory()
+            break
+        case "historyBack": historyStep(-count); break
+        case "historyForward": historyStep(count); break
+        case "historySwap": historySwap(); break
+        case "clearHistory": requestClearHistory(); break
+        case "toggleHistory": toggleHistoryEnabled(); break
         case "copy": if (bible.ready) copyPassage(); break
         case "copyPlain": if (bible.ready) copyPassage(true); break
         case "export": exportDialog.open(); break
@@ -2465,6 +2758,10 @@ ApplicationWindow {
                         // Block: one solid run of lines.
                         for (const y of [4, 8.5, 13, 17.5]) { ctx.moveTo(3, y); ctx.lineTo(21, y) }
                         ctx.moveTo(3, 22); ctx.lineTo(12, 22)
+                    } else if (glyph === "history") {
+                        // A clock face with hands at ten past.
+                        ctx.arc(12, 12, 9.5, 0, 2 * Math.PI)
+                        ctx.moveTo(12, 6.5); ctx.lineTo(12, 12); ctx.lineTo(16, 14)
                     } else if (glyph === "more") {
                         ctx.fillRect(4, 11, 3, 3); ctx.fillRect(10.5, 11, 3, 3); ctx.fillRect(17, 11, 3, 3)
                     } else if (glyph === "visual") {
@@ -3356,7 +3653,7 @@ ApplicationWindow {
     }
 
     // Footer: ? and mode on the left; search, passage, version, and layout in
-    // the center; Annotations, Notes, Related, and Desk on the right. The center
+    // the center; Annotations, Notes, Related, History (while enabled), and Desk on the right. The center
     // stays centered while it fits. When cramped, the side groups keep the
     // bottom corners and the center moves to a row above; more cramped hides
     // the layout button; really cramped folds the right group into "…" and
@@ -3365,7 +3662,7 @@ ApplicationWindow {
     readonly property real footerGap: 4 * controlScale
     readonly property real footerButton: 40 * controlScale
     readonly property real footerGroupGap: 24 * controlScale
-    readonly property int footerRightCount: bible.ready ? 4 : 0
+    readonly property int footerRightCount: bible.ready ? (bible.historyEnabled ? 5 : 4) : 0
     readonly property real footerLeftFull: bible.ready ? 2 * footerButton + footerGap : footerButton
     readonly property real footerRightFull: footerRightCount ? footerRightCount * footerButton + (footerRightCount - 1) * footerGap : 0
     readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
@@ -3381,8 +3678,9 @@ ApplicationWindow {
             { id: "annotations", text: "Annotations", shortcut: menuKey("annotations"), enabled: ready, run: function() { app.runCommand("annotations") } },
             { id: "notes", text: "Notes", shortcut: menuKey("notes"), enabled: ready, run: function() { app.toggleNotes() } },
             { id: "related", text: "Related passages", shortcut: menuKey("related"), enabled: ready && hasSelection, run: function() { app.runCommand("related") } },
+            bible.historyEnabled ? { id: "history", text: "History", shortcut: menuKey("history"), enabled: ready, run: function() { app.runCommand("history") } } : null,
             { id: "desk", text: "Desk", shortcut: menuKey("desk"), enabled: ready, run: function() { app.runCommand("desk") } }
-        ]
+        ].filter(function(entry) { return !!entry })
     }
     Row {
         id: leftActions
@@ -3495,6 +3793,15 @@ ApplicationWindow {
             onClicked: app.runCommand("related")
         }
         FloatingButton {
+            objectName: "historyControl"
+            glyph: "history"
+            visible: floatingActions.expanded && bible.historyEnabled
+            selected: historyDrawer.visible
+            tip: "History · " + app.keyText("history")
+            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            onClicked: app.runCommand("history")
+        }
+        FloatingButton {
             objectName: "deskControl"
             visible: floatingActions.expanded
             glyph: "desk"
@@ -3512,7 +3819,8 @@ ApplicationWindow {
             enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: {
                 const p = footerMore.mapToItem(null, 0, 0)
-                contextMenu.show("footer", app.footerPanelEntries(), p.x, p.y - 4 * 30 * app.scale - 8 * app.scale)
+                const entries = app.footerPanelEntries()
+                contextMenu.show("footer", entries, p.x, p.y - entries.length * 30 * app.scale - 8 * app.scale)
             }
         }
     }
@@ -3760,7 +4068,7 @@ ApplicationWindow {
         Shortcut { sequence: "Shift+Tab"; enabled: passagePalette.visible && !contextMenu.visible; onActivated: app.cyclePaletteMode(-1) }
         Shortcut {
             sequences: ["Menu", "Shift+F10"]
-            enabled: passagePalette.visible && app.paletteTextMode && !contextMenu.visible && paletteResults.currentIndex >= 0
+            enabled: passagePalette.visible && app.paletteTextMode && app.paletteTextQuery.length > 0 && !contextMenu.visible && paletteResults.currentIndex >= 0
             onActivated: { const p = app.sceneRowPoint(paletteResults.currentItem); app.openSearchMenu(paletteResults.currentIndex, p.x, p.y) }
         }
         // Fades in with input focus already live; closes at once behind a ghost.
@@ -3938,7 +4246,7 @@ ApplicationWindow {
                     onClicked: app.activatePaletteEntry(modelData)
                     TapHandler {
                         acceptedButtons: Qt.RightButton
-                        enabled: app.paletteTextMode
+                        enabled: app.paletteTextMode && !paletteEntry.modelData.recentQuery
                         onTapped: function(eventPoint) { app.openSearchMenu(paletteEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
                     }
                     contentItem: ColumnLayout {
@@ -4450,6 +4758,231 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 QuietButton { id: cleanDeskCancel; objectName: "cleanDeskCancel"; text: "Cancel"; onClicked: cleanDeskConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
                 QuietButton { id: cleanDeskConfirm; objectName: "cleanDeskConfirm"; text: "Clean Desk"; emphasized: true; onClicked: app.confirmCleanDesk(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+            }
+        }
+    }
+
+    Drawer {
+        id: historyDrawer
+        objectName: "historyDrawer"
+        width: Math.min(520 * app.scale, app.width - 48)
+        height: app.height
+        edge: Qt.RightEdge
+        // Same modality and close rules as the Desk drawer.
+        modal: !closing
+        dim: true
+        focus: true
+        padding: 16 * app.controlScale
+        topPadding: padding
+        bottomPadding: padding
+        leftPadding: padding
+        rightPadding: padding
+        closePolicy: closing || clearHistoryConfirmation.visible || errorDialog.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        readonly property bool listKeys: shown && !contextMenu.visible && !clearHistoryConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
+        background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
+        Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
+        Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
+        property bool closing: false
+        readonly property bool shown: visible && !closing
+        enter: Transition {
+            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+        }
+        exit: Transition {
+            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+        }
+        onAboutToShow: { const reopening = visible; closing = false; app.historySelectedId = -1; app.historyRow = 0; if (reopening) focusContent() }
+        onAboutToHide: { closing = true; app.restorePanelFocus() }
+        function focusContent() { app.restoreHistoryRow(); app.moveHistory(0) }
+        onVisibleChanged: if (visible && !closing) focusContent()
+        onClosed: { closing = false; app.restorePanelFocus() }
+        contentItem: ColumnLayout {
+            objectName: "historyContent"
+            spacing: (historyDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
+            Shortcut { sequences: ["J", "Down"]; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(-1) }
+            Shortcut { sequence: "Home"; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(-historyList.count) }
+            Shortcut { sequence: "End"; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(historyList.count) }
+            Shortcut { sequences: ["Return", "Enter"]; enabled: historyDrawer.listKeys && historyList.activeFocus; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.openHistoryItem(entry.id) } }
+            Shortcut { sequence: "Y"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.copyHistoryItem(entry.id) } }
+            Shortcut { sequence: "Shift+Y"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.copyHistoryItem(entry.id, true) } }
+            Shortcut { sequence: "D"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.toggleHistoryDesk(entry.id) } }
+            Shortcut { sequences: ["Delete", "Backspace"]; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.removeHistoryItem(entry.id) } }
+            Shortcut { sequences: app.actionKeys("historyClearKeys"); enabled: historyDrawer.listKeys && historyList.count > 0; onActivated: app.requestClearHistory() }
+            Shortcut {
+                sequences: ["Menu", "Shift+F10"]
+                enabled: historyDrawer.listKeys && historyList.currentIndex >= 0
+                onActivated: { const p = app.sceneRowPoint(historyList.currentItem); app.openHistoryMenu(historyList.currentIndex, p.x, p.y) }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2 * app.scale
+                    Label { objectName: "historyTitle"; text: "History"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                    Label { objectName: "historyCount"; text: historyList.count === 1 ? "1 passage" : historyList.count + " passages"; color: desktop.muted; font.pixelSize: 12 * app.scale }
+                }
+                QuietButton {
+                    objectName: "historyClear"
+                    Layout.alignment: Qt.AlignTop | Qt.AlignRight
+                    text: "Clear History"; compact: true
+                    enabled: historyList.count > 0 && !app.rangeEditing && !bible.busy
+                    onClicked: app.requestClearHistory()
+                    Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
+                }
+            }
+            FineRule { Layout.fillWidth: true }
+            ListView {
+                id: historyList
+                objectName: "historyList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                spacing: 6 * app.scale
+                model: app.historyRows
+                onModelChanged: Qt.callLater(app.restoreHistoryRow)
+                ScrollBar.vertical: OverlayScrollbar { objectName: "historyScrollbar" }
+                delegate: ColumnLayout {
+                    id: historyBlock
+                    required property var modelData
+                    required property int index
+                    readonly property bool firstOfGroup: index === 0 || historyList.model[index - 1].group !== modelData.group
+                    readonly property bool current: modelData.id === app.historyCurrentId
+                    width: historyList.width
+                    spacing: 6 * app.scale
+                    Label {
+                        objectName: "historyGroup" + historyBlock.index
+                        visible: historyBlock.firstOfGroup
+                        text: historyBlock.modelData.group
+                        color: desktop.muted
+                        font.pixelSize: 12 * app.scale; font.weight: Font.Medium
+                        Layout.topMargin: historyBlock.index ? 8 * app.scale : 0
+                        Layout.leftMargin: 12 * app.scale
+                    }
+                    ItemDelegate {
+                        id: historyEntry
+                        objectName: "historyEntry" + historyBlock.index
+                        Layout.fillWidth: true
+                        padding: 12 * app.scale
+                        implicitHeight: historyEntryContent.implicitHeight + topPadding + bottomPadding
+                        focusPolicy: Qt.NoFocus
+                        highlighted: historyList.currentIndex === historyBlock.index
+                        onClicked: { historyList.currentIndex = historyBlock.index; app.moveHistory(0); app.openHistoryItem(historyBlock.modelData.id) }
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: function(eventPoint) { app.openHistoryMenu(historyBlock.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                        }
+                        contentItem: ColumnLayout {
+                            id: historyEntryContent
+                            spacing: 5 * app.scale
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    objectName: "historyHeader" + historyBlock.index
+                                    text: historyBlock.modelData.reference + " · " + historyBlock.modelData.versionAbbreviation
+                                    textFormat: Text.PlainText
+                                    color: historyBlock.modelData.available ? desktop.foreground : desktop.muted
+                                    font.pixelSize: 16 * app.scale; font.weight: Font.Medium
+                                    Layout.fillWidth: true; elide: Text.ElideRight
+                                }
+                                Label {
+                                    objectName: "historyTime" + historyBlock.index
+                                    text: app.historyTime(historyBlock.modelData.visitedAt)
+                                    color: desktop.muted; font.pixelSize: 12 * app.scale
+                                }
+                            }
+                            Label {
+                                objectName: "historyExcerpt" + historyBlock.index
+                                text: app.leftToRightText(historyBlock.modelData.excerpt)
+                                visible: historyBlock.modelData.excerpt.length > 0
+                                textFormat: Text.PlainText
+                                horizontalAlignment: Text.AlignLeft
+                                color: desktop.muted
+                                font.pixelSize: 13 * app.scale
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true; wrapMode: Text.Wrap
+                            }
+                            Label {
+                                visible: !historyBlock.modelData.available
+                                text: historyBlock.modelData.versionAbbreviation + " is not installed."
+                                color: desktop.muted; font.pixelSize: 12 * app.scale; font.italic: true
+                                Layout.fillWidth: true; wrapMode: Text.Wrap
+                            }
+                        }
+                        background: Rectangle {
+                            color: historyEntry.highlighted ? app.tint(desktop.accent, 0.11) : historyEntry.hovered ? desktop.surface : "transparent"
+                            radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                            border.width: 0
+                            // The jump stack's current position: a thin accent edge.
+                            Rectangle {
+                                objectName: "historyCurrent" + historyBlock.index
+                                visible: historyBlock.current
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                anchors.margins: 6 * app.scale
+                                width: 2 * app.scale
+                                color: app.tint(desktop.accent, 0.7)
+                            }
+                        }
+                    }
+                }
+                Label {
+                    objectName: "historyEmpty"
+                    anchors.centerIn: parent
+                    width: parent.width - 24
+                    text: "No History yet. Passages you stay on for a few seconds appear here."
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    color: desktop.muted
+                    font.pixelSize: 13 * app.scale
+                    visible: historyList.count === 0
+                }
+            }
+            Label { objectName: "historyError"; text: bible.error; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            FineRule { Layout.fillWidth: true }
+            Label {
+                objectName: "historyHints"
+                text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "open"], ["Y", "copy"], ["Delete", "remove"], [app.actionKeys("historyClearKeys")[0], "clear"], ["Escape", "close"]])
+                textFormat: Text.StyledText
+                color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+        }
+    }
+
+    ModalCard {
+        id: clearHistoryConfirmation
+        objectName: "clearHistoryConfirmation"
+        closePolicy: Popup.CloseOnEscape
+        onOpened: clearHistoryCancel.forceActiveFocus()
+        onClosed: {
+            if (historyDrawer.shown) Qt.callLater(function() { if (!clearHistoryConfirmation.visible) app.moveHistory(0) })
+            else app.restorePanelFocus()
+        }
+        Shortcut {
+            sequences: ["Left", "Up", "Right", "Down"]
+            enabled: clearHistoryConfirmation.opened && !errorDialog.visible
+            onActivated: {
+                if (clearHistoryCancel.activeFocus) clearHistoryConfirm.forceActiveFocus()
+                else clearHistoryCancel.forceActiveFocus()
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: 18 * app.scale
+            Label { text: "Clear History?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label {
+                objectName: "clearHistoryExplanation"
+                text: "Remove all " + bible.history.length + (bible.history.length === 1 ? " passage" : " passages") + " and your recent searches from History in every window. Back and forward in each window still work."
+                color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton { id: clearHistoryCancel; objectName: "clearHistoryCancel"; text: "Cancel"; onClicked: clearHistoryConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { id: clearHistoryConfirm; objectName: "clearHistoryConfirm"; text: "Clear History"; emphasized: true; onClicked: app.confirmClearHistory(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
             }
         }
     }
@@ -5093,6 +5626,7 @@ ApplicationWindow {
     Timer { id: toastTimer; interval: 3000 }
     Timer { id: countTimer; interval: 2000; onTriggered: app.clearCount() }
     Timer { id: positionSaveTimer; interval: 350; onTriggered: app.savePosition() }
+    Timer { id: historyDwellTimer; objectName: "historyDwellTimer"; interval: app.historyDwellMs; onTriggered: app.recordVisit() }
     Timer { id: readingModeRestoreTimer; interval: 0; onTriggered: app.restorePosition(app.hasSelection) }
     Timer {
         id: deleteFocusTimer
@@ -5158,9 +5692,16 @@ ApplicationWindow {
                 app.restorePosition(true)
             }
             app.syncNote()
+            // Reading another chapter (h, l, or any jump) restarts the History
+            // dwell; verse steps inside one chapter keep it running.
+            if (bible.versionId + ":" + bible.book + ":" + bible.chapter !== app.dwellChapterKey) app.restartDwell()
+        }
+        function onHistoryChanged() {
+            if (!bible.historyEnabled) { historyDwellTimer.stop(); if (historyDrawer.shown) historyDrawer.close() }
+            else if (app.dwellPending && !historyDwellTimer.running) historyDwellTimer.restart()
         }
     }
-    Component.onCompleted: { readerInitialized = true; syncNote(); restorePosition() }
+    Component.onCompleted: { readerInitialized = true; syncNote(); restorePosition(); restartDwell() }
     onClosing: function(close) {
         if (rangeEditing) rangeEditor.cancel()
         if (rangeEditing) { close.accepted = false; return }

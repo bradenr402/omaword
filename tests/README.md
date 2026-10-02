@@ -24,6 +24,7 @@ suite reports status/timing; full output goes to `build/test-logs/<selector>.log
 | `search` | `tests/search.pro` | `build/search-tests/` | `tst_search` |
 | `searchui` | `tests/searchui.pro` | `build/searchui-tests/` | `tst_searchui` |
 | `deskui` | `tests/deskui.pro` | `build/deskui-tests/` | `tst_deskui` |
+| `historyui` | `tests/historyui.pro` | `build/historyui-tests/` | `tst_historyui` |
 | `motion` | `tests/motion.pro` | `build/motion-tests/` | `tst_motion` |
 | `contextmenu` | `tests/contextmenu.pro` | `build/contextmenu-tests/` | `tst_contextmenu` |
 | `searchrender` | `tests/searchrender.pro` | `build/searchrender-tests/` | `tst_searchrender` |
@@ -72,12 +73,13 @@ a fake `hyprctl` and temporary theme state.
 
 - **importer**: USFM parsing, metadata, source order, malformed/unsafe input, staged publication.
 - **catalog**: catalog metadata, streamed atomic downloads, cancel/timeout/retry.
-- **backend**: library, references, annotations, backups, migrations, peers, file ownership.
+- **backend**: library, references, annotations, backups, migrations, peers, History, file ownership.
 - **ui**: packaged Main: catalog, layouts, selection/copy, Annotations, Visual completion, footer.
 - **search**: matching semantics, async lifecycle, whitespace-preserving copy.
 - **searchui**: palette and chapter-find keyboard behavior.
 - **searchrender**: rendered match offsets/geometry across layouts.
 - **deskui**: Desk add/remove, panel, peers, version removal.
+- **historyui**: jump stack (`[` `]` `-`), dwell recording, History panel, footer button, palette recents, two windows.
 - **motion**: focus dimming, jump pulses, copy flashes, held-key repeat, reduce motion.
 - **contextmenu**: shared context menu items, keyboard navigation, actions.
 - **tags**: tag identity, exact/overlap queries, persistence, backup, rollback.

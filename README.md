@@ -61,6 +61,12 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `h` · `←`: Previous chapter
 - `l` · `→`: Next chapter
 
+### History
+
+- `[`: Back to the previous jump
+- `]`: Forward to the next jump
+- `-`: Swap with the previous jump
+
 ### Select
 
 - `click`: Select verse
@@ -98,6 +104,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `shift A`: Annotations panel
 - `shift D`: Open Desk
 - `shift L`: Related passages
+- `shift H`: History
 
 ### Palettes and windows
 
@@ -139,6 +146,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `delete` · `backspace`: Remove item
 - `/`: Search the list (Annotations, Related)
 - `shift delete` · `shift backspace`: Clean Desk
+- `shift delete` · `shift backspace`: Clear History
 
 ### Commands only
 
@@ -149,6 +157,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - Export notes as Markdown
 - Save annotation backup
 - Restore annotation backup
+- Clear History
+- Disable / Enable History
 - About & Attribution
 
 ### Aliases
@@ -163,11 +173,13 @@ These also work, but stay out of the in-app list:
 
 **Reduce motion** (`alt m`) turns off pulses, flashes, and fades; **Disable sound effects** (`alt s`) silences the subtle sounds. Both are also in Commands and apply to all windows.
 
+`[` and `]` step back and forward through the passages you jumped to in this window, and `-` swaps with the previous one. History (`shift H`) lists passages you stayed on for a few seconds, shared by every window; it never goes into backups, and Commands can clear or disable it.
+
 Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
 
 Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related, or press `shift E` to move the assignments of the focused range. Use `t` to edit exact-range assignments and **Manage tags** (`ctrl t`) to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version.
 
-The footer puts `?` before mode on the left; search, passage, version, and layout in the center; and Annotations, Notes, Related, and Desk on the right. In narrow windows the center moves up a row, then the layout button hides, and finally the right group folds into a `…` menu. Annotations are drawn like pen and highlighter marks: hand-drawn Verse rails or inline Paragraph/Block brackets, with subtle cursor-range shading.
+The footer puts `?` before mode on the left; search, passage, version, and layout in the center; and Annotations, Notes, Related, History, and Desk on the right. In narrow windows the center moves up a row, then the layout button hides, and finally the right group folds into a `…` menu. Annotations are drawn like pen and highlighter marks: hand-drawn Verse rails or inline Paragraph/Block brackets, with subtle cursor-range shading.
 
 All your Bible versions, highlights, bookmarks, notes, and tags stay on this device. Personal data lives in `~/.local/share/omaword/`; backup and Markdown export are available in Commands.
 

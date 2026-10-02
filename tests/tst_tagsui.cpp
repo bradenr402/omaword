@@ -157,6 +157,8 @@ ApplicationWindow {
     property var pendingActionCollapse: null
     function flushNote() { return flushAllowed }
     function savePosition() {}
+    function beginJump() { return null }
+    function endJump(from) {}
     function syncNote() {}
     function scrollToVerse(verse, center) {}
     function restorePanelFocus() {}

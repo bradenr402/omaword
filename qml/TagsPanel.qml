@@ -344,8 +344,9 @@ Item {
     function openTagged(entry, edit = false) {
         if (!entry || !canAct() || !installed(entry)) return false
         const captured = snapshot(entry)
-        app.savePosition()
+        const from = app.beginJump()
         if (!bible.openTaggedPassage(captured)) { failed(); return false }
+        app.endJump(from)
         app.syncNote()
         if (edit) {
             // Main captures Visual-mode completion context for the new exact range.
