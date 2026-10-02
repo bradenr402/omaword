@@ -416,6 +416,10 @@ Item {
         resultList.positionViewAtIndex(resultList.currentIndex, ListView.Contain)
         resultList.forceActiveFocus()
     }
+    function focusInBody() {
+        for (let item = app.activeFocusItem; item; item = item.parent) if (item === body) return true
+        return false
+    }
     function focusResults() {
         if (resultList.count && resultList.currentIndex < 0) resultList.currentIndex = 0
         resultList.forceActiveFocus()

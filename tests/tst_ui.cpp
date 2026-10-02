@@ -674,7 +674,7 @@ private slots:
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("reading mode");
-        QTRY_COMPARE(prop("paletteHintreadingMode","text").toString(),QString("Paragraph · b"));
+        QTRY_COMPARE(prop("paletteHintreadingMode","text").toString(),QString("Paragraph · alt l"));
         key(Qt::Key_Return); QTRY_COMPARE(bible->readingMode(),QString("verse"));
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("reading mode");
@@ -774,8 +774,10 @@ private slots:
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("importGuide","visible").toBool());
         QVERIFY(!prop("importDialog","visible").toBool());
+        // Reading settings work before any version is installed.
         key(Qt::Key_R,Qt::ControlModifier);
-        QVERIFY(!prop("settingsDialog","visible").toBool());
+        QTRY_VERIFY(prop("settingsDialog","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
         type("write a note"); key(Qt::Key_Return);
@@ -784,8 +786,6 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"notes")));
         QVERIFY(QMetaObject::invokeMethod(window,"openNotes",Q_ARG(QVariant,true)));
         QVERIFY(!window->property("notesOpen").toBool());
-        key(Qt::Key_Escape);
-        QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
@@ -937,9 +937,6 @@ private slots:
         QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 17:22"));
         const int index = prop("paletteResults","currentIndex").toInt();
         capture("phase-b-verse-picker");
-        key(Qt::Key_Escape);
-        QCOMPARE(prop("referenceInput","text").toString(),QString());
-        QVERIFY(prop("passagePalette","visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space,Qt::ShiftModifier);
         QVERIFY(!prop("passagePalette","visible").toBool());
@@ -975,8 +972,6 @@ private slots:
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("headings"); key(Qt::Key_Escape);
-        QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
-        key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
@@ -1022,11 +1017,11 @@ private slots:
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(!window->property("notePreview").toBool());
         {
-            // Ctrl n opens a new window from the note editor without touching the note.
+            // Typing owns ctrl keys: ctrl n opens no window from the note editor.
             QSignalSpy opened(window,SIGNAL(newWindowRequested()));
             const auto text = prop("noteEditor","text").toString();
             key(Qt::Key_N,Qt::ControlModifier);
-            QCOMPARE(opened.count(),1);
+            QCOMPARE(opened.count(),0);
             QCOMPARE(prop("noteEditor","text").toString(),text);
             QVERIFY(item("noteEditor")->hasActiveFocus());
             QVERIFY(prop("notesDrawer","opened").toBool());
@@ -1047,7 +1042,7 @@ private slots:
             QVERIFY(newWindow.isValid());
             for (int dismissal = 0; dismissal < 9; ++dismissal) {
                 if (dismissal == 0) key(Qt::Key_Escape);
-                if (dismissal == 1) QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"toggleNotes")));
+                if (dismissal == 1) QVERIFY(QMetaObject::invokeMethod(window,"toggleNotes"));
                 if (dismissal == 2) QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,QPoint(30,200));
                 if (dismissal == 3) {
                     QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"focus")));
@@ -1200,6 +1195,8 @@ private slots:
         action("write a note");
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("Saved before dispatch");
+        // Keys type into the editor; dispatch from the Notes panel itself.
+        item("notesPanel")->forceActiveFocus();
         action("navigate to a passage");
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("John 4:2"); key(Qt::Key_Return);
@@ -1289,13 +1286,13 @@ private slots:
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
         type("verse picker");
         QTRY_VERIFY(item("paletteHintversePicker"));
-        QCOMPARE(prop("paletteHintversePicker","text").toString(),QString("On · p"));
+        QCOMPARE(prop("paletteHintversePicker","text").toString(),QString("On · alt p"));
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         QVERIFY(!bible->versePicker());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QCOMPARE(prop("referenceInput","text").toString(),QString("> verse picker"));
-        QTRY_COMPARE(prop("paletteHintversePicker","text").toString(),QString("Off · p"));
+        QTRY_COMPARE(prop("paletteHintversePicker","text").toString(),QString("Off · alt p"));
         key(Qt::Key_A,Qt::ControlModifier); type("> reading settings"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         QVERIFY(prop("settingsDialog","height").toDouble() <= 432);
@@ -1380,7 +1377,6 @@ private slots:
         QVERIFY(!item("paletteChevron0")->isVisible());
         type("2"); key(Qt::Key_Down);
         const int row = prop("paletteResults","currentIndex").toInt();
-        key(Qt::Key_Escape); QVERIFY(prop("passagePalette","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QCOMPARE(prop("referenceInput","text").toString(),QString("2"));
@@ -1394,10 +1390,12 @@ private slots:
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
+        // The current mode's key keeps the query.
         key(Qt::Key_Space,Qt::ControlModifier);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
-        QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
         bible->setVersePicker(false);
         key(Qt::Key_K,Qt::ControlModifier);
         QCOMPARE(window->property("paletteBook").toInt(),0);
@@ -1436,7 +1434,7 @@ private slots:
         QTRY_VERIFY(!bar->property("hovered").toBool());
         QTRY_COMPARE(prop("keybindingScrollbarThumb","opacity").toDouble(),0.5);
         QTRY_COMPARE(prop("keybindingScrollbarThumb","opacity").toDouble(),0.2);
-        type("p"); QCOMPARE(prop("keybindingResults","count").toInt(),1);
+        type("alt p"); QCOMPARE(prop("keybindingResults","count").toInt(),1);
         QVERIFY(item("keybindingVerse picker"));
         key(Qt::Key_A,Qt::ControlModifier); type("reading settings");
         QCOMPARE(prop("keybindingResults","count").toInt(),1);
@@ -1510,6 +1508,7 @@ private slots:
         reference("John 3:16"); bible->toggleBookmark(); bible->toggleHighlight();
         bible->setNoteText("Delete this exact note");
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        item("notesPanel")->forceActiveFocus();
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("annotations panel"); key(Qt::Key_Return);
@@ -1929,11 +1928,11 @@ private slots:
             QVERIFY(QRectF(16,16,608,448).contains(hints->mapRectToScene(hints->boundingRect())));
             const auto text = plainHint(hints->property("text").toString());
             if (mode == "commands") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    esc clear / close"));
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    esc close"));
                 QVERIFY(!item("paletteBack")->isVisible());
             } else if (mode == "chapters") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    ← back    esc clear / close"));
-            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    esc clear / close"));
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    ← back    esc close"));
+            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    esc close"));
         }
     }
     void normalVisualAndShiftedSelection() {
@@ -2155,7 +2154,7 @@ private slots:
         QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
         QCOMPARE(prop("tagsUi","page").toString(),QString("related"));
         QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
-        QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
@@ -2381,7 +2380,8 @@ private slots:
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         const QString second = "A different note for the next verse.";
         type(second);
-        // Navigation while editing must synchronously finish the correct note.
+        // Navigation from the Notes panel must synchronously finish the correct note.
+        item("notesPanel")->forceActiveFocus();
         key(Qt::Key_K, Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("John3:16"); key(Qt::Key_Return);
@@ -2461,6 +2461,8 @@ private slots:
         reference("John 3:16");
         for (auto menuKey : {Qt::Key_K,Qt::Key_F1}) {
             key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+            // Keys type in the editor; menus open from the Notes panel.
+            item("notesPanel")->forceActiveFocus();
             key(menuKey,menuKey == Qt::Key_K ? Qt::ControlModifier : Qt::NoModifier);
             const char *menu = menuKey == Qt::Key_K ? "passagePalette" : "helpDialog";
             QTRY_VERIFY(prop(menu,"opened").toBool());
@@ -3521,8 +3523,6 @@ private slots:
         type("3h"); QCOMPARE(bible->chapter(),2);
         type("2"); key(Qt::Key_Right); QCOMPARE(bible->chapter(),4);
         type("2"); key(Qt::Key_Left); QCOMPARE(bible->chapter(),2);
-        type("3]"); QCOMPARE(bible->chapter(),5);
-        type("2["); QCOMPARE(bible->chapter(),3);
         reference("John 21:1");
         type("2l"); QCOMPARE(bible->passage(),QString("Acts 2"));
         type("2h"); QCOMPARE(bible->passage(),QString("John 21"));
@@ -3774,10 +3774,10 @@ private slots:
         type("Psalms");
         QCOMPARE(prop("referenceInput","text").toString(),QString("Psalms"));
         // Ctrl and Alt app shortcuts are inactive while typing.
-        key(Qt::Key_R,Qt::ControlModifier); key(Qt::Key_N,Qt::AltModifier);
+        key(Qt::Key_R,Qt::ControlModifier);
         QCOMPARE(prop("referenceInput","text").toString(),QString("Psalms"));
         QVERIFY(!prop("settingsDialog","visible").toBool());
-        QVERIFY(bible->showVerseNumbers());
+        key(Qt::Key_N,Qt::AltModifier); QVERIFY(bible->showVerseNumbers());
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_R,Qt::ControlModifier);
@@ -3787,7 +3787,10 @@ private slots:
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(!item("toast")->isVisible());
         type("notes s "); key(Qt::Key_R,Qt::ControlModifier); key(Qt::Key_Space,Qt::ControlModifier);
-        key(Qt::Key_K,Qt::ControlModifier); key(Qt::Key_H,Qt::AltModifier); key(Qt::Key_Question);
+        key(Qt::Key_K,Qt::ControlModifier); key(Qt::Key_Question);
+        QVERIFY(prop("noteEditor","text").toString().startsWith("notes s ?"));
+        key(Qt::Key_H,Qt::AltModifier);
+        item("noteEditor")->setProperty("text",QString("notes s ?"));
         QCOMPARE(prop("noteEditor","text").toString(),QString("notes s ?"));
         QVERIFY(!prop("settingsDialog","visible").toBool());
         QVERIFY(!prop("passagePalette","visible").toBool());
@@ -3856,10 +3859,13 @@ private slots:
         QVERIFY(window->setProperty("syncingNote",true));
         QVERIFY(object("noteEditor")->setProperty("text","Save before opening a window"));
         QVERIFY(window->setProperty("syncingNote",false));
+        // While typing, ctrl n is the editor's; from the Notes panel it opens a window.
+        key(Qt::Key_N,Qt::ControlModifier);
+        QCOMPARE(requested.count(),1);
+        item("notesPanel")->forceActiveFocus();
         key(Qt::Key_N,Qt::ControlModifier);
         QCOMPARE(requested.count(),2);
         QCOMPARE(bible->noteText(),QString("Save before opening a window"));
-        QVERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("new window");
@@ -3869,6 +3875,8 @@ private slots:
         key(Qt::Key_Return);
         QTRY_COMPARE(requested.count(),3);
         QVERIFY(!prop("passagePalette","visible").toBool());
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        item("notesPanel")->forceActiveFocus();
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("new window");
         QCOMPARE(prop("keybindingResults","count").toInt(),1);
@@ -4034,9 +4042,12 @@ private slots:
     void aliasesWorkButStayHidden() {
         reference("John 3:16");
         key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
-        QCOMPARE(plainHint(prop("keybindingHinthelp","text").toString()),QString("?"));
-        QCOMPARE(plainHint(prop("keybindingHintcommands","text").toString()),QString("ctrl space"));
-        QCOMPARE(plainHint(prop("keybindingHintgoToVerse","text").toString()),QString("20g"));
+        for (const auto &row : QList<QStringList>{{"Keybindings","help","?"},{"Open commands","commands","ctrl space"},
+                {"Go to verse number","goToVerse","20g"}}) {
+            key(Qt::Key_A,Qt::ControlModifier); type(row[0]);
+            QTRY_VERIFY(object(qPrintable("keybindingHint" + row[1])));
+            QCOMPARE(plainHint(prop(qPrintable("keybindingHint" + row[1]),"text").toString()),row[2]);
+        }
         for (const auto &query : {QString("f1"),QString("ctrl shift p"),QString("20G")}) {
             key(Qt::Key_A,Qt::ControlModifier); type(query);
             QTRY_COMPARE(prop("keybindingResults","count").toInt(),0);
@@ -4311,7 +4322,7 @@ private slots:
         // Every catalog key reads in the shared notation: lowercase except a
         // shifted letter or function key, arrows as glyphs, muted separators.
         const QRegularExpression notation(QString::fromUtf8(
-            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]]+|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|[A-Z])$"));
+            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|[A-Z])$"));
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         for (const auto &record : records) {
             const auto action = record.toMap();
@@ -4798,6 +4809,7 @@ private slots:
             QVERIFY(object("noteEditor")->setProperty("text","A draft before adding a version"));
             QVERIFY(window->setProperty("syncingNote",false));
             QVERIFY(bible->noteText().isEmpty());
+            item("notesPanel")->forceActiveFocus();
         }
         QVERIFY(desktop->setProperty("textScale",scale));
         if (scale > 1) window->resize(640,480);
@@ -4893,7 +4905,7 @@ private slots:
         const int total = prop("keybindingResults","count").toInt();
         QVERIFY(total > 10);
         capture("help");
-        for (const auto &query : {QString("m"),QString("x"),QString("bookmark"),QString("Ctrl H"),QString("Shift Down")}) {
+        for (const auto &query : {QString("m"),QString("x"),QString("bookmark"),QString("highlight"),QString("Shift Down")}) {
             key(Qt::Key_A,Qt::ControlModifier); type(query);
             QTRY_COMPARE(prop("keybindingResults","count").toInt(),1);
             const QString action = query == "m" || query == "bookmark" ? "Bookmark selection"

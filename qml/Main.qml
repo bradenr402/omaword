@@ -1124,10 +1124,19 @@ ApplicationWindow {
         flushNote()
     }
     function readerFocus() { readerSurface.forceActiveFocus() }
+    function focusWithin(container) {
+        for (let item = activeFocusItem; item; item = item.parent) if (item === container) return true
+        return false
+    }
     function restorePanelFocus() {
         // Recheck after popup teardown: a dispatched action may have opened a
         // new modal already. Never steal its focus from a delayed close signal.
         Qt.callLater(function() {
+            if (app.dialogOpen || bible.busy) return
+            // A side panel that replaced another keeps the keyboard.
+            if (savedDrawer.shown) { if (!app.focusWithin(savedDrawer.contentItem)) savedDrawer.focusContent(); return }
+            if (deskDrawer.shown) { if (!app.focusWithin(deskDrawer.contentItem)) deskDrawer.focusContent(); return }
+            if (tagsUi.relatedShown) { if (!tagsUi.focusInBody()) tagsUi.focusResults(); return }
             if (app.modalOpen || bible.busy) return
             if (notesDrawer.shown) {
                 if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
@@ -1853,6 +1862,7 @@ ApplicationWindow {
         { id: "larger", group: "Reading", title: "Larger text", sequences: ["Ctrl++", "Ctrl+="] },
         { id: "smaller", group: "Reading", title: "Smaller text", sequences: ["Ctrl+-"] },
         { id: "resetText", group: "Reading", title: "Reset text size", sequences: ["Ctrl+0"] },
+        { id: "lineHeight", group: "Commands only", title: "Line height", command: true },
         { id: "lineMore", group: "Reading", title: "Increase line height", sequences: ["Ctrl+Alt+="] },
         { id: "lineLess", group: "Reading", title: "Decrease line height", sequences: ["Ctrl+Alt+-"] },
         { id: "lineReset", group: "Reading", title: "Reset line height", sequences: ["Ctrl+Alt+0"], command: true },
@@ -1870,7 +1880,6 @@ ApplicationWindow {
         // Desk-only: bound by deskDrawer, never globally.
         { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+Del", "Shift+Backspace"], scope: "desk", command: true },
         { id: "tagsBrowser", group: "Commands only", title: "Tags", command: true },
-        { id: "lineHeight", group: "Commands only", title: "Line height", command: true },
         { id: "import", group: "Commands only", title: "Add version", scope: "global", command: true },
         { id: "removeVersion", group: "Commands only", title: "Remove version", scope: "global", command: true },
         { id: "export", group: "Commands only", title: "Export notes as Markdown", command: true },
@@ -3959,7 +3968,7 @@ ApplicationWindow {
         // belongs to the reader (or range editor) immediately.
         onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent(); else app.savedQuery = "" }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
-        function focusContent() { app.moveSaved(0) }
+        function focusContent() { app.focusSavedList() }
         onVisibleChanged: if (visible && !closing) focusContent()
         onClosed: { closing = false; tagsUi.embeddedClosed(); app.restorePanelFocus() }
         contentItem: ColumnLayout {

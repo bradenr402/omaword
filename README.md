@@ -142,8 +142,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 ### Commands only
 
-- Tags
 - Line height
+- Tags
 - Add version
 - Remove version
 - Export notes as Markdown
