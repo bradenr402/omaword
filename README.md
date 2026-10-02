@@ -32,7 +32,7 @@ The palette navigates to passages, searches Scripture, and runs commands:
 
 ![Passage palette over the reader](screenshots/palette.png)
 
-Search results follow your Omarchy theme, light or dark:
+OmaWord follows your Omarchy theme, colors, and fonts:
 
 ![Bible search results in a light theme](screenshots/search.png)
 
@@ -156,8 +156,6 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 ### Commands only
 
-- Line height
-- Tags
 - Add version
 - Remove version
 - Export notes as Markdown

@@ -2074,7 +2074,6 @@ ApplicationWindow {
         { id: "larger", group: "Reading", title: "Larger text", sequences: ["Ctrl++", "Ctrl+="] },
         { id: "smaller", group: "Reading", title: "Smaller text", sequences: ["Ctrl+-"] },
         { id: "resetText", group: "Reading", title: "Reset text size", sequences: ["Ctrl+0"] },
-        { id: "lineHeight", group: "Commands only", title: "Line height", command: true },
         { id: "lineMore", group: "Reading", title: "Increase line height", sequences: ["Ctrl+Alt+="] },
         { id: "lineLess", group: "Reading", title: "Decrease line height", sequences: ["Ctrl+Alt+-"] },
         { id: "lineReset", group: "Reading", title: "Reset line height", sequences: ["Ctrl+Alt+0"], command: true },
@@ -2099,7 +2098,6 @@ ApplicationWindow {
         { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+Del", "Shift+Backspace"], scope: "desk", command: true },
         // Bound by the History panel; the command itself is Commands-only.
         { id: "historyClearKeys", group: "Lists", title: "Clear History", sequences: ["Shift+Del", "Shift+Backspace"], scope: "history", explanation: true },
-        { id: "tagsBrowser", group: "Commands only", title: "Tags", command: true },
         { id: "import", group: "Commands only", title: "Add version", scope: "global", command: true },
         { id: "removeVersion", group: "Commands only", title: "Remove version", scope: "global", command: true },
         { id: "export", group: "Commands only", title: "Export notes as Markdown", command: true },
@@ -2126,7 +2124,6 @@ ApplicationWindow {
         const keys = keyText(action)
         if (action.id === "readingMode") return readingModeName(bible.readingMode) + (keys ? " · " + keys : "")
         if (action.setting) return (bible[action.setting] ? "On" : "Off") + (keys ? " · " + keys : "")
-        if (action.id === "lineHeight") return bible.lineHeight.toFixed(1)
         return keys
     }
     // Commands whose palette title describes the action it would take now.
@@ -2165,7 +2162,7 @@ ApplicationWindow {
         if (action.id === "copyText") return bible.ready
         if (["bookmark", "highlight", "tags", "related", "toggleDesk"].includes(action.id)) return hasSelection
         return bible.ready || !!action.setting
-            || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
+            || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
         if (action.scope === "list") return "List panels · Annotations, Desk, History, Related"
@@ -2386,8 +2383,7 @@ ApplicationWindow {
         case "lineLess": bible.setLineHeight(Math.round((bible.lineHeight - 0.1) * 10) / 10); break
         case "lineMore": bible.setLineHeight(Math.round((bible.lineHeight + 0.1) * 10) / 10); break
         case "lineReset": bible.setLineHeight(1.5); break
-        case "lineHeight": settingsDialog.lineOnly = true; settingsDialog.open(); break
-        case "settings": settingsDialog.lineOnly = false; settingsDialog.open(); break
+        case "settings": settingsDialog.open(); break
         case "annotations":
             if (!leaveSidePanel("annotations")) break
             bible.refreshCollection()
@@ -2401,7 +2397,6 @@ ApplicationWindow {
         case "bookmark": markPassage(false); break
         case "highlight": markPassage(true); break
         case "tags": openPassageTags(); break
-        case "tagsBrowser": openTagsBrowser(); break
         case "manageTags": openTagsBrowser(true); break
         case "related": if (leaveSidePanel("related")) tagsUi.openRelated(); break
         case "history":
@@ -5161,7 +5156,6 @@ ApplicationWindow {
     ModalCard {
         id: settingsDialog
         objectName: "settingsDialog"
-        property bool lineOnly: false
         width: Math.min(480 * app.scale, app.width - 48)
         height: Math.min(settingsContent.implicitHeight + 48, app.height - 48)
         // Focus at once, while the modal is still fading in.
@@ -5177,25 +5171,22 @@ ApplicationWindow {
             width: settingsScroll.availableWidth
             spacing: 12 * app.scale
             RowLayout {
-                Label { text: settingsDialog.lineOnly ? "Line height" : "Reading settings"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true }
+                Label { text: "Reading settings"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true }
             }
             Repeater {
                 model: app.actions.filter(function(action) { return !!action.setting })
                 delegate: SettingSwitch {
                     required property var modelData
                     catalogAction: modelData
-                    visible: !settingsDialog.lineOnly
                     Layout.fillWidth: true
                 }
             }
             RowLayout {
-                visible: !settingsDialog.lineOnly
                 Layout.fillWidth: true
                 Label { text: "Reading mode"; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true }
                 Label { objectName: "readingModeKey"; text: app.keyRich("readingMode"); textFormat: Text.StyledText; color: desktop.muted; font.pixelSize: 12 * app.scale }
             }
             RowLayout {
-                visible: !settingsDialog.lineOnly
                 Layout.fillWidth: true
                 spacing: 4 * app.scale
                 uniformCellSizes: true
@@ -5217,7 +5208,6 @@ ApplicationWindow {
                 }
             }
             RowLayout {
-                visible: !settingsDialog.lineOnly
                 Layout.fillWidth: true
                 Label { text: "Font size"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
                 Item { Layout.fillWidth: true }
@@ -5225,7 +5215,6 @@ ApplicationWindow {
             }
             SquareSlider {
                 objectName: "fontSizeSlider"
-                visible: !settingsDialog.lineOnly
                 Layout.fillWidth: true
                 from: 8; to: 40; stepSize: 1
                 snapMode: Slider.SnapAlways
@@ -5233,7 +5222,7 @@ ApplicationWindow {
                 onMoved: bible.setFontSize(Math.round(value))
                 Accessible.name: "Font size"
             }
-            Label { objectName: "fontSizeHints"; visible: !settingsDialog.lineOnly; text: app.hintRow([[app.actionKeys("smaller")[0], "decrease"], [app.actionKeys("larger")[0], "increase"], [app.actionKeys("resetText")[0], "reset"]]); textFormat: Text.StyledText; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Label { objectName: "fontSizeHints"; text: app.hintRow([[app.actionKeys("smaller")[0], "decrease"], [app.actionKeys("larger")[0], "increase"], [app.actionKeys("resetText")[0], "reset"]]); textFormat: Text.StyledText; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
                 Label { text: "Line height"; color: desktop.foreground; font.pixelSize: 13 * app.scale }

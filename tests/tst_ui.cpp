@@ -1212,7 +1212,7 @@ private slots:
         action("open commands");
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
-        type("line height"); key(Qt::Key_Return);
+        type("reading settings"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         QTRY_VERIFY(item("lineHeightSlider")->hasActiveFocus());
         QCOMPARE(bible->lineHeight(),1.5);
@@ -4012,11 +4012,11 @@ private slots:
             QVERIFY(!byId[record[0]].contains("keys"));
             QCOMPARE(formatKeys(byId[record[0]].value("sequences").toStringList()),record[2]);
         }
-        QVERIFY(!ids.contains("toggleNotes"));
+        QVERIFY(!ids.contains("toggleNotes")); QVERIFY(!ids.contains("tagsBrowser")); QVERIFY(!ids.contains("lineHeight"));
         for (const auto &pair : QList<QStringList>{{"previousVerse","goToVerse"},{"goToVerse","first"},
                 {"nextTen","previousChapter"},{"nextChapter","visual"},{"extendPrevious","chapterFind"},
                 {"bibleSearch","bookmark"},{"manageTags","copy"},{"clickMenu","annotations"},
-                {"related","books"},{"newWindow","focus"},{"dismiss","tagsBrowser"}})
+                {"related","books"},{"newWindow","focus"}})
             QVERIFY2(ids.indexOf(pair[0]) < ids.indexOf(pair[1]),qPrintable(pair.join(" before ")));
         key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
         // Hints use stable action IDs: quotation/plain-text titles intentionally repeat.
