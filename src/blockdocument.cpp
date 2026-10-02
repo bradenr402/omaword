@@ -116,6 +116,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     paragraph.setLineHeight(lineHeight * 100, QTextBlockFormat::ProportionalHeight);
     // Hebrew-first paragraphs and headings stay in an LTR paragraph.
     paragraph.setLayoutDirection(Qt::LeftToRight);
+    paragraph.setAlignment(Qt::AlignLeft | Qt::AlignAbsolute);
     cursor.setBlockFormat(paragraph);
     const QTextCharFormat normal;
     // Keep the original separator (and native copy offsets), but permanently

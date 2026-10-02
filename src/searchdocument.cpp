@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QQmlEngine>
 #include <QTextBlock>
+#include <QTextCursor>
 #include <QTextDocument>
 #include <QTextOption>
 #include <QTextLayout>
@@ -117,6 +118,18 @@ void SearchGeometry::forceLeftToRight(QTextDocument *document)
     if (option.textDirection() != Qt::LeftToRight) {
         option.setTextDirection(Qt::LeftToRight);
         document->setDefaultTextOption(option);
+    }
+    // QQuickTextEdit recomputes its default option from the first strong
+    // character, mirroring AlignLeft to AlignRight for Hebrew-first text. Block
+    // formats take precedence, so pin every paragraph to absolute-left LTR.
+    for (auto block = document->begin(); block.isValid(); block = block.next()) {
+        const auto format = block.blockFormat();
+        if (format.layoutDirection() == Qt::LeftToRight
+                && format.alignment() == (Qt::AlignLeft | Qt::AlignAbsolute)) continue;
+        QTextBlockFormat pinned;
+        pinned.setLayoutDirection(Qt::LeftToRight);
+        pinned.setAlignment(Qt::AlignLeft | Qt::AlignAbsolute);
+        QTextCursor(block).mergeBlockFormat(pinned);
     }
 }
 
