@@ -59,6 +59,15 @@ ApplicationWindow {
         verseTagMenu.close()
         contextMenu.close()
     }
+    function focusedSavedEntry() {
+        let focused = activeFocusItem
+        while (focused && focused !== collectionList) {
+            const row = focused as SavedEntry
+            if (row) return row.modelData
+            focused = focused.parent
+        }
+        return collectionList.model[collectionList.currentIndex] || null
+    }
     function editSavedRange() {
         let focused = activeFocusItem
         while (focused && focused !== collectionList) {
@@ -870,7 +879,7 @@ ApplicationWindow {
             { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready && entry.available, run: function() { app.openDeskItem(id) } },
             { id: "copy", text: "Copy", shortcut: KeyNotation.format("Y"), enabled: ready && entry.available, run: function() { app.copyDeskItem(id) } },
             menuDivider,
-            { id: "remove", text: "Remove from Desk", shortcut: KeyNotation.format("X"), enabled: ready, run: function() { app.removeDeskItem(id) } }
+            { id: "remove", text: "Remove from Desk", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeDeskItem(id) } }
         ], sceneX, sceneY)
     }
     function openSavedMenu(row, sceneX, sceneY) {
@@ -1433,14 +1442,14 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
-    function copyDeskItem(id) {
+    function copyDeskItem(id, plainText) {
         if (rangeEditing || bible.busy) return
         const entry = deskEntry(id)
         if (!entry) return
-        if (bible.copyDeskItem(id).length > 0) {
-            notify(entry.reference + " · " + entry.versionAbbreviation + " copied", true)
+        if ((plainText ? bible.copyScope(entry, true) : bible.copyDeskItem(id)).length > 0) {
+            notify(entry.reference + " · " + entry.versionAbbreviation + (plainText ? " copied as plain text" : " copied"), true)
             sounds.play("chime")
-        }
+        } else sounds.play("error")
     }
     function removeDeskItem(id) {
         if (rangeEditing || bible.busy) return
@@ -1815,8 +1824,18 @@ ApplicationWindow {
         { id: "lineLess", group: "Reading", title: "Decrease line height", sequences: ["Ctrl+Alt+-"] },
         { id: "lineReset", group: "Reading", title: "Reset line height", sequences: ["Ctrl+Alt+0"], command: true },
         { id: "dismiss", group: "Reading", title: "Dismiss current panel or selection", sequences: ["Escape"], explanation: true },
+        // List panels (Annotations, Desk, Related) bind these themselves.
+        { id: "listNext", group: "Lists", title: "Next item", sequences: ["J", "Down"], scope: "list", explanation: true },
+        { id: "listPrevious", group: "Lists", title: "Previous item", sequences: ["K", "Up"], scope: "list", explanation: true },
+        { id: "listOpen", group: "Lists", title: "Open item", sequences: ["Return"], scope: "list", explanation: true },
+        { id: "listCopy", group: "Lists", title: "Copy item as quotation", sequences: ["Y"], scope: "list", explanation: true },
+        { id: "listCopyPlain", group: "Lists", title: "Copy item as plain text", sequences: ["Shift+Y"], scope: "list", explanation: true },
+        { id: "listDesk", group: "Lists", title: "Add item to Desk, or remove it", sequences: ["D"], scope: "list", explanation: true },
+        { id: "listEditRange", group: "Lists", title: "Edit item's annotation range", sequences: ["Shift+E"], scope: "list", explanation: true },
+        { id: "listRemove", group: "Lists", title: "Remove item", sequences: ["Delete", "Backspace"], scope: "list", explanation: true },
+        { id: "listSearch", group: "Lists", title: "Search the list (Annotations, Related)", sequences: ["/"], scope: "list", explanation: true },
         // Desk-only: bound by deskDrawer, never globally.
-        { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+X"], scope: "desk", command: true },
+        { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+Del", "Shift+Backspace"], scope: "desk", command: true },
         { id: "tagsBrowser", group: "Commands only", title: "Tags", command: true },
         { id: "lineHeight", group: "Commands only", title: "Line height", command: true },
         { id: "import", group: "Commands only", title: "Add version", scope: "global", command: true },
@@ -1880,6 +1899,7 @@ ApplicationWindow {
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineHeight", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
+        if (action.scope === "list") return "List panels · Annotations, Desk, Related"
         if (action.explanation) return "Reader gesture"
         if (action.scope === "global") return "This window · also with the Notes panel open, but not while typing"
         if (action.scope === "palette") return "This window · passage and command search"
@@ -3916,6 +3936,10 @@ ApplicationWindow {
             Shortcut { sequence: "Shift+E"; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.editSavedRange() }
             Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.shown && !deleteConfirmation.visible && app.activeFocusItem === collectionList; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
             Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.requestDeleteSaved() }
+            // Shared list keys: y quotation, shift Y plain text, d Desk.
+            Shortcut { sequence: "Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry()) }
+            Shortcut { sequence: "Shift+Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry(), true) }
+            Shortcut { sequence: "D"; enabled: savedDrawer.collectionKeys; onActivated: app.toggleScopeDesk(app.focusedSavedEntry()) }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
                 enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0
@@ -4113,10 +4137,11 @@ ApplicationWindow {
             Shortcut { sequence: "Home"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-deskList.count) }
             Shortcut { sequence: "End"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(deskList.count) }
             Shortcut { sequences: ["Return", "Enter"]; enabled: deskDrawer.listKeys && app.activeFocusItem === deskList; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.openDeskItem(entry.id) } }
-            Shortcut { sequences: ["Y"]; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id) } }
-            Shortcut { sequences: ["X", "Delete", "Backspace"]; enabled: deskDrawer.listKeys; onActivated: app.removeCurrentDeskItem() }
-            // x removes one passage; Shift X asks to clean the whole Desk.
-            Shortcut { sequence: "Shift+X"; enabled: deskDrawer.listKeys && deskList.count > 0; onActivated: app.requestCleanDesk() }
+            Shortcut { sequence: "Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id) } }
+            Shortcut { sequence: "Shift+Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id, true) } }
+            // d (the Desk toggle) and delete remove one passage; shift delete asks to clean the Desk.
+            Shortcut { sequences: ["D", "Delete", "Backspace"]; enabled: deskDrawer.listKeys; onActivated: app.removeCurrentDeskItem() }
+            Shortcut { sequences: app.actionKeys("cleanDesk"); enabled: deskDrawer.listKeys && deskList.count > 0; onActivated: app.requestCleanDesk() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
                 enabled: deskDrawer.listKeys && deskList.currentIndex >= 0
@@ -4220,7 +4245,7 @@ ApplicationWindow {
             // No-break spaces keep each key with its verb when the row wraps.
             Label {
                 objectName: "deskHints"
-                text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "open"], ["Y", "copy"], ["X", "remove"], ["Shift+X", "clean"], ["Escape", "close"]])
+                text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "open"], ["Y", "copy"], ["Delete", "remove"], [app.actionKeys("cleanDesk")[0], "clean"], ["Escape", "close"]])
                 textFormat: Text.StyledText
                 color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
             }

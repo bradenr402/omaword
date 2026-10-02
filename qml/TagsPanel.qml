@@ -391,6 +391,20 @@ Item {
         if (tagById(managedId)) renameInput.text = tagById(managedId).name
         search.forceActiveFocus()
     }
+    readonly property bool summaryKeys: browserVisible && !visibleModal && !app.rangeEditing && !app.contextMenuOpen && !textInputActive()
+    readonly property bool relatedKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen && !textInputActive()
+        && !relatedDrawer.closing && !tagList.activeFocus
+    readonly property bool listKeys: !bible.busy && ((summaryKeys && page === "summary") || (relatedKeys && resultList.currentIndex >= 0))
+    function listScope() {
+        if (page === "related") return results[resultList.currentIndex] || null
+        return focusedSummaryScope()
+    }
+    function moveResult(delta) {
+        if (!resultList.count) return
+        resultList.currentIndex = Math.max(0, Math.min(resultList.count - 1, resultList.currentIndex + delta))
+        resultList.positionViewAtIndex(resultList.currentIndex, ListView.Contain)
+        resultList.forceActiveFocus()
+    }
     function focusResults() {
         if (resultList.count && resultList.currentIndex < 0) resultList.currentIndex = 0
         resultList.forceActiveFocus()
@@ -615,6 +629,14 @@ Item {
             Shortcut { sequence: "Shift+E"; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.app.openRangeEditor(panel.focusedSummaryScope(), "tag") }
             Shortcut { sequences: ["J", "Down"]; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.moveSummary(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.moveSummary(-1) }
+            // Shared list keys on the focused summary range or Related result.
+            Shortcut { sequence: "Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope()) }
+            Shortcut { sequence: "Shift+Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope(), true) }
+            Shortcut { sequence: "D"; enabled: panel.listKeys; onActivated: panel.app.toggleScopeDesk(panel.listScope()) }
+            Shortcut { sequences: ["Delete", "Backspace"]; enabled: panel.listKeys; onActivated: panel.app.removeMarkerAnnotation(panel.listScope(), "tag") }
+            Shortcut { sequence: "Shift+E"; enabled: panel.relatedKeys && resultList.currentIndex >= 0; onActivated: panel.app.openRangeEditor(panel.listScope(), "tag") }
+            Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedKeys; onActivated: panel.moveResult(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedKeys; onActivated: panel.moveResult(-1) }
             Shortcut { sequence: "/"; enabled: panel.relatedShown && !panel.pickerVisible && !panel.app.contextMenuOpen && !panel.textInputActive(); onActivated: panel.focusSearch() }
             RowLayout {
                 Layout.fillWidth: true

@@ -4171,6 +4171,56 @@ private slots:
         QCOMPARE(bible->noteText(),QString("D more"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
     }
+    void annotationsListKeys() {
+        reference("John 3:16");
+        QVERIFY(bible->toggleBookmark());
+        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        QApplication::clipboard()->clear();
+        key(Qt::Key_Y); QTRY_VERIFY(QApplication::clipboard()->text().contains("John 3:16"));
+        QVERIFY(QApplication::clipboard()->text().startsWith(QString::fromUtf8("“")));
+        key(Qt::Key_Y,Qt::ShiftModifier);
+        QTRY_VERIFY(!QApplication::clipboard()->text().contains("John 3:16"));
+        QVERIFY(!QApplication::clipboard()->text().isEmpty());
+        key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),1);
+        key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),0);
+        // x no longer removes; shift delete has no bulk clear here.
+        key(Qt::Key_X); key(Qt::Key_Delete,Qt::ShiftModifier); QTest::qWait(60);
+        QCOMPARE(bible->collection().size(),1); QVERIFY(!prop("deleteConfirmation","visible").toBool());
+        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        QCOMPARE(bible->collection().size(),1);
+        QVERIFY(prop("savedDrawer","visible").toBool());
+        key(Qt::Key_Backspace); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+    }
+    void relatedListKeys() {
+        reference("John 3:17");
+        const auto other = bible->tagScope();
+        QVERIFY(!bible->createAndAssignTag(other,"Sent").isEmpty());
+        reference("John 3:16");
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Sent").isEmpty());
+        key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        QTRY_COMPARE(prop("tagResults","count").toInt(),1);
+        QApplication::clipboard()->clear();
+        key(Qt::Key_Y); QTRY_VERIFY(QApplication::clipboard()->text().contains("John 3:17"));
+        key(Qt::Key_Y,Qt::ShiftModifier);
+        QTRY_VERIFY(!QApplication::clipboard()->text().contains("John 3:17"));
+        key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),1);
+        QCOMPARE(bible->desk().first().toMap().value("reference").toString(),QString("John 3:17"));
+        key(Qt::Key_J); key(Qt::Key_K); QCOMPARE(prop("tagResults","currentIndex").toInt(),0);
+        key(Qt::Key_E,Qt::ShiftModifier); QTRY_VERIFY(window->property("rangeEditing").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!window->property("rangeEditing").toBool());
+        QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        if (!prop("relatedDrawer","visible").toBool()) { key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool()); }
+        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        key(Qt::Key_Delete);
+        QTRY_VERIFY(bible->tagsForScope(other).isEmpty());
+        QTRY_COMPARE(prop("tagResults","count").toInt(),0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
+    }
     void keyNotation() {
         const QList<QPair<QStringList,QString>> cases = {
             {{"Shift+D"},"shift D"}, {{"Ctrl+K"},"ctrl k"}, {{"Alt+H"},"alt h"}, {{"X"},"x"},

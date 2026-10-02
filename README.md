@@ -128,7 +128,16 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 ### Lists
 
-- `shift X`: Clean Desk
+- `j` · `↓`: Next item
+- `k` · `↑`: Previous item
+- `enter`: Open item
+- `y`: Copy item as quotation
+- `shift Y`: Copy item as plain text
+- `d`: Add item to Desk, or remove it
+- `shift E`: Edit item's annotation range
+- `delete` · `backspace`: Remove item
+- `/`: Search the list (Annotations, Related)
+- `shift delete` · `shift backspace`: Clean Desk
 
 ### Commands only
 
