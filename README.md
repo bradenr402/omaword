@@ -40,87 +40,90 @@ Search results follow your Omarchy theme, light or dark:
 
 <!-- shortcuts:start -->
 
-Press `?` · `F1` in the app for the full, searchable list; `enter` there performs the selected action.
+Press `?` in the app for the full, searchable list; `enter` there performs the selected action.
 Generated from the action catalog by `bin/shortcuts`; alternatives are separated by ·.
 
 ### Navigate
 
-- `zz`: Center current verse
-- `zt`: Scroll current verse to top
-- `zb`: Scroll current verse to bottom
-- `h` · `←` · `[`: Previous chapter
-- `l` · `→` · `]`: Next chapter
 - `k` · `↑`: Previous verse
 - `j` · `↓`: Next verse
+- `4j`: Repeat a verse motion by a count
+- `20g`: Go to verse number
+- `g` · `home`: Select chapter beginning
+- `shift G` · `end`: Select chapter end
 - `ctrl u`: Previous 5 verses
 - `ctrl d`: Next 5 verses
 - `ctrl b` · `pgup`: Previous 10 verses
 - `ctrl f` · `pgdn`: Next 10 verses
-- `g` · `home`: Select chapter beginning
-- `shift G` · `end`: Select chapter end
-- `20g`: Go to verse number
+- `zz`: Center current verse
+- `zt`: Scroll current verse to top
+- `zb`: Scroll current verse to bottom
+- `h` · `←`: Previous chapter
+- `l` · `→`: Next chapter
 
 ### Select
 
 - `click`: Select verse
 - `shift click`: Select a range
 - `v`: Toggle visual selection
-- `shift K` · `shift ↑`: Extend to previous verse
 - `shift J` · `shift ↓`: Extend to next verse
+- `shift K` · `shift ↑`: Extend to previous verse
 
 ### Search
 
-- `s`: Search Bible
 - `/`: Find in chapter
 - `n`: Next search match
 - `shift N`: Previous search match
+- `ctrl /`: Search Bible
 
 ### Annotate
 
-- `d`: Add to Desk
-- `shift E`: Edit annotation range
+- `m`: Bookmark selection
+- `x`: Highlight selection
 - `w`: Write a note
 - `t`: Tag passage
-- `m` · `ctrl m`: Bookmark selection
-- `x` · `ctrl h`: Highlight selection
+- `d`: Add to Desk
+- `shift E`: Edit annotation range
+- `ctrl t`: Manage tags
 
 ### Copy
 
 - `y` · `middle click`: Copy passage as quotation
-- `shift Y` · `ctrl shift C`: Copy passage as plain text
 - `ctrl c`: Copy selected text
+- `shift Y` · `ctrl shift C`: Copy passage as plain text
 - `menu` · `shift F10` · `right click`: Open context menu
 
 ### Panels
 
-- `ctrl a`: Annotations panel
+- `shift A`: Annotations panel
 - `shift D`: Open Desk
-- Notes panel
 - `shift L`: Related passages
 
 ### Palettes and windows
 
 - `ctrl k`: Navigate to a passage
-- `ctrl space` · `ctrl shift P`: Open commands
-- `ctrl n`: New window
-- `shift R`: Reading settings
-- `shift V`: Switch version
+- `ctrl space`: Open commands
 - `space`: Resume last palette
-- `?` · `F1`: Keybindings
+- `ctrl r`: Reading settings
+- `ctrl v`: Switch version
+- `?`: Keybindings
+- `ctrl n`: New window
 
 ### Reading
 
+- `f`: Focus mode
+- `alt n`: Show verse numbers
+- `alt h`: Show headings
+- `alt p`: Verse picker
+- `alt l`: Reading mode
+- `alt s`: Sound effects
+- `alt m`: Reduce motion
 - `ctrl +` · `ctrl =`: Larger text
 - `ctrl -`: Smaller text
 - `ctrl 0`: Reset text size
-- `r`: Show verse numbers
-- `shift H`: Show headings
-- `p`: Verse picker
-- `b`: Reading mode
-- `f`: Focus mode
-- `ctrl [`: Decrease line height
-- `ctrl ]`: Increase line height
-- `ctrl \`: Reset line height
+- `ctrl alt =`: Increase line height
+- `ctrl alt -`: Decrease line height
+- `ctrl alt 0`: Reset line height
 - `esc`: Dismiss current panel or selection
 
 ### Lists
@@ -130,16 +133,21 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 ### Commands only
 
 - Tags
-- Manage tags
+- Line height
+- Add version
+- Remove version
 - Export notes as Markdown
 - Save annotation backup
 - Restore annotation backup
-- Line height
-- Remove version
-- Add version
 - About & Attribution
-- Sound effects
-- Reduce motion
+
+### Aliases
+
+These also work, but stay out of the in-app list:
+
+- `20G` (Go to verse number): Vim's go-to-line.
+- `ctrl shift P` (Open commands): the command palette key in VS Code and its kin.
+- `F1` (Keybindings): the help key in most desktop apps.
 
 <!-- shortcuts:end -->
 

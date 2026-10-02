@@ -101,7 +101,7 @@ class SearchUiTest : public QObject
         QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus()); type(query); QTest::qWait(200);
     }
     void search(const QString &query) {
-        key(Qt::Key_S); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        key(Qt::Key_Slash, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
@@ -424,7 +424,7 @@ private slots:
             QVERIFY(!object("relatedDrawer")->property("visible").toBool());
         }
         // Single-key actions remain available after the chord has completed.
-        key(Qt::Key_B); QVERIFY(bible->readingMode() != mode);
+        key(Qt::Key_L, Qt::AltModifier); QVERIFY(bible->readingMode() != mode);
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
     }
     void alignmentInputGuardsAndCatalog() {
@@ -693,7 +693,7 @@ private slots:
         find("ALPh"); QVERIFY(prop("searchMatches").toList().size() > 4); key(Qt::Key_Return);
         QVERIFY(bible->toggleBookmark());
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
-        const auto scope = bible->tagScope(); key(Qt::Key_Slash); key(Qt::Key_S); key(Qt::Key_N);
+        const auto scope = bible->tagScope(); key(Qt::Key_Slash); key(Qt::Key_Slash, Qt::ControlModifier); key(Qt::Key_N);
         QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!object("passagePalette")->property("visible").toBool());
         const auto y = object("reading")->property("contentY");
         for (auto suffix : {Qt::Key_Z, Qt::Key_T, Qt::Key_B}) {

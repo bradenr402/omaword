@@ -104,7 +104,7 @@ class ContextMenuTest : public QObject
         QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus()); type(query); QTest::qWait(200);
     }
     void search(const QString &query) {
-        key(Qt::Key_S); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        key(Qt::Key_Slash, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
@@ -484,7 +484,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         // Annotations panel row.
         navigate("John 1:2"); key(Qt::Key_M);
-        key(Qt::Key_A, Qt::ControlModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         const auto saved = "savedEntry" + bible->collection().first().toMap().value("reference").toString();
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());

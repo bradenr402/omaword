@@ -202,7 +202,7 @@ private slots:
         QSignalSpy commits(bible.get(), &BibleBackend::tagsChanged);
         key(Qt::Key_2); key(Qt::Key_J); QCOMPARE(bible->selectedEnd(), 6); QCOMPARE(bible->selectedStart(), 2);
         const auto destination = bible->tagScope();
-        key(Qt::Key_M); key(Qt::Key_N); key(Qt::Key_V, Qt::ShiftModifier);
+        key(Qt::Key_M); key(Qt::Key_N); key(Qt::Key_V, Qt::ControlModifier);
         QCOMPARE(bible->annotationSnapshot(source), unchanged); QVERIFY(!object("notesDrawer")->property("visible").toBool());
         QSignalSpy newWindow(window, SIGNAL(newWindowRequested())); key(Qt::Key_N, Qt::ControlModifier); QCOMPARE(newWindow.count(), 1);
         commits.clear();
@@ -304,7 +304,7 @@ private slots:
         call(window, "syncNote"); QCOMPARE(item("noteEditor")->property("cursorPosition").toInt(), cursor + 1);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         const auto source = bible->tagScope(); QVERIFY(!bible->createAndAssignTag(source, "Tab test").isEmpty());
-        key(Qt::Key_A, Qt::ControlModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         key(Qt::Key_H); QCOMPARE(window->property("collectionTab").toInt(), 3);
         key(Qt::Key_J); QVERIFY(item("summaryTag:" + bible->tags().first().toMap().value("id").toString())->hasActiveFocus());
         key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(), 2);
@@ -319,7 +319,7 @@ private slots:
     void focusedAnnotationRow() {
         QVERIFY(bible->toggleBookmark()); const auto source = bible->tagScope();
         navigate("John 3:8"); QVERIFY(bible->toggleBookmark());
-        key(Qt::Key_A, Qt::ControlModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         // Bookmarks are listed in source order; the first row is the John 3:2 source.
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         QCOMPARE(object("collectionList")->property("currentIndex").toInt(), 0);

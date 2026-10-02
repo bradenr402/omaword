@@ -105,7 +105,7 @@ class MotionTest : public QObject
         QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus()); type(query); QTest::qWait(200);
     }
     void search(const QString &query) {
-        key(Qt::Key_S); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        key(Qt::Key_Slash, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
@@ -438,7 +438,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!desk->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         // Annotations drawer: immediate list focus.
-        key(Qt::Key_A, Qt::ControlModifier);
+        key(Qt::Key_A, Qt::ShiftModifier);
         QVERIFY(object("savedDrawer")->property("visible").toBool());
         QVERIFY(item("collectionList")->hasActiveFocus());
         QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
@@ -484,9 +484,11 @@ private slots:
         QCOMPARE(object("contextMenu")->property("fadeDuration").toInt(), 0);
         QCOMPARE(item("chapterFind")->property("fadeDuration").toInt(), 0);
         call("readerFocus");
-        // No default key binding.
+        // Bound to alt m, which toggles it back.
+        key(Qt::Key_M, Qt::AltModifier); QVERIFY(!prop("reduceMotion").toBool());
+        key(Qt::Key_M, Qt::AltModifier); QVERIFY(prop("reduceMotion").toBool());
         QVariantList actions = prop("actions").toList(); bool found = false;
-        for (const auto &a : actions) if (a.toMap()["id"] == "reduceMotion") { found = true; QVERIFY(!a.toMap().contains("keys")); QVERIFY(a.toMap()["sequences"].isNull() || a.toMap()["sequences"].toList().isEmpty()); }
+        for (const auto &a : actions) if (a.toMap()["id"] == "reduceMotion") { found = true; QVERIFY(!a.toMap().contains("keys")); QCOMPARE(a.toMap()["sequences"].toStringList(), QStringList{"Alt+M"}); }
         QVERIFY(found);
         // Jumps and copies produce no pulse/flash objects.
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());

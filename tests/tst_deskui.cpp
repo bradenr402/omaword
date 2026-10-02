@@ -102,7 +102,7 @@ class DeskUiTest : public QObject
         QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus()); type(query); QTest::qWait(200);
     }
     void search(const QString &query) {
-        key(Qt::Key_S); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        key(Qt::Key_Slash, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
@@ -391,7 +391,7 @@ private slots:
         key(Qt::Key_X, Qt::ShiftModifier); QTest::qWait(100);
         QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
         // Annotations panel.
-        key(Qt::Key_A, Qt::ControlModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         key(Qt::Key_X, Qt::ShiftModifier); QTest::qWait(100);
         QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
