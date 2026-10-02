@@ -24,7 +24,7 @@ Launch **OmaWord** from your application launcher or run `omaword`. To update, `
 
 Choose **Add version** to install NET, KJV, KJV with Apocrypha, OJB, YLT, ASV, or BSB directly from eBible.org. You can also import a local USFM ZIP.
 
-Internet is needed only to download a version. Once installed, reading and annotations work offline, and the original ZIP is no longer needed. Bible text has its own copyright and attribution, available in the app and [version guide](VERSIONS.md).
+Internet is needed only to download a version. Once installed, reading and annotations work offline, and the original ZIP is no longer needed. Bible text has its own copyright and attribution, shown in About & Attribution.
 
 ## Screenshots
 
@@ -38,30 +38,72 @@ Search results follow your Omarchy theme, light or dark:
 
 ## Shortcuts
 
-- `s` searches Scripture across the current version; `Ctrl k` opens a passage by reference.
-- `/` finds text in the current chapter; `n` / `N` moves between matches (`3n` works). See [search](SEARCH.md).
-- `Ctrl Space` or `Ctrl Shift P` opens Commands. `Space` resumes the last palette.
-- `j` / `k` moves between verses; `h` / `l` moves between chapters. Arrow keys work too.
-- `v` starts visual selection; `j` / `k` extends it. `J` / `K` starts and extends a range immediately.
-- `4j` moves four verses; `20g` goes to verse 20.
-- `zz`, `zt`, and `zb` align the current verse with the center, top, or bottom of the viewport.
-- `m` bookmarks; `x` highlights; `w` writes a note; `t` opens the modal passage tag picker.
-- `Shift E` edits an existing annotation range: choose components, adjust endpoints, `o` swaps, Enter saves, Esc restores. See [range editing](RANGE_EDITING.md).
-- In the tag editor, `Space` / `Enter` toggles a tag; Enter in search creates and applies it.
-- `Ctrl n` toggles Notes; `Ctrl a` toggles Annotations (Bookmarks, Highlights, Notes, Tags).
-- `d` adds or removes the passage on the Desk, a study list shared by all windows and versions; `Shift D` opens it.
-- `y` copies a quotation; `Y` copies plain text. `Ctrl c` copies selected text, or the passage when no text is selected. Middle-click copies the clicked verse or selection as a quotation.
-- Right-click (or `Menu` / `Shift F10`) opens a context menu for the passage, a marker, a Desk item, an annotation, or a search result.
-- `b` cycles Paragraph, Verse, and Block layouts; `f` toggles focus mode, which dims everything except the current verse or selection.
-- Jumps briefly pulse the destination and copies flash the copied verses. Commands → **Reduce motion** turns off pulses, flashes, and fades; Commands → **Disable sound effects** silences the subtle sounds. Both apply to all windows.
-- `Shift V` switches versions; `Shift R` opens Reading settings; `Shift H` toggles headings.
-- `Shift L` opens Related passages: search tags, match Any/All, and choose the source version or all installed versions. **Find related to current passage** explicitly replaces the pinned source.
-- `Ctrl Shift N` opens another reader window.
-- `?` or `F1` opens the searchable keybindings list, where Enter performs the selected action.
+Press `?` or `F1` in the app for the full, searchable list; Enter there performs the selected action.
+
+### Navigate
+
+- `j` / `k` or `Down` / `Up`: next / previous verse (hold to keep moving)
+- `h` / `l`: previous / next chapter
+- `4j`: move four verses (any count works)
+- `20g`: go to verse 20
+- `zz` / `zt` / `zb`: center the current verse, or scroll it to the top / bottom
+- `Ctrl k`: navigate to a passage by reference
+
+### Search
+
+- `s`: search Scripture in the current version
+- `/`: find text in the current chapter
+- `n` / `N`: next / previous match (`3n` works)
+
+### Palette
+
+- `Ctrl Space` or `Ctrl Shift P`: open Commands
+- `Space`: resume the last palette
+- `Tab` / `Shift Tab`: switch between Passage, Search, and Command
+
+### Select
+
+- `v`: start visual selection, then `j` / `k` to extend it
+- `J` / `K`: start and extend a range immediately
+
+### Annotate
+
+- `m`: bookmark
+- `x`: highlight
+- `w`: write a note
+- `t`: tag the passage (in the tag editor, `Space` / `Enter` toggles a tag; Enter in search creates and applies one)
+- `Shift E`: edit an existing annotation's range (`o` swaps ends, Enter saves, Esc restores)
+- `d`: add the passage to the Desk, or remove it
+- `Shift L`: Related passages that share tags
+
+### Copy
+
+- `y`: copy as a quotation
+- `Y`: copy as plain text
+- `Ctrl c`: copy selected text, or the passage when no text is selected
+- Middle-click: copy the clicked verse or selection as a quotation
+- Right-click, `Menu`, or `Shift F10`: context menu for whatever you clicked
+
+### Panels and windows
+
+- `Ctrl n`: Notes
+- `Ctrl a`: Annotations (Bookmarks, Highlights, Notes, Tags)
+- `Shift D`: Desk, a study list shared by all windows and versions
+- `Shift V`: switch versions
+- `Shift R`: Reading settings
+- `Ctrl Shift N`: new reader window
+
+### Reading
+
+- `b`: cycle Paragraph, Verse, and Block layouts
+- `f`: focus mode, which dims everything except the current verse or selection
+- `Shift H`: show or hide headings
+
+Commands → **Reduce motion** turns off pulses, flashes, and fades; **Disable sound effects** silences the subtle sounds. Both apply to all windows.
 
 Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
 
-Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related or **Edit range** to move assignments. Use `t` to edit exact-range assignments and Commands → **Manage tags** to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version. See the [tag contract](TAGS.md).
+Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Related or **Edit range** to move assignments. Use `t` to edit exact-range assignments and Commands → **Manage tags** to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version.
 
 The footer puts `?` before mode on the left, search, passage, and version in the center, and Related, Annotations, Desk, and Notes on the right. Annotations are drawn like pen and highlighter marks: hand-drawn Verse rails or inline Paragraph/Block brackets, with subtle cursor-range shading.
 
@@ -80,4 +122,4 @@ Omarchy already provides most of these; the install command above adds the rest.
 
 Found a problem or have an idea? [Open a GitHub issue](https://github.com/bradenr402/omaword/issues) with what you did, what you expected, and what happened. Screenshots and the passage or version involved help.
 
-Application code is [MIT licensed](LICENSE). See [tests/README.md](tests/README.md) for development checks.
+Application code is [MIT licensed](LICENSE). See [ARCHITECTURE.md](ARCHITECTURE.md) and [tests/README.md](tests/README.md) for development.
