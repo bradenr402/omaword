@@ -6,6 +6,9 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQml
 import "HandDrawn.js" as HandDrawn
+// qmllint disable import
+import OmaWord.Reader 1.0
+// qmllint enable import
 
 ApplicationWindow {
     id: app
@@ -1128,6 +1131,35 @@ ApplicationWindow {
         syncNote()
         readerFocus()
     }
+    // Holding a verse motion repeats it immediately after a brief tap window,
+    // instead of waiting for the platform's (often ~600 ms) repeat delay.
+    readonly property var heldKeys: ({ nextVerse: [Qt.Key_J, Qt.Key_Down], previousVerse: [Qt.Key_K, Qt.Key_Up],
+        extendNext: [Qt.Key_J, Qt.Key_Down], extendPrevious: [Qt.Key_K, Qt.Key_Up] })
+    property string holdAction: ""
+    property int holdKey: 0
+    function beginHold(action) {
+        const keys = heldKeys[action]
+        if (!keys) return
+        const key = keys.find(function(candidate) { return keyHold.isDown(candidate) })
+        if (key === undefined) return
+        holdAction = action; holdKey = key
+        holdTimer.interval = 150
+        holdTimer.restart()
+    }
+    function endHold() { holdTimer.stop(); holdAction = ""; holdKey = 0 }
+    // qmllint disable import
+    KeyHold { id: keyHold; onReleased: function(key) { if (key === app.holdKey) app.endHold() } }
+    // qmllint enable import
+    Timer {
+        id: holdTimer
+        repeat: true
+        onTriggered: {
+            if (!app.active || !app.readerKeys || !keyHold.isDown(app.holdKey)) { app.endHold(); return }
+            interval = 33
+            app.runCommand(app.holdAction)
+        }
+    }
+    onActiveChanged: if (!active) endHold()
     function moveVerse(delta, extend, bulk) {
         if (rangeEditor.active) extend = true
         clearCount()
@@ -4017,8 +4049,20 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                Label { objectName: "deskTitle"; text: "Desk"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                Label { objectName: "deskCount"; text: deskList.count === 1 ? "1 passage" : deskList.count + " passages"; color: desktop.muted; font.pixelSize: 12 * app.scale }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2 * app.scale
+                    Label { objectName: "deskTitle"; text: "Desk"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                    Label { objectName: "deskCount"; text: deskList.count === 1 ? "1 passage" : deskList.count + " passages"; color: desktop.muted; font.pixelSize: 12 * app.scale }
+                }
+                QuietButton {
+                    objectName: "deskClean"
+                    Layout.alignment: Qt.AlignTop | Qt.AlignRight
+                    text: "Clean Desk"; compact: true
+                    enabled: deskList.count > 0 && !app.rangeEditing && !bible.busy
+                    onClicked: app.requestCleanDesk()
+                    Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
+                }
             }
             FineRule { Layout.fillWidth: true }
             ListView {
@@ -4049,38 +4093,13 @@ ApplicationWindow {
                     contentItem: ColumnLayout {
                         id: deskEntryContent
                         spacing: 7 * app.scale
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 12 * app.scale
-                            Label {
-                                objectName: "deskHeader" + deskEntry.index
-                                text: deskEntry.modelData.reference + " · " + deskEntry.modelData.versionAbbreviation
-                                textFormat: Text.PlainText
-                                color: deskEntry.modelData.available ? desktop.foreground : desktop.muted
-                                font.pixelSize: 16 * app.scale; font.weight: Font.Medium
-                                Layout.fillWidth: true; wrapMode: Text.Wrap
-                            }
-                            RowLayout {
-                                objectName: "deskButtons" + deskEntry.index
-                                Layout.alignment: Qt.AlignTop
-                                spacing: 4 * app.controlScale
-                                QuietButton {
-                                    objectName: "deskCopy" + deskEntry.index
-                                    text: "Copy"; compact: true; focusPolicy: Qt.NoFocus
-                                    tip: "Copy quotation · y"
-                                    enabled: deskEntry.modelData.available && !app.rangeEditing && !bible.busy
-                                    onClicked: { deskList.currentIndex = deskEntry.index; app.moveDesk(0); app.copyDeskItem(deskEntry.modelData.id) }
-                                }
-                                QuietButton {
-                                    objectName: "deskRemove" + deskEntry.index
-                                    text: "×"; compact: true; focusPolicy: Qt.NoFocus
-                                    tip: "Remove from Desk · x"
-                                    Accessible.name: "Remove " + deskEntry.modelData.reference + " from Desk"
-                                    font.pixelSize: 18 * app.scale
-                                    enabled: !app.rangeEditing && !bible.busy
-                                    onClicked: app.removeDeskItem(deskEntry.modelData.id)
-                                }
-                            }
+                        Label {
+                            objectName: "deskHeader" + deskEntry.index
+                            text: deskEntry.modelData.reference + " · " + deskEntry.modelData.versionAbbreviation
+                            textFormat: Text.PlainText
+                            color: deskEntry.modelData.available ? desktop.foreground : desktop.muted
+                            font.pixelSize: 16 * app.scale; font.weight: Font.Medium
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
                         }
                         Label {
                             objectName: "deskText" + deskEntry.index
@@ -4123,17 +4142,7 @@ ApplicationWindow {
             }
             Label { objectName: "deskError"; text: bible.error; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             FineRule { Layout.fillWidth: true }
-            RowLayout {
-                Layout.fillWidth: true
-                Label { text: "j k choose    Enter open    y copy    x remove    Esc close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                QuietButton {
-                    objectName: "deskClean"
-                    text: "Clean Desk"; compact: true
-                    enabled: deskList.count > 0 && !app.rangeEditing && !bible.busy
-                    onClicked: app.requestCleanDesk()
-                    Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
-                }
-            }
+            Label { text: "j k choose    Enter open    y copy    x remove    Esc close"; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
         }
     }
 
@@ -4893,7 +4902,9 @@ ApplicationWindow {
             context: Qt.ApplicationShortcut
             sequences: modelData.id === "first" ? ["G"] : modelData.id === "last" ? ["Shift+G"] : modelData.sequences
             enabled: app.active && app.shortcutEnabled(modelData)
-            onActivated: app.runCommand(modelData.id)
+            // Verse motions repeat on our own timer, without the platform delay.
+            autoRepeat: !app.heldKeys[modelData.id]
+            onActivated: { app.runCommand(modelData.id); app.beginHold(modelData.id) }
         }
     }
     Instantiator {

@@ -132,6 +132,12 @@ class DeskUiTest : public QObject
         QVERIFY(!block.layout()->textOption().textDirection() || block.layout()->textOption().textDirection() == Qt::LeftToRight);
         QVERIFY2(caret(body, l).x() > caret(body, h).x(), qPrintable(QString("%1 %2").arg(caret(body, l).x()).arg(caret(body, h).x())));
         QCOMPARE(body->property("effectiveHorizontalAlignment").toInt(), int(Qt::AlignLeft));
+        // Left-aligned, not merely LTR: the paragraph's first line starts at the
+        // left edge even when it is shorter than the available width.
+        const auto line = block.layout()->lineAt(0);
+        QVERIFY(line.isValid());
+        QVERIFY2(line.naturalTextRect().left() < 2, qPrintable(QString("line starts at %1 of %2")
+            .arg(line.naturalTextRect().left()).arg(doc->textWidth())));
     }
     QString toast() const { return object("toast")->property("text").toString(); }
     bool deskOpen() const { return object("deskDrawer")->property("opened").toBool(); }
@@ -255,8 +261,14 @@ private slots:
         QVERIFY(first->property("topPadding").toReal() > 0);
         const auto header = item("deskHeader0");
         QCOMPARE(header->mapToItem(first, QPointF()).x(), first->property("leftPadding").toReal());
-        const auto copy = item("deskCopy0"), remove = item("deskRemove0");
-        QCOMPARE(remove->x() - (copy->x() + copy->width()), item("savedTabs") ? item("savedTabs")->property("spacing").toReal() : 0.0);
+        // Minimal rows: no per-item buttons; Clean Desk sits across from the title, count below it.
+        QVERIFY(!item("deskCopy0") && !item("deskRemove0"));
+        const auto title = item("deskTitle"), count = item("deskCount"), clean = item("deskClean");
+        const auto titleRect = title->mapRectToItem(content, QRectF(0, 0, title->width(), title->height()));
+        const auto countRect = count->mapRectToItem(content, QRectF(0, 0, count->width(), count->height()));
+        const auto cleanRect = clean->mapRectToItem(content, QRectF(0, 0, clean->width(), clean->height()));
+        QVERIFY(countRect.top() >= titleRect.bottom() - 0.5); QCOMPARE(countRect.left(), titleRect.left());
+        QCOMPARE(cleanRect.top(), titleRect.top()); QVERIFY(qAbs(cleanRect.right() - content->width()) < 1);
         // The title starts at the drawer's padding, just like Annotations.
         QCOMPARE(item("deskTitle")->mapToItem(content, QPointF()).y(), item("savedTitle")->mapToItem(savedContent, QPointF()).y());
         key(Qt::Key_Escape);
@@ -315,13 +327,13 @@ private slots:
         QCOMPARE(desk().size(), 4);
         openDesk();
         QGuiApplication::clipboard()->clear();
-        QTest::mouseClick(window, Qt::LeftButton, {}, item("deskCopy0")->mapToScene(QPointF(4, 4)).toPoint());
+        key(Qt::Key_Y);
         QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("John 1:1"));
         QVERIFY(toast().contains("copied"));
         QVERIFY(deskOpen());
         key(Qt::Key_J); QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
         QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("John 1:4"));
-        QTest::mouseClick(window, Qt::LeftButton, {}, item("deskRemove0")->mapToScene(QPointF(4, 4)).toPoint());
+        key(Qt::Key_K); key(Qt::Key_X);
         QTRY_COMPARE(desk().size(), 3);
         QCOMPARE(desk().first().toMap()["reference"].toString(), QString("John 1:4"));
         QTRY_VERIFY(item("deskList")->hasActiveFocus());
@@ -407,7 +419,8 @@ private slots:
         QCOMPARE(desk().size(), 1);
         openDesk();
         QVERIFY(object("deskUnavailable0")->property("visible").toBool());
-        QVERIFY(!object("deskCopy0")->property("enabled").toBool());
+        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
+        QVERIFY(QGuiApplication::clipboard()->text().isEmpty());
         const auto version = bible->versionId(); const auto reference = bible->selectionReference();
         key(Qt::Key_Return);
         QVERIFY(deskOpen()); QCOMPARE(bible->versionId(), version); QCOMPARE(bible->selectionReference(), reference);
