@@ -1,6 +1,8 @@
 #include "usfmimporter.h"
 #include "biblebooks.h"
 #include <QtTest/QTest>
+#include <QCryptographicHash>
+#include <QSqlRecord>
 #include <QDir>
 #include <QFile>
 #include <QMap>
@@ -212,6 +214,61 @@ private slots:
         QCOMPARE(db.scalar("SELECT text FROM verses WHERE chapter=3").toString(), QString("Word tail."));
         QCOMPARE(db.scalar("SELECT heading FROM verses WHERE chapter=3").toString(), QString("Acrostic label"));
     }
+    void notesAndWordsOfJesus() {
+        const QString path = root.filePath("schema4.zip"), target = root.filePath("schema4.sqlite");
+        auto entries = fixture("\\c 1\n\\s1 Heading\\f + \\ft Heading note\\f*\n\\p\n"
+            "\\v 1 ¶ He said,\\f a \\fr 1:1 \\ft Or \\fq spoke\\fq* \\ft plainly\\f* \\wj  \\+w Follow|strong=\"G1\"\\+w* \\+add me\\+add*.\\wj* Then\\x - \\xo 1:1 \\xt Ps 33:6,9; Mk 16:2\\x* went.\n"
+            "\\v 2 Plain\\fe 1 \\ft End note \\+w word|strong=\"X\"\\+w*\\fe* text.\n");
+        QVERIFY(zip(path, entries));
+        const auto result = UsfmImporter::importFile(path, target); QVERIFY2(result.ok, qPrintable(result.error));
+        QString error; QVERIFY2(UsfmImporter::validateDatabase(target, &error), qPrintable(error));
+        Database db(target);
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("4"));
+        const QString text = db.scalar("SELECT text FROM verses WHERE number=1").toString();
+        QCOMPARE(text, QString("He said, Follow me. Then went."));
+        // Heading note anchors at the start of the following verse.
+        QCOMPARE(db.scalar("SELECT offset||'|'||kind||'|'||text FROM notes WHERE verse=1 AND seq=1").toString(), QString("0|f|Heading note"));
+        QCOMPARE(db.scalar("SELECT offset||'|'||caller||'|'||text FROM notes WHERE verse=1 AND seq=2").toString(),
+                 QString("%1|a|1:1 Or spoke plainly").arg(text.indexOf(',') + 1));
+        QCOMPARE(db.scalar("SELECT offset||'|'||kind||'|'||targets FROM notes WHERE verse=1 AND seq=3").toString(),
+                 QString("%1|x|Ps 33:6,9; Mk 16:2").arg(text.indexOf(" went")));
+        QCOMPARE(db.scalar("SELECT kind||'|'||text||'|'||offset FROM notes WHERE verse=2").toString(), QString("fe|End note word|5"));
+        QCOMPARE(db.scalar("SELECT start||'-'||end FROM words_of_jesus WHERE verse=1").toString(),
+                 QString("%1-%2").arg(text.indexOf("Follow")).arg(text.indexOf(" Then")));
+        QVERIFY(db.scalar("SELECT html FROM verses WHERE number=1").toString().contains("<span class=\"wj\">"));
+        QCOMPARE(db.scalar("SELECT count(*) FROM words_of_jesus WHERE verse=2").toInt(), 0);
+        // Tampering with the new tables is caught by the schema 4 digest.
+        { QSqlQuery q(db.db); QVERIFY(q.exec("UPDATE notes SET text='Altered' WHERE verse=2")); }
+        QVERIFY(!UsfmImporter::validateDatabase(target, &error));
+    }
+    void schema3StillValid() {
+        // A schema 3 generation (no notes) keeps validating with its own digest.
+        const QString path = root.filePath("legacy.zip"), target = root.filePath("legacy.sqlite");
+        QVERIFY(zip(path, fixture("\\c 1\n\\p\n\\v 1 Old\\f + \\ft note\\f* text.\n")));
+        QVERIFY(UsfmImporter::importFile(path, target).ok);
+        {
+            Database db(target); QSqlQuery q(db.db);
+            QVERIFY(q.exec("DROP TABLE notes")); QVERIFY(q.exec("DROP TABLE words_of_jesus"));
+            QVERIFY(q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')"));
+            QVERIFY(q.exec("UPDATE metadata SET value='3' WHERE key='schema'"));
+            QCryptographicHash hash(QCryptographicHash::Sha256);
+            auto field = [&](const QByteArray &v) { hash.addData(QByteArray::number(v.size())); hash.addData(":"); hash.addData(v); };
+            for (const QString &sql : {QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
+                     QString("SELECT id,code,name,abbreviation,ordinal FROM books ORDER BY ordinal"),
+                     QString("SELECT book,chapter FROM source_chapters ORDER BY book,chapter"),
+                     QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
+                     QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
+                     QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")}) {
+                field(sql.toUtf8()); QVERIFY(q.exec(sql));
+                while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
+            }
+            q.prepare("UPDATE metadata SET value=? WHERE key='content_digest'"); q.addBindValue(QString::fromLatin1(hash.result().toHex()));
+            QVERIFY(q.exec());
+        }
+        QString error; QVERIFY2(UsfmImporter::validateDatabase(target, &error), qPrintable(error));
+        Database db(target); { QSqlQuery q(db.db); QVERIFY(q.exec("UPDATE metadata SET value='2' WHERE key='schema'")); }
+        QVERIFY(!UsfmImporter::validateDatabase(target, &error));
+    }
     void malformed_data() {
         QTest::addColumn<QByteArray>("body"); QTest::addColumn<QString>("error");
         QTest::newRow("bridge") << QByteArray("\\c 1\n\\v 1-2 Words") << QString("integer");
@@ -342,6 +399,16 @@ private slots:
             QVERIFY(db.scalar("SELECT text FROM verses WHERE book=2 AND chapter=20 AND number=13").toString().contains("Thou shalt not steal."));
             QVERIFY(!db.scalar("SELECT text FROM verses WHERE book=2 AND chapter=20 AND number=13").toString().contains("14"));
         }
+        // Schema 4: notes and words of Jesus survive with valid anchors.
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("4"));
+        const int footnotes = db.scalar("SELECT count(*) FROM notes WHERE kind IN ('f','fe')").toInt();
+        const int xrefs = db.scalar("SELECT count(*) FROM notes WHERE kind='x'").toInt();
+        const int jesus = db.scalar("SELECT count(*) FROM words_of_jesus").toInt();
+        if (id == "eng-kjv") { QVERIFY(jesus > 1000); QVERIFY(footnotes > 100); }
+        if (id == "engbsb" || id == "engojb") QVERIFY(footnotes > 100);
+        if (id == "engojb") { QCOMPARE(xrefs, 3); QCOMPARE(db.scalar("SELECT targets FROM notes WHERE kind='x' AND book=1 AND chapter=1 AND verse=1").toString(), QString("Ps 51:10")); }
+        QCOMPARE(db.scalar("SELECT count(*) FROM notes WHERE length(text)=0 AND length(targets)=0").toInt(), 0);
+        qInfo().noquote() << id << footnotes << "footnotes," << xrefs << "cross references," << jesus << "words-of-Jesus spans";
         qInfo().noquote() << id << books << "books," << markers << "source verse markers," << total << "nonempty verses";
     }
 };

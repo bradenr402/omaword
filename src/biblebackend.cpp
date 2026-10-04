@@ -1687,16 +1687,55 @@ void BibleBackend::removeOwnedBibleFiles(const QString &path, const QString &id)
         QFile::remove(path+suffix);
 }
 
+QPair<int, bool> BibleBackend::textInfo(const QString &id, const QString &path) const
+{
+    // Generations are immutable files: cache by path. Unreadable or foreign
+    // files report schema 0 (never offered re-import from here).
+    const auto cached = m_textInfo.constFind(path);
+    if (cached != m_textInfo.cend()) return *cached;
+    QPair<int, bool> info{0, false};
+    if (ownedBiblePath(path, id) && QFileInfo::exists(path)) {
+        const QString name = connectionName();
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", name);
+            db.setDatabaseName(path); db.setConnectOptions("QSQLITE_OPEN_READONLY");
+            if (db.open()) {
+                QSqlQuery q(db);
+                if (q.exec("SELECT key,value FROM metadata WHERE key IN ('schema','words_of_jesus')")) {
+                    while (q.next()) {
+                        if (q.value(0).toString() == "schema") info.first = q.value(1).toInt();
+                        else info.second = q.value(1).toInt() > 0;
+                    }
+                }
+                db.close();
+            }
+        }
+        QSqlDatabase::removeDatabase(name);
+        if (info.first < 4) info.second = false;
+        m_textInfo.insert(path, info);
+    }
+    return info;
+}
+QVariantList BibleBackend::footnotes() const
+{
+    QVariantList result;
+    for (const auto &row : m_verses) for (const auto &note : row.toMap().value("footnotes").toList()) result.append(note);
+    return result;
+}
 bool BibleBackend::readVersions(QVariantList *result)
 {
     QSqlQuery q(m_store);
-    q.prepare("SELECT version_id,abbreviation,name,version_id=? FROM installed ORDER BY 4 DESC,last_used DESC,version_id");
+    q.prepare("SELECT version_id,abbreviation,name,version_id=?,path FROM installed ORDER BY 4 DESC,last_used DESC,version_id");
     q.addBindValue(m_versionId.isNull() ? QString("") : m_versionId);
     if (!q.exec())
         return setError("Cannot read installed versions: " + q.lastError().text());
     QVariantList rows;
-    while (q.next()) rows.append(QVariantMap{{"id",q.value(0)},{"abbreviation",q.value(1)},
-        {"name",q.value(2)},{"active",q.value(3).toBool()}});
+    while (q.next()) {
+        const auto info = textInfo(q.value(0).toString(), m_directory + '/' + q.value(4).toString());
+        rows.append(QVariantMap{{"id",q.value(0)},{"abbreviation",q.value(1)},
+            {"name",q.value(2)},{"active",q.value(3).toBool()},{"textSchema",info.first},
+            {"needsReimport",info.first > 0 && info.first < CurrentTextSchema},{"wordsOfJesus",info.second}});
+    }
     if (q.lastError().isValid()) return setError("Cannot read installed versions: " + q.lastError().text());
     *result = rows; return true;
 }
@@ -1762,7 +1801,8 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     const auto oldConnection = m_bibleConnection;
     const auto oldId = m_versionId, oldEdition = m_edition, oldAbbreviation = m_abbreviation, oldCopyright = m_copyright;
     const auto oldKeys = m_keys;
-    const bool oldParagraphs = m_hasParagraphs;
+    const bool oldParagraphs = m_hasParagraphs, oldWordsOfJesus = m_hasWordsOfJesus;
+    const int oldSchema = m_textSchema;
     const auto oldBooks = m_books;
     const auto oldChapters = m_chapters;
     const auto oldAliases = m_bookAliases;
@@ -1779,12 +1819,14 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_keys = oldKeys; m_book = oldBook; m_chapter = oldChapter; m_start = oldStart; m_end = oldEnd;
         m_anchor = oldA; m_cursor = oldC; m_position = oldPosition;
         m_hasParagraphs = oldParagraphs; m_books = oldBooks; m_chapters = oldChapters;
+        m_hasWordsOfJesus = oldWordsOfJesus; m_textSchema = oldSchema;
         m_bookAliases = oldAliases; m_keyIndices = oldIndices;
         blocker.unblock(); emit errorChanged();
     });
     m_bible = QSqlDatabase(); m_bibleConnection.clear();
     m_versionId = id; m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_keys = {{0,0,0}};
     m_hasParagraphs = false; m_books.clear(); m_chapters.clear(); m_bookAliases.clear(); m_keyIndices.clear();
+    m_hasWordsOfJesus = false; m_textSchema = 0;
     if (!id.isEmpty()) {
         m_bibleConnection = connectionName(); m_bible = QSqlDatabase::addDatabase("QSQLITE",m_bibleConnection);
         m_bible.setDatabaseName(path); m_bible.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
@@ -1799,6 +1841,8 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_edition = metadata["edition"].toString(); m_abbreviation = metadata["abbreviation"].toString();
         m_copyright = metadata["copyright"].toString();
         m_hasParagraphs = metadata["paragraph_layout"] == "1";
+        m_textSchema = metadata["schema"].toInt();
+        m_hasWordsOfJesus = m_textSchema >= 4 && metadata["words_of_jesus"].toInt() > 0;
         if (!text.exec("SELECT v.book,v.chapter,v.number,v.paragraphStart FROM verses v JOIN books b ON b.id=v.book ORDER BY b.ordinal,v.chapter,v.number")) return setError("Cannot read Bible verse keys.");
         while (text.next()) {
             const int b = text.value(0).toInt(), c = text.value(1).toInt(), v = text.value(2).toInt();
@@ -2142,6 +2186,27 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
         rows.append(QVariantMap{{"number",q.value(0)}, {"text",text}, {"html",html},
             {"paragraphStart",endpoint(absoluteVerse(book,chapter,q.value(0).toInt())).paragraphStart},
             {"heading",q.value(3)}, {"poetry",q.value(4).toBool()}, {"highlighted",false}, {"bookmarked",false}, {"hasNote",false}});
+    }
+    if (m_textSchema >= 4) {
+        // Schema 4: footnotes (\f, \fe) and words-of-Jesus ranges, both as
+        // UTF-16 offsets into each verse's plain text.
+        QHash<int, QVariantList> notes, spans;
+        QSqlQuery extra(m_bible);
+        extra.prepare("SELECT verse,seq,kind,caller,offset,text FROM notes WHERE book=? AND chapter=? AND kind IN ('f','fe') ORDER BY verse,seq");
+        extra.addBindValue(book); extra.addBindValue(chapter);
+        if (!extra.exec()) return setError("Cannot load chapter footnotes: " + extra.lastError().text());
+        while (extra.next()) notes[extra.value(0).toInt()].append(QVariantMap{{"verse",extra.value(0)},{"seq",extra.value(1)},
+            {"kind",extra.value(2)},{"caller",extra.value(3)},{"offset",extra.value(4)},{"text",extra.value(5)}});
+        extra.prepare("SELECT verse,start,end FROM words_of_jesus WHERE book=? AND chapter=? ORDER BY verse,start");
+        extra.addBindValue(book); extra.addBindValue(chapter);
+        if (!extra.exec()) return setError("Cannot load chapter markup: " + extra.lastError().text());
+        while (extra.next()) spans[extra.value(0).toInt()].append(QVariantMap{{"start",extra.value(1)},{"end",extra.value(2)}});
+        for (auto &row : rows) {
+            auto map = row.toMap();
+            const int number = map.value("number").toInt();
+            map["footnotes"] = notes.value(number); map["wordsOfJesus"] = spans.value(number);
+            row = map;
+        }
     }
     QVector<int> expected;
     for (const auto &key : m_keys) if (key.book == book && key.chapter == chapter) expected.append(key.verse);

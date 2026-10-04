@@ -2,6 +2,9 @@
 #include "biblebackend.h"
 #include "biblebooks.h"
 #include <QClipboard>
+#include <QCryptographicHash>
+#include <QSqlRecord>
+#include <QUuid>
 #include <QDateTime>
 #include <QGuiApplication>
 #include <QJsonArray>
@@ -125,6 +128,48 @@ class BackendTest : public QObject
         QVERIFY2(bible->ready(),qPrintable(bible->error()));
         verify(nextBook,chapter,{first,second}); verify(previousBook,previousChapter,{previousVerse});
         QVERIFY(bible->deleteAnnotation(reference)); verify(nextBook,chapter,{}); verify(previousBook,previousChapter,{});
+    }
+    static QMap<QString,QByteArray> studyEntries() {
+        return {{"01-GENstudy.usfm", "\\id GEN Study Test Bible\n\\c 1\n\\p\n\\v 1 In the beginning.\\f + \\fr 1:1 \\ft First note\\f*\n"
+                    "\\v 2 Formless.\\x - \\xo 1:2 \\xt Jn 1:3; Mt 1:2-3\\x*\n\\v 3 Light.\\f b \\ft Second note\\f*\n\\c 2\n\\p\n\\v 1 Finished.\n"},
+                {"02-MATstudy.usfm", "\\id MAT Study Test Bible\n\\c 1\n\\p\n\\v 1 Book.\n\\v 2 Abraham.\n\\v 3 Judah.\n"},
+                {"03-JHNstudy.usfm", "\\id JHN Study Test Bible\n\\c 1\n\\p\n\\v 1 Word.\n\\v 2 Same.\n\\v 3 Made.\n"
+                    "\\c 3\n\\p\n\\v 16 For God so loved. He said, \\wj Truly I say\\wj* again.\n"}};
+    }
+    // Rewrites a schema 4 generation as the schema 3 layout older builds wrote.
+    static bool downgradeToSchema3(const QString &path) {
+        const QString name = QUuid::createUuid().toString();
+        bool ok = false;
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
+            if (db.open()) {
+                QSqlQuery q(db);
+                ok = q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
+                    && q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')")
+                    && q.exec("UPDATE metadata SET value='3' WHERE key='schema'")
+                    && q.exec("UPDATE verses SET html=replace(replace(html,'<span class=\"wj\">',''),'</span>','')");
+                QCryptographicHash hash(QCryptographicHash::Sha256);
+                auto field = [&](const QByteArray &v) { hash.addData(QByteArray::number(v.size())); hash.addData(":"); hash.addData(v); };
+                for (const QString &sql : {QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
+                         QString("SELECT id,code,name,abbreviation,ordinal FROM books ORDER BY ordinal"),
+                         QString("SELECT book,chapter FROM source_chapters ORDER BY book,chapter"),
+                         QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
+                         QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
+                         QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")}) {
+                    field(sql.toUtf8()); ok = ok && q.exec(sql);
+                    while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
+                }
+                q.prepare("UPDATE metadata SET value=? WHERE key='content_digest'"); q.addBindValue(QString::fromLatin1(hash.result().toHex()));
+                ok = ok && q.exec();
+                db.close();
+            }
+        }
+        QSqlDatabase::removeDatabase(name);
+        return ok;
+    }
+    static QVariantMap versionRow(BibleBackend *b, const QString &id) {
+        for (const auto &row : b->versions()) if (row.toMap()["id"] == id) return row.toMap();
+        return {};
     }
 private slots:
     void initTestCase() {
@@ -835,6 +880,39 @@ private slots:
         }
         QSqlDatabase::removeDatabase("corruption");
         QString error; QVERIFY(!UsfmImporter::validateDatabase(path,&error)); QVERIFY(!error.isEmpty());
+    }
+    void textSchemaFootnotesAndReimportFlag() {
+        const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
+        install(path);
+        QCOMPARE(bible->versionId(), QString("study")); QCOMPARE(bible->textSchema(), 4); QVERIFY(bible->hasWordsOfJesus());
+        QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
+        QCOMPARE(versionRow(bible.get(),"study")["textSchema"].toInt(), 4);
+        QVERIFY(bible->navigate("Genesis 1"));
+        const auto notes = bible->footnotes();
+        QCOMPARE(notes.size(), 2);
+        QCOMPARE(notes[0].toMap()["verse"].toInt(), 1); QCOMPARE(notes[0].toMap()["text"].toString(), QString("1:1 First note"));
+        QCOMPARE(notes[0].toMap()["offset"].toInt(), QString("In the beginning.").size());
+        QCOMPARE(notes[1].toMap()["caller"].toString(), QString("b"));
+        QCOMPARE(bible->verses()[0].toMap()["footnotes"].toList().size(), 1);
+        QVERIFY(bible->navigate("John 3:16"));
+        const auto row = bible->verses()[0].toMap();
+        const auto spans = row["wordsOfJesus"].toList(); QCOMPARE(spans.size(), 1);
+        const QString text = row["text"].toString();
+        QCOMPARE(text.mid(spans[0].toMap()["start"].toInt(), spans[0].toMap()["end"].toInt() - spans[0].toMap()["start"].toInt()), QString("Truly I say"));
+        bible->selectVerses(16,16); bible->setNoteText("Kept across re-import"); QVERIFY(bible->error().isEmpty());
+        // An older generation stays readable and is flagged for re-import.
+        const QString file = installedPath();
+        bible.reset(); QVERIFY(downgradeToSchema3(file)); bible = std::make_unique<BibleBackend>();
+        QVERIFY2(bible->ready(), qPrintable(bible->error()));
+        QCOMPARE(bible->textSchema(), 3); QVERIFY(!bible->hasWordsOfJesus()); QVERIFY(bible->footnotes().isEmpty());
+        QVERIFY(versionRow(bible.get(),"study")["needsReimport"].toBool());
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->verses()[0].toMap()["wordsOfJesus"].toList().isEmpty());
+        // Re-import through the ordinary install/replace flow keeps annotations.
+        install(path);
+        QCOMPARE(bible->textSchema(), 4); QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
+        QVERIFY(installedPath() != file); QVERIFY(!QFile::exists(file));
+        QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16,16);
+        QCOMPARE(bible->noteText(), QString("Kept across re-import"));
     }
     void optionalSourceArchives_data() {
         QTest::addColumn<QString>("id"); QTest::addColumn<QString>("path");

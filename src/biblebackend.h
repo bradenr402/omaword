@@ -53,6 +53,11 @@ class BibleBackend : public QObject
     Q_PROPERTY(QString readingMode READ readingMode WRITE setReadingMode NOTIFY preferencesChanged)
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
     Q_PROPERTY(bool hasParagraphs READ hasParagraphs NOTIFY versionChanged)
+    // Text DB schema of the active version (4 = notes and words of Jesus kept).
+    Q_PROPERTY(int textSchema READ textSchema NOTIFY versionChanged)
+    Q_PROPERTY(bool hasWordsOfJesus READ hasWordsOfJesus NOTIFY versionChanged)
+    // Current chapter's footnotes {verse,seq,kind,caller,offset,text}, source order.
+    Q_PROPERTY(QVariantList footnotes READ footnotes NOTIFY versesChanged)
     Q_PROPERTY(QVariantList searchResults READ searchResults NOTIFY searchChanged)
     Q_PROPERTY(bool searchBusy READ searchBusy NOTIFY searchChanged)
     Q_PROPERTY(QString searchError READ searchError NOTIFY searchChanged)
@@ -150,6 +155,10 @@ public:
     QString readingMode() const { return m_readingMode; }
     int fontSize() const { return m_fontSize; }
     bool hasParagraphs() const { return m_hasParagraphs; }
+    static constexpr int CurrentTextSchema = 4;
+    int textSchema() const { return m_textSchema; }
+    bool hasWordsOfJesus() const { return m_hasWordsOfJesus; }
+    QVariantList footnotes() const;
     // Records: versionId/versionAbbreviation, book/chapter/start/endBook/
     // endChapter/end, reference, source-preserving text, score (exact-term count),
     // segments[{verse,start,length}], displaySegments[{start,length}]. Segment
@@ -341,6 +350,8 @@ private:
     bool ownedBiblePath(const QString &path, const QString &id = {}) const;
     void removeOwnedBibleFiles(const QString &path, const QString &id = {});
     bool readVersions(QVariantList *versions);
+    QPair<int, bool> textInfo(const QString &id, const QString &path) const;
+    mutable QHash<QString, QPair<int, bool>> m_textInfo;
     void closeBible();
     bool loadChapter();
     bool readChapter(int book, int chapter, QVariantList *rows);
@@ -407,7 +418,8 @@ private:
     bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;
-    bool m_hasParagraphs = false;
+    bool m_hasParagraphs = false, m_hasWordsOfJesus = false;
+    int m_textSchema = 0;
     double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection, m_desk, m_history;
     QStringList m_recentQueries;

@@ -43,9 +43,14 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
   registry pointer to a fresh immutable `bible-<UUID>.sqlite` generation. A crash
   leaves only an unreferenced file. Replacement refreshes affected readers before
   old-file cleanup; ownership checks reject symlinks/hardlinks/foreign targets.
-- Text DB schema is **3** (independent of personal schema): `metadata` (incl.
+- Text DB schema is **4** (independent of personal schema): `metadata` (incl.
   digests), `books(...,ordinal)`, `book_aliases`, `source_chapters`,
-  `source_keys(book,chapter,number,retained)`, `verses(...,html,heading,poetry,paragraphStart)`.
+  `source_keys(book,chapter,number,retained)`, `verses(...,html,heading,poetry,paragraphStart)`,
+  `notes(book,chapter,verse,seq,kind,caller,offset,text,targets)` (`\f`/`\fe`/`\x`
+  as plain text; `offset` is UTF-16 into the verse's plain text; `targets` = `\xt`)
+  and `words_of_jesus(book,chapter,verse,start,end)`; `\wj` also renders as
+  `<span class="wj">` in `html`. Schema 3 files still validate (own digest) and
+  open without notes; Versions flags them (`needsReimport`) for Re-import.
 - Identity: source ID from numbered internal filename suffixes, cross-checked
   with `copr.htm`; else `usfm-<first 32 hex of SHA-256(title)>`. Outer ZIP name
   never matters.
@@ -57,8 +62,9 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
 - Chapters/verses: strictly increasing integers 1–999. Gaps/omissions are kept
   (never manufactured); bridges and suffix labels are explicit errors.
 - Sanitization: text is HTML-escaped; only supported inline emphasis survives.
-  `\w` keeps the word, drops attributes. Footnotes, xrefs, alt numbers, intros
-  excluded. Unknown markers / bad UTF-8 fail. Archive limits: 2,048 entries,
+  `\w` keeps the word, drops attributes. Footnotes and xrefs leave verse
+  text (kept in `notes`); alt numbers, intros excluded. Notes in headings or
+  before a verse anchor at offset 0 of the next verse. Unknown markers / bad UTF-8 fail. Archive limits: 2,048 entries,
   32 MiB/entry, 256 MiB total, nesting 32, 65,536 units per verse/heading;
   unsafe/duplicate paths, links, encryption rejected. `copr.htm` entities are
   decoded without an XML/HTML engine.

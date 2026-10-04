@@ -287,7 +287,12 @@ Input load(const QString &path)
     return input;
 }
 
-struct Verse { int chapter = 0, number = 0; QString text, html, heading; bool poetry = false, paragraphStart = false; };
+struct Note { QString kind, caller, text, targets; int offset = 0; };
+struct Span { int start = 0, end = 0; };
+struct Verse {
+    int chapter = 0, number = 0; QString text, html, heading; bool poetry = false, paragraphStart = false;
+    QVector<Note> notes; QVector<Span> wordsOfJesus;
+};
 struct Text {
     QString plain, html;
     bool space = false;
@@ -302,12 +307,15 @@ struct Text {
     void line() { if (!plain.isEmpty()) { plain += '\n'; html += "<br/>"; } space = false; }
 };
 
+QString openTag(const QString &tag) { return tag == "span" ? QStringLiteral("<span class=\"wj\">") : "<" + tag + ">"; }
 QString style(const QString &marker)
 {
     if (marker == "add" || marker == "it" || marker == "bk" || marker == "tl" || marker == "qs" || marker == "qac") return "i";
     if (marker == "bd") return "b";
     if (marker == "bdit") return "b";
     if (marker == "sup" || marker == "ord") return "sup";
+    // Words of Jesus: a classed span the reader may color (format only).
+    if (marker == "wj") return "span";
     return {};
 }
 const QSet<QString> inlineMarkers = {"w","add","it","bd","bdit","nd","qt","qs","qac","sup","ord","sc","wj","bk","tl","em","no","pn","png","k","sig","sls","dc","ior","rq"};
@@ -349,6 +357,13 @@ void parse(const SourceBook &book, const std::function<void(const Verse &, bool)
     QVector<int> noteStyleDepths;
     int chapter = 0, previousVerse = 0;
     bool pendingParagraph = true, poetry = false, introduction = false;
+    // Schema 4: top-level notes (\f, \fe, \x) are captured as plain text with
+    // their anchor offset in the verse's plain text; \wj spans become ranges.
+    Note note;
+    QString noteField;
+    bool capturing = false, anchored = false, inWj = false;
+    int wjStart = -1;
+    QVector<Note> pendingNotes;
     auto finishTitle = [&] {
         if (!title.plain.isEmpty()) {
             if (!pendingHeading.isEmpty()) pendingHeading += '\n';
@@ -360,12 +375,24 @@ void parse(const SourceBook &book, const std::function<void(const Verse &, bool)
     auto finishVerse = [&] {
         if (!verse.number) return;
         verse.text = body.plain.trimmed(); verse.html = body.html.trimmed();
+        const int untrimmed = verse.text.size();
         if (stripLayoutPilcrow(&verse.text, &verse.html)) verse.paragraphStart = true;
+        // Offsets were recorded against the untrimmed text; a stripped layout
+        // pilcrow shifts them left. Clamp into the stored verse text.
+        const int lead = untrimmed - verse.text.size(), length = verse.text.size();
+        for (auto &n : verse.notes) n.offset = std::clamp(n.offset - lead, 0, length);
+        QVector<Span> spans;
+        for (auto span : verse.wordsOfJesus) {
+            span.start = std::clamp(span.start - lead, 0, length); span.end = std::clamp(span.end - lead, 0, length);
+            if (span.end > span.start) spans.append(span);
+        }
+        verse.wordsOfJesus = spans;
         const bool retained = !verse.text.isEmpty();
         sink(verse, retained);
         if (!retained) {
             if (!verse.heading.isEmpty()) pendingHeading = verse.heading + (pendingHeading.isEmpty() ? "" : "\n" + pendingHeading);
             pendingParagraph = pendingParagraph || verse.paragraphStart;
+            for (auto n : verse.notes) { n.offset = 0; pendingNotes.append(n); }
         }
         verse = {}; body = {};
     };
@@ -390,7 +417,19 @@ void parse(const SourceBook &book, const std::function<void(const Verse &, bool)
             }
             verse.poetry = verse.poetry || poetry;
         }
+        const auto before = out.plain.size();
         out.append(text);
+        if (destination == Body && inWj && wjStart < 0 && out.plain.size() > before)
+            wjStart = int(before) + (out.plain.at(before).isSpace() ? 1 : 0);
+    };
+    auto noteText = [&](QString text) {
+        if (!capturing || notes.size() != 1) return;
+        if (!noteStyles.isEmpty() && (noteStyles.back() == "w" || noteStyles.back() == "+w")) {
+            const auto attributes = text.indexOf('|');
+            if (attributes >= 0) text.truncate(attributes);
+        }
+        note.text += text;
+        if (noteField == "xt") note.targets += text;
     };
     while (lexer.next(token)) {
         QString m = token.marker;
@@ -404,7 +443,18 @@ void parse(const SourceBook &book, const std::function<void(const Verse &, bool)
                 if (noteStyles.size() != noteStyleDepths.back()) fail("Unclosed USFM character style in note.");
                 noteStyleDepths.removeLast();
                 notes.removeLast();
-                if (notes.isEmpty()) append(token.text);
+                if (notes.isEmpty()) {
+                    if (capturing) {
+                        note.text = note.text.simplified(); note.targets = note.targets.simplified();
+                        if (note.text.size() > MaxText) fail("USFM note text limit exceeded.");
+                        if (!note.text.isEmpty() || !note.targets.isEmpty()) {
+                            if (anchored) verse.notes.append(note); else pendingNotes.append(note);
+                        }
+                    }
+                    capturing = false;
+                    append(token.text);
+                    continue;
+                }
             } else if (m == "c" || m == "v") fail("Unclosed USFM note before " + m + " in " + book.code);
             else if (inlineMarkers.contains(m) && !noteFields.contains(m)) {
                 if (token.close) {
@@ -417,6 +467,8 @@ void parse(const SourceBook &book, const std::function<void(const Verse &, bool)
             }
             // Note subfields (including +fl and xt) implicitly end at the next
             // subfield or note close; they are not paired character styles.
+            if (noteFields.contains(m) && !token.close) { noteField = m; if (notes.size() == 1) note.text += ' '; }
+            noteText(token.text);
             continue;
         }
         if (!excluded.isEmpty()) {
@@ -431,9 +483,24 @@ void parse(const SourceBook &book, const std::function<void(const Verse &, bool)
             continue;
         }
         if (m.isEmpty()) { append(token.text); continue; }
-        if ((m == "f" || m == "fe" || m == "x") && !token.close) { notes.append(m); noteStyleDepths.append(0); continue; }
+        if ((m == "f" || m == "fe" || m == "x") && !token.close) {
+            notes.append(m); noteStyleDepths.append(0);
+            const QString head = token.text.trimmed();
+            note = {}; note.kind = m; noteField.clear();
+            note.caller = head.section(' ', 0, 0).left(16);
+            note.text = head.section(' ', 1);
+            capturing = destination != Ignore && !introduction;
+            anchored = destination == Body && verse.number;
+            note.offset = anchored ? int(body.plain.size()) : 0;
+            continue;
+        }
         if ((m == "va" || m == "ca" || m == "vp" || m == "xt") && !token.close) { excluded.append(token.marker); continue; }
         if (inlineMarkers.contains(m)) {
+            if (m == "wj" && token.close) {
+                if (inWj && wjStart >= 0 && destination == Body && verse.number)
+                    verse.wordsOfJesus.append({wjStart, int(body.plain.size())});
+                inWj = false; wjStart = -1;
+            } else if (m == "wj") { inWj = true; wjStart = -1; }
             if (token.close) {
                 if (styles.isEmpty() || styles.back().marker != token.marker) fail("Mismatched USFM character style: " + token.marker + " in " + book.code);
                 const auto frame = styles.takeLast();
@@ -442,7 +509,7 @@ void parse(const SourceBook &book, const std::function<void(const Verse &, bool)
                 if (styles.size() >= 32) fail("USFM character style depth exceeded.");
                 const QString tag = style(m);
                 styles.append({token.marker, tag});
-                if (destination != Ignore && !tag.isEmpty()) (destination == Heading ? title : body).html += "<" + tag + ">";
+                if (destination != Ignore && !tag.isEmpty()) (destination == Heading ? title : body).html += openTag(tag);
             }
             append(token.text); continue;
         }
@@ -463,6 +530,7 @@ void parse(const SourceBook &book, const std::function<void(const Verse &, bool)
             if (next <= previousVerse) fail("USFM verses must be strictly ascending: " + book.code + " " + QString::number(chapter));
             previousVerse = next;
             verse.chapter = chapter; verse.number = next; verse.heading = pendingHeading; pendingHeading.clear();
+            verse.notes = pendingNotes; pendingNotes.clear();
             verse.paragraphStart = pendingParagraph; verse.poetry = poetry;
             destination = Body; append(token.text);
         } else if (heading(m) && !introduction) {
@@ -527,6 +595,12 @@ const QStringList integrityQueries = {
     "SELECT book,name FROM book_aliases ORDER BY book,name", keyQuery,
     "SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number"
 };
+// Schema 4 adds source notes and words-of-Jesus ranges; schema 3 files keep
+// their original digest and remain readable (flagged for re-import).
+const QStringList schema4Queries = {
+    "SELECT book,chapter,verse,seq,kind,caller,offset,text,targets FROM notes ORDER BY book,chapter,verse,seq",
+    "SELECT book,chapter,verse,start,end FROM words_of_jesus ORDER BY book,chapter,verse,start"
+};
 void validate(QSqlDatabase db)
 {
     QSqlQuery q(db);
@@ -535,7 +609,8 @@ void validate(QSqlDatabase db)
     QMap<QString, QString> metadata;
     exec(q, "SELECT key,value FROM metadata");
     while (q.next()) metadata.insert(q.value(0).toString(), q.value(1).toString());
-    if (metadata.value("schema") != "3" || metadata.value("source_format") != "usfm"
+    const QString schema = metadata.value("schema");
+    if ((schema != "3" && schema != "4") || metadata.value("source_format") != "usfm"
         || metadata.value("version_id").isEmpty() || metadata.value("edition").isEmpty()
         || metadata.value("abbreviation").isEmpty() || metadata.value("paragraph_layout") != "1") fail("Invalid USFM database metadata.");
     int books = 0;
@@ -557,10 +632,18 @@ void validate(QSqlDatabase db)
         "SELECT 1 FROM book_aliases WHERE book NOT IN (SELECT id FROM books) OR length(trim(name))=0 LIMIT 1"
     };
     for (const auto &sql : invalid) { exec(q, sql); if (q.next()) fail("USFM source book/chapter/verse integrity mismatch."); }
+    if (schema == "4") {
+        const QStringList notes = {
+            "SELECT 1 FROM notes n LEFT JOIN verses v ON v.book=n.book AND v.chapter=n.chapter AND v.number=n.verse WHERE v.book IS NULL OR n.offset<0 OR n.offset>length(v.text) OR n.kind NOT IN ('f','fe','x') OR length(n.text)>65536 OR length(n.targets)>65536 LIMIT 1",
+            "SELECT 1 FROM words_of_jesus w LEFT JOIN verses v ON v.book=w.book AND v.chapter=w.chapter AND v.number=w.verse WHERE v.book IS NULL OR w.start<0 OR w.end<=w.start OR w.end>length(v.text) LIMIT 1"
+        };
+        for (const auto &sql : notes) { exec(q, sql); if (q.next()) fail("USFM note or words-of-Jesus integrity mismatch."); }
+    }
     exec(q, "SELECT count(*) FROM verses");
     if (!q.next() || q.value(0).toInt() <= 0 || q.value(0).toString() != metadata.value("verse_count")) fail("USFM verse count mismatch.");
     if (queryDigest(db, {keyQuery}) != metadata.value("source_keys")) fail("USFM source-key digest mismatch.");
-    if (queryDigest(db, integrityQueries) != metadata.value("content_digest")) fail("USFM database content digest mismatch.");
+    if (queryDigest(db, schema == "4" ? integrityQueries + schema4Queries : integrityQueries) != metadata.value("content_digest"))
+        fail("USFM database content digest mismatch.");
 }
 }
 
@@ -597,7 +680,12 @@ Result importFile(const QString &path, const QString &target, const std::shared_
             exec(q, "CREATE TABLE source_keys(book INTEGER,chapter INTEGER,number INTEGER,retained INTEGER NOT NULL,PRIMARY KEY(book,chapter,number)) WITHOUT ROWID");
             exec(q, "CREATE TABLE source_chapters(book INTEGER,chapter INTEGER,PRIMARY KEY(book,chapter)) WITHOUT ROWID");
             exec(q, "CREATE TABLE book_aliases(book INTEGER,name TEXT,PRIMARY KEY(book,name)) WITHOUT ROWID");
+            exec(q, "CREATE TABLE notes(book INTEGER,chapter INTEGER,verse INTEGER,seq INTEGER,kind TEXT NOT NULL,caller TEXT NOT NULL,offset INTEGER NOT NULL,text TEXT NOT NULL,targets TEXT NOT NULL,PRIMARY KEY(book,chapter,verse,seq)) WITHOUT ROWID");
+            exec(q, "CREATE TABLE words_of_jesus(book INTEGER,chapter INTEGER,verse INTEGER,start INTEGER,end INTEGER NOT NULL,PRIMARY KEY(book,chapter,verse,start)) WITHOUT ROWID");
             QSqlQuery insert(connection.db), key(connection.db), chapters(connection.db), aliases(connection.db);
+            QSqlQuery noteInsert(connection.db), wjInsert(connection.db);
+            noteInsert.prepare("INSERT INTO notes VALUES(?,?,?,?,?,?,?,?,?)"); wjInsert.prepare("INSERT OR IGNORE INTO words_of_jesus VALUES(?,?,?,?,?)");
+            int wordsOfJesus = 0, noteCount = 0;
             insert.prepare("INSERT INTO verses VALUES(?,?,?,?,?,?,?,?)"); key.prepare("INSERT INTO source_keys VALUES(?,?,?,?)");
             chapters.prepare("INSERT INTO source_chapters VALUES(?,?)"); aliases.prepare("INSERT OR IGNORE INTO book_aliases VALUES(?,?)");
             QCryptographicHash fingerprint(QCryptographicHash::Sha256);
@@ -617,10 +705,23 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                     insert.bindValue(5, verse.heading.isNull() ? QString("") : verse.heading);
                     insert.bindValue(6, verse.poetry ? 1 : 0); insert.bindValue(7, verse.paragraphStart ? 1 : 0); run(insert);
                     ++result.verseCount;
+                    int seq = 0;
+                    for (const auto &n : verse.notes) {
+                        const QVariantList values = {book.id, verse.chapter, verse.number, ++seq, n.kind, n.caller.isNull() ? QString("") : n.caller,
+                            n.offset, n.text.isNull() ? QString("") : n.text, n.targets.isNull() ? QString("") : n.targets};
+                        for (int i = 0; i < values.size(); ++i) noteInsert.bindValue(i, values[i]);
+                        run(noteInsert); ++noteCount;
+                    }
+                    for (const auto &span : verse.wordsOfJesus) {
+                        const QVariantList values = {book.id, verse.chapter, verse.number, span.start, span.end};
+                        for (int i = 0; i < values.size(); ++i) wjInsert.bindValue(i, values[i]);
+                        run(wjInsert); ++wordsOfJesus;
+                    }
                 }, [&](int chapter) { chapters.bindValue(0, book.id); chapters.bindValue(1, chapter); run(chapters); });
                 if (progress) progress->store(0.9 * book.ordinal / input.books.size());
             }
-            QMap<QString, QString> metadata = {{"schema","3"}, {"source_format","usfm"}, {"paragraph_layout","1"},
+            QMap<QString, QString> metadata = {{"schema","4"}, {"note_count",QString::number(noteCount)},
+                {"words_of_jesus",QString::number(wordsOfJesus)}, {"source_format","usfm"}, {"paragraph_layout","1"},
                 {"version_id",input.edition.id}, {"edition",input.edition.name}, {"abbreviation",input.edition.abbreviation},
                 {"copyright",input.edition.copyright}, {"book_count",QString::number(input.books.size())},
                 {"verse_count",QString::number(result.verseCount)}, {"source_keys",queryDigest(connection.db, {keyQuery})},
@@ -629,7 +730,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
             for (auto it = metadata.cbegin(); it != metadata.cend(); ++it) {
                 q.bindValue(0, it.key()); q.bindValue(1, it.value().isNull() ? QString("") : it.value()); run(q);
             }
-            q.bindValue(0, "content_digest"); q.bindValue(1, queryDigest(connection.db, integrityQueries)); run(q);
+            q.bindValue(0, "content_digest"); q.bindValue(1, queryDigest(connection.db, integrityQueries + schema4Queries)); run(q);
             exec(q, "COMMIT"); validate(connection.db);
         }
         QFile database(temporaryPath);
