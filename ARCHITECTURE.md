@@ -156,6 +156,20 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
   `SearchDocument`/`BlockDocument` map those offsets into each layout, skipping
   decoration cells and verse-number labels.
 
+### Passage recognition
+- One parser in `BibleBackend`: `referenceCandidates` (palette when the query
+  has digits past a leading ordinal; note `[[` suggestions) ranks the exact
+  `parseReference` result first, then fuzzy books (exact key > name prefix >
+  key prefix > subsequence) × number readings. A digit run is a chapter, or
+  splits into chapter:verse only where that verse exists; ties follow source order.
+- Links are exact only (`passageLinks`/`findLinks`): capitalized book name or
+  standard/source abbreviation, whitespace, existing chapter or
+  chapter:verse(-verse). Compact forms and chapter-crossing ranges never link.
+  The preview rewrites them to `omaword-passage:` Markdown links; following one
+  (click, `alt enter`) is a History jump and keeps Notes open.
+- `linkedNotes()`: active-version notes, other than the current exact range,
+  with a link overlapping the selection (or the chapter without one).
+
 ### Copy
 - Preserves stored internal whitespace. Verse joins follow source paragraph
   starts, poetry lines, and chapter breaks regardless of current layout.
