@@ -19,9 +19,8 @@ class SoundEffects : public QObject {
     // all persisted feedback preferences.
     Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY reduceMotionChanged)
     // Test hook: the last cue requested while enabled (even when silenced or
-    // within its cooldown), its weight, and a running request count.
+    // within its cooldown) and a running request count.
     Q_PROPERTY(QString lastSound READ lastSound NOTIFY played)
-    Q_PROPERTY(double lastWeight READ lastWeight NOTIFY played)
     Q_PROPERTY(int playCount READ playCount NOTIFY played)
 public:
     // settingsPath: optional INI file (tests); empty uses the application's QSettings.
@@ -38,18 +37,14 @@ public:
     bool silenced() const { return m_silenced; }
     static QStringList names();
     static constexpr int cooldownMs = 50;
-    static constexpr int thunkSteps = 6;
-    // The 16-bit mono 44.1 kHz PCM a cue plays (thunk is rendered for weight);
-    // for tests and offline inspection.
-    static QByteArray render(const QString &name, double weight = 1.0);
+    // The 16-bit mono 44.1 kHz PCM a cue plays; for tests and offline inspection.
+    static QByteArray render(const QString &name);
 
     QString lastSound() const { return m_lastSound; }
-    double lastWeight() const { return m_lastWeight; }
     int playCount() const { return m_playCount; }
 
     // Returns true when the cue was accepted (enabled, known, not silenced, past cooldown).
-    // weight (0–1] scales loudness; page-turn "thunk"s grow with distance.
-    Q_INVOKABLE bool play(const QString &name, double weight = 1.0);
+    Q_INVOKABLE bool play(const QString &name);
 
 signals:
     void enabledChanged();
@@ -65,10 +60,8 @@ private:
     bool m_audioOutput = true;
     bool m_outputFailed = false;
     QString m_lastSound;
-    double m_lastWeight = 0;
     int m_playCount = 0;
     QHash<QString, QByteArray> m_tones;
-    QList<QByteArray> m_thunks; // thunkSteps renders, lightest first
     QHash<QString, QElapsedTimer> m_lastPlayed;
     QAudioSink *m_sink = nullptr;
     QBuffer *m_buffer = nullptr;
