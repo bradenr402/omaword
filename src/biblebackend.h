@@ -249,6 +249,13 @@ public:
     // {reference, book, chapter, start, end, score}, most similar first. Accepts
     // compact input (jn316, 1co13, ps23, rev 3 14-22) besides every exact form.
     Q_INVOKABLE QVariantList referenceCandidates(QString input, int limit = 8) const;
+    // Exact plain-text passage links: a book name or standard abbreviation,
+    // whitespace, then an existing chapter or chapter:verse(-verse). Compact
+    // forms never link. Rows {start, length, text, reference} in UTF-16 offsets.
+    Q_INVOKABLE QVariantList passageLinks(QString text) const;
+    // Notes (other than the current exact range) whose links overlap the
+    // current selection, or the chapter without one. Collection-shaped rows.
+    Q_INVOKABLE QVariantList linkedNotes() const;
     Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
     Q_INVOKABLE void openChapter(int book, int chapter);
     Q_INVOKABLE void previousChapter();
@@ -342,6 +349,9 @@ private:
     bool goTo(int book, int chapter, int start, int end);
     bool goToSelection(int book, int chapter, int anchor, int cursor, double position);
     bool parseReference(QString input, int *book, int *chapter, int *start, int *end, QString *error) const;
+    struct Link { int start = 0, length = 0, first = 0, last = 0; QString text, reference; };
+    QVector<Link> findLinks(const QString &text) const;
+    bool chapterBounds(int book, int chapter, int *first, int *last) const;
     void intersectSelection();
     bool commitAnnotations(const QVector<Annotation> &annotations);
     bool flagCovered(const QVector<Annotation> &annotations, bool highlight) const;

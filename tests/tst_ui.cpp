@@ -5950,6 +5950,87 @@ private slots:
         QCOMPARE(paletteTitles().value(0),QString("1 Corinthians"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
     }
+    void openNotesOn(const QString &passage) {
+        reference(passage);
+        key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+    }
+    void noteLinkSuggestions() {
+        openNotesOn("John 3:16");
+        auto popup = item("noteLinkPopup"); QVERIFY(popup);
+        type("See [[");
+        QTRY_VERIFY(popup->isVisible());
+        type("j4");
+        QTRY_VERIFY(item("noteLinkSuggestion3"));
+        QCOMPARE(jsMap(prop("noteLinkSuggestion0","modelData"))["reference"].toString(),QString("Job 4"));
+        // Under the cursor.
+        const auto caret = item("noteEditor")->mapToItem(popup->parentItem(),prop("noteEditor","cursorRectangle").toRectF().bottomLeft());
+        QVERIFY(std::abs(popup->y() - caret.y() - 4) < 2);
+        key(Qt::Key_Down); key(Qt::Key_Down); key(Qt::Key_Up);
+        QCOMPARE(window->property("linkSuggestionIndex").toInt(),1);
+        key(Qt::Key_Tab);
+        QTRY_VERIFY(!popup->isVisible());
+        QCOMPARE(prop("noteEditor","text").toString(),QString("See Joel 4"));
+        QVERIFY(item("noteEditor")->hasActiveFocus());
+        // Esc dismisses and leaves the text; Notes stays open.
+        type(" [[jn3");
+        QTRY_VERIFY(popup->isVisible());
+        key(Qt::Key_Escape);
+        QVERIFY(!popup->isVisible());
+        QVERIFY(window->property("notesOpen").toBool());
+        QCOMPARE(prop("noteEditor","text").toString(),QString("See Joel 4 [[jn3"));
+        type("1"); QVERIFY(!popup->isVisible());
+        for (int i = 0; i < 7; ++i) key(Qt::Key_Backspace);
+        QCOMPARE(prop("noteEditor","text").toString(),QString("See Joel 4"));
+        // Enter accepts the first candidate: the full reference, no brackets, no newline.
+        type(" and [[jn42");
+        QTRY_VERIFY(popup->isVisible());
+        QCOMPARE(jsMap(prop("noteLinkSuggestion0","modelData"))["reference"].toString(),QString("John 4:2"));
+        key(Qt::Key_Return);
+        QCOMPARE(prop("noteEditor","text").toString(),QString("See Joel 4 and John 4:2"));
+        QTRY_COMPARE(bible->noteText(),QString("See Joel 4 and John 4:2"));
+    }
+    void noteLinksAndLinkedFrom() {
+        openNotesOn("John 3:16");
+        type("See Joel 4 and John 4:2");
+        QTRY_COMPARE(bible->noteText(),QString("See Joel 4 and John 4:2"));
+        // On a link, the hint row offers alt enter.
+        QTRY_VERIFY(item("notesHints")->isVisible());
+        QCOMPARE(plainHint(prop("notesHints","text").toString()),QString("alt enter open link"));
+        item("noteEditor")->setProperty("cursorPosition",1);
+        QTRY_VERIFY(!item("notesHints")->isVisible());
+        item("noteEditor")->setProperty("cursorPosition",20);
+        QTRY_VERIFY(item("notesHints")->isVisible());
+        // alt enter follows the link as a History jump; Notes stays open.
+        const int jumps = window->property("jumpIndex").toInt();
+        key(Qt::Key_Return,Qt::AltModifier);
+        QTRY_COMPARE(bible->selectionReference(),QString("John 4:2"));
+        QCOMPARE(window->property("jumpIndex").toInt(),jumps + 1);
+        QVERIFY(window->property("notesOpen").toBool());
+        QCOMPARE(prop("noteEditor","text").toString(),QString());
+        // Linked from: notes elsewhere that reference this passage.
+        QTRY_VERIFY(item("linkedFrom")->isVisible());
+        QCOMPARE(jsMap(prop("linkedFromRow0","modelData"))["reference"].toString(),QString("John 3:16"));
+        QVERIFY(!item("linkedFromRow1"));
+        click(item("linkedFromRow0"));
+        QTRY_COMPARE(bible->selectionReference(),QString("John 3:16"));
+        QCOMPARE(window->property("jumpIndex").toInt(),jumps + 2);
+        QTRY_COMPARE(prop("noteEditor","text").toString(),QString("See Joel 4 and John 4:2"));
+        QTRY_VERIFY(!item("linkedFrom")->isVisible());
+        // Preview renders links; activating one jumps.
+        click(item("previewButton"));
+        QTRY_VERIFY(item("notePreview")->isVisible());
+        const auto document = prop("notePreview","textDocument").value<QQuickTextDocument *>()->textDocument();
+        QVERIFY(document->toHtml().contains("omaword-passage:"));
+        const auto found = document->find("John 4:2");
+        QVERIFY(!found.isNull());
+        QRectF rect;
+        QMetaObject::invokeMethod(object("notePreview"),"positionToRectangle",Q_RETURN_ARG(QRectF,rect),Q_ARG(int,found.selectionStart() + 2));
+        const auto point = item("notePreview")->mapToScene(rect.center()).toPoint();
+        QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,point);
+        QTRY_COMPARE(bible->selectionReference(),QString("John 4:2"));
+        // Compact text never links.
+        QVERIFY(bible->passageLinks("jn316 and Jn3:16").isEmpty());
+    }
 };
 
 int main(int argc,char **argv)

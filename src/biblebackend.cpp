@@ -2321,6 +2321,96 @@ QVariantList BibleBackend::referenceCandidates(QString input, int limit) const
     }
     return result;
 }
+bool BibleBackend::chapterBounds(int b, int c, int *first, int *last) const
+{
+    *first = *last = 0;
+    if (!chaptersForBook(b).contains(c)) return false;
+    for (int v = 1; v <= 999; ++v) {
+        const int index = absoluteVerse(b,c,v);
+        if (!index) continue;
+        if (!*first) *first = index;
+        *last = index;
+    }
+    return *first > 0;
+}
+QVector<BibleBackend::Link> BibleBackend::findLinks(const QString &text) const
+{
+    QVector<Link> links;
+    if (!m_ready || text.isEmpty()) return links;
+    // Capitalized book words (a leading 1–3 allowed, "of"/"the" inside names),
+    // whitespace, then chapter or chapter:verse(-verse). Chapter ranges and
+    // cross-chapter ranges never link.
+    static const QRegularExpression pattern(QStringLiteral(
+        "(?<![\\p{L}\\p{N}])((?:[1-3]\\s?)?\\p{Lu}\\p{L}*\\.?(?:\\s+(?:of|the|\\p{Lu}\\p{L}*\\.?)){0,3})"
+        "\\s+(\\d{1,3})(?::(\\d{1,3})(?:\\s*[-\\x{2013}]\\s*(\\d{1,3}))?)?(?![\\p{L}\\p{N}]|:\\d|[-\\x{2013}]\\d)"));
+    static const QRegularExpression word("\\S+");
+    auto matches = pattern.globalMatch(text);
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        const QString bookText = match.captured(1);
+        auto words = word.globalMatch(bookText);
+        QVector<qsizetype> starts;
+        while (words.hasNext()) starts.append(words.next().capturedStart());
+        for (const qsizetype offset : starts) {
+            const QString name = bookText.mid(offset);
+            if (!name[0].isDigit() && !name[0].isUpper()) continue;
+            const int b = resolveBook(name);
+            if (!b) continue;
+            const int c = match.captured(2).toInt();
+            int first = 0, last = 0, start = 0, end = 0;
+            if (match.captured(3).isEmpty()) { if (!chapterBounds(b,c,&first,&last)) break; }
+            else {
+                start = match.captured(3).toInt();
+                end = match.captured(4).isEmpty() ? start : match.captured(4).toInt();
+                if (!validRange(b,c,start,end)) break;
+                first = absoluteVerse(b,c,start); last = absoluteVerse(b,c,end);
+                if (!first || !last || first > last) break;
+            }
+            Link link;
+            link.start = int(match.capturedStart(1) + offset);
+            link.length = int(match.capturedEnd() - link.start);
+            link.first = first; link.last = last;
+            link.text = text.mid(link.start,link.length);
+            link.reference = reference(b,c,start,end);
+            links.append(link);
+            break;
+        }
+    }
+    return links;
+}
+QVariantList BibleBackend::passageLinks(QString text) const
+{
+    QVariantList rows;
+    for (const auto &link : findLinks(text))
+        rows.append(QVariantMap{{"start",link.start},{"length",link.length},{"text",link.text},{"reference",link.reference}});
+    return rows;
+}
+QVariantList BibleBackend::linkedNotes() const
+{
+    if (!m_ready) return {};
+    int low = 0, high = 0;
+    if (m_anchor) { low = std::min(m_anchor,m_cursor); high = std::max(m_anchor,m_cursor); }
+    else if (!chapterBounds(m_book,m_chapter,&low,&high)) return {};
+    QVector<Annotation> notes;
+    for (const auto &a : m_annotations) {
+        if (a.note.isEmpty() || (m_anchor && a.start == low && a.end == high)) continue;
+        const auto links = findLinks(a.note);
+        if (std::any_of(links.cbegin(),links.cend(),[&](const Link &link) { return link.first <= high && link.last >= low; }))
+            notes.append(a);
+    }
+    std::sort(notes.begin(),notes.end(),[](const Annotation &a, const Annotation &b) {
+        return std::tie(a.start,a.end) < std::tie(b.start,b.end);
+    });
+    QVariantList rows;
+    for (const auto &a : notes) {
+        const auto start = endpoint(a.start), end = endpoint(a.end);
+        rows.append(QVariantMap{{"book",start.book},{"chapter",start.chapter},{"start",start.verse},
+            {"endBook",end.book},{"endChapter",end.chapter},{"end",end.verse},
+            {"reference",rangeReference(a.start,a.end)},{"versionId",m_versionId},
+            {"versionAbbreviation",m_abbreviation},{"note",a.note},{"excerpt",a.note.simplified().left(160)}});
+    }
+    return rows;
+}
 bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *first, int *last, QString *error) const
 {
     auto fail = [error](const QString &message) { *error = message; return false; };

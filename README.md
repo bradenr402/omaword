@@ -91,6 +91,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `d`: Add to Desk
 - `shift E`: Edit annotation range
 - `ctrl t`: Manage tags
+- `[[`: Suggest a passage to link (in a note)
+- `alt enter`: Open the passage link at the cursor (in a note)
 
 ### Copy
 
@@ -178,6 +180,8 @@ These also work, but stay out of the in-app list:
 **Disable animations** (`alt m`) turns off pulses, flashes, fades, and slides; **Disable sound effects** (`alt s`) silences the subtle sounds. Both are also in Commands and apply to all windows.
 
 `[` and `]` step back and forward through the passages you jumped to in this window, and `-` swaps with the previous one. History (`shift H`) lists passages you stayed on for a few seconds, shared by every window; it never goes into backups, and Commands can clear or disable it.
+
+The passage palette understands compact references such as `jn316`, `1co13`, `ps23`, or `rev 3 14-22`; when input is ambiguous it lists the likely passages, best match first. In a note, `[[` suggests passages and inserts the full reference. Exact references written as text (`John 3:16`, `Jn 3:16`, `1 Cor 13`) become links in the preview, and `alt enter` follows the one under the cursor; Notes also lists **Linked from**, the other notes that reference the passage.
 
 Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
 

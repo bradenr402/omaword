@@ -247,6 +247,46 @@ private slots:
         // Every candidate navigates.
         for (const auto &reference : refs("j4")) QVERIFY2(bible->navigate(reference),qPrintable(reference));
     }
+    void exactPassageLinks() {
+        install(net);
+        const QString text = "See John 3:16 and Jn 3:16-18, also 1 Cor 13, Jn3:16, John 99, is 3, "
+            "Mark 7. Then Revelation 22:1\u20135 and John 3:16-4:2 and John 3:99.";
+        QStringList found, references;
+        for (const auto &value : bible->passageLinks(text)) {
+            const auto link = value.toMap();
+            found << link["text"].toString(); references << link["reference"].toString();
+            QCOMPARE(text.mid(link["start"].toInt(),link["length"].toInt()),link["text"].toString());
+        }
+        QCOMPARE(found,(QStringList{"John 3:16","Jn 3:16-18","Mark 7","Revelation 22:1\u20135"}));
+        QCOMPARE(references,(QStringList{"John 3:16","John 3:16–18","Mark 7","Revelation 22:1–5"}));
+        // Only the book words link, never the prose before them.
+        const auto prose = bible->passageLinks("Read In John 4:2 today").value(0).toMap();
+        QCOMPARE(prose["text"].toString(),QString("John 4:2"));
+        QVERIFY(bible->passageLinks("Jn3:16 jn 3:16 John3").isEmpty());
+        // Linked from: other notes whose links overlap the current passage.
+        QVERIFY(bible->navigate("John 4:1")); bible->setNoteText("Compare John 3:16-18 here.");
+        QVERIFY(bible->navigate("Mark 7:2")); bible->setNoteText("Echoes John 3.");
+        QVERIFY(bible->navigate("Mark 7:3")); bible->setNoteText("Nothing linked; jn316.");
+        QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        auto linked = [&]() {
+            QStringList result;
+            for (const auto &row : bible->linkedNotes()) result << row.toMap()["reference"].toString();
+            return result;
+        };
+        QVERIFY(bible->navigate("John 3:17")); QCOMPARE(linked(),(QStringList{"Mark 7:2","John 4:1"}));
+        QVERIFY(bible->navigate("John 3:20")); QCOMPARE(linked(),QStringList{"Mark 7:2"});
+        QVERIFY(bible->navigate("John 3")); QCOMPARE(linked(),(QStringList{"Mark 7:2","John 4:1"}));
+        QVERIFY(bible->navigate("John 4")); QVERIFY(linked().isEmpty());
+        const auto row = bible->linkedNotes().value(0).toMap();
+        QVERIFY(row.isEmpty());
+        QVERIFY(bible->navigate("John 3:16"));
+        const auto note = bible->linkedNotes().value(1).toMap();
+        QCOMPARE(note["excerpt"].toString(),QString("Compare John 3:16-18 here."));
+        QVERIFY(bible->openTaggedPassage(note)); QCOMPARE(bible->selectionReference(),QString("John 4:1"));
+        // A note never links to itself.
+        QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Self John 3:16");
+        QVERIFY(!linked().contains("John 3:16"));
+    }
     void sourceOrderedNoteMetadata() {
         install(kjv);
         checkSourceOrderedNote(40,69);

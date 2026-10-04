@@ -1038,6 +1038,98 @@ ApplicationWindow {
             onObjectRemoved: function(index, object) { verseTagMenu.removeItem(object) }
         }
     }
+    // Passage links in notes: exact plain-text references (bible.passageLinks)
+    // open as History jumps; typing [[ suggests references from the shared
+    // fuzzy parser and inserts the full reference, without brackets.
+    readonly property var noteLinks: bible.ready ? Array.from(bible.passageLinks(noteEditor.text)) : []
+    readonly property var noteLinkAtCursor: {
+        const at = noteEditor.cursorPosition
+        return noteLinks.find(function(link) { return at >= link.start && at <= link.start + link.length }) || null
+    }
+    readonly property var linkedFrom: {
+        const watched = [bible.collection, bible.selectionReference, bible.passage, bible.noteText]
+        return bible.ready && notesOpen && watched ? Array.from(bible.linkedNotes()) : []
+    }
+    property int linkQueryStart: -1
+    property int linkDismissedAt: -1
+    property string linkQuery: ""
+    property var linkSuggestions: []
+    property int linkSuggestionIndex: 0
+    property bool acceptingLink: false
+    readonly property bool linkSuggesting: linkQueryStart >= 0 && noteEditor.activeFocus && !notePreview
+    function updateLinkSuggestions() {
+        if (acceptingLink || syncingNote) return
+        const text = noteEditor.text, at = noteEditor.cursorPosition
+        if (linkDismissedAt >= 0 && text.substr(linkDismissedAt, 2) !== "[[") linkDismissedAt = -1
+        const open = at >= 2 ? text.lastIndexOf("[[", at - 2) : -1
+        const query = open >= 0 ? text.substring(open + 2, at) : ""
+        if (open < 0 || open === linkDismissedAt || /[\[\]\n]/.test(query) || query.length > 40) {
+            linkQueryStart = -1; linkQuery = ""; linkSuggestions = []
+            return
+        }
+        linkQueryStart = open
+        if (query === linkQuery && linkSuggestions.length) return
+        linkQuery = query
+        linkSuggestions = query.trim().length ? Array.from(bible.referenceCandidates(query.trim(), 6)) : []
+        linkSuggestionIndex = 0
+    }
+    function moveLinkSuggestion(delta) {
+        linkSuggestionIndex = Math.max(0, Math.min(linkSuggestions.length - 1, linkSuggestionIndex + delta))
+    }
+    function acceptLinkSuggestion(index) {
+        const candidate = linkSuggestions[index === undefined ? linkSuggestionIndex : index]
+        if (!candidate || linkQueryStart < 0) return false
+        const start = linkQueryStart, end = noteEditor.cursorPosition
+        acceptingLink = true
+        noteEditor.remove(start, end)
+        noteEditor.insert(start, candidate.reference)
+        noteEditor.cursorPosition = start + candidate.reference.length
+        acceptingLink = false
+        linkQueryStart = -1; linkQuery = ""; linkSuggestions = []
+        flushNote()
+        return true
+    }
+    function dismissLinkSuggestions() {
+        linkDismissedAt = linkQueryStart
+        linkQueryStart = -1; linkQuery = ""; linkSuggestions = []
+    }
+    // Markdown preview with each passage link made clickable.
+    function linkedMarkdown(text) {
+        const links = Array.from(bible.passageLinks(text))
+        for (let i = links.length - 1; i >= 0; --i) {
+            const link = links[i]
+            text = text.slice(0, link.start) + "[" + link.text + "](omaword-passage:" + encodeURIComponent(link.reference) + ")"
+                + text.slice(link.start + link.length)
+        }
+        return text
+    }
+    function activateNoteLink(link) {
+        if (link.startsWith("omaword-passage:")) followPassageLink(decodeURIComponent(link.substring(16)))
+        else desktop.openExternal(link)
+    }
+    function openNoteLinkAtCursor() {
+        if (!noteLinkAtCursor) { sounds.play("boundary"); return false }
+        return followPassageLink(noteLinkAtCursor.reference)
+    }
+    // Opens a note's passage link as a History jump; Notes stays open on it.
+    function followPassageLink(reference) {
+        if (rangeEditing || !flushNote()) return false
+        const from = beginJump()
+        if (!bible.navigate(reference)) return false
+        endJump(from)
+        syncNote()
+        pulseDestination()
+        return true
+    }
+    function openLinkedNote(row) {
+        if (rangeEditing || !row || !flushNote()) return false
+        const from = beginJump()
+        if (!bible.openTaggedPassage(row)) return false
+        endJump(from)
+        syncNote()
+        pulseDestination()
+        return true
+    }
     function textInputActive() {
         let item = activeFocusItem
         while (item) {
@@ -2046,6 +2138,9 @@ ApplicationWindow {
         { id: "toggleDesk", group: "Annotate", title: "Add to Desk", sequences: ["D"], command: true },
         { id: "editRange", group: "Annotate", title: "Edit annotation range", sequences: ["Shift+E"], command: true },
         { id: "manageTags", group: "Annotate", title: "Manage tags", sequences: ["Ctrl+T"], command: true },
+        // Bound by the note editor itself.
+        { id: "noteLinkSuggest", group: "Annotate", title: "Suggest a passage to link (in a note)", sequences: ["[, ["], scope: "noteEditor" },
+        { id: "openNoteLink", group: "Annotate", title: "Open the passage link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
@@ -2109,7 +2204,7 @@ ApplicationWindow {
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
-    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions"].includes(action.scope) }
+    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor"].includes(action.scope) }
     function actionById(id) { return actions.find(function(entry) { return entry.id === id }) }
     function actionKeys(action) {
         if (typeof action === "string") action = actionById(action)
@@ -2175,6 +2270,7 @@ ApplicationWindow {
         if (action.scope === "palette") return "This window · passage and command search"
         if (action.scope === "notes") return "Reader or notes preview"
         if (action.scope === "desk") return "Desk panel only"
+        if (action.scope === "noteEditor") return "Notes editor"
         return "Reader · outside text editing and dialogs"
     }
     function filteredKeybindings() {
@@ -3560,6 +3656,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         OverlayScrollView {
+                            id: noteEditorScroll
                             objectName: "noteEditorScroll"
                             anchors.fill: parent
                             visible: app.hasSelection && !app.notePreview
@@ -3589,8 +3686,27 @@ ApplicationWindow {
                                 }
                                 onTextChanged: {
                                     if (!app.syncingNote) app.flushNote()
+                                    app.updateLinkSuggestions()
                                 }
-                                Keys.onEscapePressed: function(event) { app.closeNotes(); event.accepted = true }
+                                onCursorPositionChanged: app.updateLinkSuggestions()
+                                Keys.onPressed: function(event) {
+                                    const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                    if (enter && event.modifiers === Qt.AltModifier) {
+                                        event.accepted = true
+                                        app.openNoteLinkAtCursor()
+                                        return
+                                    }
+                                    if (!app.linkSuggesting || event.modifiers !== Qt.NoModifier || !app.linkSuggestions.length) return
+                                    if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
+                                        app.moveLinkSuggestion(event.key === Qt.Key_Down ? 1 : -1); event.accepted = true
+                                    } else if (enter || event.key === Qt.Key_Tab) event.accepted = app.acceptLinkSuggestion()
+                                }
+                                // Specific key handlers run before onPressed.
+                                Keys.onEscapePressed: function(event) {
+                                    if (app.linkSuggesting) app.dismissLinkSuggestions()
+                                    else app.closeNotes()
+                                    event.accepted = true
+                                }
                                 Accessible.name: "Markdown note for " + bible.selectionReference
                             }
                         }
@@ -3603,7 +3719,7 @@ ApplicationWindow {
                             TextArea {
                                 objectName: "notePreview"
                                 width: parent.width
-                                text: noteEditor.text.length ? noteEditor.text : "*Your note preview will appear here.*"
+                                text: noteEditor.text.length ? app.linkedMarkdown(noteEditor.text) : "*Your note preview will appear here.*"
                                 textFormat: TextEdit.MarkdownText
                                 readOnly: true
                                 selectByMouse: true
@@ -3612,7 +3728,7 @@ ApplicationWindow {
                                 font.pixelSize: 15 * app.scale
                                 padding: 2
                                 background: Item {}
-                                onLinkActivated: function(link) { desktop.openExternal(link) }
+                                onLinkActivated: function(link) { app.activateNoteLink(link) }
                                 Accessible.name: "Note preview"
                             }
                         }
@@ -3627,8 +3743,100 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                         }
                     }
+                    Label {
+                        objectName: "notesHints"
+                        visible: noteEditor.activeFocus && (app.linkSuggesting || !!app.noteLinkAtCursor)
+                        text: app.linkSuggesting ? app.hintRow([[["Up", "Down"], "choose"], ["Return", "insert"], ["Escape", "dismiss"]])
+                            : app.hintRow([["Alt+Return", "open link"]])
+                        textFormat: Text.StyledText
+                        color: desktop.muted
+                        font.pixelSize: 11 * app.scale
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+                    ColumnLayout {
+                        objectName: "linkedFrom"
+                        visible: app.linkedFrom.length > 0
+                        Layout.fillWidth: true
+                        spacing: 2
+                        SectionLabel { text: "LINKED FROM"; Layout.fillWidth: true }
+                        Repeater {
+                            model: app.linkedFrom
+                            delegate: ItemDelegate {
+                                id: linkedRow
+                                required property var modelData
+                                required property int index
+                                objectName: "linkedFromRow" + index
+                                Layout.fillWidth: true
+                                padding: 6 * app.scale
+                                onClicked: app.openLinkedNote(modelData)
+                                contentItem: ColumnLayout {
+                                    spacing: 2
+                                    Label { text: linkedRow.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true; elide: Text.ElideRight }
+                                    Label { text: linkedRow.modelData.excerpt; textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; elide: Text.ElideRight }
+                                }
+                                background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: linkedRow.hovered ? desktop.surface : "transparent" }
+                                Accessible.name: "Linked from " + modelData.reference
+                            }
+                        }
+                    }
                     Label { text: app.noteConflict ? "Not saved · resolve the other window's change above" : app.hasSelection ? (noteEditor.text === bible.noteText ? "Saved on this device · changes save as you type" : "Not saved · your draft is still in the editor") : "A page icon beside a verse marks a note."; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
+                }
+                Rectangle {
+                    id: linkPopup
+                    objectName: "noteLinkPopup"
+                    visible: app.linkSuggesting
+                    z: 20
+                    readonly property point at: {
+                        const caret = noteEditor.cursorRectangle
+                        // Re-evaluated as either view scrolls.
+                        const scrolled = [noteEditorScroll.contentItem.contentY, notesScroll.contentItem.contentY]
+                        return scrolled && noteEditor.mapToItem(notesPanel, caret.x, caret.y + caret.height)
+                    }
+                    width: Math.min(320 * app.scale, notesPanel.width - 16)
+                    height: linkColumn.implicitHeight + 12
+                    x: Math.max(8, Math.min(notesPanel.width - width - 8, at.x))
+                    y: Math.min(at.y + 4, notesPanel.height - height - 8)
+                    color: desktop.surface
+                    border.color: desktop.border
+                    radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                    Column {
+                        id: linkColumn
+                        x: 6; y: 6
+                        width: parent.width - 12
+                        Label {
+                            visible: !app.linkSuggestions.length
+                            width: parent.width
+                            padding: 6 * app.scale
+                            text: app.linkQuery.trim().length ? "No matching passage" : "Type a passage · jn316, ps23, 1co13"
+                            color: desktop.muted
+                            font.pixelSize: 12 * app.scale
+                        }
+                        Repeater {
+                            model: app.linkSuggestions
+                            delegate: Rectangle {
+                                id: suggestion
+                                required property var modelData
+                                required property int index
+                                objectName: "noteLinkSuggestion" + index
+                                width: linkColumn.width
+                                height: suggestionLabel.implicitHeight + 10 * app.scale
+                                radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                                color: index === app.linkSuggestionIndex ? app.tint(desktop.accent, 0.11) : "transparent"
+                                Label {
+                                    id: suggestionLabel
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    x: 6 * app.scale
+                                    text: suggestion.modelData.reference
+                                    textFormat: Text.PlainText
+                                    color: desktop.foreground
+                                    font.pixelSize: 13 * app.scale
+                                }
+                                MouseArea { anchors.fill: parent; onClicked: app.acceptLinkSuggestion(suggestion.index) }
+                            }
+                        }
+                    }
                 }
         }
     }
