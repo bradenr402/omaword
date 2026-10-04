@@ -265,14 +265,17 @@ function searchMarks(ctx, rects, accent, outlined, scale, scope) {
 // Centre-line samples of a large wavy curly brace inside the box
 // [x, x + width] × [top, bottom]. direction -1 draws "{" (tip on the left at
 // x), +1 draws "}" (tip on the right at x + width); the tip sits at tipY
-// (clamped to the middle 60% of the brace, as Margins.tips does). The spine wobbles; ends and the tip are exact,
-// so connectors can meet the returned `tip` point.
+// (clamped to braceTipBand–(1 - braceTipBand) of the brace's height, as
+// Margins.tips does). The spines carry only a small, slow wobble (a steady
+// pen, unlike the wavier arrow); ends and the tip are exact, so connectors can
+// meet the returned `tip` point.
+const braceTipBand = 0.2
 function bracePoints(x, top, bottom, tipY, width, direction, s, scale, opts) {
     opts = opts || {}
     const k = scale > 0 ? scale : 1
     const rand = mulberry32(s)
     const h = Math.max(1, bottom - top)
-    tipY = Math.max(top + 0.2 * h, Math.min(bottom - 0.2 * h, tipY))
+    tipY = Math.max(top + braceTipBand * h, Math.min(bottom - braceTipBand * h, tipY))
     // Curls tighten when the tip nears an end.
     const r = Math.min(width / 2, h / 4, (tipY - top) / 2, (bottom - tipY) / 2)
     // Columns: ends at the open side, spine in the middle, tip at the far side.
@@ -280,7 +283,7 @@ function bracePoints(x, top, bottom, tipY, width, direction, s, scale, opts) {
     const spine = x + width / 2
     const point = direction < 0 ? x : x + width
     const pen = opts.width === undefined ? 1.3 * k : opts.width
-    const amp = Math.min(opts.amp === undefined ? 2.4 * k : opts.amp, width / 3)
+    const amp = Math.min(opts.amp === undefined ? 0.7 * k : opts.amp, width / 6)
     const wave = _wave(rand, k), thickness = _wave(rand, k)
     // Ideal outline as quadratic pieces, then sampled with a wobble that
     // vanishes at the ends and the tip.
@@ -309,9 +312,10 @@ function bracePoints(x, top, bottom, tipY, width, direction, s, scale, opts) {
             const d = travelled + length * t
             // Wobble only along the straight spines, folded toward the tip side.
             const envelope = c ? 0 : Math.sin(Math.PI * t)
-            const offset = amp * envelope * (0.5 + 0.5 * _at(wave, d))
+            // Only the long-wavelength sine: one gentle drift, no ripple.
+            const offset = amp * envelope * (0.5 + 0.5 * Math.sin(Math.PI * 2 * wave.f1 * d + wave.p1))
             points.push({ x: px + (direction < 0 ? -offset : offset), y: py,
-                w: pen * (1 + 0.18 * _at(thickness, d)) * (p === 0 && i === 0 || p === pieces.length - 1 && i === count - 1 ? 0.75 : 1) })
+                w: pen * (1 + 0.08 * _at(thickness, d)) * (p === 0 && i === 0 || p === pieces.length - 1 && i === count - 1 ? 0.75 : 1) })
         }
         travelled += length
     }

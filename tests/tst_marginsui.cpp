@@ -360,7 +360,22 @@ private slots:
         // "{" tips left at the given (clamped) height; "}" tips right.
         QCOMPARE(a["tip"].toMap()["x"].toDouble(), 10.0); QCOMPARE(a["tip"].toMap()["y"].toDouble(), 180.0);
         QCOMPARE(brace(7, 1, 180)["tip"].toMap()["x"].toDouble(), 19.0);
-        QVERIFY(brace(7, 1, 50)["tip"].toMap()["y"].toDouble() > 100);
+        // Tips clamp to 20%–80% of the brace's height (100–300 here).
+        QCOMPARE(brace(7, 1, 50)["tip"].toMap()["y"].toDouble(), 140.0);
+        QCOMPARE(brace(7, -1, 120)["tip"].toMap()["y"].toDouble(), 140.0);
+        QCOMPARE(brace(7, -1, 999)["tip"].toMap()["y"].toDouble(), 260.0);
+        QCOMPARE(brace(7, 1, 260)["tip"].toMap()["y"].toDouble(), 260.0);
+        QCOMPARE(brace(7, 1, 141)["tip"].toMap()["y"].toDouble(), 141.0);
+        // A steady pen: along the straight runs (clear of the curls) the spine
+        // drifts at most ~1px from its line.
+        for (int seed = 1; seed < 20; ++seed) {
+            double drift = 0;
+            for (const auto &p : brace(seed, -1, 200)["points"].toList()) {
+                const double x = p.toMap()["x"].toDouble(), y = p.toMap()["y"].toDouble();
+                if ((y > 110 && y < 190) || (y > 210 && y < 290)) drift = qMax(drift, std::abs(x - 14.5));
+            }
+            QVERIFY2(drift <= 1.01, qPrintable(QString::number(drift)));
+        }
         // Ink stays in the brace's column.
         for (const auto &p : a["points"].toList()) {
             const double x = p.toMap()["x"].toDouble(), y = p.toMap()["y"].toDouble();
