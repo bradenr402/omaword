@@ -60,7 +60,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `zb`: Scroll current verse to bottom
 - `h` · `←`: Previous chapter
 - `l` · `→`: Next chapter
-- `{`: Previous section heading
+- `{`: Previous heading or chapter top
 - `}`: Next section heading
 
 ### History

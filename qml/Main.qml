@@ -2492,7 +2492,7 @@ ApplicationWindow {
         { id: "bottomVerse", group: "Navigate", title: "Scroll current verse to bottom", sequences: ["Z, B"], command: true },
         { id: "previousChapter", group: "Navigate", title: "Previous chapter", sequences: ["H", "Left"] },
         { id: "nextChapter", group: "Navigate", title: "Next chapter", sequences: ["L", "Right"] },
-        { id: "previousHeading", group: "Navigate", title: "Previous section heading", sequences: ["{"] },
+        { id: "previousHeading", group: "Navigate", title: "Previous heading or chapter top", sequences: ["{"] },
         { id: "nextHeading", group: "Navigate", title: "Next section heading", sequences: ["}"] },
         { id: "historyBack", group: "History", title: "Back to the previous jump", sequences: ["["] },
         { id: "historyForward", group: "History", title: "Forward to the next jump", sequences: ["]"] },
