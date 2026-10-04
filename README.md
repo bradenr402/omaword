@@ -184,23 +184,36 @@ These also work, but stay out of the in-app list:
 
 <!-- shortcuts:end -->
 
-Moving to a verse slides the reader briefly; in focus mode the cursor verse stays 40% down the window, like a typewriter. Turning one chapter (`h`/`l`) sounds like a page turn; counts, held keys (on release), and jumps land with a thunk that grows with the distance. **Disable animations** (`alt m`) turns off pulses, flashes, fades, and slides; **Disable sound effects** (`alt s`) silences the sounds. Both are also in Commands and apply to all windows.
+## Features
 
-`[` and `]` step back and forward through the passages you jumped to in this window, and `-` swaps with the previous one. History (`shift H`) lists passages you stayed on for a few seconds, shared by every window; it never goes into backups, and Commands can clear or disable it.
+### Reading
+- Paragraph, Verse, and Block layouts (`alt l`), with optional verse numbers and headings.
+- Focus mode (`f`) dims everything but the current verse and keeps it 40% down the window, like a typewriter.
+- **Highlight words of Jesus** (`alt j`) colors them with your theme's palette, where the version marks them (KJV).
+- Wide windows add margins: a sticky **Chapter outline** of section headings on the left (`alt o`; `{` / `}` jump between headings), and **Margin notes** on the right (`alt w`), each joined to its passage by hand-drawn braces and an arrow. Margin notes take priority and may move the text left; both are off by default.
 
-The passage palette understands compact references such as `jn316`, `1co13`, `ps23`, or `rev 3 14-22`; when input is ambiguous it lists the likely passages, best match first. In a note, `[[` suggests passages and inserts the full reference. Exact references written as text (`John 3:16`, `Jn 3:16`, `1 Cor 13`) become links in the preview, and `alt enter` follows the one under the cursor; Notes also lists **Linked from**, the other notes that reference the passage.
+### Finding passages
+- The passage palette understands compact references like `jn316`, `1co13`, or `rev 3 14-22`, and lists likely matches, best first.
+- Search Scripture across the current version, or find text in the current chapter.
+- `[` and `]` step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.
+- History (`shift H`) lists passages you stayed on for a few seconds, shared by every window. It never goes into backups, and Commands can clear or disable it.
 
-The Study panel (`shift S`) has three tabs, switched with `←`/`→`: **Related** (passages sharing tags), **Cross-references** (OpenBible.info, merged with the version's own references, most voted first), and **Footnotes** (the chapter's source notes). Footnotes show as small superscript marks in the text; click one to read it. **Highlight words of Jesus** (`alt j`) colors them with your theme's red where the version marks them (KJV). Versions installed before footnotes were kept show **Re-import** in Versions and Reading settings; it replaces the text and keeps your annotations.
+### Studying
+- Bookmark, highlight, tag, and write Markdown notes; notes save as you type.
+- In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` follows one), and Notes lists the other notes that link to a passage.
+- The Study panel (`shift S`) shows **Related** passages that share tags, **Cross-references**, and the chapter's **Footnotes**. Footnotes also appear as small marks in the text.
+- The Desk (`d`, `shift D`) collects passages for side-by-side study across windows and versions.
+- Annotations → Tags summarizes tags on the current range. **Manage tags** (`ctrl t`) renames, deletes, or merges them; names are shared across versions, assignments belong to one version.
 
-Wide windows have margins. **Chapter outline** (`alt o`) lists the chapter's section headings on the left; it stays in view while you scroll, marks the current section, and jumps on click. `{` and `}` move to the previous and next heading (counts work). **Margin notes** (`alt w`) show your notes on the right, each joined to its passage by hand-drawn braces and an arrow; crowded or very long notes are shortened with "…", passage links in them are clickable, and clicking a note opens it. Margin notes take priority: they may move the text left, and the outline hides when there is not room for both. Both are off by default and in Reading settings.
+### Feel
+- Annotations look like pen and highlighter marks.
+- Moving to a verse slides briefly, jumps pulse, and copies flash. Turning a chapter sounds like a page turn; longer jumps land with a heavier thunk. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows.
+- The footer holds help and mode on the left; search, passage, version, and layout in the center; and Annotations, Notes, Study, History, and Desk on the right. In narrow windows the right group stacks into a column, then folds into a `…` menu.
 
-Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
+### Your data
+Bible versions, annotations, the Desk, and History stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.
 
-Annotations → Tags summarizes exact tags, overlapping tagged ranges, and other related passages; click a tag to seed Study → Related, or press `shift E` to move the assignments of the focused range. Use `t` to edit exact-range assignments and **Manage tags** (`ctrl t`) to rename, delete, or merge global names. Names are shared across versions; assignments belong to one version.
-
-The footer puts `?` before mode on the left; search, passage, version, and layout in the center; and Annotations, Notes, Study, History, and Desk on the right. In narrow windows the right group stacks into a column in the bottom-right corner (the reader text keeps clear of it), then the layout button hides, and finally the right group folds into a `…` menu. Annotations are drawn like pen and highlighter marks: hand-drawn Verse rails or inline Paragraph/Block brackets, with subtle cursor-range shading.
-
-All your Bible versions, highlights, bookmarks, notes, and tags stay on this device. Personal data lives in `~/.local/share/omaword/`; backup and Markdown export are available in Commands.
+Versions installed before footnotes were supported show **Re-import** in Versions and Reading settings; it replaces the text and keeps your annotations.
 
 ## Requirements
 
@@ -215,6 +228,4 @@ Omarchy already provides most of these; the install command above adds the rest.
 
 Found a problem or have an idea? [Open a GitHub issue](https://github.com/bradenr402/omaword/issues) with what you did, what you expected, and what happened. Screenshots and the passage or version involved help.
 
-Cross references: [OpenBible.info](https://www.openbible.info/labs/cross-references/), CC-BY (bundled; regenerate with `bin/crossrefs`).
-
-Application code is [MIT licensed](LICENSE). See [ARCHITECTURE.md](ARCHITECTURE.md) and [tests/README.md](tests/README.md) for development.
+Cross-references are from [OpenBible.info](https://www.openbible.info/labs/cross-references/) (CC-BY), bundled and regenerated with `bin/crossrefs`. Application code is [MIT licensed](LICENSE). See [ARCHITECTURE.md](ARCHITECTURE.md) and [tests/README.md](tests/README.md) for development.
