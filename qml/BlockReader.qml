@@ -225,7 +225,7 @@ Item {
                         { top: true, bottom: true, right: i === rects.length - 1 })
                     if (!focused) {
                         // Pen accent inside its reserved two pixels plus gap.
-                        const amp = 0.6 * k
+                        const amp = HandDrawn.accentAmp(k)
                         const ax = r.x - leftInset + 1 + amp
                         ctx.fillStyle = root.controller.tint(accent, 0.7)
                         HandDrawn.wavyLine(ctx, ax, r.y, ax, r.y + r.height, HandDrawn.seed(s, "accent"), k,

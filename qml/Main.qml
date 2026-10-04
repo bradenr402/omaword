@@ -3688,7 +3688,7 @@ ApplicationWindow {
                                                 if (!highlightAccent.visible) return
                                                 // Wobble stays right of the accent's left edge,
                                                 // inside its reserved three pixels before text.
-                                                const amp = 0.6 * k
+                                                const amp = HandDrawn.accentAmp(k)
                                                 ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.7)
                                                 HandDrawn.wavyLine(ctx, 1 + amp, 0, 1 + amp, height,
                                                     HandDrawn.seed(s, "accent", verseRow.modelData.number), k,

@@ -367,15 +367,17 @@ private slots:
         QCOMPARE(brace(7, -1, 999)["tip"].toMap()["y"].toDouble(), 260.0);
         QCOMPARE(brace(7, 1, 260)["tip"].toMap()["y"].toDouble(), 260.0);
         QCOMPARE(brace(7, 1, 141)["tip"].toMap()["y"].toDouble(), 141.0);
-        // A steady pen: along the straight runs (clear of the curls) the spine
-        // drifts at most ~1px from its line.
+        // The highlight accent's pen: along the straight runs (clear of the
+        // curls) the spine drifts at most the accent's amplitude from its line.
+        const double accent = js.globalObject().property("accentAmp").call({1}).toNumber();
+        QCOMPARE(accent, 0.6);
         for (int seed = 1; seed < 20; ++seed) {
             double drift = 0;
             for (const auto &p : brace(seed, -1, 200)["points"].toList()) {
                 const double x = p.toMap()["x"].toDouble(), y = p.toMap()["y"].toDouble();
                 if ((y > 110 && y < 190) || (y > 210 && y < 290)) drift = qMax(drift, std::abs(x - 14.5));
             }
-            QVERIFY2(drift <= 1.01, qPrintable(QString::number(drift)));
+            QVERIFY2(drift <= accent + 1e-9 && drift > 0.2, qPrintable(QString::number(drift)));
         }
         // Ink stays in the brace's column.
         for (const auto &p : a["points"].toList()) {
