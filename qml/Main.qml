@@ -7,6 +7,7 @@ import QtQuick.Dialogs
 import QtQml
 import "HandDrawn.js" as HandDrawn
 import "KeyNotation.js" as KeyNotation
+import "Margins.js" as Margins
 // qmllint disable import
 import OmaWord.Reader 1.0
 // qmllint enable import
@@ -1249,6 +1250,203 @@ ApplicationWindow {
             errorDialog.open()
         }
     }
+    // Margins (Margins.js): chapter outline on the left, margin notes on the
+    // right. One space computation; notes win and may shift the column left,
+    // the outline only takes what is left and never moves it. Both are off in
+    // focus mode.
+    readonly property real readerSideInset: reading.width < 700 ? 24 : 48
+    readonly property real readerRightInset: Math.max(readerSideInset, footerRightInset)
+    readonly property real readerColumnWidth: Math.min(760 * readerScale, reading.width - readerSideInset - readerRightInset)
+    readonly property real readerNaturalX: Math.min((reading.width - readerColumnWidth) / 2, reading.width - readerRightInset - readerColumnWidth)
+    readonly property bool marginsAllowed: bible.ready && !bible.focusMode && !rangeEditing
+    // Chapter notes, one per annotation, with the chapter rows they cover.
+    readonly property var marginNoteEntries: {
+        if (!marginsAllowed || !bible.marginNotes) return []
+        const byKey = {}, list = []
+        for (const row of Array.from(bible.verses)) {
+            for (const range of Array.from(row.noteRanges || [])) {
+                const key = [range.book, range.chapter, range.start, range.endBook, range.endChapter, range.end].join(":")
+                let entry = byKey[key]
+                if (!entry) {
+                    entry = byKey[key] = { key: key, reference: range.reference, note: range.note || "", scope: range,
+                        first: row.number, last: row.number, continuesBefore: !!range.continuesBefore }
+                    list.push(entry)
+                }
+                entry.last = row.number
+                entry.continuesAfter = !!range.continuesAfter
+            }
+        }
+        return list
+    }
+    readonly property var outlineHeadings: !marginsAllowed || !bible.chapterOutline ? []
+        : Array.from(bible.verses).filter(function(row) { return (row.heading || "").length > 0 })
+            .map(function(row) { return { verse: row.number, text: row.heading } })
+    // Connector: "}" (braceWidth) after the text's right edge, an arrow, and a
+    // "{" before the note text.
+    readonly property real marginBraceWidth: 9 * readerScale
+    readonly property real marginTextRight: marginSpace.columnX + readerColumnWidth - 9
+    readonly property var marginSpace: Margins.space({
+        width: reading.width, columnX: readerNaturalX, columnWidth: readerColumnWidth,
+        minLeft: readerSideInset, leftInset: 24 * readerScale, rightInset: Math.max(28 * readerScale, footerRightInset),
+        wantNotes: marginNoteEntries.length > 0, connectorWidth: 3 * readerScale + 2 * marginBraceWidth + 34 * readerScale,
+        notesMin: 170 * readerScale, notesPreferred: 250 * readerScale, notesMax: 330 * readerScale,
+        wantOutline: outlineHeadings.length > 0, outlineGap: 12 * readerScale,
+        outlineMin: 120 * readerScale, outlineMax: 220 * readerScale
+    })
+    readonly property real marginNotePixelSize: Math.round(readerSize * readerScale * 0.8)
+    readonly property real marginNoteLineHeight: Math.round(marginNotePixelSize * 1.45)
+    // Content-space verse spans {number, top, bottom} (reader column coordinates)
+    // and the placed notes, refreshed after layout changes.
+    property var verseExtents: []
+    property var marginLayout: []
+    Timer { id: marginTimer; interval: 0; onTriggered: app.updateMargins() }
+    onMarginSpaceChanged: scheduleMargins()
+    onMarginNoteEntriesChanged: scheduleMargins()
+    onMarginNoteLineHeightChanged: scheduleMargins()
+    Connections {
+        target: bible
+        function onVersesChanged() { app.scheduleMargins() }
+    }
+    Connections {
+        target: reading
+        function onHeightChanged() { app.scheduleMargins() }
+    }
+    function scheduleMargins() { if (readerInitialized) marginTimer.restart() }
+    function measureVerses() {
+        const rows = Array.from(bible.verses)
+        const block = blockLoader.item as BlockReader
+        const out = []
+        if (block) {
+            const offset = blockLoader.mapToItem(readerColumn, 0, 0).y
+            for (const row of rows) {
+                const rects = block.verseRangeRects(row.number, row.number)
+                if (!rects.length) continue
+                let top = Infinity, bottom = -Infinity
+                for (const rect of rects) { top = Math.min(top, rect.y); bottom = Math.max(bottom, rect.y + rect.height) }
+                out.push({ number: row.number, top: offset + top, bottom: offset + bottom })
+            }
+        } else {
+            for (let i = 0; i < rows.length; ++i) {
+                const item = verseRepeater.itemAt(i) as VerseItem
+                if (!item) continue
+                out.push({ number: rows[i].number, top: item.y + item.textOffset, bottom: item.y + item.textOffset + item.textHeight })
+            }
+        }
+        return out
+    }
+    function updateMargins() {
+        if (!bible.ready) { verseExtents = []; marginLayout = []; return }
+        readerColumn.forceLayout()
+        const extents = measureVerses()
+        verseExtents = extents
+        if (!marginSpace.notes.visible) { if (marginLayout.length) marginLayout = []; return }
+        const entries = marginNoteEntries
+        const span = function(first, last) {
+            const a = extents.find(function(e) { return e.number === first }), z = extents.find(function(e) { return e.number === last })
+            return a && z ? { top: a.top, bottom: z.bottom } : null
+        }
+        const items = [], keys = []
+        for (let i = 0; i < entries.length; ++i) {
+            const passage = span(entries[i].first, entries[i].last)
+            const delegate = marginRepeater.itemAt(i)
+            if (!passage || !delegate) continue
+            items.push({ top: passage.top, bottom: passage.bottom, lines: Math.max(1, delegate.naturalLines), lineHeight: marginNoteLineHeight, pad: 0 })
+            keys.push(entries[i])
+        }
+        const placed = Margins.place(items, {
+            viewport: Math.max(1, reading.height - floatingSafety), gap: Math.round(marginNoteLineHeight * 0.6),
+            upMax: marginNoteLineHeight, bounds: { top: 0, bottom: readerColumn.height }
+        })
+        // Paragraph layouts share lines between neighbouring passages; their
+        // "}" braces split such a shared line instead of overlapping.
+        const braces = items.map(function(item) { return { top: item.top, bottom: item.bottom } })
+        const byTop = braces.map(function(brace, i) { return i }).sort(function(a, b) { return braces[a].top - braces[b].top || a - b })
+        for (let n = 1; n < byTop.length; ++n) {
+            const previous = braces[byTop[n - 1]], current = braces[byTop[n]]
+            if (current.top < previous.bottom && current.top > previous.top && current.bottom > previous.bottom) {
+                const split = (current.top + previous.bottom) / 2
+                previous.bottom = split; current.top = split
+            }
+        }
+        marginLayout = placed.map(function(place, i) {
+            const note = { top: place.y, bottom: place.y + place.height }
+            const passage = braces[i]
+            return Object.assign({ key: keys[i].key, reference: keys[i].reference, passageTop: passage.top, passageBottom: passage.bottom,
+                naturalLines: items[i].lines, tips: Margins.tips(note, passage, { inset: 3 * readerScale }) }, place)
+        })
+    }
+    function marginPlacement(key) { return marginLayout.find(function(place) { return place.key === key }) || null }
+    // Plain note text with exact passage links (as in the Notes preview).
+    function marginNoteHtml(text) {
+        const escape = function(part) { return part.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>") }
+        const links = Array.from(bible.passageLinks(text)).sort(function(a, b) { return a.start - b.start })
+        let out = "", at = 0
+        for (const link of links) {
+            if (link.start < at) continue
+            out += escape(text.slice(at, link.start)) + '<a href="omaword-passage:' + encodeURIComponent(link.reference) + '">' + escape(link.text) + "</a>"
+            at = link.start + link.length
+        }
+        return out + escape(text.slice(at))
+    }
+    function openMarginNote(entry) {
+        if (!entry || modalOpen || bible.busy) return
+        openNoteScope(entry.scope)
+    }
+    function followMarginLink(link) {
+        if (modalOpen || bible.busy) return
+        if (link.startsWith("omaword-passage:")) jump(decodeURIComponent(link.substring(16)))
+        else desktop.openExternal(link)
+    }
+    // The section being read: the cursor's while it is on screen, otherwise
+    // the one at a reading line a quarter down the viewport.
+    function readingVerse() {
+        const available = Math.max(1, reading.height - floatingSafety)
+        const top = reading.contentY, bottom = top + available
+        const extents = verseExtents
+        if (hasSelection && !bible.crossChapterSelection) {
+            const cursor = extents.find(function(e) { return e.number === bible.cursorVerse })
+            if (cursor && cursor.bottom > top && cursor.top < bottom) return bible.cursorVerse
+        }
+        const line = top + 0.25 * available
+        let verse = bible.verses.length ? bible.verses[0].number : 0
+        for (const extent of extents) if (extent.top <= line) verse = extent.number
+        return verse
+    }
+    readonly property int outlineCurrent: {
+        const watch = [reading.contentY, verseExtents, bible.cursorVerse, bible.selectedStart]
+        return watch && outlineHeadings.length ? Margins.sectionOf(outlineHeadings, readingVerse()) : 0
+    }
+    // `{` / `}`: previous/next section heading (counts), a History jump.
+    function headingStep(direction, count) {
+        if (!bible.hasHeadings) {
+            sounds.play("boundary")
+            notify(bible.versionAbbreviation + " has no section headings", true)
+            return
+        }
+        const headings = Array.from(bible.verses).filter(function(row) { return (row.heading || "").length > 0 })
+            .map(function(row) { return { verse: row.number } })
+        if (!headings.length) {
+            sounds.play("boundary")
+            notify("No headings in " + bible.passage, true)
+            return
+        }
+        const from = hasSelection && !bible.crossChapterSelection ? bible.cursorVerse : readingVerse()
+        const step = Margins.headingStep(headings, from, direction, count)
+        if (step.moved) jumpToHeading(step.verse)
+        if (step.short) {
+            sounds.play("boundary")
+            notify(direction > 0 ? "No more headings below" : "No more headings above", true)
+        }
+    }
+    function jumpToHeading(verse) {
+        if (rangeEditing || !bible.ready || !flushNote()) return
+        const jump = beginJump()
+        selectVerse(verse, false)
+        if (bible.cursorVerse !== verse) return
+        endJump(jump)
+        Qt.callLater(function() { app.scrollToVerse(verse, true) })
+        pulseDestination()
+    }
     property bool toastInFocus: false
     function notify(message, inFocus) { toastInFocus = !!inFocus; toast.text = message; toastTimer.restart() }
     // Footnote markers (all layouts) open Study → Footnotes at that note,
@@ -2281,6 +2479,8 @@ ApplicationWindow {
         { id: "bottomVerse", group: "Navigate", title: "Scroll current verse to bottom", sequences: ["Z, B"], command: true },
         { id: "previousChapter", group: "Navigate", title: "Previous chapter", sequences: ["H", "Left"] },
         { id: "nextChapter", group: "Navigate", title: "Next chapter", sequences: ["L", "Right"] },
+        { id: "previousHeading", group: "Navigate", title: "Previous section heading", sequences: ["{"] },
+        { id: "nextHeading", group: "Navigate", title: "Next section heading", sequences: ["}"] },
         { id: "historyBack", group: "History", title: "Back to the previous jump", sequences: ["["] },
         { id: "historyForward", group: "History", title: "Forward to the next jump", sequences: ["]"] },
         { id: "historySwap", group: "History", title: "Swap with the previous jump", sequences: ["-"] },
@@ -2328,6 +2528,9 @@ ApplicationWindow {
         { id: "headings", group: "Reading", title: "Show headings", sequences: ["Alt+H"], setting: "showHeadings", command: true },
         { id: "versePicker", group: "Reading", title: "Verse picker", sequences: ["Alt+P"], setting: "versePicker", command: true },
         { id: "wordsOfJesus", group: "Reading", title: "Highlight words of Jesus", sequences: ["Alt+J"], setting: "wordsOfJesus", command: true },
+        { id: "chapterOutline", group: "Reading", title: "Chapter outline", sequences: ["Alt+O"], setting: "chapterOutline", command: true },
+        // alt w: w writes a note; alt w shows notes in the margin.
+        { id: "marginNotes", group: "Reading", title: "Margin notes", sequences: ["Alt+W"], setting: "marginNotes", command: true },
         { id: "readingMode", group: "Reading", title: "Reading mode", sequences: ["Alt+L"], command: true },
         { id: "soundEffects", group: "Reading", title: "Sound effects", sequences: ["Alt+S"], scope: "global", command: true },
         { id: "reduceMotion", group: "Reading", title: "Animations", sequences: ["Alt+M"], scope: "global", command: true },
@@ -2641,6 +2844,10 @@ ApplicationWindow {
         case "headings": bible.setShowHeadings(!bible.showHeadings); break
         case "versePicker": bible.setVersePicker(!bible.versePicker); break
         case "wordsOfJesus": bible.setWordsOfJesus(!bible.wordsOfJesus); break
+        case "chapterOutline": bible.setChapterOutline(!bible.chapterOutline); break
+        case "marginNotes": bible.setMarginNotes(!bible.marginNotes); break
+        case "previousHeading": headingStep(-1, count); break
+        case "nextHeading": headingStep(1, count); break
         case "readingMode": {
             const modes = ["paragraph", "verse", "block"]
             const previousMode = bible.readingMode
@@ -3292,11 +3499,12 @@ ApplicationWindow {
                     Column {
                         id: readerColumn
                         objectName: "readerColumn"
-                        // Centered, but clear of the footer's stacked right column.
-                        readonly property real sideInset: reading.width < 700 ? 24 : 48
-                        readonly property real rightInset: Math.max(sideInset, app.footerRightInset)
-                        width: Math.min(760 * app.readerScale, reading.width - sideInset - rightInset)
-                        x: Math.min((reading.width - width) / 2, reading.width - rightInset - width)
+                        // Centered, but clear of the footer's stacked right column;
+                        // margin notes may shift it left (app.marginSpace).
+                        width: app.readerColumnWidth
+                        x: app.marginSpace.columnX
+                        onHeightChanged: app.scheduleMargins()
+                        onWidthChanged: app.scheduleMargins()
                         topPadding: 48 * app.readerScale
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
@@ -3656,6 +3864,7 @@ ApplicationWindow {
                             sourceComponent: BlockReader {
                                 mode: bible.readingMode
                                 objectName: "blockReader"
+                                onLayoutRefreshed: app.scheduleMargins()
                                 controller: app
                                 backend: bible
                                 theme: desktop
@@ -3671,6 +3880,135 @@ ApplicationWindow {
                             padding: 24
                         }
                     }
+                    // Margin notes scroll with the text, beside their passages.
+                    Item {
+                        id: marginLayer
+                        objectName: "marginLayer"
+                        width: reading.width
+                        height: readerColumn.height
+                        visible: app.marginSpace.notes.visible
+                        Repeater {
+                            id: marginRepeater
+                            model: app.marginNoteEntries
+                            onCountChanged: app.scheduleMargins()
+                            delegate: Item {
+                                id: marginNote
+                                required property var modelData
+                                required property int index
+                                readonly property var place: app.marginPlacement(modelData.key)
+                                readonly property int naturalLines: measure.lineCount
+                                onNaturalLinesChanged: app.scheduleMargins()
+                                objectName: "marginNote:" + modelData.reference
+                                visible: !!place && !place.hidden
+                                x: app.marginSpace.notes.x
+                                y: place ? place.y : 0
+                                width: app.marginSpace.notes.width
+                                height: place ? place.height : 0
+                                Accessible.role: Accessible.Button
+                                Accessible.name: "Note on " + modelData.reference + ": " + modelData.note
+                                Accessible.onPressAction: app.openMarginNote(modelData)
+                                Text {
+                                    id: measure
+                                    visible: false
+                                    width: parent.width
+                                    text: noteText.text
+                                    textFormat: Text.StyledText
+                                    wrapMode: Text.Wrap
+                                    font: noteText.font
+                                    lineHeightMode: Text.FixedHeight
+                                    lineHeight: app.marginNoteLineHeight
+                                }
+                                MouseArea {
+                                    id: marginNoteMouse
+                                    objectName: "marginNoteMouse:" + marginNote.modelData.reference
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: app.openMarginNote(marginNote.modelData)
+                                }
+                                Text {
+                                    id: noteText
+                                    objectName: "marginNoteText:" + marginNote.modelData.reference
+                                    width: parent.width
+                                    text: app.marginNoteHtml(marginNote.modelData.note)
+                                    textFormat: Text.StyledText
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: marginNote.place ? marginNote.place.lines : 1
+                                    elide: Text.ElideRight
+                                    lineHeightMode: Text.FixedHeight
+                                    lineHeight: app.marginNoteLineHeight
+                                    font.family: desktop.fontFamily
+                                    font.italic: true
+                                    font.pixelSize: app.marginNotePixelSize
+                                    color: desktop.foreground
+                                    linkColor: desktop.accent
+                                    onLinkActivated: function(link) { app.followMarginLink(link) }
+                                }
+                                AppToolTip {
+                                    theme: desktop
+                                    uiScale: app.scale
+                                    visible: marginNoteMouse.containsMouse && !noteText.hoveredLink
+                                    delay: 700
+                                    text: "Note on " + marginNote.modelData.reference + "\nClick to open it in Notes"
+                                }
+                                // "{" before the note, "}" after the passage text, and an
+                                // arrow between their tips (HandDrawn.js, seeded per note).
+                                Canvas {
+                                    id: connector
+                                    objectName: "marginConnector:" + marginNote.modelData.reference
+                                    readonly property real k: app.readerScale
+                                    readonly property real spanLeft: app.marginTextRight + 3 * k
+                                    readonly property real spanRight: marginNote.x - 5 * k
+                                    readonly property real spanTop: marginNote.place ? Math.min(marginNote.place.y, marginNote.place.passageTop) - 4 * k : 0
+                                    readonly property real spanBottom: marginNote.place ? Math.max(marginNote.place.y + marginNote.place.height, marginNote.place.passageBottom) + 4 * k : 0
+                                    property color ink: desktop.accent
+                                    // Scene geometry for tests: tips in marginLayer coordinates.
+                                    property var geometry: null
+                                    x: spanLeft - marginNote.x
+                                    y: spanTop - marginNote.y
+                                    width: Math.max(1, spanRight - spanLeft)
+                                    height: Math.max(1, spanBottom - spanTop)
+                                    readonly property var paintKey: [marginNote.place, width, height, x, y, bible.versionId]
+                                    onPaintKeyChanged: requestPaint()
+                                    onInkChanged: requestPaint()
+                                    onPaint: {
+                                        const ctx = getContext("2d")
+                                        ctx.reset()
+                                        const place = marginNote.place
+                                        if (!place) return
+                                        const s = HandDrawn.seed("marginNote", bible.versionId, marginNote.modelData.key)
+                                        const brace = app.marginBraceWidth
+                                        const noteMid = (place.y + place.y + place.height) / 2 + place.tips.note - spanTop
+                                        const passageMid = (place.passageTop + place.passageBottom) / 2 + place.tips.passage - spanTop
+                                        ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.85)
+                                        const close = HandDrawn.wavyBrace(ctx, 0, place.passageTop - spanTop, place.passageBottom - spanTop, passageMid,
+                                            brace, 1, HandDrawn.seed(s, "passage"), k)
+                                        const open = HandDrawn.wavyBrace(ctx, width - brace, place.y - spanTop, place.y + place.height - spanTop, noteMid,
+                                            brace, -1, HandDrawn.seed(s, "note"), k)
+                                        ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.7)
+                                        HandDrawn.wavyArrow(ctx, open.tip.x - 2 * k, open.tip.y, close.tip.x + 2.5 * k, close.tip.y,
+                                            HandDrawn.seed(s, "arrow"), k)
+                                        geometry = { noteTip: { x: open.tip.x + spanLeft, y: open.tip.y + spanTop }, passageTip: { x: close.tip.x + spanLeft, y: close.tip.y + spanTop },
+                                            arrowEnd: { x: close.tip.x + 2.5 * k + spanLeft, y: close.tip.y + spanTop } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                ChapterOutline {
+                    id: chapterOutline
+                    objectName: "chapterOutline"
+                    visible: app.marginSpace.outline.visible
+                    x: app.marginSpace.outline.x
+                    y: 48 * app.readerScale
+                    width: app.marginSpace.outline.width
+                    height: Math.max(0, reading.height - app.floatingSafety - y - 12 * app.readerScale)
+                    headings: app.outlineHeadings
+                    current: app.outlineCurrent
+                    theme: desktop
+                    uiScale: app.readerScale
+                    onActivated: function(verse) { app.jumpToHeading(verse) }
                 }
                 // A continuous fade keeps floating controls legible without a
                 // footer surface, divider, or shortening the reading viewport.
@@ -6186,7 +6524,7 @@ ApplicationWindow {
             else if (app.dwellPending && !historyDwellTimer.running) historyDwellTimer.restart()
         }
     }
-    Component.onCompleted: { readerInitialized = true; syncNote(); restorePosition(); restartDwell() }
+    Component.onCompleted: { readerInitialized = true; syncNote(); restorePosition(); restartDwell(); scheduleMargins() }
     onClosing: function(close) {
         if (rangeEditing) rangeEditor.cancel()
         if (rangeEditing) { close.accepted = false; return }

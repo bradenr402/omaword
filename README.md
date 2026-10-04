@@ -60,6 +60,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `zb`: Scroll current verse to bottom
 - `h` · `←`: Previous chapter
 - `l` · `→`: Next chapter
+- `{`: Previous section heading
+- `}`: Next section heading
 
 ### History
 
@@ -126,6 +128,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt h`: Show headings
 - `alt p`: Verse picker
 - `alt j`: Highlight words of Jesus
+- `alt o`: Chapter outline
+- `alt w`: Margin notes
 - `alt l`: Reading mode
 - `alt s`: Sound effects
 - `alt m`: Animations
@@ -187,6 +191,8 @@ Moving to a verse slides the reader briefly; in focus mode the cursor verse stay
 The passage palette understands compact references such as `jn316`, `1co13`, `ps23`, or `rev 3 14-22`; when input is ambiguous it lists the likely passages, best match first. In a note, `[[` suggests passages and inserts the full reference. Exact references written as text (`John 3:16`, `Jn 3:16`, `1 Cor 13`) become links in the preview, and `alt enter` follows the one under the cursor; Notes also lists **Linked from**, the other notes that reference the passage.
 
 The Study panel (`shift S`) has three tabs, switched with `←`/`→`: **Related** (passages sharing tags), **Cross-references** (OpenBible.info, merged with the version's own references, most voted first), and **Footnotes** (the chapter's source notes). Footnotes show as small superscript marks in the text; click one to read it. **Highlight words of Jesus** (`alt j`) colors them with your theme's red where the version marks them (KJV). Versions installed before footnotes were kept show **Re-import** in Versions and Reading settings; it replaces the text and keeps your annotations.
+
+Wide windows have margins. **Chapter outline** (`alt o`) lists the chapter's section headings on the left; it stays in view while you scroll, marks the current section, and jumps on click. `{` and `}` move to the previous and next heading (counts work). **Margin notes** (`alt w`) show your notes on the right, each joined to its passage by hand-drawn braces and an arrow; crowded or very long notes are shortened with "…", passage links in them are clickable, and clicking a note opens it. Margin notes take priority: they may move the text left, and the outline hides when there is not room for both. Both are off by default and in Reading settings.
 
 Notes save as you type. Reader windows have independent passages and share the local library. Reading preferences and your place are restored when you return.
 

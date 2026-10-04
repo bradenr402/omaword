@@ -10,6 +10,8 @@ import OmaWord.Reader 1.0
 Item {
     id: root
     property bool destroying: false
+    // After each geometry refresh (layout, annotations, width): margin users re-measure.
+    signal layoutRefreshed()
     required property var controller
     required property var backend
     required property var theme
@@ -94,6 +96,7 @@ Item {
             pulseRects = pulseActive ? verseRangeRects(pulseFirst, pulseLast) : []
             flashRects = flashActive ? verseRangeRects(flashFirst, flashLast) : []
             updateAnnotations()
+            layoutRefreshed()
         }
     }
     function cancelDrag() { dragging = false; pressed = false; autoscroll.stop() }

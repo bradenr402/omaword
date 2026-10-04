@@ -51,6 +51,9 @@ class BibleBackend : public QObject
     Q_PROPERTY(bool focusMode READ focusMode WRITE setFocusMode NOTIFY preferencesChanged)
     // Color \wj spans (format only); off by default, a shared preference.
     Q_PROPERTY(bool wordsOfJesus READ wordsOfJesus WRITE setWordsOfJesus NOTIFY preferencesChanged)
+    // Margins (off by default, shared preferences): left chapter outline, right margin notes.
+    Q_PROPERTY(bool chapterOutline READ chapterOutline WRITE setChapterOutline NOTIFY preferencesChanged)
+    Q_PROPERTY(bool marginNotes READ marginNotes WRITE setMarginNotes NOTIFY preferencesChanged)
     Q_PROPERTY(bool blockMode READ blockMode WRITE setBlockMode NOTIFY preferencesChanged)
     Q_PROPERTY(QString readingMode READ readingMode WRITE setReadingMode NOTIFY preferencesChanged)
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
@@ -58,6 +61,8 @@ class BibleBackend : public QObject
     // Text DB schema of the active version (4 = notes and words of Jesus kept).
     Q_PROPERTY(int textSchema READ textSchema NOTIFY versionChanged)
     Q_PROPERTY(bool hasWordsOfJesus READ hasWordsOfJesus NOTIFY versionChanged)
+    // Any section heading anywhere in the active version.
+    Q_PROPERTY(bool hasHeadings READ hasHeadings NOTIFY versionChanged)
     // Current chapter's footnotes {verse,seq,kind,caller,offset,text}, source order.
     Q_PROPERTY(QVariantList footnotes READ footnotes NOTIFY versesChanged)
     Q_PROPERTY(QVariantList searchResults READ searchResults NOTIFY searchChanged)
@@ -152,6 +157,8 @@ public:
     double lineHeight() const { return m_lineHeight; }
     bool focusMode() const { return m_focusMode; }
     bool wordsOfJesus() const { return m_wordsOfJesus; }
+    bool chapterOutline() const { return m_chapterOutline; }
+    bool marginNotes() const { return m_marginNotes; }
     // Compatibility setter: true -> block, false -> verse. Default paragraph
     // mode also reports false; callers should use readingMode for three states.
     bool blockMode() const { return m_readingMode == "block"; }
@@ -161,6 +168,7 @@ public:
     static constexpr int CurrentTextSchema = 4;
     int textSchema() const { return m_textSchema; }
     bool hasWordsOfJesus() const { return m_hasWordsOfJesus; }
+    bool hasHeadings() const { return m_hasHeadings; }
     QVariantList footnotes() const;
     // Records: versionId/versionAbbreviation, book/chapter/start/endBook/
     // endChapter/end, reference, source-preserving text, score (exact-term count),
@@ -186,6 +194,8 @@ public:
     Q_INVOKABLE void setLineHeight(double value);
     Q_INVOKABLE void setFocusMode(bool value);
     Q_INVOKABLE void setWordsOfJesus(bool value);
+    Q_INVOKABLE void setChapterOutline(bool value);
+    Q_INVOKABLE void setMarginNotes(bool value);
     Q_INVOKABLE void setBlockMode(bool value);
     Q_INVOKABLE void setReadingMode(QString value);
     Q_INVOKABLE void setFontSize(int value);
@@ -429,9 +439,10 @@ private:
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
     bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false, m_wordsOfJesus = false;
+    bool m_chapterOutline = false, m_marginNotes = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;
-    bool m_hasParagraphs = false, m_hasWordsOfJesus = false;
+    bool m_hasParagraphs = false, m_hasWordsOfJesus = false, m_hasHeadings = false;
     int m_textSchema = 0;
     double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection, m_desk, m_history;

@@ -261,3 +261,87 @@ function searchMarks(ctx, rects, accent, outlined, scale, scope) {
         }
     }
 }
+
+// Centre-line samples of a large wavy curly brace inside the box
+// [x, x + width] × [top, bottom]. direction -1 draws "{" (tip on the left at
+// x), +1 draws "}" (tip on the right at x + width); the tip sits at tipY
+// (clamped to the middle 60% of the brace, as Margins.tips does). The spine wobbles; ends and the tip are exact,
+// so connectors can meet the returned `tip` point.
+function bracePoints(x, top, bottom, tipY, width, direction, s, scale, opts) {
+    opts = opts || {}
+    const k = scale > 0 ? scale : 1
+    const rand = mulberry32(s)
+    const h = Math.max(1, bottom - top)
+    tipY = Math.max(top + 0.2 * h, Math.min(bottom - 0.2 * h, tipY))
+    // Curls tighten when the tip nears an end.
+    const r = Math.min(width / 2, h / 4, (tipY - top) / 2, (bottom - tipY) / 2)
+    // Columns: ends at the open side, spine in the middle, tip at the far side.
+    const open = direction < 0 ? x + width : x
+    const spine = x + width / 2
+    const point = direction < 0 ? x : x + width
+    const pen = opts.width === undefined ? 1.3 * k : opts.width
+    const amp = Math.min(opts.amp === undefined ? 2.4 * k : opts.amp, width / 3)
+    const wave = _wave(rand, k), thickness = _wave(rand, k)
+    // Ideal outline as quadratic pieces, then sampled with a wobble that
+    // vanishes at the ends and the tip.
+    const pieces = [
+        [{ x: open, y: top }, { x: spine, y: top }, { x: spine, y: top + r }],
+        [{ x: spine, y: top + r }, null, { x: spine, y: tipY - r }],
+        [{ x: spine, y: tipY - r }, { x: spine, y: tipY }, { x: point, y: tipY }],
+        [{ x: point, y: tipY }, { x: spine, y: tipY }, { x: spine, y: tipY + r }],
+        [{ x: spine, y: tipY + r }, null, { x: spine, y: bottom - r }],
+        [{ x: spine, y: bottom - r }, { x: spine, y: bottom }, { x: open, y: bottom }]
+    ]
+    const step = Math.max(1, 2.5 * k)
+    const points = []
+    let travelled = 0
+    for (let p = 0; p < pieces.length; ++p) {
+        const a = pieces[p][0], c = pieces[p][1], b = pieces[p][2]
+        const length = Math.hypot(b.x - a.x, b.y - a.y) * (c ? 1.2 : 1)
+        const count = Math.max(2, Math.ceil(length / step) + 1)
+        for (let i = p === 0 ? 0 : 1; i < count; ++i) {
+            const t = i / (count - 1)
+            let px, py
+            if (c) {
+                px = (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * c.x + t * t * b.x
+                py = (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * c.y + t * t * b.y
+            } else { px = a.x + (b.x - a.x) * t; py = a.y + (b.y - a.y) * t }
+            const d = travelled + length * t
+            // Wobble only along the straight spines, folded toward the tip side.
+            const envelope = c ? 0 : Math.sin(Math.PI * t)
+            const offset = amp * envelope * (0.5 + 0.5 * _at(wave, d))
+            points.push({ x: px + (direction < 0 ? -offset : offset), y: py,
+                w: pen * (1 + 0.18 * _at(thickness, d)) * (p === 0 && i === 0 || p === pieces.length - 1 && i === count - 1 ? 0.75 : 1) })
+        }
+        travelled += length
+    }
+    return { points: points, tip: { x: point, y: tipY } }
+}
+
+function wavyBrace(ctx, x, top, bottom, tipY, width, direction, s, scale, opts) {
+    const brace = bracePoints(x, top, bottom, tipY, width, direction, s, scale, opts)
+    if (ctx) _fillStroke(ctx, brace.points, true, true)
+    return brace
+}
+
+// A wavier pen arrow from (x1, y1) to (x2, y2), arrowhead at the end.
+// Returns {shaft, head: [left, right]} samples.
+function wavyArrow(ctx, x1, y1, x2, y2, s, scale, opts) {
+    opts = opts || {}
+    const k = scale > 0 ? scale : 1
+    const pen = opts.width === undefined ? 1.2 * k : opts.width
+    const length = Math.hypot(x2 - x1, y2 - y1)
+    const amp = opts.amp === undefined ? Math.min(2.4 * k, length / 8) : opts.amp
+    const shaft = wavyLine(ctx, x1, y1, x2, y2, seed(s, "shaft"), k, { width: pen, amp: amp, joinEnd: true, roughStart: true })
+    const ux = length > 0 ? (x2 - x1) / length : 1, uy = length > 0 ? (y2 - y1) / length : 0
+    const size = Math.min(opts.head === undefined ? 6 * k : opts.head, Math.max(2, length / 2))
+    const head = []
+    for (const side of [-1, 1]) {
+        const angle = side * 0.5
+        const bx = -(ux * Math.cos(angle) - uy * Math.sin(angle)) * size
+        const by = -(ux * Math.sin(angle) + uy * Math.cos(angle)) * size
+        head.push(wavyLine(ctx, x2, y2, x2 + bx, y2 + by, seed(s, "head", side), k,
+            { width: pen, amp: 0.3 * k, joinStart: true, roughEnd: true }))
+    }
+    return { shaft: shaft, head: head }
+}

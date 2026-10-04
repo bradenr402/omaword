@@ -1565,6 +1565,8 @@ bool BibleBackend::loadPreferences()
     m_versePicker = boolean("versePicker",true);
     m_focusMode = boolean("focusMode",false);
     m_wordsOfJesus = boolean("wordsOfJesus",false);
+    m_chapterOutline = boolean("chapterOutline",false);
+    m_marginNotes = boolean("marginNotes",false);
     m_historyEnabled = boolean("historyEnabled",true);
     const QString mode = values.value("readingMode").toString();
     m_readingMode = mode == "block" || mode == "verse" ? mode : "paragraph";
@@ -1619,6 +1621,16 @@ void BibleBackend::setWordsOfJesus(bool value)
 {
     if (value == m_wordsOfJesus || !savePreference("wordsOfJesus",int(value))) return;
     m_wordsOfJesus = value; emit preferencesChanged();
+}
+void BibleBackend::setChapterOutline(bool value)
+{
+    if (value == m_chapterOutline || !savePreference("chapterOutline",int(value))) return;
+    m_chapterOutline = value; emit preferencesChanged();
+}
+void BibleBackend::setMarginNotes(bool value)
+{
+    if (value == m_marginNotes || !savePreference("marginNotes",int(value))) return;
+    m_marginNotes = value; emit preferencesChanged();
 }
 void BibleBackend::setBlockMode(bool value)
 {
@@ -1807,7 +1819,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     const auto oldConnection = m_bibleConnection;
     const auto oldId = m_versionId, oldEdition = m_edition, oldAbbreviation = m_abbreviation, oldCopyright = m_copyright;
     const auto oldKeys = m_keys;
-    const bool oldParagraphs = m_hasParagraphs, oldWordsOfJesus = m_hasWordsOfJesus;
+    const bool oldParagraphs = m_hasParagraphs, oldWordsOfJesus = m_hasWordsOfJesus, oldHeadings = m_hasHeadings;
     const int oldSchema = m_textSchema;
     const auto oldBooks = m_books;
     const auto oldChapters = m_chapters;
@@ -1825,14 +1837,14 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_keys = oldKeys; m_book = oldBook; m_chapter = oldChapter; m_start = oldStart; m_end = oldEnd;
         m_anchor = oldA; m_cursor = oldC; m_position = oldPosition;
         m_hasParagraphs = oldParagraphs; m_books = oldBooks; m_chapters = oldChapters;
-        m_hasWordsOfJesus = oldWordsOfJesus; m_textSchema = oldSchema;
+        m_hasWordsOfJesus = oldWordsOfJesus; m_textSchema = oldSchema; m_hasHeadings = oldHeadings;
         m_bookAliases = oldAliases; m_keyIndices = oldIndices;
         blocker.unblock(); emit errorChanged();
     });
     m_bible = QSqlDatabase(); m_bibleConnection.clear();
     m_versionId = id; m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_keys = {{0,0,0}};
     m_hasParagraphs = false; m_books.clear(); m_chapters.clear(); m_bookAliases.clear(); m_keyIndices.clear();
-    m_hasWordsOfJesus = false; m_textSchema = 0;
+    m_hasWordsOfJesus = false; m_textSchema = 0; m_hasHeadings = false;
     if (!id.isEmpty()) {
         m_bibleConnection = connectionName(); m_bible = QSqlDatabase::addDatabase("QSQLITE",m_bibleConnection);
         m_bible.setDatabaseName(path); m_bible.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
@@ -1849,6 +1861,9 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_hasParagraphs = metadata["paragraph_layout"] == "1";
         m_textSchema = metadata["schema"].toInt();
         m_hasWordsOfJesus = m_textSchema >= 4 && metadata["words_of_jesus"].toInt() > 0;
+        if (!text.exec("SELECT EXISTS(SELECT 1 FROM verses WHERE heading IS NOT NULL AND heading<>'')") || !text.next())
+            return setError("Cannot read Bible headings.");
+        m_hasHeadings = text.value(0).toBool();
         if (!text.exec("SELECT v.book,v.chapter,v.number,v.paragraphStart FROM verses v JOIN books b ON b.id=v.book ORDER BY b.ordinal,v.chapter,v.number")) return setError("Cannot read Bible verse keys.");
         while (text.next()) {
             const int b = text.value(0).toInt(), c = text.value(1).toInt(), v = text.value(2).toInt();
@@ -2695,7 +2710,7 @@ void BibleBackend::updateAnnotations()
                 bookmark |= a.bookmark; highlight |= a.highlight; note |= !a.note.isEmpty();
                 if (!a.note.isEmpty()) {
                     const auto first = endpoint(a.start), last = endpoint(a.end);
-                    noteRanges.append(QVariantMap{{"reference",rangeReference(a.start,a.end)},
+                    noteRanges.append(QVariantMap{{"reference",rangeReference(a.start,a.end)},{"note",a.note},
                         {"versionId",m_versionId},{"book",first.book},{"chapter",first.chapter},{"start",first.verse},
                         {"endBook",last.book},{"endChapter",last.chapter},{"end",last.verse},
                         {"noteStart",v == a.start},{"noteEnd",v == a.end},

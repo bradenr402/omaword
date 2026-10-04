@@ -26,7 +26,8 @@ seven-entry `resources/catalog.json`, and `resources/crossrefs.bin`. `branding.e
 | `qml/Main.qml` | Reader, palettes, Notes, Annotations, Desk, settings, catalog, About |
 | `qml/TagsPanel.qml` | Tag picker/management (modal), Annotations Tags summary, Study drawer (tabs Related / Cross-references / Footnotes; `relatedDrawer` objectName and `related` action id kept) |
 | `qml/RangeEditor.qml` | Annotation range editing session |
-| `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths |
+| `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
+| `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
 | `qml/AppContextMenu.qml`, `qml/AppToolTip.qml` | Shared context menu and themed tooltip |
 | `qml/ChapterFind.qml`, `qml/SearchHighlights.qml` | `/` chapter find; match overlay painting |
 | `qml/KeyNotation.js`, `bin/shortcuts` | One key notation for every displayed key; README shortcuts generated from Main's `actions` catalog (`--check` in CI) |
@@ -233,6 +234,22 @@ seven-entry `resources/catalog.json`, and `resources/crossrefs.bin`. `branding.e
   i.e. Omarchy `color1`/`red`, else accent) only while the setting is on;
   layout is unchanged.
 - Focus mode hides decoration cells (incl. footnote markers), rails, and context shading.
+- Margins (off by default; hidden in focus mode and range editing): one
+  `Margins.space()` split. Margin notes win: they may shift the reader column
+  left (only in chapters that have notes) and sit right after their connector;
+  the outline takes what is left and never moves the column. `updateMargins()`
+  measures verse spans (Verse rows or `BlockReader.verseRangeRects`, re-run on
+  `layoutRefreshed`/size changes) into `verseExtents`, then `Margins.place()`
+  lays notes out in content coordinates: aligned to the passage top, pushed
+  down on overlap, a crowded run rises ≤ one line; each note must share one
+  viewport (minus the footer) with its passage, else the longest note in the
+  offending run loses one line at a time (elided "…"), else it hides. Braces
+  split lines shared by neighbouring passages; tips lean toward each other
+  (`Margins.tips`, 0.35 × centre offset, middle 60% of each brace). Note text
+  is StyledText with exact `passageLinks`. The Notes drawer is a popup, so it
+  covers them. The outline's current section is the cursor's when it is on
+  screen, else the one at a reading line ¼ down; `{`/`}` step headings from
+  the same verse (History jumps).
 - Desktop corners come from async `hyprctl` polling; failure resets to 0.
   Highlight segments stay square.
 
