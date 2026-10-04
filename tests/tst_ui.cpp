@@ -3055,7 +3055,7 @@ private slots:
         }
     }
     void themedCornerSliders() {
-        for (const auto query : {"line height","reading settings"}) {
+        for (const auto query : {"settings","reading settings"}) {
             key(Qt::Key_Space,Qt::ControlModifier);
             QTRY_VERIFY(prop("passagePalette","opened").toBool());
             type(query); key(Qt::Key_Return);
