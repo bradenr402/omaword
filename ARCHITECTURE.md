@@ -185,6 +185,11 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
   - Highlights, cursor-range context shading, search matches.
   - Focus-mode dimming: follows the cursor instantly; only entering/leaving fades.
   - Jump pulse and copy flash rects. Reduce motion disables pulses/flashes/fades.
+  - Programmatic scrolls to a verse (`scrollToVerse`, `zz`/`zt`/`zb`, search,
+    jumps) slide via one `readerSlide` animation (110 ms, ease-out) that
+    retargets from the current position; `readerTargetY()` is the logical
+    position (saved positions use it). User drags stop it. Focus mode keeps the
+    cursor verse 40% down. Instant when animations are disabled.
   - Popup motion: the context menu never animates; modals (palette, dialogs,
     tag picker, range dialogs) fade in and close at once; side panels and
     toasts animate both in and out.

@@ -685,6 +685,7 @@ private slots:
         bible->setReadingMode(mode); QTest::qWait(150);
         QVERIFY(QMetaObject::invokeMethod(window, "scrollToVerse", Q_ARG(QVariant, 2), Q_ARG(QVariant, true)));
         QTest::qWait(80);
+        QTRY_VERIFY(!window->findChild<QObject *>("readerSlide")->property("running").toBool());
         const auto marker = mode == "verse" ? QString("verseNoteMarker2") : "blockInlineMarker:note:open:" + scope.value("reference").toString();
         QTRY_VERIFY(item(marker));
         auto target = item(marker); const auto point = target->mapToScene(QPointF(target->width()/2, qMin(12.0, target->height()/2))).toPoint();

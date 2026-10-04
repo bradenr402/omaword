@@ -93,6 +93,12 @@ class SearchUiTest : public QObject
         bible->importUsfm(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(), qPrintable(bible->error()));
     }
+    // Programmatic scrolls slide (readerSlide); read positions once it lands.
+    double settledY() {
+        auto slide = object("readerSlide");
+        for (int i = 0; slide && slide->property("running").toBool() && i < 200; ++i) QTest::qWait(10);
+        return object("reading")->property("contentY").toDouble();
+    }
     void navigate(const QString &reference) {
         QVERIFY(bible->navigate(reference)); call("readerFocus"); QTRY_VERIFY(!prop("restoringPosition").toBool());
     }
@@ -409,10 +415,10 @@ private slots:
         const auto scope = bible->tagScope();
         const double available = item("reading")->height() - prop("floatingSafety").toDouble();
         for (const auto suffix : {Qt::Key_Z, Qt::Key_T, Qt::Key_B}) {
-            const double before = object("reading")->property("contentY").toDouble();
+            const double before = settledY();
             key(Qt::Key_Z);
-            QCOMPARE(object("reading")->property("contentY").toDouble(), before);
-            key(suffix);
+            QCOMPARE(settledY(), before);
+            key(suffix); settledY();
             const auto rect = verseViewportRect(35);
             const double expected = suffix == Qt::Key_T ? 0 : suffix == Qt::Key_B
                 ? available - rect.height() : (available - rect.height()) / 2;
@@ -438,10 +444,10 @@ private slots:
             auto input = item(context == "notes" ? "noteEditor" : context == "palette" ? "referenceInput"
                 : context == "find" ? "chapterFindInput" : "keybindingSearch");
             QTRY_VERIFY2(input->hasActiveFocus(), qPrintable(context));
-            const double y = object("reading")->property("contentY").toDouble();
+            const double y = settledY();
             type("zzztzb");
             QCOMPARE(input->property("text").toString(), QString("zzztzb"));
-            QCOMPARE(object("reading")->property("contentY").toDouble(), y);
+            QCOMPARE(settledY(), y);
             QCOMPARE(bible->tagScope(), scope); QCOMPARE(bible->readingMode(), QString("verse"));
             key(Qt::Key_Escape);
             if (context == "palette") key(Qt::Key_Escape);
@@ -457,6 +463,7 @@ private slots:
             QVERIFY(item("keybinding" + title)->isEnabled());
         }
         key(Qt::Key_Return); QTRY_VERIFY(!object("helpDialog")->property("visible").toBool());
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         const auto rect = verseViewportRect(35);
         QVERIFY(qAbs(rect.bottom() - (item("reading")->height() - prop("floatingSafety").toDouble())) <= 1);
         QCOMPARE(bible->tagScope(), scope);
@@ -550,12 +557,12 @@ private slots:
     void previewCancelAndVisualNormal() {
         find("alpha"); key(Qt::Key_Return); QTRY_VERIFY(!prop("findPromptOpen").toBool());
         navigate("John 1:35");
-        const auto scope = bible->tagScope(); const auto y = object("reading")->property("contentY").toDouble();
+        const auto scope = bible->tagScope(); const auto y = settledY();
         const auto height = item("reading")->height();
         find("beta"); QCOMPARE(bible->tagScope(), scope); QCOMPARE(item("reading")->height(), height);
-        QVERIFY(object("reading")->property("contentY").toDouble() != y);
+        QVERIFY(settledY() != y);
         key(Qt::Key_Escape); QCOMPARE(bible->tagScope(), scope); QCOMPARE(prop("acceptedSearchQuery").toString(), QString("alpha"));
-        QCOMPARE(object("reading")->property("contentY").toDouble(), y);
+        QCOMPARE(settledY(), y);
         key(Qt::Key_V); key(Qt::Key_K, Qt::ShiftModifier); QVERIFY(prop("verseMode").toBool()); const int cursor = bible->cursorVerse();
         key(Qt::Key_Slash); QTRY_VERIFY(prop("findPromptOpen").toBool()); QVERIFY(!prop("verseMode").toBool());
         QCOMPARE(bible->selectedStart(), cursor); QCOMPARE(bible->selectedEnd(), cursor);
@@ -588,7 +595,7 @@ private slots:
         navigate("John 1:60");
         const auto scope = bible->tagScope();
         const auto acceptedCount = object("searchMatchCount")->property("text");
-        const double y = object("reading")->property("contentY").toDouble();
+        const double y = settledY();
         key(Qt::Key_Slash); QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus());
         QCOMPARE(object("chapterFindInput")->property("selectedText").toString(), QString("alpha"));
         key(Qt::Key_Backspace); type(query);
@@ -616,11 +623,11 @@ private slots:
         }
         QVERIFY(prop("findPromptOpen").toBool()); QVERIFY(item("chapterFindInput")->hasActiveFocus());
         QCOMPARE(bible->tagScope(), scope); QCOMPARE(bible->cursorVerse(), 60);
-        QCOMPARE(object("reading")->property("contentY").toDouble(), y);
+        QCOMPARE(settledY(), y);
         QCOMPARE(prop("acceptedSearchQuery").toString(), QString("alpha"));
         QCOMPARE(prop("chapterQueryHistory").toString(), QString("alpha"));
         key(Qt::Key_Escape); QVERIFY(!prop("findPromptOpen").toBool());
-        QCOMPARE(bible->tagScope(), scope); QCOMPARE(object("reading")->property("contentY").toDouble(), y);
+        QCOMPARE(bible->tagScope(), scope); QCOMPARE(settledY(), y);
         QCOMPARE(object("searchMatchCount")->property("text"), acceptedCount);
     }
     void chapterFindStartsAtOrAfterCursor_data() {
@@ -682,7 +689,7 @@ private slots:
         QTRY_VERIFY(!prop("restoringPosition").toBool());
         navigate("John 1:35"); find("beta");
         QCOMPARE(bible->cursorVerse(), 35); QCOMPARE(prop("searchActiveMatch").toMap().value("start").toInt(), 50);
-        QVERIFY(object("reading")->property("contentY").toDouble() > 0);
+        QVERIFY(settledY() > 0);
         key(Qt::Key_Return); QCOMPARE(bible->cursorVerse(), 50);
         key(Qt::Key_N, Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(), 20);
         navigate("John 2:35"); QTRY_VERIFY(!prop("searchSegments").toList().isEmpty());
@@ -695,10 +702,10 @@ private slots:
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
         const auto scope = bible->tagScope(); key(Qt::Key_Slash); key(Qt::Key_Slash, Qt::ControlModifier); key(Qt::Key_N);
         QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!object("passagePalette")->property("visible").toBool());
-        const auto y = object("reading")->property("contentY");
+        const auto y = QVariant(settledY());
         for (auto suffix : {Qt::Key_Z, Qt::Key_T, Qt::Key_B}) {
             key(Qt::Key_Z); key(suffix);
-            QCOMPARE(object("reading")->property("contentY"), y);
+            QCOMPARE(QVariant(settledY()), y);
             QCOMPARE(bible->readingMode(), QString("verse"));
             QCOMPARE(bible->tagScope(), scope);
             QVERIFY(prop("rangeEditing").toBool());

@@ -293,7 +293,7 @@ ApplicationWindow {
         findSnapshot = { query: acceptedSearchQuery, bibleSyntax: acceptedSearchBibleSyntax,
             matches: searchMatches, index: searchMatchIndex, identity: searchMatchIdentity,
             error: searchError, scope: bible.tagScope(), cursor: bible.cursorVerse,
-            anchor: selectionAnchor, position: reading.contentY, generation: searchScope }
+            anchor: selectionAnchor, position: readerTargetY(), generation: searchScope }
         chapterFind.begin(chapterQueryHistory)
         previewChapterFind(chapterQueryHistory)
     }
@@ -332,7 +332,7 @@ ApplicationWindow {
             // Preview never changes the canonical scope or its direction.
             selectionAnchor = saved.anchor; verseMode = false
             positionTimer.stop(); positionSaveTimer.stop(); restoringPosition = false
-            reading.contentY = saved.position; savePosition()
+            setReaderY(saved.position); savePosition()
         } else refreshAcceptedSearch()
         readerFocus()
     }
@@ -379,15 +379,15 @@ ApplicationWindow {
         const index = Array.from(bible.verses).findIndex(function(row) { return row.number === segment.verse })
         const row = verseRepeater.itemAt(index) as VerseItem
         const rect = block ? block.searchRect(segment) : row ? row.searchOverlay.rectFor(segment.start, segment.length) : null
-        if (!rect || rect.height <= 0) { scrollToVerse(segment.verse, false); return }
+        if (!rect || rect.height <= 0 || bible.focusMode) { scrollToVerse(segment.verse, false); return }
         const y = block ? blockLoader.mapToItem(readerColumn, rect.x, rect.y).y
             : row.body.mapToItem(readerColumn, rect.x, rect.y).y
         const available = Math.max(1, reading.height - Math.max(floatingSafety, findPromptOpen ? chapterFind.height : 0))
         const margin = Math.min(readerLineHeight * 2, available * 0.2)
-        let target = reading.contentY
+        let target = readerTargetY()
         if (y < target + margin) target = y - margin
         else if (y + rect.height > target + available - margin) target = y + rect.height - available + margin
-        reading.contentY = Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), target))
+        slideReader(target)
     }
     function openTextSearch() {
         if (rangeEditing || !bible.ready || !flushNote()) return
@@ -575,6 +575,7 @@ ApplicationWindow {
             verseTagMenu.close()
             passagePalette.close(); savedDrawer.close(); helpDialog.close(); aboutDialog.close()
             if (!settingsDialog.visible) readerFocus()
+            if (hasSelection) Qt.callLater(function() { readerColumn.forceLayout(); app.scrollToVerse(bible.cursorVerse, false) })
         }
     }
     readonly property real controlScale: Math.min(scale, 1.4)
@@ -1279,6 +1280,7 @@ ApplicationWindow {
         positionTimer.stop()
         restoringPosition = true
         movingSelection = true
+        const fromChapter = bible.book + ":" + bible.chapter
         if (bulk) bible.moveByVerses(delta, extend)
         else bible.moveSelection(delta, extend)
         movingSelection = false
@@ -1289,7 +1291,8 @@ ApplicationWindow {
         Qt.callLater(function() {
             if (app.selectionIdentity !== movedIdentity) return
             readerColumn.forceLayout()
-            app.scrollToVerse(bible.cursorVerse, false)
+            // Crossing into another chapter has nothing to slide from.
+            app.placeVerse(bible.cursorVerse, false, bible.book + ":" + bible.chapter !== fromChapter)
             app.restoringPosition = false
             app.savePosition()
         })
@@ -1359,7 +1362,7 @@ ApplicationWindow {
         const from = beginJump()
         bible.openChapter(book, chapter)
         positionTimer.stop()
-        reading.contentY = 0
+        setReaderY(0)
         restoringPosition = false
         savePosition()
         endJump(from)
@@ -1790,19 +1793,39 @@ ApplicationWindow {
     function savePosition() {
         if (!restoringPosition && bible.ready) {
             let travel = Math.max(0, reading.contentHeight - reading.height)
-            bible.readingPosition = travel > 0 ? Math.max(0, Math.min(1, reading.contentY / travel)) : 0
+            bible.readingPosition = travel > 0 ? Math.max(0, Math.min(1, readerTargetY() / travel)) : 0
         }
+    }
+    // Programmatic scrolls to a verse slide (ease-out, ~110 ms) and retarget
+    // mid-flight, so held keys never lag; instant with animations disabled.
+    readonly property int slideMs: reduceMotion ? 0 : 110
+    NumberAnimation { id: readerSlide; objectName: "readerSlide"; target: reading; property: "contentY"; duration: app.slideMs; easing.type: Easing.OutCubic }
+    function clampReaderY(y) { return Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), y)) }
+    function readerTargetY() { return readerSlide.running ? readerSlide.to : reading.contentY }
+    function setReaderY(y) { readerSlide.stop(); reading.contentY = clampReaderY(y) }
+    function slideReader(y) {
+        const target = clampReaderY(y)
+        if (readerSlide.running) {
+            if (Math.abs(readerSlide.to - target) < 0.5) return
+            readerSlide.stop()
+        }
+        if (!slideMs || Math.abs(target - reading.contentY) < 1) { reading.contentY = target; return }
+        readerSlide.from = reading.contentY
+        readerSlide.to = target
+        readerSlide.start()
     }
     function scrollBy(amount) {
         clearCount()
-        reading.contentY = Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), reading.contentY + amount))
+        setReaderY(readerTargetY() + amount)
     }
-    function scrollToVerse(number, alignTop) {
+    function scrollToVerse(number, alignTop) { placeVerse(number, alignTop, false) }
+    // instant: restoring a freshly opened chapter, where there is nothing to slide from.
+    function placeVerse(number, alignTop, instant) {
         let index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
         let row = verseRepeater.itemAt(index) as VerseItem
         let block = blockLoader.item as BlockReader
         if (!row && !block) return
-        if (index === 0) { reading.contentY = 0; return }
+        if (index === 0) { if (instant) setReaderY(0); else slideReader(0); return }
         let rect = block ? block.verseRect(number) : null
         let y = rect ? blockLoader.mapToItem(readerColumn, 0, rect.y).y : row.mapToItem(readerColumn, 0, 0).y + row.textOffset
         let textHeight = rect ? rect.height : row.textHeight
@@ -1813,10 +1836,13 @@ ApplicationWindow {
         if (textHeight > available - 24 * readerScale)
             margin = Math.min(3 * readerLineHeight, available * 0.2)
         let extent = Math.min(textHeight, Math.max(1, available - 2 * margin))
-        let target = reading.contentY
-        if (alignTop || y < target + margin) target = y - margin
+        let target = readerTargetY()
+        // Focus mode is a typewriter: the cursor verse stays 40% down.
+        if (bible.focusMode) target = y - 0.4 * reading.height
+        else if (alignTop || y < target + margin) target = y - margin
         else if (y + extent > target + available - margin) target = y + extent - available + margin
-        reading.contentY = Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), target))
+        if (instant) setReaderY(target)
+        else slideReader(target)
     }
     function alignCurrentVerse(alignment) {
         positionTimer.stop()
@@ -1832,10 +1858,18 @@ ApplicationWindow {
         const height = block ? rect.height : row.textHeight
         const available = Math.max(1, reading.height - floatingSafety)
         const offset = alignment === "top" ? 0 : alignment === "bottom" ? available - height : (available - height) / 2
-        reading.contentY = Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), y - Math.max(0, offset)))
+        slideReader(y - Math.max(0, offset))
         savePosition()
     }
-    function restorePosition(jumpToSelection) {
+    // Navigation slides only within the chapter already on screen; other
+    // restores (new chapter, layout, version) are instant.
+    property string shownChapterKey: ""
+    property bool restoreSlides: false
+    function restorePosition(jumpToSelection) { beginRestore(jumpToSelection, false) }
+    function beginRestore(jumpToSelection, slide) {
+        const key = bible.versionId + ":" + bible.book + ":" + bible.chapter
+        restoreSlides = !!slide && key === shownChapterKey
+        shownChapterKey = key
         restoringPosition = true
         positionJumpToSelection = !!jumpToSelection
         positionTimer.restart()
@@ -3108,6 +3142,7 @@ ApplicationWindow {
                             Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
                     }
                     onContentYChanged: positionSaveTimer.restart()
+                    onMovementStarted: readerSlide.stop()
                     ScrollBar.vertical: OverlayScrollbar {
                         id: readerScrollbar
                         objectName: "readerScrollbar"
@@ -5875,8 +5910,8 @@ ApplicationWindow {
         id: positionTimer
         interval: 80
         onTriggered: {
-            if (app.positionJumpToSelection && bible.selectedStart > 0) app.scrollToVerse(bible.cursorVerse, true)
-            else reading.contentY = Math.max(0, reading.contentHeight - reading.height) * Math.max(0, Math.min(1, bible.readingPosition))
+            if (app.positionJumpToSelection && bible.selectedStart > 0) app.placeVerse(bible.cursorVerse, true, !app.restoreSlides)
+            else app.setReaderY(Math.max(0, reading.contentHeight - reading.height) * Math.max(0, Math.min(1, bible.readingPosition)))
             app.restoringPosition = false
         }
     }
@@ -5923,7 +5958,7 @@ ApplicationWindow {
             if (!app.movingSelection) {
                 app.verseMode = false
                 app.selectionAnchor = bible.crossChapterSelection ? 0 : bible.selectedStart
-                app.restorePosition(true)
+                app.beginRestore(true, true)
             }
             app.syncNote()
             // Reading another chapter (h, l, or any jump) restarts the History

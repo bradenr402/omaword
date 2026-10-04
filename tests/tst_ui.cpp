@@ -252,6 +252,8 @@ class UiTest : public QObject
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette", "visible").toBool());
         QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        // Same-chapter jumps slide; let them land.
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
     }
     void capture(const QString &name) {
         const QString directory = qEnvironmentVariable("OMAWORD_UI_SCREENSHOTS");
@@ -2141,6 +2143,7 @@ private slots:
         QVERIFY(bible->navigate("John 3:5"));
         QTest::qWait(150);
         QVERIFY(QMetaObject::invokeMethod(window,"scrollToVerse",Q_ARG(QVariant,1),Q_ARG(QVariant,true)));
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         QTRY_VERIFY(item("verseTagMarker1") && item("verseTagMarker1")->isVisible());
         QCOMPARE(prop("verseTagMarker1","entries").value<QJSValue>().toVariant().toList().size(),2);
         click(item("verseTagMarker1"));
@@ -3153,6 +3156,7 @@ private slots:
         const auto all = bible->copySelection();
         QCOMPARE(bible->chapter(),4);
         QVERIFY(QMetaObject::invokeMethod(window,"scrollToVerse",Q_ARG(QVariant,2),Q_ARG(QVariant,true)));
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         QTest::qWait(100);
         selection.clear();
         mouseCopy(2,Qt::MiddleButton);
@@ -3754,8 +3758,10 @@ private slots:
         QVERIFY(!prop("passagePalette","visible").toBool());
         QCOMPARE(bible->selectedStart(),0);
         key(Qt::Key_F,Qt::ControlModifier);
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         const double paged = prop("reading","contentY").toDouble();
         key(Qt::Key_B,Qt::ControlModifier);
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         QVERIFY(prop("reading","contentY").toDouble() < paged);
         key(Qt::Key_Right,Qt::AltModifier);
         QCOMPARE(bible->chapter(),3);
@@ -5382,6 +5388,7 @@ private slots:
         bible->setNoteText("Exact range note");
         reference("John 3:5");
         QVERIFY(QMetaObject::invokeMethod(window,"scrollToVerse",Q_ARG(QVariant,1),Q_ARG(QVariant,true)));
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         QTRY_VERIFY(item("verseNoteMarker1") && item("verseNoteMarker1")->isVisible());
         for (const auto kind : {"bookmark", "tag", "note"}) {
             for (int verse = 1; verse <= 3; ++verse) {
@@ -6030,6 +6037,73 @@ private slots:
         QTRY_COMPARE(bible->selectionReference(),QString("John 4:2"));
         // Compact text never links.
         QVERIFY(bible->passageLinks("jn316 and Jn3:16").isEmpty());
+    }
+    void readerSlideRetargetsAndRespectsAnimations() {
+        QVERIFY(!sounds->reduceMotion());
+        reference("John 3:1");
+        auto slide = object("readerSlide"); QVERIFY(slide);
+        QCOMPARE(window->property("slideMs").toInt(),110);
+        auto reading = item("reading");
+        const double start = reading->property("contentY").toDouble();
+        callJs("scrollToVerse",{30,true});
+        QVERIFY(slide->property("running").toBool());
+        const double first = callJs("readerTargetY").toDouble();
+        QVERIFY(first > start + 100);
+        QTest::qWait(40);
+        const double mid = reading->property("contentY").toDouble();
+        QVERIFY2(mid > start && mid < first,qPrintable(QString("%1 %2 %3").arg(start).arg(mid).arg(first)));
+        // Retarget mid-flight: from the current position, never jumping back.
+        callJs("scrollToVerse",{12,true});
+        const double second = callJs("readerTargetY").toDouble();
+        QVERIFY(second < first);
+        QVERIFY(std::abs(slide->property("from").toDouble() - mid) < 60);
+        QTRY_VERIFY_WITH_TIMEOUT(!slide->property("running").toBool(),1000);
+        QCOMPARE(reading->property("contentY").toDouble(),second);
+        // Held keys keep retargeting: the target is always the newest verse.
+        reference("John 3:10");
+        for (int i = 0; i < 12; ++i) { key(Qt::Key_J); QTest::qWait(15); }
+        QCOMPARE(bible->cursorVerse(),22);
+        QTRY_VERIFY_WITH_TIMEOUT(!slide->property("running").toBool(),1000);
+        const auto body = item("verseBody22");
+        const double top = body->mapToItem(reading,QPointF(0,0)).y();
+        QVERIFY(top >= 0 && top + body->height() <= reading->height());
+        // zz slides too.
+        key(Qt::Key_Z); key(Qt::Key_Z);
+        QVERIFY(slide->property("running").toBool() || std::abs(callJs("readerTargetY").toDouble() - reading->property("contentY").toDouble()) < 1);
+        QTRY_VERIFY(!slide->property("running").toBool());
+        // Disable animations: every scroll is instant.
+        sounds->setReduceMotion(true);
+        QCOMPARE(window->property("slideMs").toInt(),0);
+        callJs("scrollToVerse",{35,true});
+        QVERIFY(!slide->property("running").toBool());
+        QCOMPARE(reading->property("contentY").toDouble(),callJs("readerTargetY").toDouble());
+        const double instant = reading->property("contentY").toDouble();
+        key(Qt::Key_K);
+        QVERIFY(!slide->property("running").toBool());
+        QVERIFY(reading->property("contentY").toDouble() <= instant);
+    }
+    void focusModeKeepsCursorAt40Percent() {
+        sounds->setReduceMotion(true);
+        reference("John 3:20");
+        key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
+        auto reading = item("reading");
+        auto topOf = [&](int verse) {
+            auto body = item(qPrintable("verseBody" + QString::number(verse)));
+            return body ? body->mapToItem(reading,QPointF(0,0)).y() : -1.0;
+        };
+        QTRY_VERIFY(std::abs(topOf(20) - 0.4 * reading->height()) < 8);
+        for (const auto &step : QList<QPair<Qt::Key,int>>{{Qt::Key_J,21},{Qt::Key_J,22},{Qt::Key_K,21}}) {
+            key(step.first); QCOMPARE(bible->cursorVerse(),step.second);
+            QTRY_VERIFY2(std::abs(topOf(step.second) - 0.4 * reading->height()) < 8,
+                qPrintable(QString("verse %1 at %2 of %3").arg(step.second).arg(topOf(step.second)).arg(reading->height())));
+        }
+        // The same slide when animations are on.
+        sounds->setReduceMotion(false);
+        key(Qt::Key_J);
+        QVERIFY(object("readerSlide")->property("running").toBool());
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
+        QVERIFY(std::abs(topOf(22) - 0.4 * reading->height()) < 8);
+        key(Qt::Key_F); QTRY_VERIFY(!bible->focusMode());
     }
 };
 
