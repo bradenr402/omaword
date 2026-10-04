@@ -14,6 +14,7 @@
     <file>qml/KeyNotation.js</file>
     <file>resources/catalog.json</file>
     <file>resources/crossrefs.bin</file>
+    <file>resources/cell.png</file>
     <file alias="branding/icon.svg">assets/app.svg</file>
   </qresource>
 </RCC>

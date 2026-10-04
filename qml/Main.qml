@@ -757,7 +757,7 @@ ApplicationWindow {
             if (i < first || i > last) body.deselect()
             else {
                 body.select(i === first ? start : 0, i === last ? end : body.length)
-                pieces.push(body.selectedText)
+                pieces.push(body.selectedText.replace(/[\uFFFC\u2060]/g, ""))
             }
         }
         freeSelectedText = pieces.join("\n")
@@ -1251,6 +1251,52 @@ ApplicationWindow {
     }
     property bool toastInFocus: false
     function notify(message, inFocus) { toastInFocus = !!inFocus; toast.text = message; toastTimer.restart() }
+    // Footnote markers (all layouts) open Study → Footnotes at that note,
+    // selecting its verse first (Study is a passage panel).
+    function openFootnote(verse, seq) {
+        if (!bible.ready || bible.busy || rangeEditing || modalOpen) return
+        if (bible.selectedStart !== verse || bible.selectedEnd !== verse || bible.crossChapterSelection) selectVerse(verse, false)
+        if (bible.cursorVerse !== verse) return
+        if (sidePanel === "related") { tagsUi.setStudyTab("footnotes", { verse: verse, seq: seq }); return }
+        if (leaveSidePanel("related")) tagsUi.openStudy("footnotes", { verse: verse, seq: seq })
+    }
+    function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
+    // Verse rows reserve footnote cells like BlockDocument: a word joiner and a
+    // transparent image at each note's plain-text offset. Paint-only markers
+    // sit over them; copy strips the cells, search maps around them.
+    readonly property real footnoteCellWidth: Math.max(1, Math.round(readerSize * readerScale * 0.5))
+    function footnoteHtml(html, notes) {
+        if (!notes || !notes.length || bible.focusMode) return html
+        const offsets = Array.from(notes).map(function(note) { return note.offset }).sort(function(a, b) { return a - b })
+        const cell = '&#8288;<img src="qrc:/resources/cell.png" width="' + footnoteCellWidth + '" height="1">'
+        let out = "", count = 0, next = 0, i = 0
+        while (i < html.length) {
+            while (next < offsets.length && offsets[next] <= count) { out += cell; ++next }
+            const c = html[i]
+            if (c === "<") {
+                const end = html.indexOf(">", i)
+                const tag = end < 0 ? html.substring(i) : html.substring(i, end + 1)
+                out += tag; i += tag.length
+                if (/^<br\s*\/?>$/i.test(tag)) ++count
+                continue
+            }
+            if (c === "&") {
+                const end = html.indexOf(";", i)
+                const entity = end < 0 || end - i > 10 ? c : html.substring(i, end + 1)
+                out += entity; i += entity.length; ++count
+                continue
+            }
+            out += c; ++i; ++count
+        }
+        while (next++ < offsets.length) out += cell
+        return out
+    }
+    // Document position of the k-th (offset-sorted) footnote cell's image.
+    function footnoteCellPosition(notes, note) {
+        const sorted = Array.from(notes).slice().sort(function(a, b) { return a.offset - b.offset || a.seq - b.seq })
+        const k = sorted.findIndex(function(entry) { return entry.seq === note.seq })
+        return note.offset + 2 * k + 1
+    }
     function selectVerse(number, extend) {
         if (rangeEditor.active) {
             const rows = Array.from(bible.verses)
@@ -3498,6 +3544,45 @@ ApplicationWindow {
                                         text: "Select verse " + verseRow.modelData.number + " · " + KeyNotation.format("Shift+Click") + " for a range" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "") + (verseRow.modelData.hasTags ? "\nTagged" : "")
                                     }
                                 }
+                                Repeater {
+                                    model: bible.focusMode ? [] : (verseRow.modelData.footnotes || [])
+                                    delegate: Item {
+                                        id: footnoteMarker
+                                        required property var modelData
+                                        objectName: "verseFootnoteMark:" + verseRow.modelData.number + "." + modelData.seq
+                                        readonly property rect cell: verseBody.width > 0 && verseBody.contentHeight > 0
+                                            ? verseBody.positionToRectangle(app.footnoteCellPosition(verseRow.modelData.footnotes, modelData)) : Qt.rect(0, 0, 0, 0)
+                                        x: verseBody.x + cell.x
+                                        y: verseBody.y + cell.y
+                                        width: app.footnoteCellWidth
+                                        height: cell.height
+                                        z: 3
+                                        Text {
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            text: app.footnoteMark(footnoteMarker.modelData.caller)
+                                            color: desktop.accent
+                                            font.family: desktop.fontFamily
+                                            font.pixelSize: Math.max(6, app.readerSize * app.readerScale * 0.55)
+                                            textFormat: Text.PlainText
+                                        }
+                                        MouseArea {
+                                            id: footnoteMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: app.openFootnote(verseRow.modelData.number, footnoteMarker.modelData.seq)
+                                        }
+                                        Accessible.role: Accessible.Button
+                                        Accessible.name: "Footnote: " + footnoteMarker.modelData.text
+                                        AppToolTip {
+                                            theme: desktop
+                                            uiScale: app.scale
+                                            visible: footnoteMouse.containsMouse
+                                            delay: 500
+                                            text: "Footnote · " + footnoteMarker.modelData.text + "\nClick to read it in Study"
+                                        }
+                                    }
+                                }
                                 SearchHighlights {
                                     id: verseSearch
                                     objectName: "verseSearch" + verseRow.modelData.number
@@ -3518,7 +3603,7 @@ ApplicationWindow {
                                     width: parent.width - x - 9
                                     height: contentHeight
                                     text: '<div style="line-height:' + (bible.lineHeight * 100) + '%">'
-                                        + (app.verseHtml(verseRow.modelData.html) || verseRow.modelData.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
+                                        + (app.footnoteHtml(app.verseHtml(verseRow.modelData.html), verseRow.modelData.footnotes) || verseRow.modelData.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
                                     textFormat: Text.RichText
                                     horizontalAlignment: TextEdit.AlignLeft
                                     font.family: desktop.fontFamily

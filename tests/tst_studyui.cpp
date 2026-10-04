@@ -399,6 +399,61 @@ private slots:
         // shift L no longer opens the panel.
         call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTest::qWait(100); QVERIFY(!studyOpen());
     }
+    void footnoteMarkersOpenStudyInEveryLayout() {
+        for (const QString mode : {"verse", "paragraph", "block"}) {
+            setMode(mode); navigate("John 3:16"); bible->clearSelection();
+            QTest::qWait(50);
+            const bool verseRows = mode == "verse";
+            const QString first = verseRows ? "verseFootnoteMark:16.1" : "blockInlineMarker:footnote:footnote:16.1";
+            const QString second = verseRows ? "verseFootnoteMark:16.2" : "blockInlineMarker:footnote:footnote:16.2";
+            QTRY_VERIFY2(item(first) && item(second), qPrintable(mode));
+            QVERIFY(item(first)->isVisible());
+            QVERIFY(item(verseRows ? "verseFootnoteMark:3.1" : "blockInlineMarker:footnote:footnote:3.1"));
+            auto body = renderedBody(16);
+            const QString text = document(body)->toPlainText();
+            // Each marker sits right after its anchor word, before the next.
+            const int loved = text.indexOf("loved"), world = text.indexOf("the world");
+            QVERIFY(loved > 0 && world > loved);
+            const auto marker = item(first)->mapRectToItem(qobject_cast<QQuickItem *>(body), item(first)->boundingRect());
+            const QRectF afterLoved = caret(body, loved + 5), beforeThe = caret(body, world);
+            if (qAbs(afterLoved.y() - beforeThe.y()) < 1) {
+                QVERIFY2(marker.left() >= afterLoved.x() - 1 && marker.right() <= beforeThe.x() + 1,
+                         qPrintable(QString("%1: %2..%3 not within %4..%5").arg(mode).arg(marker.left()).arg(marker.right()).arg(afterLoved.x()).arg(beforeThe.x())));
+            }
+            // Cells never reach copied text, and search offsets still map.
+            if (!verseRows) {
+                const auto mapping = blockMapping(); QVERIFY(mapping);
+                int start = -1, end = -1;
+                for (const auto &value : mapping->spans()) {
+                    const auto span = value.toMap();
+                    if (span.value("number").toInt() == 16) { start = span.value("textStart").toInt(); end = span.value("textEnd").toInt(); }
+                }
+                QVERIFY(start >= 0);
+                const QString copied = mapping->selectionText(start, end);
+                QCOMPARE(copied, bible->verses()[15].toMap()["text"].toString());
+                const int at = copied.indexOf("world");
+                QVERIFY(!mapping->searchRectangles({QVariantMap{{"verse",16},{"start",at},{"length",5}}}).isEmpty());
+            } else {
+                QString plain;
+                QMetaObject::invokeMethod(body, "getText", Q_RETURN_ARG(QString, plain), Q_ARG(int, 0), Q_ARG(int, body->property("length").toInt()));
+                QVERIFY(plain.remove(QChar(0xfffc)).remove(QChar(0x2060)).contains("For God so loved the world that he gave his Son."));
+            }
+            // Clicking a marker selects its verse and opens Study → Footnotes there.
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, item(second)->mapToScene(QPointF(item(second)->width() / 2, item(second)->height() / 2)).toPoint());
+            QTRY_VERIFY2(studyOpen(), qPrintable(mode));
+            QCOMPARE(bible->selectionReference(), QString("John 3:16"));
+            QCOMPARE(tab(), QString("footnotes"));
+            QCOMPARE(studyIndex(), 2);
+            QCOMPARE(rows()[2].toMap()["text"].toString(), QString("Or only begotten"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+            // Focus mode hides the markers.
+            bible->setFocusMode(true);
+            QTRY_VERIFY2(!item(first) || !item(first)->isVisible(), qPrintable(mode));
+            bible->setFocusMode(false);
+            QTRY_VERIFY(item(first) && item(first)->isVisible());
+            panel()->setProperty("studyTab", "related");
+        }
+    }
 };
 int main(int argc, char **argv) {
     QQuickStyle::setStyle("Basic"); QApplication app(argc, argv);

@@ -242,7 +242,54 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
                 if (fragment.isValid()) cursor.insertText(fragment.text(), fragment.charFormat());
             }
         }
-        const int textEnd = cursor.position();
+        int textEnd = cursor.position();
+        // Footnote markers: transparent cells at their anchors inside the
+        // verse (word joiner + image), painted by the reader. They are
+        // decoration segments, so copy and search offsets skip them.
+        const QString plain = verse.value("text").toString();
+        const auto notes = annotationsVisible ? verse.value("footnotes").toList() : QVariantList();
+        if (!notes.isEmpty()) {
+            QTextCursor rendered(m_document);
+            rendered.setPosition(textStart);
+            rendered.setPosition(textEnd, QTextCursor::KeepAnchor);
+            SourcePositionMap anchors;
+            anchors.build(plain, rendered.selectedText(), textStart);
+            QVector<QPair<int, QVariantMap>> cells;
+            for (const auto &value : notes) {
+                const auto note = value.toMap();
+                const int offset = note.value("offset").toInt();
+                const int position = offset >= plain.size() ? textEnd : offset <= 0 ? textStart : anchors.range(offset, 1).first;
+                if (position >= textStart && position <= textEnd) cells.append({position, note});
+            }
+            std::stable_sort(cells.begin(), cells.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+            int shift = 0;
+            for (const auto &cell : cells) {
+                QTextCursor at(m_document);
+                at.setPosition(cell.first + shift);
+                const int segmentStart = at.position();
+                at.insertText(QString(QChar(0x2060)), joiner);
+                QVariantMap marker{{"kind", "footnote"}, {"edge", "footnote"}, {"verse", verse.value("number")},
+                    {"seq", cell.second.value("seq")}, {"caller", cell.second.value("caller")}, {"text", cell.second.value("text")},
+                    {"reference", QString("%1.%2").arg(verse.value("number").toInt()).arg(cell.second.value("seq").toInt())}};
+                marker["position"] = at.position();
+                marker["paintWidth"] = qMax(1, qRound(em * 0.5));
+                marker["textGap"] = 0;
+                marker["cellWidth"] = marker.value("paintWidth");
+                marker["cellHeight"] = bodyMetrics.height() + 2;
+                QTextImageFormat format;
+                format.setFont(m_document->defaultFont());
+                format.setName(cellUrl.toString());
+                format.setWidth(marker.value("cellWidth").toDouble());
+                format.setHeight(marker.value("cellHeight").toDouble());
+                format.setVerticalAlignment(QTextCharFormat::AlignBaseline);
+                at.insertImage(format);
+                shift += at.position() - segmentStart;
+                m_decorationSegments.append({segmentStart, at.position()});
+                m_decorations.append(marker);
+            }
+            cursor.setPosition(textEnd + shift);
+            textEnd = cursor.position();
+        }
         QTextCursor content(m_document);
         content.setPosition(textStart);
         content.setPosition(textEnd, QTextCursor::KeepAnchor);

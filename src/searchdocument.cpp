@@ -26,10 +26,18 @@ void SourcePositionMap::build(const QString &source, const QString &rendered, in
         return at + (text.at(at).isHighSurrogate() && at + 1 < text.size()
                      && text.at(at + 1).isLowSurrogate() ? 2 : 1);
     };
+    // Inline decoration cells (word joiner + object, e.g. footnote markers)
+    // occupy rendered positions with no source text; step over them.
+    auto decoration = [&](int at) {
+        const QChar c = rendered.at(at);
+        return (c == QChar::ObjectReplacementCharacter || c == QChar(0x2060))
+            && (s >= source.size() || source.at(s) != c);
+    };
     while (s < source.size() || r < rendered.size()) {
+        while (r < rendered.size() && decoration(r)) ++r;
         const int firstS = s, firstR = r;
         while (s < source.size() && source.at(s).isSpace()) ++s;
-        while (r < rendered.size() && rendered.at(r).isSpace()) ++r;
+        while (r < rendered.size() && (rendered.at(r).isSpace() || decoration(r))) ++r;
         if (s != firstS || r != firstR) {
             // HTML may trim boundary whitespace. Internal non-whitespace text
             // never gets resynchronized by substring search (repeated words).

@@ -223,7 +223,16 @@ seven-entry `resources/catalog.json`, and `resources/crossrefs.bin`. `branding.e
   - Popup motion: the context menu never animates; modals (palette, dialogs,
     tag picker, range dialogs) fade in and close at once; side panels and
     toasts animate both in and out.
-- Focus mode hides decoration cells, rails, and context shading.
+- Footnote markers reuse decoration cells at each note's plain-text offset
+  (word joiner + transparent image): `BlockDocument` inserts them in
+  Paragraph/Block; Verse rows insert `<img src="qrc:/resources/cell.png">` in
+  the row HTML and overlay marks at `positionToRectangle`. `SourcePositionMap`
+  skips U+FFFC/U+2060 in rendered text, so search offsets survive; copy strips
+  the cells. Clicking one selects the verse and opens Study → Footnotes there.
+- Words of Jesus: `<span class="wj">` gets an inline color (desktop `color1`,
+  i.e. Omarchy `color1`/`red`, else accent) only while the setting is on;
+  layout is unchanged.
+- Focus mode hides decoration cells (incl. footnote markers), rails, and context shading.
 - Desktop corners come from async `hyprctl` polling; failure resets to 0.
   Highlight segments stay square.
 

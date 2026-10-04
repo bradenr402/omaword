@@ -23,6 +23,8 @@ Item {
     readonly property var searchSegments: controller.searchSegments || []
     onSearchSegmentsChanged: if (!destroying) searchPaint.requestPaint()
     readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
+    // Source callers that are letters or digits show as-is; "+"/"-" become a dagger.
+    function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
     function tagsPlainText(tags) { return Array.from(tags || []).map(function(t) { return t.name }).join(", ") }
     property real annotationScale: 0
     // Reader text and marks follow the desktop scale; a controller without
@@ -42,6 +44,7 @@ Item {
         annotationRanges = ranges
     }
     function openAnnotation(entry) {
+        if (entry.kind === "footnote") { controller.openFootnote(entry.verse, entry.seq); return }
         if (entry.kind === "bookmark") controller.openBookmark(entry.scope || entry.reference)
         else if (entry.kind === "tag") controller.openPassageTags(entry.scope || entry.reference)
         else {
@@ -67,7 +70,7 @@ Item {
     }
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart,
-            bookmarkRanges: v.bookmarkRanges, noteRanges: v.noteRanges, tagRanges: v.tagRanges }
+            bookmarkRanges: v.bookmarkRanges, noteRanges: v.noteRanges, tagRanges: v.tagRanges, footnotes: v.footnotes }
     })) + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + backend.focusMode + controller.readerSize + root.readerScale + controller.scale
     height: body.height
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
@@ -414,7 +417,9 @@ Item {
             id: inlineMarker
             required property var modelData
             readonly property bool opening: modelData.edge !== "close"
-            readonly property string hint: (modelData.kind === "bookmark" ? "Bookmark" : modelData.kind === "note" ? "Note" : "Tag") + "\n"
+            readonly property bool footnote: modelData.kind === "footnote"
+            readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\nClick to read it in Study"
+                : (modelData.kind === "bookmark" ? "Bookmark" : modelData.kind === "note" ? "Note" : "Tag") + "\n"
                 + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
                 + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
                 + "\n" + KeyNotation.format("Shift+Click") + " to edit range"
@@ -434,6 +439,7 @@ Item {
                 id: inlinePaint
                 objectName: "blockInlinePaint:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
                 anchors.fill: parent
+                visible: !inlineMarker.footnote
                 property color accent: root.theme.accent
                 property real bracketTop: inlineMarker.modelData.bracketTop
                 property real bracketHeight: inlineMarker.modelData.bracketHeight
@@ -474,9 +480,21 @@ Item {
                     }
                 }
             }
+            // A small superscript caller (or dagger) in the reserved cell.
+            Text {
+                objectName: "blockFootnoteMark:" + inlineMarker.modelData.reference
+                visible: inlineMarker.footnote
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 0
+                text: root.footnoteMark(inlineMarker.modelData.caller)
+                color: root.theme.accent
+                font.family: root.theme.fontFamily
+                font.pixelSize: Math.max(6, root.controller.readerSize * root.readerScale * 0.55)
+                textFormat: Text.PlainText
+            }
             AnnotationGlyph {
                 objectName: "blockInlineGlyph:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.reference
-                visible: inlineMarker.opening
+                visible: inlineMarker.opening && !inlineMarker.footnote
                 kind: inlineMarker.modelData.kind
                 filled: true
                 ink: root.theme.accent
@@ -493,7 +511,12 @@ Item {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 cursorShape: Qt.PointingHandCursor
                 onClicked: function(mouse) {
-                    if (mouse.button === Qt.RightButton) {
+                    if (inlineMarker.footnote) {
+                        if (mouse.button === Qt.RightButton) {
+                            const p = mapToItem(null, mouse.x, mouse.y)
+                            root.controller.openPassageMenu(inlineMarker.modelData.verse, p.x, p.y)
+                        } else root.openAnnotation(inlineMarker.modelData)
+                    } else if (mouse.button === Qt.RightButton) {
                         const entry = inlineMarker.modelData
                         const point = mapToItem(null, mouse.x, mouse.y)
                         root.controller.openMarkerMenu([entry.scope], entry.kind, function() { root.openAnnotation(entry) },
