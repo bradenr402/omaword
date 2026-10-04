@@ -246,11 +246,15 @@ seven-entry `resources/catalog.json`, and `resources/crossrefs.bin`. `branding.e
   viewport (minus the footer) with its passage, else the longest note in the
   offending run loses one line at a time (elided "…"), else it hides. Braces
   split lines shared by neighbouring passages; tips lean toward each other
-  (`Margins.tips`, 0.35 × centre offset, middle 60% of each brace). Note text
+  (`Margins.tips`, 0.35 × centre offset, clamped to 20%–80% of each brace's
+  height). Note text
   is StyledText with exact `passageLinks`. The Notes drawer is a popup, so it
   covers them. The outline's current section is the cursor's when it is on
   screen, else the one at a reading line ¼ down; `{`/`}` step headings from
-  the same verse (History jumps).
+  the same verse (History jumps). Toggling notes (`applyMarginNotes`, driven
+  by `bible.marginNotesChanged`) fades them in while the column slides left,
+  or fades them out before it slides back (`marginSlideOffset`, 140 ms
+  ease-out); resizes and chapter changes jump, as does Disable animations.
 - Desktop corners come from async `hyprctl` polling; failure resets to 0.
   Highlight segments stay square.
 
