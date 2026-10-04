@@ -245,6 +245,10 @@ public:
     Q_INVOKABLE bool navigate(QString reference);
     // Pure preview: {valid, reference, error}; uses the current book for relative input.
     Q_INVOKABLE QVariantMap resolveReference(QString reference) const;
+    // Shared fuzzy parser (palette, note [[ suggestions): ranked candidates
+    // {reference, book, chapter, start, end, score}, most similar first. Accepts
+    // compact input (jn316, 1co13, ps23, rev 3 14-22) besides every exact form.
+    Q_INVOKABLE QVariantList referenceCandidates(QString input, int limit = 8) const;
     Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
     Q_INVOKABLE void openChapter(int book, int chapter);
     Q_INVOKABLE void previousChapter();

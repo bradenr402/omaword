@@ -204,6 +204,49 @@ private slots:
         QCOMPARE(bible->selectionReference(),reference); QCOMPARE(bible->verses(),verses);
         QCOMPARE(bible->readingPosition(),0.37); QCOMPARE(navigation.count(),0);
     }
+    void fuzzyReferenceCandidates() {
+        install(net);
+        auto refs = [&](const QString &input) {
+            QStringList result;
+            for (const auto &row : bible->referenceCandidates(input)) result << row.toMap()["reference"].toString();
+            return result;
+        };
+        auto first = [&](const QString &input) { return refs(input).value(0); };
+        // Exact forms keep their meaning and rank first.
+        QCOMPARE(first("John 3:16"),QString("John 3:16"));
+        QCOMPARE(first("Jn 3:16–18"),QString("John 3:16–18"));
+        QCOMPARE(first("John 3:35-4:2"),QString("John 3:35–4:2"));
+        // Compact and spaced forms.
+        QCOMPARE(first("jn316"),QString("John 3:16"));
+        QCOMPARE(first("jn3:16"),QString("John 3:16"));
+        QCOMPARE(first("jn 3 16"),QString("John 3:16"));
+        QCOMPARE(first("jn3.16"),QString("John 3:16"));
+        QCOMPARE(first("jn316-18"),QString("John 3:16–18"));
+        QCOMPARE(first("rev 22 14-20"),QString("Revelation 22:14–20"));
+        QCOMPARE(first("rev22"),QString("Revelation 22"));
+        QCOMPARE(first("mk7"),QString("Mark 7"));
+        QCOMPARE(first("jud5"),QString("Jude 1:5"));
+        // A digit run splits into chapter:verse only where that verse exists.
+        QCOMPARE(refs("jn3"),QStringList{"John 3"});
+        QCOMPARE(refs("jn336"),QStringList{"John 3:36"});
+        QVERIFY(refs("jn337").isEmpty());
+        QCOMPARE(first("gen12"),QString("Genesis 1:2"));
+        // Ambiguity: ranked by book similarity, then canonical order.
+        QCOMPARE(refs("j4"),(QStringList{"John 4","Jude 1:4"}));
+        QCOMPARE(refs("jn4").value(0),QString("John 4"));
+        QCOMPARE(first("mal4"),QString("Malachi 4"));
+        QCOMPARE(first("ma4"),QString("Malachi 4"));
+        const auto row = bible->referenceCandidates("jn316").value(0).toMap();
+        QCOMPARE(row["book"].toInt(),43); QCOMPARE(row["chapter"].toInt(),3);
+        QCOMPARE(row["start"].toInt(),16); QCOMPARE(row["end"].toInt(),16);
+        QCOMPARE(bible->referenceCandidates("j4",1).size(),1);
+        // Bare numbers are relative to the current book.
+        QVERIFY(bible->navigate("John 4")); QCOMPARE(first("316"),QString("John 3:16"));
+        for (const QString &none : QStringList{"", "zz9", "jn0", "John;DROP TABLE", QString(300,'j')})
+            QVERIFY2(refs(none).isEmpty(),qPrintable(none));
+        // Every candidate navigates.
+        for (const auto &reference : refs("j4")) QVERIFY2(bible->navigate(reference),qPrintable(reference));
+    }
     void sourceOrderedNoteMetadata() {
         install(kjv);
         checkSourceOrderedNote(40,69);

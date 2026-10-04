@@ -2195,6 +2195,132 @@ QVariantMap BibleBackend::resolveReference(QString input) const
     const bool valid = parseReference(input,&b,&c,&start,&end,&error);
     return {{"valid",valid},{"reference",valid ? (start ? rangeReference(start,end) : reference(b,c)) : QString()}, {"error",error}};
 }
+namespace {
+QString compactKey(QString text)
+{
+    text = text.toCaseFolded();
+    static const QRegularExpression spacing("[\\s.]+");
+    text.remove(spacing);
+    return text;
+}
+// Span of the shortest left-to-right embedding of needle in haystack, or -1.
+int subsequenceSpread(const QString &needle, const QString &haystack)
+{
+    if (needle.isEmpty() || haystack.isEmpty() || needle[0] != haystack[0]) return -1;
+    qsizetype at = 0;
+    for (const QChar c : needle) {
+        at = haystack.indexOf(c, at);
+        if (at < 0) return -1;
+        ++at;
+    }
+    return int(at);
+}
+}
+QVariantList BibleBackend::referenceCandidates(QString input, int limit) const
+{
+    if (!m_ready || limit < 1) return {};
+    input = input.simplified();
+    input.replace(QChar(0x2013), '-'); input.replace(QChar(0x2014), '-'); input.replace(QChar(0x2212), '-');
+    if (input.isEmpty() || input.size() > 200) return {};
+    struct Candidate { int score = 0; int order = 0; QVariantMap row; };
+    QVector<Candidate> found;
+    QSet<QString> seen;
+    auto addRow = [&](const QString &text, int b, int c, int start, int end, int score) {
+        if (text.isEmpty() || seen.contains(text)) return;
+        seen.insert(text);
+        found.append({score, int(found.size()), QVariantMap{{"reference",text},{"book",b},{"chapter",c},
+            {"start",start},{"end",end},{"score",score}}});
+    };
+    auto add = [&](int b, int c, int start, int end, int score) {
+        if (c < 1 || c > 999 || start > 999 || end > 999 || !validRange(b,c,start,end)) return;
+        addRow(reference(b,c,start,end),b,c,start,end,score);
+    };
+    // The exact parser wins outright, so typed references keep their meaning.
+    {
+        int b = 0, c = 0, first = 0, last = 0;
+        QString error;
+        if (parseReference(input,&b,&c,&first,&last,&error)) {
+            if (first) {
+                const auto a = endpoint(first), z = endpoint(last);
+                addRow(rangeReference(first,last),a.book,a.chapter,a.verse,
+                       a.book == z.book && a.chapter == z.chapter ? z.verse : a.verse,1000000);
+            } else addRow(reference(b,c),b,c,0,0,1000000);
+        }
+    }
+    static const QRegularExpression shape("^((?:[1-3]\\s*)?[^\\d\\s][^\\d]*?)?\\s*(\\d[\\d\\s:.-]*)?$");
+    const auto parts = shape.match(input);
+    if (parts.hasMatch()) {
+        const QString bookText = compactKey(parts.captured(1));
+        const QString numbers = parts.captured(2).trimmed();
+        // Book similarity, 0 when unrelated; a bare number means the current book.
+        QHash<int,int> bookScores;
+        if (bookText.isEmpty()) { if (!numbers.isEmpty() && m_book) bookScores.insert(m_book,60); }
+        else {
+            QHash<int,QStringList> keys;
+            for (auto it = m_bookAliases.cbegin(); it != m_bookAliases.cend(); ++it) if (it.value()) keys[it.value()].append(it.key());
+            for (const auto &value : m_books) {
+                const auto row = value.toMap();
+                const int b = row.value("id").toInt();
+                const QString name = compactKey(row.value("name").toString());
+                QStringList bookKeys = keys.value(b);
+                bookKeys << name << compactKey(row.value("code").toString()) << compactKey(row.value("abbreviation").toString());
+                if (b >= 1 && b <= BibleBooks::canon().size()) {
+                    const auto &canon = BibleBooks::canon()[b - 1];
+                    bookKeys << compactKey(QString::fromUtf8(canon.name)) << compactKey(QString::fromLatin1(canon.code));
+                    bookKeys << QString::fromLatin1(canon.aliases).split(' ', Qt::SkipEmptyParts);
+                }
+                bookKeys.removeAll(QString());
+                int score = 0;
+                if (bookKeys.contains(bookText)) score = 100;
+                else if (name.startsWith(bookText)) score = 90 - int(std::min<qsizetype>(20, name.size() - bookText.size()));
+                else if (std::any_of(bookKeys.cbegin(),bookKeys.cend(),[&](const QString &key) { return key.startsWith(bookText); })) score = 75;
+                else {
+                    const int spread = subsequenceSpread(bookText,name);
+                    if (spread > 0) score = 50 - std::min(20, spread - int(bookText.size()));
+                }
+                if (score > 0) bookScores.insert(b,score);
+            }
+        }
+        static const QRegularExpression verseForm("^(\\d{1,3})\\s*[:.\\s]\\s*(\\d{1,3})(?:\\s*-\\s*(\\d{1,3}))?$");
+        static const QRegularExpression runForm("^(\\d{1,6})(?:\\s*-\\s*(\\d{1,3}))?$");
+        const auto verse = verseForm.match(numbers), run = runForm.match(numbers);
+        for (auto it = bookScores.cbegin(); it != bookScores.cend(); ++it) {
+            const int b = it.key(), base = it.value() * 100;
+            const QVariantList chapters = chaptersForBook(b);
+            if (chapters.isEmpty()) continue;
+            const bool single = chapters == QVariantList{1};
+            if (numbers.isEmpty()) add(b,chapters.first().toInt(),0,0,base + 5);
+            else if (verse.hasMatch()) {
+                const int v = verse.captured(2).toInt();
+                add(b,verse.captured(1).toInt(),v,verse.captured(3).isEmpty() ? v : verse.captured(3).toInt(),base + 40);
+            } else if (run.hasMatch()) {
+                const QString digits = run.captured(1);
+                const bool ranged = !run.captured(2).isEmpty();
+                const int end = run.captured(2).toInt();
+                if (single) add(b,1,digits.toInt(),ranged ? end : digits.toInt(),base + 40);
+                else if (!ranged) add(b,digits.toInt(),0,0,base + 40);
+                // A digit run splits into chapter + verse only where that verse exists.
+                for (int k = 1; k < digits.size(); ++k) {
+                    const QString c = digits.left(k), v = digits.mid(k);
+                    if (v.startsWith('0') || c.size() > 3 || v.size() > 3) continue;
+                    add(b,c.toInt(),v.toInt(),ranged ? end : v.toInt(),base + 30 + k);
+                }
+            }
+        }
+    }
+    std::stable_sort(found.begin(),found.end(),[this](const Candidate &a, const Candidate &b) {
+        if (a.score != b.score) return a.score > b.score;
+        const int x = absoluteVerse(a.row.value("book").toInt(),a.row.value("chapter").toInt(),std::max(1,a.row.value("start").toInt()));
+        const int y = absoluteVerse(b.row.value("book").toInt(),b.row.value("chapter").toInt(),std::max(1,b.row.value("start").toInt()));
+        return x != y ? x < y : a.order < b.order;
+    });
+    QVariantList result;
+    for (const auto &candidate : found) {
+        if (result.size() >= limit) break;
+        result.append(candidate.row);
+    }
+    return result;
+}
 bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *first, int *last, QString *error) const
 {
     auto fail = [error](const QString &message) { *error = message; return false; };

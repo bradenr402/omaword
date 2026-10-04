@@ -5896,6 +5896,60 @@ private slots:
         window->update(); QTest::qWait(250);
         QVERIFY(window->grabWindow().save(fixtures.filePath("omaword-reader-narrow.png")));
     }
+    QVariant callJs(const char *method, const QVariantList &args = {}) {
+        QVariant result;
+        bool ok = false;
+        switch (args.size()) {
+        case 0: ok = QMetaObject::invokeMethod(window,method,Q_RETURN_ARG(QVariant,result)); break;
+        case 1: ok = QMetaObject::invokeMethod(window,method,Q_RETURN_ARG(QVariant,result),Q_ARG(QVariant,args[0])); break;
+        default: ok = QMetaObject::invokeMethod(window,method,Q_RETURN_ARG(QVariant,result),Q_ARG(QVariant,args[0]),Q_ARG(QVariant,args[1])); break;
+        }
+        if (!ok) qWarning("callJs failed: %s", method);
+        return result.canConvert<QJSValue>() ? result.value<QJSValue>().toVariant() : result;
+    }
+    static QVariantMap jsMap(const QVariant &value) {
+        return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+    }
+    QStringList paletteTitles() {
+        QStringList titles;
+        for (const auto &entry : callJs("paletteEntries").toList()) titles << entry.toMap()["title"].toString();
+        return titles;
+    }
+    void paletteFuzzyCandidates() {
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("jn316");
+        QCOMPARE(paletteTitles().value(0),QString("John 3:16"));
+        QCOMPARE(prop("referencePreview","text").toString(),QString("John 3:16"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        // Ambiguous input lists ranked candidates; arrows choose, j/k still type.
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("j4");
+        const auto titles = paletteTitles();
+        QVERIFY2(titles.size() >= 4,qPrintable(titles.join(", ")));
+        QCOMPARE(titles.mid(0,4),(QStringList{"Job 4","Joel 4","John 4","Jude 4"}));
+        QCOMPARE(prop("paletteResults","currentIndex").toInt(),0);
+        key(Qt::Key_Down); key(Qt::Key_Down); key(Qt::Key_Down); key(Qt::Key_Up);
+        QCOMPARE(prop("paletteResults","currentIndex").toInt(),2);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("John 4"));
+        type("k"); QCOMPARE(prop("referenceInput","text").toString(),QString("j4k"));
+        key(Qt::Key_Backspace); QCOMPARE(prop("paletteResults","currentIndex").toInt(),0);
+        key(Qt::Key_Down); key(Qt::Key_Down);
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->passage(),QString("John 4"));
+        // Exact forms are still first; book browsing still lists books.
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("Rev 22:1-5"); QCOMPARE(paletteTitles().value(0),QString("Revelation 22:1–5"));
+        key(Qt::Key_A,Qt::ControlModifier); type("1 co");
+        QCOMPARE(paletteTitles().value(0),QString("1 Corinthians"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+    }
 };
 
 int main(int argc,char **argv)

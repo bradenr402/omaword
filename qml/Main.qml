@@ -459,6 +459,7 @@ ApplicationWindow {
         if (paletteTextMode) return { entry: paletteSearchCurrent || !paletteTextQuery.length ? paletteResults.model[paletteResults.currentIndex] : null, reference: "" }
         let query = referenceInput.text.trim()
         let entry = paletteResults.model[paletteResults.currentIndex]
+        if (entry && entry.candidate) return { entry: entry, reference: entry.reference }
         if (entry && (paletteArrowUsed || !query || query.startsWith(">")
                 || (paletteBook > 0 && /^\d+$/.test(query))
                 || (paletteBook === 0 && !/\d/.test(query)))) {
@@ -2216,6 +2217,10 @@ ApplicationWindow {
             }
             return result
         }
+        // Typed numbers: the shared fuzzy parser's ranked candidates (jn316, ps23, …).
+        if (/\d/.test(query.replace(/^[1-3]\s*/, ""))) return Array.from(bible.referenceCandidates(referenceInput.text.trim())).map(function(candidate) {
+            return { title: candidate.reference, hint: candidate.start ? "Passage" : "Chapter", candidate: true, reference: candidate.reference }
+        })
         // Resolve exact canonical/source aliases without changing the displayed source name.
         const resolved = query && !/\d\s*$/.test(query) ? bible.resolveReference(query) : null
         return (query ? [] : recentPassages()).concat(Array.from(bible.books).filter(function(b) {
@@ -2260,6 +2265,7 @@ ApplicationWindow {
             return
         }
         if (entry.recent) { openRecentPassage(entry.recent); return }
+        if (entry.candidate) { jump(entry.reference); return }
         if (entry.action) {
             if (!actionAvailable(entry.action) || !flushNote()) return
             if (["books", "bibleSearch", "commands", "resume"].includes(entry.action)) {
