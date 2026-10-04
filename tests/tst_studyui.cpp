@@ -1,6 +1,8 @@
 #include <QtTest/QTest>
 #include <QApplication>
 #include <QClipboard>
+#include <QCryptographicHash>
+#include <QSqlRecord>
 #include <QFile>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
@@ -25,6 +27,28 @@
 #include "soundeffects.h"
 #include "versioncatalog.h"
 
+class MockCatalog : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QVariantList entries MEMBER entries NOTIFY changed)
+    Q_PROPERTY(bool busy MEMBER busy NOTIFY changed)
+    Q_PROPERTY(double progress MEMBER progress NOTIFY changed)
+    Q_PROPERTY(QString error MEMBER error NOTIFY changed)
+public:
+    QVariantList entries;
+    bool busy = false;
+    double progress = 0;
+    QString error;
+    Q_INVOKABLE void download(const QString &id) { busy = true; emit changed(); emit requested(id); }
+    Q_INVOKABLE void cancel() { busy = false; emit changed(); }
+    Q_INVOKABLE void clearError() { error.clear(); emit changed(); }
+    void finish(const QUrl &url) { busy = false; progress = 1; emit changed(); emit downloadFinished(url); }
+signals:
+    void changed();
+    void requested(const QString &id);
+    void downloadFinished(const QUrl &url);
+};
+
 // Study features: words of Jesus, Re-import offers, the Study panel's tabs,
 // and reader footnote markers, against a small original fixture with \wj,
 // \f, and \x markup.
@@ -36,11 +60,55 @@ class StudyUiTest : public QObject
     std::unique_ptr<BibleBackend> bible;
     std::unique_ptr<Desktop> desktop;
     std::unique_ptr<SoundEffects> sounds;
-    std::unique_ptr<VersionCatalog> catalog;
+    std::unique_ptr<MockCatalog> catalog;
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
     QStringList warnings;
-    QString source;
+    QString source, other;
+    QString installedFile() const {
+        QString path;
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "study-installed");
+            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+            if (db.open()) {
+                QSqlQuery q(db); q.prepare("SELECT path FROM installed WHERE version_id=?"); q.addBindValue(bible->versionId());
+                if (q.exec() && q.next()) path = bible->dataDirectory() + '/' + q.value(0).toString();
+            }
+        }
+        QSqlDatabase::removeDatabase("study-installed");
+        return path;
+    }
+    // Rewrites a schema 4 generation as the schema 3 layout older builds wrote.
+    static bool downgradeToSchema3(const QString &path) {
+        const QString name = QUuid::createUuid().toString();
+        bool ok = false;
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
+            if (db.open()) {
+                QSqlQuery q(db);
+                ok = q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
+                    && q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')")
+                    && q.exec("UPDATE metadata SET value='3' WHERE key='schema'")
+                    && q.exec("UPDATE verses SET html=replace(replace(html,'<span class=\"wj\">',''),'</span>','')");
+                QCryptographicHash hash(QCryptographicHash::Sha256);
+                auto field = [&](const QByteArray &v) { hash.addData(QByteArray::number(v.size())); hash.addData(":"); hash.addData(v); };
+                for (const QString &sql : {QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
+                         QString("SELECT id,code,name,abbreviation,ordinal FROM books ORDER BY ordinal"),
+                         QString("SELECT book,chapter FROM source_chapters ORDER BY book,chapter"),
+                         QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
+                         QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
+                         QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")}) {
+                    field(sql.toUtf8()); ok = ok && q.exec(sql);
+                    while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
+                }
+                q.prepare("UPDATE metadata SET value=? WHERE key='content_digest'"); q.addBindValue(QString::fromLatin1(hash.result().toHex()));
+                ok = ok && q.exec();
+                db.close();
+            }
+        }
+        QSqlDatabase::removeDatabase(name);
+        return ok;
+    }
     static bool edition(const QString &path) {
         auto zip = archive_write_new(); archive_write_set_format_zip(zip);
         if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
@@ -128,11 +196,27 @@ class StudyUiTest : public QObject
 private slots:
     void initTestCase() {
         source = fixtures.filePath("study_usfm.zip"); QVERIFY(edition(source));
+        // Another edition (different internal ID) for the wrong-file check.
+        other = fixtures.filePath("other_usfm.zip");
+        auto zip = archive_write_new(); archive_write_set_format_zip(zip);
+        QVERIFY(archive_write_open_filename(zip, QFile::encodeName(other).constData()) == ARCHIVE_OK);
+        const QByteArray data = "\\id JHN Another fixture\n\\c 1\n\\p\n\\v 1 Another edition.\n";
+        auto entry = archive_entry_new(); archive_entry_set_pathname(entry, "43-JHNother.usfm"); archive_entry_set_filetype(entry, AE_IFREG);
+        archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, data.size());
+        QVERIFY(archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, data.constData(), data.size()) == data.size());
+        archive_entry_free(entry); QVERIFY(archive_write_close(zip) == ARCHIVE_OK); archive_write_free(zip);
     }
     void init() {
         session = std::make_unique<QTemporaryDir>(); qputenv("XDG_DATA_HOME", session->path().toUtf8());
         bible = std::make_unique<BibleBackend>(); install(source); bible->setReadingMode("verse");
-        desktop = std::make_unique<Desktop>(); sounds = std::make_unique<SoundEffects>(nullptr, session->filePath("sound.ini"), false); catalog = std::make_unique<VersionCatalog>();
+        if (QByteArray(QTest::currentTestFunction()).startsWith("reimport")) {
+            // An installed generation from before schema 4, with a note to keep.
+            QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); bible->setNoteText("Kept note");
+            const QString file = installedFile(); bible.reset();
+            QVERIFY(downgradeToSchema3(file)); bible = std::make_unique<BibleBackend>();
+            QVERIFY2(bible->ready(), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 3);
+        }
+        desktop = std::make_unique<Desktop>(); sounds = std::make_unique<SoundEffects>(nullptr, session->filePath("sound.ini"), false); catalog = std::make_unique<MockCatalog>();
         engine = std::make_unique<QQmlApplicationEngine>(); warnings.clear();
         connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) { for (const auto &error : errors) warnings << error.toString(); });
         engine->rootContext()->setContextProperty("bible", bible.get());
@@ -185,6 +269,55 @@ private slots:
         key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
         QVERIFY(item("settingwordsOfJesus") && item("settingwordsOfJesus")->isVisible());
         QVERIFY(!item("wordsOfJesusUnmarked")->isVisible());
+    }
+    void reimportFromCatalog() {
+        catalog->entries = {QVariantMap{{"id","study"},{"name","Study fixture"},{"abbreviation","SF"},{"url","https://example.invalid/study.zip"},
+            {"detailsUrl","https://example.invalid"},{"copyright",""}}};
+        emit catalog->changed();
+        key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
+        auto button = item("versionReimport:study"); QVERIFY(button); QTRY_VERIFY(button->isVisible());
+        // Settings offers it too.
+        QSignalSpy requests(catalog.get(), &MockCatalog::requested);
+        QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+        QCOMPARE(requests.count(), 1); QCOMPARE(requests.first().first().toString(), QString("study"));
+        QTRY_VERIFY(object("importGuide")->property("visible").toBool());
+        catalog->finish(QUrl::fromLocalFile(source));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
+        QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
+        QCOMPARE(bible->textSchema(), 4);
+        QTRY_COMPARE(object("toast")->property("text").toString(), "Reimported " + bible->versionAbbreviation());
+        for (const auto &row : bible->versions()) QVERIFY(!row.toMap()["needsReimport"].toBool());
+        QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
+        key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
+        QTRY_VERIFY(!item("versionReimport:study") || !item("versionReimport:study")->isVisible());
+    }
+    void reimportLocalFilePicker() {
+        key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
+        auto button = item("settingsReimport:study"); QVERIFY(button); QVERIFY(button->isVisible());
+        QVERIFY(item("wordsOfJesusUnmarked")->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
+        auto dialog = object("importDialog"); QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QCOMPARE(window->property("reimportId").toString(), QString("study"));
+        QVERIFY(dialog->property("title").toString().startsWith("Re-import"));
+        // Another edition's file is refused, leaving the old text in place.
+        // The picker's accepted file goes through importChosen.
+        QVERIFY(QMetaObject::invokeMethod(window, "importChosen", Q_ARG(QVariant, QUrl::fromLocalFile(other))));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!bible->busy());
+        QVERIFY2(bible->error().contains("not"), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 3); QCOMPARE(bible->versions().size(), 1);
+        bible->clearError();
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(window->property("reimportId").toString(), QString());
+        key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(item("versionReimport:study"), "clicked"));
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window, "importChosen", Q_ARG(QVariant, QUrl::fromLocalFile(source))));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
+        QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
+        QCOMPARE(bible->textSchema(), 4); QVERIFY(bible->hasWordsOfJesus());
+        QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
     }
 };
 int main(int argc, char **argv) {

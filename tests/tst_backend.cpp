@@ -907,8 +907,13 @@ private slots:
         QCOMPARE(bible->textSchema(), 3); QVERIFY(!bible->hasWordsOfJesus()); QVERIFY(bible->footnotes().isEmpty());
         QVERIFY(versionRow(bible.get(),"study")["needsReimport"].toBool());
         QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->verses()[0].toMap()["wordsOfJesus"].toList().isEmpty());
+        // Re-import pins the edition: another edition's file is refused.
+        bible->importUsfm(QUrl::fromLocalFile(net), "study");
+        QVERIFY(!bible->busy()); QVERIFY(bible->error().contains("not")); QCOMPARE(bible->versions().size(), 1);
+        bible->clearError();
         // Re-import through the ordinary install/replace flow keeps annotations.
-        install(path);
+        bible->importUsfm(QUrl::fromLocalFile(path), "study");
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
         QCOMPARE(bible->textSchema(), 4); QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
         QVERIFY(installedPath() != file); QVERIFY(!QFile::exists(file));
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16,16);

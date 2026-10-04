@@ -103,6 +103,30 @@ ApplicationWindow {
         catalog.clearError()
         catalog.download(id)
     }
+    // Re-import an installed version whose text predates the current schema:
+    // catalog versions download again; local imports ask for their file. Both
+    // reuse the install/replace flow, so annotations (keyed by version) stay.
+    property string reimportId: ""
+    function catalogEntry(id) { return Array.from(catalog.entries).find(function(entry) { return entry.id === id }) || null }
+    function reimportVersion(entry) {
+        if (rangeEditing || !entry || closingWindow || bible.busy || catalog.busy || !flushNote()) return
+        versionDialog.close()
+        settingsDialog.close()
+        if (catalogEntry(entry.id)) {
+            importGuide.open()
+            installVersion(entry.id)
+        } else {
+            reimportId = entry.id
+            importDialog.open()
+        }
+    }
+    // The file picker's choice; a pending Re-import pins the expected edition.
+    function importChosen(file) {
+        const expected = reimportId
+        reimportId = ""
+        if (rangeEditing || closingWindow || bible.busy || catalog.busy || !flushNote()) return
+        bible.clearError(); bible.importUsfm(file, expected)
+    }
     function cancelDownload() {
         downloadId = ""
         pendingDownload = ""
@@ -4271,10 +4295,25 @@ ApplicationWindow {
                             color: desktop.foreground; font.pixelSize: 14 * versionDialog.uiScale
                             Layout.fillWidth: true; wrapMode: Text.Wrap
                         }
-                        Label {
-                            text: versionEntry.modelData.hint || (versionEntry.modelData.active ? "Current version" : "Installed locally")
-                            color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
-                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: versionEntry.modelData.hint || ((versionEntry.modelData.active ? "Current version" : "Installed locally")
+                                    + (versionEntry.modelData.needsReimport ? " · older text format: re-import for footnotes, cross references, and words of Jesus" : ""))
+                                color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
+                                Layout.fillWidth: true; wrapMode: Text.Wrap
+                            }
+                            QuietButton {
+                                objectName: "versionReimport:" + (versionEntry.modelData.id || "")
+                                visible: !versionDialog.removing && versionDialog.step === 0 && !!versionEntry.modelData.needsReimport
+                                text: "Re-import"
+                                compact: true
+                                font.pixelSize: 12 * versionDialog.uiScale
+                                enabled: !bible.busy && !catalog.busy
+                                tip: app.catalogEntry(versionEntry.modelData.id) ? "Download " + versionEntry.modelData.abbreviation + " again from eBible.org and replace its text; annotations are kept"
+                                    : "Choose " + versionEntry.modelData.abbreviation + "'s USFM file again and replace its text; annotations are kept"
+                                onClicked: app.reimportVersion(versionEntry.modelData)
+                            }
                         }
                     }
                 }
@@ -5490,6 +5529,24 @@ ApplicationWindow {
                     Layout.fillWidth: true
                 }
             }
+            Repeater {
+                model: Array.from(bible.versions).filter(function(version) { return version.needsReimport })
+                delegate: RowLayout {
+                    id: reimportRow
+                    required property var modelData
+                    Layout.fillWidth: true
+                    Label {
+                        text: reimportRow.modelData.abbreviation + " uses an older text format (no footnotes, cross references, or words of Jesus)."
+                        color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
+                    }
+                    QuietButton {
+                        objectName: "settingsReimport:" + reimportRow.modelData.id
+                        text: "Re-import"; compact: true
+                        enabled: !bible.busy && !catalog.busy
+                        onClicked: app.reimportVersion(reimportRow.modelData)
+                    }
+                }
+            }
             Label {
                 objectName: "wordsOfJesusUnmarked"
                 visible: bible.ready && !bible.hasWordsOfJesus
@@ -5735,10 +5792,11 @@ ApplicationWindow {
     FileDialog {
         id: importDialog
         objectName: "importDialog"
-        title: "Add version"
+        title: app.reimportId ? "Re-import " + (Array.from(bible.versions).find(function(v) { return v.id === app.reimportId }) || { name: app.reimportId }).name : "Add version"
         fileMode: FileDialog.OpenFile
         nameFilters: ["USFM ZIP (*.zip)", "USFM files (*.usfm *.sfm)"]
-        onAccepted: { if (app.rangeEditing || app.closingWindow || bible.busy || catalog.busy || !app.flushNote()) return; bible.clearError(); bible.importUsfm(selectedFile) }
+        onAccepted: app.importChosen(selectedFile)
+        onRejected: app.reimportId = ""
         onVisibleChanged: { if (!visible) app.restorePanelFocus() }
     }
     FolderDialog {

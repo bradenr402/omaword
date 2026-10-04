@@ -251,7 +251,8 @@ public:
     // Switches version when needed, then restores the range and reading position.
     Q_INVOKABLE bool openLocation(QVariantMap location);
 
-    Q_INVOKABLE void importUsfm(QUrl file);
+    // expectedId (Re-import) rejects a file of another edition before importing.
+    Q_INVOKABLE void importUsfm(QUrl file, QString expectedId = QString());
     Q_INVOKABLE bool switchVersion(QString id);
     Q_INVOKABLE bool removeVersion(QString id, bool removeAnnotations);
     Q_INVOKABLE void clearError();

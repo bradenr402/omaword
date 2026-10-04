@@ -2092,7 +2092,7 @@ QString BibleBackend::localPath(const QUrl &url)
     if (path.isEmpty() || !QFileInfo(path).isAbsolute()) { setError("Please choose an absolute local file path."); return {}; }
     return path;
 }
-void BibleBackend::importUsfm(QUrl file)
+void BibleBackend::importUsfm(QUrl file, QString expectedId)
 {
     if (sharedMutationBusy()) { setError("A shared library operation is already running."); return; }
     if (!m_storeReady || !m_store.isOpen()) { setError("Your notes database is unavailable. Check the data directory permissions."); return; }
@@ -2102,6 +2102,12 @@ void BibleBackend::importUsfm(QUrl file)
     QString error;
     const auto edition = UsfmImporter::inspectFile(path,&error);
     if (edition.id.isEmpty()) { setError(error); return; }
+    if (!expectedId.isEmpty() && edition.id != expectedId) {
+        QString expected = expectedId;
+        for (const auto &row : m_versions) if (row.toMap()["id"] == expectedId) expected = row.toMap()["name"].toString();
+        setError("That file is " + edition.name + ", not " + expected + ". Choose the USFM file for " + expected + " to re-import it.");
+        return;
+    }
     if (!flushDrafts()) return;
     clearError();
     m_busy = true; m_progress = 0;
