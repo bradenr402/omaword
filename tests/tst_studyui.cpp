@@ -333,6 +333,21 @@ private:
         QTRY_VERIFY(studyOpen());
     }
 private slots:
+    void studyOpensWithoutSelection() {
+        // A freshly opened chapter has no selection; Study studies its first verse.
+        for (int via = 0; via < 2; ++via) {
+            navigate("John 3"); QCOMPARE(bible->selectedStart(), 0);
+            if (via == 0) openStudy();
+            else {
+                auto control = object("relatedControl"); QVERIFY(control);
+                QVERIFY(control->property("enabled").toBool());
+                QVERIFY(QMetaObject::invokeMethod(control, "clicked"));
+                QTRY_VERIFY(studyOpen());
+            }
+            QCOMPARE(bible->selectedStart(), 1); QCOMPARE(bible->selectionReference(), QString("John 3:1"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        }
+    }
     void studyTabsAndKeys() {
         navigate("John 1:1");
         openStudy();

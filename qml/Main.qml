@@ -2672,7 +2672,8 @@ ApplicationWindow {
         if (!action || action.explanation || bible.busy) return false
         if (rangeEditing && !["newWindow", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)) return false
         if (action.id === "copyText") return bible.ready
-        if (["bookmark", "highlight", "tags", "related", "toggleDesk"].includes(action.id)) return hasSelection
+        if (action.id === "related") return bible.ready && bible.verses.length > 0
+        if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
         return bible.ready || !!action.setting
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
@@ -2921,7 +2922,15 @@ ApplicationWindow {
         case "highlight": markPassage(true); break
         case "tags": openPassageTags(); break
         case "manageTags": openTagsBrowser(true); break
-        case "related": if (leaveSidePanel("related")) tagsUi.openRelated(); break
+        case "related":
+            // Study needs a passage; after opening a chapter nothing is selected yet,
+            // so study the first verse, as entering Visual mode does.
+            if (!hasSelection && bible.ready && bible.verses.length) {
+                bible.selectVerses(bible.verses[0].number, bible.verses[0].number)
+                selectionAnchor = bible.cursorVerse
+            }
+            if (leaveSidePanel("related")) tagsUi.openRelated()
+            break
         case "history":
             if (!bible.historyEnabled) { openHistory(); break }
             if (leaveSidePanel("history")) openHistory()
@@ -4595,7 +4604,7 @@ ApplicationWindow {
             objectName: "relatedControl"
             glyph: "related"
             visible: floatingActions.expanded
-            enabled: !app.rangeEditing && app.hasSelection && !bible.busy && !app.modalOpen
+            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             tip: "Study · " + app.keyText("related")
             onClicked: app.runCommand("related")
         }
