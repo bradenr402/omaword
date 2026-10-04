@@ -50,6 +50,29 @@ private slots:
         QTest::qWait(SoundEffects::cooldownMs + 20);
         QVERIFY(sounds.play("tick"));
     }
+    void pageSoundsAndTestHook() {
+        SoundEffects sounds(nullptr, path(), false);
+        QVERIFY(SoundEffects::names().contains("pageTurn"));
+        QVERIFY(SoundEffects::names().contains("thunk"));
+        QSignalSpy played(&sounds, &SoundEffects::played);
+        QVERIFY(sounds.play("pageTurn"));
+        QCOMPARE(sounds.lastSound(), QString("pageTurn")); QCOMPARE(sounds.lastWeight(), 1.0);
+        QVERIFY(sounds.play("thunk", 0.4));
+        QCOMPARE(sounds.lastSound(), QString("thunk")); QCOMPARE(sounds.lastWeight(), 0.4);
+        // Weights clamp; requests inside the cooldown are still recorded.
+        QVERIFY(!sounds.play("thunk", 7));
+        QCOMPARE(sounds.lastWeight(), 1.0); QCOMPARE(sounds.playCount(), 3); QCOMPARE(played.count(), 3);
+        QTest::qWait(SoundEffects::cooldownMs + 20);
+        QVERIFY(sounds.play("thunk", 0)); QCOMPARE(sounds.lastWeight(), 0.05);
+        // Unknown cues and the sound toggle record nothing.
+        QVERIFY(!sounds.play("nonexistent")); QCOMPARE(sounds.lastSound(), QString("thunk"));
+        sounds.setEnabled(false);
+        QVERIFY(!sounds.play("pageTurn")); QCOMPARE(sounds.playCount(), 4);
+        // Silenced runs (bin/test) still record what would have played.
+        qputenv("OMAWORD_SOUND", "0");
+        SoundEffects silenced(nullptr, dir.filePath("other.ini"), false);
+        QVERIFY(!silenced.play("pageTurn")); QCOMPARE(silenced.lastSound(), QString("pageTurn"));
+    }
     void invokableFromMetaObject() {
         SoundEffects sounds(nullptr, path(), false);
         bool accepted = false;

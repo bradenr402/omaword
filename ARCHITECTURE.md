@@ -22,7 +22,7 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
 | `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing |
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC |
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
-| `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds + reduce-motion setting; key-repeat handling |
+| `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (incl. weighted `pageTurn`/`thunk`; `lastSound`/`lastWeight` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds; one weighted thunk on h/l release) |
 | `qml/Main.qml` | Reader, palettes, Notes, Annotations, Desk, settings, catalog, About |
 | `qml/TagsPanel.qml` | Tag picker/management (modal), Annotations Tags summary, Related drawer |
 | `qml/RangeEditor.qml` | Annotation range editing session |

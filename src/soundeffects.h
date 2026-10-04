@@ -18,6 +18,11 @@ class SoundEffects : public QObject {
     // every window with the sound preference; it lives here so one object owns
     // all persisted feedback preferences.
     Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY reduceMotionChanged)
+    // Test hook: the last cue requested while enabled (even when silenced or
+    // within its cooldown), its weight, and a running request count.
+    Q_PROPERTY(QString lastSound READ lastSound NOTIFY played)
+    Q_PROPERTY(double lastWeight READ lastWeight NOTIFY played)
+    Q_PROPERTY(int playCount READ playCount NOTIFY played)
 public:
     // settingsPath: optional INI file (tests); empty uses the application's QSettings.
     // audioOutput: false keeps all logic but never touches an audio device.
@@ -34,12 +39,18 @@ public:
     static QStringList names();
     static constexpr int cooldownMs = 50;
 
+    QString lastSound() const { return m_lastSound; }
+    double lastWeight() const { return m_lastWeight; }
+    int playCount() const { return m_playCount; }
+
     // Returns true when the cue was accepted (enabled, known, not silenced, past cooldown).
-    Q_INVOKABLE bool play(const QString &name);
+    // weight (0–1] scales loudness; page-turn "thunk"s grow with distance.
+    Q_INVOKABLE bool play(const QString &name, double weight = 1.0);
 
 signals:
     void enabledChanged();
     void reduceMotionChanged();
+    void played();
 
 private:
     bool ensureOutput();
@@ -49,6 +60,9 @@ private:
     bool m_silenced = false;
     bool m_audioOutput = true;
     bool m_outputFailed = false;
+    QString m_lastSound;
+    double m_lastWeight = 0;
+    int m_playCount = 0;
     QHash<QString, QByteArray> m_tones;
     QHash<QString, QElapsedTimer> m_lastPlayed;
     QAudioSink *m_sink = nullptr;

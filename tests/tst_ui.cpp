@@ -32,6 +32,7 @@
 #include "usfmimporter.h"
 #include "biblebooks.h"
 #include "versioncatalog.h"
+#include <cmath>
 #include <archive.h>
 #include <archive_entry.h>
 
@@ -6104,6 +6105,60 @@ private slots:
         QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         QVERIFY(std::abs(topOf(22) - 0.4 * reading->height()) < 8);
         key(Qt::Key_F); QTRY_VERIFY(!bible->focusMode());
+    }
+    void pageTurnSounds() {
+        reference("John 3");
+        QVERIFY(QMetaObject::invokeMethod(window,"readerFocus")); QCoreApplication::processEvents();
+        const double unit = callJs("thunkWeight",{1}).toDouble();
+        QCOMPARE(callJs("thunkWeight",{5}).toDouble(),std::min(1.0,0.3 + 0.2 * std::log2(5.0)));
+        QVERIFY(unit < callJs("thunkWeight",{5}).toDouble());
+        QCOMPARE(callJs("thunkWeight",{500}).toDouble(),1.0);
+        // Single steps turn one page.
+        int count = sounds->playCount();
+        key(Qt::Key_L); QCOMPARE(bible->chapter(),4);
+        QCOMPARE(sounds->lastSound(),QString("pageTurn")); QCOMPARE(sounds->playCount(),count + 1);
+        key(Qt::Key_H); QCOMPARE(bible->chapter(),3);
+        QCOMPARE(sounds->lastSound(),QString("pageTurn")); QCOMPARE(sounds->playCount(),count + 2);
+        // Counts thunk by distance.
+        type("5"); key(Qt::Key_L); QCOMPARE(bible->chapter(),8);
+        QCOMPARE(sounds->lastSound(),QString("thunk"));
+        QCOMPARE(sounds->lastWeight(),callJs("thunkWeight",{5}).toDouble());
+        type("20"); key(Qt::Key_H); QCOMPARE(bible->book(),40); QCOMPARE(bible->chapter(),24);
+        QCOMPARE(sounds->lastSound(),QString("thunk")); QCOMPARE(sounds->lastWeight(),1.0);
+        // Cross-chapter jumps thunk; same-chapter jumps make no page sound.
+        reference("John 3:16");
+        QCOMPARE(sounds->lastSound(),QString("thunk"));
+        QCOMPARE(sounds->lastWeight(),callJs("thunkWeight",{QVariant(callJs("chapterDistance",
+            {QVariantMap{{"book",40},{"chapter",24}},QVariantMap{{"book",43},{"chapter",3}}}))}).toDouble());
+        QCOMPARE(callJs("chapterDistance",{QVariantMap{{"book",40},{"chapter",24}},QVariantMap{{"book",43},{"chapter",3}}}).toInt(),15);
+        reference("John 3:20");
+        QCOMPARE(sounds->lastSound(),QString("tick"));
+        count = sounds->playCount();
+        key(Qt::Key_G); QCOMPARE(sounds->playCount(),count);
+        // Holding l: one page turn, silent repeats, one weighted thunk on release.
+        QVERIFY(QMetaObject::invokeMethod(window,"readerFocus")); QCoreApplication::processEvents();
+        QTest::keyPress(window,Qt::Key_L);
+        QCOMPARE(sounds->lastSound(),QString("pageTurn"));
+        const int pressed = sounds->playCount();
+        QTest::qWait(500);
+        QVERIFY2(bible->chapter() >= 6,qPrintable(QString::number(bible->chapter())));
+        QCOMPARE(sounds->playCount(),pressed);
+        QTest::keyRelease(window,Qt::Key_L);
+        const int passed = bible->chapter() - 3;
+        QCOMPARE(sounds->playCount(),pressed + 1);
+        QCOMPARE(sounds->lastSound(),QString("thunk"));
+        QCOMPARE(sounds->lastWeight(),callJs("thunkWeight",{passed}).toDouble());
+        // A tap is not a hold: no thunk after release.
+        const int held = bible->chapter();
+        key(Qt::Key_H);
+        QCOMPARE(bible->chapter(),held - 1);
+        QCOMPARE(sounds->lastSound(),QString("pageTurn"));
+        QTest::qWait(300); QCOMPARE(sounds->lastSound(),QString("pageTurn"));
+        // The sound toggle silences everything.
+        sounds->setEnabled(false); count = sounds->playCount();
+        key(Qt::Key_L); type("3"); key(Qt::Key_L);
+        QCOMPARE(sounds->playCount(),count);
+        sounds->setEnabled(true);
     }
 };
 

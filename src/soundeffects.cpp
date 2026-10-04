@@ -7,6 +7,7 @@
 #include <QMediaDevices>
 #include <QSettings>
 #include <QtMath>
+#include <cmath>
 #include <memory>
 
 namespace {
@@ -36,6 +37,42 @@ QByteArray synthesize(std::initializer_list<Note> notes)
     return pcm;
 }
 
+// A paper swish: deterministic noise through a one-pole low-pass whose
+// cutoff sweeps down, under a quick rise and a long fall.
+QByteArray synthesizeSwish(double ms, double gain, double startCutoff, double endCutoff)
+{
+    QByteArray pcm;
+    const int samples = int(sampleRate * ms / 1000.0);
+    quint32 seed = 0x9e3779b9u;
+    double low = 0, previous = 0;
+    for (int i = 0; i < samples; ++i) {
+        const double t = double(i) / samples;
+        seed = seed * 1664525u + 1013904223u;
+        const double noise = double(seed >> 8) / double(1u << 24) * 2.0 - 1.0;
+        const double cutoff = startCutoff + (endCutoff - startCutoff) * t;
+        const double alpha = 1.0 - qExp(-2 * M_PI * cutoff / sampleRate);
+        low += alpha * (noise - low);
+        // A first difference removes rumble and leaves a papery hiss.
+        const double band = low - previous * 0.6;
+        previous = low;
+        const double envelope = qMin(1.0, t / 0.18) * qPow(1.0 - t, 2.2);
+        const auto sample = qint16(qBound(-1.0, band * envelope * gain, 1.0) * 32767);
+        pcm.append(reinterpret_cast<const char *>(&sample), sizeof sample);
+    }
+    return pcm;
+}
+
+// Mixes b into a (same rate), extending a as needed.
+QByteArray mix(QByteArray a, const QByteArray &b)
+{
+    if (a.size() < b.size()) a.append(QByteArray(b.size() - a.size(), '\0'));
+    auto *out = reinterpret_cast<qint16 *>(a.data());
+    const auto *in = reinterpret_cast<const qint16 *>(b.constData());
+    for (qsizetype i = 0; i < b.size() / qsizetype(sizeof(qint16)); ++i)
+        out[i] = qint16(qBound(-32768, int(out[i]) + int(in[i]), 32767));
+    return a;
+}
+
 QSettings *openSettings(const QString &path)
 {
     return path.isEmpty() ? new QSettings : new QSettings(path, QSettings::IniFormat);
@@ -57,6 +94,9 @@ SoundEffects::SoundEffects(QObject *parent, const QString &settingsPath, bool au
     m_tones.insert(QStringLiteral("chime"), synthesize({{880, 880, 70, 0.09}, {1320, 1320, 110, 0.08}}));
     m_tones.insert(QStringLiteral("remove"), synthesize({{740, 520, 110, 0.10}}));
     m_tones.insert(QStringLiteral("error"), synthesize({{170, 110, 90, 0.20}}));
+    // A single page turned (h/l), and the thunk of many pages landing at once.
+    m_tones.insert(QStringLiteral("pageTurn"), synthesizeSwish(150, 0.9, 5200, 1400));
+    m_tones.insert(QStringLiteral("thunk"), mix(synthesize({{140, 62, 120, 0.42}}), synthesizeSwish(45, 0.7, 2600, 500)));
 }
 
 SoundEffects::~SoundEffects()
@@ -66,7 +106,8 @@ SoundEffects::~SoundEffects()
 
 QStringList SoundEffects::names()
 {
-    return {QStringLiteral("tick"), QStringLiteral("boundary"), QStringLiteral("chime"), QStringLiteral("remove"), QStringLiteral("error")};
+    return {QStringLiteral("tick"), QStringLiteral("boundary"), QStringLiteral("chime"), QStringLiteral("remove"),
+            QStringLiteral("error"), QStringLiteral("pageTurn"), QStringLiteral("thunk")};
 }
 
 void SoundEffects::setEnabled(bool enabled)
@@ -106,11 +147,15 @@ bool SoundEffects::ensureOutput()
     return true;
 }
 
-bool SoundEffects::play(const QString &name)
+bool SoundEffects::play(const QString &name, double weight)
 {
-    if (!m_enabled || m_silenced) return false;
+    if (!m_enabled) return false;
     const auto tone = m_tones.constFind(name);
     if (tone == m_tones.cend()) return false;
+    weight = std::isfinite(weight) ? qBound(0.05, weight, 1.0) : 1.0;
+    m_lastSound = name; m_lastWeight = weight; ++m_playCount;
+    emit played();
+    if (m_silenced) return false;
     QElapsedTimer &last = m_lastPlayed[name];
     if (last.isValid() && last.elapsed() < cooldownMs) return false;
     last.start();
@@ -118,7 +163,12 @@ bool SoundEffects::play(const QString &name)
     // A new cue replaces any cue still sounding; QAudioSink pulls asynchronously.
     m_sink->stop();
     m_buffer->close();
-    m_buffer->setData(*tone);
+    QByteArray pcm = *tone;
+    if (weight < 1.0) {
+        auto *samples = reinterpret_cast<qint16 *>(pcm.data());
+        for (qsizetype i = 0; i < pcm.size() / qsizetype(sizeof(qint16)); ++i) samples[i] = qint16(samples[i] * weight);
+    }
+    m_buffer->setData(pcm);
     m_buffer->open(QIODevice::ReadOnly);
     m_sink->start(m_buffer);
     if (m_sink->error() != QAudio::NoError) { m_sink->stop(); m_outputFailed = true; delete m_sink; m_sink = nullptr; }

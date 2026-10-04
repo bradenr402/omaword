@@ -1246,19 +1246,57 @@ ApplicationWindow {
     // Holding a verse motion repeats it immediately after a brief tap window,
     // instead of waiting for the platform's (often ~600 ms) repeat delay.
     readonly property var heldKeys: ({ nextVerse: [Qt.Key_J, Qt.Key_Down], previousVerse: [Qt.Key_K, Qt.Key_Up],
-        extendNext: [Qt.Key_J, Qt.Key_Down], extendPrevious: [Qt.Key_K, Qt.Key_Up] })
+        extendNext: [Qt.Key_J, Qt.Key_Down], extendPrevious: [Qt.Key_K, Qt.Key_Up],
+        previousChapter: [Qt.Key_H, Qt.Key_Left], nextChapter: [Qt.Key_L, Qt.Key_Right] })
+    readonly property var chapterActions: ["previousChapter", "nextChapter"]
     property string holdAction: ""
     property int holdKey: 0
+    // Chapters passed while h/l is held; they land with one thunk on release.
+    property bool holdRepeating: false
+    property bool holdRepeated: false
+    property int holdChapters: 0
+    property int lastChapterMoved: 0
+    property real holdStartedAt: 0
     function beginHold(action) {
         const keys = heldKeys[action]
         if (!keys) return
         const key = keys.find(function(candidate) { return keyHold.isDown(candidate) })
         if (key === undefined) return
         holdAction = action; holdKey = key
+        holdStartedAt = Date.now()
+        holdRepeated = false
+        holdChapters = chapterActions.includes(action) ? lastChapterMoved : 0
         holdTimer.interval = 150
         holdTimer.restart()
     }
-    function endHold() { holdTimer.stop(); holdAction = ""; holdKey = 0 }
+    function endHold() {
+        holdTimer.stop()
+        if (holdRepeated && chapterActions.includes(holdAction)) pageSound(holdChapters, false)
+        holdAction = ""; holdKey = 0; holdRepeated = false; holdChapters = 0
+    }
+    // Page-turn sounds: one chapter step turns a page; counts, held keys (on
+    // release) and cross-chapter jumps land with a thunk weighted by distance.
+    function thunkWeight(chapters) { return Math.min(1, 0.3 + 0.2 * Math.log2(Math.max(1, chapters))) }
+    function pageSound(chapters, single) {
+        if (chapters <= 0) return
+        if (single) sounds.play("pageTurn")
+        else sounds.play("thunk", thunkWeight(chapters))
+    }
+    function chapterOrdinal(book, chapter) {
+        let index = 0
+        for (const entry of Array.from(bible.books)) {
+            const at = Array.from(entry.chapterNumbers).indexOf(chapter)
+            if (entry.id === book) return at < 0 ? -1 : index + at
+            index += entry.chapterNumbers.length
+        }
+        return -1
+    }
+    function chapterDistance(from, to) {
+        if (!from || !to || (from.book === to.book && from.chapter === to.chapter)) return 0
+        const a = chapterOrdinal(from.book, from.chapter), z = chapterOrdinal(to.book, to.chapter)
+        return a < 0 || z < 0 ? 1 : Math.abs(z - a)
+    }
+    function jumpSound(from, to) { pageSound(chapterDistance(from, to), false) }
     // qmllint disable import
     KeyHold { id: keyHold; onReleased: function(key) { if (key === app.holdKey) app.endHold() } }
     // qmllint enable import
@@ -1267,8 +1305,14 @@ ApplicationWindow {
         repeat: true
         onTriggered: {
             if (!app.active || !app.readerKeys || !keyHold.isDown(app.holdKey)) { app.endHold(); return }
-            interval = 33
+            // The animation-driven Timer can fire early after a long frame
+            // (a heavy chapter render): a tap must never repeat.
+            if (!app.holdRepeated && Date.now() - app.holdStartedAt < 140) return
+            interval = app.chapterActions.includes(app.holdAction) ? 80 : 33
+            app.holdRepeating = true
+            app.holdRepeated = true
             app.runCommand(app.holdAction)
+            app.holdRepeating = false
         }
     }
     onActiveChanged: if (!active) endHold()
@@ -1339,9 +1383,14 @@ ApplicationWindow {
         }
         let current = chapters.findIndex(function(entry) { return entry.book === bible.book && entry.chapter === bible.chapter })
         let target = Math.max(0, Math.min(chapters.length - 1, current + delta))
+        let moved = 0
         if (current >= 0 && target !== current) {
             bible.openChapter(chapters[target].book, chapters[target].chapter)
+            moved = Math.abs(target - current)
         }
+        if (holdRepeating) holdChapters += moved
+        else pageSound(moved, Math.abs(delta) === 1)
+        lastChapterMoved = moved
         readerFocus()
     }
     function jump(reference) {
@@ -1600,6 +1649,7 @@ ApplicationWindow {
         jumpStack = stack
         jumpIndex = stack.length - 1
         jumpPrevious = jumpIndex - 1
+        jumpSound(from, to)
         restartDwell()
     }
     function restartDwell() {
@@ -1638,6 +1688,7 @@ ApplicationWindow {
         const here = locationNow()
         if (here) stack[jumpIndex] = here
         if (!openLocation(stack[target])) return false
+        jumpSound(here, stack[target])
         jumpStack = stack
         jumpPrevious = jumpIndex
         jumpIndex = target

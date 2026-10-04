@@ -177,7 +177,7 @@ These also work, but stay out of the in-app list:
 
 <!-- shortcuts:end -->
 
-**Disable animations** (`alt m`) turns off pulses, flashes, fades, and slides; **Disable sound effects** (`alt s`) silences the subtle sounds. Both are also in Commands and apply to all windows.
+Moving to a verse slides the reader briefly; in focus mode the cursor verse stays 40% down the window, like a typewriter. Turning one chapter (`h`/`l`) sounds like a page turn; counts, held keys (on release), and jumps land with a thunk that grows with the distance. **Disable animations** (`alt m`) turns off pulses, flashes, fades, and slides; **Disable sound effects** (`alt s`) silences the sounds. Both are also in Commands and apply to all windows.
 
 `[` and `]` step back and forward through the passages you jumped to in this window, and `-` swaps with the previous one. History (`shift H`) lists passages you stayed on for a few seconds, shared by every window; it never goes into backups, and Commands can clear or disable it.
 
