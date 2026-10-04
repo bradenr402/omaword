@@ -49,6 +49,8 @@ class BibleBackend : public QObject
     Q_PROPERTY(bool versePicker READ versePicker WRITE setVersePicker NOTIFY preferencesChanged)
     Q_PROPERTY(double lineHeight READ lineHeight WRITE setLineHeight NOTIFY preferencesChanged)
     Q_PROPERTY(bool focusMode READ focusMode WRITE setFocusMode NOTIFY preferencesChanged)
+    // Color \wj spans (format only); off by default, a shared preference.
+    Q_PROPERTY(bool wordsOfJesus READ wordsOfJesus WRITE setWordsOfJesus NOTIFY preferencesChanged)
     Q_PROPERTY(bool blockMode READ blockMode WRITE setBlockMode NOTIFY preferencesChanged)
     Q_PROPERTY(QString readingMode READ readingMode WRITE setReadingMode NOTIFY preferencesChanged)
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
@@ -149,6 +151,7 @@ public:
     bool versePicker() const { return m_versePicker; }
     double lineHeight() const { return m_lineHeight; }
     bool focusMode() const { return m_focusMode; }
+    bool wordsOfJesus() const { return m_wordsOfJesus; }
     // Compatibility setter: true -> block, false -> verse. Default paragraph
     // mode also reports false; callers should use readingMode for three states.
     bool blockMode() const { return m_readingMode == "block"; }
@@ -182,6 +185,7 @@ public:
     Q_INVOKABLE void setVersePicker(bool value);
     Q_INVOKABLE void setLineHeight(double value);
     Q_INVOKABLE void setFocusMode(bool value);
+    Q_INVOKABLE void setWordsOfJesus(bool value);
     Q_INVOKABLE void setBlockMode(bool value);
     Q_INVOKABLE void setReadingMode(QString value);
     Q_INVOKABLE void setFontSize(int value);
@@ -415,7 +419,7 @@ private:
     int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0;
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
-    bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false;
+    bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false, m_wordsOfJesus = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;
     bool m_hasParagraphs = false, m_hasWordsOfJesus = false;

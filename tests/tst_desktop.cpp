@@ -1,6 +1,7 @@
 #include <QTest>
 #include "desktop.h"
 
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFont>
@@ -120,6 +121,34 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(desktop.cornerRadius(), 9.0, 2000);
     }
 
+    void paletteColor1() {
+        // color1 comes from the Omarchy palette; without it, the accent.
+        const QString theme = m_dir.filePath("omarchy/current/theme");
+        QVERIFY(QDir().mkpath(theme));
+        QFile file(theme + "/colors.toml");
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write("accent = \"#112233\"\nbackground = \"#000000\"\nforeground = \"#ffffff\"\ncolor1 = \"#cc4455\"\n");
+        file.close();
+        {
+            Desktop desktop(nullptr, command());
+            QCOMPARE(desktop.property("color1").value<QColor>(), QColor("#cc4455"));
+        }
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write("accent = \"#112233\"\nred = \"#ed5b5a\"\n");
+        file.close();
+        {
+            Desktop desktop(nullptr, command());
+            QCOMPARE(desktop.property("color1").value<QColor>(), QColor("#ed5b5a"));
+        }
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write("accent = \"#112233\"\nbackground = \"#000000\"\n");
+        file.close();
+        {
+            Desktop desktop(nullptr, command());
+            QCOMPARE(desktop.property("color1").value<QColor>(), QColor("#112233"));
+        }
+        QVERIFY(QFile::remove(file.fileName()));
+    }
     void nonzeroExit() {
         Desktop desktop(nullptr, command());
         QTRY_COMPARE(desktop.cornerRadius(), 11.0);

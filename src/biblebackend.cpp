@@ -1564,6 +1564,7 @@ bool BibleBackend::loadPreferences()
     m_showHeadings = boolean("showHeadings",true);
     m_versePicker = boolean("versePicker",true);
     m_focusMode = boolean("focusMode",false);
+    m_wordsOfJesus = boolean("wordsOfJesus",false);
     m_historyEnabled = boolean("historyEnabled",true);
     const QString mode = values.value("readingMode").toString();
     m_readingMode = mode == "block" || mode == "verse" ? mode : "paragraph";
@@ -1613,6 +1614,11 @@ void BibleBackend::setFocusMode(bool value)
 {
     if (value == m_focusMode || !savePreference("focusMode",int(value))) return;
     m_focusMode = value; emit preferencesChanged();
+}
+void BibleBackend::setWordsOfJesus(bool value)
+{
+    if (value == m_wordsOfJesus || !savePreference("wordsOfJesus",int(value))) return;
+    m_wordsOfJesus = value; emit preferencesChanged();
 }
 void BibleBackend::setBlockMode(bool value)
 {

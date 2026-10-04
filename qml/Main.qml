@@ -991,6 +991,13 @@ ApplicationWindow {
     }
 
     function tint(color, alpha) { return Qt.rgba(color.r, color.g, color.b, alpha) }
+    // Words of Jesus: the importer marks \wj as <span class="wj">. Coloring only
+    // swaps that span's style, so glyphs, layout, offsets, and copy never change.
+    readonly property string wordsOfJesusColor: bible.wordsOfJesus ? String(desktop.color1) : ""
+    function verseHtml(html) {
+        if (!wordsOfJesusColor || !html || html.indexOf('<span class="wj">') < 0) return html
+        return html.split('<span class="wj">').join('<span class="wj" style="color:' + wordsOfJesusColor + '">')
+    }
     function tagsPlainText(tags) { return Array.from(tags || []).map(function(t) { return t.name }).join(", ") }
     component TagGlyph: AnnotationGlyph {
         kind: "tag"
@@ -2249,6 +2256,7 @@ ApplicationWindow {
         { id: "numbers", group: "Reading", title: "Show verse numbers", sequences: ["Alt+N"], setting: "showVerseNumbers", command: true },
         { id: "headings", group: "Reading", title: "Show headings", sequences: ["Alt+H"], setting: "showHeadings", command: true },
         { id: "versePicker", group: "Reading", title: "Verse picker", sequences: ["Alt+P"], setting: "versePicker", command: true },
+        { id: "wordsOfJesus", group: "Reading", title: "Highlight words of Jesus", sequences: ["Alt+J"], setting: "wordsOfJesus", command: true },
         { id: "readingMode", group: "Reading", title: "Reading mode", sequences: ["Alt+L"], command: true },
         { id: "soundEffects", group: "Reading", title: "Sound effects", sequences: ["Alt+S"], scope: "global", command: true },
         { id: "reduceMotion", group: "Reading", title: "Animations", sequences: ["Alt+M"], scope: "global", command: true },
@@ -2559,6 +2567,7 @@ ApplicationWindow {
         case "numbers": bible.setShowVerseNumbers(!bible.showVerseNumbers); break
         case "headings": bible.setShowHeadings(!bible.showHeadings); break
         case "versePicker": bible.setVersePicker(!bible.versePicker); break
+        case "wordsOfJesus": bible.setWordsOfJesus(!bible.wordsOfJesus); break
         case "readingMode": {
             const modes = ["paragraph", "verse", "block"]
             const previousMode = bible.readingMode
@@ -3482,7 +3491,7 @@ ApplicationWindow {
                                     width: parent.width - x - 9
                                     height: contentHeight
                                     text: '<div style="line-height:' + (bible.lineHeight * 100) + '%">'
-                                        + (verseRow.modelData.html || verseRow.modelData.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
+                                        + (app.verseHtml(verseRow.modelData.html) || verseRow.modelData.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
                                     textFormat: Text.RichText
                                     horizontalAlignment: TextEdit.AlignLeft
                                     font.family: desktop.fontFamily
@@ -5480,6 +5489,15 @@ ApplicationWindow {
                     catalogAction: modelData
                     Layout.fillWidth: true
                 }
+            }
+            Label {
+                objectName: "wordsOfJesusUnmarked"
+                visible: bible.ready && !bible.hasWordsOfJesus
+                text: "Words of Jesus are not marked in this version" + (bible.textSchema > 0 && bible.textSchema < 4 ? " (re-import it in Versions to check)." : ".")
+                color: desktop.muted
+                font.pixelSize: 12 * app.scale
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
             }
             RowLayout {
                 Layout.fillWidth: true

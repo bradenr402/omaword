@@ -3,7 +3,7 @@ set -euo pipefail
 
 root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 usage() {
-    printf 'Usage: bin/test [--suite backend|ui|search|searchui|deskui|historyui|motion|contextmenu|searchrender|tags|tagsui|ranges|rangesui|sound|desktop|importer|catalog|annotations|instance|windows|all] [Qt test arguments]\n'
+    printf 'Usage: bin/test [--suite backend|ui|search|searchui|deskui|historyui|studyui|motion|contextmenu|searchrender|tags|tagsui|ranges|rangesui|sound|desktop|importer|catalog|annotations|instance|windows|all] [Qt test arguments]\n'
     printf 'Repeat --suite to select multiple suites; Qt arguments require one suite.\n'
     printf 'JOBS caps total build jobs; TEST_JOBS caps concurrent suites (default 2).\n'
 }
@@ -21,14 +21,14 @@ while (( $# )); do
     esac
 done
 (( ${#suites[@]} )) || suites=(all)
-available=(backend ui search searchui deskui historyui motion contextmenu searchrender tags tagsui ranges rangesui sound desktop importer catalog annotations instance)
+available=(backend ui search searchui deskui historyui studyui motion contextmenu searchrender tags tagsui ranges rangesui sound desktop importer catalog annotations instance)
 [[ ! -f $root/tests/windows.pro ]] || available+=(windows)
 selected=()
 declare -A seen=()
 for suite in "${suites[@]}"; do
     case $suite in
         all) expanded=("${available[@]}") ;;
-        backend|ui|search|searchui|deskui|historyui|motion|contextmenu|searchrender|tags|tagsui|ranges|rangesui|sound|desktop|importer|catalog|annotations|instance|windows) expanded=("$suite") ;;
+        backend|ui|search|searchui|deskui|historyui|studyui|motion|contextmenu|searchrender|tags|tagsui|ranges|rangesui|sound|desktop|importer|catalog|annotations|instance|windows) expanded=("$suite") ;;
         *) printf 'Unknown suite: %s\n' "$suite" >&2; usage >&2; exit 1 ;;
     esac
     for name in "${expanded[@]}"; do
@@ -40,9 +40,9 @@ if (( $# && ${#selected[@]} != 1 )); then
     exit 1
 fi
 declare -A projects=([backend]=backend [ui]=ui [importer]=usfm [catalog]=catalog
-    [annotations]=blockannotations [instance]=singleinstance [windows]=windows [tags]=tags [tagsui]=tagsui [ranges]=ranges [rangesui]=rangesui [sound]=sound [desktop]=desktop [search]=search [searchui]=searchui [deskui]=deskui [historyui]=historyui [motion]=motion [contextmenu]=contextmenu [searchrender]=searchrender)
+    [annotations]=blockannotations [instance]=singleinstance [windows]=windows [tags]=tags [tagsui]=tagsui [ranges]=ranges [rangesui]=rangesui [sound]=sound [desktop]=desktop [search]=search [searchui]=searchui [deskui]=deskui [historyui]=historyui [studyui]=studyui [motion]=motion [contextmenu]=contextmenu [searchrender]=searchrender)
 declare -A directories=([backend]=tests [ui]=ui-tests [importer]=usfm-tests [catalog]=catalog-tests
-    [annotations]=blockannotations [instance]=singleinstance-tests [windows]=windows-tests [tags]=tags-tests [tagsui]=tagsui-tests [ranges]=ranges-tests [rangesui]=rangesui-tests [sound]=sound-tests [desktop]=desktop-tests [search]=search-tests [searchui]=searchui-tests [deskui]=deskui-tests [historyui]=historyui-tests [motion]=motion-tests [contextmenu]=contextmenu-tests [searchrender]=searchrender-tests)
+    [annotations]=blockannotations [instance]=singleinstance-tests [windows]=windows-tests [tags]=tags-tests [tagsui]=tagsui-tests [ranges]=ranges-tests [rangesui]=rangesui-tests [sound]=sound-tests [desktop]=desktop-tests [search]=search-tests [searchui]=searchui-tests [deskui]=deskui-tests [historyui]=historyui-tests [studyui]=studyui-tests [motion]=motion-tests [contextmenu]=contextmenu-tests [searchrender]=searchrender-tests)
 for suite in "${selected[@]}"; do
     if [[ ! -f $root/tests/${projects[$suite]}.pro ]]; then
         printf 'Suite project is unavailable: %s\n' "$root/tests/${projects[$suite]}.pro" >&2

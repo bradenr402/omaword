@@ -56,17 +56,26 @@ Item {
     }
     readonly property bool numbers: backend.showVerseNumbers && !backend.focusMode
     readonly property bool headings: backend.showHeadings && !backend.focusMode
+    // Display copies of the verses: words of Jesus colored (format only).
+    function displayVerses() {
+        if (!controller.verseHtml) return backend.verses
+        return Array.from(backend.verses).map(function(v) {
+            const html = controller.verseHtml(v.html)
+            if (html === v.html) return v
+            const copy = Object.assign({}, v); copy.html = html; return copy
+        })
+    }
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart,
             bookmarkRanges: v.bookmarkRanges, noteRanges: v.noteRanges, tagRanges: v.tagRanges }
-    })) + numbers + headings + backend.lineHeight + mode + backend.focusMode + controller.readerSize + root.readerScale + controller.scale
+    })) + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + backend.focusMode + controller.readerSize + root.readerScale + controller.scale
     height: body.height
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
     function rebuild() {
         if (destroying) return
         controller.clearTextSelection()
         cancelDrag()
-        document.build(body.textDocument, backend.verses, numbers, headings, backend.lineHeight, mode,
+        document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode,
                        !backend.focusMode, controller.readerSize * root.readerScale)
         geometryTimer.restart()
     }

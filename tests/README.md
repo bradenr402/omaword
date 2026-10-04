@@ -25,6 +25,7 @@ suite reports status/timing; full output goes to `build/test-logs/<selector>.log
 | `searchui` | `tests/searchui.pro` | `build/searchui-tests/` | `tst_searchui` |
 | `deskui` | `tests/deskui.pro` | `build/deskui-tests/` | `tst_deskui` |
 | `historyui` | `tests/historyui.pro` | `build/historyui-tests/` | `tst_historyui` |
+| `studyui` | `tests/studyui.pro` | `build/studyui-tests/` | `tst_studyui` |
 | `motion` | `tests/motion.pro` | `build/motion-tests/` | `tst_motion` |
 | `contextmenu` | `tests/contextmenu.pro` | `build/contextmenu-tests/` | `tst_contextmenu` |
 | `searchrender` | `tests/searchrender.pro` | `build/searchrender-tests/` | `tst_searchrender` |
@@ -79,6 +80,7 @@ a fake `hyprctl` and temporary theme state.
 - **searchui**: palette and chapter-find keyboard behavior.
 - **searchrender**: rendered match offsets/geometry across layouts.
 - **deskui**: Desk add/remove, panel, peers, version removal.
+- **studyui**: words-of-Jesus coloring, Re-import offers, Study panel tabs (Related, Cross-references, Footnotes), reader footnote markers.
 - **historyui**: jump stack (`[` `]` `-`), dwell recording, History panel, footer button, palette recents, two windows.
 - **motion**: focus dimming, jump pulses, copy flashes, held-key repeat, reduce motion.
 - **contextmenu**: shared context menu items, keyboard navigation, actions.

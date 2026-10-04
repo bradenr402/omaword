@@ -125,6 +125,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt n`: Show verse numbers
 - `alt h`: Show headings
 - `alt p`: Verse picker
+- `alt j`: Highlight words of Jesus
 - `alt l`: Reading mode
 - `alt s`: Sound effects
 - `alt m`: Animations
