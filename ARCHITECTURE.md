@@ -24,7 +24,7 @@ seven-entry `resources/catalog.json`, and `resources/crossrefs.bin`. `branding.e
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (incl. weighted `pageTurn`/`thunk`; `lastSound`/`lastWeight` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds; one weighted thunk on h/l release) |
 | `qml/Main.qml` | Reader, palettes, Notes, Annotations, Desk, settings, catalog, About |
-| `qml/TagsPanel.qml` | Tag picker/management (modal), Annotations Tags summary, Related drawer |
+| `qml/TagsPanel.qml` | Tag picker/management (modal), Annotations Tags summary, Study drawer (tabs Related / Cross-references / Footnotes; `relatedDrawer` objectName and `related` action id kept) |
 | `qml/RangeEditor.qml` | Annotation range editing session |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths |
 | `qml/AppContextMenu.qml`, `qml/AppToolTip.qml` | Shared context menu and themed tooltip |

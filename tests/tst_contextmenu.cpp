@@ -229,7 +229,7 @@ private slots:
         QCOMPARE(ids(), passageIds);
         QVERIFY(prop("modalOpen").toBool()); QVERIFY(!prop("readerKeys").toBool());
         const QHash<QString, QString> shortcuts = {{"copy", "y"}, {"copyPlain", "shift Y"}, {"bookmark", "m"}, {"highlight", "x"},
-            {"note", "w"}, {"tags", "t"}, {"desk", "d"}, {"related", "shift L"}, {"chapterFind", "/"}};
+            {"note", "w"}, {"tags", "t"}, {"desk", "d"}, {"related", "shift S"}, {"chapterFind", "/"}};
         for (auto it = shortcuts.cbegin(); it != shortcuts.cend(); ++it) {
             QCOMPARE(entry(it.key()).value("shortcut").toString(), it.value());
             auto label = item("contextMenuShortcut:" + it.key());

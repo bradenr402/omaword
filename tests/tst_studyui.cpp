@@ -319,6 +319,86 @@ private slots:
         QCOMPARE(bible->textSchema(), 4); QVERIFY(bible->hasWordsOfJesus());
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
     }
+private:
+    bool studyOpen() const { return object("relatedDrawer")->property("opened").toBool(); }
+    QObject *panel() const {
+        for (auto *obj : window->findChildren<QObject *>()) if (obj->property("studyTabs").isValid()) return obj;
+        return nullptr;
+    }
+    QString tab() const { return panel()->property("studyTab").toString(); }
+    int studyIndex() const { return object("studyList")->property("currentIndex").toInt(); }
+    QVariantList rows() const { return value(panel()->property("studyRows")).toList(); }
+    void openStudy() {
+        call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier);
+        QTRY_VERIFY(studyOpen());
+    }
+private slots:
+    void studyTabsAndKeys() {
+        navigate("John 1:1");
+        openStudy();
+        QCOMPARE(object("tagsTitle")->property("text").toString(), QString("Study"));
+        QCOMPARE(tab(), QString("related"));
+        for (int i = 0; i < 3; ++i) QVERIFY(item("studyTab" + QString::number(i))->isVisible());
+        // → and l step forward, ← and h back, wrapping like Annotations.
+        key(Qt::Key_Right); QCOMPARE(tab(), QString("crossrefs"));
+        QTRY_VERIFY(item("studyList")->hasActiveFocus());
+        key(Qt::Key_L); QCOMPARE(tab(), QString("footnotes"));
+        key(Qt::Key_Right); QCOMPARE(tab(), QString("related"));
+        key(Qt::Key_Left); QCOMPARE(tab(), QString("footnotes"));
+        key(Qt::Key_H); QCOMPARE(tab(), QString("crossrefs"));
+        // Cross references: OpenBible votes, merged with the source's \\x targets.
+        QStringList references;
+        for (const auto &row : rows()) references << row.toMap()["reference"].toString();
+        QCOMPARE(references, QStringList({"Genesis 1:1", "John 1:14", "John 1:2", "Matthew 1:23", "John 1:18", "Matthew 1:2\u20133"}));
+        QVERIFY(rows()[0].toMap()["source"].toBool()); QVERIFY(rows()[5].toMap()["source"].toBool());
+        QVERIFY(!item("tagSearch")->isVisible()); QVERIFY(!item("tagResults")->isVisible());
+        // Shared list keys and motions.
+        QCOMPARE(studyIndex(), 0);
+        key(Qt::Key_J); QCOMPARE(studyIndex(), 1);
+        key(Qt::Key_Down); QCOMPARE(studyIndex(), 2);
+        key(Qt::Key_K); QCOMPARE(studyIndex(), 1);
+        key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(studyIndex(), 5);
+        key(Qt::Key_G); QCOMPARE(studyIndex(), 0);
+        key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(studyIndex(), 5);
+        key(Qt::Key_U, Qt::ControlModifier); QCOMPARE(studyIndex(), 0);
+        key(Qt::Key_J);
+        QApplication::clipboard()->clear();
+        key(Qt::Key_Y);
+        QTRY_VERIFY(QApplication::clipboard()->text().contains("John 1:14"));
+        const int desk = bible->desk().size();
+        key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(), desk + 1);
+        QCOMPARE(bible->desk().last().toMap()["reference"].toString(), QString("John 1:14"));
+        // Enter opens the row as a History jump and keeps Study open on its pinned source.
+        const int jumps = prop("jumpStack").toList().size();
+        key(Qt::Key_Return);
+        QTRY_COMPARE(bible->selectionReference(), QString("John 1:14"));
+        QVERIFY(prop("jumpStack").toList().size() > jumps);
+        QVERIFY(studyOpen()); QCOMPARE(tab(), QString("crossrefs")); QCOMPARE(rows().size(), 6);
+        // Footnotes: the chapter's notes; the cursor verse's notes are marked.
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        navigate("John 3:16");
+        openStudy();
+        QCOMPARE(tab(), QString("crossrefs")); // The last tab is remembered.
+        key(Qt::Key_Right); QCOMPARE(tab(), QString("footnotes"));
+        QCOMPARE(rows().size(), 3);
+        QCOMPARE(studyIndex(), 1); // First note of the cursor verse.
+        QCOMPARE(rows()[1].toMap()["text"].toString(), QString("Greek agapao"));
+        QTRY_VERIFY(item("studyRow:1")->property("atCursor").toBool());
+        QVERIFY(item("studyRow:2")->property("atCursor").toBool());
+        QVERIFY(!item("studyRow:0")->property("atCursor").toBool());
+        key(Qt::Key_K); QCOMPARE(studyIndex(), 0);
+        key(Qt::Key_Return);
+        QTRY_COMPARE(bible->selectionReference(), QString("John 3:3"));
+        QTRY_VERIFY(item("studyRow:0")->property("atCursor").toBool());
+        QVERIFY(studyOpen());
+        // Related keeps its tag search; / is inert on the other tabs.
+        key(Qt::Key_Slash); QVERIFY(!item("tagSearch")->hasActiveFocus());
+        key(Qt::Key_Right); QCOMPARE(tab(), QString("related"));
+        QVERIFY(item("tagSearch")->isVisible());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        // shift L no longer opens the panel.
+        call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTest::qWait(100); QVERIFY(!studyOpen());
+    }
 };
 int main(int argc, char **argv) {
     QQuickStyle::setStyle("Basic"); QApplication app(argc, argv);

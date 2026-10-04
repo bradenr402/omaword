@@ -474,7 +474,7 @@ private slots:
         QTRY_VERIFY(object("historyDrawer")->property("opened").toBool());
         key(Qt::Key_Escape); QVERIFY(object("historyDrawer")->property("visible").toBool());
         QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
-        call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier);
+        call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier);
         QTRY_VERIFY(object("relatedDrawer")->property("visible").toBool());
         QVERIFY(object("relatedDrawer")->property("position").toDouble() < 1.0);
         QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());

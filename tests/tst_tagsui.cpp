@@ -524,7 +524,7 @@ ApplicationWindow {
         QCOMPARE(prop("filterIds").toList(), QVariantList{a});
         QCOMPARE(rows().size(), 1);
         QCOMPARE(rows().first().toMap()["versionId"], source["versionId"]);
-        QCOMPARE(item("tagsTitle")->property("text").toString(), QString("Related"));
+        QCOMPARE(item("tagsTitle")->property("text").toString(), QString("Study"));
         QCOMPARE(item("tagsTitle")->property("font").value<QFont>().pixelSize(), 25);
         QCOMPARE(item("relatedSourceLabel")->property("text").toString(), source["reference"].toString() + " · NET");
         QCOMPARE(item("tagUseCurrent")->property("text").toString(), QString("Find related to current passage"));

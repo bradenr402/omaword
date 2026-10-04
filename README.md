@@ -105,7 +105,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 - `shift A`: Annotations panel
 - `shift D`: Open Desk
-- `shift L`: Related passages
+- `shift S`: Study panel
 - `shift H`: History
 
 ### Palettes and windows
@@ -153,7 +153,9 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `d`: Add item to Desk, or remove it
 - `shift E`: Edit item's annotation range
 - `delete` · `backspace`: Remove item
-- `/`: Search the list (Annotations, Related)
+- `/`: Search the list (Annotations, Study's Related)
+- `h` · `←`: Previous tab (Annotations, Study)
+- `l` · `→`: Next tab (Annotations, Study)
 - `shift delete` · `shift backspace`: Clean Desk
 - `shift delete` · `shift backspace`: Clear History
 

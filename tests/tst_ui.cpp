@@ -1503,13 +1503,14 @@ private slots:
         }
         // Use executable panel rows for the dispatch check; their order/height
         // can change independently of the full-catalog geometry checks above.
+        bible->selectVerses(1,1); // Study needs a selection to be executable.
         type("panel");
         key(Qt::Key_Home); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
         key(Qt::Key_PageDown);
         QVERIFY(current()->isEnabled());
         const auto selectedAction = current()->property("modelData").toMap().value("id").toString();
         // The paged row is also the executable choice when focus stays in search.
-        const QHash<QString,const char *> panels = {{"annotations","savedDrawer"},{"toggleNotes","notesDrawer"}};
+        const QHash<QString,const char *> panels = {{"annotations","savedDrawer"},{"toggleNotes","notesDrawer"},{"related","relatedDrawer"}};
         QVERIFY(panels.contains(selectedAction));
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("helpDialog","visible").toBool());
@@ -2172,7 +2173,7 @@ private slots:
         QVERIFY(!item("tagSearch")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_H,Qt::AltModifier); QVERIFY(!bible->showHeadings());
-        key(Qt::Key_L,Qt::ShiftModifier);
+        key(Qt::Key_S, Qt::ShiftModifier);
         QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
         QCOMPARE(prop("tagsUi","page").toString(),QString("related"));
         QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
@@ -4159,7 +4160,7 @@ private slots:
         reference("John 3:17");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Love").isEmpty());
         reference("John 3:16");
-        key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
         QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         QVERIFY(!item("tagSearch")->hasActiveFocus());
         key(Qt::Key_Slash); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
@@ -4183,7 +4184,7 @@ private slots:
         QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
         QCOMPARE(window->property("sidePanel").toString(),QString("annotations"));
         key(Qt::Key_A, Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","opened").toBool());
-        key(Qt::Key_L, Qt::ShiftModifier);
+        key(Qt::Key_S, Qt::ShiftModifier);
         QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_W);
@@ -4246,7 +4247,7 @@ private slots:
         QVERIFY(!bible->createAndAssignTag(other,"Sent").isEmpty());
         reference("John 3:16");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Sent").isEmpty());
-        key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
         QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         QTRY_COMPARE(prop("tagResults","count").toInt(),1);
         QApplication::clipboard()->clear();
@@ -4260,7 +4261,7 @@ private slots:
         QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!window->property("rangeEditing").toBool());
         QCOMPARE(bible->selectionReference(),QString("John 3:16"));
-        if (!prop("relatedDrawer","visible").toBool()) { key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool()); }
+        if (!prop("relatedDrawer","visible").toBool()) { key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool()); }
         QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         key(Qt::Key_Delete);
         QTRY_VERIFY(bible->tagsForScope(other).isEmpty());
@@ -5046,7 +5047,7 @@ private slots:
         const int total = prop("keybindingResults","count").toInt();
         QVERIFY(total > 10);
         capture("help");
-        for (const auto &query : {QString("m"),QString("x"),QString("bookmark"),QString("highlight"),QString("Shift Down")}) {
+        for (const auto &query : {QString("m"),QString("x"),QString("bookmark"),QString("highlight selection"),QString("Shift Down")}) {
             key(Qt::Key_A,Qt::ControlModifier); type(query);
             QTRY_COMPARE(prop("keybindingResults","count").toInt(),1);
             const QString action = query == "m" || query == "bookmark" ? "Bookmark selection"
@@ -5324,7 +5325,7 @@ private slots:
         QVERIFY(!item("manageTags")->isVisible());
         QVERIFY(!item("createPassageTag")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
-        key(Qt::Key_L,Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
     }
     void rowAnnotationLanePacking() {
         reference("John 3:1-5");

@@ -430,7 +430,7 @@ private slots:
         navigate("John 1:2");
         auto results = object("tagResults"), tags = object("tagList");
         const auto openRelated = [&]() {
-            call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
             QTRY_COMPARE(results->property("count").toInt(), 5); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         };
         openRelated();
@@ -523,7 +523,7 @@ private slots:
         QCOMPARE(window->activeFocusItem()->objectName(), lastName);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
         // Related: the results.
-        call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+        call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
         QTRY_COMPARE(object("tagResults")->property("count").toInt(), 24); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         expectMotions(object("tagResults"), "related");
         key(Qt::Key_Slash); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
@@ -543,7 +543,7 @@ private slots:
         key(Qt::Key_A, Qt::ShiftModifier);
         QTRY_VERIFY(object("savedDrawer")->property("opened").toBool()); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
         key(Qt::Key_H, Qt::ShiftModifier); QTRY_VERIFY(historyOpen()); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
-        key(Qt::Key_L, Qt::ShiftModifier); QTRY_VERIFY(prop("sidePanel").toString() == "related");
+        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("sidePanel").toString() == "related");
         QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
         key(Qt::Key_H, Qt::ShiftModifier); QTRY_VERIFY(historyOpen());
         key(Qt::Key_W); QTRY_VERIFY(prop("notesOpen").toBool()); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());

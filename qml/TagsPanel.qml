@@ -24,6 +24,51 @@ Item {
     property var editingScope: null
     property var summaryScope: null
     property var relatedSource: null
+    // Study panel (the Related drawer, now tabbed): Related tag passages, the
+    // pinned source's cross references, and the current chapter's footnotes.
+    // ←/→ (h/l) switch tabs; every tab shares the list keys and motions.
+    readonly property var studyTabs: ["related", "crossrefs", "footnotes"]
+    readonly property var studyTitles: ["Related", "Cross-references", "Footnotes"]
+    property string studyTab: "related"
+    property var crossRows: []
+    readonly property var footnoteRows: Array.from(bible.footnotes || [])
+    readonly property var studyRows: studyTab === "crossrefs" ? crossRows : studyTab === "footnotes" ? footnoteRows : []
+    readonly property bool studyListTab: page === "related" && studyTab !== "related"
+    function setStudyTab(tab, note) {
+        if (studyTabs.indexOf(tab) < 0) return
+        studyTab = tab
+        refreshStudy()
+        studyList.currentIndex = studyRows.length ? 0 : -1
+        if (tab === "footnotes") {
+            // Start at the requested note, else the cursor verse's first note.
+            const verse = note ? note.verse : bible.cursorVerse
+            const index = footnoteRows.findIndex(function(row) {
+                return row.verse === verse && (!note || !note.seq || row.seq === note.seq)
+            })
+            if (index >= 0) studyList.currentIndex = index
+        }
+        if (studyList.currentIndex >= 0) studyList.positionViewAtIndex(studyList.currentIndex, ListView.Contain)
+        Qt.callLater(function() { if (panel.relatedShown) panel.focusResults() })
+    }
+    function stepStudyTab(delta) {
+        const index = studyTabs.indexOf(studyTab)
+        setStudyTab(studyTabs[(index + delta + studyTabs.length) % studyTabs.length])
+    }
+    function refreshStudy() {
+        crossRows = studyTab === "crossrefs" && installed(relatedSource) ? Array.from(bible.crossReferences(relatedSource)) : []
+    }
+    function footnoteScope(note) {
+        if (!note) return null
+        return { versionId: bible.versionId, reference: bible.passage + ":" + note.verse, book: bible.book, chapter: bible.chapter,
+            start: note.verse, endBook: bible.book, endChapter: bible.chapter, end: note.verse }
+    }
+    function studyScope(row) { return studyTab === "footnotes" ? footnoteScope(row) : row || null }
+    function openStudyRow(index) {
+        const row = studyRows[index]
+        if (!row) return
+        studyList.currentIndex = index
+        openTagged(studyScope(row))
+    }
     property string page: "picker"
     property string returnPage: "browser"
     property string query: ""
@@ -163,8 +208,12 @@ Item {
         confirmation = null
         summaryScope = null
     }
-    function openRelated() {
-        return showRelated(bible.tagScope())
+    function openRelated() { return openStudy("", null) }
+    // Opens Study on a tab ("" keeps the last one), optionally at a footnote {verse, seq}.
+    function openStudy(tab, note) {
+        if (!showRelated(bible.tagScope())) return false
+        setStudyTab(tab || studyTab, note)
+        return true
     }
     function openRelatedForTag(id, source) {
         return showRelated(source, id)
@@ -301,8 +350,11 @@ Item {
         refreshResults()
     }
     function refreshResults() {
-        if (page === "related") results = installed(relatedSource)
-            ? Array.from(bible.relatedPassages(relatedSource, filterIds, matchAll, allVersions)) : []
+        if (page === "related") {
+            results = installed(relatedSource)
+                ? Array.from(bible.relatedPassages(relatedSource, filterIds, matchAll, allVersions)) : []
+            refreshStudy()
+        }
         else if (page === "summary") results = installed(summaryScope) && summaryIds.length
             ? Array.from(bible.relatedPassages(summaryScope, summaryIds, false, false)) : []
         else results = []
@@ -406,9 +458,10 @@ Item {
     readonly property bool summaryKeys: browserVisible && !visibleModal && !app.rangeEditing && !app.contextMenuOpen && !textInputActive()
     readonly property bool relatedKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen && !textInputActive()
         && !relatedDrawer.closing && !tagList.activeFocus
-    readonly property bool listKeys: !bible.busy && ((summaryKeys && page === "summary") || (relatedKeys && resultList.currentIndex >= 0))
+    readonly property bool listKeys: !bible.busy && ((summaryKeys && page === "summary")
+        || (relatedKeys && (studyListTab ? studyList.currentIndex >= 0 : resultList.currentIndex >= 0)))
     function listScope() {
-        if (page === "related") return results[resultList.currentIndex] || null
+        if (page === "related") return studyListTab ? studyScope(studyRows[studyList.currentIndex]) : results[resultList.currentIndex] || null
         return focusedSummaryScope()
     }
     // Related: j/k and the arrows move within the focused list. In the source
@@ -418,6 +471,7 @@ Item {
     readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen
         && !textInputActive() && !relatedDrawer.closing
     function moveRelated(delta) {
+        if (studyListTab) { moveStudy(delta); return }
         const tags = tagList.visible ? tagList.count : 0
         if (tagList.activeFocus) {
             const next = (tagList.currentIndex < 0 ? (delta > 0 ? -1 : 0) : tagList.currentIndex) + delta
@@ -432,6 +486,12 @@ Item {
         }
         moveResult(delta)
     }
+    function moveStudy(delta) {
+        if (!studyList.count) return
+        studyList.currentIndex = Math.max(0, Math.min(studyList.count - 1, studyList.currentIndex + delta))
+        studyList.positionViewAtIndex(studyList.currentIndex, ListView.Contain)
+        studyList.forceActiveFocus()
+    }
     function moveResult(delta) {
         if (!resultList.count) return
         resultList.currentIndex = Math.max(0, Math.min(resultList.count - 1, resultList.currentIndex + delta))
@@ -443,11 +503,16 @@ Item {
         return false
     }
     function focusResults() {
+        if (studyListTab) {
+            if (studyList.count && studyList.currentIndex < 0) studyList.currentIndex = 0
+            studyList.forceActiveFocus()
+            return
+        }
         if (resultList.count && resultList.currentIndex < 0) resultList.currentIndex = 0
         resultList.forceActiveFocus()
     }
     function focusSearch() {
-        if (page === "related" && hostKind === "related") search.forceActiveFocus()
+        if (page === "related" && hostKind === "related" && studyTab === "related") search.forceActiveFocus()
     }
     // One esc closes the picker. In Related, esc first leaves the search
     // field (keeping its query); the next esc closes the panel.
@@ -461,6 +526,10 @@ Item {
         function onTagsChanged() { if (panel.contentVisible) panel.refresh() }
         function onVersionsChanged() { if (panel.contentVisible) panel.refresh() }
         function onVersionChanged() { if (panel.contentVisible) panel.refreshResults() }
+        function onVersesChanged() {
+            // Footnotes follow the chapter; keep the current row in range.
+            if (panel.studyTab === "footnotes" && studyList.currentIndex >= studyList.count) studyList.currentIndex = studyList.count - 1
+        }
     }
 
     component TagText: Text {
@@ -675,8 +744,10 @@ Item {
             Shortcut { sequence: "Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope()) }
             Shortcut { sequence: "Shift+Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope(), true) }
             Shortcut { sequence: "D"; enabled: panel.listKeys; onActivated: panel.app.toggleScopeDesk(panel.listScope()) }
-            Shortcut { sequences: ["Delete", "Backspace"]; enabled: panel.listKeys; onActivated: panel.app.removeMarkerAnnotation(panel.listScope(), "tag") }
-            Shortcut { sequence: "Shift+E"; enabled: panel.relatedKeys && resultList.currentIndex >= 0; onActivated: panel.app.openRangeEditor(panel.listScope(), "tag") }
+            Shortcut { sequences: ["Delete", "Backspace"]; enabled: panel.listKeys && !panel.studyListTab; onActivated: panel.app.removeMarkerAnnotation(panel.listScope(), "tag") }
+            Shortcut { sequence: "Shift+E"; enabled: panel.relatedKeys && !panel.studyListTab && resultList.currentIndex >= 0; onActivated: panel.app.openRangeEditor(panel.listScope(), "tag") }
+            Shortcut { objectName: "studyTabPrevious"; sequences: ["H", "Left"]; enabled: panel.relatedMoveKeys; onActivated: panel.stepStudyTab(-1) }
+            Shortcut { objectName: "studyTabNext"; sequences: ["L", "Right"]; enabled: panel.relatedMoveKeys; onActivated: panel.stepStudyTab(1) }
             Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveRelated(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveRelated(-1) }
             // g, shift G, ctrl d/u, ctrl f/b, pgdn/pgup: the Tags tab's ranges, Related's results.
@@ -688,11 +759,17 @@ Item {
             }
             ListMotionKeys {
                 objectName: "relatedMotionKeys"
-                active: panel.relatedMoveKeys
+                active: panel.relatedMoveKeys && !panel.studyListTab
                 count: resultList.count
                 onMove: function(delta) { if (resultList.currentIndex < 0) resultList.currentIndex = 0; panel.moveResult(delta) }
             }
-            Shortcut { sequence: "/"; enabled: panel.relatedShown && !panel.pickerVisible && !panel.app.contextMenuOpen && !panel.textInputActive(); onActivated: panel.focusSearch() }
+            ListMotionKeys {
+                objectName: "studyMotionKeys"
+                active: panel.relatedMoveKeys && panel.studyListTab
+                count: studyList.count
+                onMove: function(delta) { if (studyList.currentIndex < 0) studyList.currentIndex = 0; panel.moveStudy(delta) }
+            }
+            Shortcut { sequence: "/"; enabled: panel.relatedShown && panel.studyTab === "related" && !panel.pickerVisible && !panel.app.contextMenuOpen && !panel.textInputActive(); onActivated: panel.focusSearch() }
             RowLayout {
                 Layout.fillWidth: true
                 TagText {
@@ -700,7 +777,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     text: panel.page === "picker" ? (panel.editingScope ? panel.editingScope.reference + " · " + panel.versionName(panel.editingScope) : "Tags")
-                        : panel.page === "related" ? "Related"
+                        : panel.page === "related" ? "Study"
                         : panel.page === "summary" ? (panel.summaryScope ? panel.summaryScope.reference + " · " + panel.versionName(panel.summaryScope) : "Tags")
                         : panel.page === "manage" ? "Manage tags" : "Tags"
                     font.pixelSize: (panel.page === "related" ? 25 * panel.uiScale : 14 * panel.controlScale)
@@ -709,10 +786,31 @@ Item {
                 TagButton { objectName: "manageTags"; text: "Manage"; visible: panel.page === "picker"; onClicked: panel.manage() }
                 TagButton { objectName: "tagsDone"; text: "Done"; visible: panel.page !== "summary"; onClicked: panel.close() }
             }
+            RowLayout {
+                id: studyTabRow
+                objectName: "studyTabs"
+                Layout.fillWidth: true
+                visible: panel.page === "related"
+                spacing: 4 * panel.controlScale
+                Repeater {
+                    model: panel.studyTitles
+                    delegate: TagButton {
+                        required property string modelData
+                        required property int index
+                        objectName: "studyTab" + index
+                        text: modelData
+                        chosen: panel.studyTab === panel.studyTabs[index]
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        focusPolicy: Qt.NoFocus
+                        onClicked: panel.setStudyTab(panel.studyTabs[index])
+                    }
+                }
+            }
             TagText {
                 objectName: "relatedSourceLabel"
                 Layout.fillWidth: true
-                visible: panel.page === "related"
+                visible: panel.page === "related" && panel.studyTab !== "footnotes"
                 text: panel.relatedSource ? panel.relatedSource.reference + " · " + panel.versionName(panel.relatedSource) : ""
                 color: panel.desktop.muted
             }
@@ -794,7 +892,7 @@ Item {
             }
             TagText {
                 Layout.fillWidth: true
-                visible: (panel.page === "picker" && !panel.scopeValid) || (panel.page === "related" && !panel.installed(panel.relatedSource))
+                visible: (panel.page === "picker" && !panel.scopeValid) || (panel.page === "related" && panel.studyTab !== "footnotes" && !panel.installed(panel.relatedSource))
                 objectName: "tagScopePrompt"
                 text: panel.page === "picker" && !panel.editingScope
                     ? "Select a passage to add or remove tags."
@@ -820,7 +918,7 @@ Item {
                 id: search
                 objectName: "tagSearch"
                 Layout.fillWidth: true
-                visible: panel.page !== "summary" && panel.confirmation === null
+                visible: panel.page !== "summary" && panel.confirmation === null && !panel.studyListTab
                 placeholderText: panel.page === "picker" ? "Find or create a tag…" : "Filter tags…"
                 text: panel.query
                 onTextEdited: panel.query = text
@@ -835,7 +933,7 @@ Item {
                 objectName: "tagFilters"
                 Layout.fillWidth: true
                 spacing: 4 * panel.controlScale
-                visible: panel.page === "related"
+                visible: panel.page === "related" && panel.studyTab === "related"
                 TagButton { objectName: "tagMatchAny"; text: "Any"; chosen: !panel.matchAll; onClicked: { panel.matchAll = false; panel.refreshResults() } }
                 TagButton { objectName: "tagMatchAll"; text: "All"; chosen: panel.matchAll; onClicked: { panel.matchAll = true; panel.refreshResults() } }
                 Rectangle { objectName: "tagFilterDivider"; Layout.preferredWidth: 1; Layout.preferredHeight: 24 * panel.controlScale; Layout.leftMargin: 4 * panel.controlScale; Layout.rightMargin: 4 * panel.controlScale; color: panel.desktop.border }
@@ -849,7 +947,7 @@ Item {
                 text: "Find related to current passage"
                 wrapText: true
                 hint: "Replace the pinned source with the currently focused passage and its tags."
-                visible: panel.page === "related"
+                visible: panel.page === "related" && panel.studyTab !== "footnotes"
                 onClicked: panel.useCurrent()
             }
             ListView {
@@ -859,7 +957,7 @@ Item {
                 Layout.fillHeight: panel.page === "picker" || panel.page === "manage"
                 Layout.preferredHeight: Math.min(150 * panel.controlScale, body.height * 0.22)
                 Layout.minimumHeight: 34 * panel.controlScale
-                visible: panel.page !== "summary" && panel.confirmation === null
+                visible: panel.page !== "summary" && panel.confirmation === null && !panel.studyListTab
                 clip: true
                 spacing: 4 * panel.uiScale
                 model: []
@@ -961,7 +1059,7 @@ Item {
                 TagButton { objectName: "mergeTags"; text: "Merge…"; enabled: panel.mergeTarget.length > 0; onClicked: panel.requestManagement("merge") }
             }
             TagText {
-                visible: panel.page === "related"
+                visible: panel.page === "related" && panel.studyTab === "related"
                 Layout.fillWidth: true
                 text: panel.filterIds.length ? panel.results.length + " passages · " + panel.tagNames(panel.allTags.filter(function(tag) { return panel.filterIds.indexOf(tag.id) >= 0 }))
                     : "Choose one or more tags"
@@ -972,7 +1070,7 @@ Item {
                 objectName: "tagResults"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                visible: panel.page === "related"
+                visible: panel.page === "related" && panel.studyTab === "related"
                 clip: true
                 spacing: 8 * panel.uiScale
                 model: panel.results
@@ -999,6 +1097,82 @@ Item {
                 }
                 TagText { anchors.centerIn: parent; visible: resultList.count === 0 && panel.filterIds.length > 0; text: "No matching passages"; color: panel.desktop.muted }
             }
+            TagText {
+                objectName: "studyCount"
+                visible: panel.studyListTab
+                Layout.fillWidth: true
+                text: panel.studyTab === "crossrefs"
+                    ? (panel.crossRows.length + (panel.crossRows.length === 1 ? " cross reference" : " cross references") + " · OpenBible.info and the source")
+                    : (panel.footnoteRows.length + (panel.footnoteRows.length === 1 ? " footnote" : " footnotes") + " in " + panel.bible.passage + " · " + panel.bible.versionAbbreviation)
+                color: panel.desktop.muted
+            }
+            ListView {
+                id: studyList
+                objectName: "studyList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: panel.studyListTab
+                clip: true
+                spacing: 8 * panel.uiScale
+                model: panel.studyRows
+                currentIndex: count ? 0 : -1
+                activeFocusOnTab: true
+                keyNavigationEnabled: true
+                Keys.onReturnPressed: panel.openStudyRow(currentIndex)
+                Keys.onEnterPressed: panel.openStudyRow(currentIndex)
+                ScrollBar.vertical: TagScrollbar { objectName: "studyScrollbar" }
+                delegate: TagButton {
+                    id: studyDelegate
+                    required property var modelData
+                    required property int index
+                    readonly property bool footnote: panel.studyTab === "footnotes"
+                    // The cursor verse's footnotes stay marked while the list moves.
+                    readonly property bool atCursor: footnote && modelData.verse === panel.bible.cursorVerse
+                    objectName: "studyRow:" + index
+                    width: studyList.width
+                    chosen: studyList.activeFocus && studyList.currentIndex === index
+                    onClicked: panel.openStudyRow(index)
+                    background: Rectangle {
+                        color: studyDelegate.chosen ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
+                            : studyDelegate.atCursor ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.06)
+                            : studyDelegate.hovered ? panel.desktop.surface : "transparent"
+                        border.width: studyDelegate.atCursor ? 1 : 0
+                        border.color: Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.4)
+                        radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+                    }
+                    contentItem: Column {
+                        spacing: 4 * panel.uiScale
+                        TagText {
+                            width: parent.width
+                            text: studyDelegate.footnote
+                                ? panel.bible.passage + ":" + studyDelegate.modelData.verse + " · " + (studyDelegate.modelData.caller && studyDelegate.modelData.caller !== "+" && studyDelegate.modelData.caller !== "-" ? studyDelegate.modelData.caller : "note")
+                                : studyDelegate.modelData.reference + (studyDelegate.modelData.votes > 0 ? " · " + studyDelegate.modelData.votes + " votes" : "")
+                                    + (studyDelegate.modelData.source ? " · in " + studyDelegate.modelData.versionAbbreviation : "")
+                            color: studyDelegate.atCursor ? panel.desktop.accent : panel.desktop.foreground
+                        }
+                        TagText {
+                            width: parent.width
+                            text: (studyDelegate.footnote ? studyDelegate.modelData.text : studyDelegate.modelData.excerpt) || ""
+                            lineHeight: panel.bible.lineHeight > 0 ? panel.bible.lineHeight / 1.5 * 1.25 : 1.25
+                            maximumLineCount: studyDelegate.footnote ? 8 : 3
+                            elide: Text.ElideRight
+                            color: studyDelegate.footnote ? panel.desktop.foreground : panel.desktop.muted
+                        }
+                    }
+                }
+                TagText {
+                    objectName: "studyEmpty"
+                    anchors.centerIn: parent
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    visible: studyList.count === 0
+                    text: panel.studyTab === "footnotes"
+                        ? (panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? "Re-import this version (Versions) to read its footnotes." : "No footnotes in this chapter.")
+                        : !panel.relatedSource || !panel.relatedSource.start ? "Select a verse to see its cross references."
+                        : "No cross references in this version."
+                    color: panel.desktop.muted
+                }
+            }
             Item { Layout.fillHeight: true; visible: panel.confirmation !== null }
             TagText { objectName: "tagMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.message }
             Rectangle {
@@ -1014,7 +1188,8 @@ Item {
                 objectName: "tagsHints"
                 textFormat: Text.StyledText
                 text: KeyNotation.hint(panel.page === "picker" ? [["Space", "toggle"], ["Return", "toggle / create"], ["Escape", "close"]]
-                    : panel.page === "related" ? [["/", "search"], ["Return", "open"], ["Escape", "close"]]
+                    : panel.page === "related" ? (panel.studyTab === "related" ? [[["Left", "Right"], "tabs"], ["/", "search"], ["Return", "open"], ["Escape", "close"]]
+                        : [[["Left", "Right"], "tabs"], ["Return", panel.studyTab === "footnotes" ? "go to verse" : "open"], ["Y", "copy"], ["D", "Desk"], ["Escape", "close"]])
                     : [["Return", "open"], ["Escape", "close"]], panel.desktop.foreground, panel.desktop.muted)
                 font.pixelSize: 11 * panel.controlScale
                 color: panel.desktop.muted

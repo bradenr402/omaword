@@ -514,7 +514,7 @@ ApplicationWindow {
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
     readonly property bool contextMenuOpen: contextMenu.visible
     readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || historyDrawer.shown || tagsUi.visibleModal
-    // Everything modal except the side panels (Annotations, Desk, Related).
+    // Everything modal except the side panels (Annotations, Desk, Study).
     readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool notesClosableFromReader: notesOpen && bible.ready && !bible.busy && !modalOpen && !findPromptOpen && !textInputActive()
     // One side panel at a time. Its opening key does nothing while it is open;
@@ -791,7 +791,7 @@ ApplicationWindow {
             menuDivider,
             menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "toggleDesk"),
             menuDivider,
-            menuAction("related", "Related passages", "related"),
+            menuAction("related", "Study", "related"),
             menuAction("chapterFind", "Find in chapter", "chapterFind")
         ]
     }
@@ -2265,7 +2265,8 @@ ApplicationWindow {
         { id: "clickMenu", group: "Copy", title: "Open context menu", sequences: ["RightClick"], explanation: true },
         { id: "annotations", group: "Panels", title: "Annotations panel", sequences: ["Shift+A"], command: true },
         { id: "desk", group: "Panels", title: "Open Desk", sequences: ["Shift+D"], command: true },
-        { id: "related", group: "Panels", title: "Related passages", sequences: ["Shift+L"], command: true },
+        // The Study panel (Related, Cross-references, Footnotes); id kept for compatibility.
+        { id: "related", group: "Panels", title: "Study panel", sequences: ["Shift+S"], command: true },
         { id: "history", group: "Panels", title: "History", sequences: ["Shift+H"], command: true },
         { id: "books", group: "Palettes and windows", title: "Navigate to a passage", sequences: ["Ctrl+K"], scope: "palette", command: true },
         { id: "commands", group: "Palettes and windows", title: "Open commands", sequences: ["Ctrl+Space"], aliases: ["Ctrl+Shift+P"], aliasReason: "the command palette key in VS Code and its kin.", scope: "palette" },
@@ -2291,7 +2292,7 @@ ApplicationWindow {
         { id: "lineLess", group: "Reading", title: "Decrease line height", sequences: ["Ctrl+Alt+-"] },
         { id: "lineReset", group: "Reading", title: "Reset line height", sequences: ["Ctrl+Alt+0"], command: true },
         { id: "dismiss", group: "Reading", title: "Dismiss current panel or selection", sequences: ["Escape"], explanation: true },
-        // List panels (Annotations, Desk, Related) bind these themselves.
+        // List panels (Annotations, Desk, History, Study) bind these themselves.
         { id: "listNext", group: "Lists", title: "Next item", sequences: ["J", "Down"], scope: "list", explanation: true },
         { id: "listPrevious", group: "Lists", title: "Previous item", sequences: ["K", "Up"], scope: "list", explanation: true },
         { id: "listFirst", group: "Lists", title: "First item", sequences: ["G"], scope: "list", explanation: true },
@@ -2306,7 +2307,9 @@ ApplicationWindow {
         { id: "listDesk", group: "Lists", title: "Add item to Desk, or remove it", sequences: ["D"], scope: "list", explanation: true },
         { id: "listEditRange", group: "Lists", title: "Edit item's annotation range", sequences: ["Shift+E"], scope: "list", explanation: true },
         { id: "listRemove", group: "Lists", title: "Remove item", sequences: ["Delete", "Backspace"], scope: "list", explanation: true },
-        { id: "listSearch", group: "Lists", title: "Search the list (Annotations, Related)", sequences: ["/"], scope: "list", explanation: true },
+        { id: "listSearch", group: "Lists", title: "Search the list (Annotations, Study's Related)", sequences: ["/"], scope: "list", explanation: true },
+        { id: "listPreviousTab", group: "Lists", title: "Previous tab (Annotations, Study)", sequences: ["H", "Left"], scope: "list", explanation: true },
+        { id: "listNextTab", group: "Lists", title: "Next tab (Annotations, Study)", sequences: ["L", "Right"], scope: "list", explanation: true },
         // Desk-only: bound by deskDrawer, never globally.
         { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+Del", "Shift+Backspace"], scope: "desk", command: true },
         // Bound by the History panel; the command itself is Commands-only.
@@ -2378,7 +2381,7 @@ ApplicationWindow {
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
-        if (action.scope === "list") return "List panels · Annotations, Desk, History, Related"
+        if (action.scope === "list") return "List panels · Annotations, Desk, History, Study"
         if (action.scope === "history") return "History panel only"
         if (action.scope === "versions") return "Versions dialog"
         if (action.explanation) return "Reader gesture"
@@ -3974,7 +3977,7 @@ ApplicationWindow {
     }
 
     // Footer: ? and mode on the left; search, passage, version, and layout in
-    // the center; Annotations, Notes, Related, History (while enabled), and Desk on the right. The center
+    // the center; Annotations, Notes, Study, History (while enabled), and Desk on the right. The center
     // stays centered while it fits. When cramped, the right group stacks into a
     // column at the bottom-right corner and the reader text keeps clear of it;
     // the footer stays one row tall. More cramped hides the layout button;
@@ -4010,7 +4013,7 @@ ApplicationWindow {
         return [
             { id: "annotations", text: "Annotations", shortcut: menuKey("annotations"), enabled: ready, run: function() { app.runCommand("annotations") } },
             { id: "notes", text: "Notes", shortcut: menuKey("notes"), enabled: ready, run: function() { app.toggleNotes() } },
-            { id: "related", text: "Related passages", shortcut: menuKey("related"), enabled: ready && hasSelection, run: function() { app.runCommand("related") } },
+            { id: "related", text: "Study", shortcut: menuKey("related"), enabled: ready && hasSelection, run: function() { app.runCommand("related") } },
             bible.historyEnabled ? { id: "history", text: "History", shortcut: menuKey("history"), enabled: ready, run: function() { app.runCommand("history") } } : null,
             { id: "desk", text: "Desk", shortcut: menuKey("desk"), enabled: ready, run: function() { app.runCommand("desk") } }
         ].filter(function(entry) { return !!entry })
@@ -4123,7 +4126,7 @@ ApplicationWindow {
             glyph: "related"
             visible: floatingActions.expanded
             enabled: !app.rangeEditing && app.hasSelection && !bible.busy && !app.modalOpen
-            tip: "Related passages · " + app.keyText("related")
+            tip: "Study · " + app.keyText("related")
             onClicked: app.runCommand("related")
         }
         FloatingButton {
