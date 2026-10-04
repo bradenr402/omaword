@@ -169,7 +169,9 @@ class UiTest : public QObject
         QTest::mouseClick(window, Qt::LeftButton, modifiers, point);
         QCoreApplication::processEvents();
     }
-    QString bodyText(int verse) const {
+    QString bodyText(int verse) const { return rawBodyText(verse).remove(QChar(0xfffc)).remove(QChar(0x2060)); }
+    // Rendered verse-row text in document positions, footnote cells included.
+    QString rawBodyText(int verse) const {
         auto body = object(qPrintable("verseBody" + QString::number(verse)));
         QString text;
         if (body) QMetaObject::invokeMethod(body,"getText",Q_RETURN_ARG(QString,text),
@@ -3175,7 +3177,9 @@ private slots:
         QVERIFY(!item("verseBody21"));
         const int start = 10, end = 15;
         drag(textPoint(20,start),textPoint(22,end));
-        QCOMPARE(window->property("freeSelectedText").toString(),bodyText(20).mid(start) + '\n' + bodyText(22).left(end));
+        // Positions are document positions; footnote cells (real NET) never reach the copy.
+        QCOMPARE(window->property("freeSelectedText").toString(),
+                 (rawBodyText(20).mid(start) + '\n' + rawBodyText(22).left(end)).remove(QChar(0xfffc)).remove(QChar(0x2060)));
         // The number gutter remains a canonical range target when labels hide.
         click(item("verseNumber20"));
         click(item("verseNumber22"),Qt::ShiftModifier);
