@@ -1,4 +1,6 @@
 #include <QtTest/QTest>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QApplication>
 #include <QClipboard>
 #include <QFile>
@@ -321,6 +323,23 @@ private slots:
         const int released = bible->cursorVerse();
         QTest::qWait(250);
         QCOMPARE(bible->cursorVerse(), released);
+    }
+    void verseTapDuringStallDoesNotRepeat_data() { heldVerseMotionRepeatsWithoutPlatformDelay_data(); }
+    void verseTapDuringStallDoesNotRepeat() {
+        // A tap whose press handler (or the frame after it) blocks the GUI
+        // thread past the hold delay: the overdue hold timer is dispatched
+        // while the release is still in flight from the platform.
+        QFETCH(int, key); QFETCH(int, direction);
+        navigate("John 1:20"); settle();
+        const int start = bible->cursorVerse();
+        QTest::keyPress(window, Qt::Key(key));
+        QThread::msleep(400);
+        // The loop runs briefly (the frame after the stall) before the release.
+        QElapsedTimer responsive; responsive.start();
+        while (responsive.elapsed() < 40) QCoreApplication::processEvents();
+        QTest::keyRelease(window, Qt::Key(key));
+        QTest::qWait(300);
+        QCOMPARE(bible->cursorVerse(), start + direction);
     }
     void dimmingInstantOnCursorMove() {
         QFETCH(QString, mode);

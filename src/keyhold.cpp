@@ -30,12 +30,16 @@ bool KeyHold::eventFilter(QObject *watched, QEvent *event)
     // as ShortcutOverride, before the shortcut activates.
     if (event->type() == QEvent::KeyPress || event->type() == QEvent::ShortcutOverride) {
         const auto key = static_cast<QKeyEvent *>(event);
-        if (!key->isAutoRepeat()) m_down.insert(key->key());
+        const auto released = m_releasedAt.constFind(key->key());
+        const bool stale = key->timestamp() && released != m_releasedAt.cend() && key->timestamp() < *released;
+        if (!key->isAutoRepeat() && !stale && !m_down.contains(key->key())) m_down.insert(key->key(), ++m_presses);
     } else if (event->type() == QEvent::KeyRelease) {
         const auto key = static_cast<QKeyEvent *>(event);
-        if (!key->isAutoRepeat() && m_down.remove(key->key())) emit released(key->key());
+        if (key->isAutoRepeat()) return QObject::eventFilter(watched, event);
+        if (key->timestamp()) m_releasedAt.insert(key->key(), key->timestamp());
+        if (m_down.remove(key->key())) emit released(key->key());
     } else if (event->type() == QEvent::ApplicationDeactivate) {
-        const auto keys = m_down;
+        const auto keys = m_down.keys();
         m_down.clear();
         for (int key : keys) emit released(key);
     }

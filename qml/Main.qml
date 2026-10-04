@@ -1529,6 +1529,8 @@ ApplicationWindow {
     readonly property var chapterActions: ["previousChapter", "nextChapter"]
     property string holdAction: ""
     property int holdKey: 0
+    property int holdPress: 0
+    property real holdTickAt: 0
     // Chapters passed while h/l is held; they land with one thunk on release.
     property bool holdRepeating: false
     property bool holdRepeated: false
@@ -1540,8 +1542,8 @@ ApplicationWindow {
         if (!keys) return
         const key = keys.find(function(candidate) { return keyHold.isDown(candidate) })
         if (key === undefined) return
-        holdAction = action; holdKey = key
-        holdStartedAt = Date.now()
+        holdAction = action; holdKey = key; holdPress = keyHold.press(key)
+        holdStartedAt = holdTickAt = Date.now()
         holdRepeated = false
         holdChapters = chapterActions.includes(action) ? lastChapterMoved : 0
         holdTimer.interval = 150
@@ -1550,7 +1552,7 @@ ApplicationWindow {
     function endHold() {
         holdTimer.stop()
         if (holdRepeated && chapterActions.includes(holdAction)) pageSound(holdChapters, false)
-        holdAction = ""; holdKey = 0; holdRepeated = false; holdChapters = 0
+        holdAction = ""; holdKey = 0; holdPress = 0; holdRepeated = false; holdChapters = 0
     }
     // Page-turn sounds: one chapter step turns a page; counts, held keys (on
     // release) and cross-chapter jumps land with a thunk weighted by distance.
@@ -1582,15 +1584,27 @@ ApplicationWindow {
         id: holdTimer
         repeat: true
         onTriggered: {
-            if (!app.active || !app.readerKeys || !keyHold.isDown(app.holdKey)) { app.endHold(); return }
-            // The animation-driven Timer can fire early after a long frame
-            // (a heavy chapter render): a tap must never repeat.
-            if (!app.holdRepeated && Date.now() - app.holdStartedAt < 140) return
+            if (!app.active || !app.readerKeys || keyHold.press(app.holdKey) !== app.holdPress) { app.endHold(); return }
+            // "Down" only means no release has been processed yet. After the
+            // GUI thread stalls (a heavy chapter render), this overdue tick can
+            // run before a release still queued behind it, so a late tick
+            // never repeats: it restarts the hold window, letting the loop
+            // drain input first. A tap must never repeat. Once repeating, the
+            // repeats themselves stall (chapter steps), so a late tick only
+            // yields one short pass to pending input before continuing.
+            const now = Date.now(), late = now - app.holdTickAt > interval + 50
+            app.holdTickAt = now
+            if (late && !app.holdRepeated) { app.holdStartedAt = now; return }
+            if (late) { interval = 10; return }
+            // The animation-driven Timer can also fire early after a long frame.
+            if (!app.holdRepeated && now - app.holdStartedAt < 140) return
             interval = app.chapterActions.includes(app.holdAction) ? 80 : 33
             app.holdRepeating = true
             app.holdRepeated = true
             app.runCommand(app.holdAction)
             app.holdRepeating = false
+            // The repeat's own work is not a stall.
+            app.holdTickAt = Date.now()
         }
     }
     onActiveChanged: if (!active) endHold()
