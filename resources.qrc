@@ -13,6 +13,7 @@
     <file>qml/HandDrawn.js</file>
     <file>qml/Margins.js</file>
     <file>qml/ChapterOutline.qml</file>
+    <file>qml/PanelTabs.qml</file>
     <file>qml/KeyNotation.js</file>
     <file>resources/catalog.json</file>
     <file>resources/crossrefs.bin</file>

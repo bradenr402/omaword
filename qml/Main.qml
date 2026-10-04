@@ -5004,13 +5004,16 @@ ApplicationWindow {
                     Accessible.name: "Passage reference, / Bible search, or > command"
                 }
             }
-            RowLayout {
+            PanelTabs {
                 Layout.fillWidth: true
-                spacing: 4 * app.scale
-                uniformCellSizes: true
-                QuietButton { objectName: "paletteBooks"; text: "Passage"; Layout.fillWidth: true; emphasized: !app.paletteTextMode && !referenceInput.text.startsWith(">"); enabled: bible.ready; onClicked: app.openPalette(false) }
-                QuietButton { objectName: "paletteSearch"; text: "Search"; Layout.fillWidth: true; emphasized: app.paletteTextMode; enabled: bible.ready; onClicked: app.openTextSearch() }
-                QuietButton { objectName: "paletteCommands"; text: "Command"; Layout.fillWidth: true; emphasized: referenceInput.text.startsWith(">"); onClicked: app.openPalette(true) }
+                labels: ["Passage", "Search", "Command"]
+                names: ["paletteBooks", "paletteSearch", "paletteCommands"]
+                theme: desktop
+                uiScale: app.scale
+                uniform: true
+                enabledTabs: [bible.ready, bible.ready, true]
+                currentIndex: referenceInput.text.startsWith(">") ? 2 : app.paletteTextMode ? 1 : 0
+                onActivated: index => { if (index === 0) app.openPalette(false); else if (index === 1) app.openTextSearch(); else app.openPalette(true) }
             }
             Label {
                 objectName: "referencePreview"
@@ -5226,34 +5229,16 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Label { objectName: "savedTitle"; text: "Annotations"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
             }
-            RowLayout {
+            PanelTabs {
                 id: savedTabs
                 objectName: "savedTabs"
                 Layout.fillWidth: true
-                spacing: 4 * app.controlScale
-                // One row takes priority over unbounded text scaling. Allocate
-                // natural label widths, with the same bounded font for all tabs.
-                readonly property real labelSize: Math.max(12, Math.min(14 * app.controlScale, width / 29))
-                Repeater {
-                    model: ["Bookmarks", "Highlights", "Notes", "Tags"]
-                    delegate: QuietButton {
-                        required property string modelData
-                        required property int index
-                        objectName: "savedTab" + index
-                        text: modelData
-                        emphasized: app.collectionTab === index
-                        compact: true
-                        implicitHeight: 32 * app.controlScale
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: 0
-                        Layout.preferredWidth: implicitWidth
-                        padding: 6 * app.controlScale
-                        font.pixelSize: savedTabs.labelSize
-                        onClicked: app.filterSaved(index - app.collectionTab)
-                        Keys.onReturnPressed: clicked()
-                        Keys.onEnterPressed: clicked()
-                    }
-                }
+                labels: ["Bookmarks", "Highlights", "Notes", "Tags"]
+                theme: desktop
+                uiScale: app.controlScale
+                namePrefix: "savedTab"
+                currentIndex: app.collectionTab
+                onActivated: index => app.filterSaved(index - app.collectionTab)
             }
             FineRule { Layout.fillWidth: true }
             TextField {

@@ -29,6 +29,7 @@ seven-entry `resources/catalog.json`, and `resources/crossrefs.bin`. `branding.e
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
 | `qml/AppContextMenu.qml`, `qml/AppToolTip.qml` | Shared context menu and themed tooltip |
+| `qml/PanelTabs.qml` | Shared tab row (Annotations, Study, palette Passage/Search/Command): sizing, selected accent tint, focus outline |
 | `qml/ChapterFind.qml`, `qml/SearchHighlights.qml` | `/` chapter find; match overlay painting |
 | `qml/KeyNotation.js`, `bin/shortcuts` | One key notation for every displayed key; README shortcuts generated from Main's `actions` catalog (`--check` in CI) |
 

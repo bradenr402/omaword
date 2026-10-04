@@ -786,26 +786,19 @@ Item {
                 TagButton { objectName: "manageTags"; text: "Manage"; visible: panel.page === "picker"; onClicked: panel.manage() }
                 TagButton { objectName: "tagsDone"; text: "Done"; visible: panel.page !== "summary"; onClicked: panel.close() }
             }
-            RowLayout {
+            PanelTabs {
                 id: studyTabRow
                 objectName: "studyTabs"
                 Layout.fillWidth: true
                 visible: panel.page === "related"
-                spacing: 4 * panel.controlScale
-                Repeater {
-                    model: panel.studyTitles
-                    delegate: TagButton {
-                        required property string modelData
-                        required property int index
-                        objectName: "studyTab" + index
-                        text: modelData
-                        chosen: panel.studyTab === panel.studyTabs[index]
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: 0
-                        focusPolicy: Qt.NoFocus
-                        onClicked: panel.setStudyTab(panel.studyTabs[index])
-                    }
-                }
+                labels: panel.studyTitles
+                theme: panel.desktop
+                uiScale: panel.controlScale
+                namePrefix: "studyTab"
+                // ←/→ (h/l) drive the tabs; clicks still switch.
+                focusable: false
+                currentIndex: panel.studyTabs.indexOf(panel.studyTab)
+                onActivated: index => panel.setStudyTab(panel.studyTabs[index])
             }
             TagText {
                 objectName: "relatedSourceLabel"
