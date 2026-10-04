@@ -1267,7 +1267,7 @@ private slots:
         QVERIFY(!item("keybindingsClose"));
         QCOMPARE(search->width(),item("keybindingResults")->width());
         type("chapter");
-        QCOMPARE(prop("keybindingResults","count").toInt(),5);
+        QCOMPARE(prop("keybindingResults","count").toInt(),6);
         QVERIFY(item("keybindingFind in chapter"));
         key(Qt::Key_Down); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),1);
         key(Qt::Key_Up); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
@@ -4465,7 +4465,7 @@ private slots:
         // Every catalog key reads in the shared notation: lowercase except a
         // shifted letter or function key, arrows as glyphs, muted separators.
         const QRegularExpression notation(QString::fromUtf8(
-            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|[A-Z])$"));
+            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|[A-Z])$"));
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         for (const auto &record : records) {
             const auto action = record.toMap();
