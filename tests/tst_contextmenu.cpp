@@ -1,4 +1,5 @@
 #include <QtTest/QTest>
+#include <utility>
 #include <QApplication>
 #include <QClipboard>
 #include <QFile>
@@ -98,6 +99,10 @@ class ContextMenuTest : public QObject
     }
     void navigate(const QString &reference) {
         QVERIFY(bible->navigate(reference)); call("readerFocus"); QTRY_VERIFY(!prop("restoringPosition").toBool());
+        // Let the reader settle (slide and late layout) before measuring positions.
+        double y = -1;
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool()
+            && std::exchange(y, item("reading")->property("contentY").toDouble()) == item("reading")->property("contentY").toDouble());
     }
     void find(const QString &query) {
         key(Qt::Key_Slash); QTRY_VERIFY(prop("findPromptOpen").toBool());
