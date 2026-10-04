@@ -5944,14 +5944,18 @@ private slots:
         type("j4");
         const auto titles = paletteTitles();
         QVERIFY2(titles.size() >= 4,qPrintable(titles.join(", ")));
-        QCOMPARE(titles.mid(0,4),(QStringList{"Job 4","Joel 4","John 4","Jude 4"}));
+        // Which J books have a chapter 4 depends on the fixture (NET: no Joel 4 or Jude 4).
+        if (netSource().isEmpty()) QCOMPARE(titles.mid(0,4),(QStringList{"Job 4","Joel 4","John 4","Jude 4"}));
+        QCOMPARE(titles.value(0),QString("Job 4"));
+        for (const auto &title : titles.mid(0,4)) QVERIFY2(title.startsWith('J') && title.endsWith('4'),qPrintable(titles.join(", ")));
         QCOMPARE(prop("paletteResults","currentIndex").toInt(),0);
         key(Qt::Key_Down); key(Qt::Key_Down); key(Qt::Key_Down); key(Qt::Key_Up);
         QCOMPARE(prop("paletteResults","currentIndex").toInt(),2);
-        QCOMPARE(prop("referencePreview","text").toString(),QString("John 4"));
+        QCOMPARE(prop("referencePreview","text").toString(),titles.value(2));
         type("k"); QCOMPARE(prop("referenceInput","text").toString(),QString("j4k"));
         key(Qt::Key_Backspace); QCOMPARE(prop("paletteResults","currentIndex").toInt(),0);
-        key(Qt::Key_Down); key(Qt::Key_Down);
+        const int john = titles.indexOf("John 4"); QVERIFY2(john > 0,qPrintable(titles.join(", ")));
+        for (int i = 0; i < john; ++i) key(Qt::Key_Down);
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         QCOMPARE(bible->passage(),QString("John 4"));
@@ -5980,9 +5984,13 @@ private slots:
         QVERIFY(std::abs(popup->y() - caret.y() - 4) < 2);
         key(Qt::Key_Down); key(Qt::Key_Down); key(Qt::Key_Up);
         QCOMPARE(window->property("linkSuggestionIndex").toInt(),1);
+        // The fixture decides which book is second (Joel 4 here; NET's Joel has 3 chapters).
+        const QString second = jsMap(prop("noteLinkSuggestion1","modelData"))["reference"].toString();
+        QVERIFY(second.endsWith(" 4") && second != "Job 4");
+        if (netSource().isEmpty()) QCOMPARE(second,QString("Joel 4"));
         key(Qt::Key_Tab);
         QTRY_VERIFY(!popup->isVisible());
-        QCOMPARE(prop("noteEditor","text").toString(),QString("See Joel 4"));
+        QCOMPARE(prop("noteEditor","text").toString(),"See " + second);
         QVERIFY(item("noteEditor")->hasActiveFocus());
         // Esc dismisses and leaves the text; Notes stays open.
         type(" [[jn3");
@@ -5990,17 +5998,17 @@ private slots:
         key(Qt::Key_Escape);
         QVERIFY(!popup->isVisible());
         QVERIFY(window->property("notesOpen").toBool());
-        QCOMPARE(prop("noteEditor","text").toString(),QString("See Joel 4 [[jn3"));
+        QCOMPARE(prop("noteEditor","text").toString(),"See " + second + " [[jn3");
         type("1"); QVERIFY(!popup->isVisible());
         for (int i = 0; i < 7; ++i) key(Qt::Key_Backspace);
-        QCOMPARE(prop("noteEditor","text").toString(),QString("See Joel 4"));
+        QCOMPARE(prop("noteEditor","text").toString(),"See " + second);
         // Enter accepts the first candidate: the full reference, no brackets, no newline.
         type(" and [[jn42");
         QTRY_VERIFY(popup->isVisible());
         QCOMPARE(jsMap(prop("noteLinkSuggestion0","modelData"))["reference"].toString(),QString("John 4:2"));
         key(Qt::Key_Return);
-        QCOMPARE(prop("noteEditor","text").toString(),QString("See Joel 4 and John 4:2"));
-        QTRY_COMPARE(bible->noteText(),QString("See Joel 4 and John 4:2"));
+        QCOMPARE(prop("noteEditor","text").toString(),"See " + second + " and John 4:2");
+        QTRY_COMPARE(bible->noteText(),"See " + second + " and John 4:2");
     }
     void noteLinksAndLinkedFrom() {
         openNotesOn("John 3:16");
@@ -6128,14 +6136,19 @@ private slots:
         type("5"); key(Qt::Key_L); QCOMPARE(bible->chapter(),8);
         QCOMPARE(sounds->lastSound(),QString("thunk"));
         QCOMPARE(sounds->lastWeight(),callJs("thunkWeight",{5}).toDouble());
-        type("20"); key(Qt::Key_H); QCOMPARE(bible->book(),40); QCOMPARE(bible->chapter(),24);
+        // Twenty chapters back crosses books (Matthew 24 here; Luke 13 in NET).
+        type("20"); key(Qt::Key_H);
+        const QVariantMap back{{"book",bible->book()},{"chapter",bible->chapter()}};
+        if (netSource().isEmpty()) { QCOMPARE(bible->book(),40); QCOMPARE(bible->chapter(),24); }
+        QVERIFY(bible->book() < 43);
+        QCOMPARE(callJs("chapterDistance",{back,QVariantMap{{"book",43},{"chapter",8}}}).toInt(),20);
         QCOMPARE(sounds->lastSound(),QString("thunk")); QCOMPARE(sounds->lastWeight(),1.0);
         // Cross-chapter jumps thunk; same-chapter jumps make no page sound.
         reference("John 3:16");
         QCOMPARE(sounds->lastSound(),QString("thunk"));
         QCOMPARE(sounds->lastWeight(),callJs("thunkWeight",{QVariant(callJs("chapterDistance",
-            {QVariantMap{{"book",40},{"chapter",24}},QVariantMap{{"book",43},{"chapter",3}}}))}).toDouble());
-        QCOMPARE(callJs("chapterDistance",{QVariantMap{{"book",40},{"chapter",24}},QVariantMap{{"book",43},{"chapter",3}}}).toInt(),15);
+            {back,QVariantMap{{"book",43},{"chapter",3}}}))}).toDouble());
+        QCOMPARE(callJs("chapterDistance",{back,QVariantMap{{"book",43},{"chapter",3}}}).toInt(),15);
         reference("John 3:20");
         QCOMPARE(sounds->lastSound(),QString("tick"));
         count = sounds->playCount();
