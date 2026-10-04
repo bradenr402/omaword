@@ -190,7 +190,7 @@ These also work, but stay out of the in-app list:
 - Paragraph, Verse, and Block layouts (`alt l`), with optional verse numbers and headings.
 - Focus mode (`f`) dims everything but the current verse and keeps it 40% down the window, like a typewriter.
 - **Highlight words of Jesus** (`alt j`) colors them with your theme's palette, where the version marks them (KJV).
-- Wide windows add margins: a sticky **Chapter outline** of section headings on the left (`alt o`; `{` / `}` jump between headings), and **Margin notes** on the right (`alt w`), each joined to its passage by hand-drawn braces and an arrow. Margin notes take priority and may move the text left; both are off by default.
+- Wide windows add margins: a sticky **Chapter outline** of the chapter and its section headings on the left (`alt o`; `{` / `}` jump between headings, `{` ending at the top of the chapter), and **Margin notes** on the right (`alt w`), each joined to its passage by hand-drawn braces and an arrow. Margin notes take priority and may move the text left; both are off by default.
 
 ### Finding passages
 - The passage palette understands compact references like `jn316`, `1co13`, or `rev 3 14-22`, and lists likely matches, best first.

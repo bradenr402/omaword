@@ -1,18 +1,22 @@
 import QtQuick
 
-// Chapter outline: the chapter's section headings in the left margin. It
-// stays put while the reader scrolls, highlights the current section, and
-// scrolls itself to keep that heading visible when it is taller than its
-// space. Clicking a heading asks the reader to jump there.
+// Chapter outline: the book and chapter over its section headings in the left
+// margin. It stays put while the reader scrolls, highlights the current
+// section (the title before the first heading), and scrolls itself to keep
+// that entry visible when it is taller than its space. Clicking a heading asks
+// the reader to jump there; clicking the title, to the top of the chapter.
 Item {
     id: root
     required property var headings // [{verse, text}]
     required property var theme
-    property int current: 0
+    property string title: "" // e.g. "John 3"
+    property int current: 0 // a heading's verse; 0 before the first heading
     property real uiScale: 1
     signal activated(int verse)
+    signal activatedTop()
 
     function reveal() {
+        if (current === 0) { list.contentY = 0; return }
         for (let i = 0; i < entries.count; ++i) {
             const entry = entries.itemAt(i)
             if (!entry || !root.headings[i] || root.headings[i].verse !== current) continue
@@ -36,6 +40,46 @@ Item {
         Column {
             id: column
             width: list.width
+            Item {
+                id: titleEntry
+                readonly property bool isCurrent: root.current === 0
+                objectName: "outlineTitle"
+                width: column.width
+                height: titleLabel.implicitHeight + 14 * root.uiScale
+                Accessible.role: Accessible.Button
+                Accessible.name: root.title + (isCurrent ? ", current" : "")
+                Accessible.onPressAction: root.activatedTop()
+                Rectangle {
+                    objectName: "outlineTitleMark"
+                    visible: titleEntry.isCurrent
+                    x: 0
+                    y: 5 * root.uiScale
+                    width: 2 * root.uiScale
+                    height: titleLabel.implicitHeight
+                    color: root.theme.accent
+                }
+                Text {
+                    id: titleLabel
+                    objectName: "outlineTitleText"
+                    x: 10 * root.uiScale
+                    y: 5 * root.uiScale
+                    width: parent.width - x
+                    text: root.title
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    font.family: root.theme.fontFamily
+                    font.pixelSize: 15 * root.uiScale
+                    font.weight: Font.Bold
+                    color: titleEntry.isCurrent || titleMouse.containsMouse ? root.theme.foreground : root.theme.muted
+                }
+                MouseArea {
+                    id: titleMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.activatedTop()
+                }
+            }
             Repeater {
                 id: entries
                 model: root.headings

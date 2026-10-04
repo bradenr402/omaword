@@ -251,8 +251,10 @@ seven-entry `resources/catalog.json`, and `resources/crossrefs.bin`. `branding.e
   (`HandDrawn.linePoints` with `accentAmp`). Note text
   is StyledText with exact `passageLinks`. The Notes drawer is a popup, so it
   covers them. The outline's current section is the cursor's when it is on
-  screen, else the one at a reading line ¼ down; `{`/`}` step headings from
-  the same verse (History jumps). Toggling notes (`applyMarginNotes`, driven
+  screen, else the one at a reading line ¼ down (the chapter title above the
+  headings is current before the first one, and jumps to the chapter top);
+  `{`/`}` step headings from the same verse (History jumps), `{` ending at the
+  chapter top (`Margins.headingStep`'s `top`), even without headings. Toggling notes (`applyMarginNotes`, driven
   by `bible.marginNotesChanged`) fades them in while the column slides left,
   or fades them out before it slides back (`marginSlideOffset`, 140 ms
   ease-out); resizes and chapter changes jump, as does Disable animations.

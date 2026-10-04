@@ -2,6 +2,7 @@
 #include <QElapsedTimer>
 #include <QApplication>
 #include <QFile>
+#include <QFont>
 #include <QJSEngine>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
@@ -54,7 +55,7 @@ class MarginsUiTest : public QObject
     QString source, plain;
     QString studyId, plainId;
 
-    // John 1 (headings at 1, 10, 19, 29, 35), John 2 (none), John 3 (1, 16,
+    // John 1 (headings at 4, 10, 19, 29, 35), John 2 (none), John 3 (1, 16,
     // 22, 31), John 4 (a heading every three verses, for a tall outline).
     static bool zip(const QString &path, const QMap<QString, QByteArray> &entries) {
         auto archive = archive_write_new(); archive_write_set_format_zip(archive);
@@ -70,7 +71,7 @@ class MarginsUiTest : public QObject
         ok = archive_write_close(archive) == ARCHIVE_OK && ok; archive_write_free(archive); return ok;
     }
     static QByteArray john(const QString &title, bool headings) {
-        const QMap<int, QList<int>> sections = {{1, {1, 10, 19, 29, 35}}, {2, {}}, {3, {1, 16, 22, 31}},
+        const QMap<int, QList<int>> sections = {{1, {4, 10, 19, 29, 35}}, {2, {}}, {3, {1, 16, 22, 31}},
             {4, {1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52}}};
         const QMap<int, int> counts = {{1, 51}, {2, 25}, {3, 36}, {4, 54}};
         QByteArray data = QString("\\id JHN %1\n\\h John\n\\toc1 John\n\\toc2 John\n\\toc3 Jn\n").arg(title).toUtf8();
@@ -347,6 +348,18 @@ private slots:
         QCOMPARE(step(20, -1, 1)["verse"].toInt(), 16);
         QCOMPARE(step(16, -1, 1)["verse"].toInt(), 1);
         auto none = step(31, 1, 1); QCOMPARE(none["moved"].toInt(), 0); QVERIFY(none["short"].toBool());
+        // With the chapter top (first verse), { ends there, merged with a heading on it.
+        auto topStep = [&](const QJSValue &list, int verse, int count) {
+            return js.globalObject().property("headingStep").call({list, verse, -1, count, 1}).toVariant().toMap();
+        };
+        QCOMPARE(topStep(headings, 20, 1)["verse"].toInt(), 16);
+        auto merged = topStep(headings, 20, 5); QCOMPARE(merged["verse"].toInt(), 1); QCOMPARE(merged["moved"].toInt(), 2);
+        auto later = js.evaluate("[{verse: 4}, {verse: 10}]");
+        QCOMPARE(topStep(later, 3, 1)["verse"].toInt(), 1);
+        auto toTop = topStep(later, 12, 3); QCOMPARE(toTop["verse"].toInt(), 1); QCOMPARE(toTop["moved"].toInt(), 3);
+        QCOMPARE(topStep(js.evaluate("[]"), 7, 1)["verse"].toInt(), 1);
+        QCOMPARE(topStep(later, 1, 1)["moved"].toInt(), 0);
+        QCOMPARE(js.globalObject().property("headingStep").call({later, 3, 1, 1, 1}).toVariant().toMap()["verse"].toInt(), 4);
         QCOMPARE(js.globalObject().property("sectionOf").call({headings, 21}).toInt(), 16);
         QCOMPARE(js.globalObject().property("sectionOf").call({js.evaluate("[{verse: 3}]"), 2}).toInt(), 0);
     }
@@ -453,6 +466,29 @@ private slots:
             QVERIFY(item("outlineEntry:31")->property("isCurrent").toBool());
             QVERIFY(!item("outlineEntry:1")->property("isCurrent").toBool());
             QCOMPARE(outline->mapToScene(QPointF(0, 0)), before);
+            // The chapter title heads the outline, larger and bolder than sections.
+            auto title = item("outlineTitleText");
+            QCOMPARE(title->property("text").toString(), bible->passage());
+            QCOMPARE(bible->passage(), QString("John 3"));
+            QVERIFY(item("outlineTitle")->y() < item("outlineEntry:1")->y());
+            QVERIFY(title->property("font").value<QFont>().pixelSize() > 12.5 * window->property("readerScale").toDouble() + 1);
+            QVERIFY(title->property("font").value<QFont>().bold());
+            QVERIFY(!item("outlineTitle")->property("isCurrent").toBool());
+            // Clicking it jumps to the top of the chapter.
+            click(item("outlineTitle"));
+            QTRY_COMPARE(bible->selectionReference(), QString("John 3:1"));
+            QCOMPARE(jumpIndex(), jumps + 2);
+            QTRY_VERIFY(item("reading")->property("contentY").toDouble() < 1);
+            // Before the first heading (John 1 starts its sections at verse 4)
+            // the title is current.
+            navigate("John 1:2"); QTRY_VERIFY(outlineShown());
+            QTRY_COMPARE(window->property("outlineCurrent").toInt(), 0);
+            QCOMPARE(item("outlineTitleText")->property("text").toString(), QString("John 1"));
+            QVERIFY(item("outlineTitle")->property("isCurrent").toBool());
+            QVERIFY(item("outlineTitleMark")->isVisible());
+            QVERIFY(!item("outlineEntry:4")->property("isCurrent").toBool());
+            navigate("John 1:5"); QTRY_COMPARE(window->property("outlineCurrent").toInt(), 4);
+            QVERIFY(!item("outlineTitle")->property("isCurrent").toBool());
         }
     }
     void outlineScrollsToCurrentWhenTall() {
@@ -490,10 +526,13 @@ private slots:
             QCOMPARE(bible->selectionReference(), QString("John 3:31")); QCOMPARE(jumpIndex(), jumps);
             QCOMPARE(toast(), QString("No more headings below"));
             key(Qt::Key_BraceLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 3:22")); QCOMPARE(jumpIndex(), ++jumps);
-            // A count past the first heading stops there, with a toast.
+            // A count past the first heading stops at the chapter top.
             type("5"); key(Qt::Key_BraceLeft);
-            QTRY_COMPARE(bible->selectionReference(), QString("John 3:1"));
-            QCOMPARE(toast(), QString("No more headings above"));
+            QTRY_COMPARE(bible->selectionReference(), QString("John 3:1")); QCOMPARE(jumpIndex(), ++jumps);
+            QTRY_VERIFY(item("reading")->property("contentY").toDouble() < 1);
+            // Already there: a brief toast, no jump.
+            key(Qt::Key_BraceLeft); QCOMPARE(toast(), QString("Already at the top of John 3"));
+            QCOMPARE(bible->selectionReference(), QString("John 3:1")); QCOMPARE(jumpIndex(), jumps);
             // History goes back through the heading jumps.
             key(Qt::Key_BracketLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 3:22"));
             // Inside a section, { goes to its own heading.
@@ -502,12 +541,20 @@ private slots:
             navigate("John 2:3"); jumps = jumpIndex();
             key(Qt::Key_BraceRight); QCOMPARE(toast(), QString("No headings in John 2")); QCOMPARE(jumpIndex(), jumps);
             QCOMPARE(bible->selectionReference(), QString("John 2:3"));
+            // { goes to the chapter top instead.
+            key(Qt::Key_BraceLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 2:1")); QCOMPARE(jumpIndex(), ++jumps);
+            // Before the first heading: the chapter top too.
+            navigate("John 1:3"); jumps = jumpIndex();
+            key(Qt::Key_BraceLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 1:1")); QCOMPARE(jumpIndex(), ++jumps);
+            QTRY_VERIFY(item("reading")->property("contentY").toDouble() < 1);
         }
         // A version without any headings.
         QVERIFY(bible->switchVersion(plainId)); QVERIFY(!bible->hasHeadings()); settle();
         navigate("John 3:2");
         key(Qt::Key_BraceRight); QCOMPARE(toast(), bible->versionAbbreviation() + " has no section headings");
-        key(Qt::Key_BraceLeft); QCOMPARE(bible->selectionReference(), QString("John 3:2"));
+        const int jumps = jumpIndex();
+        key(Qt::Key_BraceLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 3:1")); QCOMPARE(jumpIndex(), jumps + 1);
+        key(Qt::Key_BraceLeft); QCOMPARE(toast(), QString("Already at the top of John 3"));
     }
 
     // ---- Margin notes -------------------------------------------------------

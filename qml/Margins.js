@@ -166,9 +166,12 @@ function sectionOf(headings, verse) {
 
 // Target heading for `{` (direction -1) / `}` (+1) with a count, from `verse`.
 // -> {verse, moved, short}: moved < count when the chapter ran out (short).
-function headingStep(headings, verse, direction, count) {
+// With `top` (the chapter's first verse), `{` ends at the chapter top: it is
+// the last stop above, merged with a heading on that verse.
+function headingStep(headings, verse, direction, count, top) {
     const candidates = headings.map(function(h) { return h.verse })
         .filter(function(v) { return direction > 0 ? v > verse : v < verse })
+    if (direction < 0 && top !== undefined && top < verse && candidates.indexOf(top) < 0) candidates.unshift(top)
     if (direction < 0) candidates.reverse()
     if (!candidates.length) return { verse: 0, moved: 0, short: true }
     const moved = Math.min(count, candidates.length)

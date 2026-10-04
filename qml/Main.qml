@@ -1448,27 +1448,33 @@ ApplicationWindow {
         const watch = [reading.contentY, verseExtents, bible.cursorVerse, bible.selectedStart]
         return watch && outlineHeadings.length ? Margins.sectionOf(outlineHeadings, readingVerse()) : 0
     }
-    // `{` / `}`: previous/next section heading (counts), a History jump.
+    // `{` / `}`: previous/next section heading (counts), a History jump. `{`
+    // ends at the chapter top (its first verse, scrolled to the top), also in
+    // chapters and versions without headings.
     function headingStep(direction, count) {
-        if (!bible.hasHeadings) {
-            sounds.play("boundary")
-            notify(bible.versionAbbreviation + " has no section headings", true)
-            return
-        }
-        const headings = Array.from(bible.verses).filter(function(row) { return (row.heading || "").length > 0 })
+        const headings = !bible.hasHeadings ? [] : Array.from(bible.verses)
+            .filter(function(row) { return (row.heading || "").length > 0 })
             .map(function(row) { return { verse: row.number } })
-        if (!headings.length) {
+        if (direction > 0 && !headings.length) {
             sounds.play("boundary")
-            notify("No headings in " + bible.passage, true)
+            notify(bible.hasHeadings ? "No headings in " + bible.passage
+                : bible.versionAbbreviation + " has no section headings", true)
             return
         }
         if (!marginsMeasured) { readerColumn.forceLayout(); verseExtents = measureVerses() }
         const from = hasSelection && !bible.crossChapterSelection ? bible.cursorVerse : readingVerse()
-        const step = Margins.headingStep(headings, from, direction, count)
+        const top = bible.verses.length ? bible.verses[0].number : 0
+        const step = Margins.headingStep(headings, from, direction, count, top)
         if (step.moved) jumpToHeading(step.verse)
-        if (step.short) {
+        // Scrolled away from the top while the first verse is current.
+        else if (direction < 0 && from === top && reading.contentY > 1) jumpToHeading(top)
+        else if (direction < 0) {
             sounds.play("boundary")
-            notify(direction > 0 ? "No more headings below" : "No more headings above", true)
+            notify("Already at the top of " + bible.passage, true)
+        }
+        if (direction > 0 && step.short) {
+            sounds.play("boundary")
+            notify("No more headings below", true)
         }
     }
     function jumpToHeading(verse) {
@@ -4021,10 +4027,12 @@ ApplicationWindow {
                     width: app.marginSpace.outline.width
                     height: Math.max(0, reading.height - app.floatingSafety - y - 12 * app.readerScale)
                     headings: app.outlineHeadings
+                    title: bible.passage
                     current: app.outlineCurrent
                     theme: desktop
                     uiScale: app.readerScale
                     onActivated: function(verse) { app.jumpToHeading(verse) }
+                    onActivatedTop: if (bible.verses.length) app.jumpToHeading(bible.verses[0].number)
                 }
                 // A continuous fade keeps floating controls legible without a
                 // footer surface, divider, or shortening the reading viewport.
