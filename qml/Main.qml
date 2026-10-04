@@ -1317,14 +1317,9 @@ ApplicationWindow {
         const block = blockLoader.item as BlockReader
         const out = []
         if (block) {
-            const offset = blockLoader.mapToItem(readerColumn, 0, 0).y
-            for (const row of rows) {
-                const rects = block.verseRangeRects(row.number, row.number)
-                if (!rects.length) continue
-                let top = Infinity, bottom = -Infinity
-                for (const rect of rects) { top = Math.min(top, rect.y); bottom = Math.max(bottom, rect.y + rect.height) }
-                out.push({ number: row.number, top: offset + top, bottom: offset + bottom })
-            }
+            const offset = block.body.mapToItem(readerColumn, 0, 0).y
+            for (const extent of block.verseExtents())
+                out.push({ number: extent.number, top: offset + extent.top, bottom: offset + extent.bottom })
         } else {
             for (let i = 0; i < rows.length; ++i) {
                 const item = verseRepeater.itemAt(i) as VerseItem
@@ -1334,8 +1329,15 @@ ApplicationWindow {
         }
         return out
     }
+    // Margins measure only while one is shown; `{`/`}` measure on demand.
+    readonly property bool marginsMeasured: marginSpace.notes.visible || marginSpace.outline.visible
+    onMarginsMeasuredChanged: scheduleMargins()
     function updateMargins() {
-        if (!bible.ready) { verseExtents = []; marginLayout = []; return }
+        if (!bible.ready || !marginsMeasured) {
+            if (verseExtents.length) verseExtents = []
+            if (marginLayout.length) marginLayout = []
+            return
+        }
         readerColumn.forceLayout()
         const extents = measureVerses()
         verseExtents = extents
@@ -1430,6 +1432,7 @@ ApplicationWindow {
             notify("No headings in " + bible.passage, true)
             return
         }
+        if (!marginsMeasured) { readerColumn.forceLayout(); verseExtents = measureVerses() }
         const from = hasSelection && !bible.crossChapterSelection ? bible.cursorVerse : readingVerse()
         const step = Margins.headingStep(headings, from, direction, count)
         if (step.moved) jumpToHeading(step.verse)

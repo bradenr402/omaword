@@ -10,8 +10,9 @@ import OmaWord.Reader 1.0
 Item {
     id: root
     property bool destroying: false
-    // After each geometry refresh (layout, annotations, width): margin users re-measure.
+    // After the geometry refresh that follows a rebuild: margin users re-measure.
     signal layoutRefreshed()
+    property bool layoutDirty: false
     required property var controller
     required property var backend
     required property var theme
@@ -82,6 +83,7 @@ Item {
         cancelDrag()
         document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode,
                        !backend.focusMode, controller.readerSize * root.readerScale)
+        layoutDirty = true
         geometryTimer.restart()
     }
     function refreshGeometry() {
@@ -96,7 +98,7 @@ Item {
             pulseRects = pulseActive ? verseRangeRects(pulseFirst, pulseLast) : []
             flashRects = flashActive ? verseRangeRects(flashFirst, flashLast) : []
             updateAnnotations()
-            layoutRefreshed()
+            if (layoutDirty) { layoutDirty = false; layoutRefreshed() }
         }
     }
     function cancelDrag() { dragging = false; pressed = false; autoscroll.stop() }
@@ -104,6 +106,21 @@ Item {
     function verseRect(number) { return body.positionToRectangle(document.positionFor(number)) }
     function searchRect(segment) { return document.searchRect(segment) }
     function hit(x, y) { return document.verseAtPoint(x, y) }
+    // Vertical extent {number, top, bottom} of every verse (body coordinates),
+    // reading the span list once.
+    function verseExtents() {
+        const out = []
+        for (const span of Array.from(document.spans)) {
+            const rects = document.rectangles(span.start, span.end)
+            if (!rects.length) continue
+            let top = Infinity, bottom = -Infinity
+            for (const rect of rects) { top = Math.min(top, rect.y); bottom = Math.max(bottom, rect.y + rect.height) }
+            const last = out.length ? out[out.length - 1] : null
+            if (last && last.number === span.number) { last.top = Math.min(last.top, top); last.bottom = Math.max(last.bottom, bottom) }
+            else out.push({ number: span.number, top: top, bottom: bottom })
+        }
+        return out
+    }
     // Line rectangles of verses first..last in the shared layout (paint only).
     function verseRangeRects(first, last) {
         if (first <= 0) return []
