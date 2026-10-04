@@ -5647,6 +5647,7 @@ ApplicationWindow {
                 text: "Version details & permissions ↗"; visible: !!entry; compact: true
                 onClicked: desktop.openExternal(entry.detailsUrl)
             }
+            Label { objectName: "aboutCrossReferences"; text: "Cross references: OpenBible.info, CC-BY"; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
             Label { text: desktop.appName + " " + desktop.version + " · Application code licensed under MIT\nNo account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             QuietButton { text: "Open local data folder ↗"; compact: true; onClicked: desktop.openExternal("file://" + bible.dataDirectory()) }
         }

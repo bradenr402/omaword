@@ -130,8 +130,8 @@ class BackendTest : public QObject
         QVERIFY(bible->deleteAnnotation(reference)); verify(nextBook,chapter,{}); verify(previousBook,previousChapter,{});
     }
     static QMap<QString,QByteArray> studyEntries() {
-        return {{"01-GENstudy.usfm", "\\id GEN Study Test Bible\n\\c 1\n\\p\n\\v 1 In the beginning.\\f + \\fr 1:1 \\ft First note\\f*\n"
-                    "\\v 2 Formless.\\x - \\xo 1:2 \\xt Jn 1:3; Mt 1:2-3\\x*\n\\v 3 Light.\\f b \\ft Second note\\f*\n\\c 2\n\\p\n\\v 1 Finished.\n"},
+        return {{"01-GENstudy.usfm", "\\id GEN Study Test Bible\n\\c 1\n\\p\n\\v 1 In the beginning.\\f + \\fr 1:1 \\ft First note\\f*\\x - \\xo 1:1 \\xt Jn 1:1-3; John 1:1-3\\x*\n"
+                    "\\v 2 Formless.\\x - \\xo 1:2 \\xt Jn 1:3; Mt 1:2-3, 1; Zz 9:9\\x*\n\\v 3 Light.\\f b \\ft Second note\\f*\n\\c 2\n\\p\n\\v 1 Finished.\n"},
                 {"02-MATstudy.usfm", "\\id MAT Study Test Bible\n\\c 1\n\\p\n\\v 1 Book.\n\\v 2 Abraham.\n\\v 3 Judah.\n"},
                 {"03-JHNstudy.usfm", "\\id JHN Study Test Bible\n\\c 1\n\\p\n\\v 1 Word.\n\\v 2 Same.\n\\v 3 Made.\n"
                     "\\c 3\n\\p\n\\v 16 For God so loved. He said, \\wj Truly I say\\wj* again.\n"}};
@@ -919,6 +919,41 @@ private slots:
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16,16);
         QCOMPARE(bible->noteText(), QString("Kept across re-import"));
     }
+    void crossReferencesMergeDedupeSortAndHide() {
+        const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
+        install(path);
+        QVERIFY(bible->crossReferences().isEmpty()); // No verse selected.
+        QVERIFY(bible->navigate("Genesis 1:1"));
+        // OpenBible's Gen 1:1 -> John 1:1-3 (379 votes) merges with the source's
+        // duplicate \\x target; every other OpenBible target is absent here.
+        auto rows = bible->crossReferences();
+        QCOMPARE(rows.size(), 1);
+        auto row = rows[0].toMap();
+        QCOMPARE(row["reference"].toString(), QString("John 1:1\u20133"));
+        QVERIFY(row["votes"].toInt() >= 300); QVERIFY(row["source"].toBool()); QVERIFY(row["openBible"].toBool());
+        QCOMPARE(row["book"].toInt(), 43); QCOMPARE(row["start"].toInt(), 1); QCOMPARE(row["end"].toInt(), 3);
+        QVERIFY(row["excerpt"].toString().startsWith("Word. Same."));
+        QCOMPARE(row["versionId"].toString(), QString("study"));
+        // Source-only targets (no votes) follow in source order; a bare number
+        // continues the previous chapter; unknown books are skipped.
+        QVERIFY(bible->navigate("Genesis 1:2"));
+        QStringList references;
+        for (const auto &value : bible->crossReferences()) {
+            references << value.toMap()["reference"].toString();
+            QVERIFY(value.toMap()["source"].toBool()); QCOMPARE(value.toMap()["votes"].toInt(), 0);
+        }
+        QCOMPARE(references, QStringList({"Matthew 1:1", "Matthew 1:2\u20133", "John 1:3"}));
+        // A range unions its verses; the passage itself is never listed.
+        QVERIFY(bible->navigate("Genesis 1:1-2"));
+        references.clear();
+        for (const auto &value : bible->crossReferences()) references << value.toMap()["reference"].toString();
+        QCOMPARE(references.first(), QString("John 1:1\u20133")); QCOMPARE(references.size(), 4);
+        // John 3:16's OpenBible targets are all absent from this fixture.
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->crossReferences().isEmpty());
+        // Another version's scope is not answered from the active text.
+        auto scope = bible->tagScope(); scope["versionId"] = "elsewhere";
+        QVERIFY(bible->crossReferences(scope).isEmpty());
+    }
     void optionalSourceArchives_data() {
         QTest::addColumn<QString>("id"); QTest::addColumn<QString>("path");
         const auto directory = qEnvironmentVariable("OMAWORD_TEST_USFM_DIR");
@@ -954,6 +989,23 @@ private slots:
             const int next = books[acts+1].toMap()["id"].toInt();
             QVERIFY(next != 45); // This source does not place Romans after Acts.
             checkSourceOrderedNote(next,44);
+            // OJB's own \\x "Ps 33:6,9" merges into the bundled cross references.
+            QVERIFY(bible->navigate("Genesis 1:3"));
+            bool psalm6 = false, psalm9 = false;
+            for (const auto &value : bible->crossReferences()) {
+                const auto row = value.toMap();
+                if (row["book"].toInt() == 19 && row["chapter"].toInt() == 33 && row["start"].toInt() == 6) psalm6 = row["source"].toBool();
+                if (row["book"].toInt() == 19 && row["chapter"].toInt() == 33 && row["start"].toInt() == 9) psalm9 = row["source"].toBool();
+            }
+            QVERIFY(psalm6); QVERIFY(psalm9);
+        }
+        if (id == "eng-kjv2006") {
+            // KJV versification matches OpenBible: John 3:16 has many targets, sorted by votes.
+            QVERIFY(bible->navigate("John 3:16"));
+            const auto rows = bible->crossReferences();
+            QVERIFY(rows.size() >= 20);
+            for (int i = 1; i < rows.size(); ++i) QVERIFY(rows[i-1].toMap()["votes"].toInt() >= rows[i].toMap()["votes"].toInt());
+            QVERIFY(bible->navigate("Matthew 1")); QVERIFY(!bible->footnotes().isEmpty() || bible->hasWordsOfJesus());
         }
         for (const auto &row : bible->books()) {
             const auto book = row.toMap();

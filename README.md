@@ -205,4 +205,6 @@ Omarchy already provides most of these; the install command above adds the rest.
 
 Found a problem or have an idea? [Open a GitHub issue](https://github.com/bradenr402/omaword/issues) with what you did, what you expected, and what happened. Screenshots and the passage or version involved help.
 
+Cross references: [OpenBible.info](https://www.openbible.info/labs/cross-references/), CC-BY (bundled; regenerate with `bin/crossrefs`).
+
 Application code is [MIT licensed](LICENSE). See [ARCHITECTURE.md](ARCHITECTURE.md) and [tests/README.md](tests/README.md) for development.

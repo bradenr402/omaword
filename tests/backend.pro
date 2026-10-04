@@ -9,5 +9,6 @@ PKGCONFIG += libarchive
 INCLUDEPATH += ../src
 SOURCES += tst_backend.cpp ../src/biblebackend.cpp ../src/usfmimporter.cpp ../src/biblebooks.cpp
 HEADERS += ../src/biblebackend.h ../src/usfmimporter.h ../src/biblebooks.h
+RESOURCES += ../resources.qrc
 SOURCES += ../src/scripturesearch.cpp
 HEADERS += ../src/scripturesearch.h

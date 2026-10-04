@@ -4,8 +4,8 @@ Durable, non-obvious knowledge for developers. Code wins over this file; the
 tests (see [tests/README.md](tests/README.md)) pin the contracts below.
 
 Stack: C++17, Qt 6 Quick/QML (SQL, Concurrent, DBus, Network, Multimedia),
-libarchive for ZIPs, qmake (`omaword.pro`). `resources.qrc` embeds QML and the
-seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
+libarchive for ZIPs, qmake (`omaword.pro`). `resources.qrc` embeds QML, the
+seven-entry `resources/catalog.json`, and `resources/crossrefs.bin`. `branding.env` feeds generated headers
 (`src/brand.h.in`) and desktop files.
 
 ## Components
@@ -70,6 +70,16 @@ seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
   decoded without an XML/HTML engine.
 
 ## Versions and attribution
+
+- Cross references: OpenBible.info (CC-BY, credited in About and README).
+  `bin/crossrefs` converts its `cross_references.txt` at development time:
+  OSIS abbreviations → USFM codes → book IDs, votes ≤ 0 dropped, KJV verse
+  keys, columnar + delta/varint encoded, `qCompress`ed (≈ 0.9 MB for 341k
+  rows). `BibleBackend` decodes it once per process. `crossReferences(scope)`
+  unions the selection's verses (≤ 50), merges the source's own `\x` targets
+  (parsed with book/chapter carry-over), dedupes exact ranges, hides absent
+  targets and the passage itself, sorts by votes (source wins ties). Other
+  versifications are looked up by the same numbers.
 
 - Seven catalog entries (`engnet`, `eng-kjv2006`, `eng-kjv` = **KJV+**, `engojb`,
   `engylt`, `eng-asv`, `engbsb`) from `https://ebible.org/Scriptures/<id>_usfm.zip`.

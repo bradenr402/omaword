@@ -270,6 +270,13 @@ public:
     // Notes (other than the current exact range) whose links overlap the
     // current selection, or the chapter without one. Collection-shaped rows.
     Q_INVOKABLE QVariantList linkedNotes() const;
+    // Cross references for a scope in the active version (empty: the current
+    // selection; none without a verse): bundled OpenBible.info data (KJV verse
+    // IDs, votes > 0) merged with the source's own \x targets (schema 4),
+    // deduplicated by exact range, targets absent from this version and the
+    // passage itself hidden, sorted by votes (source references win ties).
+    // Rows: canonical scope fields + reference, votes, source, openBible, excerpt.
+    Q_INVOKABLE QVariantList crossReferences(QVariantMap scope = QVariantMap()) const;
     Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
     Q_INVOKABLE void openChapter(int book, int chapter);
     Q_INVOKABLE void previousChapter();
@@ -367,6 +374,7 @@ private:
     bool parseReference(QString input, int *book, int *chapter, int *start, int *end, QString *error) const;
     struct Link { int start = 0, length = 0, first = 0, last = 0; QString text, reference; };
     QVector<Link> findLinks(const QString &text) const;
+    QVector<QPair<int, int>> sourceTargets(const QString &text, int book, int chapter) const;
     bool chapterBounds(int book, int chapter, int *first, int *last) const;
     void intersectSelection();
     bool commitAnnotations(const QVector<Annotation> &annotations);
