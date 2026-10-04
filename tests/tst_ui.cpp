@@ -3735,7 +3735,8 @@ private slots:
         reference("John 3:15");
         for (const auto movement : {Qt::Key_J,Qt::Key_K,Qt::Key_J,Qt::Key_Down,Qt::Key_Up}) {
             key(movement);
-            QTest::qWait(100);
+            // The 110 ms slide must land before measuring.
+            QTest::qWait(20); QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
             auto body = item(qPrintable("verseBody" + QString::number(bible->cursorVerse())));
             QVERIFY(body);
             const double y = body->mapToItem(item("reading"),QPointF()).y();
