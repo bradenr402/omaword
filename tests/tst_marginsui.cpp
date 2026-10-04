@@ -1,4 +1,5 @@
 #include <QtTest/QTest>
+#include <QElapsedTimer>
 #include <QApplication>
 #include <QFile>
 #include <QJSEngine>
@@ -592,6 +593,48 @@ private slots:
         // Wide: both, no shift.
         resize(1920, 900); QTRY_VERIFY(notesShown() && outlineShown());
         QCOMPARE(space()["shift"].toDouble(), 0.0);
+    }
+    void marginNotesToggleSlidesTheReader() {
+        note("John 3:16", 16, 16, "A note that needs room in the margin.");
+        resize(1200, 900);
+        navigate("John 3:16");
+        const double natural = window->property("readerNaturalX").toDouble();
+        auto layer = item("marginLayer");
+        // Motion allowed: the column passes through intermediate x on the way.
+        sounds->setProperty("reduceMotion", false);
+        auto sample = [&](double from, double to) {
+            bool between = false;
+            QElapsedTimer clock; clock.start();
+            while (clock.elapsed() < 600) {
+                const double x = columnX();
+                if ((x - from) * (x - to) < 0) between = true;
+                if (x == to && clock.elapsed() > 80) break;
+                QTest::qWait(5);
+            }
+            return between;
+        };
+        key(Qt::Key_W, Qt::AltModifier); QVERIFY(bible->marginNotes());
+        const double shifted = natural - space()["shift"].toDouble();
+        QVERIFY(shifted < natural);
+        QVERIFY(sample(natural, shifted));
+        QTRY_COMPARE(columnX(), shifted);
+        QTRY_COMPARE(layer->opacity(), 1.0);
+        key(Qt::Key_W, Qt::AltModifier); QVERIFY(!bible->marginNotes());
+        QTRY_VERIFY(layer->opacity() < 1); // fading out before the slide back
+        QVERIFY(sample(shifted, natural));
+        QTRY_COMPARE(columnX(), natural);
+        // Resizing does not animate.
+        key(Qt::Key_W, Qt::AltModifier); QTRY_COMPARE(columnX(), shifted);
+        window->resize(1300, 900); QTRY_COMPARE(window->width(), 1300);
+        QCOMPARE(window->property("marginSlideOffset").toDouble(), 0.0);
+        QCOMPARE(columnX(), space()["columnX"].toDouble());
+        // Reduce motion: the toggle jumps.
+        sounds->setProperty("reduceMotion", true);
+        key(Qt::Key_W, Qt::AltModifier);
+        QCOMPARE(columnX(), window->property("readerNaturalX").toDouble()); QCOMPARE(layer->opacity(), 1.0);
+        key(Qt::Key_W, Qt::AltModifier);
+        QCOMPARE(columnX(), space()["columnX"].toDouble()); QVERIFY(columnX() < window->property("readerNaturalX").toDouble());
+        bible->setMarginNotes(false);
     }
     void crowdedMarginNotesTruncate() {
         const QString long1 = QString("A long reflection that keeps going. ").repeated(30);

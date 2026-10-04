@@ -1259,9 +1259,12 @@ ApplicationWindow {
     readonly property real readerColumnWidth: Math.min(760 * readerScale, reading.width - readerSideInset - readerRightInset)
     readonly property real readerNaturalX: Math.min((reading.width - readerColumnWidth) / 2, reading.width - readerRightInset - readerColumnWidth)
     readonly property bool marginsAllowed: bible.ready && !bible.focusMode && !rangeEditing
+    // bible.marginNotes as the margins show it: toggling off lags by the notes'
+    // fade-out (applyMarginNotes) so they leave before the reader slides back.
+    property bool marginNotesOn: false // set from bible.marginNotes on completion, then by applyMarginNotes
     // Chapter notes, one per annotation, with the chapter rows they cover.
     readonly property var marginNoteEntries: {
-        if (!marginsAllowed || !bible.marginNotes) return []
+        if (!marginsAllowed || !marginNotesOn) return []
         const byKey = {}, list = []
         for (const row of Array.from(bible.verses)) {
             for (const range of Array.from(row.noteRanges || [])) {
@@ -1306,6 +1309,33 @@ ApplicationWindow {
     Connections {
         target: bible
         function onVersesChanged() { app.scheduleMargins() }
+        function onMarginNotesChanged() { app.applyMarginNotes(bible.marginNotes) }
+    }
+    // Toggling margin notes slides the reader to make or return room, and fades
+    // the notes in/out; resizes, chapter changes, and Disable animations jump.
+    readonly property int marginSlideMs: reduceMotion ? 0 : 140
+    property real marginSlideOffset: 0
+    NumberAnimation { id: marginSlide; objectName: "marginSlide"; target: app; property: "marginSlideOffset"; to: 0; duration: app.marginSlideMs; easing.type: Easing.OutCubic }
+    NumberAnimation { id: marginFade; target: marginLayer; property: "opacity"; duration: app.marginSlideMs; easing.type: Easing.OutCubic
+        onFinished: if (marginLayer.opacity === 0) app.slideMarginsTo(false) }
+    function slideMarginsTo(on) {
+        const before = marginSpace.columnX + marginSlideOffset
+        marginNotesOn = on
+        marginSlide.stop()
+        marginSlideOffset = reduceMotion ? 0 : before - marginSpace.columnX
+        if (marginSlideOffset !== 0) marginSlide.start()
+    }
+    function applyMarginNotes(on) {
+        marginFade.stop()
+        if (on === marginNotesOn && !(on && marginLayer.opacity < 1)) return
+        if (reduceMotion || !marginSpace.notes.visible && !on) {
+            marginLayer.opacity = 1; slideMarginsTo(on); return
+        }
+        if (on) {
+            if (!marginNotesOn) marginLayer.opacity = 0
+            slideMarginsTo(true)
+            marginFade.to = 1; marginFade.start()
+        } else { marginFade.to = 0; marginFade.start() }
     }
     Connections {
         target: reading
@@ -3519,7 +3549,7 @@ ApplicationWindow {
                         // Centered, but clear of the footer's stacked right column;
                         // margin notes may shift it left (app.marginSpace).
                         width: app.readerColumnWidth
-                        x: app.marginSpace.columnX
+                        x: app.marginSpace.columnX + app.marginSlideOffset
                         onHeightChanged: app.scheduleMargins()
                         onWidthChanged: app.scheduleMargins()
                         topPadding: 48 * app.readerScale
@@ -6541,7 +6571,7 @@ ApplicationWindow {
             else if (app.dwellPending && !historyDwellTimer.running) historyDwellTimer.restart()
         }
     }
-    Component.onCompleted: { readerInitialized = true; syncNote(); restorePosition(); restartDwell(); scheduleMargins() }
+    Component.onCompleted: { marginNotesOn = bible.marginNotes; readerInitialized = true; syncNote(); restorePosition(); restartDwell(); scheduleMargins() }
     onClosing: function(close) {
         if (rangeEditing) rangeEditor.cancel()
         if (rangeEditing) { close.accepted = false; return }
