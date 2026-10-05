@@ -1492,6 +1492,47 @@ private slots:
         call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
         click("searchControl"); QTRY_VERIFY(!shown("deskDrawer")); QVERIFY(!shown("passagePalette"));
     }
+    // Keyboard: ↓ through the open menu to `id`, then enter.
+    void menuKeyTo(const QString &id) {
+        QTRY_VERIFY(menu()->property("opened").toBool());
+        for (int i = 0; i < 40; ++i) {
+            const auto entries = value(menu()->property("entries")).toList();
+            const int at = menu()->property("currentIndex").toInt();
+            if (at >= 0 && at < entries.size() && entries[at].toMap()["id"].toString() == id) break;
+            key(Qt::Key_Down);
+        }
+        key(Qt::Key_Return); QTRY_VERIFY(!menu()->property("visible").toBool());
+    }
+    void passageMenuStepsAndClickableMatchCounter() {
+        navigate("John 2:5");
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        for (const auto &id : {"previousChapter", "nextChapter", "previousHeading", "nextHeading"}) QVERIFY2(menuIds().contains(id), id);
+        QCOMPARE(menuShortcut("previousChapter"), QString("h")); QCOMPARE(menuShortcut("nextChapter"), QString("l"));
+        QCOMPARE(menuShortcut("previousHeading"), QString("{")); QCOMPARE(menuShortcut("nextHeading"), QString("}"));
+        // Keyboard: choose Next chapter in the menu.
+        menuKeyTo("nextChapter"); QTRY_COMPARE(bible->chapter(), 3);
+        // Mouse: Previous chapter, then Next heading.
+        clickAt(versePoint(5), Qt::RightButton); chooseMenu("previousChapter"); QTRY_COMPARE(bible->chapter(), 2);
+        navigate("John 2:5");
+        clickAt(versePoint(5), Qt::RightButton); chooseMenu("nextHeading"); QTRY_COMPARE(bible->cursorVerse(), 20);
+        clickAt(versePoint(20), Qt::RightButton); chooseMenu("previousHeading"); QTRY_VERIFY(bible->cursorVerse() < 20);
+        // The match counter: click next, shift click previous, right click for a menu.
+        navigate("John 3:1"); key(Qt::Key_Slash); type("access"); key(Qt::Key_Return);
+        QTRY_VERIFY(shown("searchMatchCount"));
+        auto counter = item("searchMatchCount");
+        auto counterMouse = item("searchMatchCountMouse"); QCOMPARE(counterMouse->cursor().shape(), Qt::PointingHandCursor);
+        QTest::mouseMove(window, center(counter)); QTRY_VERIFY(toolTipOf(counter)->property("visible").toBool());
+        QVERIFY(toolTipOf(counter)->property("text").toString().contains("shift click"));
+        const int first = prop("searchMatchIndex").toInt();
+        click(counter); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first + 1);
+        click(counter, Qt::LeftButton, Qt::ShiftModifier); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first);
+        click(counter, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), QStringList({"nextMatch", "previousMatch", "|", "clearSearch"}));
+        chooseMenu("nextMatch"); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first + 1);
+        // Keyboard: the same menu by keys.
+        click(counter, Qt::RightButton); menuKeyTo("clearSearch");
+        QTRY_VERIFY(prop("acceptedSearchQuery").toString().isEmpty()); QVERIFY(!shown("searchMatchCount"));
+    }
 };
 
 int main(int argc, char **argv) {

@@ -1207,7 +1207,12 @@ ApplicationWindow {
             menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "toggleDesk"),
             menuDivider,
             menuAction("related", "Study", "related"),
-            menuAction("chapterFind", "Find in chapter", "chapterFind")
+            menuAction("chapterFind", "Find in chapter", "chapterFind"),
+            menuDivider,
+            menuAction("previousChapter", "Previous chapter", "previousChapter"),
+            menuAction("nextChapter", "Next chapter", "nextChapter"),
+            menuAction("previousHeading", "Previous heading", "previousHeading"),
+            menuAction("nextHeading", "Next heading", "nextHeading")
         ].concat(openRangeEntries(sceneX, sceneY))
             .concat(bible.focusMode ? [menuDivider, menuAction("leaveFocus", "Leave focus mode", "focus")] : [])
     }
@@ -5803,6 +5808,18 @@ ApplicationWindow {
         onAccepted: function(query) { app.acceptChapterFind(query) }
         onCanceled: app.cancelChapterFind()
     }
+    // The match counter acts like n / shift N: click the next match, shift
+    // click the previous; right click for Next / Previous / Clear search.
+    function searchCounterMenu(sceneX, sceneY) {
+        const ready = !rangeEditing && acceptedSearchQuery.length > 0
+        contextMenu.show("searchCount", [
+            menuAction("nextMatch", "Next match", "nextMatch"),
+            menuAction("previousMatch", "Previous match", "previousMatch"),
+            menuDivider,
+            { id: "clearSearch", text: "Clear search", shortcut: KeyNotation.format("Escape"), enabled: ready,
+                run: function() { app.clearSearch(); app.readerFocus() } }
+        ], sceneX, sceneY)
+    }
     Label {
         id: searchMatchCount
         objectName: "searchMatchCount"
@@ -5813,7 +5830,29 @@ ApplicationWindow {
         visible: !app.findPromptOpen && app.acceptedSearchQuery.length > 0
         text: app.searchError || (app.searchMatches.length ? (app.searchMatchIndex < 0
             ? app.searchMatches.length + " matches" : (app.searchMatchIndex + 1) + " / " + app.searchMatches.length) : "No matches")
-        color: desktop.muted; font.pixelSize: 12 * app.scale
+        color: searchCountMouse.containsMouse ? desktop.foreground : desktop.muted; font.pixelSize: 12 * app.scale
+        MouseArea {
+            id: searchCountMouse
+            objectName: "searchMatchCountMouse"
+            anchors.fill: parent
+            anchors.margins: -6 * app.controlScale
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: function(mouse) {
+                if (mouse.button === Qt.RightButton) {
+                    const p = mapToItem(null, mouse.x, mouse.y)
+                    app.searchCounterMenu(p.x, p.y)
+                } else app.runCommand((mouse.modifiers & Qt.ShiftModifier) ? "previousMatch" : "nextMatch")
+            }
+        }
+        AppToolTip {
+            theme: desktop
+            uiScale: app.scale
+            visible: searchCountMouse.containsMouse
+            text: "Click: next match · " + app.keyText("nextMatch") + "\n" + KeyNotation.format("Shift+Click") + ": previous · "
+                + app.keyText("previousMatch") + "\n" + KeyNotation.format("RightClick") + ": more"
+        }
     }
     Label {
         objectName: "searchQueryLabel"
