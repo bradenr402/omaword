@@ -197,14 +197,14 @@ These also work, but stay out of the in-app list:
 
 ### Reading
 - Paragraph, Verse, and Block layouts (`alt l`), with optional verse numbers and headings.
-- Focus mode (`f`) dims everything but the current verse and keeps it 40% down the window, like a typewriter.
+- Focus mode (`f`) dims everything but the current verse and keeps it 40% down the window, like a typewriter. The footer then shows only the focus button; rest the pointer on it (or tab to it) to reveal the rest in place.
 - **Highlight words of Jesus** (`alt j`) colors them with your theme's palette, where the version marks them (KJV).
 - Wide windows add margins: a sticky **Chapter outline** of the chapter and its section headings on the left (`alt o`; `{` / `}` jump between headings, `{` ending at the top of the chapter), and **Margin notes** on the right (`alt w`), each joined to its passage by hand-drawn braces and an arrow. Margin notes take priority and may move the text left; both are off by default.
 
 ### Finding passages
 - The passage palette understands compact references like `jn316`, `1co13`, or `rev 3 14-22`, and lists likely matches, best first.
 - Search Scripture across the current version, or find text in the current chapter.
-- `[` and `]` step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.
+- `[` and `]` (or the mouse's back and forward buttons) step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.
 - History (`shift H`) lists passages you stayed on for a few seconds, shared by every window. It never goes into backups, and Commands can clear or disable it.
 
 ### Studying
@@ -217,12 +217,17 @@ These also work, but stay out of the in-app list:
 ### Feel
 - Annotations look like pen and highlighter marks.
 - Moving to a verse slides briefly, jumps pulse, copies flash, and the text slides aside for margin notes. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows.
-- The footer holds help and mode on the left; search, passage, version, and layout in the center; and Annotations, Study, History, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows the right group stacks into a column, then folds into a `…` menu.
+- The footer holds help, mode, and focus on the left; search, passage, version, and layout in the center; and Annotations, Study, History, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows the right group stacks into a column, then folds into a `…` menu.
+
+### Keyboard and mouse
+- Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Desk), and `menu` or `shift F10` opens it from the keyboard.
+- Footer and dialog buttons take the keyboard by `tab` only; a focused button takes `enter` and `space`. Scrollable dialogs scroll with `j` `k`, `pgup` `pgdn`, `ctrl d` `ctrl u`, `home` `end`.
+- Clicking outside a panel, dialog, or picker only closes it; right-clicking elsewhere while a menu is open moves the menu there. Keys that cannot act sound an error.
 
 ### Your data
 Bible versions, annotations, the Desk, and History stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.
 
-Versions installed before footnotes were supported show **Re-import** in Versions and Reading settings; it replaces the text and keeps your annotations.
+Versions installed before footnotes were supported show **Re-import** in Versions (`ctrl shift I` on the highlighted row) and Reading settings; it replaces the text and keeps your annotations.
 
 ## Requirements
 
