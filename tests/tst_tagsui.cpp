@@ -917,6 +917,9 @@ private slots:
         key(Qt::Key_J); QCOMPARE(list->property("currentIndex").toInt(), 2);
         key(Qt::Key_K); key(Qt::Key_K); QCOMPARE(list->property("currentIndex").toInt(), 0);
         key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(list->property("currentIndex").toInt(), 3);
+        // Hints: this tab's keys.
+        const QString hints = item("savedHints")->property("text").toString();
+        QVERIFY(hints.contains("remove&nbsp;tag")); QVERIFY(hints.contains("manage"));
         // The context menu.
         key(Qt::Key_Menu);
         QTRY_VERIFY(root->findChild<QObject *>("contextMenu")->property("visible").toBool());
@@ -947,9 +950,11 @@ private slots:
         QCOMPARE(ids(bible->tagsForScope(scope(5, 5))), QStringList{beta});
         QTRY_COMPARE(list->property("count").toInt(), 3);
         bible->openChapter(43, 3); bible->selectVerses(8, 8);
-        // Every Annotations tab has the passage header.
+        // Every Annotations tab has a hint row and the passage header.
         for (int tab = 0; tab < 4; ++tab) {
             QVERIFY(QMetaObject::invokeMethod(root.get(), "filterSaved", Q_ARG(QVariant, tab - root->property("collectionTab").toInt())));
+            QVERIFY(item("savedHints")->isVisible());
+            QVERIFY(item("savedHints")->property("text").toString().contains(tab == 3 ? "remove&nbsp;tag" : "delete"));
             QCOMPARE(item("savedPassage")->property("text").toString(), QString("John 3:8 · NET"));
         }
         bible->clearSelection();

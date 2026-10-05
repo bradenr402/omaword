@@ -5519,6 +5519,18 @@ ApplicationWindow {
                     visible: collectionList.count === 0
                 }
             }
+            // Each tab's keys, above the footer (dropped when the drawer is too short for its list).
+            Label {
+                objectName: "savedHints"
+                visible: savedDrawer.height >= 420 * app.scale
+                text: app.hintRow(app.collectionTab === 3
+                    ? [[["Left", "Right"], "tabs"], ["Return", "open"], ["T", "tags"], ["Delete", "remove tag"], ["Y", "copy"], ["D", "Desk"],
+                        ["Shift+E", "range"], [app.actionKeys("manageTags")[0], "manage"], app.savedSearchVisible ? ["/", "search"] : null, ["Escape", "close"]]
+                    : [[["Left", "Right"], "tabs"], ["Return", "open"], ["Y", "copy"], ["D", "Desk"], ["Shift+E", "range"], ["Delete", "delete"],
+                        app.savedSearchVisible ? ["/", "search"] : null, ["Escape", "close"]])
+                textFormat: Text.StyledText
+                color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
             FineRule { Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
