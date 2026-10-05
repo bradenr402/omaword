@@ -345,6 +345,12 @@ private slots:
                 QTRY_VERIFY(studyOpen());
             }
             QCOMPARE(bible->selectedStart(), 1); QCOMPARE(bible->selectionReference(), QString("John 3:1"));
+            {   // A rule under the tabs, as in Annotations.
+                auto tabs = item("studyTabs"), rule = item("studyTabsRule");
+                QVERIFY(tabs && rule && rule->isVisible()); QCOMPARE(rule->height(), 1.0);
+                const auto t = tabs->mapToScene(QPointF(0, tabs->height())), r = rule->mapToScene(QPointF());
+                QVERIFY(r.y() >= t.y()); QVERIFY(r.y() - t.y() < 20); QCOMPARE(rule->width(), tabs->width());
+            }
             key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
         }
     }

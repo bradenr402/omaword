@@ -807,6 +807,7 @@ Item {
                 currentIndex: panel.studyTabs.indexOf(panel.studyTab)
                 onActivated: index => panel.setStudyTab(panel.studyTabs[index])
             }
+            FineRule { objectName: "studyTabsRule" }
             TagText {
                 Layout.fillWidth: true
                 visible: panel.studyTab !== "footnotes" && !panel.installed(panel.relatedSource)
