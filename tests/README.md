@@ -76,14 +76,14 @@ a fake `hyprctl` and temporary theme state.
 
 - **importer**: USFM parsing, metadata, source order, malformed/unsafe input, staged publication.
 - **catalog**: catalog metadata, streamed atomic downloads, cancel/timeout/retry.
-- **backend**: library, references, annotations, backups, migrations, peers, History, file ownership.
+- **backend**: library, references, annotations, backups, migrations, peers, History, file ownership, character-selection motions/objects and the quotation format.
 - **ui**: packaged Main: catalog, layouts, selection/copy, Annotations, Visual completion, footer.
 - **search**: matching semantics, async lifecycle, whitespace-preserving copy.
 - **searchui**: palette and chapter-find keyboard behavior.
 - **searchrender**: rendered match offsets/geometry across layouts.
 - **deskui**: Desk add/remove, panel, peers, version removal.
 - **studyui**: words-of-Jesus coloring, Re-import offers, Study panel tabs (Related, Cross-references, Footnotes), reader footnote markers.
-- **a11yui**: keyboard and mouse access: button keys and focus, clickable key hints, shared row menus, scroll keys, outside clicks, range-edit menu, search paging, Re-import key, error banner, Notes Linked from, focus-mode footer, chapter-find clicks and tab, mouse back/forward, keeping text selections.
+- **a11yui**: keyboard and mouse access: button keys and focus, clickable key hints, shared row menus, scroll keys, outside clicks, range-edit menu, search paging, Re-import key, error banner, Notes Linked from, focus-mode footer, chapter-find clicks and tab, mouse back/forward, keeping text selections; Phase 3: character selection (`shift V`) in every layout and quotation copies of selected text, range chooser and Combine notes keys, Manage tags keys, Annotations row focus, Notes `alt v` and web links, Add version guide keys, footnote markers and hit areas, slider arrows, Versions backspace, side-panel key hand-off, passage menu steps and match counter, double clicks, Study chip menus, margin note menus, PRIMARY selection, scrollbar gutters.
 - **marginsui**: chapter outline, `{`/`}` heading motions, margin notes (placement, truncation, connectors, reader shift, links, drawer), and the pure `Margins.js`/`HandDrawn.js` functions.
 - **historyui**: jump stack (`[` `]` `-`), dwell recording, History panel, footer button, palette recents, two windows.
 - **motion**: focus dimming, jump pulses, copy flashes, held-key repeat, reduce motion.

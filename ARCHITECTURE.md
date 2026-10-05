@@ -208,6 +208,19 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   Leaving the chapter, layout, or reader keys (a modal) ends it; so does a
   rebuild of the flowing document (text size, line height).
 
+- A finished mouse selection (drag end, double-clicked word) is offered as the
+  PRIMARY selection (`bible.setPrimarySelection`, plain text).
+
+### Keys
+- Panel- and mode-local keys are catalog rows with a non-global `scope`
+  (`characters`, `tags`, `rangeEditor`, `importGuide`, `versions`, `list`, …):
+  listed in Keybindings and the README, bound by their owner, never globally.
+- With a side panel open, `panelLeavingActions` (palettes, dialogs, reading
+  toggles) move the keyboard to the reader, close the panel, then act — so the
+  drawer's exit cannot hand focus back over what opened. Catalog shortcuts
+  recheck `shortcutEnabled` on activation (a popup's focus change can leave the
+  binding stale).
+
 ### LTR forcing
 - All Scripture layouts are LTR even when a paragraph begins in Hebrew:
   `SearchGeometry::forceLeftToRight` pins every block; plain `Text` gets a
