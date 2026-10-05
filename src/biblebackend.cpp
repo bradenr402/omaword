@@ -1819,7 +1819,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     const auto oldConnection = m_bibleConnection;
     const auto oldId = m_versionId, oldEdition = m_edition, oldAbbreviation = m_abbreviation, oldCopyright = m_copyright;
     const auto oldKeys = m_keys;
-    const bool oldParagraphs = m_hasParagraphs, oldWordsOfJesus = m_hasWordsOfJesus, oldHeadings = m_hasHeadings;
+    const bool oldParagraphs = m_hasParagraphs, oldWordsOfJesus = m_hasWordsOfJesus, oldHeadings = m_hasHeadings, oldCrossReferences = m_hasCrossReferences;
     const int oldSchema = m_textSchema;
     const auto oldBooks = m_books;
     const auto oldChapters = m_chapters;
@@ -1838,13 +1838,14 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_anchor = oldA; m_cursor = oldC; m_position = oldPosition;
         m_hasParagraphs = oldParagraphs; m_books = oldBooks; m_chapters = oldChapters;
         m_hasWordsOfJesus = oldWordsOfJesus; m_textSchema = oldSchema; m_hasHeadings = oldHeadings;
+        m_hasCrossReferences = oldCrossReferences;
         m_bookAliases = oldAliases; m_keyIndices = oldIndices;
         blocker.unblock(); emit errorChanged();
     });
     m_bible = QSqlDatabase(); m_bibleConnection.clear();
     m_versionId = id; m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_keys = {{0,0,0}};
     m_hasParagraphs = false; m_books.clear(); m_chapters.clear(); m_bookAliases.clear(); m_keyIndices.clear();
-    m_hasWordsOfJesus = false; m_textSchema = 0; m_hasHeadings = false;
+    m_hasWordsOfJesus = false; m_textSchema = 0; m_hasHeadings = false; m_hasCrossReferences = false;
     if (!id.isEmpty()) {
         m_bibleConnection = connectionName(); m_bible = QSqlDatabase::addDatabase("QSQLITE",m_bibleConnection);
         m_bible.setDatabaseName(path); m_bible.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
@@ -1864,6 +1865,11 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         if (!text.exec("SELECT EXISTS(SELECT 1 FROM verses WHERE heading IS NOT NULL AND heading<>'')") || !text.next())
             return setError("Cannot read Bible headings.");
         m_hasHeadings = text.value(0).toBool();
+        if (m_textSchema >= 4) {
+            if (!text.exec("SELECT EXISTS(SELECT 1 FROM notes WHERE kind='x' AND targets<>'')") || !text.next())
+                return setError("Cannot read Bible cross references.");
+            m_hasCrossReferences = text.value(0).toBool();
+        }
         if (!text.exec("SELECT v.book,v.chapter,v.number,v.paragraphStart FROM verses v JOIN books b ON b.id=v.book ORDER BY b.ordinal,v.chapter,v.number")) return setError("Cannot read Bible verse keys.");
         while (text.next()) {
             const int b = text.value(0).toInt(), c = text.value(1).toInt(), v = text.value(2).toInt();
@@ -3372,72 +3378,6 @@ bool BibleBackend::importBackup(QUrl file)
     clearError(); setStatus(QString("Restored %1 annotations from backup.").arg(rows.size())); return true;
 }
 
-// OpenBible.info cross references (CC-BY), bundled as resources/crossrefs.bin
-// by bin/crossrefs: qCompress'ed columns keyed by KJV-style verse IDs. Decoded
-// once per process on first use; immutable afterwards (thread-safe static).
-namespace {
-quint32 verseCode(int b, int c, int v) { return quint32(b) << 16 | quint32(c) << 8 | quint32(v); }
-struct CrossTarget { quint32 start = 0, end = 0; int votes = 0; };
-struct CrossData { QHash<quint32, QPair<int, int>> index; QVector<CrossTarget> rows; };
-const CrossData &crossData()
-{
-    static const CrossData data = [] {
-        CrossData d;
-        QFile file(":/resources/crossrefs.bin");
-        if (!file.open(QIODevice::ReadOnly)) return d;
-        const QByteArray bytes = qUncompress(file.readAll());
-        const auto *p = reinterpret_cast<const uchar *>(bytes.constData());
-        const auto *end = p + bytes.size();
-        bool ok = true;
-        auto u8 = [&]() -> quint32 { if (p >= end) { ok = false; return 0; } return *p++; };
-        auto u32 = [&]() -> quint32 { quint32 v = 0; for (int i = 0; i < 4; ++i) v = v << 8 | u8(); return v; };
-        auto varint = [&]() -> quint32 {
-            quint32 v = 0;
-            for (int shift = 0; shift < 32; shift += 7) { const quint32 b = u8(); v |= (b & 0x7f) << shift; if (!(b & 0x80)) return v; }
-            ok = false; return 0;
-        };
-        if (bytes.size() < 13 || !bytes.startsWith("OWXR")) return d;
-        p += 4;
-        if (u8() != 1) return d;
-        const quint32 sourceCount = u32(), rowCount = u32();
-        if (sourceCount > 100000 || rowCount > 2000000) return d;
-        QVector<quint32> sources(sourceCount), counts(sourceCount);
-        int b = 0;
-        for (auto &source : sources) { b += int(u8()); const int c = int(u8()), v = int(u8()); source = verseCode(b,c,v); }
-        quint64 total = 0;
-        for (auto &count : counts) { count = varint(); total += count; }
-        if (!ok || total != rowCount) return d;
-        QVector<quint32> books(rowCount), chapters(rowCount), verses(rowCount), spans(rowCount), votes(rowCount);
-        for (auto &value : books) value = u8();
-        for (auto &value : chapters) value = u8();
-        for (auto &value : verses) value = varint();
-        int explicitEnds = 0;
-        for (auto &value : spans) { value = u8(); explicitEnds += value == 255; }
-        QVector<quint32> ends(explicitEnds);
-        for (auto &value : ends) { const int eb = int(u8()), ec = int(u8()), ev = int(u8()); value = verseCode(eb,ec,ev); }
-        for (auto &value : votes) value = varint();
-        if (!ok) return d;
-        d.rows.resize(rowCount);
-        int row = 0, endIndex = 0;
-        for (quint32 s = 0; s < sourceCount; ++s) {
-            d.index.insert(sources[s], {row, int(counts[s])});
-            int tb = 0, tc = 0, tv = 0;
-            for (quint32 i = 0; i < counts[s]; ++i, ++row) {
-                if (books[row]) { tb += int(books[row]); tc = int(chapters[row]); tv = int(verses[row]); }
-                else if (chapters[row]) { tc += int(chapters[row]); tv = int(verses[row]); }
-                else tv += int(verses[row]);
-                auto &target = d.rows[row];
-                target.start = verseCode(tb,tc,tv);
-                target.end = spans[row] == 255 ? ends.value(endIndex++) : verseCode(tb,tc,tv + int(spans[row]));
-                target.votes = int(votes[row]);
-            }
-        }
-        return d;
-    }();
-    return data;
-}
-}
-
 QVector<QPair<int, int>> BibleBackend::sourceTargets(const QString &text, int book, int chapter) const
 {
     // Source \xt lists: "Ps 33:6,9; Mk 16:2", "1 Cor 13", "Gen 1:1-2:3". A
@@ -3487,43 +3427,28 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
     const int first = absoluteVerse(scope.value("book").toInt(),scope.value("chapter").toInt(),scope.value("start").toInt());
     const int last = absoluteVerse(scope.value("endBook").toInt(),scope.value("endChapter").toInt(),scope.value("end").toInt());
     if (!first || last < first) return {};
-    struct Entry { int first = 0, last = 0, votes = 0; bool source = false, openBible = false; };
-    std::map<std::pair<int, int>, Entry> merged;
-    auto add = [&](int a, int z, int votes, bool source) {
-        // Hide targets absent from the active version, and the passage itself.
-        if (!a || z < a || (a >= first && z <= last)) return;
-        auto &entry = merged[{a, z}];
-        entry.first = a; entry.last = z;
-        if (source) entry.source = true;
-        else { entry.openBible = true; entry.votes = std::max(entry.votes, votes); }
-    };
-    const auto &data = crossData();
-    QSqlQuery notes(m_bible);
-    if (m_textSchema >= 4) notes.prepare("SELECT targets FROM notes WHERE book=? AND chapter=? AND verse=? AND kind='x' ORDER BY seq");
-    for (int index = first; index <= last && index < first + 50; ++index) {
-        const auto verse = endpoint(index);
-        const auto found = data.index.constFind(verseCode(verse.book,verse.chapter,verse.verse));
-        if (found != data.index.cend()) {
-            for (int i = found->first; i < found->first + found->second; ++i) {
-                const auto &target = data.rows[i];
-                add(absoluteVerse(int(target.start >> 16),int(target.start >> 8 & 0xff),int(target.start & 0xff)),
-                    absoluteVerse(int(target.end >> 16),int(target.end >> 8 & 0xff),int(target.end & 0xff)),target.votes,false);
+    // The source's own \x targets in source order (verse, note, list order);
+    // exact duplicates keep their first position.
+    struct Entry { int first = 0, last = 0; };
+    QVector<Entry> entries;
+    QSet<QPair<int, int>> seen;
+    if (m_textSchema >= 4) {
+        QSqlQuery notes(m_bible);
+        notes.prepare("SELECT targets FROM notes WHERE book=? AND chapter=? AND verse=? AND kind='x' ORDER BY seq");
+        for (int index = first; index <= last && index < first + 50; ++index) {
+            const auto verse = endpoint(index);
+            notes.bindValue(0,verse.book); notes.bindValue(1,verse.chapter); notes.bindValue(2,verse.verse);
+            if (!notes.exec()) continue;
+            while (notes.next()) {
+                for (const auto &range : sourceTargets(notes.value(0).toString(),verse.book,verse.chapter)) {
+                    // Hide targets absent from the active version, and the passage itself.
+                    const int a = range.first, z = range.second;
+                    if (!a || z < a || (a >= first && z <= last) || seen.contains(range)) continue;
+                    seen.insert(range); entries.append({a,z});
+                }
             }
         }
-        if (m_textSchema >= 4) {
-            notes.bindValue(0,verse.book); notes.bindValue(1,verse.chapter); notes.bindValue(2,verse.verse);
-            if (notes.exec()) while (notes.next())
-                for (const auto &range : sourceTargets(notes.value(0).toString(),verse.book,verse.chapter)) add(range.first,range.second,0,true);
-        }
     }
-    QVector<Entry> entries;
-    for (const auto &pair : merged) entries.append(pair.second);
-    // Votes first; the source's own references win ties; then source order.
-    std::stable_sort(entries.begin(),entries.end(),[](const Entry &a, const Entry &b) {
-        if (a.votes != b.votes) return a.votes > b.votes;
-        if (a.source != b.source) return a.source;
-        return a.first < b.first;
-    });
     QSqlQuery text(m_bible);
     text.prepare("SELECT text FROM verses WHERE book=? AND chapter=? AND number=?");
     QVariantList rows;
@@ -3538,8 +3463,7 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
         if (excerpt.size() > 320) excerpt = excerpt.left(319) + QChar(0x2026);
         rows.append(QVariantMap{{"versionId",m_versionId},{"versionAbbreviation",m_abbreviation},
             {"reference",rangeReference(entry.first,entry.last)},{"book",a.book},{"chapter",a.chapter},{"start",a.verse},
-            {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse},{"votes",entry.votes},
-            {"source",entry.source},{"openBible",entry.openBible},{"excerpt",excerpt}});
+            {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse},{"excerpt",excerpt}});
     }
     return rows;
 }

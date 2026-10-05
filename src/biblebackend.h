@@ -61,6 +61,7 @@ class BibleBackend : public QObject
     // Text DB schema of the active version (4 = notes and words of Jesus kept).
     Q_PROPERTY(int textSchema READ textSchema NOTIFY versionChanged)
     Q_PROPERTY(bool hasWordsOfJesus READ hasWordsOfJesus NOTIFY versionChanged)
+    Q_PROPERTY(bool hasCrossReferences READ hasCrossReferences NOTIFY versionChanged)
     // Any section heading anywhere in the active version.
     Q_PROPERTY(bool hasHeadings READ hasHeadings NOTIFY versionChanged)
     // Current chapter's footnotes {verse,seq,kind,caller,offset,text}, source order.
@@ -168,6 +169,7 @@ public:
     static constexpr int CurrentTextSchema = 4;
     int textSchema() const { return m_textSchema; }
     bool hasWordsOfJesus() const { return m_hasWordsOfJesus; }
+    bool hasCrossReferences() const { return m_hasCrossReferences; }
     bool hasHeadings() const { return m_hasHeadings; }
     QVariantList footnotes() const;
     // Records: versionId/versionAbbreviation, book/chapter/start/endBook/
@@ -281,11 +283,10 @@ public:
     // current selection, or the chapter without one. Collection-shaped rows.
     Q_INVOKABLE QVariantList linkedNotes() const;
     // Cross references for a scope in the active version (empty: the current
-    // selection; none without a verse): bundled OpenBible.info data (KJV verse
-    // IDs, votes > 0) merged with the source's own \x targets (schema 4),
-    // deduplicated by exact range, targets absent from this version and the
-    // passage itself hidden, sorted by votes (source references win ties).
-    // Rows: canonical scope fields + reference, votes, source, openBible, excerpt.
+    // selection; none without a verse): only the source's own \x targets
+    // (schema 4), in source order, deduplicated by exact range, targets absent
+    // from this version and the passage itself hidden.
+    // Rows: canonical scope fields + reference, excerpt.
     Q_INVOKABLE QVariantList crossReferences(QVariantMap scope = QVariantMap()) const;
     Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
     Q_INVOKABLE void openChapter(int book, int chapter);
@@ -442,7 +443,7 @@ private:
     bool m_chapterOutline = false, m_marginNotes = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;
-    bool m_hasParagraphs = false, m_hasWordsOfJesus = false, m_hasHeadings = false;
+    bool m_hasParagraphs = false, m_hasWordsOfJesus = false, m_hasHeadings = false, m_hasCrossReferences = false;
     int m_textSchema = 0;
     double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection, m_desk, m_history;

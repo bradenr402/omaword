@@ -1095,7 +1095,7 @@ Item {
                 visible: panel.studyListTab
                 Layout.fillWidth: true
                 text: panel.studyTab === "crossrefs"
-                    ? (panel.crossRows.length + (panel.crossRows.length === 1 ? " cross reference" : " cross references") + " · OpenBible.info and the source")
+                    ? (panel.crossRows.length + (panel.crossRows.length === 1 ? " cross reference" : " cross references") + " in " + panel.bible.versionAbbreviation)
                     : (panel.footnoteRows.length + (panel.footnoteRows.length === 1 ? " footnote" : " footnotes") + " in " + panel.bible.passage + " · " + panel.bible.versionAbbreviation)
                 color: panel.desktop.muted
             }
@@ -1139,8 +1139,7 @@ Item {
                             width: parent.width
                             text: studyDelegate.footnote
                                 ? panel.bible.passage + ":" + studyDelegate.modelData.verse + " · " + (studyDelegate.modelData.caller && studyDelegate.modelData.caller !== "+" && studyDelegate.modelData.caller !== "-" ? studyDelegate.modelData.caller : "note")
-                                : studyDelegate.modelData.reference + (studyDelegate.modelData.votes > 0 ? " · " + studyDelegate.modelData.votes + " votes" : "")
-                                    + (studyDelegate.modelData.source ? " · in " + studyDelegate.modelData.versionAbbreviation : "")
+                                : studyDelegate.modelData.reference || ""
                             color: studyDelegate.atCursor ? panel.desktop.accent : panel.desktop.foreground
                         }
                         TagText {
@@ -1162,7 +1161,9 @@ Item {
                     text: panel.studyTab === "footnotes"
                         ? (panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? "Re-import this version (Versions) to read its footnotes." : "No footnotes in this chapter.")
                         : !panel.relatedSource || !panel.relatedSource.start ? "Select a verse to see its cross references."
-                        : "No cross references in this version."
+                        : panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? "Re-import this version (Versions) to read its cross-references."
+                        : !panel.bible.hasCrossReferences ? "This version has no cross-references."
+                        : "No cross-references for this passage in " + panel.bible.versionAbbreviation + "."
                     color: panel.desktop.muted
                 }
             }

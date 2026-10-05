@@ -129,7 +129,7 @@ class StudyUiTest : public QObject
                 return v == 1 ? QString("In the beginning of the original fixture.\\f + \\fr 1:1 \\ft A Genesis note\\f*") : QString(); })},
             {"40-MATstudy.usfm", book("MAT", "Matthew", 1, 25, [](int, int) { return QString(); })},
             {"43-JHNstudy.usfm", book("JHN", "John", 3, 36, [](int c, int v) {
-                if (c == 1 && v == 1) return QString("In the beginning was the Word.\\x - \\xo 1:1 \\xt Gen 1:1; Mt 1:2-3\\x* Original words follow.");
+                if (c == 1 && v == 1) return QString("In the beginning was the Word.\\x - \\xo 1:1 \\xt Gen 1:1; Jn 1:14, 2; Mt 1:23; Jn 1:18; Mt 1:2-3\\x* Original words follow.");
                 if (c != 3) return QString();
                 if (v == 3) return QString("Jesus answered,\\f + \\fr 3:3 \\ft Or \\fq from above\\f* \\wj Truly I tell you, unless one is born again\\wj* he cannot see.");
                 if (v == 16) return QString("For God so loved\\f a \\ft Greek \\fq agapao\\f* the world that he gave\\f b \\ft Or only begotten\\f* his Son.");
@@ -361,11 +361,10 @@ private slots:
         key(Qt::Key_Right); QCOMPARE(tab(), QString("related"));
         key(Qt::Key_Left); QCOMPARE(tab(), QString("footnotes"));
         key(Qt::Key_H); QCOMPARE(tab(), QString("crossrefs"));
-        // Cross references: OpenBible votes, merged with the source's \\x targets.
+        // Cross references: only the source's own \\x targets, in source order.
         QStringList references;
         for (const auto &row : rows()) references << row.toMap()["reference"].toString();
         QCOMPARE(references, QStringList({"Genesis 1:1", "John 1:14", "John 1:2", "Matthew 1:23", "John 1:18", "Matthew 1:2\u20133"}));
-        QVERIFY(rows()[0].toMap()["source"].toBool()); QVERIFY(rows()[5].toMap()["source"].toBool());
         QVERIFY(!item("tagSearch")->isVisible()); QVERIFY(!item("tagResults")->isVisible());
         // Shared list keys and motions.
         QCOMPARE(studyIndex(), 0);
@@ -394,6 +393,8 @@ private slots:
         navigate("John 3:16");
         openStudy();
         QCOMPARE(tab(), QString("crossrefs")); // The last tab is remembered.
+        QVERIFY(rows().isEmpty());
+        QCOMPARE(object("studyEmpty")->property("text").toString(), QString("No cross-references for this passage in ") + bible->versionAbbreviation() + ".");
         key(Qt::Key_Right); QCOMPARE(tab(), QString("footnotes"));
         QCOMPARE(rows().size(), 3);
         QCOMPARE(studyIndex(), 1); // First note of the cursor verse.
