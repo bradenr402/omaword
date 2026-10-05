@@ -287,8 +287,10 @@ ApplicationWindow {
     }
     readonly property string searchScope: bible.textGeneration + ":" + bible.book + ":" + bible.chapter
     onSearchScopeChanged: if (readerInitialized) searchRefreshTimer.restart()
+    // Bible search results reapply their own syntax; chapter find (`/`) takes
+    // a smart-case regular expression (\c ignores case, \C matches it).
     function localSearch(query, bibleSyntax) {
-        const result = bible.findInChapter(query, bibleSyntax)
+        const result = bibleSyntax ? bible.findInChapter(query, true) : bible.findPatternInChapter(query)
         searchError = result.error || ""
         searchMatches = Array.from(result.matches || []).sort(function(a, b) {
             return a.start - b.start || a.segments[0].start - b.segments[0].start || a.end - b.end
@@ -334,7 +336,7 @@ ApplicationWindow {
             searchMatchIndex = 0
             searchError = ""
         }
-        if (searchError.length) return
+        if (searchError.length) { rejected(); return }
         const match = searchActiveMatch
         if (!query.trim().length || !match || !focusSearchMatch(match)) return
         chapterQueryHistory = query

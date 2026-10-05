@@ -228,7 +228,8 @@ These also work, but stay out of the in-app list:
 
 ### Finding passages
 - The passage palette understands compact references like `jn316`, `1co13`, or `rev 3 14-22`, and lists likely matches, best first.
-- Search Scripture across the current version, or find text in the current chapter.
+- Search Scripture across the current version, or find in the current chapter (`/`) with a regular expression, Neovim-style smart case: lowercase ignores case, any capital matches it, `\c` / `\C` force either way.
+- Click the chapter title to pick another chapter of the book.
 - `[` and `]` (or the mouse's back and forward buttons) step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.
 - History (`shift H`) lists passages you stayed on for a few seconds, shared by every window. It never goes into backups, and Commands can clear or disable it.
 

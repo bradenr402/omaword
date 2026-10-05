@@ -1682,6 +1682,41 @@ private slots:
         check("deskList", "deskEntry0", "deskScrollbar");
         QVERIFY(warnings.isEmpty());
     }
+    // ── Phase 5: new
+
+    int matchCount() const { return value(prop("searchMatches")).toList().size(); }
+    void findInChapterTakesRegularExpressions() {
+        navigate("John 3:1");
+        auto input = item("chapterFindInput");
+        auto find = [&](const QString &pattern) {
+            if (!prop("findPromptOpen").toBool()) { key(Qt::Key_Slash); QTRY_VERIFY(input->hasActiveFocus()); }
+            input->setProperty("text", QString()); type(pattern); QTest::qWait(220);
+        };
+        // Keyboard: patterns are regular expressions, smart case.
+        find("access text 3:1\\d "); QTRY_COMPARE(matchCount(), 9); // 3:10–19 but 3:16, whose text differs
+        find("original access"); const int all = matchCount(); QVERIFY(all >= 30);
+        find("ORIGINAL access"); QCOMPARE(matchCount(), 0);
+        find("ORIGINAL access\\c"); QCOMPARE(matchCount(), all);
+        find("\\Coriginal access"); QCOMPARE(matchCount(), 0);
+        find("(beginning|again)"); QTRY_COMPARE(matchCount(), 1); // within John 3: born again
+        // An invalid pattern says so, matches nothing, and enter is refused.
+        find("access("); QTRY_COMPARE(object("chapterFindCount")->property("text").toString(), QString("invalid pattern"));
+        QCOMPARE(matchCount(), 0);
+        const int sounds = playCount(); key(Qt::Key_Return);
+        QVERIFY(prop("findPromptOpen").toBool()); QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > sounds);
+        shot("find-invalid-pattern");
+        // Accepted: n and N step the regex matches.
+        find("text 3:2\\d "); QTRY_COMPARE(matchCount(), 10); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("findPromptOpen").toBool()); const int at = bible->cursorVerse(); QVERIFY(at >= 20);
+        key(Qt::Key_N); QTRY_COMPARE(bible->cursorVerse(), at + 1);
+        key(Qt::Key_N, Qt::ShiftModifier); QTRY_COMPARE(bible->cursorVerse(), at);
+        // Mouse: clicking the reader accepts a valid pattern; with an invalid one it just closes.
+        find("access("); QTRY_COMPARE(object("chapterFindCount")->property("text").toString(), QString("invalid pattern"));
+        clickAt(outsidePoint("chapterFind", -1)); QTRY_VERIFY(!prop("findPromptOpen").toBool());
+        QCOMPARE(prop("acceptedSearchQuery").toString(), QString("text 3:2\\d "));
+        find("born ag(ai)n"); QTRY_COMPARE(matchCount(), 1); clickAt(outsidePoint("chapterFind", -1));
+        QTRY_VERIFY(!prop("findPromptOpen").toBool()); QCOMPARE(prop("acceptedSearchQuery").toString(), QString("born ag(ai)n"));
+    }
 };
 
 int main(int argc, char **argv) {

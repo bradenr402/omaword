@@ -15,6 +15,13 @@ struct Chapter { int book = 0, number = 0; QString name; QVector<Verse> verses; 
 struct Result { QString error; QVariantList matches; };
 Result find(const Chapter &chapter, const QString &query, bool bibleSyntax = false,
             const Cancellation &cancel = {});
+// Chapter find (`/`): `pattern` is a regular expression (QRegularExpression,
+// Perl/ECMAScript-like), matched within each verse's source text. Neovim
+// smart-case: case-insensitive unless the pattern has an uppercase letter
+// (escaped characters such as \S do not count); `\c` anywhere forces
+// insensitive, `\C` sensitive (`\c` wins). Empty matches are skipped. An
+// invalid pattern yields the error "invalid pattern" and no matches.
+Result findPattern(const Chapter &chapter, const QString &pattern, const Cancellation &cancel = {});
 Result search(const QString &path, const QString &versionId, const QString &abbreviation,
               const QString &query, const Cancellation &cancel = {});
 }

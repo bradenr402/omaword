@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QMutex>
+#include <QRegularExpression>
 #include <QScopeGuard>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -307,6 +308,56 @@ Result find(const Chapter &chapter, const QString &query, bool bibleSyntax, cons
     if (!parsed.error.isEmpty() || parsed.terms.isEmpty() || stopped(cancel)) return {parsed.error,{}};
     auto result = scan(PreparedChapter(chapter),parsed,bibleSyntax,cancel);
     removeRanking(result.matches);
+    return result;
+}
+
+Result findPattern(const Chapter &chapter, const QString &input, const Cancellation &cancel)
+{
+    if (input.size() > MaximumQuerySize) return {QStringLiteral("Search queries may contain at most 4096 UTF-16 units."),{}};
+    // Strip \c / \C (keeping an escaped backslash), and look for an
+    // unescaped uppercase letter for smart-case.
+    QString pattern; pattern.reserve(input.size());
+    bool forceInsensitive = false, forceSensitive = false, upper = false;
+    for (qsizetype i = 0; i < input.size(); ++i) {
+        const QChar c = input[i];
+        if (c == '\\' && i+1 < input.size()) {
+            const QChar next = input[i+1];
+            if (next == 'c') { forceInsensitive = true; ++i; continue; }
+            if (next == 'C') { forceSensitive = true; ++i; continue; }
+            pattern += c; pattern += next; ++i;
+            // \p{Lu} / \P{Lu}: the property name is not a typed letter.
+            if ((next == 'p' || next == 'P') && i+1 < input.size() && input[i+1] == '{') {
+                const qsizetype close = input.indexOf('}',i+1);
+                if (close > 0) { pattern += input.mid(i+1,close-i); i = close; }
+            }
+            continue;
+        }
+        if (c.isUpper()) upper = true;
+        pattern += c;
+    }
+    if (pattern.isEmpty() || stopped(cancel)) return {};
+    const bool insensitive = forceInsensitive || (!forceSensitive && !upper);
+    QRegularExpression expression(pattern, QRegularExpression::UseUnicodePropertiesOption
+        | (insensitive ? QRegularExpression::CaseInsensitiveOption : QRegularExpression::NoPatternOption));
+    if (!expression.isValid()) return {QStringLiteral("invalid pattern"),{}};
+    Result result;
+    for (const auto &verse : chapter.verses) {
+        auto it = expression.globalMatch(verse.text);
+        while (it.hasNext()) {
+            if (stopped(cancel)) return {};
+            const auto match = it.next();
+            if (match.capturedLength() <= 0) continue;
+            const int start = int(match.capturedStart()), length = int(match.capturedLength());
+            const QString reference = chapter.name + ' ' + QString::number(chapter.number) + ':' + QString::number(verse.number);
+            result.matches.append(QVariantMap{{QStringLiteral("book"),chapter.book},{QStringLiteral("chapter"),chapter.number},
+                {QStringLiteral("start"),verse.number},{QStringLiteral("endBook"),chapter.book},{QStringLiteral("endChapter"),chapter.number},
+                {QStringLiteral("end"),verse.number},{QStringLiteral("reference"),reference},
+                {QStringLiteral("segments"),QVariantList{QVariantMap{{QStringLiteral("verse"),verse.number},{QStringLiteral("start"),start},{QStringLiteral("length"),length}}}},
+                {QStringLiteral("text"),verse.text},
+                {QStringLiteral("displaySegments"),QVariantList{QVariantMap{{QStringLiteral("start"),start},{QStringLiteral("length"),length}}}},
+                {QStringLiteral("score"),1}});
+        }
+    }
     return result;
 }
 

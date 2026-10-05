@@ -54,7 +54,7 @@ Rectangle {
             objectName: "chapterFindInput"
             Layout.fillWidth: true; Layout.minimumWidth: 0
             color: root.theme.foreground
-            placeholderText: "Find in chapter"
+            placeholderText: "Find in chapter · regex, \\c any case"
             horizontalAlignment: TextInput.AlignLeft
             placeholderTextColor: root.theme.muted
             font.family: root.theme.fontFamily; font.pixelSize: 14 * root.uiScale
@@ -75,7 +75,7 @@ Rectangle {
                 root.hintFocus = -1
                 if (press) { event.accepted = true; hints.activatePart(marked) }
             }
-            Accessible.name: "Find literal text in this chapter"
+            Accessible.name: "Find a regular expression in this chapter (smart case)"
         }
         Label {
             objectName: "chapterFindCount"

@@ -115,6 +115,31 @@ private slots:
         QCOMPARE(folds.size(),1); QCOMPARE(folds.first().toMap()["length"].toInt(),2);
         QCOMPARE(find(chapter({"ßß"}),"s").matches.size(),2);
     }
+    void chapterFindPatterns() {
+        const auto c = chapter({"For God so loved the world", "God is love. Loved ones", "a\\b and 123 SHOUT"});
+        auto count = [&](const QString &pattern) { return findPattern(c,pattern).matches.size(); };
+        // Smart case: all-lowercase ignores case; any uppercase letter matches it.
+        QCOMPARE(count("loved"),2); QCOMPARE(count("Loved"),1); QCOMPARE(count("god"),2);
+        // \c forces any case, \C exact case; \c wins over \C.
+        QCOMPARE(count("Loved\\c"),2); QCOMPARE(count("\\Cgod"),0); QCOMPARE(count("\\c\\Cgod"),2);
+        // Escapes are not uppercase letters for smart case: \S still ignores case.
+        QCOMPARE(count("\\Shout"),1); QCOMPARE(count("\\d+"),1);
+        // An escaped backslash before c is a literal backslash and c.
+        QCOMPARE(count("a\\\\b"),1);
+        // Regular expressions, within a verse: alternation, classes, anchors.
+        QCOMPARE(count("^god"),1); QCOMPARE(count("world|ones"),2); QCOMPARE(count("lov(ed|e)"),3);
+        QCOMPARE(count("world god"),0); // never across verses
+        const auto row = findPattern(c,"lo\\w+d").matches.first().toMap();
+        QCOMPARE(row["start"].toInt(),990); QCOMPARE(row["end"].toInt(),990);
+        QCOMPARE(sourceSegment(c,row["segments"].toList().first()),QString("loved"));
+        // Empty matches are skipped; an invalid pattern is an error, not a crash.
+        QCOMPARE(count("x*"),0);
+        const auto invalid = findPattern(c,"lov(e");
+        QCOMPARE(invalid.error,QString("invalid pattern")); QVERIFY(invalid.matches.isEmpty());
+        QVERIFY(findPattern(c,"[").matches.isEmpty());
+        QVERIFY(findPattern(c,"").error.isEmpty() && findPattern(c,"").matches.isEmpty());
+        QVERIFY(!findPattern(c,QString(4097,'x')).error.isEmpty());
+    }
     void phraseMinimalCovers() {
         auto c = chapter({"outside", "red green", "blue inside", "outside"});
         auto rows = find(c,"\"green blue\" inside",true).matches;

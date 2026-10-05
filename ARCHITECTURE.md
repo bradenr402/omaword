@@ -168,7 +168,15 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 - Bible search: unquoted terms AND within a verse; quoted phrases may span
   adjacent verses; mixed queries anchor on the minimal phrase range. Never
   crosses chapters. Max 4096 units; unbalanced quotes error.
-- Chapter find (`/`) is literal; `n`/`shift N` never wrap.
+- Chapter find (`/`) is a regular expression (`ScriptureSearch::findPattern`,
+  `QRegularExpression` with Unicode properties) over each verse's source text:
+  matches never cross verses (the old literal find could), empty matches are
+  skipped, no whitespace collapse or full case folding. Neovim smart case:
+  insensitive unless an unescaped capital appears; `\c`/`\C` force it (`\c`
+  wins). A bad pattern returns `error: "invalid pattern"` and no matches; enter
+  then sounds the error and the prompt stays. `findInChapter` stays the literal
+  / Bible-syntax engine (reapplying a Bible search's matches). `n`/`shift N`
+  never wrap.
 - `ScriptureSearch` keeps grapheme-safe maps to original UTF-16 offsets; one
   shared corpus cache (one generation, ≤ 64 MiB); stale requests dropped by token.
   `SearchDocument`/`BlockDocument` map those offsets into each layout, skipping

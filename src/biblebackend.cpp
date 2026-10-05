@@ -2090,18 +2090,30 @@ void BibleBackend::loadMoreSearchResults()
     emit searchChanged();
 }
 
-QVariantMap BibleBackend::findInChapter(QString query, bool bibleSyntax) const
+// The current chapter's source text, for chapter find.
+static ScriptureSearch::Chapter loadedChapter(int book, int number, const QVariantList &books, const QVariantList &verses)
 {
-    ScriptureSearch::Chapter chapter{m_book,m_chapter,{}, {}};
-    for (const auto &row : m_books) {
+    ScriptureSearch::Chapter chapter{book,number,{}, {}};
+    for (const auto &row : books) {
         const auto map = row.toMap();
-        if (map.value("id").toInt() == m_book) { chapter.name = map.value("name").toString(); break; }
+        if (map.value("id").toInt() == book) { chapter.name = map.value("name").toString(); break; }
     }
-    for (const auto &row : m_verses) {
+    for (const auto &row : verses) {
         const auto map = row.toMap();
         chapter.verses.append({map.value("number").toInt(),map.value("text").toString()});
     }
+    return chapter;
+}
+QVariantMap BibleBackend::findInChapter(QString query, bool bibleSyntax) const
+{
+    const auto chapter = loadedChapter(m_book,m_chapter,m_books,m_verses);
     const auto result = ScriptureSearch::find(chapter,query,bibleSyntax);
+    return {{"error",result.error},{"matches",result.matches}};
+}
+QVariantMap BibleBackend::findPatternInChapter(QString pattern) const
+{
+    const auto chapter = loadedChapter(m_book,m_chapter,m_books,m_verses);
+    const auto result = ScriptureSearch::findPattern(chapter,pattern);
     return {{"error",result.error},{"matches",result.matches}};
 }
 QString BibleBackend::localPath(const QUrl &url)

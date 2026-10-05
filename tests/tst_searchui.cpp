@@ -697,7 +697,9 @@ private slots:
         key(Qt::Key_N); QCOMPARE(bible->cursorVerse(), 50);
     }
     void guardsAndLiteralSyntax() {
-        find("ALPh"); QVERIFY(prop("searchMatches").toList().size() > 4); key(Qt::Key_Return);
+        // Smart case: an uppercase letter matches case, \c ignores it.
+        find("ALPh"); QCOMPARE(prop("searchMatches").toList().size(), 0); key(Qt::Key_Escape);
+        find("ALPh\\c"); QVERIFY(prop("searchMatches").toList().size() > 4); key(Qt::Key_Return);
         QVERIFY(bible->toggleBookmark());
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
         const auto scope = bible->tagScope(); key(Qt::Key_Slash); key(Qt::Key_Slash, Qt::ControlModifier); key(Qt::Key_N);
@@ -717,7 +719,7 @@ private slots:
         object("noteEditor")->setProperty("text", "Unsaved conflict draft");
         key(Qt::Key_Return); QVERIFY(object("passagePalette")->property("visible").toBool());
         QCOMPARE(bible->tagScope(), original); QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ beta"));
-        QCOMPARE(prop("acceptedSearchQuery").toString(), QString("ALPh"));
+        QCOMPARE(prop("acceptedSearchQuery").toString(), QString("ALPh\\c"));
     }
 };
 

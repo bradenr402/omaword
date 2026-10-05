@@ -190,6 +190,8 @@ public:
     // Pure cached-chapter scan; source UTF-16 segments, one semantic range per
     // Bible match, individual occurrences for literal chapter find.
     Q_INVOKABLE QVariantMap findInChapter(QString query, bool bibleSyntax = false) const;
+    // Chapter find (`/`): a smart-case regular expression (ScriptureSearch::findPattern).
+    Q_INVOKABLE QVariantMap findPatternInChapter(QString pattern) const;
     Q_INVOKABLE void setShowVerseNumbers(bool value);
     Q_INVOKABLE void setShowHeadings(bool value);
     Q_INVOKABLE void setVersePicker(bool value);
