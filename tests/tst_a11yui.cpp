@@ -767,6 +767,39 @@ private slots:
         auto wide = item("verseTagAction:John 3:4–6"); QTRY_VERIFY(wide && wide->isVisible());
         click(wide); QTRY_COMPARE(bible->selectionReference(), QString("John 3:4–6"));
     }
+    void notesTabReachesLinkedFrom() {
+        QVERIFY(bible->navigate("John 1:5")); bible->selectVerses(5, 5); bible->setNoteText("See John 3:16 here.");
+        QVERIFY(bible->navigate("John 1:7")); bible->selectVerses(7, 7); bible->setNoteText("Also John 3:16.");
+        navigate("John 3:16"); bible->selectVerses(16, 16); call("readerFocus");
+        key(Qt::Key_W); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        // The editor hint names tab; tab moves to the list and never types.
+        QTRY_VERIFY(item("notesHintsPart:linked from"));
+        key(Qt::Key_Tab); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        QCOMPARE(item("noteEditor")->property("text").toString(), QString());
+        QVERIFY(item("linkedHints")->isVisible());
+        QCOMPARE(item("linkedFromRowBackground0")->property("color").value<QColor>().alphaF() > 0, true);
+        key(Qt::Key_J); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 1);
+        key(Qt::Key_K); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 0);
+        // esc returns to the note (Notes stays open); shift tab too.
+        key(Qt::Key_Escape); QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); QVERIFY(opened("notesDrawer"));
+        key(Qt::Key_Tab); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        key(Qt::Key_Tab, Qt::ShiftModifier); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        // Enter opens the linking note; Notes stays open on it.
+        key(Qt::Key_Tab); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        key(Qt::Key_Return); QTRY_COMPARE(bible->selectionReference(), QString("John 1:5"));
+        QVERIFY(opened("notesDrawer"));
+        // [[ suggestions: tab accepts the suggestion instead.
+        QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));
+        navigate("John 3:16"); bible->selectVerses(16, 16); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("[[jn 3:1"); QTRY_VERIFY(prop("linkSuggesting").toBool());
+        key(Qt::Key_Tab); QTRY_VERIFY(!prop("linkSuggesting").toBool());
+        QVERIFY(item("noteEditor")->hasActiveFocus());
+        QVERIFY(item("noteEditor")->property("text").toString().startsWith("John 3:1"));
+        // Mouse: the editor's tab hint and the list's open hint.
+        item("noteEditor")->setProperty("text", QString());
+        click(item("notesHintsPart:linked from")); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        key(Qt::Key_J); click(item("linkedHintsPart:open")); QTRY_COMPARE(bible->selectionReference(), QString("John 1:7"));
+    }
 };
 
 int main(int argc, char **argv) {

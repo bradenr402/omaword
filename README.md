@@ -95,6 +95,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl t`: Manage tags
 - `[[`: Suggest a passage to link (in a note)
 - `alt enter`: Open the passage link at the cursor (in a note)
+- `tab` · `shift tab`: Between a note and its Linked from list (in a note)
 
 ### Copy
 

@@ -1241,8 +1241,45 @@ ApplicationWindow {
     function openLinkedMenu(index, sceneX, sceneY) {
         const row = linkedFrom[index]
         if (!row) return
-        contextMenu.show("linked", RowMenu.entries(app, { busy: bible.busy, scope: row, keys: false,
+        linkedList.currentIndex = index
+        contextMenu.show("linked", RowMenu.entries(app, { busy: bible.busy, scope: row,
             open: function() { app.openLinkedNote(row) } }), sceneX, sceneY)
+    }
+    // Tab from the note editor: the Linked from list takes the keyboard.
+    function focusLinkedFrom() {
+        if (!linkedFrom.length) { rejected(); return }
+        linkedList.currentIndex = Math.max(0, Math.min(linkedFrom.length - 1, linkedList.currentIndex))
+        linkedList.forceActiveFocus()
+    }
+    // Linked from list keys; `run` false only claims them (ShortcutOverride).
+    function linkedKey(event, run) {
+        const mods = event.modifiers & ~Qt.KeypadModifier
+        const row = linkedFrom[linkedList.currentIndex]
+        const plain = mods === Qt.NoModifier
+        let action = null
+        if (plain && (event.key === Qt.Key_J || event.key === Qt.Key_Down)) action = function() { app.moveLinked(1) }
+        else if (plain && (event.key === Qt.Key_K || event.key === Qt.Key_Up)) action = function() { app.moveLinked(-1) }
+        else if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) action = function() { if (row) app.openLinkedNote(row); else app.rejected() }
+        else if (plain && event.key === Qt.Key_Y) action = function() { app.copyScope(row) }
+        else if (mods === Qt.ShiftModifier && event.key === Qt.Key_Y) action = function() { app.copyScope(row, true) }
+        else if (plain && event.key === Qt.Key_D) action = function() { app.toggleScopeDesk(row) }
+        else if ((plain && (event.key === Qt.Key_Escape || event.key === Qt.Key_Tab)) || event.key === Qt.Key_Backtab
+                || (mods === Qt.ShiftModifier && event.key === Qt.Key_Tab))
+            action = function() { noteEditor.forceActiveFocus() }
+        else if ((plain && event.key === Qt.Key_Menu) || (mods === Qt.ShiftModifier && event.key === Qt.Key_F10))
+            action = function() {
+                const item = linkedRepeater.itemAt(linkedList.currentIndex)
+                const at = app.sceneRowPoint(item)
+                app.openLinkedMenu(linkedList.currentIndex, at.x, at.y)
+            }
+        if (!action) return false
+        if (run) { event.accepted = true; action() }
+        return true
+    }
+    function moveLinked(delta) {
+        const next = linkedList.currentIndex + delta
+        if (next < 0 || next >= linkedFrom.length) { sounds.play("boundary"); return }
+        linkedList.currentIndex = next
     }
     // Scroll keys for scrollable dialogs and panes: j k ↑ ↓ a line, pgup pgdn
     // a page, ctrl d/u half a page, home end the ends. Returns whether it acted.
@@ -2719,6 +2756,7 @@ ApplicationWindow {
         // Bound by the note editor itself.
         { id: "noteLinkSuggest", group: "Annotate", title: "Suggest a passage to link (in a note)", sequences: ["[, ["], scope: "noteEditor" },
         { id: "openNoteLink", group: "Annotate", title: "Open the passage link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
+        { id: "noteLinkedFrom", group: "Annotate", title: "Between a note and its Linked from list (in a note)", sequences: ["Tab", "Shift+Tab"], scope: "noteEditor" },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
@@ -4679,6 +4717,14 @@ ApplicationWindow {
                                 onCursorPositionChanged: app.updateLinkSuggestions()
                                 Keys.onPressed: function(event) {
                                     const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                    // Tab never types: it accepts a [[ suggestion, else moves to Linked from.
+                                    if (event.key === Qt.Key_Tab && event.modifiers === Qt.NoModifier) {
+                                        event.accepted = true
+                                        if (app.linkSuggesting && app.linkSuggestions.length) app.acceptLinkSuggestion()
+                                        else app.focusLinkedFrom()
+                                        return
+                                    }
+                                    if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && event.modifiers === Qt.ShiftModifier)) { event.accepted = true; return }
                                     if (enter && event.modifiers === Qt.AltModifier) {
                                         event.accepted = true
                                         app.openNoteLinkAtCursor()
@@ -4738,29 +4784,39 @@ ApplicationWindow {
                     }
                     HintRow {
                         objectName: "notesHints"
-                        visible: noteEditor.activeFocus && (app.linkSuggesting || !!app.noteLinkAtCursor)
+                        visible: noteEditor.activeFocus && (app.linkSuggesting || !!app.noteLinkAtCursor || app.linkedFrom.length > 0)
                         theme: desktop
                         parts: app.linkSuggesting ? [[["Up", "Down"], "choose"], ["Return", "insert", function() { app.acceptLinkSuggestion() }, app.linkSuggestions.length > 0],
                                 ["Escape", "dismiss", app.dismissLinkSuggestions]]
-                            : [["Alt+Return", "open link", app.openNoteLinkAtCursor]]
+                            : [app.noteLinkAtCursor ? ["Alt+Return", "open link", app.openNoteLinkAtCursor] : null,
+                                app.linkedFrom.length ? [app.actionKeys("noteLinkedFrom")[0], "linked from", app.focusLinkedFrom] : null]
                         pixelSize: 11 * app.scale
                         Layout.fillWidth: true
                     }
                     ColumnLayout {
+                        id: linkedList
                         objectName: "linkedFrom"
+                        // Reached by tab from the note: j k move, enter opens,
+                        // y / shift Y copy, d Desk, esc (or tab) returns to the note.
+                        property int currentIndex: 0
                         visible: app.linkedFrom.length > 0
                         Layout.fillWidth: true
                         spacing: 2
+                        Keys.onShortcutOverride: function(event) { if (app.linkedKey(event, false)) event.accepted = true }
+                        Keys.onPressed: function(event) { app.linkedKey(event, true) }
                         SectionLabel { text: "LINKED FROM"; Layout.fillWidth: true }
                         Repeater {
+                            id: linkedRepeater
                             model: app.linkedFrom
                             delegate: ItemDelegate {
                                 id: linkedRow
                                 required property var modelData
                                 required property int index
                                 objectName: "linkedFromRow" + index
+                                readonly property bool current: linkedList.activeFocus && linkedList.currentIndex === index
                                 Layout.fillWidth: true
                                 padding: 6 * app.scale
+                                focusPolicy: Qt.NoFocus
                                 onClicked: app.openLinkedNote(modelData)
                                 TapHandler {
                                     acceptedButtons: Qt.RightButton
@@ -4771,9 +4827,25 @@ ApplicationWindow {
                                     Label { text: linkedRow.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true; elide: Text.ElideRight }
                                     Label { text: linkedRow.modelData.excerpt; textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; elide: Text.ElideRight }
                                 }
-                                background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: linkedRow.hovered ? desktop.surface : "transparent" }
+                                background: Rectangle {
+                                    objectName: "linkedFromRowBackground" + linkedRow.index
+                                    radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                                    color: linkedRow.current ? app.tint(desktop.accent, 0.11) : linkedRow.hovered ? desktop.surface : "transparent"
+                                }
                                 Accessible.name: "Linked from " + modelData.reference
                             }
+                        }
+                        HintRow {
+                            objectName: "linkedHints"
+                            visible: linkedList.activeFocus
+                            theme: desktop
+                            readonly property var row: app.linkedFrom[linkedList.currentIndex] || null
+                            parts: [[["Up", "Down"], "choose"], ["Return", "open", function() { app.openLinkedNote(app.linkedFrom[linkedList.currentIndex]) }, !!row],
+                                ["Y", "copy", function() { app.copyScope(app.linkedFrom[linkedList.currentIndex]) }, !!row],
+                                ["D", "Desk", function() { app.toggleScopeDesk(app.linkedFrom[linkedList.currentIndex]) }, !!row],
+                                ["Escape", "back to the note", function() { noteEditor.forceActiveFocus() }]]
+                            pixelSize: 11 * app.scale
+                            Layout.fillWidth: true
                         }
                     }
                     Label { text: app.noteConflict ? "Not saved · resolve the other window's change above" : app.hasSelection ? (noteEditor.text === bible.noteText ? "Saved on this device · changes save as you type" : "Not saved · your draft is still in the editor") : "A page icon beside a verse marks a note."; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
