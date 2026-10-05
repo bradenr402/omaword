@@ -773,7 +773,7 @@ private slots:
         QCOMPARE(prop("setupTitle","text").toString(),desktop->property("appName").toString());
         QCOMPARE(prop("setupDescription","text").toString(),QString("Add a version to begin. Install from the catalog or import a USFM ZIP.\nRead offline, bookmark and highlight passages, and keep your notes alongside the text."));
         QCOMPARE(prop("setupPrivacy","text").toString(),QString("All your Bible versions, highlights, bookmarks, and notes stay on this device."));
-        QVERIFY(!item("savedControl")->isVisible()); QVERIFY(!item("notesControl")->isVisible());
+        QVERIFY(!item("savedControl")->isVisible()); QVERIFY(!item("notesControl"));
         QVERIFY(item("helpControl")->isVisible());
         QCOMPARE(prop("catalogResults","count").toInt(),7);
         QVERIFY(prop("importSupported","text").toString().contains("USFM ZIP"));
@@ -3345,7 +3345,7 @@ private slots:
         // Stacked or not, the center row sits between the corner groups.
         QVERIFY(location->x() + location->width() < actions->x());
         QVERIFY(location->x() > item("leftActions")->x() + item("leftActions")->width());
-        for (const auto name : {"modeControl","searchControl","passageControl","versionControl","layoutControl","relatedControl","savedControl","notesControl","deskControl","helpControl"}) {
+        for (const auto name : {"modeControl","searchControl","passageControl","versionControl","layoutControl","relatedControl","savedControl","deskControl","helpControl"}) {
             auto control = item(name);
             if (control == layout && !layout->isVisible()) continue;
             QVERIFY(control->isVisible());
@@ -3376,11 +3376,13 @@ private slots:
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         click(item("savedControl"));
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        QVERIFY(!item("notesControl")->isEnabled());
+        QVERIFY(!item("relatedControl")->isEnabled());
         capture("omaword-refined-saved-" + QString::fromLatin1(QTest::currentDataTag()));
         key(Qt::Key_A,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        click(item("notesControl"));
+        // No footer Notes button: w opens Notes.
+        QVERIFY(!item("notesControl"));
+        key(Qt::Key_W);
         QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(prop("notesPanel","color"),desktop->property("background"));
         QVERIFY(prop("noteEditor","placeholderText").toString().isEmpty());
@@ -4362,7 +4364,7 @@ private slots:
     void footerOrderAndResponsiveLayout() {
         reference("1 Thessalonians 5:16-18");
         const QStringList names = {"helpControl","modeControl","searchControl","passageControl","versionControl",
-            "layoutControl","savedControl","notesControl","relatedControl","historyControl","deskControl","footerMore"};
+            "layoutControl","savedControl","relatedControl","historyControl","deskControl","footerMore"};
         window->setMinimumWidth(320);
         struct Case { int width; int height; double scale; bool stacked; bool layout; bool collapsed; };
         const QList<Case> cases = {{1120,820,1,false,true,false},{900,820,1.5,true,true,false},{700,820,1,true,true,false},
@@ -4381,7 +4383,7 @@ private slots:
             QCOMPARE(item("savedControl")->isVisible(),!entry.collapsed);
             // The footer itself is always one row tall; only the right group stacks.
             QCOMPARE(window->property("footerHeight").toDouble(),window->property("footerButton").toDouble());
-            const QStringList right = {"savedControl","notesControl","relatedControl","historyControl","deskControl","footerMore"};
+            const QStringList right = {"savedControl","relatedControl","historyControl","deskControl","footerMore"};
             QList<QPair<QString,QRectF>> rects;
             for (const auto &name : names) {
                 auto button = item(qPrintable(name));
@@ -4407,22 +4409,22 @@ private slots:
             QVERIFY2(qAbs(location.center().x() - entry.width / 2.0) <= 1,qPrintable(tag));
             const auto x = [this](const char *name) { return item(name)->mapToScene(QPointF()).x(); };
             const auto y = [this](const char *name) { return item(name)->mapToScene(QPointF()).y(); };
+            const auto w = [this](const char *name) { return item(name)->width(); };
+            const auto h = [this](const char *name) { return item(name)->height(); };
+            QVERIFY(!item("notesControl"));
+            // Buttons within a group sit edge to edge.
+            const QList<const char *> order = {"savedControl","relatedControl","historyControl","deskControl"};
             if (!entry.collapsed && !entry.stacked) {
-                QVERIFY(x("savedControl") < x("notesControl"));
-                QVERIFY(x("notesControl") < x("relatedControl"));
-                QVERIFY(x("relatedControl") < x("historyControl"));
-                QVERIFY(x("historyControl") < x("deskControl"));
+                for (int i = 1; i < order.size(); ++i) QCOMPARE(x(order[i]),x(order[i - 1]) + w(order[i - 1]));
             } else if (!entry.collapsed) {
                 // A column in the same order, top to bottom, bottom-aligned with the row.
-                for (auto name : {"notesControl","relatedControl","historyControl","deskControl"}) QCOMPARE(x(name),x("savedControl"));
-                QVERIFY(y("savedControl") < y("notesControl"));
-                QVERIFY(y("notesControl") < y("relatedControl"));
-                QVERIFY(y("relatedControl") < y("historyControl"));
-                QVERIFY(y("historyControl") < y("deskControl"));
+                for (int i = 1; i < order.size(); ++i) { QCOMPARE(x(order[i]),x("savedControl")); QCOMPARE(y(order[i]),y(order[i - 1]) + h(order[i - 1])); }
                 QCOMPARE(item("deskControl")->mapRectToScene(item("deskControl")->boundingRect()).bottom(),modeBottom);
                 QVERIFY(location.right() <= x("deskControl"));
             }
-            QVERIFY(x("helpControl") < x("modeControl") || entry.collapsed);
+            if (!entry.collapsed) QCOMPARE(x("modeControl"),x("helpControl") + w("helpControl"));
+            QCOMPARE(x("passageControl"),x("searchControl") + w("searchControl"));
+            QCOMPARE(x("versionControl"),x("passageControl") + w("passageControl"));
             if (entry.layout) QVERIFY(x("versionControl") < x("layoutControl"));
             const auto passage = item("passageControl")->mapRectToScene(item("passageControl")->boundingRect());
             QCOMPARE(passage.top(),item("modeControl")->mapRectToScene(item("modeControl")->boundingRect()).top());
@@ -5308,24 +5310,24 @@ private slots:
         QVERIFY(relatedBounds.left() > modeBounds.right());
         QVERIFY(relatedBounds.left() > window->width() / 2);
         const auto helpBounds = item("helpControl")->mapRectToScene(item("helpControl")->boundingRect());
-        QVERIFY(helpBounds.right() < modeBounds.left());
-        // Right group order: Annotations, Notes, Related, Desk; a column when cramped.
+        QCOMPARE(helpBounds.right(),modeBounds.left()); // Edge to edge.
+        // Right group order: Annotations, Study, Desk (no Notes); a column when cramped.
         const auto scene = [this](const char *name) { return item(name)->mapRectToScene(item(name)->boundingRect()); };
         if (window->property("footerStacked").toBool()) {
             QVERIFY(relatedBounds.bottom() < modeBounds.bottom());
             QCOMPARE(scene("deskControl").bottom(),modeBounds.bottom());
-            QVERIFY(scene("savedControl").bottom() < scene("notesControl").top());
-            QVERIFY(scene("notesControl").bottom() < relatedBounds.top());
-            QVERIFY(relatedBounds.bottom() < scene("deskControl").top());
+            QCOMPARE(scene("savedControl").bottom(),relatedBounds.top());
+            QVERIFY(relatedBounds.bottom() <= scene("deskControl").top());
         } else {
             QCOMPARE(relatedBounds.bottom(),modeBounds.bottom());
-            QVERIFY(scene("savedControl").right() < scene("notesControl").left());
-            QVERIFY(scene("notesControl").right() < relatedBounds.left());
-            QVERIFY(relatedBounds.right() < scene("deskControl").left());
+            QCOMPARE(scene("savedControl").right(),relatedBounds.left());
+            QVERIFY(relatedBounds.right() <= scene("deskControl").left());
         }
-        QCOMPARE(related->property("glyph").toString(),QString("related"));
-        QCOMPARE(prop("relatedControlGlyph","kind").toString(),QString("tag"));
-        QVERIFY(!prop("relatedControlGlyph","filled").toBool());
+        // Study draws its own book-and-magnifier glyph, not the tag; Annotations wears the note.
+        QCOMPARE(related->property("glyph").toString(),QString("study"));
+        QVERIFY(!item("relatedControlGlyph")->isVisible());
+        QCOMPARE(prop("savedControlGlyph","kind").toString(),QString("note"));
+        QVERIFY(item("savedControlGlyph")->isVisible());
         click(related); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
         QVERIFY(!prop("savedDrawer","visible").toBool());
         const auto inner = item("tagsBody")->mapRectToScene(item("tagsBody")->boundingRect());
@@ -5458,8 +5460,8 @@ private slots:
                 for (int x = 0; x < image.width(); ++x) amount += image.pixelColor(x,y).alpha();
             return amount;
         };
-        for (const auto kind : {"bookmark", "tag", "note"}) {
-            auto footer = item(qstrcmp(kind,"bookmark") == 0 ? "savedControlGlyph" : qstrcmp(kind,"tag") == 0 ? "relatedControlGlyph" : "notesControlGlyph");
+        for (const auto kind : {"note"}) {
+            auto footer = item("savedControlGlyph");
             auto row = item(qPrintable(QString(kind) + "Glyph1"));
             QVERIFY(footer && row);
             QVERIFY(!footer->property("filled").toBool());

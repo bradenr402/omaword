@@ -572,7 +572,7 @@ private slots:
         QVERIFY(!bible->historyEnabled()); QVERIFY(bible->history().isEmpty());
         QCOMPARE(commandTitle("able history"), QString("Enable History"));
         QTRY_VERIFY(!item("historyControl")->isVisible());
-        QCOMPARE(window->property("footerRightCount").toInt(), 4);
+        QCOMPARE(window->property("footerRightCount").toInt(), 3);
         key(Qt::Key_H, Qt::ShiftModifier); QTest::qWait(100);
         QVERIFY(!object("historyDrawer")->property("visible").toBool());
         QCOMPARE(toast(), QString("History is disabled · enable it in Commands"));

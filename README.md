@@ -208,7 +208,7 @@ These also work, but stay out of the in-app list:
 ### Feel
 - Annotations look like pen and highlighter marks.
 - Moving to a verse slides briefly, jumps pulse, copies flash, and the text slides aside for margin notes. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows.
-- The footer holds help and mode on the left; search, passage, version, and layout in the center; and Annotations, Notes, Study, History, and Desk on the right. In narrow windows the right group stacks into a column, then folds into a `…` menu.
+- The footer holds help and mode on the left; search, passage, version, and layout in the center; and Annotations, Study, History, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows the right group stacks into a column, then folds into a `…` menu.
 
 ### Your data
 Bible versions, annotations, the Desk, and History stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.

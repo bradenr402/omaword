@@ -3180,7 +3180,7 @@ ApplicationWindow {
                 anchors.centerIn: parent
                 width: 22 * app.controlScale
                 height: width
-                visible: floatingButton.glyph.length > 0 && !["notes", "saved", "related"].includes(floatingButton.glyph)
+                visible: floatingButton.glyph.length > 0 && floatingButton.glyph !== "saved"
                 property color ink: !floatingButton.enabled ? desktop.muted : floatingButton.selected ? desktop.accent : desktop.foreground
                 property string glyph: floatingButton.glyph
                 onInkChanged: requestPaint()
@@ -3230,6 +3230,19 @@ ApplicationWindow {
                         // A clock face with hands at ten past.
                         ctx.arc(12, 12, 9.5, 0, 2 * Math.PI)
                         ctx.moveTo(12, 6.5); ctx.lineTo(12, 12); ctx.lineTo(16, 14)
+                    } else if (glyph === "study") {
+                        // An open book under a magnifier: reading closely.
+                        // The lens hides the book's lower-right corner.
+                        ctx.moveTo(18.5, 9.5); ctx.lineTo(18.5, 3.5); ctx.lineTo(13.5, 3.5)
+                        ctx.lineTo(10, 5); ctx.lineTo(6.5, 3.5); ctx.lineTo(1.5, 3.5)
+                        ctx.lineTo(1.5, 16); ctx.lineTo(6.5, 16); ctx.lineTo(10, 17.5); ctx.lineTo(11, 17.1)
+                        ctx.moveTo(10, 5); ctx.lineTo(10, 11.5)
+                        ctx.moveTo(4, 7); ctx.lineTo(7, 7)
+                        ctx.moveTo(4, 10.5); ctx.lineTo(7, 10.5)
+                        ctx.moveTo(22, 22); ctx.lineTo(19.6, 19.6)
+                        ctx.stroke()
+                        ctx.beginPath()
+                        ctx.arc(16, 16, 5, 0, 2 * Math.PI)
                     } else if (glyph === "more") {
                         ctx.fillRect(4, 11, 3, 3); ctx.fillRect(10.5, 11, 3, 3); ctx.fillRect(17, 11, 3, 3)
                     } else if (glyph === "visual") {
@@ -3256,8 +3269,9 @@ ApplicationWindow {
                 objectName: floatingButton.objectName + "Glyph"
                 anchors.centerIn: parent
                 width: 22 * app.controlScale; height: width
-                visible: ["notes", "saved", "related"].includes(floatingButton.glyph)
-                kind: floatingButton.glyph === "notes" ? "note" : floatingButton.glyph === "related" ? "tag" : "bookmark"
+                // Annotations wears the note glyph.
+                visible: floatingButton.glyph === "saved"
+                kind: "note"
                 ink: floatingIcon.ink
             }
         }
@@ -4417,19 +4431,21 @@ ApplicationWindow {
     }
 
     // Footer: ? and mode on the left; search, passage, version, and layout in
-    // the center; Annotations, Notes, Study, History (while enabled), and Desk on the right. The center
+    // the center; Annotations, Study, History (while enabled), and Desk on the right
+    // (Notes is `w`). Buttons in a group sit edge to edge (no gaps). The center
     // stays centered while it fits. When cramped, the right group stacks into a
     // column at the bottom-right corner and the reader text keeps clear of it;
     // the footer stays one row tall. More cramped hides the layout button;
     // really cramped folds the right group into "…" and hides ?. The reader
     // keeps the footer row inside floatingSafety.
     readonly property real footerMargin: 16 * controlScale
+    // Clearance between reader text and the stacked right column.
     readonly property real footerGap: 4 * controlScale
     readonly property real footerButton: 40 * controlScale
     readonly property real footerGroupGap: 24 * controlScale
-    readonly property int footerRightCount: bible.ready ? (bible.historyEnabled ? 5 : 4) : 0
-    readonly property real footerLeftFull: bible.ready ? 2 * footerButton + footerGap : footerButton
-    readonly property real footerRightFull: footerRightCount ? footerRightCount * footerButton + (footerRightCount - 1) * footerGap : 0
+    readonly property int footerRightCount: bible.ready ? (bible.historyEnabled ? 4 : 3) : 0
+    readonly property real footerLeftFull: bible.ready ? 2 * footerButton : footerButton
+    readonly property real footerRightFull: footerRightCount * footerButton
     readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
         + (bible.ready ? versionControl.implicitWidth + layoutControl.implicitWidth : 0)
     readonly property real footerAvailable: width - 2 * footerMargin
@@ -4464,7 +4480,7 @@ ApplicationWindow {
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.margins: app.footerMargin
-        spacing: app.footerGap
+        spacing: 0
         visible: !bible.focusMode && !app.findPromptOpen
         FloatingButton {
             objectName: "helpControl"
@@ -4538,9 +4554,9 @@ ApplicationWindow {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: app.footerMargin
-        spacing: app.footerGap
+        spacing: 0
         // One row, or a column bottom-aligned in the corner when cramped.
-        columns: app.footerStacked ? 1 : 6
+        columns: app.footerStacked ? 1 : 5
         visible: !bible.focusMode && !app.findPromptOpen
         readonly property bool expanded: bible.ready && !app.footerCollapsed
         FloatingButton {
@@ -4553,17 +4569,8 @@ ApplicationWindow {
             onClicked: app.runCommand("annotations")
         }
         FloatingButton {
-            objectName: "notesControl"
-            visible: floatingActions.expanded
-            glyph: "notes"
-            selected: app.notesOpen
-            tip: "Notes · " + app.keyText("notes")
-            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
-            onClicked: app.toggleNotes()
-        }
-        FloatingButton {
             objectName: "relatedControl"
-            glyph: "related"
+            glyph: "study"
             visible: floatingActions.expanded
             enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             tip: "Study · " + app.keyText("related")
