@@ -1915,6 +1915,23 @@ private slots:
         navigate("John 3:5"); key(Qt::Key_Menu); menuKeyTo("editRange"); QTRY_VERIFY(prop("rangeEditing").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
     }
+    void rangeDialogsUseTheOverlayScrollbar() {
+        auto editor = object("rangeEditor"); auto merge = object("rangeNoteMerge");
+        QString note; for (int i = 0; i < 60; ++i) note += QString("Note line %1\n").arg(i);
+        editor->setProperty("pending", QVariantMap{{"preview", QVariantMap{{"sourceNote", note}, {"destinationNote", note}}}});
+        QVERIFY(QMetaObject::invokeMethod(merge, "open")); QTRY_VERIFY(merge->property("opened").toBool());
+        QTRY_VERIFY(travel("rangeMergeScroll") > 20);
+        auto bar = item("rangeMergeScrollbar"); QVERIFY(bar); QTRY_VERIFY(bar->isVisible());
+        auto thumb = item("rangeMergeScrollbarThumb"); QVERIFY(thumb);
+        QVERIFY(thumb->width() < bar->width()); // a thin thumb over the content, no track
+        shot("range-merge-scrollbar");
+        // Keyboard: end scrolls the notes. Mouse: the wheel does too.
+        key(Qt::Key_End); QTRY_VERIFY(contentY("rangeMergeScroll") > 0);
+        key(Qt::Key_Home); QTRY_COMPARE(contentY("rangeMergeScroll"), 0.0);
+        wheel(item("rangeMergeScroll"), -360); QTRY_VERIFY(contentY("rangeMergeScroll") > 0);
+        QVERIFY(QMetaObject::invokeMethod(merge, "close")); editor->setProperty("pending", QVariant());
+        QVERIFY(item("rangeChoiceScrollbar"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }

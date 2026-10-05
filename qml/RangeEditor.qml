@@ -315,6 +315,38 @@ Item {
             visible: check.allTagsHint && (check.hovered || check.activeFocus)
         }
     }
+    // The app's overlay scrollbar (Main's OverlayScrollbar): a thin thumb over
+    // the content that widens on hover, no track, no reserved gutter.
+    component RangeScrollbar: ScrollBar {
+        id: bar
+        implicitWidth: 18 * editor.uiScale
+        width: implicitWidth
+        anchors.right: parent ? parent.right : undefined
+        z: 10
+        policy: ScrollBar.AlwaysOn
+        visible: size < 1
+        hoverEnabled: true
+        padding: 0
+        minimumSize: 0.035
+        onPositionChanged: linger.restart()
+        onHoveredChanged: linger.restart()
+        Timer { id: linger; interval: 1100 }
+        contentItem: Item {
+            Rectangle {
+                objectName: bar.objectName + "Thumb"
+                anchors.right: parent.right
+                anchors.rightMargin: 4 * editor.uiScale
+                height: parent.height
+                width: (bar.hovered || bar.pressed ? 10 : 4) * editor.uiScale
+                color: editor.desktop.muted
+                radius: Math.min(editor.desktop.cornerRadius, width / 2, height / 2)
+                opacity: bar.hovered || bar.pressed ? 0.8 : linger.running ? 0.5 : 0.2
+                Behavior on width { NumberAnimation { duration: editor.app && editor.app.reduceMotion ? 0 : 120 } }
+                Behavior on opacity { NumberAnimation { duration: editor.app && editor.app.reduceMotion ? 0 : 200 } }
+            }
+        }
+        background: Item {}
+    }
     component FineRule: Rectangle {
         color: editor.desktop.border
         implicitHeight: 1
@@ -420,7 +452,10 @@ Item {
                 contentWidth: availableWidth
                 contentHeight: choices.implicitHeight
                 clip: true
+                leftPadding: 0
+                rightPadding: 0
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical: RangeScrollbar { objectName: "rangeChoiceScrollbar" }
                 Column {
                     id: choices
                     width: choiceScroll.availableWidth
@@ -546,6 +581,10 @@ Item {
                 Layout.fillHeight: true
                 implicitHeight: Math.min(320, noteTexts.implicitHeight)
                 contentWidth: availableWidth
+                leftPadding: 0
+                rightPadding: 0
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ScrollBar.vertical: RangeScrollbar { objectName: "rangeMergeScrollbar" }
                 ColumnLayout {
                     id: noteTexts
                     width: parent.width
