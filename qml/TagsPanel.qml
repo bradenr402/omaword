@@ -1277,7 +1277,8 @@ Item {
                     // The cursor verse's footnotes stay marked while the list moves.
                     readonly property bool atCursor: footnote && modelData.verse === panel.bible.cursorVerse
                     objectName: "studyRow:" + index
-                    width: studyList.width
+                    // Clear of the scrollbar while it shows.
+                    width: studyList.width - (studyList.ScrollBar.vertical.visible ? studyList.ScrollBar.vertical.width : 0)
                     chosen: studyList.activeFocus && studyList.currentIndex === index
                     onClicked: panel.openStudyRow(index)
                     TapHandler {

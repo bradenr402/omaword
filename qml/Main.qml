@@ -3926,6 +3926,12 @@ ApplicationWindow {
         implicitHeight: 1
         opacity: 0.65
     }
+    // Lists reserve the scrollbar's width while it shows, so rows (and their
+    // right-hand labels, such as "here") never sit under it.
+    function scrollGutter(list) {
+        const bar = list ? list.ScrollBar.vertical : null
+        return bar && bar.visible ? bar.width : 0
+    }
     component OverlayScrollbar: ScrollBar {
         id: bar
         implicitWidth: 18 * app.scale
@@ -5980,7 +5986,7 @@ ApplicationWindow {
                     required property var modelData
                     required property int index
                     objectName: "versionEntry" + index
-                    width: versionResults.width
+                    width: versionResults.width - app.scrollGutter(versionResults)
                     height: versionEntryContent.implicitHeight + 20 * versionDialog.uiScale
                     highlighted: ListView.isCurrentItem
                     onClicked: { versionResults.currentIndex = index; versionResults.forceActiveFocus(); app.acceptVersion() }
@@ -6527,7 +6533,7 @@ ApplicationWindow {
                     id: savedBlock
                     required property var modelData
                     required property int index
-                    width: collectionList.width
+                    width: collectionList.width - app.scrollGutter(collectionList)
                     Label {
                         objectName: "savedTagGroup:" + (savedBlock.modelData.group || "")
                         visible: app.collectionTab === 3 && !!savedBlock.modelData.firstOfGroup
@@ -6549,7 +6555,7 @@ ApplicationWindow {
                     // Like Desk and History rows: the list keeps the keyboard (tab
                     // never stops on a row); the current row is the list's.
                     focusPolicy: Qt.NoFocus
-                    width: collectionList.width
+                    width: collectionList.width - app.scrollGutter(collectionList)
                     padding: 12 * app.scale
                     height: savedContent.implicitHeight + topPadding + bottomPadding
                     clip: true
@@ -6773,7 +6779,7 @@ ApplicationWindow {
                     required property var modelData
                     required property int index
                     objectName: "deskEntry" + index
-                    width: deskList.width
+                    width: deskList.width - app.scrollGutter(deskList)
                     padding: 12 * app.scale
                     height: deskEntryContent.implicitHeight + topPadding + bottomPadding
                     focusPolicy: Qt.NoFocus
@@ -6982,7 +6988,7 @@ ApplicationWindow {
                     required property int index
                     readonly property bool firstOfGroup: index === 0 || historyList.model[index - 1].group !== modelData.group
                     readonly property bool current: modelData.id === app.historyCurrentId
-                    width: historyList.width
+                    width: historyList.width - app.scrollGutter(historyList)
                     spacing: 6 * app.scale
                     Label {
                         objectName: "historyGroup" + historyBlock.index

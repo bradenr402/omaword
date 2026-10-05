@@ -1636,6 +1636,37 @@ private slots:
             QCOMPARE(bible->lastPrimarySelection(), QString("world"));
         }
     }
+    void listsReserveTheScrollbar() {
+        window->resize(1000, 520);
+        for (int verse = 1; verse <= 24; ++verse) {
+            bible->selectVerses(verse, verse); QVERIFY(bible->addToDesk()); QVERIFY(bible->toggleBookmark());
+            bible->createAndAssignTag(bible->tagScope(), "Long");
+        }
+        navigate("John 3:3");
+        auto check = [&](const QString &list, const QString &row, const QString &bar) {
+            QTRY_VERIFY2(item(bar) && item(bar)->isVisible(), qPrintable(bar));
+            auto first = item(row); QVERIFY2(first, qPrintable(row));
+            const qreal right = first->mapToItem(item(list), QPointF(first->width(), 0)).x();
+            QVERIFY2(right <= item(list)->width() - item(bar)->width() + 0.5, qPrintable(list + QString(" %1 / %2").arg(right).arg(item(list)->width())));
+        };
+        // Keyboard opens each list; rows end where the scrollbar begins.
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer"));
+        check("deskList", "deskEntry0", "deskScrollbar"); shot("scrollbar-desk");
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer"));
+        check("collectionList", "savedEntryJohn 3:1", "savedScrollbar");
+        // Tags: the "here" label stays clear of the scrollbar.
+        call("filterSaved", 3); QTRY_VERIFY(item("savedHereJohn 3:3"));
+        auto here = item("savedHereJohn 3:3");
+        QTRY_VERIFY(here->mapToItem(item("collectionList"), QPointF(here->width(), 0)).x() <= item("collectionList")->width() - item("savedScrollbar")->width() + 0.5);
+        shot("scrollbar-annotations-tags");
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        // Mouse: wheel scrolling still works and the rows keep their width.
+        call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer"));
+        wheel(item("deskList"), -480); QTRY_VERIFY(contentY("deskList") > 0 || item("deskList")->property("contentY").toReal() > 0);
+        check("deskList", "deskEntry0", "deskScrollbar");
+        QVERIFY(warnings.isEmpty());
+    }
 };
 
 int main(int argc, char **argv) {
