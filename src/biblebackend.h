@@ -325,6 +325,10 @@ public:
                                       bool quotation = true) const;
     Q_INVOKABLE QString copyCharacters(int startVerse, int startOffset, int endVerse, int endOffset,
                                        bool plainText = false);
+    // The desktop's PRIMARY selection (middle-click paste), where supported.
+    // lastPrimarySelection() is the last text offered (also where unsupported).
+    Q_INVOKABLE void setPrimarySelection(QString text);
+    Q_INVOKABLE QString lastPrimarySelection() const { return m_primarySelection; }
     Q_INVOKABLE bool exportNotes(QUrl directory);
     Q_INVOKABLE bool exportBackup(QUrl file);
     Q_INVOKABLE bool importBackup(QUrl file);
@@ -439,6 +443,7 @@ private:
 
     QString m_directory, m_error, m_status, m_note;
     QString m_versionId, m_edition, m_abbreviation, m_copyright, m_importTarget;
+    QString m_primarySelection;
     QVariantList m_versions;
     QVariantList m_books;
     QHash<int, QVariantList> m_chapters;

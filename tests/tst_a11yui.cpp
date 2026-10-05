@@ -1620,6 +1620,22 @@ private slots:
         // Left click still opens the note.
         click(note); QTRY_VERIFY(opened("notesDrawer"));
     }
+    void finishedMouseSelectionsBecomePrimary() {
+        for (const QString mode : {"verse", "block"}) {
+            setMode(mode); navigate("John 3:16"); call("readerFocus");
+            // Mouse: a drag, when it ends, offers its plain text as PRIMARY.
+            drag(charPoint(16, 4), charPoint(16, 16));
+            QTRY_VERIFY(!prop("freeSelectedText").toString().isEmpty());
+            QCOMPARE(bible->lastPrimarySelection(), prop("freeSelectedText").toString());
+            // A double-clicked word too.
+            QTest::mouseDClick(window, Qt::LeftButton, {}, charPoint(16, 24));
+            QTRY_COMPARE(prop("freeSelectedText").toString(), QString("world"));
+            QCOMPARE(bible->lastPrimarySelection(), QString("world"));
+            // Keyboard: character selection never touches PRIMARY by itself.
+            key(Qt::Key_Escape); key(Qt::Key_V, Qt::ShiftModifier); keys("e"); key(Qt::Key_Escape);
+            QCOMPARE(bible->lastPrimarySelection(), QString("world"));
+        }
+    }
 };
 
 int main(int argc, char **argv) {

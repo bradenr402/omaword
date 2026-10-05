@@ -397,6 +397,9 @@ Item {
             }
             onReleased: function(mouse) {
                 if (mouse.button === Qt.LeftButton) {
+                    // A finished selection becomes PRIMARY (controllers without it: tests).
+                    const finished = root.wordClick || root.dragging
+                    if (finished && typeof root.controller.publishPrimary === "function") root.controller.publishPrimary()
                     if (root.wordClick) root.wordClick = false
                     else if (!root.dragging) root.controller.selectVerse(root.pressedVerse, !!(mouse.modifiers & Qt.ShiftModifier))
                     root.cancelDrag()

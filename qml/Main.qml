@@ -788,9 +788,14 @@ ApplicationWindow {
         row.body.selectWord()
         freeSelectedText = row.body.selectedText.replace(/[\uFFFC\u2060]/g, "")
         wordClick = freeSelectedText.length > 0
+        publishPrimary()
     }
+    // A finished mouse selection (drag or double-clicked word) becomes the
+    // desktop's PRIMARY selection, as plain selected text.
+    function publishPrimary() { if (freeSelectedText.length) bible.setPrimarySelection(freeSelectedText) }
     function finishTextDrag(number, mouse) {
         if (wordClick) { wordClick = false; draggingText = false; dragAnchorRow = -1; return }
+        if (draggingText) publishPrimary()
         if (!draggingText) { clearTextSelection(); selectVerse(number, !!(mouse.modifiers & Qt.ShiftModifier)) }
         draggingText = false
         dragAnchorRow = -1

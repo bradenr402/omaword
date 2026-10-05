@@ -3041,6 +3041,15 @@ void BibleBackend::copyText(QString text)
     if (qobject_cast<QGuiApplication *>(QCoreApplication::instance())) QGuiApplication::clipboard()->setText(text);
 }
 
+void BibleBackend::setPrimarySelection(QString text)
+{
+    if (text.isEmpty()) return;
+    m_primarySelection = text;
+    if (!qobject_cast<QGuiApplication *>(QCoreApplication::instance())) return;
+    auto clipboard = QGuiApplication::clipboard();
+    if (clipboard->supportsSelection()) clipboard->setText(text, QClipboard::Selection);
+}
+
 namespace {
 QList<TextSelection::Verse> selectionVerses(const QVariantList &rows)
 {
