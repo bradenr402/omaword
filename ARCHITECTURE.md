@@ -17,7 +17,8 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 | `src/versioncatalog.*` | Async HTTPS ZIP download to cache; progress, cancel, errors |
 | `src/biblebackend.*` | Per-reader `bible`: active text, references, annotations, tags, Desk, prefs, library ops, backup/export |
 | `src/scripturesearch.*` | Normalized, cancellable Bible-wide search on a worker pool |
-| `src/searchdocument.*` | Offset mapping into rich text; LTR forcing helpers |
+| `src/searchdocument.*` | Offset mapping into rich text (both directions); LTR forcing helpers |
+| `src/textselection.*` | Character selection (`shift V`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
 | `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing |
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC |
@@ -192,6 +193,20 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   starts, poetry lines, and chapter breaks regardless of current layout.
 - `selectionText()` strips only generated decoration cells; original joiners and
   object characters are kept.
+- Selected text (mouse drag or character selection) is mapped back to source
+  `{verse, offset}` (`SourcePositionMap::sourceStart/sourceEnd`) and copied by
+  `TextSelection::text`: `ctrl c`/`y` a quotation — `…` where the selection
+  starts after a verse's first ink or ends before its last (whitespace and
+  punctuation trimmed at the cut), superscript numbers only for verses whose
+  beginning is selected and never for one verse, reference over the verses
+  touched — `ctrl shift C`/`shift Y` plain text, never with ellipses. Joins
+  follow the source as above; headings and decorations never copy.
+- Character selection: positions are source `{verse, offset}` in all layouts;
+  each layout maps them to its document and paints its native selection.
+  Motions crossing verse breaks (breaks are whitespace) and text objects are
+  pure C++ (`TextSelection`); lines (`j k 0 ^ $`) use the layout's geometry.
+  Leaving the chapter, layout, or reader keys (a modal) ends it; so does a
+  rebuild of the flowing document (text size, line height).
 
 ### LTR forcing
 - All Scripture layouts are LTR even when a paragraph begins in Hebrew:

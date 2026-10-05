@@ -1267,7 +1267,7 @@ private slots:
         QVERIFY(!item("keybindingsClose"));
         QCOMPARE(search->width(),item("keybindingResults")->width());
         type("chapter");
-        QCOMPARE(prop("keybindingResults","count").toInt(),7);
+        QCOMPARE(prop("keybindingResults","count").toInt(),8);
         QVERIFY(item("keybindingFind in chapter"));
         key(Qt::Key_Down); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),1);
         key(Qt::Key_Up); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
@@ -1500,7 +1500,7 @@ private slots:
             QVERIFY(qAbs(prop("keybindingResults","contentY").toDouble() - qMax(first,top - list->height())) < 1);
             QVERIFY(current());
             const auto rect = current()->mapRectToItem(list,current()->boundingRect());
-            QVERIFY(onPage(list,rect));
+            QVERIFY2(onPage(list,rect),qPrintable(QString("Row outside page: %1..%2 / %3 at %4 row %5").arg(rect.top()).arg(rect.bottom()).arg(list->height()).arg(prop("keybindingResults","contentY").toDouble()).arg(prop("keybindingResults","currentIndex").toInt())));
             if (top <= first + 1) break;
         }
         // Use executable panel rows for the dispatch check; their order/height
@@ -2531,9 +2531,9 @@ private slots:
             QCOMPARE(bible->selectionReference(),selected);
         }
         key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
-        type("copy selected text");
-        QTRY_VERIFY(item("keybindingCopy selected text"));
-        QVERIFY(item("keybindingCopy selected text")->isEnabled());
+        type("copy selected text as quotation");
+        QTRY_VERIFY(item("keybindingCopy selected text as quotation (else the passage)"));
+        QVERIFY(item("keybindingCopy selected text as quotation (else the passage)")->isEnabled());
         key(Qt::Key_Return); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"copyText")));
         QCOMPARE(QApplication::clipboard()->text(),bible->copySelection());
@@ -2775,11 +2775,16 @@ private slots:
         QCOMPARE(window->property("freeSelectedText").toString(),expected);
         QCOMPARE(prop("blockBody","selectedText").toString(),documentSelection);
         QCOMPARE(bible->selectionReference(),range);
-        key(Qt::Key_C,Qt::ControlModifier);
+        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),expected);
+        // ctrl c quotes it: ellipses at the cut verses, numbers where a verse starts.
+        key(Qt::Key_C,Qt::ControlModifier);
+        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“…café")),qPrintable(QApplication::clipboard()->text()));
+        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral("…”\n\n—John 3:1–3")));
         key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),quoted);
         key(Qt::Key_Y,Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),plain);
-        key(Qt::Key_C,Qt::ControlModifier | Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),plain);
+        // With selected text, ctrl shift C copies that text; shift Y the passage.
+        key(Qt::Key_C,Qt::ControlModifier | Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),expected);
         QCOMPARE(window->property("freeSelectedText").toString(),expected);
         QCOMPARE(bible->collection(),annotations);
         QTest::mouseClick(window,Qt::MiddleButton,Qt::NoModifier,blockPoint(2,4));
@@ -2852,7 +2857,7 @@ private slots:
         QTRY_VERIFY(window->property("freeSelectedText").toString().size() > before.size());
         QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,bottom);
         const auto selected = window->property("freeSelectedText").toString();
-        key(Qt::Key_C,Qt::ControlModifier); QCOMPARE(QApplication::clipboard()->text(),selected);
+        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),selected);
         key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
         QVERIFY(window->property("freeSelectedText").toString().isEmpty());
         const auto quoted = bible->copySelection(), plain = bible->copySelection(true);
@@ -3120,12 +3125,15 @@ private slots:
         QCOMPARE(selection.count(),0);
         QVERIFY(window->activeFocusItem()->objectName().startsWith("verseBody"));
         QApplication::clipboard()->setText("replace me");
-        key(Qt::Key_C,Qt::ControlModifier);
+        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),expected);
-        // Ctrl+C also works after moving focus out of the TextEdit.
+        // Ctrl+C (a quotation) also works after moving focus out of the TextEdit.
         item("readerSurface")->forceActiveFocus();
         QApplication::clipboard()->setText("replace again");
         key(Qt::Key_C,Qt::ControlModifier);
+        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“…café")),qPrintable(QApplication::clipboard()->text()));
+        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral("…”\n\n—John 3:1–3")));
+        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),expected);
         // Middle clicks must not consume the free selection or alter the
         // canonical selection before deciding which passage to copy.
@@ -3220,7 +3228,7 @@ private slots:
         QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,top);
         QVERIFY(!window->property("draggingText").toBool());
         QCOMPARE(bible->cursorVerse(),10);
-        key(Qt::Key_C,Qt::ControlModifier);
+        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),window->property("freeSelectedText").toString());
     }
     void runtimeReadingPreferences() {
@@ -4091,7 +4099,7 @@ private slots:
                 owners.insert(key,id);
             }
         }
-        for (const auto &removed : {"S","Ctrl+P","Ctrl+M","Ctrl+H","Ctrl+A","Shift+R","Shift+V","Shift+X","Ctrl+Shift+N",
+        for (const auto &removed : {"S","Ctrl+P","Ctrl+M","Ctrl+H","Ctrl+A","Shift+R","Shift+X","Ctrl+Shift+N",
                                     "R","P","B","Ctrl+[","Ctrl+]","Ctrl+\\"})
             QVERIFY2(!owners.contains("app:" + QKeySequence(QString(removed)).toString()),removed);
         // [ ] - and shift H moved from chapters/headings to History.
@@ -4504,7 +4512,7 @@ private slots:
         // Every catalog key reads in the shared notation: lowercase except a
         // shifted letter or function key, arrows as glyphs, muted separators.
         const QRegularExpression notation(QString::fromUtf8(
-            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|mouse back|mouse forward|[A-Z])$"));
+            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}()$^]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|mouse back|mouse forward|[A-Z])$"));
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         for (const auto &record : records) {
             const auto action = record.toMap();

@@ -41,6 +41,12 @@ public:
     Q_INVOKABLE QVariantList rectangles(int start, int end) const;
     Q_INVOKABLE QVariantList searchRectangles(const QVariantList &segments) const;
     Q_INVOKABLE QRectF searchRect(const QVariantMap &segment) const;
+    // Character selection over source text: a verse's source [start, start +
+    // length) → [documentStart, documentEnd] (empty when unmapped); and a
+    // document position → {verse, offset} (forward: the first source unit at or
+    // after it; else the exclusive end of the units before it), {} when none.
+    Q_INVOKABLE QVariantList documentRange(int verse, int start, int length) const;
+    Q_INVOKABLE QVariantMap sourceAt(int position, bool forward) const;
     // One entry per logical annotation intersecting this chapter. Geometry is
     // in document coordinates, including reserved inline decoration cells.
     // Membership comes from per-verse bookmarkRanges/noteRanges/tagRanges in source order.

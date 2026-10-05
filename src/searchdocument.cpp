@@ -67,6 +67,20 @@ QPair<int, int> SourcePositionMap::range(int start, int length) const
     return {m_positions[start].first, m_positions[start + length - 1].second};
 }
 
+int SourcePositionMap::sourceStart(int position) const
+{
+    for (int i = 0; i < m_positions.size(); ++i)
+        if (m_positions[i].first >= 0 && m_positions[i].second > position) return i;
+    return -1;
+}
+
+int SourcePositionMap::sourceEnd(int position) const
+{
+    for (int i = m_positions.size() - 1; i >= 0; --i)
+        if (m_positions[i].first >= 0 && m_positions[i].first < position) return i + 1;
+    return 0;
+}
+
 QVariantList SearchGeometry::rectangles(QTextDocument *document, int start, int end)
 {
     QVariantList result;
@@ -192,6 +206,18 @@ QRectF SearchDocument::rectFor(int start, int length) const
 {
     const auto range = m_map.range(start, length);
     return SearchGeometry::firstRect(SearchGeometry::rectangles(m_document, range.first, range.second));
+}
+
+QVariantList SearchDocument::documentRange(int start, int length) const
+{
+    const auto range = m_map.range(start, length);
+    if (range.first < 0) return {};
+    return {range.first, range.second};
+}
+
+int SearchDocument::sourceAt(int position, bool forward) const
+{
+    return forward ? m_map.sourceStart(position) : m_map.sourceEnd(position);
 }
 
 QRectF SearchDocument::cursorRect(int position) const

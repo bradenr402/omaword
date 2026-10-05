@@ -257,6 +257,36 @@ class A11yUiTest : public QObject
         return {};
     }
 
+    // Character selection (shift V) state, as {verse, offset} maps.
+    QVariantMap charCursor() const { return prop("charCursor").toMap(); }
+    QVariantMap charAnchor() const { return prop("charAnchor").toMap(); }
+    bool charAt(const QVariantMap &at, int verse, int offset) const { return at.value("verse").toInt() == verse && at.value("offset").toInt() == offset; }
+    QString verseText(int number) const {
+        for (const auto &row : bible->verses()) if (row.toMap()["number"].toInt() == number) return row.toMap()["text"].toString();
+        return {};
+    }
+    void keys(const QString &text) {
+        for (const auto c : text) {
+            const char ch = c.toLatin1();
+            Qt::KeyboardModifiers mods = (QChar(ch).isUpper() || QString("()$^").contains(c)) ? Qt::ShiftModifier : Qt::NoModifier;
+            QTest::keyClick(window, ch, mods);
+        }
+        QCoreApplication::processEvents();
+    }
+    void drag(const QPoint &from, const QPoint &to) {
+        QTest::mousePress(window, Qt::LeftButton, {}, from);
+        for (int i = 1; i <= 6; ++i) QTest::mouseMove(window, from + (to - from) * i / 6);
+        QTest::mouseRelease(window, Qt::LeftButton, {}, to); QCoreApplication::processEvents();
+    }
+    // The scene point of a source character (verse, offset) in any layout.
+    QPoint charPoint(int verse, int offset) {
+        QVariant result;
+        const QVariant at = QVariantMap{{"verse", verse}, {"offset", offset}};
+        QMetaObject::invokeMethod(window, "charRect", Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, at));
+        const auto r = value(result).toMap(); if (r.isEmpty()) return {};
+        return item("readerColumn")->mapToScene(QPointF(r["x"].toReal() + 2, r["y"].toReal() + r["height"].toReal() / 2)).toPoint();
+    }
+
     // Visual checks: with OMAWORD_A11Y_SHOTS set to a directory, save the window.
     void shot(const QString &name) {
         const auto directory = qEnvironmentVariable("OMAWORD_A11Y_SHOTS");
@@ -979,15 +1009,172 @@ private slots:
             clickAt((from + to) / 2, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
             QCOMPARE(menuIds().first(), QString("copySelected")); QCOMPARE(menuShortcut("copySelected"), QString("ctrl c"));
             QCOMPARE(prop("freeSelectedText").toString(), selected); QCOMPARE(bible->tagScope(), selection);
+            // Copy selected text is a quotation (ctrl c); the plain entry follows.
             QGuiApplication::clipboard()->clear(); chooseMenu("copySelected");
-            QTRY_COMPARE(QGuiApplication::clipboard()->text(), selected);
+            QTRY_VERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("”\n\n—John 3:4")));
             QCOMPARE(prop("freeSelectedText").toString(), selected);
             // Keyboard: the menu key offers it first too; enter copies.
             key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
             QCOMPARE(menuIds().first(), QString("copySelected"));
-            QGuiApplication::clipboard()->clear(); key(Qt::Key_Return);
+            QGuiApplication::clipboard()->clear(); key(Qt::Key_Down); key(Qt::Key_Return);
             QTRY_COMPARE(QGuiApplication::clipboard()->text(), selected);
             key(Qt::Key_Escape); QTRY_VERIFY(prop("freeSelectedText").toString().isEmpty());
+        }
+    }
+
+    // ── Phase 3
+
+    void characterSelectionByKeysInEveryLayout() {
+        for (const QString mode : {"verse", "block", "paragraph"}) {
+            setMode(mode); navigate("John 3:16"); call("readerFocus");
+            const QString v16 = verseText(16), v17 = verseText(17);
+            QCOMPARE(v16, QString("For God so loved the world that he gave his Son."));
+            key(Qt::Key_V, Qt::ShiftModifier);
+            QTRY_VERIFY2(prop("charMode").toBool(), qPrintable(mode));
+            QVERIFY(charAt(charAnchor(), 16, 0)); QVERIFY(charAt(charCursor(), 16, 0));
+            QCOMPARE(prop("freeSelectedText").toString(), QString("F"));
+            QVERIFY(shown("characterStatus")); QCOMPARE(item("modeControl")->property("glyph").toString(), QString("characters"));
+            // The selection paints with the layout's native selection.
+            QQuickItem *body = mode == "verse" ? item("verseBody16") : item("blockBody");
+            QCOMPARE(body->property("selectedText").toString(), QString("F"));
+            // Words, ends, counts, swap.
+            keys("w"); QVERIFY(charAt(charCursor(), 16, 4)); QCOMPARE(prop("freeSelectedText").toString(), QString("For G"));
+            keys("2e"); QVERIFY(charAt(charCursor(), 16, 9));
+            QCOMPARE(body->property("selectedText").toString().remove(QChar(0x2060)).remove(QChar(0xFFFC)), QString("For God so"));
+            keys("o"); QVERIFY(charAt(charAnchor(), 16, 9)); QVERIFY(charAt(charCursor(), 16, 0));
+            keys("o"); QVERIFY(charAt(charCursor(), 16, 9));
+            keys("b"); QVERIFY(charAt(charCursor(), 16, 8));
+            keys("ge"); QVERIFY(charAt(charCursor(), 16, 6));
+            keys("W"); QVERIFY(charAt(charCursor(), 16, 8)); keys("E"); QVERIFY(charAt(charCursor(), 16, 9)); keys("B"); QVERIFY(charAt(charCursor(), 16, 8));
+            // Line edges (no counts) follow the visual line: a whole verse row,
+            // or a wrapped line of the flowing text.
+            auto cursorPoint = [&] { return charPoint(charCursor()["verse"].toInt(), charCursor()["offset"].toInt()); };
+            const qreal left = body->mapToScene(QPointF(0, 0)).x();
+            keys("$");
+            if (mode == "verse") QVERIFY(charAt(charCursor(), 16, v16.size() - 1));
+            else {
+                // The wrapped line ends on its last ink; the next word is on the next line.
+                const QPoint end = cursorPoint(); keys("w"); QVERIFY(cursorPoint().y() > end.y()); keys("ge");
+                QCOMPARE(cursorPoint(), end);
+            }
+            // h and l cross the verse break; ) and ( step sentences.
+            keys(")"); QVERIFY(charAt(charCursor(), 17, 0));
+            keys("h"); QVERIFY(charAt(charCursor(), 16, v16.size() - 1));
+            keys("l"); QVERIFY(charAt(charCursor(), 17, 0));
+            keys("h"); QVERIFY(charAt(charCursor(), 16, v16.size() - 1));
+            keys("0");
+            if (mode == "verse") QVERIFY(charAt(charCursor(), 16, 0));
+            QVERIFY2(cursorPoint().x() - left < 6, qPrintable(mode));
+            const auto lineStart = charCursor();
+            keys("3l"); keys("^"); QCOMPARE(charCursor(), lineStart);
+            keys(")3l("); QVERIFY(charAt(charCursor(), 17, 0)); keys("("); QVERIFY(charAt(charCursor(), 16, 0));
+            // A count of 20 (0 joins a count) moves 20 characters.
+            keys("20l"); QVERIFY(charAt(charCursor(), 16, 20));
+            // j and k move by line, keeping the column, across verses.
+            keys("j"); QCOMPARE(charCursor()["verse"].toInt(), 17);
+            const int column = charCursor()["offset"].toInt(); QVERIFY2(column > 5, qPrintable(mode + " " + QString::number(column)));
+            keys("k"); QVERIFY2(charAt(charCursor(), 16, 20), qPrintable(mode + QString(" %1:%2").arg(charCursor()["verse"].toInt()).arg(charCursor()["offset"].toInt())));
+            keys("2j"); QVERIFY(charCursor()["verse"].toInt() >= 17);
+            keys("2k"); QVERIFY(charAt(charCursor(), 16, 20));
+            // Sentences, chapter edges (counts ignored).
+            keys(")"); QVERIFY(charAt(charCursor(), 17, 0));
+            keys("("); QVERIFY(charAt(charCursor(), 16, 0));
+            keys("5gg"); QVERIFY(charAt(charCursor(), 1, 0));
+            keys("3G"); QVERIFY(charAt(charCursor(), 36, verseText(36).size() - 1));
+            // An unknown key sounds the error and keeps the selection.
+            const int plays = playCount(); keys("q"); QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > plays);
+            QVERIFY(prop("charMode").toBool());
+            // esc leaves without copying.
+            QGuiApplication::clipboard()->setText("unchanged");
+            key(Qt::Key_Escape); QVERIFY(!prop("charMode").toBool());
+            QVERIFY(prop("freeSelectedText").toString().isEmpty()); QCOMPARE(QGuiApplication::clipboard()->text(), QString("unchanged"));
+            QVERIFY(readerFocused()); QVERIFY(!shown("characterStatus"));
+            // Text objects, then y copies a quotation and leaves.
+            navigate("John 3:16"); key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("charMode").toBool());
+            keys("l"); keys("iw"); QVERIFY(charAt(charAnchor(), 16, 0)); QVERIFY(charAt(charCursor(), 16, 2));
+            keys("aw"); QVERIFY(charAt(charCursor(), 16, 6));
+            keys("y"); QVERIFY(!prop("charMode").toBool());
+            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“For God…”\n\n—John 3:16"));
+            QCOMPARE(lastSound(), QString("chime"));
+            // Across a verse break: y quotes with the later verse's number, shift Y is plain.
+            key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("charMode").toBool());
+            keys("wo"); keys(")w");
+            QVERIFY(charAt(charAnchor(), 16, 4)); QVERIFY(charAt(charCursor(), 17, 9));
+            const QString plain = v16.mid(4) + " " + v17.left(10);
+            key(Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier); QVERIFY(!prop("charMode").toBool());
+            QCOMPARE(QGuiApplication::clipboard()->text(), plain);
+            key(Qt::Key_V, Qt::ShiftModifier); keys("wo)w"); QVERIFY(charAt(charCursor(), 17, 9));
+            key(Qt::Key_C, Qt::ControlModifier);
+            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“…God so loved the world that he gave his Son. ¹⁷ Original a…”\n\n—John 3:16–17"));
+            key(Qt::Key_V, Qt::ShiftModifier); keys(")h"); keys("Y");
+            QCOMPARE(QGuiApplication::clipboard()->text(), v16);
+            QVERIFY(warnings.isEmpty());
+        }
+    }
+    void characterSelectionRendersInEveryLayout() {
+        for (const QString mode : {"verse", "block", "paragraph"}) {
+            setMode(mode); navigate("John 3:16"); call("readerFocus");
+            key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("charMode").toBool());
+            keys("w"); keys("o"); keys("$j");
+            QTRY_VERIFY(shown("characterStatus"));
+            QCOMPARE(charAnchor()["verse"].toInt(), 16);
+            QCOMPARE(charCursor()["verse"].toInt(), 17);
+            // Verse rows select each touched row; the flowing layouts one body.
+            if (mode == "verse") {
+                QCOMPARE(item("verseBody16")->property("selectedText").toString().remove(QChar(0x2060)).remove(QChar(0xFFFC)), verseText(16).mid(4));
+                QVERIFY(!item("verseBody17")->property("selectedText").toString().isEmpty());
+                QVERIFY(item("verseBody18")->property("selectedText").toString().isEmpty());
+            } else QVERIFY(item("blockBody")->property("selectedText").toString().contains("God so loved"));
+            shot("characters-" + mode);
+            key(Qt::Key_Escape);
+        }
+    }
+    void characterSelectionByMouse() {
+        for (const QString mode : {"verse", "block"}) {
+            setMode(mode); navigate("John 3:16"); bible->clearSelection(); call("readerFocus");
+            // Mouse: a drag inside verse 16 copies a quotation with ellipses on ctrl c.
+            const QString v16 = verseText(16);
+            const QPoint from = charPoint(16, 4), to = charPoint(16, 16);
+            QVERIFY(!from.isNull() && !to.isNull());
+            drag(from, to); QTRY_VERIFY(!prop("freeSelectedText").toString().isEmpty());
+            QGuiApplication::clipboard()->clear();
+            key(Qt::Key_C, Qt::ControlModifier);
+            const QString quote = QGuiApplication::clipboard()->text();
+            QVERIFY2(quote.startsWith(QStringLiteral("“…God so loved")) && quote.endsWith(QStringLiteral("…”\n\n—John 3:16")), qPrintable(mode + ": " + quote));
+            QCOMPARE(toast(), QString("Selected text copied as quotation"));
+            key(Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier);
+            QCOMPARE(QGuiApplication::clipboard()->text(), prop("freeSelectedText").toString());
+            QVERIFY(QGuiApplication::clipboard()->text().startsWith("God so loved"));
+            // The menu copies either way.
+            clickAt((from + to) / 2, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+            QCOMPARE(menuIds().mid(0, 2), QStringList({"copySelected", "copySelectedPlain"}));
+            QCOMPARE(menuShortcut("copySelectedPlain"), QString("ctrl shift C"));
+            QGuiApplication::clipboard()->clear(); chooseMenu("copySelected");
+            QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(QStringLiteral("“…God")));
+            // A drag across a verse break: the later verse is numbered.
+            const QPoint end = charPoint(17, 7);
+            drag(from, end); QTRY_VERIFY(!prop("freeSelectedText").toString().isEmpty());
+            key(Qt::Key_C, Qt::ControlModifier);
+            QVERIFY2(QGuiApplication::clipboard()->text().contains(QStringLiteral("Son. ¹⁷ Origin")), qPrintable(QGuiApplication::clipboard()->text()));
+            QVERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("—John 3:16–17")));
+            // shift V turns the dragged text into a character selection.
+            key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("charMode").toBool());
+            QCOMPARE(charAnchor()["verse"].toInt(), 16); QCOMPARE(charCursor()["verse"].toInt(), 17);
+            QVERIFY(readerFocused());
+            // Mouse: the hint parts act; quotation copies and leaves.
+            QGuiApplication::clipboard()->clear();
+            clickHint("characterHintsPart:quotation");
+            QTRY_VERIFY(!prop("charMode").toBool());
+            QVERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("—John 3:16–17")));
+            // The footer mode button leaves character selection; a click in the text does too.
+            key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("charMode").toBool());
+            click("modeControl"); QVERIFY(!prop("charMode").toBool()); QVERIFY(readerFocused());
+            key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("charMode").toBool());
+            clickHint("characterHintsPart:exit"); QVERIFY(!prop("charMode").toBool());
+            key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("charMode").toBool());
+            const QPoint inside = charPoint(18, 3); QVERIFY2(!inside.isNull(), qPrintable(mode));
+            clickAt(inside); QTRY_VERIFY2(!prop("charMode").toBool(), qPrintable(mode + QString(" %1,%2").arg(inside.x()).arg(inside.y())));
+            QVERIFY(v16.size() > 0);
         }
     }
 };

@@ -180,7 +180,7 @@ Item {
         width: body.width + leftInset
         height: body.height
         property var annotations: root.backend.verses
-        property int first: root.backend.selectedStart
+        property int first: root.controller.charMode ? 0 : root.backend.selectedStart
         property int last: root.backend.selectedEnd
         property color accent: root.theme.accent
         property bool focused: root.backend.focusMode
@@ -346,8 +346,12 @@ Item {
         }
         Keys.onPressed: function(event) {
             if (event.matches(StandardKey.Copy)) {
-                root.controller.freeSelectedText = document.selectionText(selectionStart, selectionEnd)
-                if (root.controller.freeSelectedText.length) root.controller.copyFreeText()
+                if (!root.controller.charMode) root.controller.freeSelectedText = document.selectionText(selectionStart, selectionEnd)
+                // Controllers without quotation copy (tests, embedders) copy the plain text.
+                if (root.controller.freeSelectedText.length) {
+                    if (typeof root.controller.copySelectedText === "function") root.controller.copySelectedText(false)
+                    else root.controller.copyFreeText()
+                }
                 else root.controller.copyPassage(false)
                 event.accepted = true
             }

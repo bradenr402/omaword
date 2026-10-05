@@ -1,6 +1,7 @@
 #include <QtTest/QTest>
 #include "biblebackend.h"
 #include "biblebooks.h"
+#include "textselection.h"
 #include <QClipboard>
 #include <QCryptographicHash>
 #include <QSqlRecord>
@@ -362,6 +363,147 @@ private slots:
         QTest::newRow("hyphenated-book") << "GEN 1:1-2" << QStringLiteral("First-Book 1:1–2");
         QTest::newRow("single-verse") << "REV 3:14" << QStringLiteral("Revelation 3:14");
         QTest::newRow("whole-chapter") << "REV 3" << QStringLiteral("Revelation 3");
+    }
+    // ── Character selection (TextSelection): motions, objects, copy text
+    static QList<TextSelection::Verse> charVerses() {
+        return {{16, "For God so loved the world, that he gave his Son.", false, false},
+                {17, "God did not send his Son to condemn. He came to save!", false, false},
+                {18, "Whoever believes is not condemned.", false, true},
+                {19, "", false, false},
+                {20, "Light (came) into the world.", true, false},
+                {21, "Darkness hated it.", true, false}};
+    }
+    static TextSelection::Position at(int verse, int offset) { return {verse, offset}; }
+    void characterMotionsCrossVerseBreaks() {
+        using namespace TextSelection;
+        const auto v = charVerses();
+        // h/l step characters and cross the verse break both ways, with counts.
+        QCOMPARE(move(v, at(0, 0), "l"), at(0, 1));
+        QCOMPARE(move(v, at(0, 0), "l", 4), at(0, 4));
+        QCOMPARE(move(v, at(0, v[0].text.size() - 1), "l"), at(1, 0));
+        QCOMPARE(move(v, at(1, 0), "h"), at(0, v[0].text.size() - 1));
+        QCOMPARE(move(v, at(1, 1), "h", 3), at(0, v[0].text.size() - 2));
+        QCOMPARE(move(v, at(0, 0), "h"), at(0, 0)); // chapter start stops
+        QCOMPARE(move(v, at(5, v[5].text.size() - 1), "l", 9), at(5, v[5].text.size() - 1));
+        // Empty verses are skipped.
+        QCOMPARE(move(v, at(2, v[2].text.size() - 1), "l"), at(4, 0));
+        // w b e: keyword runs and punctuation are separate words.
+        QCOMPARE(move(v, at(0, 0), "w"), at(0, 4));             // God
+        QCOMPARE(move(v, at(0, 0), "w", 3), at(0, 11));         // loved
+        QCOMPARE(move(v, at(0, 21), "w"), at(0, 26));           // world → ","
+        QCOMPARE(move(v, at(0, 21), "W"), at(0, 28));           // world, → that
+        QCOMPARE(move(v, at(0, 4), "e"), at(0, 6));
+        QCOMPARE(move(v, at(0, 22), "e"), at(0, 25));           // end of world
+        QCOMPARE(move(v, at(0, 22), "E"), at(0, 26));           // end of world,
+        QCOMPARE(move(v, at(0, 11), "b"), at(0, 8));
+        QCOMPARE(move(v, at(0, 11), "b", 2), at(0, 4));
+        QCOMPARE(move(v, at(0, 28), "b"), at(0, 26));
+        QCOMPARE(move(v, at(0, 28), "B"), at(0, 21));
+        QCOMPARE(move(v, at(0, 11), "ge"), at(0, 9));            // so
+        QCOMPARE(move(v, at(0, 28), "ge"), at(0, 26));           // ","
+        QCOMPARE(move(v, at(0, 28), "gE"), at(0, 26));
+        QCOMPARE(move(v, at(0, 11), "ge", 2), at(0, 6));
+        // Word motions cross verse breaks.
+        const int son = v[0].text.indexOf("Son");
+        QCOMPARE(move(v, at(0, son), "w", 2), at(1, 0));          // Son . → God
+        QCOMPARE(move(v, at(0, son), "W"), at(1, 0));
+        QCOMPARE(move(v, at(1, 0), "b"), at(0, v[0].text.size() - 1));
+        QCOMPARE(move(v, at(1, 0), "ge"), at(0, v[0].text.size() - 1));
+        QCOMPARE(move(v, at(0, v[0].text.size() - 1), "e"), at(1, 2));
+        // At the chapter edges word motions stop on the last/first character.
+        QCOMPARE(move(v, at(5, 9), "w", 50), at(5, v[5].text.size() - 1));
+        QCOMPARE(move(v, at(0, 4), "b", 50), at(0, 0));
+        // Sentences: ( ) with counts, across verse breaks and paragraph starts.
+        QCOMPARE(move(v, at(0, 5), ")"), at(1, 0));
+        QCOMPARE(move(v, at(1, 2), ")"), at(1, v[1].text.indexOf("He came")));
+        QCOMPARE(move(v, at(0, 5), ")", 3), at(2, 0));
+        QCOMPARE(move(v, at(1, 40), "("), at(1, v[1].text.indexOf("He came")));
+        QCOMPARE(move(v, at(1, v[1].text.indexOf("He came")), "("), at(1, 0));
+        QCOMPARE(move(v, at(1, 40), "(", 2), at(1, 0));
+        QCOMPARE(move(v, at(2, 3), "(", 9), at(0, 0));
+        QCOMPARE(move(v, at(4, 3), ")", 9), at(5, v[5].text.size() - 1));
+        // gg and G ignore counts.
+        QCOMPARE(move(v, at(4, 3), "gg", 5), at(0, 0));
+        QCOMPARE(move(v, at(0, 3), "G", 2), at(5, v[5].text.size() - 1));
+        // Graphemes are one character.
+        const QList<Verse> emoji{{1, QStringLiteral("a 😀é b"), false, false}};
+        QCOMPARE(move(emoji, at(0, 2), "l"), at(0, 4));
+        QCOMPARE(move(emoji, at(0, 4), "l", 2), at(0, 6));
+        QCOMPARE(characterEnd(emoji, at(0, 2)), 4);
+        QCOMPARE(clamp(v, at(3, 0)), at(4, 0));
+    }
+    void characterTextObjects() {
+        using namespace TextSelection;
+        const auto v = charVerses();
+        auto object = [&](TextSelection::Position a, TextSelection::Position c, const char *name, int count = 1) { return textObject(v, a, c, name, count); };
+        // iw: the word, or the white space run; counts add runs.
+        QCOMPARE(object(at(0, 12), at(0, 12), "iw"), qMakePair(at(0, 11), at(0, 15)));
+        QCOMPARE(object(at(0, 12), at(0, 12), "iw", 3), qMakePair(at(0, 11), at(0, 19)));
+        QCOMPARE(object(at(0, 3), at(0, 3), "iw"), qMakePair(at(0, 3), at(0, 3)));
+        // aw: trailing white space, else leading; counts add words.
+        QCOMPARE(object(at(0, 12), at(0, 12), "aw"), qMakePair(at(0, 11), at(0, 16)));
+        QCOMPARE(object(at(0, 12), at(0, 12), "aw", 2), qMakePair(at(0, 11), at(0, 20)));
+        const int son = v[0].text.indexOf("Son");
+        QCOMPARE(object(at(0, son), at(0, son), "aw"), qMakePair(at(0, son - 1), at(0, son + 2)));
+        // A word object crossing a verse break.
+        QCOMPARE(object(at(0, son), at(0, son), "iw", 4), qMakePair(at(0, son), at(1, 2)));
+        // is / as: the sentence (as with trailing white space); counts add sentences.
+        const int he = v[1].text.indexOf("He came");
+        QCOMPARE(object(at(1, 5), at(1, 5), "is"), qMakePair(at(1, 0), at(1, he - 2)));
+        QCOMPARE(object(at(1, 5), at(1, 5), "as"), qMakePair(at(1, 0), at(1, he - 1)));
+        QCOMPARE(object(at(1, 5), at(1, 5), "is", 2), qMakePair(at(1, 0), at(1, v[1].text.size() - 1)));
+        QCOMPARE(object(at(0, 5), at(0, 5), "is", 2), qMakePair(at(0, 0), at(1, he - 2)));
+        // With a selection the object extends past the cursor.
+        QCOMPARE(object(at(0, 11), at(0, 15), "iw", 2), qMakePair(at(0, 11), at(0, 19)));
+        QCOMPARE(object(at(0, 15), at(0, 11), "aw"), qMakePair(at(0, 15), at(0, 8)));
+    }
+    void characterQuotationEllipsesAndNumbers() {
+        using namespace TextSelection;
+        const auto v = charVerses();
+        const QString a = v[0].text, b = v[1].text;
+        // Plain text is the selection as is; never ellipses or numbers.
+        QCOMPARE(text(v, at(0, 4), at(0, 16), false), QString("God so loved"));
+        QCOMPARE(text(v, at(0, 17), at(1, 3), false), a.mid(17) + " God");
+        // A whole single verse: no ellipsis, no number.
+        QCOMPARE(text(v, at(0, 0), at(0, a.size()), true, "John 3:16"), QStringLiteral("“") + a + QStringLiteral("”\n\n—John 3:16"));
+        // Partial single verse: ellipses at both cuts, punctuation trimmed at them.
+        QCOMPARE(text(v, at(0, 4), at(0, 27), true, "John 3:16"), QStringLiteral("“…God so loved the world…”\n\n—John 3:16"));
+        QCOMPARE(text(v, at(0, 0), at(0, 16), true, "R"), QStringLiteral("“For God so loved…”\n\n—R"));
+        QCOMPARE(text(v, at(0, 26), at(0, a.size()), true, "R"), QStringLiteral("“…that he gave his Son.”\n\n—R"));
+        // Across verses: the first verse's number only when its beginning is selected.
+        QCOMPARE(text(v, at(0, 21), at(1, 7), true, "John 3:16–17"),
+                 QStringLiteral("“…world, that he gave his Son. ¹⁷ God did…”\n\n—John 3:16–17"));
+        QCOMPARE(text(v, at(0, 0), at(1, b.size()), true, "John 3:16–17"),
+                 QStringLiteral("“¹⁶ ") + a + QStringLiteral(" ¹⁷ ") + b + QStringLiteral("”\n\n—John 3:16–17"));
+        QCOMPARE(text(v, at(0, 0), at(1, 3), true, "R"), QStringLiteral("“¹⁶ ") + a + QStringLiteral(" ¹⁷ God…”\n\n—R"));
+        // Paragraph and poetry joins follow the source.
+        const int he = b.indexOf("He came");
+        QCOMPARE(text(v, at(1, he), at(2, 8), false), b.mid(he) + "\n\nWhoever ");
+        QCOMPARE(text(v, at(4, 0), at(5, 8), true, "R"), QStringLiteral("“²⁰ ") + v[4].text + QStringLiteral("\n²¹ Darkness…”\n\n—R"));
+        // An end at a verse's start or a start at its end touches nothing there.
+        QCOMPARE(touched(v, at(0, a.size()), at(2, 0)), qMakePair(1, 1));
+        QCOMPARE(text(v, at(0, a.size()), at(2, 0), true, "R"), QStringLiteral("“") + b + QStringLiteral("”\n\n—R"));
+        QVERIFY(text(v, at(0, 3), at(0, 3), true, "R").isEmpty());
+    }
+    void characterCopyOnTheChapter() {
+        install(net); QVERIFY(bible->navigate("GEN 1"));
+        const auto rows = bible->verses();
+        const QString one = rows[0].toMap()["text"].toString(), two = rows[1].toMap()["text"].toString();
+        const QString quote = bible->copyCharacters(1, 9, 2, 8);
+        QCOMPARE(QGuiApplication::clipboard()->text(), quote);
+        QVERIFY2(quote.startsWith(QStringLiteral("“…")), qPrintable(quote));
+        QVERIFY2(quote.contains(QStringLiteral(" ² ") + two.left(8).trimmed() + QStringLiteral("…”")), qPrintable(quote));
+        QVERIFY2(quote.endsWith(QStringLiteral(" 1:1–2")), qPrintable(quote));
+        QCOMPARE(bible->copyCharacters(1, 9, 2, 8, true), one.mid(9) + ' ' + two.left(8));
+        QVERIFY(bible->characterText(1, 0, 1, one.size()).startsWith(QStringLiteral("“") + one + QStringLiteral("”\n\n—")));
+        QVERIFY(bible->characterText(1, 0, 1, one.size()).endsWith(" 1:1"));
+        QCOMPARE(bible->textMotion("w", 1, 0).value("offset").toInt(), one.indexOf(' ') + 1);
+        QCOMPARE(bible->textMotion("l", 1, one.size() - 1).value("verse").toInt(), 2);
+        QCOMPARE(bible->textMotion("G", 1, 0, 7).value("verse").toInt(), rows.last().toMap()["number"].toInt());
+        const auto word = bible->textObject("iw", 1, 1, 1, 1);
+        QCOMPARE(word["anchor"].toMap()["offset"].toInt(), 0);
+        QCOMPARE(word["cursor"].toMap()["offset"].toInt(), one.indexOf(' ') - 1);
+        QVERIFY(bible->copyCharacters(1, 3, 1, 3).isEmpty()); QVERIFY(!bible->error().isEmpty());
     }
     void quotationReferenceTypography() {
         QFETCH(QString,input); QFETCH(QString,label);

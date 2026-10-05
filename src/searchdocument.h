@@ -14,6 +14,12 @@ class SourcePositionMap
 public:
     void build(const QString &source, const QString &rendered, int documentStart = 0);
     QPair<int, int> range(int start, int length) const;
+    // Inverse lookups for a document position: the first source unit at or
+    // after it (-1 if none), and the exclusive end of the source units before
+    // it (0 if none). Whitespace collapsed into one rendered run maps as a run.
+    int sourceStart(int position) const;
+    int sourceEnd(int position) const;
+    bool isEmpty() const { return m_positions.isEmpty(); }
 private:
     QList<QPair<int, int>> m_positions;
 };
@@ -36,6 +42,11 @@ public:
     Q_INVOKABLE QVariantList rectangles(const QVariantList &segments) const;
     Q_INVOKABLE QRectF rectFor(int start, int length) const;
     Q_INVOKABLE QRectF cursorRect(int position) const;
+    // Character selection: source [start, start + length) → [documentStart,
+    // documentEnd] (empty list when unmapped), and a document position back to
+    // a source offset (forward: first unit at/after it; else exclusive end).
+    Q_INVOKABLE QVariantList documentRange(int start, int length) const;
+    Q_INVOKABLE int sourceAt(int position, bool forward) const;
     Q_INVOKABLE void leftToRight(QQuickTextDocument *target) const;
 signals:
     void geometryChanged();

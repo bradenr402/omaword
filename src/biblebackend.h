@@ -312,6 +312,19 @@ public:
     Q_INVOKABLE QString copySelection(bool plainText = false);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
     Q_INVOKABLE void copyText(QString text);
+    // Character selection over the current chapter's source text (see
+    // textselection.h). Positions are {verse, offset}: a verse number and a
+    // UTF-16 offset into its plain text.
+    Q_INVOKABLE QVariantMap textMotion(QString motion, int verse, int offset, int count = 1) const;
+    Q_INVOKABLE QVariantMap textObject(QString object, int anchorVerse, int anchorOffset,
+                                       int cursorVerse, int cursorOffset, int count = 1) const;
+    Q_INVOKABLE int characterEnd(int verse, int offset) const;
+    // [start, end) with an exclusive end; quotation follows the ellipsis and
+    // verse-number rules, plain is the selected text. Copy also sets the clipboard.
+    Q_INVOKABLE QString characterText(int startVerse, int startOffset, int endVerse, int endOffset,
+                                      bool quotation = true) const;
+    Q_INVOKABLE QString copyCharacters(int startVerse, int startOffset, int endVerse, int endOffset,
+                                       bool plainText = false);
     Q_INVOKABLE bool exportNotes(QUrl directory);
     Q_INVOKABLE bool exportBackup(QUrl file);
     Q_INVOKABLE bool importBackup(QUrl file);

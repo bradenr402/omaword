@@ -542,8 +542,10 @@ ApplicationWindow {
         return true
     }
     // The chapter outline, reached by tab, keeps its scroll keys.
-    readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
+    readonly property bool readerBase: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
         && !(chapterOutline && chapterOutline.activeFocus)
+    // Character selection takes the reader's keys itself (charKey).
+    readonly property bool readerKeys: readerBase && !charMode
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
@@ -693,6 +695,7 @@ ApplicationWindow {
     property string freeSelectedText: ""
     function clearTextSelection() {
         freeSelectedText = ""
+        if (charMode) { charMode = false; charPending = ""; charAnchor = null; charCursor = null }
         let block = blockLoader.item as BlockReader
         if (block) block.clearSelection()
         for (let i = 0; i < verseRepeater.count; ++i) {
@@ -817,13 +820,374 @@ ApplicationWindow {
     }
     function selectedTextEntries() {
         return [{ id: "copySelected", text: "Copy selected text", shortcut: menuKey("copyText"), enabled: !bible.busy,
-            run: function() { app.copySelectedText() } }, menuDivider]
+            run: function() { app.copySelectedText(false) } },
+            { id: "copySelectedPlain", text: "Copy selected plain text", shortcut: menuKey("copyTextPlain"), enabled: !bible.busy,
+            run: function() { app.copySelectedText(true) } }, menuDivider]
     }
-    function copySelectedText() {
-        if (!freeSelectedText.length || bible.busy) { rejected(); return }
-        copyFreeText()
-        notify("Selected text copied", true)
+    // Selected text (mouse-dragged or character selection): ctrl c copies it
+    // as a quotation (ellipses at cut verses, numbers for verses whose start is
+    // selected), ctrl shift C as plain text, exactly as selected. A selection
+    // that maps to no Scripture text (a heading alone) copies its plain text.
+    function copySelectedText(plainText) {
+        if (!freeSelectedText.length || bible.busy) { rejected(); return false }
+        // Plain text is the selection as shown (character selection: its source text).
+        const range = plainText ? null : selectedSourceRange()
+        const text = range ? bible.copyCharacters(range.start.verse, range.start.offset, range.end.verse, range.end.offset, false) : ""
+        if (!text.length) copyFreeText()
+        if (range && text.length) flashVerses(range.start.verse, range.end.verse)
+        notify(plainText || !text.length ? "Selected text copied as plain text" : "Selected text copied as quotation", true)
         sounds.play("chime")
+        return true
+    }
+
+    // ── Character selection (shift V): Vim's charwise visual over the source
+    // text of the chapter. Positions are {verse, offset}: a verse number and a
+    // UTF-16 offset into that verse's plain text, shared by all three layouts;
+    // each layout maps them into its own document (SearchDocument per Verse
+    // row, BlockDocument in Paragraph/Block) and paints the native selection.
+    // Motions and copy text come from the backend (textselection.cpp); lines
+    // (j k 0 ^ $) come from the layout's geometry.
+    property bool charMode: false
+    property var charAnchor: null
+    property var charCursor: null
+    property real charColumn: -1
+    property string charPending: ""
+    readonly property string charChapterKey: bible.versionId + ":" + bible.book + ":" + bible.chapter + ":" + bible.readingMode
+    onCharChapterKeyChanged: if (charMode) endCharMode()
+    onReaderBaseChanged: if (!readerBase && charMode) endCharMode()
+    function verseText(number) {
+        const row = Array.from(bible.verses).find(function(v) { return v.number === number })
+        return row ? String(row.text || "") : ""
+    }
+    function verseRowFor(number) {
+        const index = Array.from(bible.verses).findIndex(function(v) { return v.number === number })
+        return index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
+    }
+    // A source range of one verse in its layout: {body, start, end} document positions.
+    function charDocRange(verse, offset, length) {
+        const block = blockLoader.item as BlockReader
+        let range = []
+        let body = null
+        if (block) { range = Array.from(block.mapping.documentRange(verse, offset, length)); body = block.body }
+        else {
+            const row = verseRowFor(verse)
+            if (!row || !row.searchOverlay) return null
+            range = Array.from(row.searchOverlay.documentRange(offset, length)); body = row.body
+        }
+        return range.length === 2 ? { body: body, start: range[0], end: range[1] } : null
+    }
+    // A document position of `body` (verse row `verse`, or the block body) back
+    // to source: forward → the first character at/after it, else the exclusive end before it.
+    function charSourceAt(body, verse, position, forward) {
+        const block = blockLoader.item as BlockReader
+        if (block) {
+            const at = block.mapping.sourceAt(position, forward)
+            return at && at.verse ? { verse: at.verse, offset: at.offset } : null
+        }
+        const row = verseRowFor(verse)
+        if (!row || !row.searchOverlay) return null
+        const offset = row.searchOverlay.sourceAt(position, forward)
+        return forward ? (offset >= 0 ? { verse: verse, offset: offset } : null) : { verse: verse, offset: offset }
+    }
+    function charLength(pos) { return Math.max(1, bible.characterEnd(pos.verse, pos.offset) - pos.offset) }
+    // The character's box in readerColumn coordinates (x, y, height), with its body.
+    function charRect(pos) {
+        if (!pos) return null
+        const range = charDocRange(pos.verse, pos.offset, charLength(pos))
+        if (!range) return null
+        const r = range.body.positionToRectangle(range.start)
+        const p = range.body.mapToItem(readerColumn, r.x, r.y)
+        return { x: p.x, y: p.y, height: r.height, body: range.body, verse: pos.verse, position: range.start }
+    }
+    function charCompare(a, b) { return a.verse !== b.verse ? verseOrder(a.verse) - verseOrder(b.verse) : a.offset - b.offset }
+    function verseOrder(number) { return Array.from(bible.verses).findIndex(function(v) { return v.number === number }) }
+    // [start, end) of the character selection, end exclusive.
+    function charRange() {
+        if (!charMode || !charAnchor || !charCursor) return null
+        const forward = charCompare(charAnchor, charCursor) <= 0
+        const first = forward ? charAnchor : charCursor, last = forward ? charCursor : charAnchor
+        return { start: { verse: first.verse, offset: first.offset },
+                 end: { verse: last.verse, offset: bible.characterEnd(last.verse, last.offset) } }
+    }
+    // The mouse-dragged selection as source [start, end), or the character selection.
+    function selectedSourceRange() {
+        if (charMode) return charRange()
+        const block = blockLoader.item as BlockReader
+        if (block) {
+            const body = block.body
+            if (body.selectionStart === body.selectionEnd) return null
+            const start = charSourceAt(body, 0, body.selectionStart, true)
+            const end = charSourceAt(body, 0, body.selectionEnd, false)
+            return start && end && charCompare(start, end) < 0 ? { start: start, end: end } : null
+        }
+        let start = null, end = null
+        for (let i = 0; i < verseRepeater.count; ++i) {
+            const row = verseRepeater.itemAt(i) as VerseItem
+            if (!row || !row.body || row.body.selectionStart === row.body.selectionEnd) continue
+            const number = bible.verses[i].number
+            if (!start) start = charSourceAt(row.body, number, row.body.selectionStart, true) || { verse: number, offset: verseText(number).length }
+            end = charSourceAt(row.body, number, row.body.selectionEnd, false)
+        }
+        return start && end && charCompare(start, end) < 0 ? { start: start, end: end } : null
+    }
+    // Paints the character selection with the layouts' native text selection.
+    function applyCharSelection(reveal) {
+        const range = charRange()
+        if (!range) return
+        const last = { verse: range.end.verse, offset: charCompare(charAnchor, charCursor) <= 0 ? charCursor.offset : charAnchor.offset }
+        const first = charDocRange(range.start.verse, range.start.offset, charLength(range.start))
+        const end = charDocRange(last.verse, last.offset, range.end.offset - last.offset)
+        const block = blockLoader.item as BlockReader
+        if (block) {
+            if (first && end) block.body.select(first.start, end.end)
+        } else {
+            const a = verseOrder(range.start.verse), z = verseOrder(range.end.verse)
+            for (let i = 0; i < verseRepeater.count; ++i) {
+                const row = verseRepeater.itemAt(i) as VerseItem
+                if (!row || !row.body) continue
+                if (i < a || i > z) { row.body.deselect(); continue }
+                row.body.select(i === a && first ? first.start : 0, i === z && end ? end.end : row.body.length)
+            }
+        }
+        freeSelectedText = bible.characterText(range.start.verse, range.start.offset, range.end.verse, range.end.offset, false)
+        if (reveal !== false) revealChar()
+    }
+    function revealChar() {
+        const rect = charRect(charCursor)
+        if (!rect) return
+        const available = Math.max(1, reading.height - floatingSafety)
+        const margin = Math.min(2 * readerLineHeight, available / 4)
+        const top = readerTargetY()
+        if (rect.y < top + margin) slideReader(rect.y - margin)
+        else if (rect.y + rect.height > top + available - margin) slideReader(rect.y + rect.height - available + margin)
+    }
+    function firstInk(verse) {
+        const text = verseText(verse)
+        let i = 0
+        while (i < text.length - 1 && /\s/.test(text.charAt(i))) ++i
+        return i
+    }
+    function beginCharMode() {
+        if (!bible.ready || bible.busy || rangeEditing || !bible.verses.length) { rejected(); return false }
+        clearCount()
+        // A mouse-dragged selection becomes the character selection.
+        const dragged = freeSelectedText.length ? selectedSourceRange() : null
+        let anchor, cursor
+        if (dragged) {
+            anchor = dragged.start
+            cursor = bible.textMotion("", dragged.end.verse, Math.max(0, dragged.end.offset - 1))
+        } else {
+            // The cursor verse when one is selected, else the first text on screen.
+            const number = hasSelection && bible.cursorVerse > 0 ? bible.cursorVerse : 0
+            anchor = number ? bible.textMotion("", number, firstInk(number)) : firstVisibleChar()
+            cursor = anchor
+        }
+        if (!anchor || !anchor.verse || !cursor || !cursor.verse) { rejected(); return false }
+        if (verseMode) { verseMode = false }
+        charAnchor = { verse: anchor.verse, offset: anchor.offset }
+        charCursor = { verse: cursor.verse, offset: cursor.offset }
+        charColumn = -1
+        charPending = ""
+        charMode = true
+        readerFocus()
+        applyCharSelection()
+        notify("Character selection", true)
+        return true
+    }
+    function firstVisibleChar() {
+        const top = readerTargetY()
+        const bottom = top + Math.max(1, reading.height - floatingSafety)
+        for (let y = Math.max(top, 0) + 4; y < bottom; y += Math.max(2, readerLineHeight / 3)) {
+            // The start of the first line whose text is on screen.
+            const hit = charAtPoint(0, y)
+            if (hit && hit.rect.y >= top) return hit.pos
+        }
+        const first = bible.verses[0].number
+        return bible.textMotion("", first, firstInk(first))
+    }
+    function endCharMode() {
+        if (!charMode) return
+        charMode = false
+        charPending = ""
+        charAnchor = null
+        charCursor = null
+        clearCount()
+        clearTextSelection()
+    }
+    function setCharCursor(pos, keepColumn) {
+        if (!pos || !pos.verse) { rejected(); return }
+        charCursor = { verse: pos.verse, offset: pos.offset }
+        if (!keepColumn) charColumn = -1
+        applyCharSelection()
+    }
+    function charCount() {
+        const count = Math.max(1, Math.min(999999, Number(verseCount) || 1))
+        clearCount()
+        return count
+    }
+    function charMotion(motion, counted) {
+        let count = 1
+        if (counted === false) clearCount()
+        else count = charCount()
+        const next = bible.textMotion(motion, charCursor.verse, charCursor.offset, count)
+        if (next && next.verse === charCursor.verse && next.offset === charCursor.offset) sounds.play("boundary")
+        setCharCursor(next)
+    }
+    function charObject(object) {
+        const count = charCount()
+        const range = bible.textObject(object, charAnchor.verse, charAnchor.offset, charCursor.verse, charCursor.offset, count)
+        if (!range || !range.anchor || !range.anchor.verse) { rejected(); return }
+        charAnchor = { verse: range.anchor.verse, offset: range.anchor.offset }
+        setCharCursor(range.cursor)
+    }
+    function charSwap() {
+        clearCount()
+        const anchor = charAnchor
+        charAnchor = charCursor
+        setCharCursor(anchor)
+    }
+    // The character under a readerColumn point, on that point's line.
+    function charAtPoint(x, y) {
+        const block = blockLoader.item as BlockReader
+        let body = null, verse = 0, position = 0
+        if (block) {
+            body = block.body
+            const p = body.mapFromItem(readerColumn, x, y)
+            position = body.positionAt(p.x, p.y)
+        } else {
+            // Only a point on a row's text: headings and row gaps hold none.
+            for (let i = 0; i < verseRepeater.count && !body; ++i) {
+                const row = verseRepeater.itemAt(i) as VerseItem
+                const p = row && row.body ? row.body.mapFromItem(readerColumn, x, y) : null
+                if (!p || p.y < 0 || p.y > row.body.height) continue
+                body = row.body
+                verse = bible.verses[i].number
+                position = body.positionAt(p.x, p.y)
+            }
+            if (!body) return null
+        }
+        // Below a line's glyphs (line spacing) Qt answers the document end:
+        // ask again at the middle of the line that position is on.
+        const line = body.positionToRectangle(position)
+        const local = body.mapFromItem(readerColumn, x, y)
+        position = body.positionAt(local.x, line.y + line.height / 2)
+        const lineY = body.positionToRectangle(position).y
+        let at = charSourceAt(body, verse, position, true)
+        let rect = at ? charRect(at) : null
+        // Past the line's last character: take that character instead.
+        if (!rect || body.mapFromItem(readerColumn, rect.x, rect.y).y > lineY + 1) {
+            const before = charSourceAt(body, verse, position, false)
+            if (!before || before.offset <= 0) return rect ? { pos: at, rect: rect } : null
+            at = bible.textMotion("", before.verse, before.offset - 1)
+            rect = charRect(at)
+        }
+        return rect ? { pos: at, rect: rect } : null
+    }
+    function charLineStep(direction) {
+        const count = charCount()
+        let pos = charCursor
+        let rect = charRect(pos)
+        if (!rect) { rejected(); return }
+        if (charColumn < 0) charColumn = rect.x
+        let moved = false
+        for (let i = 0; i < count; ++i) {
+            let next = null
+            let y = direction > 0 ? rect.y + rect.height + 1 : rect.y - 1
+            const step = Math.max(2, rect.height / 3)
+            for (let n = 0; n < 600 && y >= 0 && y <= readerColumn.height; ++n, y += direction * step) {
+                const hit = charAtPoint(charColumn, y)
+                if (hit && (direction > 0 ? hit.rect.y > rect.y + rect.height / 2 : hit.rect.y + hit.rect.height / 2 < rect.y)) { next = hit; break }
+            }
+            if (!next) break
+            pos = next.pos; rect = next.rect; moved = true
+        }
+        if (!moved) { sounds.play("boundary"); return }
+        setCharCursor(pos, true)
+    }
+    // 0 ^ $: the cursor's visual line in the current layout.
+    function charLineEdge(edge) {
+        clearCount()
+        const rect = charRect(charCursor)
+        if (!rect) { rejected(); return }
+        const body = rect.body
+        const local = body.mapFromItem(readerColumn, rect.x, rect.y + rect.height / 2)
+        const lineStart = charSourceAt(body, rect.verse, body.positionAt(0, local.y), true)
+        const lineEndExclusive = charSourceAt(body, rect.verse, body.positionAt(body.width + 1000, local.y), false)
+        if (!lineStart || !lineEndExclusive) { rejected(); return }
+        let pos = lineStart
+        if (edge === "end") {
+            pos = bible.textMotion("", lineEndExclusive.verse, Math.max(0, lineEndExclusive.offset - 1))
+            // A wrapped line's trailing space is invisible: stop on the last ink.
+            while (pos.offset > 0 && /\s/.test(verseText(pos.verse).charAt(pos.offset)) && charCompare(pos, lineStart) > 0)
+                pos = bible.textMotion("h", pos.verse, pos.offset, 1)
+        } else if (edge === "first") {
+            let guard = 0
+            while (/\s/.test(verseText(pos.verse).charAt(pos.offset)) && charCompare(pos, lineEndExclusive) < 0 && guard++ < 500) {
+                const next = bible.textMotion("l", pos.verse, pos.offset, 1)
+                if (next.verse === pos.verse && next.offset === pos.offset) break
+                pos = next
+            }
+        }
+        setCharCursor(pos)
+    }
+    function copyCharSelection(plainText) {
+        clearCount()
+        if (copySelectedText(plainText)) endCharMode()
+        readerFocus()
+    }
+    // Keys while selecting characters; returns whether the key was used.
+    function charKey(event) {
+        const mods = event.modifiers & ~Qt.KeypadModifier
+        if ([Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta].includes(event.key)) return false
+        if (event.key === Qt.Key_Escape) {
+            if (charPending.length || verseCount.length) { charPending = ""; clearCount() }
+            else { endCharMode(); readerFocus() }
+            return true
+        }
+        if (mods & Qt.ControlModifier) {
+            if (event.key === Qt.Key_C && !(mods & Qt.AltModifier)) { copyCharSelection(!!(mods & Qt.ShiftModifier)); return true }
+            return false
+        }
+        if (mods & Qt.AltModifier) return false
+        const named = { [Qt.Key_Left]: "h", [Qt.Key_Right]: "l", [Qt.Key_Up]: "k", [Qt.Key_Down]: "j", [Qt.Key_Home]: "0", [Qt.Key_End]: "$" }
+        const text = named[event.key] || event.text
+        if (!text.length) return false
+        if (charPending.length) {
+            const pending = charPending
+            charPending = ""
+            if (pending === "g") {
+                if (text === "g") charMotion("gg", false)
+                else if (text === "e" || text === "E") charMotion("g" + text)
+                else { clearCount(); rejected() }
+            } else if (text === "w" || text === "s") charObject(pending + text)
+            else { clearCount(); rejected() }
+            return true
+        }
+        if (/^[1-9]$/.test(text) || (text === "0" && verseCount.length)) { countDigit(text); return true }
+        switch (text) {
+        case "h": case "l": case "w": case "b": case "e": case "W": case "B": case "E": case "(": case ")": charMotion(text); break
+        case "j": charLineStep(1); break
+        case "k": charLineStep(-1); break
+        case "0": charLineEdge("start"); break
+        case "^": charLineEdge("first"); break
+        case "$": charLineEdge("end"); break
+        case "G": charMotion("G", false); break
+        case "g": case "i": case "a": charPending = text; break
+        case "o": charSwap(); break
+        case "y": copyCharSelection(false); break
+        case "Y": copyCharSelection(true); break
+        case "V": endCharMode(); readerFocus(); break
+        case "v": endCharMode(); setVisualMode(true); readerFocus(); break
+        default: clearCount(); rejected()
+        }
+        return true
+    }
+    function characterHintParts() {
+        const ready = charMode && !bible.busy
+        return [[["H", "L", "W", "B", "E", "J", "K"], "move"], ["O", "swap", app.charSwap, ready],
+            ["Y", "quotation", function() { app.copyCharSelection(false) }, ready],
+            ["Shift+Y", "plain text", function() { app.copyCharSelection(true) }, ready],
+            ["Escape", "exit", function() { app.endCharMode(); app.readerFocus() }, charMode]]
     }
     function passageMenuEntries(sceneX, sceneY) {
         return [
@@ -2791,6 +3155,20 @@ ApplicationWindow {
         { id: "selectVerse", group: "Select", title: "Select verse", sequences: ["Click"], explanation: true },
         { id: "selectRange", group: "Select", title: "Select a range", sequences: ["Shift+Click"], explanation: true },
         { id: "visual", group: "Select", title: "Toggle visual selection", sequences: ["V"] },
+        { id: "characterVisual", group: "Select", title: "Select characters (Vim charwise visual)", sequences: ["Shift+V"] },
+        // Bound by character selection itself (charKey).
+        { id: "charMove", group: "Select", title: "Characters: left, right (across verses)", sequences: ["H", "L"], scope: "characters", explanation: true },
+        { id: "charWords", group: "Select", title: "Characters: by word", sequences: ["W", "B", "E", "G, E"], scope: "characters", explanation: true },
+        { id: "charBigWords", group: "Select", title: "Characters: by WORD (no spaces)", sequences: ["Shift+W", "Shift+B", "Shift+E"], scope: "characters", explanation: true },
+        { id: "charSentences", group: "Select", title: "Characters: by sentence", sequences: ["(", ")"], scope: "characters", explanation: true },
+        { id: "charLines", group: "Select", title: "Characters: by line", sequences: ["J", "K"], scope: "characters", explanation: true },
+        { id: "charLineEdges", group: "Select", title: "Characters: line start, first ink, end", sequences: ["0", "^", "$"], scope: "characters", explanation: true },
+        { id: "charEdges", group: "Select", title: "Characters: chapter start, end", sequences: ["G, G", "Shift+G"], scope: "characters", explanation: true },
+        { id: "charObjects", group: "Select", title: "Characters: word, sentence objects", sequences: ["I, W", "A, W", "I, S", "A, S"], scope: "characters", explanation: true },
+        { id: "charSwap", group: "Select", title: "Characters: swap ends", sequences: ["O"], scope: "characters", explanation: true },
+        { id: "charCopy", group: "Select", title: "Characters: copy quotation", sequences: ["Y", "Ctrl+C"], scope: "characters", explanation: true },
+        { id: "charCopyPlain", group: "Select", title: "Characters: copy plain text", sequences: ["Shift+Y", "Ctrl+Shift+C"], scope: "characters", explanation: true },
+        { id: "charExit", group: "Select", title: "Characters: leave", sequences: ["Escape"], scope: "characters", explanation: true },
         { id: "extendNext", group: "Select", title: "Extend to next verse", sequences: ["Shift+J", "Shift+Down"] },
         { id: "extendPrevious", group: "Select", title: "Extend to previous verse", sequences: ["Shift+K", "Shift+Up"] },
         { id: "chapterFind", group: "Search", title: "Find in chapter", sequences: ["/"], command: true },
@@ -2809,9 +3187,10 @@ ApplicationWindow {
         { id: "openNoteLink", group: "Annotate", title: "Open the passage link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
         { id: "noteLinkedFrom", group: "Annotate", title: "Between a note and its Linked from list (in a note)", sequences: ["Tab", "Shift+Tab"], scope: "noteEditor" },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
-        { id: "copyText", group: "Copy", title: "Copy selected text", sequences: ["Ctrl+C"] },
+        { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
-        { id: "copyPlain", group: "Copy", title: "Copy passage as plain text", sequences: ["Shift+Y", "Ctrl+Shift+C"], command: true },
+        { id: "copyPlain", group: "Copy", title: "Copy passage as plain text", sequences: ["Shift+Y"], command: true },
+        { id: "copyTextPlain", group: "Copy", title: "Copy selected text as plain text (else the passage)", sequences: ["Ctrl+Shift+C"] },
         { id: "contextMenu", group: "Copy", title: "Open context menu", sequences: ["Menu", "Shift+F10"] },
         { id: "clickMenu", group: "Copy", title: "Open context menu", sequences: ["RightClick"], explanation: true },
         { id: "annotations", group: "Panels", title: "Annotations panel", sequences: ["Shift+A"], command: true },
@@ -2885,7 +3264,7 @@ ApplicationWindow {
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
-    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor"].includes(action.scope) }
+    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters"].includes(action.scope) }
     function actionById(id) { return actions.find(function(entry) { return entry.id === id }) }
     function actionKeys(action) {
         if (typeof action === "string") action = actionById(action)
@@ -3003,6 +3382,9 @@ ApplicationWindow {
         // panels, the palette, modals, find, and text fields included.
         if (textSizeActions.includes(action.id)) return !errorDialog.visible
         if (findPromptOpen) return false
+        // Character selection owns the reader's keys (charKey); window keys
+        // (palettes, dialogs) still work and end it as they take the keyboard.
+        if (charMode && readerBase && action.scope !== "global" && action.scope !== "palette") return false
         if (zPending && action.sequences.some(function(sequence) { return ["Z", "T", "B"].includes(sequence) })) return false
         // Typing owns every key, Ctrl and Alt included (ctrl v pastes); only the
         // palette's own mode keys still switch modes from its input.
@@ -3020,8 +3402,8 @@ ApplicationWindow {
     function actionAvailable(action) {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action || action.explanation || bible.busy) return false
-        if (rangeEditing && !["newWindow", "contextMenu", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)) return false
-        if (action.id === "copyText") return bible.ready
+        if (rangeEditing && !["newWindow", "contextMenu", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "copyTextPlain", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)) return false
+        if (action.id === "copyText" || action.id === "copyTextPlain") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
         return bible.ready || !!action.setting
@@ -3038,6 +3420,7 @@ ApplicationWindow {
         if (action.scope === "notes") return "Reader or notes preview"
         if (action.scope === "desk") return "Desk panel only"
         if (action.scope === "noteEditor") return "Notes editor"
+        if (action.scope === "characters") return "Character selection · " + keyText("characterVisual")
         return "Reader · outside text editing and dialogs"
     }
     function filteredKeybindings() {
@@ -3269,7 +3652,9 @@ ApplicationWindow {
         case "visual": setVisualMode(!verseMode); break
         case "extendPrevious": extendVerse(-count); break
         case "extendNext": extendVerse(count); break
-        case "copyText": if (freeSelectedText.length) copyFreeText(); else copyPassage(false); break
+        case "copyText": if (freeSelectedText.length) copySelectedText(false); else copyPassage(false); break
+        case "copyTextPlain": if (freeSelectedText.length) copySelectedText(true); else copyPassage(true); break
+        case "characterVisual": beginCharMode(); break
         case "larger": bible.setFontSize(readerSize + 1); break
         case "smaller": bible.setFontSize(readerSize - 1); break
         case "resetText": bible.setFontSize(18); break
@@ -3384,7 +3769,8 @@ ApplicationWindow {
             // Without a fully visible row, keep the one most visible on the page.
             const visible = Math.min(item.y + item.height, top + view.height) - Math.max(item.y, top)
             if (visible > shown) { shown = visible; fallback = i }
-            if (item.y < top || item.y + item.height > top + view.height) continue
+            // A row overhanging the page by a fraction of a pixel still fits.
+            if (item.y < top - 1 || item.y + item.height > top + view.height + 1) continue
             const gap = Math.abs(item.y + item.height / 2 - target)
             if (gap < distance) { distance = gap; row = i }
         }
@@ -3731,6 +4117,17 @@ ApplicationWindow {
                         ctx.arc(12, 12, 2.2, 0, 2 * Math.PI)
                         ctx.fill()
                         ctx.beginPath()
+                    } else if (glyph === "characters") {
+                        // Two text lines, the second partly selected, and a text caret.
+                        ctx.moveTo(3, 6); ctx.lineTo(21, 6)
+                        ctx.moveTo(3, 12); ctx.lineTo(9, 12)
+                        ctx.moveTo(3, 18); ctx.lineTo(8, 18)
+                        ctx.moveTo(16, 9); ctx.lineTo(16, 21)
+                        ctx.moveTo(13, 9); ctx.lineTo(19, 9)
+                        ctx.moveTo(13, 21); ctx.lineTo(19, 21)
+                        ctx.stroke()
+                        ctx.beginPath()
+                        ctx.fillRect(9, 10, 6, 4)
                     } else if (glyph === "visual") {
                         // The bracket and square handles span all three verse lines.
                         ctx.moveTo(8, 6); ctx.lineTo(21, 6)
@@ -3963,6 +4360,39 @@ ApplicationWindow {
                 Label { Layout.fillWidth: true; text: rangeEditor.message; visible: text.length > 0; color: desktop.foreground; wrapMode: Text.Wrap; textFormat: Text.PlainText }
             }
         }
+        // Character selection (shift V): the mode, its keys, and what is selected.
+        Rectangle {
+            objectName: "characterStatus"
+            Layout.fillWidth: true
+            implicitHeight: characterStatusContent.implicitHeight + 16
+            visible: app.charMode
+            color: desktop.surface
+            RowLayout {
+                id: characterStatusContent
+                anchors.fill: parent
+                anchors.margins: 8
+                anchors.leftMargin: 24
+                spacing: 16
+                Label {
+                    objectName: "characterTitle"
+                    Layout.alignment: Qt.AlignTop
+                    text: "Characters" + (app.charPending.length ? " · " + app.charPending : "")
+                        + (app.verseCount.length ? " · " + app.verseCount : "")
+                    textFormat: Text.PlainText
+                    color: desktop.accent
+                    font.pixelSize: 13 * app.scale
+                }
+                HintRow {
+                    objectName: "characterHints"
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    Layout.alignment: Qt.AlignTop
+                    theme: desktop
+                    pixelSize: 13 * app.scale
+                    parts: app.characterHintParts()
+                }
+            }
+        }
         Rectangle {
             objectName: "errorBanner"
             Layout.fillWidth: true
@@ -3995,6 +4425,7 @@ ApplicationWindow {
                 focus: true
                 visible: bible.ready
                 Keys.onPressed: function(event) {
+                    if (app.charMode && app.readerBase) { event.accepted = app.charKey(event); return }
                     // Unbound reader keys also end a pending count. Text editors
                     // and modal content have their own focus trees.
                     if (app.readerKeys && event.key !== Qt.Key_Shift && event.key !== Qt.Key_Control && event.key !== Qt.Key_Alt) app.clearCount()
@@ -4243,7 +4674,7 @@ ApplicationWindow {
                                     y: verseRow.index > 0 && (bible.verses[verseRow.index - 1]?.number || 0) >= bible.selectedStart ? 0 : verseHeading.height
                                     width: parent.width - x
                                     height: (verseRow.modelData.number < bible.selectedEnd ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
-                                    visible: verseRow.selected
+                                    visible: verseRow.selected && !app.charMode
                                     radius: 0
                                     color: app.tint(desktop.accent, 0.22)
                                 }
@@ -4388,7 +4819,7 @@ ApplicationWindow {
                                     Keys.onPressed: function(event) {
                                         // Ctrl a never selects one verse's text: reader selection spans verses.
                                         if (event.key === Qt.Key_A && event.modifiers === Qt.ControlModifier && app.readerKeys) event.accepted = true
-                                        if (event.key === Qt.Key_C && event.modifiers === Qt.ControlModifier && app.freeSelectedText.length) { app.copyFreeText(); event.accepted = true }
+                                        if (event.key === Qt.Key_C && event.modifiers === Qt.ControlModifier && app.freeSelectedText.length) { app.copySelectedText(false); event.accepted = true }
                                     }
                                     MouseArea {
                                         id: bodyMouse
@@ -5134,12 +5565,18 @@ ApplicationWindow {
         FloatingButton {
             id: modeControl
             objectName: "modeControl"
-            glyph: app.verseMode ? "visual" : "normal"
-            selected: app.verseMode
+            glyph: app.charMode ? "characters" : app.verseMode ? "visual" : "normal"
+            selected: app.verseMode || app.charMode
             visible: bible.ready
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
-            tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · " + app.keyText("visual")
-            onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
+            tip: app.charMode ? "Character selection · switch to normal · " + KeyNotation.format("Escape")
+                : (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · " + app.keyText("visual")
+                  + "\nCharacters · " + app.keyText("characterVisual")
+            onClicked: {
+                if (app.charMode) app.endCharMode()
+                else app.setVisualMode(!app.verseMode)
+                app.readerFocus()
+            }
         }
         FloatingButton {
             id: focusControl

@@ -75,6 +75,19 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `click`: Select verse
 - `shift click`: Select a range
 - `v`: Toggle visual selection
+- `shift V`: Select characters (Vim charwise visual)
+- `h` · `l`: Characters: left, right (across verses)
+- `w` · `b` · `e` · `ge`: Characters: by word
+- `shift W` · `shift B` · `shift E`: Characters: by WORD (no spaces)
+- `(` · `)`: Characters: by sentence
+- `j` · `k`: Characters: by line
+- `0` · `^` · `$`: Characters: line start, first ink, end
+- `gg` · `shift G`: Characters: chapter start, end
+- `iw` · `aw` · `is` · `as`: Characters: word, sentence objects
+- `o`: Characters: swap ends
+- `y` · `ctrl c`: Characters: copy quotation
+- `shift Y` · `ctrl shift C`: Characters: copy plain text
+- `esc`: Characters: leave
 - `shift J` · `shift ↓`: Extend to next verse
 - `shift K` · `shift ↑`: Extend to previous verse
 
@@ -101,8 +114,9 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 ### Copy
 
 - `y` · `middle click`: Copy passage as quotation
-- `ctrl c`: Copy selected text
-- `shift Y` · `ctrl shift C`: Copy passage as plain text
+- `ctrl c`: Copy selected text as quotation (else the passage)
+- `shift Y`: Copy passage as plain text
+- `ctrl shift C`: Copy selected text as plain text (else the passage)
 - `menu` · `shift F10` · `right click`: Open context menu
 
 ### Panels

@@ -17,3 +17,5 @@ HEADERS += src/scripturesearch.h src/searchdocument.h src/keyhold.h
 brand_desktop.input = $$PWD/assets/launcher.desktop.in
 brand_desktop.output = $$OUT_PWD/$${BRAND_ID}.desktop
 QMAKE_SUBSTITUTES += brand_desktop
+SOURCES += src/textselection.cpp
+HEADERS += src/textselection.h

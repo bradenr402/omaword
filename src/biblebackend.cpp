@@ -2,6 +2,7 @@
 #include "brand.h"
 #include "biblebooks.h"
 #include "scripturesearch.h"
+#include "textselection.h"
 
 #include <QClipboard>
 #include <QCryptographicHash>
@@ -3038,6 +3039,74 @@ QString BibleBackend::copyRange(int first, int last, const QString &label, bool 
 void BibleBackend::copyText(QString text)
 {
     if (qobject_cast<QGuiApplication *>(QCoreApplication::instance())) QGuiApplication::clipboard()->setText(text);
+}
+
+namespace {
+QList<TextSelection::Verse> selectionVerses(const QVariantList &rows)
+{
+    QList<TextSelection::Verse> verses;
+    for (const auto &row : rows) {
+        const auto map = row.toMap();
+        verses.append({map.value("number").toInt(), map.value("text").toString(),
+                       map.value("poetry").toBool(), map.value("paragraphStart").toBool()});
+    }
+    return verses;
+}
+int verseIndex(const QList<TextSelection::Verse> &verses, int number)
+{
+    for (int i = 0; i < verses.size(); ++i) if (verses[i].number == number) return i;
+    return -1;
+}
+QVariantMap publicPosition(const QList<TextSelection::Verse> &verses, TextSelection::Position p)
+{
+    if (p.verse < 0 || p.verse >= verses.size()) return {};
+    return {{"verse", verses[p.verse].number}, {"offset", p.offset}};
+}
+}
+
+QVariantMap BibleBackend::textMotion(QString motion, int verse, int offset, int count) const
+{
+    const auto verses = selectionVerses(m_verses);
+    const int index = verseIndex(verses, verse);
+    if (index < 0) return {};
+    return publicPosition(verses, TextSelection::move(verses, {index, offset}, motion, count));
+}
+
+QVariantMap BibleBackend::textObject(QString object, int anchorVerse, int anchorOffset,
+                                     int cursorVerse, int cursorOffset, int count) const
+{
+    const auto verses = selectionVerses(m_verses);
+    const int a = verseIndex(verses, anchorVerse), c = verseIndex(verses, cursorVerse);
+    if (a < 0 || c < 0) return {};
+    const auto range = TextSelection::textObject(verses, {a, anchorOffset}, {c, cursorOffset}, object, count);
+    return {{"anchor", publicPosition(verses, range.first)}, {"cursor", publicPosition(verses, range.second)}};
+}
+
+int BibleBackend::characterEnd(int verse, int offset) const
+{
+    const auto verses = selectionVerses(m_verses);
+    const int index = verseIndex(verses, verse);
+    return index < 0 ? offset + 1 : TextSelection::characterEnd(verses, {index, offset});
+}
+
+QString BibleBackend::characterText(int startVerse, int startOffset, int endVerse, int endOffset, bool quotation) const
+{
+    const auto verses = selectionVerses(m_verses);
+    const int first = verseIndex(verses, startVerse), last = verseIndex(verses, endVerse);
+    if (first < 0 || last < 0 || first > last) return {};
+    const TextSelection::Position start{first, startOffset}, end{last, endOffset};
+    const auto range = TextSelection::touched(verses, start, end);
+    if (range.first < 0) return {};
+    const QString reference = quotation ? this->reference(m_book, m_chapter, verses[range.first].number, verses[range.second].number) : QString();
+    return TextSelection::text(verses, start, end, quotation, reference);
+}
+
+QString BibleBackend::copyCharacters(int startVerse, int startOffset, int endVerse, int endOffset, bool plainText)
+{
+    if (!requireReady()) return {};
+    const QString text = characterText(startVerse, startOffset, endVerse, endOffset, !plainText);
+    if (text.isEmpty()) { setError("Select some text to copy."); return {}; }
+    copyText(text); clearError(); return text;
 }
 
 bool BibleBackend::exportNotes(QUrl directory)

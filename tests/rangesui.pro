@@ -12,3 +12,5 @@ SOURCES += ../src/scripturesearch.cpp ../src/searchdocument.cpp ../src/keyhold.c
 HEADERS += ../src/scripturesearch.h ../src/searchdocument.h ../src/keyhold.h
 SOURCES += ../src/soundeffects.cpp
 HEADERS += ../src/soundeffects.h
+SOURCES += ../src/textselection.cpp
+HEADERS += ../src/textselection.h

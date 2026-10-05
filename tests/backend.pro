@@ -12,3 +12,5 @@ HEADERS += ../src/biblebackend.h ../src/usfmimporter.h ../src/biblebooks.h
 RESOURCES += ../resources.qrc
 SOURCES += ../src/scripturesearch.cpp
 HEADERS += ../src/scripturesearch.h
+SOURCES += ../src/textselection.cpp
+HEADERS += ../src/textselection.h

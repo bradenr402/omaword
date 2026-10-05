@@ -326,6 +326,33 @@ QRectF BlockDocument::searchRect(const QVariantMap &segment) const
     return SearchGeometry::firstRect(searchRectangles({segment}));
 }
 
+QVariantList BlockDocument::documentRange(int verse, int start, int length) const
+{
+    const auto map = m_sourceMaps.constFind(verse);
+    if (map == m_sourceMaps.cend()) return {};
+    const auto range = map->range(start, length);
+    if (range.first < 0) return {};
+    return {range.first, range.second};
+}
+
+QVariantMap BlockDocument::sourceAt(int position, bool forward) const
+{
+    const int count = m_spans.size();
+    for (int n = 0; n < count; ++n) {
+        const int verse = m_spans.at(forward ? n : count - 1 - n).toMap().value("number").toInt();
+        const auto map = m_sourceMaps.constFind(verse);
+        if (map == m_sourceMaps.cend() || map->isEmpty()) continue;
+        if (forward) {
+            const int offset = map->sourceStart(position);
+            if (offset >= 0) return {{"verse", verse}, {"offset", offset}};
+        } else {
+            const int offset = map->sourceEnd(position);
+            if (offset > 0) return {{"verse", verse}, {"offset", offset}};
+        }
+    }
+    return {};
+}
+
 QString BlockDocument::selectionText(int start, int end) const
 {
     if (!m_document) return {};

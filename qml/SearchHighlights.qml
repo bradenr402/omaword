@@ -29,6 +29,16 @@ Item {
         const origin = bodyOrigin()
         return Qt.rect(r.x + origin.x, r.y + origin.y, r.width, r.height)
     }
+    // Character selection: source [start, start + length) → [documentStart,
+    // documentEnd] in the body ([] when unmapped), and back (see SearchDocument).
+    function documentRange(start, length) {
+        document.attach(body.textDocument, sourceText)
+        return document.documentRange(start, length)
+    }
+    function sourceAt(position, forward) {
+        document.attach(body.textDocument, sourceText)
+        return document.sourceAt(position, forward)
+    }
     // Scripture paragraphs are always LTR, even when they open with Hebrew.
     function leftToRight() { if (!destroying && body) document.leftToRight(body.textDocument) }
     onBodyChanged: { leftToRight(); refresh() }

@@ -11,3 +11,5 @@ SOURCES += tst_ranges.cpp ../src/biblebackend.cpp ../src/usfmimporter.cpp ../src
 HEADERS += ../src/biblebackend.h ../src/usfmimporter.h ../src/biblebooks.h
 SOURCES += ../src/scripturesearch.cpp
 HEADERS += ../src/scripturesearch.h
+SOURCES += ../src/textselection.cpp
+HEADERS += ../src/textselection.h
