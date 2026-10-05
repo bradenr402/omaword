@@ -2547,7 +2547,19 @@ ApplicationWindow {
         versionResults.currentIndex = versionResults.count ? Math.max(0, Math.min(versionResults.count - 1, versionResults.currentIndex + delta)) : -1
         if (versionResults.count) versionResults.positionViewAtIndex(versionResults.currentIndex, ListView.Contain)
     }
+    // The highlighted Versions row, when its text predates the current schema.
+    function reimportableVersion() {
+        const entry = versionResults.model[versionResults.currentIndex]
+        return !versionDialog.removing && versionDialog.step === 0 && entry && entry.needsReimport ? entry : null
+    }
     function versionKey(event) {
+        if (event.key === Qt.Key_I && event.modifiers === (Qt.ControlModifier | Qt.ShiftModifier)) {
+            event.accepted = true
+            const entry = reimportableVersion()
+            if (entry && !bible.busy && !catalog.busy) reimportVersion(entry)
+            else sounds.play("error")
+            return
+        }
         if (event.key === Qt.Key_I && event.modifiers === Qt.ControlModifier) {
             event.accepted = true
             if (!versionDialog.removing && versionDialog.step === 0) addVersionFromPicker()
@@ -2697,6 +2709,7 @@ ApplicationWindow {
         { id: "newWindow", group: "Palettes and windows", title: "New window", sequences: ["Ctrl+N"], scope: "global", command: true },
         // Bound by the Versions dialog itself.
         { id: "addVersion", group: "Palettes and windows", title: "Add version from Versions", sequences: ["Ctrl+I"], scope: "versions", explanation: true },
+        { id: "reimportVersion", group: "Palettes and windows", title: "Re-import the highlighted version (Versions)", sequences: ["Ctrl+Shift+I"], scope: "versions", explanation: true },
         { id: "focus", group: "Reading", title: "Focus mode", sequences: ["F"], setting: "focusMode", command: true },
         { id: "numbers", group: "Reading", title: "Show verse numbers", sequences: ["Alt+N"], setting: "showVerseNumbers", command: true },
         { id: "headings", group: "Reading", title: "Show headings", sequences: ["Alt+H"], setting: "showHeadings", command: true },
@@ -2799,7 +2812,9 @@ ApplicationWindow {
         const ready = !bible.busy
         if (versionDialog.step === 2) return [[["Left", "Right"], "choose"], ["Return", "select", app.acceptVersion, ready], ["Escape", "cancel", function() { versionDialog.close() }]]
         const select = ["Return", "select", app.acceptVersion, ready && versionResults.currentIndex >= 0 && versionResults.count > 0]
+        const reimport = reimportableVersion()
         if (!versionDialog.removing) return [[["Up", "Down"], "choose"], [actionKeys("addVersion")[0], "add", app.addVersionFromPicker, ready],
+            reimport ? [actionKeys("reimportVersion")[0], "re-import", function() { app.reimportVersion(app.reimportableVersion()) }, ready && !catalog.busy] : null,
             select, ["Escape", "cancel", function() { versionDialog.close() }]]
         return [[["Up", "Down"], "choose"], [["Home", "End"], "jump"], select, ["Escape", "cancel", function() { versionDialog.close() }]]
     }
@@ -5157,8 +5172,8 @@ ApplicationWindow {
                                 compact: true
                                 font.pixelSize: 12 * versionDialog.uiScale
                                 enabled: !bible.busy && !catalog.busy
-                                tip: app.catalogEntry(versionEntry.modelData.id) ? "Download " + versionEntry.modelData.abbreviation + " again from eBible.org and replace its text; annotations are kept"
-                                    : "Choose " + versionEntry.modelData.abbreviation + "'s USFM file again and replace its text; annotations are kept"
+                                tip: (app.catalogEntry(versionEntry.modelData.id) ? "Download " + versionEntry.modelData.abbreviation + " again from eBible.org and replace its text; annotations are kept"
+                                    : "Choose " + versionEntry.modelData.abbreviation + "'s USFM file again and replace its text; annotations are kept") + " · " + app.keyText("reimportVersion")
                                 onClicked: app.reimportVersion(versionEntry.modelData)
                             }
                         }

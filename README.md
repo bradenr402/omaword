@@ -120,6 +120,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `?`: Keybindings
 - `ctrl n`: New window
 - `ctrl i`: Add version from Versions
+- `ctrl shift I`: Re-import the highlighted version (Versions)
 
 ### Reading
 

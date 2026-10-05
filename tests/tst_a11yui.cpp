@@ -60,6 +60,50 @@ class A11yUiTest : public QObject
     QStringList warnings;
     QString source;
 
+    QString installedFile() const {
+        QString path;
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "access-installed");
+            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
+            if (db.open()) {
+                QSqlQuery q(db); q.prepare("SELECT path FROM installed WHERE version_id=?"); q.addBindValue(bible->versionId());
+                if (q.exec() && q.next()) path = bible->dataDirectory() + '/' + q.value(0).toString();
+            }
+        }
+        QSqlDatabase::removeDatabase("access-installed");
+        return path;
+    }
+    // Rewrites a schema 4 generation as the schema 3 layout older builds wrote.
+    static bool downgradeToSchema3(const QString &path) {
+        const QString name = QUuid::createUuid().toString();
+        bool ok = false;
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
+            if (db.open()) {
+                QSqlQuery q(db);
+                ok = q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
+                    && q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')")
+                    && q.exec("UPDATE metadata SET value='3' WHERE key='schema'")
+                    && q.exec("UPDATE verses SET html=replace(replace(html,'<span class=\"wj\">',''),'</span>','')");
+                QCryptographicHash hash(QCryptographicHash::Sha256);
+                auto field = [&](const QByteArray &v) { hash.addData(QByteArray::number(v.size())); hash.addData(":"); hash.addData(v); };
+                for (const QString &sql : {QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
+                         QString("SELECT id,code,name,abbreviation,ordinal FROM books ORDER BY ordinal"),
+                         QString("SELECT book,chapter FROM source_chapters ORDER BY book,chapter"),
+                         QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
+                         QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
+                         QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")}) {
+                    field(sql.toUtf8()); ok = ok && q.exec(sql);
+                    while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
+                }
+                q.prepare("UPDATE metadata SET value=? WHERE key='content_digest'"); q.addBindValue(QString::fromLatin1(hash.result().toHex()));
+                ok = ok && q.exec();
+                db.close();
+            }
+        }
+        QSqlDatabase::removeDatabase(name);
+        return ok;
+    }
     static bool edition(const QString &path) {
         auto zip = archive_write_new(); archive_write_set_format_zip(zip);
         if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
@@ -220,6 +264,12 @@ private slots:
     void init() {
         session = std::make_unique<QTemporaryDir>(); qputenv("XDG_DATA_HOME", session->path().toUtf8());
         bible = std::make_unique<BibleBackend>(); install(source); bible->setReadingMode("verse");
+        if (QByteArray(QTest::currentTestFunction()).startsWith("reimport")) {
+            // An installed generation from before schema 4: Versions offers Re-import.
+            const QString file = installedFile(); bible.reset();
+            QVERIFY(downgradeToSchema3(file)); bible = std::make_unique<BibleBackend>();
+            QVERIFY2(bible->ready(), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 3);
+        }
         desktop = std::make_unique<Desktop>(); sounds = std::make_unique<SoundEffects>(nullptr, session->filePath("sound.ini"), false);
         sounds->setReduceMotion(true);
         catalog = std::make_unique<MockCatalog>();
@@ -654,6 +704,32 @@ private slots:
         run("books"); key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         search();
         click(item("paletteHintsPart:more")); QTRY_COMPARE(results->property("count").toInt(), 167);
+    }
+    void reimportFromVersionsByKeyAndButton() {
+        const QString id = bible->versionId();
+        catalog->entries = {QVariantMap{{"id", id}, {"name", "Access fixture"}, {"abbreviation", "OAF"}, {"copyright", "Original"}, {"detailsUrl", "https://example.invalid"}}};
+        emit catalog->changed();
+        // Keyboard: ctrl shift I re-imports the highlighted row; the hint names the key.
+        run("switchVersion"); QTRY_VERIFY(opened("versionDialog"));
+        QTRY_VERIFY(item("versionHintsPart:re-import"));
+        QVERIFY(object("versionHints")->property("text").toString().contains("ctrl&nbsp;shift&nbsp;I"));
+        key(Qt::Key_I, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(catalog->requests, QStringList{id}); QTRY_VERIFY(opened("importGuide"));
+        catalog->cancel(); key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
+        // Keyboard: the Re-import button, reached by focus, takes enter.
+        catalog->requests.clear();
+        run("switchVersion"); QTRY_VERIFY(opened("versionDialog"));
+        auto button = item("versionReimport:" + id); QTRY_VERIFY(button && button->isVisible());
+        button->forceActiveFocus(); key(Qt::Key_Return);
+        QTRY_COMPARE(catalog->requests, QStringList{id});
+        catalog->cancel(); key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
+        // Mouse: the hint part re-imports too.
+        catalog->requests.clear();
+        run("switchVersion"); QTRY_VERIFY(opened("versionDialog"));
+        QTRY_VERIFY(item("versionHintsPart:re-import") && item("versionHintsPart:re-import")->property("clickable").toBool());
+        QTest::qWait(50);
+        click(item("versionHintsPart:re-import")); QTRY_COMPARE(catalog->requests, QStringList{id});
+        catalog->cancel(); key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
     }
 };
 
