@@ -1033,11 +1033,38 @@ ApplicationWindow {
     }
     // Panels outside Main (Study) show their rows' menus through here.
     function showContextMenu(kind, entries, sceneX, sceneY) { contextMenu.show(kind, entries, sceneX, sceneY) }
+    function mouseNavigate(forward) {
+        if (contextMenu.visible) { contextMenu.close(); return }
+        if (passagePalette.visible) {
+            if (!forward && (paletteBook > 0 || paletteChapter > 0)) backToBooks()
+            else rejected()
+            return
+        }
+        if (sidePanel.length && !dialogOpen && !rangeEditing) {
+            if (forward) rejected()
+            else if (leaveSidePanel("")) readerFocus()
+            return
+        }
+        if (!readerKeys || rangeEditing) { rejected(); return }
+        clearCount()
+        historyStep(forward ? 1 : -1)
+    }
     AppContextMenu {
         id: contextMenu
         uiScale: app.scale
         objectName: "contextMenu"
         theme: desktop
+    }
+    // The mouse's back and forward buttons, anywhere in the window: a menu
+    // closes; the palette steps back toward its book list; an open side panel
+    // closes; the reader travels its jumps like [ and ].
+    MouseArea {
+        objectName: "mouseNavigation"
+        parent: Overlay.overlay
+        anchors.fill: parent
+        z: 2000
+        acceptedButtons: Qt.BackButton | Qt.ForwardButton
+        onPressed: function(mouse) { app.mouseNavigate(mouse.button === Qt.ForwardButton) }
     }
     MouseArea {
         objectName: "contextMenuOutside"
@@ -2744,6 +2771,8 @@ ApplicationWindow {
         { id: "historyBack", group: "History", title: "Back to the previous jump", sequences: ["["] },
         { id: "historyForward", group: "History", title: "Forward to the next jump", sequences: ["]"] },
         { id: "historySwap", group: "History", title: "Swap with the previous jump", sequences: ["-"] },
+        { id: "mouseBack", group: "History", title: "Back a jump, back to the palette's books, or close the open panel", sequences: ["BackClick"], explanation: true },
+        { id: "mouseForward", group: "History", title: "Forward to the next jump", sequences: ["ForwardClick"], explanation: true },
         { id: "selectVerse", group: "Select", title: "Select verse", sequences: ["Click"], explanation: true },
         { id: "selectRange", group: "Select", title: "Select a range", sequences: ["Shift+Click"], explanation: true },
         { id: "visual", group: "Select", title: "Toggle visual selection", sequences: ["V"] },

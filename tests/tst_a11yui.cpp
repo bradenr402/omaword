@@ -893,6 +893,31 @@ private slots:
         find("text 3:9 with"); key(Qt::Key_Tab); key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("findPromptOpen").toBool()); QCOMPARE(bible->selectionReference(), QString("John 3:7"));
     }
+    void mouseBackAndForwardButtons() {
+        auto jumpTo = [&](const QString &reference) { call("jump", reference); QCOMPARE(bible->selectionReference(), reference); };
+        jumpTo("John 1:10"); jumpTo("John 2:5");
+        const QPoint middle(window->width() / 2, window->height() / 2);
+        // Reader: mouse back and forward travel the jumps, like [ and ].
+        clickAt(middle, Qt::BackButton); QCOMPARE(bible->selectionReference(), QString("John 1:10"));
+        clickAt(middle, Qt::ForwardButton); QCOMPARE(bible->selectionReference(), QString("John 2:5"));
+        key(Qt::Key_BracketLeft); QCOMPARE(bible->selectionReference(), QString("John 1:10"));
+        key(Qt::Key_BracketRight); QCOMPARE(bible->selectionReference(), QString("John 2:5"));
+        // Palette: back returns from a book's chapters to the book list.
+        run("books"); QTRY_VERIFY(opened("passagePalette")); type("genesis"); key(Qt::Key_Return);
+        QTRY_VERIFY(prop("paletteBook").toInt() > 0);
+        clickAt(middle, Qt::BackButton); QCOMPARE(prop("paletteBook").toInt(), 0); QVERIFY(opened("passagePalette"));
+        QCOMPARE(bible->selectionReference(), QString("John 2:5"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        // A side panel: back closes it (and does not travel).
+        run("desk"); QTRY_VERIFY(opened("deskDrawer"));
+        clickAt(middle, Qt::BackButton); QTRY_VERIFY(!shown("deskDrawer"));
+        QCOMPARE(bible->selectionReference(), QString("John 2:5")); QVERIFY(readerFocused());
+        // Keyboard equivalent for the panel: esc.
+        run("desk"); QTRY_VERIFY(opened("deskDrawer")); key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        // The keybindings list explains the buttons.
+        QVariant text; QMetaObject::invokeMethod(window, "keyText", Q_RETURN_ARG(QVariant, text), Q_ARG(QVariant, QString("mouseBack")));
+        QCOMPARE(text.toString(), QString("mouse back"));
+    }
 };
 
 int main(int argc, char **argv) {

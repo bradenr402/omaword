@@ -14,7 +14,8 @@ var named = {
     "tab": "tab", "backtab": "tab", "pgup": "pgup", "pageup": "pgup", "pgdown": "pgdn",
     "pagedown": "pgdn", "pgdn": "pgdn", "home": "home", "end": "end", "menu": "menu",
     "up": "↑", "down": "↓", "left": "←", "right": "→",
-    "click": "click", "rightclick": "right click", "middleclick": "middle click"
+    "click": "click", "rightclick": "right click", "middleclick": "middle click",
+    "backclick": "mouse back", "forwardclick": "mouse forward"
 }
 var separator = " · "
 

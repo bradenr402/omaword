@@ -23,6 +23,7 @@ NAMED = {
     "pagedown": "pgdn", "pgdn": "pgdn", "home": "home", "end": "end", "menu": "menu",
     "up": "↑", "down": "↓", "left": "←", "right": "→",
     "click": "click", "rightclick": "right click", "middleclick": "middle click",
+    "backclick": "mouse back", "forwardclick": "mouse forward",
 }
 
 

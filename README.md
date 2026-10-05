@@ -66,8 +66,9 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 ### History
 
 - `[`: Back to the previous jump
-- `]`: Forward to the next jump
+- `]` · `mouse forward`: Forward to the next jump
 - `-`: Swap with the previous jump
+- `mouse back`: Back a jump, back to the palette's books, or close the open panel
 
 ### Select
 
