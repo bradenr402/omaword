@@ -252,7 +252,7 @@ These also work, but stay out of the in-app list:
 - Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Desk), and `menu` or `shift F10` opens it from the keyboard.
 - Footer and dialog buttons take the keyboard by `tab` only; a focused button takes `enter` and `space`. Scrollable dialogs scroll with `j` `k`, `pgup` `pgdn`, `ctrl d` `ctrl u`, `home` `end`.
 - Clicking outside a panel, dialog, or picker only closes it; right-clicking elsewhere while a menu is open moves the menu there. Keys that cannot act sound an error.
-- With Annotations, Desk, History, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl r`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus.
+- With Annotations, Desk, History, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl r`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. The passage menu offers **Edit range** when the selection is annotated, and tooltips on the outline, margin notes, and verse numbers name their keys.
 
 ### Your data
 Bible versions, annotations, the Desk, and History stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.
