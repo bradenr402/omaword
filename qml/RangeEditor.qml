@@ -507,9 +507,14 @@ Item {
         onVisibleChanged: if (visible) { contentItem.forceActiveFocus() }
         contentItem: ColumnLayout {
             Keys.onEscapePressed: editor.cancel()
+            // The two notes scroll by key (j k ↑ ↓ pgup pgdn ctrl d/u home end).
+            Keys.onPressed: function(event) { editor.app.scrollKey(mergeScroll.contentItem, event) }
             RangeText { text: "Combine notes?"; font.pixelSize: 20 * editor.uiScale }
             RangeText { text: "Both ranges have notes. Combine keeps both, separated by a blank line." }
             ScrollView {
+                id: mergeScroll
+                objectName: "rangeMergeScroll"
+                clip: true
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 implicitHeight: Math.min(320, noteTexts.implicitHeight)

@@ -180,6 +180,22 @@ class A11yUiTest : public QObject
         return body->mapToScene(QPointF(30, 8)).toPoint();
     }
 
+    void wheel(QQuickItem *target, int delta) {
+        const QPointF local(target->width() / 2, target->height() / 2);
+        const QPointF scene = target->mapToScene(local);
+        QWheelEvent event(scene, scene, QPoint(), QPoint(0, delta), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QGuiApplication::sendEvent(window, &event); QCoreApplication::processEvents();
+    }
+    qreal contentY(const QString &scroll) const {
+        auto view = object(scroll); if (!view) return -1;
+        auto flick = view->property("contentItem").value<QObject *>();
+        return flick ? flick->property("contentY").toReal() : view->property("contentY").toReal();
+    }
+    qreal travel(const QString &scroll) const {
+        auto view = object(scroll); auto flick = view->property("contentItem").value<QObject *>(); if (!flick) flick = view;
+        return flick->property("contentHeight").toReal() - flick->property("height").toReal();
+    }
+
 private slots:
     void initTestCase() {
         source = fixtures.filePath("access_usfm.zip"); QVERIFY(edition(source));
@@ -406,6 +422,82 @@ private slots:
         click(item("linkedFromRow0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), (QStringList{"open", "copy", "copyPlain", "desk"}));
         chooseMenu("open"); QTRY_COMPARE(bible->selectionReference(), QString("John 1:5"));
+    }
+    void scrollablePanesScrollByKey() {
+        window->resize(900, 480); QTRY_COMPARE(window->height(), 480); bible->setFontSize(26);
+        // About: focus lands on the pane; j k pgdn ctrl d/u home end move it.
+        run("about"); QTRY_VERIFY(opened("aboutDialog")); QTRY_VERIFY(item("aboutScroll")->hasActiveFocus());
+        QVERIFY(travel("aboutScroll") > 20);
+        key(Qt::Key_J); QTRY_VERIFY(contentY("aboutScroll") > 0);
+        key(Qt::Key_K); QTRY_COMPARE(contentY("aboutScroll"), 0.0);
+        key(Qt::Key_End); QTRY_VERIFY(qAbs(contentY("aboutScroll") - travel("aboutScroll")) < 1);
+        key(Qt::Key_Home); QTRY_COMPARE(contentY("aboutScroll"), 0.0);
+        key(Qt::Key_D, Qt::ControlModifier); QTRY_VERIFY(contentY("aboutScroll") > 0);
+        key(Qt::Key_U, Qt::ControlModifier); QTRY_COMPARE(contentY("aboutScroll"), 0.0);
+        key(Qt::Key_PageDown); QTRY_VERIFY(contentY("aboutScroll") > 0);
+        // Mouse: the wheel still scrolls it.
+        key(Qt::Key_Home); wheel(item("aboutScroll"), -240); QTRY_VERIFY(contentY("aboutScroll") > 0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("aboutDialog"));
+        // Reading settings: tabbing to a control below the fold scrolls it into view.
+        run("settings"); QTRY_VERIFY(opened("settingsDialog"));
+        QVERIFY(travel("settingsScroll") > 20);
+        auto first = item("settingfocus"); QVERIFY(first); first->forceActiveFocus();
+        QTRY_VERIFY(first->mapRectToItem(item("settingsScroll"), first->boundingRect()).top() >= -1);
+        key(Qt::Key_Home); QTRY_COMPARE(contentY("settingsScroll"), 0.0);
+        key(Qt::Key_J); QTRY_VERIFY(contentY("settingsScroll") > 0);
+        key(Qt::Key_Home); QTRY_COMPARE(contentY("settingsScroll"), 0.0);
+        auto line = item("lineHeightSlider"); line->forceActiveFocus(); QCoreApplication::processEvents();
+        const auto slider = line->mapRectToItem(item("settingsScroll"), line->boundingRect());
+        QVERIFY2(slider.top() >= -1 && slider.bottom() <= item("settingsScroll")->height() + 1, qPrintable(QString::number(slider.top())));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
+        // Versions removal summary: arrows still choose, the other scroll keys scroll.
+        window->resize(640, 480); bible->setFontSize(40);
+        run("removeVersion"); QTRY_VERIFY(opened("versionDialog"));
+        key(Qt::Key_Return); key(Qt::Key_Return); QTRY_COMPARE(object("versionDialog")->property("step").toInt(), 2);
+        QTRY_VERIFY(travel("versionSummaryScroll") > 0);
+        key(Qt::Key_End); QTRY_VERIFY(contentY("versionSummaryScroll") > 0);
+        key(Qt::Key_Home); QTRY_COMPARE(contentY("versionSummaryScroll"), 0.0);
+        QVERIFY(item("versionCancel")->hasActiveFocus()); key(Qt::Key_Right); QVERIFY(item("versionNext")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
+        // Backup scope: the explanation scrolls while Choose file… keeps focus.
+        run("backup"); QTRY_VERIFY(opened("backupScope"));
+        QTRY_VERIFY(travel("backupScopeScroll") > 0);
+        key(Qt::Key_J); QTRY_VERIFY(contentY("backupScopeScroll") > 0);
+        QVERIFY(item("backupChoose")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("backupScope"));
+        // The Notes preview takes focus and scrolls.
+        bible->setFontSize(18); window->resize(1200, 820); QTRY_COMPARE(window->height(), 820);
+        QString note; for (int i = 0; i < 80; ++i) note += QString("Line %1 of a long note.\n\n").arg(i);
+        bible->selectVerses(3, 3); bible->setNoteText(note);
+        run("notes"); QTRY_VERIFY(opened("notesDrawer"));
+        click("previewButton"); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
+        QTRY_VERIFY(travel("notePreviewScroll") > 100);
+        key(Qt::Key_End); QTRY_VERIFY(qAbs(contentY("notePreviewScroll") - travel("notePreviewScroll")) < 1);
+        key(Qt::Key_K); QTRY_VERIFY(contentY("notePreviewScroll") < travel("notePreviewScroll"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+    }
+    void outlineAndCombineDialogScrollByKey() {
+        // The chapter outline: reached by tab; j scrolls it instead of moving the reader.
+        bible->setChapterOutline(true); navigate("John 3:3");
+        QTRY_VERIFY(item("chapterOutline")->isVisible());
+        bool reached = false;
+        for (int i = 0; i < 30 && !reached; ++i) { key(Qt::Key_Tab); reached = item("chapterOutline")->hasActiveFocus(); }
+        QVERIFY(reached); QVERIFY(item("outlineFocus")->isVisible());
+        QVERIFY(!prop("readerKeys").toBool());
+        key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), 3);
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), 4);
+        // Mouse: clicking an outline entry still jumps.
+        click(item("outlineEntry:20")); QTRY_COMPARE(bible->cursorVerse(), 20);
+        // Combine notes: the two notes scroll by key.
+        auto editor = object("rangeEditor"); auto merge = object("rangeNoteMerge");
+        QString note; for (int i = 0; i < 60; ++i) note += QString("Note line %1\n").arg(i);
+        editor->setProperty("pending", QVariantMap{{"preview", QVariantMap{{"sourceNote", note}, {"destinationNote", note}}}});
+        QVERIFY(QMetaObject::invokeMethod(merge, "open")); QTRY_VERIFY(merge->property("opened").toBool());
+        QTRY_VERIFY(travel("rangeMergeScroll") > 20);
+        key(Qt::Key_End); QTRY_VERIFY(contentY("rangeMergeScroll") > 0);
+        key(Qt::Key_Home); QTRY_COMPARE(contentY("rangeMergeScroll"), 0.0);
+        QVERIFY(QMetaObject::invokeMethod(merge, "close")); editor->setProperty("pending", QVariant());
     }
 };
 

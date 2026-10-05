@@ -535,7 +535,9 @@ ApplicationWindow {
         else if (current === "related") tagsUi.close()
         return true
     }
+    // The chapter outline, reached by tab, keeps its scroll keys.
     readonly property bool readerKeys: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
+        && !(chapterOutline && chapterOutline.activeFocus)
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
@@ -1183,6 +1185,46 @@ ApplicationWindow {
         contextMenu.show("linked", RowMenu.entries(app, { busy: bible.busy, scope: row, keys: false,
             open: function() { app.openLinkedNote(row) } }), sceneX, sceneY)
     }
+    // Scroll keys for scrollable dialogs and panes: j k ↑ ↓ a line, pgup pgdn
+    // a page, ctrl d/u half a page, home end the ends. Returns whether it acted.
+    function scrollKey(flick, event) {
+        if (!flick) return false
+        const mods = event.modifiers & ~Qt.KeypadModifier
+        const line = 40 * scale, page = Math.max(line, flick.height - line)
+        let delta = null
+        if (mods === Qt.NoModifier) {
+            if (event.key === Qt.Key_J || event.key === Qt.Key_Down) delta = line
+            else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) delta = -line
+            else if (event.key === Qt.Key_PageDown) delta = page
+            else if (event.key === Qt.Key_PageUp) delta = -page
+            else if (event.key === Qt.Key_Home) delta = -Infinity
+            else if (event.key === Qt.Key_End) delta = Infinity
+        } else if (mods === Qt.ControlModifier) {
+            if (event.key === Qt.Key_D) delta = page / 2
+            else if (event.key === Qt.Key_U) delta = -page / 2
+        }
+        if (delta === null) return false
+        event.accepted = true
+        const top = flick.originY, bottom = flick.originY + Math.max(0, flick.contentHeight - flick.height)
+        const target = delta === Infinity ? bottom : delta === -Infinity ? top : flick.contentY + delta
+        flick.contentY = Math.max(top, Math.min(bottom, target))
+        return true
+    }
+    // Keeps the focused item inside a scrolled pane visible as focus moves (tab).
+    function revealFocus(flick) {
+        const focused = activeFocusItem
+        if (!flick || !focused || !flick.contentItem || flick.height <= 0) return
+        let inside = false
+        for (let at = focused.parent; at; at = at.parent) if (at === flick.contentItem) { inside = true; break }
+        if (!inside) return
+        const margin = 12 * scale
+        const y = focused.mapToItem(flick.contentItem, 0, 0).y
+        const top = flick.originY, bottom = flick.originY + Math.max(0, flick.contentHeight - flick.height)
+        let target = flick.contentY
+        if (y + focused.height + margin > flick.contentY + flick.height) target = y + focused.height + margin - flick.height
+        if (y - margin < target) target = y - margin
+        flick.contentY = Math.max(top, Math.min(bottom, target))
+    }
     function textInputActive() {
         let item = activeFocusItem
         while (item) {
@@ -1259,6 +1301,7 @@ ApplicationWindow {
             if (app.modalOpen || bible.busy) return
             if (notesDrawer.shown) {
                 if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
+                else if (app.hasSelection) notePreviewText.forceActiveFocus()
                 else notesPanel.forceActiveFocus()
             } else app.readerFocus()
         })
@@ -2484,6 +2527,9 @@ ApplicationWindow {
             if (event.modifiers === Qt.NoModifier) acceptVersion()
             return
         }
+        // The removal summary scrolls by key; arrows still move between Cancel and Confirm.
+        if (versionDialog.step === 2 && ![Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].includes(event.key)
+                && scrollKey(versionSummaryScroll.contentItem as Flickable, event)) return
         if (event.modifiers !== Qt.NoModifier) return
         const keys = [Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown]
         if (versionDialog.step === 2) keys.push(Qt.Key_Left, Qt.Key_Right)
@@ -3225,6 +3271,19 @@ ApplicationWindow {
         // would otherwise reserve their implicit width as a gutter.
         leftPadding: 0
         rightPadding: 0
+    }
+    // A scrollable dialog pane: it takes focus, scrolls by key (scrollKey),
+    // and keeps the focused control inside it visible (revealFocus).
+    component KeyScrollView: OverlayScrollView {
+        id: keyScroll
+        activeFocusOnTab: true
+        focusPolicy: Qt.StrongFocus
+        Keys.onPressed: function(event) { app.scrollKey(keyScroll.contentItem as Flickable, event) }
+        Connections {
+            target: app
+            enabled: keyScroll.visible
+            function onActiveFocusItemChanged() { app.revealFocus(keyScroll.contentItem as Flickable) }
+        }
     }
     component SettingSwitch: Switch {
         id: settingSwitch
@@ -4262,6 +4321,8 @@ ApplicationWindow {
                     uiScale: app.readerScale
                     onActivated: function(verse) { app.jumpToHeading(verse) }
                     onActivatedTop: if (bible.verses.length) app.jumpToHeading(bible.verses[0].number)
+                    scrollKey: app.scrollKey
+                    onLeave: app.readerFocus()
                 }
                 // A continuous fade keeps floating controls legible without a
                 // footer surface, divider, or shortening the reading viewport.
@@ -4356,6 +4417,7 @@ ApplicationWindow {
         function focusContent() {
             if (app.modalOpen) return
             if (focusEditor && app.hasSelection) app.focusNoteEnd()
+            else if (app.hasSelection && app.notePreview) notePreviewText.forceActiveFocus()
             else notesPanel.forceActiveFocus()
         }
         onVisibleChanged: if (visible && !closing) focusContent()
@@ -4376,6 +4438,11 @@ ApplicationWindow {
                     id: notesScroll
                     objectName: "notesScroll"
                     anchors.fill: parent
+                    Connections {
+                        target: app
+                        enabled: notesDrawer.visible
+                        function onActiveFocusItemChanged() { app.revealFocus(notesScroll.contentItem as Flickable) }
+                    }
                     contentWidth: availableWidth
                     contentHeight: notesContent.height + 44
                     clip: true
@@ -4444,7 +4511,7 @@ ApplicationWindow {
                         visible: app.hasSelection
                         spacing: 4
                         QuietButton { text: "Write"; compact: true; emphasized: !app.notePreview; onClicked: { app.notePreview = false; noteEditor.forceActiveFocus() } }
-                        QuietButton { objectName: "previewButton"; text: "Preview"; compact: true; emphasized: app.notePreview; onClicked: { if (app.flushNote()) app.notePreview = true } }
+                        QuietButton { objectName: "previewButton"; text: "Preview"; compact: true; emphasized: app.notePreview; onClicked: { if (app.flushNote()) { app.notePreview = true; notePreviewText.forceActiveFocus() } } }
                         Item { Layout.fillWidth: true }
                         Label { text: "Markdown"; color: desktop.muted; font.pixelSize: 11 * app.scale }
                     }
@@ -4507,14 +4574,19 @@ ApplicationWindow {
                             }
                         }
                         OverlayScrollView {
+                            id: notePreviewScroll
                             objectName: "notePreviewScroll"
                             anchors.fill: parent
                             visible: app.hasSelection && app.notePreview
                             clip: true
                             contentWidth: availableWidth
                             TextArea {
+                                id: notePreviewText
                                 objectName: "notePreview"
                                 width: parent.width
+                                // Focusable for reading by key: the scroll keys move the preview.
+                                activeFocusOnTab: true
+                                Keys.onPressed: function(event) { app.scrollKey(notePreviewScroll.contentItem as Flickable, event) }
                                 text: noteEditor.text.length ? app.linkedMarkdown(noteEditor.text) : "*Your note preview will appear here.*"
                                 textFormat: TextEdit.MarkdownText
                                 readOnly: true
@@ -6287,7 +6359,7 @@ ApplicationWindow {
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { lineHeightSlider.forceActiveFocus() }
         onClosed: app.restorePanelFocus()
-        contentItem: OverlayScrollView {
+        contentItem: KeyScrollView {
             id: settingsScroll
             objectName: "settingsScroll"
             contentWidth: availableWidth
@@ -6417,7 +6489,8 @@ ApplicationWindow {
         id: aboutDialog
         objectName: "aboutDialog"
         onClosed: app.restorePanelFocus()
-        contentItem: OverlayScrollView {
+        onVisibleChanged: if (visible) { aboutScroll.contentItem.contentY = 0; aboutScroll.forceActiveFocus() }
+        contentItem: KeyScrollView {
             id: aboutScroll
             objectName: "aboutScroll"
             implicitHeight: Math.min(aboutContent.implicitHeight, app.height - 110)
@@ -6478,8 +6551,14 @@ ApplicationWindow {
                 background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: catalogSearch.activeFocus ? desktop.accent : desktop.border }
                 placeholderText: "Search versions…"
                 Accessible.name: "Search versions"
+                // Paging keys scroll the guide; arrows and letters stay with the field.
+                Keys.onPressed: function(event) {
+                    const paging = [Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)
+                        || (event.modifiers === Qt.ControlModifier && [Qt.Key_D, Qt.Key_U].includes(event.key))
+                    if (paging) app.scrollKey(importGuideScroll.contentItem as Flickable, event)
+                }
             }
-            OverlayScrollView {
+            KeyScrollView {
                 id: importGuideScroll
                 objectName: "importGuideScroll"
                 Layout.fillWidth: true
@@ -6563,8 +6642,10 @@ ApplicationWindow {
         objectName: "catalogDetails"
         property var entry: null
         onClosed: { if (importGuide.visible) catalogSearch.forceActiveFocus(); else app.restorePanelFocus() }
-        contentItem: OverlayScrollView {
+        onVisibleChanged: if (visible) { detailsScroll.contentItem.contentY = 0; detailsScroll.forceActiveFocus() }
+        contentItem: KeyScrollView {
             id: detailsScroll
+            objectName: "detailsScroll"
             implicitHeight: Math.min(detailsContent.implicitHeight, app.height - 110)
             contentWidth: availableWidth
             clip: true
@@ -6616,6 +6697,7 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 12 * app.scale
+            Keys.onPressed: function(event) { app.scrollKey(backupScopeScroll.contentItem as Flickable, event) }
             Label {
                 text: "Save " + bible.versionAbbreviation + " annotation backup"
                 color: desktop.foreground; font.pixelSize: 22 * app.scale

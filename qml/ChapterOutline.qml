@@ -14,6 +14,23 @@ Item {
     property real uiScale: 1
     signal activated(int verse)
     signal activatedTop()
+    // Reached by tab from the reader: scroll keys move the outline; esc
+    // (or tab onward) leaves it. `scrollKey(flickable, event)` is the app's.
+    signal leave()
+    property var scrollKey: null
+    activeFocusOnTab: true
+    Keys.onEscapePressed: root.leave()
+    Keys.onPressed: function(event) { if (root.scrollKey) root.scrollKey(list, event) }
+    Rectangle {
+        objectName: "outlineFocus"
+        anchors.fill: parent
+        anchors.margins: -4 * root.uiScale
+        visible: root.activeFocus
+        color: "transparent"
+        border.width: 1
+        border.color: root.theme.accent
+        radius: Math.min(root.theme.cornerRadius || 0, 8 * root.uiScale)
+    }
 
     function reveal() {
         if (current === 0) { list.contentY = 0; return }
