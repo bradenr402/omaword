@@ -815,6 +815,16 @@ ApplicationWindow {
             })
         return entries.length ? [menuDivider].concat(entries) : []
     }
+    function selectedTextEntries() {
+        return [{ id: "copySelected", text: "Copy selected text", shortcut: menuKey("copyText"), enabled: !bible.busy,
+            run: function() { app.copySelectedText() } }, menuDivider]
+    }
+    function copySelectedText() {
+        if (!freeSelectedText.length || bible.busy) { rejected(); return }
+        copyFreeText()
+        notify("Selected text copied", true)
+        sounds.play("chime")
+    }
     function passageMenuEntries(sceneX, sceneY) {
         return [
             menuAction("copy", "Copy quotation", "copy"),
@@ -850,6 +860,11 @@ ApplicationWindow {
         if (!bible.ready || bible.busy) return
         clearCount()
         if (rangeEditor.active) { contextMenu.show("rangeEdit", rangeEditMenuEntries(), sceneX, sceneY); return }
+        // Text dragged with the mouse stays selected: the menu leads with copying it.
+        if (freeSelectedText.length) {
+            contextMenu.show("passage", selectedTextEntries().concat(passageMenuEntries(sceneX, sceneY)), sceneX, sceneY)
+            return
+        }
         if (!rangeEditing && number > 0) {
             const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
             if (!inside) {
@@ -880,13 +895,13 @@ ApplicationWindow {
             contextMenu.show("rangeEdit", rangeEditMenuEntries(), at.x, at.y)
             return
         }
-        if (!hasSelection) {
+        if (!hasSelection && !freeSelectedText.length) {
             const rows = Array.from(bible.verses)
             const number = bible.cursorVerse > 0 ? bible.cursorVerse : rows.length ? rows[0].number : 0
             if (number > 0) selectVerse(number, false)
         }
         const point = verseMenuPoint(bible.cursorVerse)
-        contextMenu.show("passage", passageMenuEntries(point.x, point.y), point.x, point.y)
+        contextMenu.show("passage", (freeSelectedText.length ? selectedTextEntries() : []).concat(passageMenuEntries(point.x, point.y)), point.x, point.y)
     }
     function sceneRowPoint(item) {
         return item ? item.mapToItem(null, 24 * scale, Math.min(item.height, 28 * scale)) : Qt.point(width / 3, height / 3)

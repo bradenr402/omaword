@@ -918,6 +918,39 @@ private slots:
         QVariant text; QMetaObject::invokeMethod(window, "keyText", Q_RETURN_ARG(QVariant, text), Q_ARG(QVariant, QString("mouseBack")));
         QCOMPARE(text.toString(), QString("mouse back"));
     }
+    void rightClickKeepsMouseSelectedText() {
+        for (const QString mode : {"verse", "block"}) {
+            setMode(mode); navigate("John 3:3"); bible->clearSelection(); call("readerFocus");
+            QQuickItem *body = mode == "verse" ? item("verseBody4") : item("blockBody");
+            QVERIFY(body);
+            QPoint from, to;
+            if (mode == "verse") { from = body->mapToScene(QPointF(10, 8)).toPoint(); to = body->mapToScene(QPointF(200, 8)).toPoint(); }
+            else {
+                QRectF rect; auto blockBody = item("blockBody");
+                QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<BlockDocument *>()->positionFor(4) + 2));
+                from = blockBody->mapToScene(rect.center()).toPoint(); to = QPoint(from.x() + 200, from.y());
+            }
+            // Mouse: drag over text, then right-click on it.
+            QTest::mousePress(window, Qt::LeftButton, {}, from);
+            for (int i = 1; i <= 5; ++i) QTest::mouseMove(window, from + (to - from) * i / 5);
+            QTest::mouseRelease(window, Qt::LeftButton, {}, to);
+            QTRY_VERIFY2(!prop("freeSelectedText").toString().isEmpty(), qPrintable(mode));
+            const QString selected = prop("freeSelectedText").toString();
+            const auto selection = bible->tagScope();
+            clickAt((from + to) / 2, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+            QCOMPARE(menuIds().first(), QString("copySelected")); QCOMPARE(menuShortcut("copySelected"), QString("ctrl c"));
+            QCOMPARE(prop("freeSelectedText").toString(), selected); QCOMPARE(bible->tagScope(), selection);
+            QGuiApplication::clipboard()->clear(); chooseMenu("copySelected");
+            QTRY_COMPARE(QGuiApplication::clipboard()->text(), selected);
+            QCOMPARE(prop("freeSelectedText").toString(), selected);
+            // Keyboard: the menu key offers it first too; enter copies.
+            key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+            QCOMPARE(menuIds().first(), QString("copySelected"));
+            QGuiApplication::clipboard()->clear(); key(Qt::Key_Return);
+            QTRY_COMPARE(QGuiApplication::clipboard()->text(), selected);
+            key(Qt::Key_Escape); QTRY_VERIFY(prop("freeSelectedText").toString().isEmpty());
+        }
+    }
 };
 
 int main(int argc, char **argv) {
