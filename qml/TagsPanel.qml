@@ -28,12 +28,14 @@ Item {
     // selection, or its chapter when nothing is selected — never blank.
     readonly property string passageSubtitle: (bible.selectedStart > 0 && bible.selectionReference
         ? bible.selectionReference : bible.passage) + (bible.versionAbbreviation ? " · " + bible.versionAbbreviation : "")
-    // Study panel (the Related drawer, now tabbed): Related tag passages, the
-    // pinned source's cross references, and the current chapter's footnotes.
-    // ←/→ (h/l) switch tabs; every tab shares the list keys and motions.
-    readonly property var studyTabs: ["related", "crossrefs", "footnotes"]
-    readonly property var studyTitles: ["Related", "Cross-references", "Footnotes"]
-    property string studyTab: "related"
+    // Study panel (the Related drawer, now tabbed): the passage's cross
+    // references, the current chapter's footnotes, and other passages sharing
+    // its tags (internal id "related", shown as "Tags"). ←/→ (h/l) switch
+    // tabs; every tab shares the list keys and motions. Opens on
+    // Cross-references, then remembers the last tab for this window.
+    readonly property var studyTabs: ["crossrefs", "footnotes", "related"]
+    readonly property var studyTitles: ["Cross-references", "Footnotes", "Tags"]
+    property string studyTab: "crossrefs"
     property var crossRows: []
     readonly property var footnoteRows: Array.from(bible.footnotes || [])
     readonly property var studyRows: studyTab === "crossrefs" ? crossRows : studyTab === "footnotes" ? footnoteRows : []

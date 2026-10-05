@@ -2508,7 +2508,7 @@ ApplicationWindow {
         { id: "clickMenu", group: "Copy", title: "Open context menu", sequences: ["RightClick"], explanation: true },
         { id: "annotations", group: "Panels", title: "Annotations panel", sequences: ["Shift+A"], command: true },
         { id: "desk", group: "Panels", title: "Open Desk", sequences: ["Shift+D"], command: true },
-        // The Study panel (Related, Cross-references, Footnotes); id kept for compatibility.
+        // The Study panel (Cross-references, Footnotes, Tags); id kept for compatibility.
         { id: "related", group: "Panels", title: "Study panel", sequences: ["Shift+S"], command: true },
         { id: "history", group: "Panels", title: "History", sequences: ["Shift+H"], command: true },
         { id: "books", group: "Palettes and windows", title: "Navigate to a passage", sequences: ["Ctrl+K"], scope: "palette", command: true },
@@ -2553,7 +2553,7 @@ ApplicationWindow {
         { id: "listDesk", group: "Lists", title: "Add item to Desk, or remove it", sequences: ["D"], scope: "list", explanation: true },
         { id: "listEditRange", group: "Lists", title: "Edit item's annotation range", sequences: ["Shift+E"], scope: "list", explanation: true },
         { id: "listRemove", group: "Lists", title: "Remove item", sequences: ["Delete", "Backspace"], scope: "list", explanation: true },
-        { id: "listSearch", group: "Lists", title: "Search the list (Annotations, Study's Related)", sequences: ["/"], scope: "list", explanation: true },
+        { id: "listSearch", group: "Lists", title: "Search the list (Annotations, Study's Tags)", sequences: ["/"], scope: "list", explanation: true },
         { id: "listPreviousTab", group: "Lists", title: "Previous tab (Annotations, Study)", sequences: ["H", "Left"], scope: "list", explanation: true },
         { id: "listNextTab", group: "Lists", title: "Next tab (Annotations, Study)", sequences: ["L", "Right"], scope: "list", explanation: true },
         // Desk-only: bound by deskDrawer, never globally.
