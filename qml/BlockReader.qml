@@ -555,7 +555,6 @@ Item {
                 theme: root.theme
                 uiScale: root.controller.scale
                 visible: inlineMarker.visible && (inlineMouse.containsMouse || inlineMarker.activeFocus)
-                delay: 500
                 text: inlineMarker.hint
             }
         }

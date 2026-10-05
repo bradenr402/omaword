@@ -26,6 +26,7 @@ suite reports status/timing; full output goes to `build/test-logs/<selector>.log
 | `deskui` | `tests/deskui.pro` | `build/deskui-tests/` | `tst_deskui` |
 | `historyui` | `tests/historyui.pro` | `build/historyui-tests/` | `tst_historyui` |
 | `studyui` | `tests/studyui.pro` | `build/studyui-tests/` | `tst_studyui` |
+| `a11yui` | `tests/a11yui.pro` | `build/a11yui-tests/` | `tst_a11yui` |
 | `marginsui` | `tests/marginsui.pro` | `build/marginsui-tests/` | `tst_marginsui` |
 | `motion` | `tests/motion.pro` | `build/motion-tests/` | `tst_motion` |
 | `contextmenu` | `tests/contextmenu.pro` | `build/contextmenu-tests/` | `tst_contextmenu` |
@@ -82,6 +83,7 @@ a fake `hyprctl` and temporary theme state.
 - **searchrender**: rendered match offsets/geometry across layouts.
 - **deskui**: Desk add/remove, panel, peers, version removal.
 - **studyui**: words-of-Jesus coloring, Re-import offers, Study panel tabs (Related, Cross-references, Footnotes), reader footnote markers.
+- **a11yui**: keyboard and mouse access: button keys and focus, clickable key hints, shared row menus, scroll keys, outside clicks, range-edit menu, search paging, Re-import key, error banner, Notes Linked from, focus-mode footer, chapter-find clicks and tab, mouse back/forward, keeping text selections.
 - **marginsui**: chapter outline, `{`/`}` heading motions, margin notes (placement, truncation, connectors, reader shift, links, drawer), and the pure `Margins.js`/`HandDrawn.js` functions.
 - **historyui**: jump stack (`[` `]` `-`), dwell recording, History panel, footer button, palette recents, two windows.
 - **motion**: focus dimming, jump pulses, copy flashes, held-key repeat, reduce motion.

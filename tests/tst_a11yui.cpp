@@ -1,0 +1,228 @@
+#include <QtTest/QTest>
+#include <QApplication>
+#include <QClipboard>
+#include <QCryptographicHash>
+#include <QFile>
+#include <QJSValue>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQuickItem>
+#include <QQuickStyle>
+#include <QQuickWindow>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QSqlRecord>
+#include <QTemporaryDir>
+#include <QUuid>
+#include <archive.h>
+#include <archive_entry.h>
+#include "biblebackend.h"
+#include "blockdocument.h"
+#include "desktop.h"
+#include "soundeffects.h"
+
+class MockCatalog : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QVariantList entries MEMBER entries NOTIFY changed)
+    Q_PROPERTY(bool busy MEMBER busy NOTIFY changed)
+    Q_PROPERTY(double progress MEMBER progress NOTIFY changed)
+    Q_PROPERTY(QString error MEMBER error NOTIFY changed)
+public:
+    QVariantList entries;
+    bool busy = false;
+    double progress = 0;
+    QString error;
+    QStringList requests;
+    Q_INVOKABLE void download(const QString &id) { requests << id; busy = true; emit changed(); }
+    Q_INVOKABLE void cancel() { busy = false; emit changed(); }
+    Q_INVOKABLE void clearError() { error.clear(); emit changed(); }
+signals:
+    void changed();
+    void downloadFinished(const QUrl &url);
+};
+
+// Keyboard and mouse access across the app: buttons, clickable key hints,
+// row menus, scroll keys, outside clicks, and the Phase 2 reader features.
+// Every feature is exercised by key and by pointer.
+class A11yUiTest : public QObject
+{
+    Q_OBJECT
+    QTemporaryDir fixtures;
+    std::unique_ptr<QTemporaryDir> session;
+    std::unique_ptr<BibleBackend> bible;
+    std::unique_ptr<Desktop> desktop;
+    std::unique_ptr<SoundEffects> sounds;
+    std::unique_ptr<MockCatalog> catalog;
+    std::unique_ptr<QQmlApplicationEngine> engine;
+    QQuickWindow *window = nullptr;
+    QStringList warnings;
+    QString source;
+
+    static bool edition(const QString &path) {
+        auto zip = archive_write_new(); archive_write_set_format_zip(zip);
+        if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
+        auto book = [](const char *code, const char *name, int chapters, int verses, auto special) {
+            QByteArray data = QString("\\id %1 Original access fixture\n\\h %2\n\\toc1 %2\n\\toc2 %2\n").arg(code, name).toUtf8();
+            for (int c = 1; c <= chapters; ++c) {
+                data += QString("\\c %1\n\\s Access fixture heading\n\\p\n").arg(c).toUtf8();
+                for (int v = 1; v <= verses; ++v) {
+                    if (v == 20) data += "\\s A later heading\n\\p\n";
+                    const QString text = special(c, v);
+                    data += QString("\\v %1 %2\n").arg(v).arg(text.isEmpty()
+                        ? QString("Original access text %1:%2 with enough ordinary words to wrap across a reading line.").arg(c).arg(v) : text).toUtf8();
+                }
+            }
+            return data;
+        };
+        const QMap<QString, QByteArray> entries = {
+            {"01-GENaccess.usfm", book("GEN", "Genesis", 2, 31, [](int, int) { return QString(); })},
+            {"43-JHNaccess.usfm", book("JHN", "John", 3, 36, [](int c, int v) {
+                if (c == 1 && v == 1) return QString("In the beginning was the Word.\\x - \\xo 1:1 \\xt Gen 1:1; Jn 1:14; Gen 2:3\\x* Original words follow.");
+                if (c == 3 && v == 3) return QString("Jesus answered,\\f + \\fr 3:3 \\ft Or \\fq from above\\f* truly unless one is born again.");
+                if (c == 3 && v == 16) return QString("For God so loved\\f a \\ft Greek \\fq agapao\\f* the world that he gave his Son.");
+                return QString(); })},
+        };
+        bool ok = true;
+        for (auto it = entries.cbegin(); it != entries.cend(); ++it) {
+            auto entry = archive_entry_new(); const auto name = it.key().toUtf8();
+            archive_entry_set_pathname(entry, name.constData()); archive_entry_set_filetype(entry, AE_IFREG);
+            archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, it.value().size());
+            ok = archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, it.value().constData(), it.value().size()) == it.value().size() && ok;
+            archive_entry_free(entry);
+        }
+        ok = archive_write_close(zip) == ARCHIVE_OK && ok; archive_write_free(zip); return ok;
+    }
+    static QVariant value(QVariant v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; }
+    static QQuickItem *visual(QQuickItem *root, const QString &name) {
+        if (root->objectName() == name) return root;
+        for (auto child : root->childItems()) if (auto found = visual(child, name)) return found;
+        return nullptr;
+    }
+    QObject *object(const QString &name) const {
+        if (auto found = window->findChild<QObject *>(name)) return found;
+        return visual(window->contentItem(), name);
+    }
+    QQuickItem *item(const QString &name) const { return qobject_cast<QQuickItem *>(object(name)); }
+    QVariant prop(const char *name) const { return value(window->property(name)); }
+    QVariant call(const char *method, const QVariant &a = {}, const QVariant &b = {}) {
+        QVariant result; bool ok;
+        if (!b.isValid() && !a.isValid()) ok = QMetaObject::invokeMethod(window, method, Q_RETURN_ARG(QVariant, result));
+        else if (!b.isValid()) ok = QMetaObject::invokeMethod(window, method, Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, a));
+        else ok = QMetaObject::invokeMethod(window, method, Q_RETURN_ARG(QVariant, result), Q_ARG(QVariant, a), Q_ARG(QVariant, b));
+        if (!ok) qWarning() << "invoke failed" << method;
+        QCoreApplication::processEvents();
+        return value(result);
+    }
+    void run(const QString &command) { call("runCommand", command); }
+    void key(Qt::Key key, Qt::KeyboardModifiers mods = Qt::NoModifier) { QTest::keyClick(window, key, mods); QCoreApplication::processEvents(); }
+    void type(const QString &text) { for (const auto c : text) QTest::keyClick(window, c.toLatin1()); QCoreApplication::processEvents(); }
+    QPoint center(QQuickItem *target) const { return target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint(); }
+    void click(QQuickItem *target, Qt::MouseButton button = Qt::LeftButton, Qt::KeyboardModifiers mods = {}) {
+        QVERIFY(target); QTest::mouseClick(window, button, mods, center(target)); QCoreApplication::processEvents();
+    }
+    void click(const QString &name, Qt::MouseButton button = Qt::LeftButton) {
+        auto target = item(name); QVERIFY2(target, qPrintable(name)); QVERIFY2(target->isVisible(), qPrintable(name)); click(target, button);
+    }
+    void clickAt(const QPoint &point, Qt::MouseButton button = Qt::LeftButton) { QTest::mouseClick(window, button, {}, point); QCoreApplication::processEvents(); }
+    void install(const QString &file) {
+        bible->importUsfm(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
+        QVERIFY2(bible->ready() && bible->error().isEmpty(), qPrintable(bible->error()));
+    }
+    void navigate(const QString &reference) {
+        QVERIFY(bible->navigate(reference)); call("readerFocus"); QTRY_VERIFY(!prop("restoringPosition").toBool());
+    }
+    void setMode(const QString &mode) {
+        bible->setReadingMode(mode); QTRY_COMPARE(prop("continuousReader").toBool(), mode != "verse");
+        QTest::qWait(50); QCoreApplication::processEvents();
+    }
+    QString focusName() const { return window->activeFocusItem() ? window->activeFocusItem()->objectName() : QString(); }
+    bool focusWithin(const QString &name) const {
+        for (auto at = window->activeFocusItem(); at; at = at->parentItem()) if (at->objectName() == name) return true;
+        return false;
+    }
+    bool readerFocused() const { return window->activeFocusItem() == item("readerSurface"); }
+    bool opened(const QString &name) const { auto o = object(name); return o && o->property("opened").toBool(); }
+    bool shown(const QString &name) const { auto o = object(name); return o && o->property("visible").toBool(); }
+    QObject *menu() const { return object("contextMenu"); }
+    QStringList menuIds() const {
+        QStringList ids;
+        for (const auto &entry : value(menu()->property("layout")).toList()) {
+            const auto map = entry.toMap();
+            ids << (map.value("separator").toBool() ? QString("|") : map.value("id").toString());
+        }
+        return ids;
+    }
+    QString menuShortcut(const QString &id) const {
+        for (const auto &entry : value(menu()->property("layout")).toList()) if (entry.toMap().value("id") == id) return entry.toMap().value("shortcut").toString();
+        return "?";
+    }
+    bool menuEnabled(const QString &id) const {
+        for (const auto &entry : value(menu()->property("layout")).toList()) if (entry.toMap().value("id") == id) return entry.toMap().value("enabled").toBool();
+        return false;
+    }
+    void chooseMenu(const QString &id) {
+        QTRY_VERIFY(menu()->property("opened").toBool());
+        QTRY_VERIFY(item("contextMenuContent") && item("contextMenuContent")->height() > 0);
+        auto row = item("contextMenuItem:" + id); QVERIFY2(row, qPrintable(id)); QVERIFY(row->isVisible());
+        click(row); QTRY_VERIFY(!menu()->property("visible").toBool());
+    }
+    QString lastSound() const { return sounds->property("lastSound").toString(); }
+    int playCount() const { return sounds->property("playCount").toInt(); }
+    QString toast() const { return object("toast")->property("text").toString(); }
+    QObject *toolTipOf(QQuickItem *owner) const {
+        for (auto child : owner->findChildren<QObject *>())
+            if (QByteArray(child->metaObject()->className()).startsWith("AppToolTip")) return child;
+        return nullptr;
+    }
+    QPoint versePoint(int verse) {
+        auto body = item("verseBody" + QString::number(verse)); if (!body) return {};
+        return body->mapToScene(QPointF(30, 8)).toPoint();
+    }
+
+private slots:
+    void initTestCase() {
+        source = fixtures.filePath("access_usfm.zip"); QVERIFY(edition(source));
+    }
+    void init() {
+        session = std::make_unique<QTemporaryDir>(); qputenv("XDG_DATA_HOME", session->path().toUtf8());
+        bible = std::make_unique<BibleBackend>(); install(source); bible->setReadingMode("verse");
+        desktop = std::make_unique<Desktop>(); sounds = std::make_unique<SoundEffects>(nullptr, session->filePath("sound.ini"), false);
+        sounds->setReduceMotion(true);
+        catalog = std::make_unique<MockCatalog>();
+        engine = std::make_unique<QQmlApplicationEngine>(); warnings.clear();
+        connect(engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) { for (const auto &error : errors) warnings << error.toString(); });
+        engine->rootContext()->setContextProperty("bible", bible.get());
+        engine->rootContext()->setContextProperty("desktop", desktop.get());
+        engine->rootContext()->setContextProperty("sounds", sounds.get());
+        engine->rootContext()->setContextProperty("catalog", catalog.get());
+        engine->load(QUrl::fromLocalFile(QFINDTESTDATA("../qml/Main.qml")));
+        QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
+        window = qobject_cast<QQuickWindow *>(engine->rootObjects().first()); QVERIFY(window);
+        window->resize(1200, 820);
+        window->requestActivate(); QVERIFY(QTest::qWaitForWindowExposed(window)); QTRY_VERIFY(window->isActive());
+        window->setProperty("historyDwellMs", 3600000);
+        navigate("John 3:3");
+    }
+    void cleanup() {
+        engine.reset(); window = nullptr; catalog.reset(); sounds.reset(); desktop.reset(); bible.reset(); session.reset();
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+    }
+
+    // ── Phase 1: shared foundations
+
+    void tooltipsShareOneDelay() {
+        int seen = 0;
+        for (auto child : window->findChildren<QObject *>()) {
+            if (!QByteArray(child->metaObject()->className()).startsWith("AppToolTip")) continue;
+            QCOMPARE(child->property("delay").toInt(), 600); ++seen;
+        }
+        QVERIFY(seen > 5);
+    }
+};
+
+int main(int argc, char **argv) {
+    QQuickStyle::setStyle("Basic"); QApplication app(argc, argv);
+    A11yUiTest test; return QTest::qExec(&test, argc, argv);
+}
+#include "tst_a11yui.moc"

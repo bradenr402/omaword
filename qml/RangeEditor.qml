@@ -297,7 +297,6 @@ Item {
             uiScale: editor.textScale
             text: KeyNotation.format("Space") + " toggles this tag; " + KeyNotation.format("T") + " toggles all tags"
             visible: check.allTagsHint && (check.hovered || check.activeFocus)
-            delay: 650
         }
     }
     component FineRule: Rectangle {

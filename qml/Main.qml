@@ -3080,7 +3080,7 @@ ApplicationWindow {
             border.width: button.activeFocus ? 1 : 0
             border.color: desktop.accent
         }
-        AppToolTip { theme: desktop; uiScale: app.scale; visible: (button.hovered || button.activeFocus) && button.tip.length > 0; text: button.tip; delay: 650 }
+        AppToolTip { theme: desktop; uiScale: app.scale; visible: (button.hovered || button.activeFocus) && button.tip.length > 0; text: button.tip }
         Accessible.name: text
     }
     component FineRule: Rectangle {
@@ -3236,7 +3236,7 @@ ApplicationWindow {
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
         Accessible.name: tip
-        AppToolTip { theme: desktop; uiScale: app.scale; visible: floatingButton.hovered || floatingButton.activeFocus; text: floatingButton.tip; delay: 500 }
+        AppToolTip { theme: desktop; uiScale: app.scale; visible: floatingButton.hovered || floatingButton.activeFocus; text: floatingButton.tip }
         background: Rectangle {
             color: floatingButton.down ? app.tint(desktop.accent, 0.18)
                 : floatingButton.hovered ? app.tint(desktop.accent, 0.09) : "transparent"
@@ -3883,7 +3883,6 @@ ApplicationWindow {
                                         theme: desktop
                                         uiScale: app.scale
                                         visible: numberMouse.containsMouse && !bible.focusMode
-                                        delay: 700
                                         text: "Select verse " + verseRow.modelData.number + " · " + KeyNotation.format("Shift+Click") + " for a range" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "") + (verseRow.modelData.hasTags ? "\nTagged" : "")
                                     }
                                 }
@@ -3921,7 +3920,6 @@ ApplicationWindow {
                                             theme: desktop
                                             uiScale: app.scale
                                             visible: footnoteMouse.containsMouse
-                                            delay: 500
                                             text: "Footnote · " + footnoteMarker.modelData.text + "\nClick to read it in Study"
                                         }
                                     }
@@ -4083,7 +4081,6 @@ ApplicationWindow {
                                     theme: desktop
                                     uiScale: app.scale
                                     visible: marginNoteMouse.containsMouse && !noteText.hoveredLink
-                                    delay: 700
                                     text: "Note on " + marginNote.modelData.reference + "\nClick to open it in Notes"
                                 }
                                 // "{" before the note, "}" after the passage text, and an
@@ -6106,7 +6103,7 @@ ApplicationWindow {
                     height: keybindingContent.implicitHeight + 20 * app.scale
                     rightPadding: leftPadding + (keybindingScrollbar.visible ? 12 * app.scale : 0)
                     enabled: app.actionAvailable(modelData)
-                    AppToolTip { theme: desktop; uiScale: app.scale; visible: keybindingRow.hovered; text: app.scopeTitle(keybindingRow.modelData); delay: 650 }
+                    AppToolTip { theme: desktop; uiScale: app.scale; visible: keybindingRow.hovered; text: app.scopeTitle(keybindingRow.modelData) }
                     highlighted: ListView.isCurrentItem
                     onClicked: app.activateKeybinding(modelData)
                     Keys.onReturnPressed: clicked()

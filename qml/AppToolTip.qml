@@ -6,6 +6,8 @@ ToolTip {
     id: control
     required property var theme
     property real uiScale: theme.textScale > 0 ? theme.textScale : 1
+    // One delay everywhere: long enough not to flicker while the pointer passes.
+    delay: 600
 
     font.family: theme.fontFamily
     font.pixelSize: 12 * control.uiScale
