@@ -3710,11 +3710,12 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 8
                 spacing: 2
-                Flow {
+                RowLayout {
                     Layout.fillWidth: true
                     spacing: rangeEditKeys.spacing
                     Label {
                         objectName: "rangeEditTitle"
+                        Layout.alignment: Qt.AlignTop
                         text: "Edit range · " + rangeEditor.endpoint
                         textFormat: Text.PlainText
                         color: desktop.accent
@@ -3723,7 +3724,10 @@ ApplicationWindow {
                     HintRow {
                         id: rangeEditKeys
                         objectName: "rangeEditHints"
-                        width: Math.min(implicitWidth, parent.width)
+                        // Fill what the title leaves; the parts wrap there.
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0
+                        Layout.alignment: Qt.AlignTop
                         theme: desktop
                         pixelSize: 13 * app.scale
                         parts: app.rangeEditHintParts()
