@@ -12,6 +12,9 @@ Item {
     property string title: "" // e.g. "John 3"
     property int current: 0 // a heading's verse; 0 before the first heading
     property real uiScale: 1
+    // Tooltips naming the keyboard equivalents (the app fills in its keys).
+    property string titleTip: ""
+    property string entryTip: ""
     signal activated(int verse)
     signal activatedTop()
     // Reached by tab from the reader: scroll keys move the outline; esc
@@ -96,6 +99,12 @@ Item {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.activatedTop()
                 }
+                AppToolTip {
+                    theme: root.theme
+                    uiScale: root.uiScale
+                    visible: titleMouse.containsMouse && root.titleTip.length > 0
+                    text: root.titleTip
+                }
             }
             Repeater {
                 id: entries
@@ -139,6 +148,12 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.activated(entry.verse)
+                    }
+                    AppToolTip {
+                        theme: root.theme
+                        uiScale: root.uiScale
+                        visible: mouse.containsMouse && root.entryTip.length > 0
+                        text: root.entryTip
                     }
                 }
             }

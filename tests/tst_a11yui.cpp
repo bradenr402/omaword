@@ -1682,6 +1682,36 @@ private slots:
         check("deskList", "deskEntry0", "deskScrollbar");
         QVERIFY(warnings.isEmpty());
     }
+    // ── Phase 4: low
+
+    void outlineAndMarginNoteTooltipsNameTheirKeys() {
+        window->resize(1700, 900); QTRY_COMPARE(window->width(), 1700);
+        bible->selectVerses(16, 16); bible->setNoteText("See John 3:5 and https://example.org"); bible->setMarginNotes(true);
+        bible->setChapterOutline(true); navigate("John 3:14");
+        QTRY_VERIFY(item("chapterOutline")->isVisible());
+        // Mouse: hovering the title and an entry names { and } in their tooltips.
+        auto title = item("outlineTitle"), entry = item("outlineEntry:20");
+        QTest::mouseMove(window, center(title)); QTRY_VERIFY(toolTipOf(title)->property("visible").toBool());
+        QVERIFY(toolTipOf(title)->property("text").toString().contains("{"));
+        QTest::mouseMove(window, center(entry)); QTRY_VERIFY(toolTipOf(entry)->property("visible").toBool());
+        QCOMPARE(toolTipOf(entry)->property("text").toString(), QStringLiteral("Jump to this section · { } step between sections"));
+        shot("outline-entry-tooltip");
+        // Keyboard: } and { do what the tooltip says.
+        call("readerFocus"); key(Qt::Key_BraceRight); QTRY_COMPARE(bible->cursorVerse(), 20);
+        key(Qt::Key_BraceLeft); QTRY_VERIFY(bible->cursorVerse() < 20);
+        // A margin note names w, and alt enter for its links.
+        navigate("John 3:14");
+        QTRY_VERIFY(item("marginNote:John 3:16") && item("marginNote:John 3:16")->isVisible());
+        auto note = item("marginNote:John 3:16"); auto tip = toolTipOf(note); QVERIFY(tip);
+        QVERIFY(tip->property("text").toString().contains(QStringLiteral("Click to open it in Notes · w")));
+        QVERIFY(tip->property("text").toString().contains(QStringLiteral("alt enter")));
+        QTest::mouseMove(window, note->mapToScene(QPointF(note->width() - 4, note->height() - 3)).toPoint());
+        QTest::mouseMove(window, note->mapToScene(QPointF(note->width() - 3, note->height() - 3)).toPoint());
+        // Keyboard: w on the passage opens Notes, where alt enter follows the link.
+        navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        item("noteEditor")->setProperty("cursorPosition", 6);
+        key(Qt::Key_Return, Qt::AltModifier); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }

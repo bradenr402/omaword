@@ -5076,7 +5076,8 @@ ApplicationWindow {
                                     theme: desktop
                                     uiScale: app.scale
                                     visible: marginNoteMouse.containsMouse && !noteText.hoveredLink
-                                    text: "Note on " + marginNote.modelData.reference + "\nClick to open it in Notes"
+                                    text: "Note on " + marginNote.modelData.reference + "\nClick to open it in Notes · " + app.menuKey("notes") + " on the selected passage"
+                                        + (noteText.text.indexOf("<a ") >= 0 ? "\nLinks: " + app.menuKey("openNoteLink") + " opens the one at the cursor in Notes" : "")
                                 }
                                 // "{" before the note, "}" after the passage text, and an
                                 // arrow between their tips (HandDrawn.js, seeded per note).
@@ -5140,6 +5141,8 @@ ApplicationWindow {
                     onActivatedTop: if (bible.verses.length) app.jumpToHeading(bible.verses[0].number)
                     scrollKey: app.scrollKey
                     onLeave: app.readerFocus()
+                    titleTip: "Jump to the chapter top · " + app.menuKey("previousHeading") + " steps back to it"
+                    entryTip: "Jump to this section · " + app.menuKey("previousHeading") + " " + app.menuKey("nextHeading") + " step between sections"
                 }
                 // A continuous fade keeps floating controls legible without a
                 // footer surface, divider, or shortening the reading viewport.
