@@ -250,6 +250,8 @@ Item {
             border.color: editor.desktop.accent
             radius: editor.desktop.cornerRadius
         }
+        // A focused button owns enter and space (never a dialog shortcut).
+        Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
         AppToolTip { theme: editor.desktop; uiScale: editor.textScale; text: button.hint; visible: text.length > 0 && (button.hovered || button.activeFocus) }

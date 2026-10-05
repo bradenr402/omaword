@@ -581,6 +581,8 @@ Item {
             border.color: panel.desktop.accent
             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
+        // A focused button owns enter and space (never a window shortcut).
+        Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
         AppToolTip { theme: panel.desktop; uiScale: panel.uiScale; text: control.hint; visible: text.length > 0 && (control.hovered || control.activeFocus) }
@@ -652,6 +654,7 @@ Item {
             }
         }
         Keys.onReleased: function(event) { if (event.key === Qt.Key_Space) event.accepted = true }
+        Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
         AppToolTip {
             theme: panel.desktop; uiScale: panel.uiScale
             text: chip.modelData.overlap ? "on " + chip.modelData.reference + " (overlapping range)" : ""
@@ -882,6 +885,7 @@ Item {
                         radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
                     }
                     onClicked: { panel.chipsExpanded = true; Qt.callLater(panel.focusChips) }
+                    Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
                     Keys.onPressed: function(event) {
                         if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) { event.accepted = true; panel.focusResults() }
                         else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; moreChips.clicked() }
@@ -1058,6 +1062,7 @@ Item {
                         }
                         onClicked: panel.app.openPassageTags(panel.snapshot(panel.relatedSource))
                         Keys.onReturnPressed: clicked()
+                        Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
                         Keys.onEnterPressed: clicked()
                     }
                 }

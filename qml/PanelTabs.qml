@@ -72,6 +72,8 @@ RowLayout {
                 border.color: root.theme.accent
             }
             onClicked: root.activated(index)
+            // A focused tab owns enter and space (never a window shortcut).
+            Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
             Keys.onReturnPressed: clicked()
             Keys.onEnterPressed: clicked()
             Accessible.role: Accessible.PageTab

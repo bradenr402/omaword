@@ -2671,6 +2671,25 @@ ApplicationWindow {
     function keyText(action) { return KeyNotation.formatList(actionKeys(action)) }
     function keyRich(action) { return KeyNotation.richList(actionKeys(action), desktop.foreground, desktop.muted) }
     function formatKeys(sequences) { return KeyNotation.formatList(sequences) }
+    // A focused button owns enter and space: they activate it, never a window
+    // shortcut (space would otherwise resume the last palette).
+    function buttonShortcutOverride(event) {
+        const plain = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
+        if (plain && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true
+    }
+    // Plain enter presses a focused button (modified enter passes through).
+    function buttonEnter(button, event) {
+        if ((event.modifiers & ~Qt.KeypadModifier) !== Qt.NoModifier) { event.accepted = false; return }
+        button.keyActivated = true
+        button.clicked()
+    }
+    // After a mouse click on a button that held the keyboard (reached by tab),
+    // the keyboard returns to the reader, the open panel, or the note editor.
+    function buttonClicked(button) {
+        const byKey = button.keyActivated
+        button.keyActivated = false
+        if (!byKey && button.activeFocus) restorePanelFocus()
+    }
     function hintRow(parts) { return KeyNotation.hint(parts, desktop.foreground, desktop.muted) }
     function hintPlain(parts) { return KeyNotation.hintPlain(parts) }
     function actionHint(action) {
@@ -3080,6 +3099,14 @@ ApplicationWindow {
             border.width: button.activeFocus ? 1 : 0
             border.color: desktop.accent
         }
+        // Chrome buttons take the keyboard only by tab; a mouse click leaves it where it was.
+        focusPolicy: Qt.TabFocus
+        property bool keyActivated: false
+        Keys.onShortcutOverride: function(event) { app.buttonShortcutOverride(event) }
+        Keys.onPressed: function(event) { if (event.key === Qt.Key_Space) button.keyActivated = true }
+        Keys.onReturnPressed: function(event) { app.buttonEnter(button, event) }
+        Keys.onEnterPressed: function(event) { app.buttonEnter(button, event) }
+        Connections { target: button; function onClicked() { app.buttonClicked(button) } }
         AppToolTip { theme: desktop; uiScale: app.scale; visible: (button.hovered || button.activeFocus) && button.tip.length > 0; text: button.tip }
         Accessible.name: text
     }
@@ -3137,6 +3164,9 @@ ApplicationWindow {
         padding: 0
         spacing: 12 * app.scale
         onClicked: app.runCommand(catalogAction.id)
+        Keys.onShortcutOverride: function(event) { app.buttonShortcutOverride(event) }
+        Keys.onReturnPressed: app.runCommand(catalogAction.id)
+        Keys.onEnterPressed: app.runCommand(catalogAction.id)
         indicator: Rectangle {
             objectName: settingSwitch.objectName + "Track"
             x: settingSwitch.width - width
@@ -3230,11 +3260,17 @@ ApplicationWindow {
         implicitHeight: 40 * app.controlScale
         padding: 8 * app.controlScale
         hoverEnabled: true
-        focusPolicy: Qt.StrongFocus
+        // Footer chrome: the keyboard reaches it by tab only, and a mouse click
+        // returns the keyboard to the reader (or the open panel).
+        focusPolicy: Qt.TabFocus
         font.pixelSize: 13 * app.scale
         onPressed: app.clearCount()
-        Keys.onReturnPressed: clicked()
-        Keys.onEnterPressed: clicked()
+        property bool keyActivated: false
+        Keys.onShortcutOverride: function(event) { app.buttonShortcutOverride(event) }
+        Keys.onPressed: function(event) { if (event.key === Qt.Key_Space) floatingButton.keyActivated = true }
+        Keys.onReturnPressed: function(event) { app.buttonEnter(floatingButton, event) }
+        Keys.onEnterPressed: function(event) { app.buttonEnter(floatingButton, event) }
+        Connections { target: floatingButton; function onClicked() { app.buttonClicked(floatingButton) } }
         Accessible.name: tip
         AppToolTip { theme: desktop; uiScale: app.scale; visible: floatingButton.hovered || floatingButton.activeFocus; text: floatingButton.tip }
         background: Rectangle {
@@ -4313,13 +4349,11 @@ ApplicationWindow {
                                 text: "Save my draft"; tip: "Replace the saved note with your draft"
                                 enabled: app.noteScopeMatches && app.hasSelection && !bible.busy
                                 onClicked: app.retryNote()
-                                Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
                             }
                             QuietButton {
                                 objectName: "noteUseSaved"
                                 text: "Use saved text"
                                 onClicked: app.loadSavedNote()
-                                Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
                             }
                         }
                     }
@@ -4807,7 +4841,6 @@ ApplicationWindow {
                     Accessible.name: tip
                     visible: !versionDialog.removing
                     enabled: !bible.busy
-                    focusPolicy: Qt.StrongFocus
                     font.pixelSize: 24 * versionDialog.uiScale
                     Layout.preferredWidth: versionSearch.implicitHeight
                     Layout.preferredHeight: versionSearch.implicitHeight
@@ -5112,8 +5145,6 @@ ApplicationWindow {
                 visible: !app.paletteTextMode && app.paletteBook > 0
                 emphasized: activeFocus
                 onClicked: app.backToBooks()
-                Keys.onReturnPressed: app.backToBooks()
-                Keys.onEnterPressed: app.backToBooks()
                 Keys.onDownPressed: { paletteResults.currentIndex = -1; app.movePalette(1) }
                 Keys.onUpPressed: {}
             }
@@ -5531,9 +5562,9 @@ ApplicationWindow {
             FineRule { Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked(); onClicked: { savedDrawer.close(); app.runCommand("export") } }
+                QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: { savedDrawer.close(); app.runCommand("export") } }
                 Item { Layout.fillWidth: true }
-                QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked(); onClicked: { savedDrawer.close(); app.runCommand("backup") } }
+                QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: { savedDrawer.close(); app.runCommand("backup") } }
             }
         }
     }
@@ -5616,7 +5647,6 @@ ApplicationWindow {
                     text: "Clean Desk"; compact: true
                     enabled: deskList.count > 0 && !app.rangeEditing && !bible.busy
                     onClicked: app.requestCleanDesk()
-                    Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
                 }
             }
             FineRule { Layout.fillWidth: true }
@@ -5738,8 +5768,8 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                QuietButton { id: cleanDeskCancel; objectName: "cleanDeskCancel"; text: "Cancel"; onClicked: cleanDeskConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
-                QuietButton { id: cleanDeskConfirm; objectName: "cleanDeskConfirm"; text: "Clean Desk"; emphasized: true; onClicked: app.confirmCleanDesk(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { id: cleanDeskCancel; objectName: "cleanDeskCancel"; text: "Cancel"; onClicked: cleanDeskConfirmation.close() }
+                QuietButton { id: cleanDeskConfirm; objectName: "cleanDeskConfirm"; text: "Clean Desk"; emphasized: true; onClicked: app.confirmCleanDesk() }
             }
         }
     }
@@ -5816,7 +5846,6 @@ ApplicationWindow {
                     text: "Clear History"; compact: true
                     enabled: historyList.count > 0 && !app.rangeEditing && !bible.busy
                     onClicked: app.requestClearHistory()
-                    Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked()
                 }
             }
             FineRule { Layout.fillWidth: true }
@@ -5970,8 +5999,8 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                QuietButton { id: clearHistoryCancel; objectName: "clearHistoryCancel"; text: "Cancel"; onClicked: clearHistoryConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
-                QuietButton { id: clearHistoryConfirm; objectName: "clearHistoryConfirm"; text: "Clear History"; emphasized: true; onClicked: app.confirmClearHistory(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { id: clearHistoryCancel; objectName: "clearHistoryCancel"; text: "Cancel"; onClicked: clearHistoryConfirmation.close() }
+                QuietButton { id: clearHistoryConfirm; objectName: "clearHistoryConfirm"; text: "Clear History"; emphasized: true; onClicked: app.confirmClearHistory() }
             }
         }
     }
@@ -6021,8 +6050,8 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                QuietButton { id: deleteCancel; objectName: "deleteCancel"; text: "Cancel"; onClicked: deleteConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
-                QuietButton { id: deleteConfirm; objectName: "deleteConfirm"; text: deleteConfirmation.tag ? "Remove" : "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { id: deleteCancel; objectName: "deleteCancel"; text: "Cancel"; onClicked: deleteConfirmation.close() }
+                QuietButton { id: deleteConfirm; objectName: "deleteConfirm"; text: deleteConfirmation.tag ? "Remove" : "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved() }
             }
         }
     }
@@ -6389,7 +6418,7 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                QuietButton { objectName: "importCancel"; text: "Close"; font.pixelSize: 14 * importGuide.uiScale; onClicked: importGuide.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { objectName: "importCancel"; text: "Close"; font.pixelSize: 14 * importGuide.uiScale; onClicked: importGuide.close() }
                 QuietButton {
                     id: importChoose
                     objectName: "importChoose"
@@ -6398,8 +6427,6 @@ ApplicationWindow {
                     emphasized: true
                     enabled: !bible.busy && !catalog.busy
                     onClicked: { if (bible.busy || catalog.busy || !app.flushNote()) return; importGuide.choosePending = true; importGuide.close() }
-                    Keys.onReturnPressed: clicked()
-                    Keys.onEnterPressed: clicked()
                 }
             }
         }
@@ -6493,8 +6520,6 @@ ApplicationWindow {
                     objectName: "backupCancel"
                     text: "Cancel"
                     onClicked: backupScope.close()
-                    Keys.onReturnPressed: clicked()
-                    Keys.onEnterPressed: clicked()
                 }
                 QuietButton {
                     id: backupChoose
@@ -6503,8 +6528,6 @@ ApplicationWindow {
                     emphasized: true
                     enabled: app.actionAvailable("backup")
                     onClicked: { if (!app.flushNote()) return; backupScope.choosePending = true; backupScope.close() }
-                    Keys.onReturnPressed: clicked()
-                    Keys.onEnterPressed: clicked()
                 }
             }
         }
@@ -6577,16 +6600,12 @@ ApplicationWindow {
                     objectName: "restoreCancel"
                     text: "Cancel"
                     onClicked: restoreConfirmation.close()
-                    Keys.onReturnPressed: restoreConfirmation.close()
-                    Keys.onEnterPressed: restoreConfirmation.close()
                 }
                 QuietButton {
                     objectName: "restoreConfirm"
                     text: "Restore"
                     emphasized: true
                     onClicked: app.confirmRestore()
-                    Keys.onReturnPressed: app.confirmRestore()
-                    Keys.onEnterPressed: app.confirmRestore()
                 }
             }
         }
@@ -6603,7 +6622,7 @@ ApplicationWindow {
             spacing: 16 * app.scale
             Label { text: "Unable to complete action"; color: desktop.foreground; font.pixelSize: 22 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Label { objectName: "focusedErrorMessage"; text: errorDialog.message; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; Accessible.role: Accessible.AlertMessage }
-            QuietButton { id: errorDismiss; text: "Dismiss"; Layout.alignment: Qt.AlignRight; onClicked: errorDialog.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+            QuietButton { id: errorDismiss; text: "Dismiss"; Layout.alignment: Qt.AlignRight; onClicked: errorDialog.close() }
         }
     }
 

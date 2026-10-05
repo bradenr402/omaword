@@ -219,6 +219,44 @@ private slots:
         }
         QVERIFY(seen > 5);
     }
+    void buttonsActivateOnEnterAndOwnSpace() {
+        // Keyboard: a focused footer button takes enter and space; space does not resume the palette.
+        auto layout = item("layoutControl"); QVERIFY(layout);
+        layout->forceActiveFocus(); QCOMPARE(bible->readingMode(), QString("verse"));
+        key(Qt::Key_Return); QCOMPARE(bible->readingMode(), QString("block"));
+        key(Qt::Key_Enter); QCOMPARE(bible->readingMode(), QString("paragraph"));
+        auto search = item("searchControl"); search->forceActiveFocus();
+        key(Qt::Key_Space); QTRY_VERIFY(opened("passagePalette"));
+        QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        // A dialog's QuietButton: enter and space both activate it.
+        QVERIFY(bible->navigate("John 3:5")); QVERIFY(bible->addToDesk());
+        run("desk"); QTRY_VERIFY(opened("deskDrawer"));
+        auto clean = item("deskClean"); clean->forceActiveFocus(); key(Qt::Key_Space);
+        QTRY_VERIFY(opened("cleanDeskConfirmation"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
+        clean->forceActiveFocus(); key(Qt::Key_Return); QTRY_VERIFY(opened("cleanDeskConfirmation"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
+    }
+    void chromeButtonsTakeFocusOnlyByTab() {
+        // Mouse: a click never moves the keyboard off the reader.
+        QVERIFY(readerFocused());
+        auto layout = item("layoutControl");
+        QCOMPARE(layout->property("focusPolicy").toInt(), int(Qt::TabFocus));
+        click(layout); QCOMPARE(bible->readingMode(), QString("block")); QVERIFY(readerFocused());
+        // Reached by tab, a mouse click hands the keyboard back to the reader.
+        layout->forceActiveFocus(); QVERIFY(layout->hasActiveFocus());
+        click(layout); QCOMPARE(bible->readingMode(), QString("paragraph")); QTRY_VERIFY(readerFocused());
+        // Keyboard focus shows the tooltip as hover does.
+        auto tip = toolTipOf(layout); QVERIFY(tip);
+        layout->forceActiveFocus(); QTRY_VERIFY(tip->property("visible").toBool());
+        QTest::mouseMove(window, QPoint(window->width() / 2, 200));
+        call("readerFocus"); QTRY_VERIFY(!tip->property("visible").toBool());
+        // Tab reaches the footer from the reader.
+        bool reached = false;
+        for (int i = 0; i < 12 && !reached; ++i) { key(Qt::Key_Tab); reached = focusName() == "helpControl" || focusName() == "modeControl" || focusName() == "searchControl"; }
+        QVERIFY(reached);
+    }
 };
 
 int main(int argc, char **argv) {
