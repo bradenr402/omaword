@@ -188,8 +188,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `t`: Edit the item's tags (Annotations and Study Tags)
 - `tab` · `shift tab`: Between Study Tags results and tag chips
 - `space`: Turn a Study tag chip on or off
-- `shift space`: Show only this chip's tag, or every tag again
-- `0`: Turn every Study tag chip back on
+- `shift space`: Show only this tag (a Study tag chip), or all tags again
+- `0`: Show all tags (Study tag chips)
 - `a`: Study Tags in all installed versions, or this one
 - `/`: Search the list (Annotations, Study's Tags)
 - `h` · `←`: Previous tab (Annotations, Study)

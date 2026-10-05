@@ -1562,6 +1562,46 @@ private slots:
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         }
     }
+    void studyTagChipsAndCountByMouseAndKey() {
+        bible->selectVerses(7, 7); const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
+        bible->selectVerses(9, 9); const QString beta = bible->createAndAssignTag(bible->tagScope(), "Beta");
+        bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true)); QVERIFY(bible->setTag(bible->tagScope(), beta, true));
+        navigate("John 3:3");
+        auto tags = object("tagsUi");
+        QVERIFY(QMetaObject::invokeMethod(tags, "openStudy", Q_ARG(QVariant, "related"), Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyChip:" + alpha));
+        auto chip = item("studyChip:" + alpha);
+        // Every chip's tooltip explains the clicks.
+        auto tip = toolTipOf(chip); QVERIFY(tip);
+        QVERIFY(tip->property("text").toString().contains("shift click: show only this tag"));
+        QTest::mouseMove(window, center(chip) + QPoint(1, 1)); QTest::mouseMove(window, center(chip)); QTRY_VERIFY(tip->property("visible").toBool());
+        // Mouse: the chip's menu shows only this tag, then all tags again.
+        click(chip, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), QStringList({"soloChip", "allChips", "|", "editTags"}));
+        QVERIFY(!menuEnabled("allChips"));
+        chooseMenu("soloChip"); QCOMPARE(value(tags->property("onIds")).toStringList(), QStringList{alpha});
+        click(chip, Qt::RightButton); chooseMenu("allChips"); QCOMPARE(value(tags->property("onIds")).toStringList().size(), 2);
+        // Keyboard: the chip hints use the same words.
+        chip->forceActiveFocus();
+        QTRY_VERIFY(object("studyHints")->property("plainText").toString().contains("shift space show only this tag"));
+        QVERIFY(object("studyHints")->property("plainText").toString().contains("0 show all tags"));
+        key(Qt::Key_Space, Qt::ShiftModifier); QCOMPARE(value(tags->property("onIds")).toStringList(), QStringList{alpha});
+        key(Qt::Key_0); QCOMPARE(value(tags->property("onIds")).toStringList().size(), 2);
+        // The count line opens the passage search; its menu offers All versions and Search.
+        auto count = item("studyTagCount"); QVERIFY(count && count->isVisible());
+        QCOMPARE(item("studyTagCountMouse")->cursor().shape(), Qt::PointingHandCursor);
+        click(count); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("studySearch")->isVisible());
+        QTRY_VERIFY(item("studyTagCount")->isVisible());
+        click(item("studyTagCount"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), QStringList({"allVersions", "searchPassages"}));
+        QVERIFY(!menuEnabled("allVersions")); // one version installed
+        chooseMenu("searchPassages"); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
+        key(Qt::Key_Escape);
+        // Edit tags from the chip menu opens the tag picker for the passage.
+        click(item("studyChip:" + alpha), Qt::RightButton); chooseMenu("editTags"); QTRY_VERIFY(opened("tagsSurface"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
+    }
 };
 
 int main(int argc, char **argv) {

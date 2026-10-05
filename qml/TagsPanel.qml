@@ -154,6 +154,27 @@ Item {
         else setChipOff(rootChips.map(function(chip) { return chip.id }).filter(function(other) { return other !== id }))
     }
     function restoreChips() { setChipOff([]) }
+    // A chip's right-click menu, and the passage count's (Study → Tags).
+    function chipMenu(chip, sceneX, sceneY) {
+        const only = onIds.length === 1 && onIds[0] === chip.id
+        app.showContextMenu("studyChip", [
+            { id: "soloChip", text: "Show only this tag", shortcut: KeyNotation.format("Shift+Space"), enabled: !only,
+                run: function() { panel.soloChip(chip.id) } },
+            { id: "allChips", text: "Show all tags", shortcut: KeyNotation.format("0"), enabled: chipOff.length > 0,
+                run: function() { panel.restoreChips() } },
+            { separator: true },
+            { id: "editTags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: !bible.busy && !app.rangeEditing && installed(relatedSource),
+                run: function() { panel.app.openPassageTags(panel.snapshot(panel.relatedSource)) } }
+        ], sceneX, sceneY)
+    }
+    function countMenu(sceneX, sceneY) {
+        app.showContextMenu("studyCount", [
+            { id: "allVersions", text: allVersions ? "This version only" : "All versions", shortcut: KeyNotation.format("A"), enabled: otherVersions,
+                run: function() { panel.toggleAllVersions() } },
+            { id: "searchPassages", text: "Search passages…", shortcut: KeyNotation.format("/"), enabled: tagsTab,
+                run: function() { panel.showStudySearch() } }
+        ], sceneX, sceneY)
+    }
     function toggleAllVersions() {
         allVersions = !allVersions
         refreshTagResults()
@@ -561,7 +582,7 @@ Item {
         if (!rootChips.length) return [tabs, tag, ["Escape", "close", escape]]
         const chip = currentChip()
         if (chipFocused) return [[["Left", "Right"], "chips"], ["Space", "toggle", function() { panel.toggleChip(chip.id) }, !!chip],
-            ["Shift+Space", "solo", function() { panel.soloChip(chip.id) }, !!chip], ["0", "all", function() { panel.restoreChips() }],
+            ["Shift+Space", "show only this tag", function() { panel.soloChip(chip.id) }, !!chip], ["0", "show all tags", function() { panel.restoreChips() }],
             ["Down", "passages"], ["Escape", "close", escape]]
         return [tabs, ["Return", "open", function() { panel.openTagged(panel.visibleResults[resultList.currentIndex]) }, listKeys], ["T", "tag", tag[2], tag[3]],
             otherVersions ? ["A", allVersions ? "this version" : "all versions", function() { panel.toggleAllVersions() }, relatedMoveKeys] : null,
@@ -746,20 +767,26 @@ Item {
         }
         background: Rectangle {
             color: chipMouse.pressed ? panel.desktop.surface
-                : chip.on ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, chip.hovered ? 0.14 : 0.08)
-                : chip.hovered ? panel.desktop.surface : "transparent"
+                : chip.on ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, (chip.hovered || chipMouse.containsMouse) ? 0.14 : 0.08)
+                : (chip.hovered || chipMouse.containsMouse) ? panel.desktop.surface : "transparent"
             border.width: 1
-            border.color: chip.activeFocus ? panel.desktop.accent : chip.hovered ? panel.desktop.muted : panel.desktop.border
+            border.color: chip.activeFocus ? panel.desktop.accent : (chip.hovered || chipMouse.containsMouse) ? panel.desktop.muted : panel.desktop.border
             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
         onActiveFocusChanged: if (activeFocus) panel.chipIndex = Math.max(0, panel.chipItems().indexOf(chip))
-        // Click toggles; shift click solos the chip (again: every chip back on).
+        // Click toggles; shift click solos the chip (again: every chip back on);
+        // right click: Show only this tag / Show all tags / Edit tags.
         MouseArea {
             id: chipMouse
             anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: function(mouse) {
                 chip.forceActiveFocus()
-                if (mouse.modifiers & Qt.ShiftModifier) panel.soloChip(chip.modelData.id)
+                if (mouse.button === Qt.RightButton) {
+                    const p = mapToItem(null, mouse.x, mouse.y)
+                    panel.chipMenu(chip.modelData, p.x, p.y)
+                } else if (mouse.modifiers & Qt.ShiftModifier) panel.soloChip(chip.modelData.id)
                 else panel.toggleChip(chip.modelData.id)
             }
         }
@@ -778,8 +805,9 @@ Item {
         Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
         AppToolTip {
             theme: panel.desktop; uiScale: panel.uiScale
-            text: chip.modelData.overlap ? "on " + chip.modelData.reference + " (overlapping range)" : ""
-            visible: text.length > 0 && chip.hovered
+            text: (chip.modelData.overlap ? "On " + chip.modelData.reference + " (overlapping range)\n" : "")
+                + "click: turn on/off · " + KeyNotation.format("Shift+Click") + ": show only this tag"
+            visible: chipMouse.containsMouse || chip.activeFocus
         }
         Accessible.name: modelData.name + (on ? "" : ", off")
     }
@@ -1024,6 +1052,26 @@ Item {
             }
             TagText {
                 objectName: "studyTagCount"
+                // Clickable: opens the passage search; right click for its menu.
+                MouseArea {
+                    id: studyCountMouse
+                    objectName: "studyTagCountMouse"
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: function(mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            const p = mapToItem(null, mouse.x, mouse.y)
+                            panel.countMenu(p.x, p.y)
+                        } else panel.showStudySearch()
+                    }
+                }
+                AppToolTip {
+                    theme: panel.desktop; uiScale: panel.uiScale
+                    text: "Search these passages · " + KeyNotation.format("/") + "\n" + KeyNotation.format("RightClick") + ": all versions, search"
+                    visible: studyCountMouse.containsMouse
+                }
                 Layout.fillWidth: true
                 visible: panel.tagsTab && !panel.studySearchOpen && panel.onIds.length > 0 && panel.results.length > 0
                 font.pixelSize: 12 * panel.studyScale
