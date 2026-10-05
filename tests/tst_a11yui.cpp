@@ -872,6 +872,11 @@ private slots:
         chooseMenu("leaveFocus"); QVERIFY(!bible->focusMode());
         key(Qt::Key_F); QVERIFY(bible->focusMode());
         click(item("focusControl")); QVERIFY(!bible->focusMode()); QVERIFY(readerFocused());
+        // A cramped footer keeps its folds: the focus button shows only in focus mode there.
+        desktop->setProperty("textScale", 1.8); window->resize(640, 480); QTRY_COMPARE(window->width(), 640);
+        QTRY_VERIFY(!item("focusControl")->isVisible()); QVERIFY(item("savedControl")->isVisible());
+        key(Qt::Key_F); QVERIFY(bible->focusMode()); QTRY_VERIFY(item("focusControl")->isVisible());
+        key(Qt::Key_F); QVERIFY(!bible->focusMode()); QTRY_VERIFY(!item("focusControl")->isVisible());
     }
     void chapterFindByClickAndTab() {
         auto find = [&](const QString &query) {

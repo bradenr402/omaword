@@ -5065,7 +5065,14 @@ ApplicationWindow {
     readonly property real footerButton: 40 * controlScale
     readonly property real footerGroupGap: 24 * controlScale
     readonly property int footerRightCount: bible.ready ? (bible.historyEnabled ? 4 : 3) : 0
-    readonly property real footerLeftFull: bible.ready ? 3 * footerButton : footerButton
+    // The focus button joins the left group where the footer has room for it
+    // without changing any other fold (and always in focus mode).
+    readonly property real footerLeftBase: bible.ready ? 2 * footerButton : footerButton
+    readonly property bool footerFocusFits: bible.ready
+        && (footerCenterFull + 2 * Math.max(footerLeftBase + footerButton, footerRightFull) + 2 * footerGroupGap <= footerAvailable
+            || footerCenterMin + layoutControl.implicitWidth + 2 * (Math.max(footerLeftBase + footerButton, footerRightCount ? footerButton : 0) + footerGroupGap) <= footerAvailable)
+    readonly property bool footerShowsFocus: bible.ready && (footerFocusFits || bible.focusMode)
+    readonly property real footerLeftFull: footerLeftBase + (footerShowsFocus ? footerButton : 0)
     readonly property real footerRightFull: footerRightCount * footerButton
     readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
         + (bible.ready ? versionControl.implicitWidth + layoutControl.implicitWidth : 0)
@@ -5141,7 +5148,7 @@ ApplicationWindow {
             // The one footer button focus mode always shows.
             persistent: true
             selected: bible.focusMode
-            visible: bible.ready
+            visible: app.footerShowsFocus
             available: !bible.busy && !app.modalOpen && app.actionAvailable("focus")
             tip: (bible.focusMode ? "Focus mode · leave" : "Focus mode") + " · " + app.keyText("focus")
             onClicked: { app.runCommand("focus"); app.readerFocus() }

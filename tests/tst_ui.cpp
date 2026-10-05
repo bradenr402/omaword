@@ -3353,7 +3353,7 @@ private slots:
         for (const auto name : {"modeControl","searchControl","passageControl","versionControl","layoutControl","relatedControl","savedControl","deskControl","helpControl"}) {
             auto control = item(name);
             if (control == layout && !layout->isVisible()) continue;
-            QVERIFY(control->isVisible());
+            QVERIFY2(control->isVisible(), name);
             QVERIFY(QRectF(QPointF(),size).contains(control->mapRectToScene(QRectF(0,0,control->width(),control->height()))));
             const auto background = qvariant_cast<QQuickItem *>(control->property("background"));
             QVERIFY(background);
