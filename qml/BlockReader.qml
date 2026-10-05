@@ -444,7 +444,7 @@ Item {
             required property var modelData
             readonly property bool opening: modelData.edge !== "close"
             readonly property bool footnote: modelData.kind === "footnote"
-            readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\nClick to read it in Study"
+            readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\n" + (root.controller.footnoteHint || "Click to read it in Study")
                 : (modelData.kind === "bookmark" ? "Bookmark" : modelData.kind === "note" ? "Note" : "Tag") + "\n"
                 + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
                 + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
@@ -454,7 +454,8 @@ Item {
             width: modelData.width; height: modelData.height
             z: 2
             visible: !root.backend.focusMode
-            activeFocusOnTab: opening
+            // Footnotes stay out of the tab order (shift S opens Study → Footnotes).
+            activeFocusOnTab: opening && !footnote
             Keys.onPressed: function(event) {
                 if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Return || event.key === Qt.Key_Space)) {
                     root.openAnnotation(modelData)

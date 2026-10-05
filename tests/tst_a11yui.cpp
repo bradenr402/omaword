@@ -1364,6 +1364,32 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("catalogDetails"));
         clickHint("importGuideHintsPart:close"); QTRY_VERIFY(!shown("importGuide"));
     }
+    static QQuickItem *visualPrefix(QQuickItem *root, const QString &prefix) {
+        if (root->objectName().startsWith(prefix)) return root;
+        for (auto child : root->childItems()) if (auto found = visualPrefix(child, prefix)) return found;
+        return nullptr;
+    }
+    void footnoteMarkersSkipTabAndNameTheKey() {
+        for (const QString mode : {"verse", "block"}) {
+            setMode(mode); navigate("John 3:3");
+            auto marker = visualPrefix(window->contentItem(), mode == "verse" ? "verseFootnoteMark:3." : "blockInlineMarker:footnote:");
+            QVERIFY2(marker, qPrintable(mode)); QVERIFY(!marker->activeFocusOnTab());
+            auto tip = toolTipOf(marker); QVERIFY(tip);
+            QVERIFY2(tip->property("text").toString().contains(QStringLiteral("shift S → Footnotes")), qPrintable(tip->property("text").toString()));
+            // Mouse: hovering shows it.
+            QTest::mouseMove(window, center(marker)); QTRY_VERIFY(tip->property("visible").toBool());
+            QTest::mouseMove(window, QPoint(5, window->height() / 2));
+            // Keyboard: tab never stops on a footnote marker.
+            call("readerFocus");
+            for (int i = 0; i < 14; ++i) {
+                key(Qt::Key_Tab);
+                QVERIFY2(!focusName().startsWith("verseFootnoteMark") && !focusName().startsWith("blockInlineMarker:footnote"), qPrintable(focusName()));
+            }
+            call("readerFocus");
+            key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(opened("relatedDrawer"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+        }
+    }
 };
 
 int main(int argc, char **argv) {

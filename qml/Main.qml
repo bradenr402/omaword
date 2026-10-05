@@ -2099,6 +2099,8 @@ ApplicationWindow {
         if (sidePanel === "related") { tagsUi.setStudyTab("footnotes", { verse: verse, seq: seq }); return }
         if (leaveSidePanel("related")) tagsUi.openStudy("footnotes", { verse: verse, seq: seq })
     }
+    // Footnote markers stay out of the tab order; their tooltips name the key.
+    readonly property string footnoteHint: "Click to read it in Study · " + KeyNotation.format("Shift+S") + " → Footnotes"
     function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
     // Verse rows reserve footnote cells like BlockDocument: a word joiner and a
     // transparent image at each note's plain-text offset. Paint-only markers
@@ -4793,6 +4795,8 @@ ApplicationWindow {
                                         width: app.footnoteCellWidth
                                         height: cell.height
                                         z: 3
+                                        // Out of the tab order: shift S opens Study → Footnotes.
+                                        activeFocusOnTab: false
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
                                             text: app.footnoteMark(footnoteMarker.modelData.caller)
@@ -4814,7 +4818,7 @@ ApplicationWindow {
                                             theme: desktop
                                             uiScale: app.scale
                                             visible: footnoteMouse.containsMouse
-                                            text: "Footnote · " + footnoteMarker.modelData.text + "\nClick to read it in Study"
+                                            text: "Footnote · " + footnoteMarker.modelData.text + "\n" + app.footnoteHint
                                         }
                                     }
                                 }
