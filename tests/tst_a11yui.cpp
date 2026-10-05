@@ -1932,6 +1932,29 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(merge, "close")); editor->setProperty("pending", QVariant());
         QVERIFY(item("rangeChoiceScrollbar"));
     }
+    void chapterTitleOpensItsChapterList() {
+        navigate("John 3:1"); call("setReaderY", 0);
+        auto title = item("chapterTitleMouse"); QVERIFY(title);
+        QTRY_VERIFY(center(title).y() > 20 && center(title).y() < window->height() / 2);
+        QCOMPARE(title->cursor().shape(), Qt::PointingHandCursor);
+        // Mouse: hovering explains it; a click lists John's chapters with 3 chosen.
+        QTest::mouseMove(window, center(title) + QPoint(2, 0)); QTest::mouseMove(window, center(title));
+        QTRY_VERIFY(toolTipOf(item("chapterTitle"))->property("visible").toBool());
+        click(title); QTRY_VERIFY(opened("passagePalette"));
+        QCOMPARE(prop("paletteBook").toInt(), bible->book());
+        QCOMPARE(item("paletteResults")->property("currentIndex").toInt(), 2);
+        shot("chapter-title-palette");
+        // Keyboard: ↑ and enter open the previous chapter; ← goes back to all books.
+        key(Qt::Key_Up); key(Qt::Key_Return);
+        QTRY_VERIFY(!shown("passagePalette") || prop("paletteChapter").toInt() == 2);
+        if (shown("passagePalette")) { key(Qt::Key_Return); QTRY_VERIFY(!shown("passagePalette")); }
+        QCOMPARE(bible->chapter(), 2);
+        call("setReaderY", 0); QTRY_VERIFY(center(title).y() > 20 && center(title).y() < window->height() / 2);
+        click(item("chapterTitleMouse")); QTRY_VERIFY(opened("passagePalette"));
+        key(Qt::Key_Left); QTRY_COMPARE(prop("paletteBook").toInt(), 0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+    }
+
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }

@@ -2388,6 +2388,23 @@ ApplicationWindow {
         passagePalette.open()
         referenceInput.forceActiveFocus()
     }
+    // The Passage palette at the reader's book, its chapters listed with the
+    // current one chosen (clicking the chapter title).
+    function openChapterList() {
+        if (rangeEditing || !bible.ready || bible.busy) { rejected(); return }
+        const book = Array.from(bible.books).find(function(b) { return b.id === bible.book })
+        if (!book) { rejected(); return }
+        openPalette(false)
+        if (!passagePalette.visible) return
+        paletteBookName = book.name
+        paletteBook = book.id
+        referenceInput.text = ""
+        paletteArrowUsed = true
+        const row = Math.max(0, Array.from(book.chapterNumbers).indexOf(bible.chapter))
+        paletteResults.currentIndex = row
+        paletteResults.positionViewAtIndex(row, ListView.Contain)
+        referenceInput.forceActiveFocus()
+    }
     function rememberPalette() {
         paletteSnapshot = { query: referenceInput.text, book: paletteBook, chapter: paletteChapter,
             name: paletteBookName, row: paletteResults.currentIndex, arrow: paletteArrowUsed,
@@ -4640,6 +4657,24 @@ ApplicationWindow {
                             bottomPadding: 24 * app.readerScale
                             width: parent.width
                             wrapMode: Text.Wrap
+                            // Click: the Passage palette at this book's chapter list.
+                            MouseArea {
+                                id: chapterTitleMouse
+                                objectName: "chapterTitleMouse"
+                                x: parent.leftPadding
+                                width: Math.min(parent.width - x, parent.contentWidth)
+                                height: parent.height - parent.bottomPadding
+                                enabled: bible.ready && !app.rangeEditing
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: app.openChapterList()
+                            }
+                            AppToolTip {
+                                theme: desktop
+                                uiScale: app.scale
+                                visible: chapterTitleMouse.containsMouse && !bible.focusMode
+                                text: "Choose another chapter · " + app.menuKey("books") + " for any passage"
+                            }
                         }
                         Repeater {
                             id: verseRepeater
