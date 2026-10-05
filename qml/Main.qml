@@ -2050,6 +2050,10 @@ ApplicationWindow {
         if (!entry || modalOpen || bible.busy) return
         openNoteScope(entry.scope)
     }
+    function openMarginNoteMenu(entry, sceneX, sceneY) {
+        if (!entry || modalOpen || bible.busy) return
+        openMarkerMenu([entry.scope], "note", function() { app.openMarginNote(entry) }, entry.scope, sceneX, sceneY)
+    }
     function followMarginLink(link) {
         if (modalOpen || bible.busy) return
         if (link.startsWith("omaword-passage:")) jump(decodeURIComponent(link.substring(16)))
@@ -5005,7 +5009,14 @@ ApplicationWindow {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: app.openMarginNote(marginNote.modelData)
+                                    // Right click: the same menu as a note marker (Open, Edit range, Delete note…, Copy, Desk).
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: function(mouse) {
+                                        if (mouse.button === Qt.RightButton) {
+                                            const p = mapToItem(null, mouse.x, mouse.y)
+                                            app.openMarginNoteMenu(marginNote.modelData, p.x, p.y)
+                                        } else app.openMarginNote(marginNote.modelData)
+                                    }
                                 }
                                 Text {
                                     id: noteText

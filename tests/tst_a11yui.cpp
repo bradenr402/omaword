@@ -1602,6 +1602,24 @@ private slots:
         click(item("studyChip:" + alpha), Qt::RightButton); chooseMenu("editTags"); QTRY_VERIFY(opened("tagsSurface"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
     }
+    void marginNotesTakeTheMarkerMenu() {
+        window->resize(1700, 900); QTRY_COMPARE(window->width(), 1700);
+        bible->selectVerses(16, 16); bible->setNoteText("A margin note"); bible->setMarginNotes(true);
+        navigate("John 3:14");
+        QTRY_VERIFY(item("marginNote:John 3:16") && item("marginNote:John 3:16")->isVisible());
+        auto note = item("marginNote:John 3:16");
+        // Mouse: right click opens the note marker's menu.
+        click(note, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), QStringList({"open", "|", "editRange", "remove", "|", "copy", "|", "desk"}));
+        QCOMPARE(value(menu()->property("layout")).toList().at(3).toMap()["text"].toString(), QString("Delete note…"));
+        chooseMenu("open"); QTRY_VERIFY(opened("notesDrawer")); QCOMPARE(bible->selectionReference(), QString("John 3:16"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        // Keyboard: the same menu by keys copies the passage.
+        click(note, Qt::RightButton); QGuiApplication::clipboard()->clear(); menuKeyTo("copy");
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("—John 3:16")));
+        // Left click still opens the note.
+        click(note); QTRY_VERIFY(opened("notesDrawer"));
+    }
 };
 
 int main(int argc, char **argv) {
