@@ -1793,6 +1793,17 @@ private slots:
         QTest::qWait(50); QTest::mouseMove(window, center(row)); QTRY_VERIFY(toolTipOf(row)->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
     }
+    void paletteHintsCycleModesWithTab() {
+        run("books"); QTRY_VERIFY(opened("passagePalette"));
+        QTRY_VERIFY(object("paletteHints")->property("plainText").toString().contains("tab mode"));
+        // Mouse: the tab hint steps Passage → Search → Command.
+        clickHint("paletteHintsPart:mode"); QTRY_VERIFY(prop("paletteTextMode").toBool());
+        clickHint("paletteHintsPart:mode"); QTRY_COMPARE(object("referenceInput")->property("text").toString(), QString("> "));
+        // Keyboard: tab continues back to Passage.
+        key(Qt::Key_Tab); QTRY_COMPARE(object("referenceInput")->property("text").toString(), QString());
+        QVERIFY(!prop("paletteTextMode").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }

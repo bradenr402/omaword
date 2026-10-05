@@ -1967,11 +1967,11 @@ private slots:
             QVERIFY(QRectF(16,16,608,448).contains(hints->mapRectToScene(hints->boundingRect())));
             const auto text = plainHint(hints->property("text").toString());
             if (mode == "commands") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    esc close"));
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    tab mode    esc close"));
                 QVERIFY(!item("paletteBack")->isVisible());
             } else if (mode == "chapters") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    ← back    esc close"));
-            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    esc close"));
+                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    ← back    tab mode    esc close"));
+            } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    tab mode    esc close"));
         }
     }
     void normalVisualAndShiftedSelection() {
@@ -4150,7 +4150,7 @@ private slots:
         QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
         key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
         QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
-        QCOMPARE(plainHint(prop("paletteHints","text").toString()),QString::fromUtf8("↑ ↓ choose    enter select    esc close"));
+        QCOMPARE(plainHint(prop("paletteHints","text").toString()),QString::fromUtf8("↑ ↓ choose    enter select    tab mode    esc close"));
         // One esc closes with a query; space resumes it.
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());

@@ -3398,7 +3398,9 @@ ApplicationWindow {
     function paletteHintParts() {
         return [[["Up", "Down"], "choose"], paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
             ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
-            paletteBook > 0 ? ["Left", "back", app.backToBooks] : null, ["Escape", "close", app.escapePalette]]
+            paletteBook > 0 ? ["Left", "back", app.backToBooks] : null,
+            // tab / shift tab cycle Passage → Search → Command.
+            bible.ready ? ["Tab", "mode", function() { app.cyclePaletteMode(1) }] : null, ["Escape", "close", app.escapePalette]]
     }
     function versionHintParts() {
         const ready = !bible.busy
