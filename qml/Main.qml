@@ -1566,6 +1566,17 @@ ApplicationWindow {
         const at = noteEditor.cursorPosition
         return noteLinks.find(function(link) { return at >= link.start && at <= link.start + link.length }) || null
     }
+    // A web address (http/https) at the note cursor, without trailing punctuation.
+    readonly property string noteUrlAtCursor: {
+        const at = noteEditor.cursorPosition
+        const pattern = /https?:\/\/[^\s<>"'\]\[()]+/g
+        let match
+        while ((match = pattern.exec(noteEditor.text)) !== null) {
+            const url = match[0].replace(/[.,;:!?]+$/, "")
+            if (at >= match.index && at <= match.index + url.length) return url
+        }
+        return ""
+    }
     readonly property var linkedFrom: {
         const watched = [bible.collection, bible.selectionReference, bible.passage, bible.noteText]
         return bible.ready && notesOpen && watched ? Array.from(bible.linkedNotes()) : []
@@ -1627,9 +1638,23 @@ ApplicationWindow {
         if (link.startsWith("omaword-passage:")) followPassageLink(decodeURIComponent(link.substring(16)))
         else desktop.openExternal(link)
     }
+    // alt enter: a passage link opens in the reader, a web address in the browser.
     function openNoteLinkAtCursor() {
-        if (!noteLinkAtCursor) { sounds.play("boundary"); return false }
-        return followPassageLink(noteLinkAtCursor.reference)
+        if (noteLinkAtCursor) return followPassageLink(noteLinkAtCursor.reference)
+        if (noteUrlAtCursor.length) { desktop.openExternal(noteUrlAtCursor); return true }
+        sounds.play("boundary")
+        return false
+    }
+    // alt v: Write ↔ Preview, from the editor or anywhere in the Notes panel.
+    function toggleNotePreview() {
+        if (!notesOpen || !hasSelection) { rejected(); return }
+        if (notePreview) {
+            notePreview = false
+            noteEditor.forceActiveFocus()
+        } else if (flushNote()) {
+            notePreview = true
+            notePreviewText.forceActiveFocus()
+        }
     }
     // Opens a note's passage link as a History jump; Notes stays open on it.
     function followPassageLink(reference) {
@@ -3191,7 +3216,8 @@ ApplicationWindow {
         { id: "manageBack", group: "Annotate", title: "Manage tags: back to the picker (empty filter)", sequences: ["Backspace"], scope: "tags", explanation: true },
         // Bound by the note editor itself.
         { id: "noteLinkSuggest", group: "Annotate", title: "Suggest a passage to link (in a note)", sequences: ["[, ["], scope: "noteEditor" },
-        { id: "openNoteLink", group: "Annotate", title: "Open the passage link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
+        { id: "openNoteLink", group: "Annotate", title: "Open the passage or web link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
+        { id: "notePreview", group: "Annotate", title: "Switch a note between Write and Preview (Notes panel)", sequences: ["Alt+V"], scope: "noteEditor" },
         { id: "noteLinkedFrom", group: "Annotate", title: "Between a note and its Linked from list (in a note)", sequences: ["Tab", "Shift+Tab"], scope: "noteEditor" },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
@@ -5199,8 +5225,8 @@ ApplicationWindow {
                     RowLayout {
                         visible: app.hasSelection
                         spacing: 4
-                        QuietButton { text: "Write"; compact: true; emphasized: !app.notePreview; onClicked: { app.notePreview = false; noteEditor.forceActiveFocus() } }
-                        QuietButton { objectName: "previewButton"; text: "Preview"; compact: true; emphasized: app.notePreview; onClicked: { if (app.flushNote()) { app.notePreview = true; notePreviewText.forceActiveFocus() } } }
+                        QuietButton { objectName: "writeButton"; text: "Write"; compact: true; emphasized: !app.notePreview; tip: "Write · " + app.keyText("notePreview"); onClicked: { app.notePreview = false; noteEditor.forceActiveFocus() } }
+                        QuietButton { objectName: "previewButton"; text: "Preview"; compact: true; emphasized: app.notePreview; tip: "Preview · " + app.keyText("notePreview"); onClicked: { if (app.flushNote()) { app.notePreview = true; notePreviewText.forceActiveFocus() } } }
                         Item { Layout.fillWidth: true }
                         Label { text: "Markdown"; color: desktop.muted; font.pixelSize: 11 * app.scale }
                     }
@@ -5310,11 +5336,13 @@ ApplicationWindow {
                     }
                     HintRow {
                         objectName: "notesHints"
-                        visible: noteEditor.activeFocus && (app.linkSuggesting || !!app.noteLinkAtCursor || app.linkedFrom.length > 0)
+                        visible: noteEditor.activeFocus || notePreviewText.activeFocus
                         theme: desktop
                         parts: app.linkSuggesting ? [[["Up", "Down"], "choose"], ["Return", "insert", function() { app.acceptLinkSuggestion() }, app.linkSuggestions.length > 0],
                                 ["Escape", "dismiss", app.dismissLinkSuggestions]]
-                            : [app.noteLinkAtCursor ? ["Alt+Return", "open link", app.openNoteLinkAtCursor] : null,
+                            : notePreviewText.activeFocus ? [[["J", "K"], "scroll"], [app.actionKeys("notePreview")[0], "write", app.toggleNotePreview]]
+                            : [app.noteLinkAtCursor || app.noteUrlAtCursor.length ? ["Alt+Return", "open link", app.openNoteLinkAtCursor] : null,
+                                [app.actionKeys("notePreview")[0], "preview", app.toggleNotePreview],
                                 app.linkedFrom.length ? [app.actionKeys("noteLinkedFrom")[0], "linked from", app.focusLinkedFrom] : null]
                         pixelSize: 11 * app.scale
                         Layout.fillWidth: true
@@ -7846,6 +7874,15 @@ ApplicationWindow {
             enabled: app.active && app.zPending && app.actionAvailable(modelData) && app.readerKeys
             onActivated: app.runCommand(modelData.id)
         }
+    }
+    // alt v in the Notes panel (editor, preview, Linked from); the drawer is a
+    // popup, so the application context reaches it in the active window only.
+    Shortcut {
+        objectName: "notePreviewShortcut"
+        context: Qt.ApplicationShortcut
+        sequences: app.actionKeys("notePreview")
+        enabled: app.active && app.notesOpen && app.hasSelection && app.focusWithin(notesDrawer.contentItem) && !app.modalOpen
+        onActivated: app.toggleNotePreview()
     }
     Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
     Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }

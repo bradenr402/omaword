@@ -114,7 +114,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl m`: Manage tags: choose a tag to merge into
 - `backspace`: Manage tags: back to the picker (empty filter)
 - `[[`: Suggest a passage to link (in a note)
-- `alt enter`: Open the passage link at the cursor (in a note)
+- `alt enter`: Open the passage or web link at the cursor (in a note)
+- `alt v`: Switch a note between Write and Preview (Notes panel)
 - `tab` · `shift tab`: Between a note and its Linked from list (in a note)
 
 ### Copy

@@ -2,6 +2,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCryptographicHash>
+#include <QDesktopServices>
 #include <QFile>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
@@ -304,6 +305,11 @@ class A11yUiTest : public QObject
         click(item(name));
     }
 
+public slots:
+    // Web links opened from a note (QDesktopServices handler).
+    void openUrl(const QUrl &url) { openedUrls << url; }
+private:
+    QList<QUrl> openedUrls;
 private slots:
     void initTestCase() {
         source = fixtures.filePath("access_usfm.zip"); QVERIFY(edition(source));
@@ -1296,6 +1302,32 @@ private slots:
         QTRY_VERIFY(item("collectionList")->hasActiveFocus()); QVERIFY(!row->hasActiveFocus());
         // Mouse: a click opens the row's passage.
         click(item("savedEntryJohn 3:7")); QTRY_COMPARE(bible->selectionReference(), QString("John 3:7"));
+    }
+    void notesPreviewKeyAndWebLinks() {
+        QDesktopServices::setUrlHandler("https", this, "openUrl"); openedUrls.clear();
+        run("notes"); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        auto editor = item("noteEditor");
+        editor->setProperty("text", "Read https://example.org/page. Then more.");
+        editor->setProperty("cursorPosition", 12);
+        // Keyboard: alt enter opens the web address at the cursor.
+        QTRY_VERIFY(object("notesHints")->property("plainText").toString().contains("alt enter open link"));
+        key(Qt::Key_Return, Qt::AltModifier); QCOMPARE(openedUrls, QList<QUrl>{QUrl("https://example.org/page")});
+        // Away from a link it only sounds the boundary.
+        editor->setProperty("cursorPosition", 35); key(Qt::Key_Return, Qt::AltModifier);
+        QCOMPARE(openedUrls.size(), 1); QCOMPARE(lastSound(), QString("boundary"));
+        // alt v switches Write and Preview, from the editor and from the preview.
+        QVERIFY(object("notesHints")->property("plainText").toString().contains("alt v preview"));
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(prop("notePreview").toBool()); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
+        QVERIFY(object("notesHints")->property("plainText").toString().contains("alt v write"));
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(!prop("notePreview").toBool()); QTRY_VERIFY(editor->hasActiveFocus());
+        // Not from the reader: alt v there does nothing to Notes.
+        call("readerFocus"); key(Qt::Key_V, Qt::AltModifier); QVERIFY(!prop("notePreview").toBool());
+        // Mouse: the hint parts switch too, and the buttons' tooltips name the key.
+        editor->forceActiveFocus();
+        clickHint("notesHintsPart:preview"); QTRY_VERIFY(prop("notePreview").toBool());
+        clickHint("notesHintsPart:write"); QTRY_VERIFY(!prop("notePreview").toBool());
+        QVERIFY(toolTipOf(item("previewButton"))->property("text").toString().contains("alt v"));
+        QDesktopServices::unsetUrlHandler("https");
     }
 };
 
