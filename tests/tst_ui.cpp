@@ -5322,7 +5322,7 @@ private slots:
         QVERIFY(qAbs(inner.right() - (window->width() - padding)) < 0.1);
         QVERIFY(qAbs(inner.top() - padding) < 0.1);
         QVERIFY(qAbs(inner.bottom() - (window->height() - padding)) < 0.1);
-        for (const auto name : {"tagMatchAny", "tagMatchAll", "tagSourceVersion", "tagAllVersions", "tagsDone", "tagSearch"}) {
+        for (const auto name : {"tagMatchAny", "tagMatchAll", "tagSourceVersion", "tagAllVersions", "tagSearch"}) {
             auto button = item(name); QVERIFY(button && button->isVisible());
             const auto bounds = button->mapRectToScene(button->boundingRect());
             QVERIFY2(inner.adjusted(-1,-1,1,1).contains(bounds),name);

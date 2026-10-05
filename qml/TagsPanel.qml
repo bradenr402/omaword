@@ -709,7 +709,9 @@ Item {
         padding: 16 * panel.uiScale
         modal: true
         focus: true
-        closePolicy: Popup.NoAutoClose
+        // Esc or a click on the scrim closes it (a pending confirmation first
+        // needs esc or its own buttons).
+        closePolicy: panel.confirmation ? Popup.NoAutoClose : Popup.CloseOnPressOutside
         // A modal: fades in, closes at once.
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: panel.app.fadeMs || 0; easing.type: Easing.OutQuad } }
         exit: null
@@ -784,7 +786,6 @@ Item {
                 }
                 TagButton { text: "Back"; visible: panel.page === "manage"; onClicked: panel.back() }
                 TagButton { objectName: "manageTags"; text: "Manage"; visible: panel.page === "picker"; onClicked: panel.manage() }
-                TagButton { objectName: "tagsDone"; text: "Done"; visible: panel.page !== "summary"; onClicked: panel.close() }
             }
             PanelTabs {
                 id: studyTabRow

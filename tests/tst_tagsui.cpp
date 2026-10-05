@@ -387,7 +387,10 @@ ApplicationWindow {
         invoke("toggleTag", a);
         QCOMPARE(bible->tagsForScope(first).size(), 2);
         QVERIFY(bible->tagsForScope(second).isEmpty());
-        invoke("close");
+        // No Done button: a click on the scrim closes the picker (esc too).
+        QVERIFY(!item("tagsDone"));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(4, 4));
+        QTRY_VERIFY(!panel->findChild<QObject *>("tagsSurface")->property("visible").toBool());
         QVERIFY(invoke("open").toBool());
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), second);
@@ -429,7 +432,7 @@ ApplicationWindow {
         QCOMPARE(rows().size(), 1);
         QCOMPARE(rows().first().toMap()["versionId"], source["versionId"]);
         QCOMPARE(rows().first().toMap()["start"], target["start"]);
-        for (const auto &name : {"tagSearch", "tagRenameInput", "tagFilters", "tagList", "createPassageTag", "manageTags", "tagsDone"})
+        for (const auto &name : {"tagSearch", "tagRenameInput", "tagFilters", "tagList", "createPassageTag", "manageTags"})
             QVERIFY2(!item(name)->isVisible(), name);
         QTRY_VERIFY(item("summaryTag:" + a) && item("summaryTag:" + a)->isVisible());
         {
