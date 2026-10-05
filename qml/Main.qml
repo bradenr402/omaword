@@ -3181,6 +3181,8 @@ ApplicationWindow {
         { id: "tags", group: "Annotate", title: "Tag passage", sequences: ["T"], command: true },
         { id: "toggleDesk", group: "Annotate", title: "Add to Desk", sequences: ["D"], command: true },
         { id: "editRange", group: "Annotate", title: "Edit annotation range", sequences: ["Shift+E"], command: true },
+        { id: "rangeChooseAnother", group: "Annotate", title: "Edit range: choose another overlapping range", sequences: ["Backspace"], scope: "rangeEditor", explanation: true },
+        { id: "rangeMergeBack", group: "Annotate", title: "Edit range: back from Combine notes to moving the range", sequences: ["Escape"], scope: "rangeEditor", explanation: true },
         { id: "manageTags", group: "Annotate", title: "Manage tags", sequences: ["Ctrl+T"], command: true },
         // Bound by the tag picker's Manage tags page itself.
         { id: "manageRename", group: "Annotate", title: "Manage tags: rename the chosen tag", sequences: ["Return"], scope: "tags", explanation: true },
@@ -3269,7 +3271,7 @@ ApplicationWindow {
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
-    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters", "tags"].includes(action.scope) }
+    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters", "tags", "rangeEditor"].includes(action.scope) }
     function actionById(id) { return actions.find(function(entry) { return entry.id === id }) }
     function actionKeys(action) {
         if (typeof action === "string") action = actionById(action)
@@ -3428,6 +3430,7 @@ ApplicationWindow {
         if (action.scope === "desk") return "Desk panel only"
         if (action.scope === "noteEditor") return "Notes editor"
         if (action.scope === "characters") return "Character selection · " + keyText("characterVisual")
+        if (action.scope === "rangeEditor") return "Range editing (" + keyText("editRange") + ")"
         if (action.scope === "tags") return "Tag picker · Manage tags (" + keyText("manageTags") + ")"
         return "Reader · outside text editing and dialogs"
     }

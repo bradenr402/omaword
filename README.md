@@ -106,6 +106,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `t`: Tag passage
 - `d`: Add to Desk
 - `shift E`: Edit annotation range
+- `backspace`: Edit range: choose another overlapping range
+- `esc`: Edit range: back from Combine notes to moving the range
 - `ctrl t`: Manage tags
 - `enter`: Manage tags: rename the chosen tag
 - `delete`: Manage tags: delete a tag
