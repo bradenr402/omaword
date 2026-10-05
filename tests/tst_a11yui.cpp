@@ -1413,6 +1413,29 @@ private slots:
         // Keyboard: the opening marker still takes tab and opens on enter.
         glyph->forceActiveFocus(); key(Qt::Key_Return); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5–6"));
     }
+    void settingsSlidersTakeLeftAndRight() {
+        run("settings"); QTRY_VERIFY(opened("settingsDialog"));
+        auto font = item("fontSizeSlider"), line = item("lineHeightSlider");
+        // Keyboard: → and ↑ increase, ← and ↓ decrease.
+        font->forceActiveFocus();
+        QTRY_VERIFY(object("fontSizeHints")->property("plainText").toString().contains(QStringLiteral("← → adjust")));
+        key(Qt::Key_Right); QCOMPARE(bible->fontSize(), 19);
+        key(Qt::Key_Left); key(Qt::Key_Left); QCOMPARE(bible->fontSize(), 17);
+        key(Qt::Key_Up); QCOMPARE(bible->fontSize(), 18);
+        line->forceActiveFocus();
+        QTRY_VERIFY(object("lineHeightHints")->property("plainText").toString().contains(QStringLiteral("← → adjust")));
+        QVERIFY(!object("fontSizeHints")->property("plainText").toString().contains("adjust"));
+        key(Qt::Key_Right); QCOMPARE(bible->lineHeight(), 1.6);
+        key(Qt::Key_Left); QCOMPARE(bible->lineHeight(), 1.5);
+        // Mouse: dragging along the track still sets the value.
+        const QPoint from = font->mapToScene(QPointF(font->width() * 0.3, font->height() / 2)).toPoint();
+        const QPoint to = font->mapToScene(QPointF(font->width() * 0.9, font->height() / 2)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, {}, from);
+        for (int i = 1; i <= 6; ++i) QTest::mouseMove(window, from + (to - from) * i / 6);
+        QTest::mouseRelease(window, Qt::LeftButton, {}, to);
+        QTRY_VERIFY(bible->fontSize() > 30);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
+    }
 };
 
 int main(int argc, char **argv) {

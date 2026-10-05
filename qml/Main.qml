@@ -3986,10 +3986,10 @@ ApplicationWindow {
         implicitWidth: 200 * app.scale
         padding: 9 * app.scale
         Keys.priority: Keys.BeforeItem
+        // ← → and ↑ ↓ all adjust by one step (right and up increase).
         Keys.onPressed: function(event) {
-            if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) event.accepted = true
-            else if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
-                if (event.key === Qt.Key_Up) increase()
+            if (event.modifiers === Qt.NoModifier && [Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down].includes(event.key)) {
+                if (event.key === Qt.Key_Up || event.key === Qt.Key_Right) increase()
                 else decrease()
                 moved()
                 event.accepted = true
@@ -7305,6 +7305,7 @@ ApplicationWindow {
                 Label { objectName: "fontSizeValue"; text: bible.fontSize; color: desktop.accent; font.pixelSize: 14 * app.scale }
             }
             SquareSlider {
+                id: fontSizeSliderItem
                 objectName: "fontSizeSlider"
                 Layout.fillWidth: true
                 from: 8; to: 40; stepSize: 1
@@ -7316,9 +7317,10 @@ ApplicationWindow {
             HintRow {
                 objectName: "fontSizeHints"
                 theme: desktop
-                parts: ["smaller", "larger", "resetText"].map(function(id, index) {
+                // With the slider focused, its arrows adjust it too.
+                parts: (fontSizeSliderItem.activeFocus ? [[["Left", "Right"], "adjust"]] : []).concat(["smaller", "larger", "resetText"].map(function(id, index) {
                     return [app.actionKeys(id)[0], ["decrease", "increase", "reset"][index], () => app.runCommand(id), app.actionAvailable(id)]
-                })
+                }))
                 pixelSize: 11 * app.scale
                 Layout.fillWidth: true
             }
@@ -7341,9 +7343,10 @@ ApplicationWindow {
             HintRow {
                 objectName: "lineHeightHints"
                 theme: desktop
-                parts: ["lineLess", "lineMore", "lineReset"].map(function(id, index) {
+                // With the slider focused, its arrows adjust it too.
+                parts: (lineHeightSlider.activeFocus ? [[["Left", "Right"], "adjust"]] : []).concat(["lineLess", "lineMore", "lineReset"].map(function(id, index) {
                     return [app.actionKeys(id)[0], ["decrease", "increase", "reset"][index], () => app.runCommand(id), app.actionAvailable(id)]
-                })
+                }))
                 pixelSize: 11 * app.scale
                 Layout.fillWidth: true
             }
