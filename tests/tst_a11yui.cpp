@@ -360,7 +360,9 @@ private slots:
         QVERIFY(object("deskHints")->property("text").toString().contains("shift&nbsp;delete"));
         // Unhovered parts show no tint; hovering a clickable one tints it under a pointing hand.
         auto tint = item("deskHintsPart:copy:tint"); QVERIFY(tint); QVERIFY(!tint->isVisible());
+        shot("hints-desk-unhovered");
         QTest::mouseMove(window, center(copy)); QTRY_VERIFY(tint->isVisible());
+        shot("hints-desk-hover-copy");
         QQuickItem *area = nullptr;
         for (auto child : copy->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) area = child;
         QVERIFY(area); QCOMPARE(area->cursor().shape(), Qt::PointingHandCursor);
