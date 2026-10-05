@@ -72,9 +72,10 @@ Item {
             start: note.verse, endBook: bible.book, endChapter: bible.chapter, end: note.verse }
     }
     function studyScope(row) { return studyTab === "footnotes" ? footnoteScope(row) : row || null }
+    function rejected() { if (typeof app.rejected === "function") app.rejected() }
     function openStudyRow(index) {
         const row = studyRows[index]
-        if (!row) return
+        if (!row) { rejected(); return }
         studyList.currentIndex = index
         openTagged(studyScope(row))
     }
@@ -987,8 +988,8 @@ Item {
                 currentIndex: count ? 0 : -1
                 activeFocusOnTab: true
                 keyNavigationEnabled: false
-                Keys.onReturnPressed: { if (currentIndex >= 0) panel.openTagged(panel.visibleResults[currentIndex]) }
-                Keys.onEnterPressed: { if (currentIndex >= 0) panel.openTagged(panel.visibleResults[currentIndex]) }
+                Keys.onReturnPressed: { if (currentIndex >= 0) panel.openTagged(panel.visibleResults[currentIndex]); else panel.rejected() }
+                Keys.onEnterPressed: { if (currentIndex >= 0) panel.openTagged(panel.visibleResults[currentIndex]); else panel.rejected() }
                 Keys.onTabPressed: function(event) { event.accepted = panel.focusChips() }
                 Keys.onBacktabPressed: function(event) { event.accepted = panel.focusChips() }
                 ScrollBar.vertical: TagScrollbar { objectName: "tagResultsScrollbar" }

@@ -843,7 +843,7 @@ ApplicationWindow {
         })
     }
     function toggleScopeDesk(scope) {
-        if (rangeEditing || bible.busy || !scope) return
+        if (rangeEditing || bible.busy || !scope) { sounds.play("error"); return }
         const existing = deskRowFor(scope)
         if (existing ? bible.removeFromDesk(existing.id) : bible.addToDesk(scope)) {
             const reference = (existing || {}).reference || scope.reference || "Passage"
@@ -852,7 +852,7 @@ ApplicationWindow {
         } else sounds.play("error")
     }
     function copyScope(scope, plainText) {
-        if (!scope || bible.busy) return
+        if (!scope || bible.busy) { sounds.play("error"); return }
         const copied = bible.copyScope(scope, !!plainText)
         if (copied.length) {
             flashScope(scope)
@@ -1225,6 +1225,8 @@ ApplicationWindow {
         if (y - margin < target) target = y - margin
         flick.contentY = Math.max(top, Math.min(bottom, target))
     }
+    // A key or row that cannot act sounds the error rather than doing nothing.
+    function rejected() { sounds.play("error") }
     function textInputActive() {
         let item = activeFocusItem
         while (item) {
@@ -2377,8 +2379,8 @@ ApplicationWindow {
         moveSaved(0)
     }
     function openSaved(entry) {
-        if (rangeEditing) return
-        if (!entry || !flushNote()) return
+        if (rangeEditing || !entry) { sounds.play("error"); return }
+        if (!flushNote()) return
         const from = beginJump()
         if (!bible.openTaggedPassage(entry)) return
         endJump(from)
@@ -2545,13 +2547,13 @@ ApplicationWindow {
             : event.key === Qt.Key_PageUp ? -page : event.key === Qt.Key_PageDown ? page : event.key === Qt.Key_Up ? -1 : 1)
     }
     function acceptVersion() {
-        if (bible.busy) return
+        if (bible.busy) { sounds.play("error"); return }
         if (versionAdd.activeFocus) { addVersionFromPicker(); return }
         if (versionCancel.activeFocus) { versionDialog.close(); return }
         if (versionBack.activeFocus) { backVersion(); return }
         if (versionDialog.step === 2) { confirmRemoveVersion(); return }
         const entry = versionResults.model[versionResults.currentIndex]
-        if (!entry) return
+        if (!entry) { sounds.play("error"); return }
         if (!versionDialog.removing) { switchVersion(entry.id); return }
         if (versionDialog.step === 0) versionDialog.chosen = entry
         else versionDialog.removeAnnotations = !!entry.remove
@@ -2827,7 +2829,12 @@ ApplicationWindow {
     }
     function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
     function shortcutEnabled(action) {
-        if (!actionAvailable(action)) return false
+        if (action.explanation || bible.busy) return false
+        // A reader key whose action cannot run now still fires, so runCommand
+        // sounds the error instead of swallowing the key silently.
+        return shortcutContext(action) && (actionAvailable(action) || readerKeys)
+    }
+    function shortcutContext(action) {
         // Text size and line height type nothing, so they work from anywhere:
         // panels, the palette, modals, find, and text fields included.
         if (textSizeActions.includes(action.id)) return !errorDialog.visible
@@ -2959,7 +2966,8 @@ ApplicationWindow {
         if (entry.recent) { openRecentPassage(entry.recent); return }
         if (entry.candidate) { jump(entry.reference); return }
         if (entry.action) {
-            if (!actionAvailable(entry.action) || !flushNote()) return
+            if (!actionAvailable(entry.action)) { sounds.play("error"); return }
+            if (!flushNote()) return
             if (["books", "bibleSearch", "commands", "resume"].includes(entry.action)) {
                 runCommand(entry.action)
                 return
@@ -2991,6 +2999,7 @@ ApplicationWindow {
         let destination = paletteDestination
         if (destination.entry) activatePaletteEntry(destination.entry)
         else if (paletteResolution.valid) jump(destination.reference)
+        else sounds.play("error")
     }
     function backToBooks() {
         if (paletteChapter > 0) {
@@ -3028,7 +3037,7 @@ ApplicationWindow {
         referenceInput.forceActiveFocus()
     }
     function runCommand(action) {
-        if (!actionAvailable(action)) return
+        if (!actionAvailable(action)) { sounds.play("error"); return }
         if (action === "first" || action === "last") { countedVerse(action === "last"); return }
         const count = Math.max(1, Math.min(999999, Number(verseCount) || 1))
         clearCount()
@@ -3187,7 +3196,8 @@ ApplicationWindow {
         view.contentY = top
     }
     function activateKeybinding(action) {
-        if (!actionAvailable(action) || !flushNote()) return
+        if (!action || !actionAvailable(action)) { sounds.play("error"); return }
+        if (!flushNote()) return
         helpDialog.pendingAction = action.id
         helpDialog.close()
     }
@@ -5769,11 +5779,11 @@ ApplicationWindow {
             ListMotionKeys { objectName: "deskMotionKeys"; active: deskDrawer.listKeys; count: deskList.count; onMove: function(delta) { app.moveDesk(delta) } }
             Shortcut { sequence: "Home"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-deskList.count) }
             Shortcut { sequence: "End"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(deskList.count) }
-            Shortcut { sequences: ["Return", "Enter"]; enabled: deskDrawer.listKeys && app.activeFocusItem === deskList; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.openDeskItem(entry.id) } }
-            Shortcut { sequence: "Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id) } }
-            Shortcut { sequence: "Shift+Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id, true) } }
+            Shortcut { sequences: ["Return", "Enter"]; enabled: deskDrawer.listKeys && app.activeFocusItem === deskList; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.openDeskItem(entry.id); else sounds.play("error") } }
+            Shortcut { sequence: "Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id); else sounds.play("error") } }
+            Shortcut { sequence: "Shift+Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id, true); else sounds.play("error") } }
             // d (the Desk toggle) and delete remove one passage; shift delete asks to clean the Desk.
-            Shortcut { sequences: ["D", "Delete", "Backspace"]; enabled: deskDrawer.listKeys; onActivated: app.removeCurrentDeskItem() }
+            Shortcut { sequences: ["D", "Delete", "Backspace"]; enabled: deskDrawer.listKeys; onActivated: { if (deskList.count) app.removeCurrentDeskItem(); else sounds.play("error") } }
             Shortcut { sequences: app.actionKeys("cleanDesk"); enabled: deskDrawer.listKeys && deskList.count > 0; onActivated: app.requestCleanDesk() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
@@ -5976,11 +5986,11 @@ ApplicationWindow {
             ListMotionKeys { objectName: "historyMotionKeys"; active: historyDrawer.listKeys; count: historyList.count; onMove: function(delta) { app.moveHistory(delta) } }
             Shortcut { sequence: "Home"; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(-historyList.count) }
             Shortcut { sequence: "End"; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(historyList.count) }
-            Shortcut { sequences: ["Return", "Enter"]; enabled: historyDrawer.listKeys && historyList.activeFocus; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.openHistoryItem(entry.id) } }
-            Shortcut { sequence: "Y"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.copyHistoryItem(entry.id) } }
-            Shortcut { sequence: "Shift+Y"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.copyHistoryItem(entry.id, true) } }
-            Shortcut { sequence: "D"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.toggleHistoryDesk(entry.id) } }
-            Shortcut { sequences: ["Delete", "Backspace"]; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.removeHistoryItem(entry.id) } }
+            Shortcut { sequences: ["Return", "Enter"]; enabled: historyDrawer.listKeys && historyList.activeFocus; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.openHistoryItem(entry.id); else sounds.play("error") } }
+            Shortcut { sequence: "Y"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.copyHistoryItem(entry.id); else sounds.play("error") } }
+            Shortcut { sequence: "Shift+Y"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.copyHistoryItem(entry.id, true); else sounds.play("error") } }
+            Shortcut { sequence: "D"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.toggleHistoryDesk(entry.id); else sounds.play("error") } }
+            Shortcut { sequences: ["Delete", "Backspace"]; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.removeHistoryItem(entry.id); else sounds.play("error") } }
             Shortcut { sequences: app.actionKeys("historyClearKeys"); enabled: historyDrawer.listKeys && historyList.count > 0; onActivated: app.requestClearHistory() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]

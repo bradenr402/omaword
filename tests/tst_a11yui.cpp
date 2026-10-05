@@ -499,6 +499,31 @@ private slots:
         key(Qt::Key_Home); QTRY_COMPARE(contentY("rangeMergeScroll"), 0.0);
         QVERIFY(QMetaObject::invokeMethod(merge, "close")); editor->setProperty("pending", QVariant());
     }
+    void rejectedKeysAndRowsSoundTheError() {
+        bible->clearSelection(); call("readerFocus"); QTRY_VERIFY(!prop("hasSelection").toBool());
+        // Keyboard: a reader key that cannot act now (bookmark with nothing selected).
+        int before = playCount(); key(Qt::Key_M);
+        QCOMPARE(playCount(), before + 1); QCOMPARE(lastSound(), QString("error")); QVERIFY(bible->collection().isEmpty());
+        // A disabled command row: enter sounds, the palette stays.
+        run("commands"); QTRY_VERIFY(opened("passagePalette")); type("bookmark");
+        QTRY_COMPARE(item("paletteResults")->property("count").toInt(), 1);
+        before = playCount(); key(Qt::Key_Return);
+        QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before); QVERIFY(opened("passagePalette"));
+        // Mouse: a disabled row is skipped, nothing runs.
+        before = playCount();
+        click(qobject_cast<QQuickItem *>(item("paletteResults")->property("currentItem").value<QObject *>()));
+        QCOMPARE(playCount(), before); QVERIFY(opened("passagePalette"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        // A disabled keybinding row.
+        run("help"); QTRY_VERIFY(opened("helpDialog")); type("bookmark selection");
+        before = playCount(); key(Qt::Key_Return);
+        QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before); QVERIFY(opened("helpDialog"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
+        // An empty list: y has no row to copy.
+        run("desk"); QTRY_VERIFY(opened("deskDrawer"));
+        before = playCount(); key(Qt::Key_Y); QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+    }
 };
 
 int main(int argc, char **argv) {
