@@ -1883,6 +1883,22 @@ private slots:
         // Keyboard: the same selection by j and shift J.
         call("readerFocus"); key(Qt::Key_J, Qt::ShiftModifier); QTRY_COMPARE(bible->selectionReference(), QString("John 3:17–18"));
     }
+    void ctrlClickOpensNoteLinks() {
+        navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        auto editor = item("noteEditor"); editor->setProperty("text", QStringLiteral("Compare John 3:5 here"));
+        QRectF rect; QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, 10));
+        const QPoint link = editor->mapToScene(rect.center()).toPoint();
+        // Mouse: a plain click only places the caret.
+        clickAt(link); QCOMPARE(bible->selectionReference(), QString("John 3:16"));
+        // ctrl click opens the passage; Notes stays open.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::ControlModifier, link); QCoreApplication::processEvents();
+        QTRY_COMPARE(bible->selectionReference(), QString("John 3:5")); QVERIFY(opened("notesDrawer"));
+        // Keyboard: alt enter at the cursor does the same (Notes is now on 3:5's empty note).
+        QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));
+        navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        item("noteEditor")->setProperty("cursorPosition", 10);
+        key(Qt::Key_Return, Qt::AltModifier); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }

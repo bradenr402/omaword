@@ -3273,6 +3273,7 @@ ApplicationWindow {
         // Bound by the note editor itself.
         { id: "noteLinkSuggest", group: "Annotate", title: "Suggest a passage to link (in a note)", sequences: ["[, ["], scope: "noteEditor" },
         { id: "openNoteLink", group: "Annotate", title: "Open the passage or web link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
+        { id: "noteLinkClick", group: "Annotate", title: "Open the passage or web link clicked (in a note)", sequences: ["Ctrl+Click"], scope: "noteEditor", explanation: true },
         { id: "notePreview", group: "Annotate", title: "Switch a note between Write and Preview (Notes panel)", sequences: ["Alt+V"], scope: "noteEditor" },
         { id: "noteLinkedFrom", group: "Annotate", title: "Between a note and its Linked from list (in a note)", sequences: ["Tab", "Shift+Tab"], scope: "noteEditor" },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
@@ -5430,6 +5431,16 @@ ApplicationWindow {
                                     event.accepted = true
                                 }
                                 Accessible.name: "Markdown note for " + bible.selectionReference
+                                // ctrl click: open the passage (or web) link clicked, as alt enter does at the cursor.
+                                TapHandler {
+                                    objectName: "noteEditorLinkClick"
+                                    acceptedButtons: Qt.LeftButton
+                                    acceptedModifiers: Qt.ControlModifier
+                                    onTapped: function(point) {
+                                        noteEditor.cursorPosition = noteEditor.positionAt(point.position.x, point.position.y)
+                                        if (app.noteLinkAtCursor || app.noteUrlAtCursor.length) app.openNoteLinkAtCursor()
+                                    }
+                                }
                             }
                         }
                         OverlayScrollView {

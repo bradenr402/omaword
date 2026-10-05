@@ -115,6 +115,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `backspace`: Manage tags: back to the picker (empty filter)
 - `[[`: Suggest a passage to link (in a note)
 - `alt enter`: Open the passage or web link at the cursor (in a note)
+- `ctrl click`: Open the passage or web link clicked (in a note)
 - `alt v`: Switch a note between Write and Preview (Notes panel)
 - `tab` · `shift tab`: Between a note and its Linked from list (in a note)
 
@@ -236,7 +237,7 @@ These also work, but stay out of the in-app list:
 
 ### Studying
 - Bookmark, highlight, tag, and write Markdown notes; notes save as you type. `alt v` switches a note between Write and Preview.
-- In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
+- In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
 - Quote part of a passage: `shift V` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.
 - The Study panel (`shift S`) follows the passage you are reading: its **Cross-references**, the chapter's **Footnotes**, and **Tags** — other passages you tagged the same way, ranked by shared tags. The passage's tags sit above the list as chips: `space` turns one off, `shift space` shows only it, `0` turns them all back on, and `a` includes every installed version. Footnotes also appear as small marks in the text.
 - The Desk (`d`, `shift D`) collects passages for side-by-side study across windows and versions.
