@@ -143,6 +143,9 @@ function place(items, opts) {
 // Connector tips lean toward each other: a note below its passage raises
 // its "{" tip and lowers the passage's "}" tip (and vice versa), each by
 // factor * the centres' offset, clamped inside the middle of its brace.
+// A brace one line tall keeps its tip centred: opts.noteLines (the note's
+// line count) and opts.passageLine (one reader line, px; a passage under 1.5
+// lines tall is a single line) mark those.
 // -> {note, passage}: offsets from each span's centre (positive = down).
 function tips(note, passage, opts) {
     opts = opts || {}
@@ -154,7 +157,9 @@ function tips(note, passage, opts) {
         const limit = Math.max(0, h / 2 - Math.max(inset, 0.2 * h))
         return Math.max(-limit, Math.min(limit, value))
     }
-    return { note: clamp(note, -factor * offset), passage: clamp(passage, factor * offset) }
+    const noteSingle = opts.noteLines !== undefined && opts.noteLines <= 1
+    const passageSingle = opts.passageLine > 0 && passage.bottom - passage.top < 1.5 * opts.passageLine
+    return { note: noteSingle ? 0 : clamp(note, -factor * offset), passage: passageSingle ? 0 : clamp(passage, factor * offset) }
 }
 
 // Current section: the last heading at or before `verse`; 0 before the first.

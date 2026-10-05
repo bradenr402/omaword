@@ -244,7 +244,8 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   offending run loses one line at a time (elided "…"), else it hides. Braces
   split lines shared by neighbouring passages; tips lean toward each other
   (`Margins.tips`, 0.35 × centre offset, clamped to 20%–80% of each brace's
-  height); their spines are the highlight accent's pen stroke
+  height; a one-line note `{` or one-line passage `}` keeps its tip centred);
+  their spines are the highlight accent's pen stroke
   (`HandDrawn.linePoints` with `accentAmp`). Note text
   is StyledText with exact `passageLinks`. The Notes drawer is a popup, so it
   covers them. The outline's current section is the cursor's when it is on

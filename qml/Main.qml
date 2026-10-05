@@ -1397,7 +1397,7 @@ ApplicationWindow {
             const note = { top: place.y, bottom: place.y + place.height }
             const passage = braces[i]
             return Object.assign({ key: keys[i].key, reference: keys[i].reference, passageTop: passage.top, passageBottom: passage.bottom,
-                naturalLines: items[i].lines, tips: Margins.tips(note, passage, { inset: 3 * readerScale }) }, place)
+                naturalLines: items[i].lines, tips: Margins.tips(note, passage, { inset: 3 * readerScale, noteLines: place.lines, passageLine: readerLineHeight }) }, place)
         })
     }
     function marginPlacement(key) { return marginLayout.find(function(place) { return place.key === key }) || null }

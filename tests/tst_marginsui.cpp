@@ -335,6 +335,21 @@ private slots:
         // Far apart: clamped inside each brace (middle 60%).
         auto far = tips(5000, 5100, 100, 140);
         QCOMPARE(far["note"].toDouble(), -30.0); QCOMPARE(far["passage"].toDouble(), 12.0);
+        // Single-line braces keep their tips centred; multi-line ones still lean.
+        auto withLines = [&](double noteTop, double noteBottom, int noteLines, double passageTop, double passageBottom, double passageLine) {
+            return js.globalObject().property("tips").call({js.toScriptValue(QVariantMap{{"top", noteTop}, {"bottom", noteBottom}}),
+                js.toScriptValue(QVariantMap{{"top", passageTop}, {"bottom", passageBottom}}),
+                js.toScriptValue(QVariantMap{{"noteLines", noteLines}, {"passageLine", passageLine}})}).toVariant().toMap();
+        };
+        auto oneLineNote = withLines(5000, 5020, 1, 100, 300, 30);
+        QCOMPARE(oneLineNote["note"].toDouble(), 0.0); QCOMPARE(oneLineNote["passage"].toDouble(), 60.0);
+        auto oneLinePassage = withLines(5000, 5100, 5, 100, 130, 30);
+        QCOMPARE(oneLinePassage["note"].toDouble(), -30.0); QCOMPARE(oneLinePassage["passage"].toDouble(), 0.0);
+        auto bothSingle = withLines(150, 170, 1, 100, 140, 30);
+        QCOMPARE(bothSingle["note"].toDouble(), 0.0); QCOMPARE(bothSingle["passage"].toDouble(), 0.0);
+        // Two lines (passage 60 px at 30 px lines; note 2 lines) shift within 20-80%.
+        auto twoLines = withLines(5000, 5040, 2, 100, 160, 30);
+        QCOMPARE(twoLines["note"].toDouble(), -12.0); QCOMPARE(twoLines["passage"].toDouble(), 18.0);
     }
     void headingStepsAndSections() {
         QJSEngine js; QVERIFY(!script(js, "Margins.js").isError());
