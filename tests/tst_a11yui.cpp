@@ -211,6 +211,9 @@ class A11yUiTest : public QObject
         QTRY_VERIFY(menu()->property("opened").toBool());
         QTRY_VERIFY(item("contextMenuContent") && item("contextMenuContent")->height() > 0);
         auto row = item("contextMenuItem:" + id); QVERIFY2(row, qPrintable(id)); QVERIFY(row->isVisible());
+        // Under load a reused menu may still be laying out its rows: wait until it settles.
+        QPointF last(-1, -1);
+        QTRY_VERIFY([&] { QTest::qWait(20); const auto at = row->mapToScene(QPointF()); const bool settled = at == last; last = at; return settled; }());
         click(row); QTRY_VERIFY(!menu()->property("visible").toBool());
     }
     QString lastSound() const { return sounds->property("lastSound").toString(); }
@@ -1528,12 +1531,19 @@ private slots:
         QTest::mouseMove(window, center(counter)); QTRY_VERIFY(toolTipOf(counter)->property("visible").toBool());
         QVERIFY(toolTipOf(counter)->property("text").toString().contains("shift click"));
         QTRY_VERIFY(prop("searchMatchIndex").toInt() >= 0); QTest::qWait(50);
+        QTest::mouseMove(window, QPoint(5, window->height() / 2)); QTRY_VERIFY(!toolTipOf(counter)->property("visible").toBool());
         const int first = prop("searchMatchIndex").toInt();
-        click(counter); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first + 1);
+        click(counter);
+        QTRY_VERIFY2(prop("searchMatchIndex").toInt() == first + 1, qPrintable(QString("index %1 chapter %2 query %3 matches %4 at %5,%6")
+            .arg(prop("searchMatchIndex").toInt()).arg(bible->chapter()).arg(prop("acceptedSearchQuery").toString())
+            .arg(value(prop("searchMatches")).toList().size()).arg(center(counter).x()).arg(center(counter).y())));
         click(counter, Qt::LeftButton, Qt::ShiftModifier); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first);
         click(counter, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), QStringList({"nextMatch", "previousMatch", "|", "clearSearch"}));
-        chooseMenu("nextMatch"); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first + 1);
+        chooseMenu("nextMatch");
+        QTRY_VERIFY2(prop("searchMatchIndex").toInt() == first + 1, qPrintable(QString("index %1 chapter %2 query %3 matches %4 cursor %5")
+            .arg(prop("searchMatchIndex").toInt()).arg(bible->chapter()).arg(prop("acceptedSearchQuery").toString())
+            .arg(value(prop("searchMatches")).toList().size()).arg(bible->cursorVerse())));
         // Keyboard: the same menu by keys.
         click(counter, Qt::RightButton); menuKeyTo("clearSearch");
         QTRY_VERIFY(prop("acceptedSearchQuery").toString().isEmpty()); QVERIFY(!shown("searchMatchCount"));

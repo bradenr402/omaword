@@ -1224,7 +1224,8 @@ private slots:
         QCOMPARE(prop("lineHeightSlider","from").toDouble(),1.0);
         QCOMPARE(prop("lineHeightSlider","to").toDouble(),3.0);
         QCOMPARE(prop("lineHeightSlider","stepSize").toDouble(),0.1);
-        key(Qt::Key_Right); QCOMPARE(bible->lineHeight(),1.5);
+        key(Qt::Key_Right); QCOMPARE(bible->lineHeight(),1.6);
+        key(Qt::Key_Left); QCOMPARE(bible->lineHeight(),1.5);
         key(Qt::Key_Up); QTRY_COMPARE(bible->lineHeight(),1.6);
         capture("phase-b-line-height");
         for (int i = 0; i < 30; ++i) key(Qt::Key_Equal,Qt::ControlModifier | Qt::AltModifier);
@@ -3093,7 +3094,8 @@ private slots:
             QCOMPARE(track->property("color"),desktop->property("accent"));
             QCOMPARE(handle->property("color"),desktop->property("surface"));
             const auto old = bible->lineHeight();
-            key(Qt::Key_Right); QCOMPARE(bible->lineHeight(),old);
+            key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
+            key(Qt::Key_Left); QTRY_COMPARE(bible->lineHeight(),old);
             key(Qt::Key_Up); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
             QVERIFY(desktop->setProperty("accent",QColor("#b454ea")));
             QCOMPARE(track->property("color").value<QColor>(),QColor("#b454ea"));
@@ -5840,7 +5842,8 @@ private slots:
         QVERIFY(qAbs(entry->height() - inner.bottom() - 12 * scale) < 0.1);
         auto bar = item("savedScrollbar");
         QVERIFY(bar);
-        QCOMPARE(entry->width(),list->width());
+        // Rows reserve the scrollbar's width while it shows.
+        QCOMPARE(entry->width(),list->width() - (bar->isVisible() ? bar->width() : 0));
         QVERIFY(qAbs(bar->mapToItem(list,QPointF()).x() + bar->width() - list->width()) < 0.1);
         capture("saved-" + QString::fromLatin1(QTest::currentDataTag()));
         click(item("savedTab1"));
@@ -6064,11 +6067,12 @@ private slots:
         QTRY_COMPARE(bible->noteText(),QString("See Joel 4 and John 4:2"));
         // On a link, the hint row offers alt enter.
         QTRY_VERIFY(item("notesHints")->isVisible());
-        QCOMPARE(plainHint(prop("notesHints","text").toString()),QString("alt enter open link"));
+        QCOMPARE(plainHint(prop("notesHints","text").toString()),QString("alt enter open link    alt v preview"));
+        // Away from a link, only alt v remains.
         item("noteEditor")->setProperty("cursorPosition",1);
-        QTRY_VERIFY(!item("notesHints")->isVisible());
+        QTRY_COMPARE(plainHint(prop("notesHints","text").toString()),QString("alt v preview"));
         item("noteEditor")->setProperty("cursorPosition",20);
-        QTRY_VERIFY(item("notesHints")->isVisible());
+        QTRY_VERIFY(plainHint(prop("notesHints","text").toString()).startsWith("alt enter open link"));
         // alt enter follows the link as a History jump; Notes stays open.
         const int jumps = window->property("jumpIndex").toInt();
         key(Qt::Key_Return,Qt::AltModifier);
