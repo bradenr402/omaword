@@ -716,8 +716,10 @@ Item {
         }
         background: Rectangle {
             color: control.down || control.chosen || control.hovered ? panel.desktop.surface : "transparent"
-            // Quiet like the app's other buttons: a border only marks focus or a chosen toggle.
-            border.width: control.activeFocus || control.chosen ? 1 : 0
+            // Quiet like the app's other buttons: a border only marks focus or a
+            // chosen toggle; focus draws it heavier, so the two never read alike.
+            objectName: control.objectName.length ? control.objectName + ":focus" : ""
+            border.width: control.activeFocus ? 2 : control.chosen ? 1 : 0
             border.color: panel.desktop.accent
             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }

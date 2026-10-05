@@ -1804,6 +1804,28 @@ private slots:
         QVERIFY(!prop("paletteTextMode").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
     }
+    void switchesAndTagButtonsShowFocus() {
+        run("settings"); QTRY_VERIFY(opened("settingsDialog"));
+        auto first = item("settingfocus"), outline = item("settingfocusFocus"), next = item("settingnumbersFocus");
+        QVERIFY(first && outline && next);
+        // Keyboard: the focused switch is outlined; tab moves the outline.
+        QTRY_VERIFY(first->hasActiveFocus()); QCOMPARE(outline->property("border").value<QObject *>()->property("width").toInt(), 1);
+        shot("settings-switch-focus");
+        key(Qt::Key_Tab); QTRY_VERIFY(item("settingnumbers")->hasActiveFocus());
+        QCOMPARE(outline->property("border").value<QObject *>()->property("width").toInt(), 0);
+        QCOMPARE(next->property("border").value<QObject *>()->property("width").toInt(), 1);
+        // Mouse: hover tints without an outline.
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
+        // TagButtons: focus draws a heavier border than a chosen toggle.
+        key(Qt::Key_T); QTRY_VERIFY(opened("tagsSurface"));
+        auto manage = item("manageTags"); auto frame = item("manageTags:focus"); QVERIFY(manage && frame);
+        QCOMPARE(frame->property("border").value<QObject *>()->property("width").toInt(), 0);
+        manage->forceActiveFocus(); QCOMPARE(frame->property("border").value<QObject *>()->property("width").toInt(), 2);
+        shot("tag-button-focus");
+        // Keyboard: enter on the focused button opens management; a click does too.
+        key(Qt::Key_Return); QTRY_COMPARE(object("tagsUi")->property("page").toString(), QString("manage"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }

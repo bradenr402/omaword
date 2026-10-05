@@ -4042,6 +4042,9 @@ ApplicationWindow {
         enabled: app.actionAvailable(catalogAction)
         implicitHeight: Math.max(40 * app.scale, settingLabel.implicitHeight + 16 * app.scale)
         padding: 0
+        // Room inside the focus outline.
+        leftPadding: 8 * app.scale
+        rightPadding: 8 * app.scale
         spacing: 12 * app.scale
         onClicked: app.runCommand(catalogAction.id)
         Keys.onShortcutOverride: function(event) { app.buttonShortcutOverride(event) }
@@ -4049,7 +4052,7 @@ ApplicationWindow {
         Keys.onEnterPressed: app.runCommand(catalogAction.id)
         indicator: Rectangle {
             objectName: settingSwitch.objectName + "Track"
-            x: settingSwitch.width - width
+            x: settingSwitch.width - width - settingSwitch.rightPadding
             y: (settingSwitch.height - height) / 2
             width: 36 * app.scale
             height: 20 * app.scale
@@ -4086,7 +4089,14 @@ ApplicationWindow {
             }
             Item { Layout.preferredWidth: 36 * app.scale; Layout.preferredHeight: 20 * app.scale }
         }
-        background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: settingSwitch.hovered ? desktop.surface : "transparent" }
+        // Keyboard focus outlines the whole row, like a focused button.
+        background: Rectangle {
+            objectName: settingSwitch.objectName + "Focus"
+            radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+            color: settingSwitch.hovered ? desktop.surface : "transparent"
+            border.width: settingSwitch.activeFocus ? 1 : 0
+            border.color: desktop.accent
+        }
     }
     component SquareSlider: Slider {
         id: slider
