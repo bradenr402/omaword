@@ -4499,12 +4499,12 @@ private slots:
             {{"Ctrl++","Ctrl+="},QString::fromUtf8("ctrl + · ctrl =")}, {{"Ctrl+-"},"ctrl -"},
             {{"Ctrl+Alt+="},"ctrl alt ="}, {{"Ctrl+Shift+C"},"ctrl shift C"}, {{"Shift+F10"},"shift F10"},
             {{"F1"},"F1"}, {{"Menu"},"menu"}, {{"RightClick"},"right click"}, {{"MiddleClick"},"middle click"},
-            {{"Click"},"click"}, {{"Shift+Click"},"shift click"}};
+            {{"Click"},"click"}, {{"Shift+Click"},"shift click"}, {{"BackClick"},"mouse back"}, {{"ForwardClick"},"mouse forward"}};
         for (const auto &entry : cases) QCOMPARE(formatKeys(entry.first),entry.second);
         // Every catalog key reads in the shared notation: lowercase except a
         // shifted letter or function key, arrows as glyphs, muted separators.
         const QRegularExpression notation(QString::fromUtf8(
-            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|[A-Z])$"));
+            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|mouse back|mouse forward|[A-Z])$"));
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         for (const auto &record : records) {
             const auto action = record.toMap();
@@ -4628,7 +4628,8 @@ private slots:
         QTRY_VERIFY(prop("versionDialog","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
         key(Qt::Key_F); QVERIFY(bible->focusMode());
-        QVERIFY(!version->isVisible()); QVERIFY(!passage->isVisible());
+        // The quiet focus-mode footer keeps them in place, hidden and disabled.
+        QTRY_COMPARE(version->opacity(),0.0); QTRY_COMPARE(passage->opacity(),0.0); QVERIFY(!version->isEnabled());
         key(Qt::Key_V,Qt::ControlModifier);
         QTRY_VERIFY(prop("versionDialog","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
