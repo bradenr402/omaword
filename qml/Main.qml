@@ -3708,6 +3708,18 @@ ApplicationWindow {
         paletteResults.positionViewAtIndex(paletteResults.currentIndex, ListView.Contain)
         referenceInput.forceActiveFocus()
     }
+    // A catalog key: with a side panel open, palette, dialog, and reading
+    // toggle keys close the panel first. The keyboard leaves the panel before
+    // it closes, so its exit cannot hand focus back over what opens next.
+    // (Dispatch from Keybindings or Commands keeps the panel, as before.)
+    function runKey(action) {
+        if (sidePanel.length && panelLeavingActions.includes(action) && actionAvailable(action)) {
+            if (!flushNote()) return
+            readerFocus()
+            if (!leaveSidePanel("")) { restorePanelFocus(); return }
+        }
+        runCommand(action)
+    }
     function runCommand(action) {
         if (!actionAvailable(action)) { sounds.play("error"); return }
         if (action === "first" || action === "last") { countedVerse(action === "last"); return }
@@ -3716,12 +3728,6 @@ ApplicationWindow {
         // Text size never touches a Notes draft, so typing in Notes keeps going.
         if (!textSizeActions.includes(action) && !flushNote()) return
         // A palette, dialog, or reading toggle first closes the open side panel.
-        // The keyboard leaves the panel before it closes, so its exit cannot
-        // hand focus back over the palette or dialog that opens next.
-        if (sidePanel.length && panelLeavingActions.includes(action)) {
-            readerFocus()
-            if (!leaveSidePanel("")) { restorePanelFocus(); return }
-        }
         const catalogAction = actions.find(function(entry) { return entry.id === action })
         const previousSetting = catalogAction.setting ? bible[catalogAction.setting] : null
         const previousLineHeight = bible.lineHeight
@@ -8052,7 +8058,7 @@ ApplicationWindow {
             autoRepeat: !app.heldKeys[modelData.id]
             // Checked again on activation: the enabled binding can lag a focus
             // change inside a popup (Notes), and typing must keep its keys.
-            onActivated: { if (!app.shortcutEnabled(modelData)) return; app.runCommand(modelData.id); app.beginHold(modelData.id) }
+            onActivated: { if (!app.shortcutEnabled(modelData)) return; app.runKey(modelData.id); app.beginHold(modelData.id) }
         }
     }
     Instantiator {
