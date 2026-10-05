@@ -1454,6 +1454,44 @@ private slots:
         clickHint("versionHintsPart:back"); QCOMPARE(dialog->property("step").toInt(), 0);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
     }
+    void globalKeysLeaveSidePanels() {
+        QVERIFY(bible->addToDesk()); bible->selectVerses(3, 3); QVERIFY(bible->toggleBookmark());
+        struct Panel { Qt::Key key; const char *drawer; };
+        const QList<Panel> panels = {{Qt::Key_D, "deskDrawer"}, {Qt::Key_A, "savedDrawer"}, {Qt::Key_H, "historyDrawer"}, {Qt::Key_S, "relatedDrawer"}};
+        for (const auto &panel : panels) {
+            auto open = [&] { call("readerFocus"); key(panel.key, Qt::ShiftModifier); QTRY_VERIFY2(opened(panel.drawer), panel.drawer); QTest::qWait(30); };
+            // Keyboard: the palette, a dialog, and a reading toggle each close the panel first.
+            open(); key(Qt::Key_K, Qt::ControlModifier);
+            QTRY_VERIFY2(opened("passagePalette"), panel.drawer); QTRY_VERIFY(!shown(panel.drawer));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+            open(); key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(opened("settingsDialog")); QTRY_VERIFY(!shown(panel.drawer));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
+            open(); const bool numbers = bible->showVerseNumbers();
+            key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), !numbers); QTRY_VERIFY(!shown(panel.drawer));
+            bible->setShowVerseNumbers(numbers);
+        }
+        open: {
+            call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
+            key(Qt::Key_Question); QTRY_VERIFY(opened("helpDialog")); QTRY_VERIFY(!shown("deskDrawer"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
+            call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
+            key(Qt::Key_F); QTRY_VERIFY(bible->focusMode()); QTRY_VERIFY(!shown("deskDrawer"));
+            bible->setFocusMode(false);
+            // ctrl t opens Manage tags over the panel, which stays.
+            call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
+            key(Qt::Key_T, Qt::ControlModifier); QTRY_VERIFY(opened("tagsSurface")); QVERIFY(shown("deskDrawer"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
+        }
+        // Notes: from the preview (not while typing) a toggle closes Notes too.
+        call("readerFocus"); key(Qt::Key_Escape); run("notes"); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_K, Qt::ControlModifier); QVERIFY(!shown("passagePalette")); QVERIFY(opened("notesDrawer"));
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QTRY_VERIFY(!shown("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        // Mouse: a click outside an open panel only closes it (the footer button underneath does not act).
+        call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
+        click("searchControl"); QTRY_VERIFY(!shown("deskDrawer")); QVERIFY(!shown("passagePalette"));
+    }
 };
 
 int main(int argc, char **argv) {

@@ -526,6 +526,11 @@ ApplicationWindow {
     readonly property string sidePanel: notesOpen ? "notes" : savedDrawer.shown ? "annotations"
         : deskDrawer.shown ? "desk" : historyDrawer.shown ? "history" : tagsUi.relatedShown ? "related" : ""
     readonly property var panelActions: ["notes", "annotations", "desk", "related", "history"]
+    // With a side panel open, these keys close it first and then act:
+    // palettes, dialogs, and reading toggles.
+    readonly property var panelLeavingActions: ["books", "bibleSearch", "commands", "help", "settings", "switchVersion",
+        "about", "import", "removeVersion", "focus", "numbers", "headings", "versePicker", "wordsOfJesus", "chapterOutline",
+        "marginNotes", "readingMode", "soundEffects", "reduceMotion"]
     readonly property bool panelSwitchKeys: sidePanel.length > 0 && bible.ready && !bible.busy && !dialogOpen
         && !findPromptOpen && !rangeEditing && !textInputActive()
     // Closes the open side panel before another opens. A Notes draft must
@@ -3443,6 +3448,9 @@ ApplicationWindow {
         // palette's own mode keys still switch modes from its input.
         if (textInputActive() && !(action.scope === "palette" && passagePalette.visible)) return false
         if (sidePanel.length && panelActions.includes(action.id)) return panelSwitchKeys
+        if (sidePanel.length && panelLeavingActions.includes(action.id)) return panelSwitchKeys
+        // ctrl t opens Manage tags over a side panel (Annotations → Tags binds it itself).
+        if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && !(sidePanel === "annotations" && collectionTab === 3)
         if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         // visible, not opened: the palette accepts keys during its fade-in.
@@ -3679,6 +3687,13 @@ ApplicationWindow {
         clearCount()
         // Text size never touches a Notes draft, so typing in Notes keeps going.
         if (!textSizeActions.includes(action) && !flushNote()) return
+        // A palette, dialog, or reading toggle first closes the open side panel.
+        // The keyboard leaves the panel before it closes, so its exit cannot
+        // hand focus back over the palette or dialog that opens next.
+        if (sidePanel.length && panelLeavingActions.includes(action)) {
+            readerFocus()
+            if (!leaveSidePanel("")) { restorePanelFocus(); return }
+        }
         const catalogAction = actions.find(function(entry) { return entry.id === action })
         const previousSetting = catalogAction.setting ? bible[catalogAction.setting] : null
         const previousLineHeight = bible.lineHeight
@@ -7959,7 +7974,9 @@ ApplicationWindow {
             enabled: app.active && app.shortcutEnabled(modelData)
             // Verse motions repeat on our own timer, without the platform delay.
             autoRepeat: !app.heldKeys[modelData.id]
-            onActivated: { app.runCommand(modelData.id); app.beginHold(modelData.id) }
+            // Checked again on activation: the enabled binding can lag a focus
+            // change inside a popup (Notes), and typing must keep its keys.
+            onActivated: { if (!app.shortcutEnabled(modelData)) return; app.runCommand(modelData.id); app.beginHold(modelData.id) }
         }
     }
     Instantiator {
