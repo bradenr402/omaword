@@ -15,12 +15,15 @@ class BlockDocument : public QObject
     Q_OBJECT
     Q_PROPERTY(QVariantList spans READ spans NOTIFY spansChanged)
 public:
+    // noteMarks false (margin notes shown) builds without note cells, so the
+    // reflow happens once per toggle and no blank cells remain in the text.
     explicit BlockDocument(QObject *parent = nullptr);
     QVariantList spans() const { return m_spans; }
     Q_INVOKABLE void build(QQuickTextDocument *target, const QVariantList &verses,
                           bool numbers, bool headings, double lineHeight,
                           const QString &mode = QStringLiteral("block"),
-                          bool annotationsVisible = false, double decorationSize = 0);
+                          bool annotationsVisible = false, double decorationSize = 0,
+                          bool noteMarks = true);
     // Plain clipboard text for actual TextEdit selection offsets (either order).
     // start/end include decorations; textStart/textEnd delimit original verse text.
     Q_INVOKABLE QString selectionText(int start, int end) const;

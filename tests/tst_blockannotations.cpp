@@ -170,6 +170,7 @@ ApplicationWindow {
         property real readerSize: 20
         property real scale: 1
         property real floatingSafety: 0
+        property bool inlineNoteMarks: true
         property string freeSelectedText: ""
         property string openedBookmark: ""
         property var openedBookmarkScope: ({})
@@ -761,6 +762,28 @@ ApplicationWindow {
         backend->setProperty("verses",verses);
         QTRY_VERIFY(controller->property("freeSelectedText").toString().isEmpty());
         QVERIFY(body->property("selectedText").toString().isEmpty());
+    }
+    void marginNotesDropInlineNoteCells() {
+        populate();
+        const auto kinds = [this]() {
+            QStringList out;
+            for (const auto &marker : list("inlineMarkers")) out << marker.toMap()["kind"].toString() + ":" + marker.toMap()["edge"].toString();
+            return out;
+        };
+        QTRY_VERIFY(kinds().contains("note:open"));
+        QVERIFY(kinds().contains("bookmark:open"));
+        const int withNotes = mapping->spans().last().toMap()["end"].toInt();
+        // Margin notes shown: the document is rebuilt without note cells, so
+        // no blank cells stay in the text; bookmarks keep theirs.
+        controller->setProperty("inlineNoteMarks", false);
+        QTRY_VERIFY(!kinds().join(",").contains("note:"));
+        QVERIFY(kinds().contains("bookmark:open")); QVERIFY(kinds().contains("bookmark:close"));
+        QVERIFY(!item("blockInlineGlyph:note:Genesis 1:1–3"));
+        QVERIFY(mapping->spans().last().toMap()["end"].toInt() < withNotes);
+        QCOMPARE(mapping->selectionText(0, mapping->spans().last().toMap()["end"].toInt()).count("Verse"), 6);
+        controller->setProperty("inlineNoteMarks", true);
+        QTRY_VERIFY(kinds().contains("note:open"));
+        QCOMPARE(mapping->spans().last().toMap()["end"].toInt(), withNotes);
     }
     void contextUnionContinuationAndFocus() {
         QVariantList verses;

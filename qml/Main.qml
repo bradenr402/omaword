@@ -1289,6 +1289,9 @@ ApplicationWindow {
         wantOutline: outlineHeadings.length > 0, outlineGap: 12 * readerScale,
         outlineMin: 120 * readerScale, outlineMax: 220 * readerScale
     })
+    // While margin notes show for this chapter, the reader drops its inline
+    // note marks (Verse rails, Paragraph/Block brackets); other kinds stay.
+    readonly property bool inlineNoteMarks: !marginSpace.notes.visible
     readonly property real marginNotePixelSize: Math.round(readerSize * readerScale * 0.8)
     readonly property real marginNoteLineHeight: Math.round(marginNotePixelSize * 1.45)
     // Content-space verse spans {number, top, bottom} (reader column coordinates)
@@ -3627,6 +3630,7 @@ ApplicationWindow {
                                     ranges: Array.from(verseRow.modelData.noteRanges || [])
                                     headingHeight: verseHeading.height; bodyHeight: verseBody.height
                                     height: verseRow.height
+                                    visible: ranges.length > 0 && !bible.focusMode && app.inlineNoteMarks
                                 }
                                 Rectangle {
                                     objectName: "contextSegment" + verseRow.modelData.number

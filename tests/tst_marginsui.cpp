@@ -632,6 +632,46 @@ private slots:
         key(Qt::Key_W, Qt::AltModifier); QTRY_VERIFY(!bible->marginNotes());
         QTRY_VERIFY(!item("marginLayer")->isVisible());
     }
+    void marginNotesHideInlineNoteMarks() {
+        note("John 3:16", 16, 16, "A note shown in the margin.");
+        QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QVERIFY(bible->toggleBookmark());
+        resize(1400, 900);
+        setMode("verse"); navigate("John 3:16");
+        const auto shown = [this](const QString &name) { auto found = item(name); return found && found->isVisible(); };
+        const auto shot = [this](const QString &name) {
+            const auto directory = qEnvironmentVariable("OMAWORD_MARGINS_SCREENSHOTS");
+            if (!directory.isEmpty()) { settle(); QVERIFY(window->grabWindow().save(directory + "/" + name + ".png")); }
+        };
+        QTRY_VERIFY(shown("verseNoteMarker16")); QVERIFY(shown("bookmarkMarker16"));
+        shot("inline-notes-verse-off");
+        bible->setMarginNotes(true); QTRY_VERIFY(notesShown());
+        // Only the note mark goes; the rails do not shift.
+        const double bookmarkX = item("bookmarkMarker16")->x();
+        QTRY_VERIFY(!shown("verseNoteMarker16")); QVERIFY(shown("bookmarkMarker16"));
+        QCOMPARE(item("bookmarkMarker16")->x(), bookmarkX);
+        shot("inline-notes-verse-margin");
+        // No room for the margin: the inline mark returns.
+        resize(900, 900); QTRY_VERIFY(!notesShown()); QTRY_VERIFY(shown("verseNoteMarker16"));
+        resize(1400, 900); QTRY_VERIFY(notesShown()); QTRY_VERIFY(!shown("verseNoteMarker16"));
+        const auto blockKinds = [this]() {
+            QStringList out;
+            auto reader = object("blockReader");
+            if (!reader) return out;
+            for (const auto &marker : value(reader->property("inlineMarkers")).toList()) out << marker.toMap()["kind"].toString();
+            return out;
+        };
+        for (const QString mode : {"paragraph", "block"}) {
+            setMode(mode); navigate("John 3:16");
+            QTRY_VERIFY(blockKinds().contains("bookmark")); QVERIFY(!blockKinds().contains("note"));
+            shot("inline-notes-" + mode + "-margin");
+            bible->setMarginNotes(false); QTRY_VERIFY(!notesShown());
+            QTRY_VERIFY(blockKinds().contains("note")); QVERIFY(blockKinds().contains("bookmark"));
+            shot("inline-notes-" + mode + "-off");
+            bible->setMarginNotes(true); QTRY_VERIFY(notesShown());
+            QTRY_VERIFY(!blockKinds().contains("note"));
+        }
+        bible->setMarginNotes(false);
+    }
     void marginNotesShiftReaderAndOutlineYields() {
         note("John 3:16", 16, 16, "A note that needs room in the margin.");
         bible->setChapterOutline(true);

@@ -247,7 +247,10 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   height; a one-line note `{` or one-line passage `}` keeps its tip centred);
   their spines are the highlight accent's pen stroke
   (`HandDrawn.linePoints` with `accentAmp`). Note text
-  is StyledText with exact `passageLinks`. The Notes drawer is a popup, so it
+  is StyledText with exact `passageLinks`. While margin notes show
+  (`inlineNoteMarks` false), the reader drops its inline note marks: Verse
+  hides note rails, Paragraph/Block rebuild without note cells (`build(...,
+  noteMarks)`: one reflow per toggle rather than blank cells in the text). The Notes drawer is a popup, so it
   covers them. The outline's current section is the cursor's when it is on
   screen, else the one at a reading line ¼ down (the chapter title above the
   headings is current before the first one, and jumps to the chapter top);

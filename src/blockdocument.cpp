@@ -78,7 +78,7 @@ void BlockDocument::filterClipboard(QClipboard::Mode mode)
 
 void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses,
                           bool numbers, bool headings, double lineHeight, const QString &mode,
-                          bool annotationsVisible, double decorationSize)
+                          bool annotationsVisible, double decorationSize, bool noteMarks)
 {
     if (!target || !target->textDocument()) return;
     QScopedValueRollback<bool> building(m_building, true);
@@ -175,6 +175,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
             if (!annotationsVisible) return;
             QVariantList entries;
             for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("note"), QStringLiteral("tag")}) {
+                if (kind == QStringLiteral("note") && !noteMarks) continue;
                 QSet<QString> seen;
                 for (const auto &entry : verse.value(kind + "Ranges").toList()) {
                     auto range = entry.toMap();
