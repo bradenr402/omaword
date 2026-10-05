@@ -27,6 +27,7 @@ Rectangle {
     radius: Math.min(theme.cornerRadius, width / 2, height / 2)
     function begin(query) {
         debounce.stop()
+        hintFocus = -1
         input.text = query
         opened = true
         input.forceActiveFocus()
@@ -34,6 +35,13 @@ Rectangle {
     }
     function cancelPending() { debounce.stop() }
     function accept() { debounce.stop(); root.accepted(input.text) }
+    // Tab and shift tab cycle the prompt → accept → cancel; the keyboard stays
+    // in the field while a hint is marked, and enter or space presses it.
+    property int hintFocus: -1
+    function cycle(delta) {
+        const count = hints.visible ? hints.partItems().length : 0
+        hintFocus = ((hintFocus + 1 + delta) % (count + 1) + count + 1) % (count + 1) - 1
+    }
     function cancel() { debounce.stop(); root.canceled() }
     readonly property string query: input.text
     RowLayout {
@@ -56,6 +64,17 @@ Rectangle {
             onTextEdited: debounce.restart()
             onAccepted: root.accept()
             Keys.onEscapePressed: root.cancel()
+            Keys.onTabPressed: function(event) { root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1) }
+            Keys.onBacktabPressed: root.cycle(-1)
+            // A marked hint takes enter and space; any other key returns to typing.
+            Keys.onPressed: function(event) {
+                if (root.hintFocus < 0 || [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta].includes(event.key)) return
+                const press = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
+                    && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)
+                const marked = root.hintFocus
+                root.hintFocus = -1
+                if (press) { event.accepted = true; hints.activatePart(marked) }
+            }
             Accessible.name: "Find literal text in this chapter"
         }
         Label {
@@ -71,6 +90,7 @@ Rectangle {
             objectName: "chapterFindHints"
             theme: root.theme
             parts: [["Return", "accept", function() { root.accept() }], ["Escape", "cancel", function() { root.cancel() }]]
+            markedPart: root.hintFocus
             visible: root.width > 600 * root.uiScale
             // Same gap between the counter and the hints as between hint pairs.
             Layout.leftMargin: 16 * root.uiScale

@@ -852,6 +852,47 @@ private slots:
         key(Qt::Key_F); QVERIFY(bible->focusMode());
         click(item("focusControl")); QVERIFY(!bible->focusMode()); QVERIFY(readerFocused());
     }
+    void chapterFindByClickAndTab() {
+        auto find = [&](const QString &query) {
+            key(Qt::Key_Slash); QTRY_VERIFY(prop("findPromptOpen").toBool());
+            QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus()); type(query); QTest::qWait(220);
+        };
+        // Mouse: a click in the reader accepts the current match; the click selects nothing.
+        find("text 3:2 with");
+        const QPoint elsewhere(window->width() / 2, window->height() / 2);
+        clickAt(elsewhere); QTRY_VERIFY(!prop("findPromptOpen").toBool());
+        QCOMPARE(prop("acceptedSearchQuery").toString(), QString("text 3:2 with"));
+        QCOMPARE(bible->selectionReference(), QString("John 3:2"));
+        // Nothing matches: the click cancels.
+        key(Qt::Key_Escape); find("zzzz");
+        clickAt(elsewhere); QTRY_VERIFY(!prop("findPromptOpen").toBool());
+        QVERIFY(prop("acceptedSearchQuery").toString().isEmpty()); QCOMPARE(bible->selectionReference(), QString("John 3:2"));
+        // The hints are buttons: enter accept, esc cancel.
+        find("text 3:5 with"); click(item("chapterFindHintsPart:accept")); QTRY_VERIFY(!prop("findPromptOpen").toBool());
+        QCOMPARE(bible->selectionReference(), QString("John 3:5"));
+        find("text 3:9 with"); click(item("chapterFindHintsPart:cancel")); QTRY_VERIFY(!prop("findPromptOpen").toBool());
+        QCOMPARE(bible->selectionReference(), QString("John 3:5"));
+        // Keyboard: tab cycles prompt → accept → cancel → prompt (the field keeps
+        // the keyboard; the marked hint shows a focus ring); shift tab goes back.
+        auto marked = [&] { return object("chapterFind")->property("hintFocus").toInt(); };
+        find("text 3:7 with");
+        key(Qt::Key_Tab); QCOMPARE(marked(), 0); QVERIFY(item("chapterFindHintsPart:accept:tint")->isVisible());
+        key(Qt::Key_Tab); QCOMPARE(marked(), 1); QVERIFY(item("chapterFindHintsPart:cancel:tint")->isVisible());
+        QVERIFY(!item("chapterFindHintsPart:accept:tint")->isVisible());
+        key(Qt::Key_Tab); QCOMPARE(marked(), -1);
+        key(Qt::Key_Tab, Qt::ShiftModifier); QCOMPARE(marked(), 1);
+        key(Qt::Key_Return); QTRY_VERIFY(!prop("findPromptOpen").toBool()); QCOMPARE(bible->selectionReference(), QString("John 3:5"));
+        find("text 3:7 with"); key(Qt::Key_Tab); key(Qt::Key_Space);
+        QTRY_VERIFY(!prop("findPromptOpen").toBool()); QCOMPARE(bible->selectionReference(), QString("John 3:7"));
+        QVERIFY(readerFocused());
+        // Typing while a hint is marked returns to the field and types.
+        find("text 3:9"); key(Qt::Key_Tab); QCOMPARE(marked(), 0); type("x"); QCOMPARE(marked(), -1);
+        QCOMPARE(item("chapterFindInput")->property("text").toString(), QString("text 3:9x"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("findPromptOpen").toBool());
+        // Esc with a hint marked cancels too.
+        find("text 3:9 with"); key(Qt::Key_Tab); key(Qt::Key_Escape);
+        QTRY_VERIFY(!prop("findPromptOpen").toBool()); QCOMPARE(bible->selectionReference(), QString("John 3:7"));
+    }
 };
 
 int main(int argc, char **argv) {

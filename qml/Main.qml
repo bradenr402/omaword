@@ -343,6 +343,12 @@ ApplicationWindow {
         chapterFind.opened = false; findSnapshot = null
         readerFocus()
     }
+    function acceptFindByClick() {
+        if (!findPromptOpen) return
+        chapterFind.cancelPending()
+        if (chapterFind.query.trim().length) acceptChapterFind(chapterFind.query)
+        if (findPromptOpen) cancelChapterFind()
+    }
     function cancelChapterFind() {
         chapterFind.cancelPending()
         const saved = findSnapshot
@@ -5205,6 +5211,17 @@ ApplicationWindow {
         }
     }
 
+    // While the find prompt is open, a click in the reader accepts the current
+    // match and closes the prompt (or cancels when nothing matches); the click
+    // itself selects nothing.
+    MouseArea {
+        objectName: "findClickCatcher"
+        anchors.fill: parent
+        visible: app.findPromptOpen
+        acceptedButtons: Qt.AllButtons
+        onPressed: app.acceptFindByClick()
+        onWheel: function(wheel) { wheel.accepted = false }
+    }
     ChapterFind {
         id: chapterFind
         objectName: "chapterFind"

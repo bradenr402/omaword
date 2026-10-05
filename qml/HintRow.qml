@@ -9,20 +9,25 @@ import "KeyNotation.js" as KeyNotation
 // showing a pointing hand and a light tint on hover. Navigation parts (↑ ↓,
 // j k, ← →, tabs, choose) carry no `run` and stay display only. Unhovered,
 // the row looks exactly like the styled-text hint it replaced; `text` keeps
-// that markup. With `focusableParts`, clickable parts also join the tab
-// chain, and enter or space activates the focused one.
+// that markup. An owner that cycles through its parts by key (the chapter
+// find prompt) marks the current one with `markedPart` (an index among the
+// clickable parts) and runs it with `activatePart`.
 Flow {
     id: row
     required property var theme
     property var parts: []
     property real pixelSize: 11
-    property bool focusableParts: false
+    property int markedPart: -1
     readonly property var entries: KeyNotation.hintParts(parts)
     readonly property string text: KeyNotation.hint(parts, theme.foreground, theme.muted)
     readonly property string plainText: KeyNotation.hintPlain(parts)
     // The muted ink of the labels (keys are in the foreground), as on the plain hint.
     readonly property color color: theme.muted
-    // The focusable parts, in order (tab cycling in the chapter find prompt).
+    function activatePart(index) {
+        const part = partItems()[index]
+        if (part) part.activate()
+    }
+    // The clickable parts, in order.
     function partItems() {
         const items = []
         for (let i = 0; i < repeater.count; ++i) {
@@ -55,26 +60,16 @@ Flow {
             implicitHeight: label.implicitHeight
             width: Math.min(implicitWidth, Math.max(1, row.width))
             height: label.height
-            activeFocusOnTab: row.focusableParts && clickable
-            Keys.onShortcutOverride: function(event) {
-                if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true
-            }
-            Keys.onPressed: function(event) {
-                if ((event.modifiers & ~Qt.KeypadModifier) !== Qt.NoModifier) return
-                if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                    event.accepted = true
-                    part.activate()
-                }
-            }
+            readonly property bool marked: row.markedPart >= 0 && row.partItems().indexOf(part) === row.markedPart
             Rectangle {
                 objectName: part.objectName.length ? part.objectName + ":tint" : ""
                 anchors.fill: label
                 anchors.leftMargin: -3
                 anchors.rightMargin: -3
                 z: -1
-                visible: part.clickable && (part.hovered || part.activeFocus)
-                color: Qt.rgba(row.theme.accent.r, row.theme.accent.g, row.theme.accent.b, part.activeFocus && !part.hovered ? 0.06 : 0.12)
-                border.width: part.activeFocus ? 1 : 0
+                visible: part.clickable && (part.hovered || part.marked)
+                color: Qt.rgba(row.theme.accent.r, row.theme.accent.g, row.theme.accent.b, part.marked && !part.hovered ? 0.06 : 0.12)
+                border.width: part.marked ? 1 : 0
                 border.color: row.theme.accent
                 radius: Math.min(row.theme.cornerRadius || 0, height / 2)
             }
