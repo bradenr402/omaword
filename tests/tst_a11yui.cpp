@@ -257,6 +257,14 @@ class A11yUiTest : public QObject
         return {};
     }
 
+    // Visual checks: with OMAWORD_A11Y_SHOTS set to a directory, save the window.
+    void shot(const QString &name) {
+        const auto directory = qEnvironmentVariable("OMAWORD_A11Y_SHOTS");
+        if (directory.isEmpty()) return;
+        QCoreApplication::processEvents(); QTest::qWait(30);
+        QVERIFY(window->grabWindow().save(directory + "/" + name + ".png"));
+    }
+
 private slots:
     void initTestCase() {
         source = fixtures.filePath("access_usfm.zip"); QVERIFY(edition(source));
@@ -799,6 +807,50 @@ private slots:
         item("noteEditor")->setProperty("text", QString());
         click(item("notesHintsPart:linked from")); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
         key(Qt::Key_J); click(item("linkedHintsPart:open")); QTRY_COMPARE(bible->selectionReference(), QString("John 1:7"));
+    }
+    void focusModeFooterRevealsInPlace() {
+        const QPointF searchAt = item("searchControl")->mapToScene(QPointF());
+        const QPointF deskAt = item("deskControl")->mapToScene(QPointF());
+        // Keyboard: f enters focus mode; the footer stays with only the focus button.
+        key(Qt::Key_F); QVERIFY(bible->focusMode()); QVERIFY(prop("footerQuiet").toBool());
+        QTRY_COMPARE(item("searchControl")->opacity(), 0.0);
+        QVERIFY(!item("searchControl")->isEnabled()); QVERIFY(!item("deskControl")->isEnabled());
+        QCOMPARE(item("focusControl")->opacity(), 1.0); QVERIFY(item("focusControl")->isEnabled());
+        QCOMPARE(item("focusControl")->property("selected").toBool(), true);
+        QCOMPARE(item("searchControl")->mapToScene(QPointF()), searchAt);
+        QCOMPARE(item("deskControl")->mapToScene(QPointF()), deskAt);
+        QTest::mouseMove(window, QPoint(window->width() / 2, 200));
+        shot("focus-footer-quiet");
+        // Tab reaches the focus button and reveals the rest at once, in place.
+        bool reached = false;
+        for (int i = 0; i < 30 && !reached; ++i) { key(Qt::Key_Tab); reached = focusName() == "focusControl"; }
+        QVERIFY(reached); QVERIFY(!prop("footerQuiet").toBool()); QVERIFY(item("searchControl")->isEnabled());
+        QVERIFY(!prop("footerGuard").toBool());
+        key(Qt::Key_Tab); QCOMPARE(focusName(), QString("searchControl")); QVERIFY(!prop("footerQuiet").toBool());
+        call("readerFocus"); QVERIFY(prop("footerQuiet").toBool());
+        // Space on the focused focus button leaves focus mode.
+        for (int i = 0; i < 30 && focusName() != "focusControl"; ++i) key(Qt::Key_Tab);
+        key(Qt::Key_Space); QVERIFY(!bible->focusMode()); QVERIFY(!prop("footerQuiet").toBool());
+        QCOMPARE(item("searchControl")->mapToScene(QPointF()), searchAt);
+        // Mouse: resting on the footer reveals it after 250 ms; a click in the next 300 ms is ignored.
+        call("readerFocus"); key(Qt::Key_F); QVERIFY(bible->focusMode());
+        QTest::mouseMove(window, center(item("layoutControl")));
+        QTest::qWait(120); QVERIFY(prop("footerQuiet").toBool());
+        QTRY_VERIFY(!prop("footerQuiet").toBool()); QVERIFY(prop("footerGuard").toBool());
+        const QString mode = bible->readingMode();
+        click(item("layoutControl")); QCOMPARE(bible->readingMode(), mode);
+        QTRY_VERIFY(!prop("footerGuard").toBool());
+        QTRY_COMPARE(item("layoutControl")->opacity(), 1.0);
+        shot("focus-footer-revealed");
+        click(item("layoutControl")); QVERIFY(bible->readingMode() != mode);
+        QVERIFY(readerFocused());
+        QTest::mouseMove(window, QPoint(window->width() / 2, 200)); QTRY_VERIFY(prop("footerQuiet").toBool());
+        // The focus button by mouse; the passage menu offers Leave focus mode (f).
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds().last(), QString("leaveFocus")); QCOMPARE(menuShortcut("leaveFocus"), QString("f"));
+        chooseMenu("leaveFocus"); QVERIFY(!bible->focusMode());
+        key(Qt::Key_F); QVERIFY(bible->focusMode());
+        click(item("focusControl")); QVERIFY(!bible->focusMode()); QVERIFY(readerFocused());
     }
 };
 

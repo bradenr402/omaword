@@ -655,7 +655,7 @@ private slots:
         QVERIFY(prop("acceptedSearchBibleSyntax").toBool()); QVERIFY(prop("searchMatchIndex").toInt() >= 0);
         QCOMPARE(prop("searchMatchIdentity"), prop("selectionIdentity"));
         const auto scope = bible->tagScope(); QCOMPARE(bible->selectedStart(), 2); QCOMPARE(bible->selectedEnd(), 3);
-        bible->setFocusMode(true); QTRY_VERIFY(!item("locationControls")->isVisible()); call("readerFocus");
+        bible->setFocusMode(true); QTRY_VERIFY(window->property("footerQuiet").toBool()); call("readerFocus");
         QVERIFY(!prop("searchSegments").toList().isEmpty());
         key(Qt::Key_Escape);
         QVERIFY(bible->focusMode()); QVERIFY(prop("acceptedSearchQuery").toString().isEmpty());

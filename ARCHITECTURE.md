@@ -237,6 +237,9 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   i.e. Omarchy `color1`/`red`, else accent) only while the setting is on;
   layout is unchanged.
 - Focus mode hides decoration cells (incl. footnote markers), rails, and annotation tints.
+- Focus mode keeps the footer quiet: only the focus button shows; the others keep
+  their places hidden and disabled. Hovering the footer 250 ms reveals them (clicks
+  wait 300 ms more); keyboard focus entering the footer reveals them at once.
 - Margins (off by default; hidden in focus mode and range editing): one
   `Margins.space()` split. Margin notes win: they may shift the reader column
   left (only in chapters that have notes) and sit right after their connector;

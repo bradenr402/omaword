@@ -591,7 +591,7 @@ ApplicationWindow {
         readingModeRestoreTimer.restart()
     }
     readonly property bool observedFocusMode: bible.focusMode
-    onObservedFocusModeChanged: { toastTimer.stop(); Qt.callLater(app.applyFocusMode) }
+    onObservedFocusModeChanged: { toastTimer.stop(); footerHoverRevealed = false; footerRevealTimer.stop(); Qt.callLater(app.applyFocusMode) }
     function applyFocusMode() {
         if (observedFocusMode) {
             if (!closeNotes()) { bible.setFocusMode(false); return }
@@ -824,6 +824,7 @@ ApplicationWindow {
             menuAction("related", "Study", "related"),
             menuAction("chapterFind", "Find in chapter", "chapterFind")
         ].concat(openRangeEntries(sceneX, sceneY))
+            .concat(bible.focusMode ? [menuDivider, menuAction("leaveFocus", "Leave focus mode", "focus")] : [])
     }
     // While an annotation range is being moved, the menu offers the session's
     // own actions (the same keys as the status bar), then the copies.
@@ -3544,6 +3545,17 @@ ApplicationWindow {
         property string glyph: ""
         property string tip: ""
         property bool selected: false
+        // Whether the button can act now; focus mode's quiet footer also hides
+        // and disables every button but the persistent one, in place.
+        property bool available: true
+        property bool persistent: false
+        readonly property bool footerButton: true
+        readonly property bool quiet: app.footerQuiet && !persistent
+        enabled: available && !quiet
+        opacity: quiet ? 0 : 1
+        Behavior on opacity { NumberAnimation { duration: app.fadeMs } }
+        onActiveFocusChanged: app.footerFocusChanged()
+        onHoveredChanged: app.updateFooterHover()
         implicitWidth: glyph.length ? implicitHeight : Math.ceil(floatingText.implicitWidth + leftPadding + rightPadding) + 1
         implicitHeight: 40 * app.controlScale
         padding: 8 * app.controlScale
@@ -3559,6 +3571,13 @@ ApplicationWindow {
         Keys.onReturnPressed: function(event) { app.buttonEnter(floatingButton, event) }
         Keys.onEnterPressed: function(event) { app.buttonEnter(floatingButton, event) }
         Connections { target: floatingButton; function onClicked() { app.buttonClicked(floatingButton) } }
+        // Just revealed by hover: a click that was aimed elsewhere is ignored briefly.
+        MouseArea {
+            anchors.fill: parent
+            z: 10
+            visible: app.footerGuard && !floatingButton.persistent
+            acceptedButtons: Qt.AllButtons
+        }
         Accessible.name: tip
         AppToolTip { theme: desktop; uiScale: app.scale; visible: floatingButton.hovered || floatingButton.activeFocus; text: floatingButton.tip }
         background: Rectangle {
@@ -3651,6 +3670,17 @@ ApplicationWindow {
                         ctx.arc(16, 16, 5, 0, 2 * Math.PI)
                     } else if (glyph === "more") {
                         ctx.fillRect(4, 11, 3, 3); ctx.fillRect(10.5, 11, 3, 3); ctx.fillRect(17, 11, 3, 3)
+                    } else if (glyph === "focus") {
+                        // A viewfinder: four corner brackets around a dot.
+                        ctx.moveTo(3, 8); ctx.lineTo(3, 3); ctx.lineTo(8, 3)
+                        ctx.moveTo(16, 3); ctx.lineTo(21, 3); ctx.lineTo(21, 8)
+                        ctx.moveTo(21, 16); ctx.lineTo(21, 21); ctx.lineTo(16, 21)
+                        ctx.moveTo(8, 21); ctx.lineTo(3, 21); ctx.lineTo(3, 16)
+                        ctx.stroke()
+                        ctx.beginPath()
+                        ctx.arc(12, 12, 2.2, 0, 2 * Math.PI)
+                        ctx.fill()
+                        ctx.beginPath()
                     } else if (glyph === "visual") {
                         // The bracket and square handles span all three verse lines.
                         ctx.moveTo(8, 6); ctx.lineTo(21, 6)
@@ -4492,11 +4522,15 @@ ApplicationWindow {
                 Rectangle {
                     id: readingBottomFade
                     objectName: "readingBottomFade"
-                    visible: !bible.focusMode
+                    // In focus mode only while the footer is revealed.
+                    readonly property bool shown: !bible.focusMode || !app.footerQuiet
+                    visible: opacity > 0
+                    opacity: shown ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: app.fadeMs } }
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
-                    height: app.floatingSafety + 24 * app.scale
+                    height: Math.max(72 * app.systemScale, app.footerHeight + 2 * app.footerMargin) + 24 * app.scale
                     // Fully opaque from just above the footer's top row, so reader
                     // text never shows through the footer controls.
                     readonly property real opaqueFrom: Math.min(0.6, Math.max(0.05,
@@ -4956,13 +4990,32 @@ ApplicationWindow {
     // the footer stays one row tall. More cramped hides the layout button;
     // really cramped folds the right group into "…" and hides ?. The reader
     // keeps the footer row inside floatingSafety.
+    // Focus mode keeps the footer but shows only the focus button. Resting the
+    // pointer on the footer for 250 ms reveals the rest where they always sit
+    // (their clicks wait 300 ms more, so a click aimed at the text is not
+    // caught); keyboard focus entering the footer reveals it at once.
+    property bool footerHoverRevealed: false
+    readonly property bool footerFocused: !!activeFocusItem && activeFocusItem.footerButton === true
+    readonly property bool footerQuiet: bible.focusMode && !footerHoverRevealed && !footerFocused
+    readonly property bool footerGuard: footerGuardTimer.running
+    Timer { id: footerRevealTimer; interval: 250; onTriggered: { app.footerHoverRevealed = true; footerGuardTimer.restart() } }
+    Timer { id: footerGuardTimer; interval: 300 }
+    // The pointer is on the footer: its zone, or a (revealed) button over it.
+    function updateFooterHover() {
+        let hovered = footerZone.containsMouse
+        for (const group of [leftActions, locationControls, floatingActions])
+            for (const child of group.children) if (child.footerButton === true && child.hovered) hovered = true
+        if (hovered && bible.focusMode && !footerHoverRevealed) { if (!footerRevealTimer.running) footerRevealTimer.restart() }
+        else if (!hovered) { footerRevealTimer.stop(); footerHoverRevealed = false }
+    }
+    function footerFocusChanged() { if (footerFocused) footerGuardTimer.stop() }
     readonly property real footerMargin: 16 * controlScale
     // Clearance between reader text and the stacked right column.
     readonly property real footerGap: 4 * controlScale
     readonly property real footerButton: 40 * controlScale
     readonly property real footerGroupGap: 24 * controlScale
     readonly property int footerRightCount: bible.ready ? (bible.historyEnabled ? 4 : 3) : 0
-    readonly property real footerLeftFull: bible.ready ? 2 * footerButton : footerButton
+    readonly property real footerLeftFull: bible.ready ? 3 * footerButton : footerButton
     readonly property real footerRightFull: footerRightCount * footerButton
     readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
         + (bible.ready ? versionControl.implicitWidth + layoutControl.implicitWidth : 0)
@@ -4992,6 +5045,19 @@ ApplicationWindow {
             { id: "desk", text: "Desk", shortcut: menuKey("desk"), enabled: ready, run: function() { app.runCommand("desk") } }
         ].filter(function(entry) { return !!entry })
     }
+    // Hover only (no buttons): clicks fall through to the text beneath.
+    MouseArea {
+        id: footerZone
+        objectName: "footerZone"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: app.footerHeight + 2 * app.footerMargin
+        visible: bible.ready && bible.focusMode && !app.findPromptOpen
+        acceptedButtons: Qt.NoButton
+        hoverEnabled: true
+        onContainsMouseChanged: app.updateFooterHover()
+    }
     Row {
         id: leftActions
         objectName: "leftActions"
@@ -4999,13 +5065,13 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.margins: app.footerMargin
         spacing: 0
-        visible: !bible.focusMode && !app.findPromptOpen
+        visible: !app.findPromptOpen
         FloatingButton {
             objectName: "helpControl"
             glyph: "help"
             tip: "Keybindings · " + app.keyText("help")
             visible: !app.footerCollapsed
-            enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: helpDialog.open()
         }
         FloatingButton {
@@ -5014,9 +5080,21 @@ ApplicationWindow {
             glyph: app.verseMode ? "visual" : "normal"
             selected: app.verseMode
             visible: bible.ready
-            enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && !bible.busy && !app.modalOpen
             tip: (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · " + app.keyText("visual")
             onClicked: { app.setVisualMode(!app.verseMode); app.readerFocus() }
+        }
+        FloatingButton {
+            id: focusControl
+            objectName: "focusControl"
+            glyph: "focus"
+            // The one footer button focus mode always shows.
+            persistent: true
+            selected: bible.focusMode
+            visible: bible.ready
+            available: !bible.busy && !app.modalOpen && app.actionAvailable("focus")
+            tip: (bible.focusMode ? "Focus mode · leave" : "Focus mode") + " · " + app.keyText("focus")
+            onClicked: { app.runCommand("focus"); app.readerFocus() }
         }
     }
     Row {
@@ -5028,13 +5106,13 @@ ApplicationWindow {
         readonly property real availableWidth: Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
         readonly property real fixedWidth: searchControl.width + (versionControl.visible ? versionControl.width : 0) + (layoutControl.visible ? layoutControl.width : 0)
         width: Math.min(fixedWidth + passageControl.implicitWidth, availableWidth)
-        visible: !bible.focusMode && !app.findPromptOpen
+        visible: !app.findPromptOpen
         FloatingButton {
             id: searchControl
             objectName: "searchControl"
             glyph: "search"
             tip: "Search Bible · " + app.keyText("bibleSearch")
-            enabled: bible.ready && !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: bible.ready && !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.showPaletteMode("search")
         }
         FloatingButton {
@@ -5043,7 +5121,7 @@ ApplicationWindow {
             width: Math.max(0, locationControls.width - locationControls.fixedWidth)
             text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
             tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · " + app.keyText("books")
-            enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.openPalette(false)
         }
         FloatingButton {
@@ -5053,7 +5131,7 @@ ApplicationWindow {
             text: bible.versionAbbreviation
             tip: bible.edition + " · Switch version · " + app.keyText("switchVersion")
             visible: bible.ready
-            enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.openVersions(false)
         }
         FloatingButton {
@@ -5062,7 +5140,7 @@ ApplicationWindow {
             glyph: "layout-" + bible.readingMode
             tip: "Layout · " + app.readingModeName(bible.readingMode) + " · " + app.keyText("readingMode")
             visible: bible.ready && !app.footerHideLayout
-            enabled: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("readingMode")
         }
     }
@@ -5075,7 +5153,7 @@ ApplicationWindow {
         spacing: 0
         // One row, or a column bottom-aligned in the corner when cramped.
         columns: app.footerStacked ? 1 : 5
-        visible: !bible.focusMode && !app.findPromptOpen
+        visible: !app.findPromptOpen
         readonly property bool expanded: bible.ready && !app.footerCollapsed
         FloatingButton {
             objectName: "savedControl"
@@ -5083,14 +5161,14 @@ ApplicationWindow {
             glyph: "saved"
             selected: savedDrawer.visible
             tip: "Annotations · " + app.keyText("annotations")
-            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("annotations")
         }
         FloatingButton {
             objectName: "relatedControl"
             glyph: "study"
             visible: floatingActions.expanded
-            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             tip: "Study · " + app.keyText("related")
             onClicked: app.runCommand("related")
         }
@@ -5100,7 +5178,7 @@ ApplicationWindow {
             visible: floatingActions.expanded && bible.historyEnabled
             selected: historyDrawer.visible
             tip: "History · " + app.keyText("history")
-            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("history")
         }
         FloatingButton {
@@ -5109,7 +5187,7 @@ ApplicationWindow {
             glyph: "desk"
             selected: deskDrawer.visible
             tip: "Desk · " + app.keyText("desk")
-            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("desk")
         }
         FloatingButton {
@@ -5118,7 +5196,7 @@ ApplicationWindow {
             visible: bible.ready && app.footerCollapsed
             glyph: "more"
             tip: "Panels"
-            enabled: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: {
                 const p = footerMore.mapToItem(null, 0, 0)
                 const entries = app.footerPanelEntries()
@@ -5147,7 +5225,8 @@ ApplicationWindow {
         objectName: "searchMatchCount"
         anchors.right: parent.right; anchors.bottom: parent.bottom
         anchors.rightMargin: 20 * app.controlScale + app.footerRightInset
-        anchors.bottomMargin: bible.focusMode ? app.footerMargin : app.footerMargin + app.footerHeight + 6 * app.controlScale
+        // Above the footer row, which focus mode keeps (quiet, revealed on hover).
+        anchors.bottomMargin: app.footerMargin + app.footerHeight + 6 * app.controlScale
         visible: !app.findPromptOpen && app.acceptedSearchQuery.length > 0
         text: app.searchError || (app.searchMatches.length ? (app.searchMatchIndex < 0
             ? app.searchMatches.length + " matches" : (app.searchMatchIndex + 1) + " / " + app.searchMatches.length) : "No matches")

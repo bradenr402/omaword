@@ -1361,7 +1361,7 @@ private slots:
         key(Qt::Key_0,Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(),1.5);
         key(Qt::Key_F);
         QVERIFY(bible->focusMode()); QVERIFY(prop("settingsDialog","opened").toBool());
-        QVERIFY(!item("floatingActions")->isVisible());
+        QVERIFY(window->property("footerQuiet").toBool());
         QVERIFY(!bible->showVerseNumbers()); QVERIFY(!bible->showHeadings());
         key(Qt::Key_F); QVERIFY(!bible->focusMode());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
@@ -3066,7 +3066,7 @@ private slots:
             QCOMPARE(prop("focusedErrorMessage","text").toString(),bible->error());
             QVERIFY(item("focusedErrorMessage")->isVisible());
             QVERIFY(bible->focusMode());
-            for (const auto name : {"errorMessage","floatingActions"}) QVERIFY(!item(name)->isVisible());
+            QVERIFY(!item("errorMessage")->isVisible()); QVERIFY(window->property("footerQuiet").toBool());
             QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
             capture(importing ? "review-focused-import-error" : "review-focused-export-error");
             key(Qt::Key_Escape); QTRY_VERIFY(!prop("errorDialog","visible").toBool());
@@ -3255,8 +3255,12 @@ private slots:
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
-        for (const auto name : {"readingBottomFade","readerScrollbar","notesPanel","modeControl","passageControl","floatingActions","bookmarkMarker1","toast"})
+        for (const auto name : {"readerScrollbar","notesPanel","bookmarkMarker1","toast"})
             QVERIFY2(!item(name)->isVisible(),name);
+        // The footer stays, quiet: only the focus button shows; the rest keep their places, hidden.
+        QTRY_VERIFY(!item("readingBottomFade")->isVisible());
+        QVERIFY(window->property("footerQuiet").toBool()); QVERIFY(item("focusControl")->opacity() == 1);
+        for (const auto name : {"modeControl","passageControl","deskControl"}) QTRY_COMPARE(item(name)->opacity(),0.0);
         QCOMPARE(item("reading")->width(),double(window->width()));
         QVERIFY(item("verseBody1")->isVisible());
         QVERIFY(item("chapterTitle")->isVisible());
@@ -3274,7 +3278,7 @@ private slots:
         QVERIFY(bible->focusMode());
         key(Qt::Key_Escape);
         QVERIFY(!bible->focusMode());
-        QVERIFY(item("readingBottomFade")->isVisible());
+        QTRY_VERIFY(item("readingBottomFade")->isVisible());
         QVERIFY(item("bookmarkMarker1")->isVisible());
     }
     void readerScrollbarAndHeader() {
@@ -3599,7 +3603,7 @@ private slots:
         key(Qt::Key_F); QVERIFY(bible->focusMode()); checkToast("Focus mode on");
         QVERIFY(item("chapterTitle")->isVisible());
         QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
-        QVERIFY(!item("floatingActions")->isVisible());
+        QVERIFY(window->property("footerQuiet").toBool());
         QVERIFY(!item("verseHeading1")->isVisible());
         QVERIFY(!item("verseNumberLabel1")->isVisible());
         for (const auto &toggle : QList<QPair<Qt::Key,QString>>{{Qt::Key_N,"Show verse numbers"},
@@ -3620,7 +3624,7 @@ private slots:
         key(Qt::Key_Equal,Qt::ControlModifier | Qt::AltModifier); checkToast("Line height 1.6");
         key(Qt::Key_0,Qt::ControlModifier | Qt::AltModifier); checkToast("Line height 1.5");
         QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
-        QVERIFY(!item("floatingActions")->isVisible());
+        QVERIFY(window->property("footerQuiet").toBool());
         key(Qt::Key_F); QVERIFY(!bible->focusMode()); checkToast("Focus mode off");
         QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
         {
