@@ -525,6 +525,12 @@ private slots:
         key(Qt::Key_M); key(Qt::Key_T); key(Qt::Key_Z); QCOMPARE(prop("components"), selected);
         auto target = item(cancelFocus ? "rangeChooserCancel" : "rangeComponent:highlight"); QVERIFY(target); target->forceActiveFocus();
         key(cancelFocus ? Qt::Key_Enter : Qt::Key_Return);
+        if (cancelFocus) {
+            // A focused button owns enter: Cancel ends the session untouched.
+            QTRY_VERIFY(!prop("sessionOpen").toBool());
+            QCOMPARE(bible->annotationSnapshot(source), snapshot);
+            return;
+        }
         QTRY_VERIFY(prop("active").toBool()); QVERIFY(!prop("visibleModal").toBool());
         QCOMPARE(prop("components"), selected); QCOMPARE(bible->annotationSnapshot(source), snapshot);
         QTRY_VERIFY(window->property("readerKeys").toBool());

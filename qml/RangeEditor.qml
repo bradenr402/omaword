@@ -345,8 +345,8 @@ Item {
         }
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { focusRow(0) }
-        // Shortcuts intercept Return before a focused checkbox or Cancel button can
-        // consume it. Arrow/Tab navigation stays within the selectable rows.
+        // Return continues from a focused checkbox (a Shortcut); a focused button
+        // takes enter itself. Arrow/Tab navigation stays within the selectable rows.
         Shortcut { sequences: ["Return", "Enter"]; enabled: chooser.visible; onActivated: chooser.continueChoice() }
         Shortcut { sequence: "Escape"; enabled: chooser.visible; onActivated: editor.cancel() }
         Shortcut { sequences: ["J", "Down", "Right", "Tab"]; enabled: chooser.visible; onActivated: chooser.focusRow(chooser.focusedRow + 1) }
