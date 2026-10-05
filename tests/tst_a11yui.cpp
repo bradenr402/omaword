@@ -536,6 +536,24 @@ private slots:
         key(Qt::Key_Home); QTRY_COMPARE(contentY("versionSummaryScroll"), 0.0);
         QVERIFY(item("versionCancel")->hasActiveFocus()); key(Qt::Key_Right); QVERIFY(item("versionNext")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
+        // Add-version guide: paging keys from the search field scroll the catalog;
+        // Details & Attribution takes focus and scrolls by key.
+        QVariantList entries;
+        for (int i = 0; i < 12; ++i) entries << QVariantMap{{"id", QString("v%1").arg(i)}, {"name", QString("Version %1 with a long descriptive name").arg(i)},
+            {"abbreviation", QString("V%1").arg(i)}, {"copyright", QString("A long copyright notice. ").repeated(40)}, {"detailsUrl", "https://example.invalid"}};
+        catalog->entries = entries; emit catalog->changed();
+        bible->setFontSize(26); window->resize(900, 480); QTRY_COMPARE(window->width(), 900);
+        run("import"); QTRY_VERIFY(opened("importGuide")); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
+        QTRY_VERIFY(travel("importGuideScroll") > 20);
+        key(Qt::Key_PageDown); QTRY_VERIFY(contentY("importGuideScroll") > 0);
+        QVERIFY(item("catalogSearch")->hasActiveFocus());
+        key(Qt::Key_PageUp); QTRY_COMPARE(contentY("importGuideScroll"), 0.0);
+        click(item("catalogDetails:v0")); QTRY_VERIFY(opened("catalogDetails")); QTRY_VERIFY(item("detailsScroll")->hasActiveFocus());
+        QTRY_VERIFY(travel("detailsScroll") > 20);
+        key(Qt::Key_End); QTRY_VERIFY(contentY("detailsScroll") > 0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("catalogDetails"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
+        bible->setFontSize(40); window->resize(640, 480); QTRY_COMPARE(window->width(), 640);
         // Backup scope: the explanation scrolls while Choose file… keeps focus.
         run("backup"); QTRY_VERIFY(opened("backupScope"));
         QTRY_VERIFY(travel("backupScopeScroll") > 0);
@@ -639,6 +657,7 @@ private slots:
         clickAt(outsidePoint("contextMenu")); QTRY_VERIFY(!menu()->property("visible").toBool());
         QCOMPARE(bible->selectedStart(), 3);
         // ...while a right click elsewhere closes it and opens the new menu there at once.
+        QTRY_VERIFY(prop("readerKeys").toBool()); QTRY_VERIFY(readerFocused());
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
         const QPoint there = versePoint(8);
         clickAt(there, Qt::RightButton);
