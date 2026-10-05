@@ -1348,10 +1348,13 @@ private slots:
             const auto labelRect = label->mapRectToItem(control,label->boundingRect());
             const auto keyRect = shortcut->mapRectToItem(control,shortcut->boundingRect());
             const auto trackRect = track->mapRectToItem(control,track->boundingRect());
-            QVERIFY(labelRect.left() < 1);
+            // Inset by the padding that keeps the row clear of its focus outline.
+            const qreal left = control->property("leftPadding").toReal(), right = control->property("rightPadding").toReal();
+            QVERIFY(left > 0 && right > 0);
+            QVERIFY(qAbs(labelRect.left() - left) < 1);
             QVERIFY(labelRect.right() < keyRect.left());
             QVERIFY(keyRect.right() < trackRect.left());
-            QCOMPARE(trackRect.right(),control->width());
+            QCOMPARE(trackRect.right(),control->width() - right);
             QCOMPARE(track->property("radius").toDouble(),qMin(desktop->cornerRadius(),qMin(track->width(),track->height()) / 2));
             QCOMPARE(thumb->property("radius").toDouble(),qMin(desktop->cornerRadius(),qMin(thumb->width(),thumb->height()) / 2));
         }
@@ -3095,6 +3098,7 @@ private slots:
             QCOMPARE(track->property("radius").toDouble(),qMin(desktop->cornerRadius(),qMin(track->width(),track->height()) / 2));
             QCOMPARE(track->property("color"),desktop->property("accent"));
             QCOMPARE(handle->property("color"),desktop->property("surface"));
+            item("lineHeightSlider")->forceActiveFocus(); // focus starts on the first switch
             const auto old = bible->lineHeight();
             key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
             key(Qt::Key_Left); QTRY_COMPARE(bible->lineHeight(),old);
