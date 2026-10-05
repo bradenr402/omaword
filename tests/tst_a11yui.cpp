@@ -744,6 +744,29 @@ private slots:
         QCOMPARE(toolTipOf(dismiss)->property("text").toString(), QString::fromUtf8("Dismiss · esc"));
         click(dismiss); QVERIFY(bible->error().isEmpty()); QVERIFY(readerFocused());
     }
+    void passageMenuOpensTheCursorsRangesAndMarkersSkipTab() {
+        bible->selectVerses(5, 5); QVERIFY(bible->toggleBookmark()); bible->setNoteText("A note on five");
+        bible->selectVerses(4, 6); QVERIFY(bible->toggleBookmark());
+        navigate("John 3:5"); bible->selectVerses(5, 5); call("readerFocus");
+        // The verse rails are mouse only: tab never lands on them.
+        for (int i = 0; i < 25; ++i) {
+            key(Qt::Key_Tab);
+            QVERIFY2(!focusName().contains("Marker"), qPrintable(focusName()));
+        }
+        call("readerFocus");
+        // Keyboard: the menu adds Open bookmark (two overlap: a chooser) and Open note.
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds().mid(menuIds().size() - 3), (QStringList{"|", "openBookmark", "openNote"}));
+        key(Qt::Key_End); key(Qt::Key_Return); QTRY_VERIFY(opened("notesDrawer"));
+        QCOMPARE(bible->selectionReference(), QString("John 3:5"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        // Mouse: right-click, Open bookmark, then pick the wider range in the chooser.
+        clickAt(versePoint(5), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        chooseMenu("openBookmark");
+        QTRY_VERIFY(object("verseTagMenu")->property("opened").toBool());
+        auto wide = item("verseTagAction:John 3:4–6"); QTRY_VERIFY(wide && wide->isVisible());
+        click(wide); QTRY_COMPARE(bible->selectionReference(), QString("John 3:4–6"));
+    }
 };
 
 int main(int argc, char **argv) {

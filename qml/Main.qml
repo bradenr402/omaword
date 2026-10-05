@@ -779,7 +779,37 @@ ApplicationWindow {
         return { id: id, text: text, shortcut: menuKey(action), enabled: actionAvailable(action),
             run: function() { app.runCommand(action) } }
     }
-    function passageMenuEntries() {
+    // The cursor verse's annotation ranges of one kind (every layout reads bible.verses).
+    function cursorRanges(kind) {
+        const row = Array.from(bible.verses).find(function(verse) { return verse.number === bible.cursorVerse })
+        return row ? Array.from(row[kind + "Ranges"] || []) : []
+    }
+    // Opens a kind's range at the cursor; overlapping ranges get the chooser.
+    function openCursorRanges(kind, sceneX, sceneY) {
+        const ranges = cursorRanges(kind)
+        if (!ranges.length) { rejected(); return }
+        if (ranges.length === 1) {
+            if (kind === "tag") openPassageTags(ranges[0])
+            else if (kind === "bookmark") openBookmark(ranges[0])
+            else openNoteScope(ranges[0])
+            return
+        }
+        verseTagMenu.annotationKind = kind
+        verseTagMenu.entries = ranges
+        verseTagMenu.popup(sceneX, sceneY)
+    }
+    function openRangeEntries(sceneX, sceneY) {
+        const ready = !rangeEditing && !bible.busy
+        const entries = [["bookmark", "openBookmark", "Open bookmark"], ["note", "openNote", "Open note"], ["tag", "openTags", "Open tags…"]]
+            .filter(function(kind) { return app.cursorRanges(kind[0]).length > 0 })
+            .map(function(kind) {
+                const many = app.cursorRanges(kind[0]).length > 1
+                return { id: kind[1], text: kind[2] + (many ? " (choose)" : ""), enabled: ready,
+                    run: function() { app.openCursorRanges(kind[0], sceneX, sceneY) } }
+            })
+        return entries.length ? [menuDivider].concat(entries) : []
+    }
+    function passageMenuEntries(sceneX, sceneY) {
         return [
             menuAction("copy", "Copy quotation", "copy"),
             menuAction("copyPlain", "Copy plain text", "copyPlain"),
@@ -793,7 +823,7 @@ ApplicationWindow {
             menuDivider,
             menuAction("related", "Study", "related"),
             menuAction("chapterFind", "Find in chapter", "chapterFind")
-        ]
+        ].concat(openRangeEntries(sceneX, sceneY))
     }
     // While an annotation range is being moved, the menu offers the session's
     // own actions (the same keys as the status bar), then the copies.
@@ -820,7 +850,7 @@ ApplicationWindow {
                 if (bible.selectedStart !== number) return
             }
         }
-        contextMenu.show("passage", passageMenuEntries(), sceneX, sceneY)
+        contextMenu.show("passage", passageMenuEntries(sceneX, sceneY), sceneX, sceneY)
     }
     function verseMenuPoint(number) {
         const view = reading.mapToItem(null, 0, 0)
@@ -849,7 +879,7 @@ ApplicationWindow {
             if (number > 0) selectVerse(number, false)
         }
         const point = verseMenuPoint(bible.cursorVerse)
-        contextMenu.show("passage", passageMenuEntries(), point.x, point.y)
+        contextMenu.show("passage", passageMenuEntries(point.x, point.y), point.x, point.y)
     }
     function sceneRowPoint(item) {
         return item ? item.mapToItem(null, 24 * scale, Math.min(item.height, 28 * scale)) : Qt.point(width / 3, height / 3)
@@ -3646,6 +3676,8 @@ ApplicationWindow {
             return r.reference + (marker.kind === "tag" ? " · " + app.tagsPlainText(r.tags) : "")
         }).join("\n")
         width: 16 * app.readerScale
+        // Mouse only: the passage menu's Open bookmark / note / tags reach the same ranges by key.
+        focusPolicy: Qt.NoFocus
         readonly property int lane: (app.annotationLanes[rowIndex] || {})[kind] || 0
         x: (36 - lane * 18) * app.readerScale
         padding: 0
