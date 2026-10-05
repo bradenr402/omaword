@@ -19,6 +19,8 @@ Item {
     readonly property bool visibleModal: surface.visible || relatedDrawer.visible
     readonly property bool pickerVisible: surface.visible
     readonly property bool relatedShown: relatedDrawer.visible && !relatedDrawer.closing
+    // The Study drawer itself, for the reader's outside-click catcher.
+    readonly property Drawer studyDrawer: relatedDrawer
     readonly property bool contentVisible: visibleModal
     readonly property bool scopePinned: surface.visible && editingScope !== null
     property var editingScope: null

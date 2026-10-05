@@ -983,6 +983,16 @@ ApplicationWindow {
         objectName: "contextMenu"
         theme: desktop
     }
+    MouseArea {
+        objectName: "contextMenuOutside"
+        parent: Overlay.overlay
+        anchors.fill: parent
+        z: contextMenu.z - 0.5
+        visible: contextMenu.visible
+        acceptedButtons: Qt.AllButtons
+        onPressed: function(mouse) { mouse.accepted = contextMenu.pressedOutside(mouse.button) }
+        onWheel: function(wheel) { wheel.accepted = true }
+    }
     function copyClickedVerse(number, plainText) {
         if (rangeEditing) { bible.copySelection(plainText); return }
         if (!flushNote()) return
@@ -4723,6 +4733,7 @@ ApplicationWindow {
     }
 
     MouseArea {
+        objectName: "notesOutside"
         parent: Overlay.overlay
         // Cover only the dimmed outside region. Drawer consumes its own outside
         // events before the dimmer, so guard dismissal here without auto-close.
@@ -4732,8 +4743,33 @@ ApplicationWindow {
         width: app.width - notesDrawer.width * notesDrawer.position
         z: notesDrawer.z + 0.1
         visible: app.notesOpen && !app.modalOpen
-        onClicked: app.closeNotes()
+        acceptedButtons: Qt.AllButtons
+        onPressed: app.closeNotes()
+        onWheel: function(wheel) { wheel.accepted = true }
     }
+    // Outside an open side panel, a press only closes the panel: it never
+    // reaches the reader or footer beneath (a Drawer alone lets it through).
+    // Hidden while a dialog, picker, or menu sits above the panel.
+    component DrawerOutside: MouseArea {
+        id: outside
+        required property Drawer drawer
+        property bool shown: drawer.visible
+        signal dismiss()
+        parent: Overlay.overlay
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        width: app.width - drawer.width * drawer.position
+        z: outside.drawer.z + 0.1
+        visible: shown && !app.dialogOpen
+        acceptedButtons: Qt.AllButtons
+        onPressed: outside.dismiss()
+        onWheel: function(wheel) { wheel.accepted = true }
+    }
+    DrawerOutside { objectName: "savedOutside"; drawer: savedDrawer; shown: savedDrawer.shown; onDismiss: savedDrawer.close() }
+    DrawerOutside { objectName: "deskOutside"; drawer: deskDrawer; shown: deskDrawer.shown && !cleanDeskConfirmation.visible; onDismiss: deskDrawer.close() }
+    DrawerOutside { objectName: "historyOutside"; drawer: historyDrawer; shown: historyDrawer.shown && !clearHistoryConfirmation.visible; onDismiss: historyDrawer.close() }
+    DrawerOutside { objectName: "studyOutside"; drawer: tagsUi.studyDrawer; shown: tagsUi.relatedShown && !tagsUi.pickerVisible; onDismiss: tagsUi.close() }
 
     // Footer: ? and mode on the left; search, passage, version, and layout in
     // the center; Annotations, Study, History (while enabled), and Desk on the right
@@ -5903,7 +5939,8 @@ ApplicationWindow {
     ModalCard {
         id: cleanDeskConfirmation
         objectName: "cleanDeskConfirmation"
-        closePolicy: Popup.CloseOnEscape
+        // Outside clicks cancel, like esc; they never reach what is underneath.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { cleanDeskCancel.forceActiveFocus() }
         onClosed: {
@@ -6142,7 +6179,8 @@ ApplicationWindow {
     ModalCard {
         id: clearHistoryConfirmation
         objectName: "clearHistoryConfirmation"
-        closePolicy: Popup.CloseOnEscape
+        // Outside clicks cancel, like esc; they never reach what is underneath.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { clearHistoryCancel.forceActiveFocus() }
         onClosed: {
@@ -6192,7 +6230,8 @@ ApplicationWindow {
         readonly property string versionId: scope ? scope.versionId : ""
         property int row: -1
         property bool noteOnly: false
-        closePolicy: Popup.CloseOnEscape
+        // Outside clicks cancel, like esc; they never reach what is underneath.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { deleteCancel.forceActiveFocus() }
         Shortcut {
@@ -6773,7 +6812,8 @@ ApplicationWindow {
         id: restoreConfirmation
         objectName: "restoreConfirmation"
         property url backupFile
-        closePolicy: Popup.CloseOnEscape
+        // Outside clicks cancel, like esc; they never reach what is underneath.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { restoreCancel.forceActiveFocus() }
         Shortcut {

@@ -25,11 +25,22 @@ Popup {
     parent: Overlay.overlay
     // Above drawers and dialogs that may be declared later in the window.
     z: 1000
-    modal: true
+    // Not modal: the owner's outside catcher (`pressedOutside`) decides what a
+    // press outside the menu does. It must not be declared inside this popup:
+    // an overlay child owned by a popup makes Qt treat the closed menu as the
+    // top popup and block every window shortcut.
+    modal: false
     dim: false
     focus: true
     padding: 4 * uiScale
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    closePolicy: Popup.CloseOnEscape
+    // Outside the menu a left (or middle) press only closes it, acting on
+    // nothing underneath. A right press closes it and falls through (returns
+    // false), so the target under the pointer opens its own menu there.
+    function pressedOutside(button) {
+        close()
+        return button !== Qt.RightButton
+    }
     // No motion, ever: the menu appears and disappears at once, so actions and
     // focus restoration never wait on animation.
     enter: null

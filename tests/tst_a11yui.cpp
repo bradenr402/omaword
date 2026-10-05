@@ -14,6 +14,7 @@
 #include <QSqlRecord>
 #include <QTemporaryDir>
 #include <QUuid>
+#include <functional>
 #include <archive.h>
 #include <archive_entry.h>
 #include "biblebackend.h"
@@ -194,6 +195,22 @@ class A11yUiTest : public QObject
     qreal travel(const QString &scroll) const {
         auto view = object(scroll); auto flick = view->property("contentItem").value<QObject *>(); if (!flick) flick = view;
         return flick->property("contentHeight").toReal() - flick->property("height").toReal();
+    }
+
+    // A verse point on screen, outside the popup `name` and clear of the footer.
+    QPoint outsidePoint(const QString &name, int avoidVerse = 3) {
+        auto popup = object(name);
+        auto frame = qobject_cast<QQuickItem *>(popup->property("background").value<QObject *>());
+        const QRectF area = frame ? frame->mapRectToScene(frame->boundingRect()) : QRectF();
+        for (int verse = 1; verse <= 36; ++verse) {
+            if (verse == avoidVerse) continue;
+            auto body = item("verseBody" + QString::number(verse)); if (!body) continue;
+            for (const QPointF local : {QPointF(30, 8), QPointF(body->width() / 2, 8), QPointF(body->width() - 30, 8)}) {
+                const QPoint point = body->mapToScene(local).toPoint();
+                if (point.y() > 60 && point.y() < window->height() - 100 && !area.adjusted(-8, -8, 8, 8).contains(point)) return point;
+            }
+        }
+        return {};
     }
 
 private slots:
@@ -523,6 +540,52 @@ private slots:
         run("desk"); QTRY_VERIFY(opened("deskDrawer"));
         before = playCount(); key(Qt::Key_Y); QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+    }
+    void outsideClicksOnlyClose() {
+        bible->selectVerses(3, 3); call("readerFocus");
+        auto check = [&](const QString &popup, std::function<void()> open) {
+            open(); QTRY_VERIFY2(opened(popup), qPrintable(popup));
+            const QPoint point = outsidePoint(popup); QVERIFY2(!point.isNull(), qPrintable(popup));
+            const int before = playCount();
+            clickAt(point); QTRY_VERIFY2(!shown(popup), qPrintable(popup));
+            QVERIFY2(bible->selectedStart() == 3 && bible->selectedEnd() == 3, qPrintable(popup + ": " + bible->selectionReference()));
+            QVERIFY2(bible->collection().isEmpty() && bible->desk().isEmpty(), qPrintable(popup));
+            QVERIFY(playCount() >= before);
+            QTest::qWait(30);
+        };
+        check("passagePalette", [&] { run("books"); });
+        check("helpDialog", [&] { run("help"); });
+        check("settingsDialog", [&] { run("settings"); });
+        check("versionDialog", [&] { run("switchVersion"); });
+        check("aboutDialog", [&] { run("about"); });
+        check("savedDrawer", [&] { run("annotations"); });
+        check("deskDrawer", [&] { run("desk"); });
+        check("historyDrawer", [&] { run("history"); });
+        check("relatedDrawer", [&] { run("related"); });
+        check("notesDrawer", [&] { run("notes"); });
+        // The picker nearly fills the window: give it room above to click outside.
+        window->resize(1200, 1100); QTRY_COMPARE(window->height(), 1100); call("setReaderY", 0);
+        check("tagsSurface", [&] { run("tags"); });
+        window->resize(1200, 820); QTRY_COMPARE(window->height(), 820);
+        // A confirmation over a drawer: the outside click cancels only the confirmation.
+        QVERIFY(bible->navigate("John 3:30")); QVERIFY(bible->addToDesk()); navigate("John 3:3"); bible->selectVerses(3, 3);
+        run("desk"); QTRY_VERIFY(opened("deskDrawer")); QTRY_VERIFY(item("deskList")->hasActiveFocus());
+        key(Qt::Key_Delete, Qt::ShiftModifier);
+        clickAt(outsidePoint("cleanDeskConfirmation")); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
+        QVERIFY(opened("deskDrawer")); QCOMPARE(bible->desk().size(), 1);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        // Context menu: a left click outside only closes it.
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        clickAt(outsidePoint("contextMenu")); QTRY_VERIFY(!menu()->property("visible").toBool());
+        QCOMPARE(bible->selectedStart(), 3);
+        // ...while a right click elsewhere closes it and opens the new menu there at once.
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        const QPoint there = versePoint(8);
+        clickAt(there, Qt::RightButton);
+        QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(bible->selectedStart(), 8);
+        QVERIFY(qAbs(menu()->property("x").toReal() - there.x()) < 2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
     }
 };
 
