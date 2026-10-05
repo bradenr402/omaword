@@ -1177,6 +1177,48 @@ private slots:
             QVERIFY(v16.size() > 0);
         }
     }
+    void rangeEditorBackspaceAndCombineKeys() {
+        bible->selectVerses(2, 5); bible->setNoteText("Destination");
+        bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
+        bible->selectVerses(2, 4); QVERIFY(bible->toggleBookmark()); bible->setNoteText("Source");
+        call("readerFocus"); auto editor = object("rangeEditor");
+        run("editRange"); QTRY_VERIFY(opened("rangeChooser")); QTest::qWait(60);
+        const QString source = QStringLiteral("rangeChoice:John 3:2–4");
+        // Keyboard: backspace goes from the components back to the range list.
+        click(source); QTRY_VERIFY(editor->property("source").isValid() && !editor->property("source").value<QJSValue>().isNull());
+        QTRY_VERIFY(shown("rangeChooseAnother"));
+        QVERIFY(object("rangeChooserKeys")->property("plainText").toString().contains("backspace another range"));
+        key(Qt::Key_Backspace); QTRY_VERIFY(shown(source)); QVERIFY(!shown("rangeChooseAnother"));
+        // Mouse: the hint part does the same.
+        click(source); QTRY_VERIFY(shown("rangeChooseAnother"));
+        clickHint("rangeChooserKeysPart:another range"); QTRY_VERIFY(shown(source));
+        click(source); QTRY_VERIFY(shown("rangeContinue")); key(Qt::Key_Return);
+        QTRY_VERIFY(editor->property("active").toBool()); QTRY_VERIFY(prop("readerKeys").toBool()); call("readerFocus");
+        // Combine notes: Combine has the keyboard; esc steps back to moving the range.
+        key(Qt::Key_J); key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge"));
+        QTRY_VERIFY(item("rangeMergeCombine")->hasActiveFocus());
+        QVERIFY(object("rangeMergeKeys")->property("plainText").toString().contains("enter combine")); shot("range-merge");
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("rangeNoteMerge"));
+        QVERIFY(editor->property("active").toBool()); QVERIFY(editor->property("sessionOpen").toBool()); QTRY_VERIFY(readerFocused());
+        // ← → move between the buttons.
+        key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge")); QTRY_VERIFY(item("rangeMergeCombine")->hasActiveFocus());
+        key(Qt::Key_Right); QVERIFY(item("rangeMergeBack")->hasActiveFocus());
+        key(Qt::Key_Left); QVERIFY(item("rangeMergeCombine")->hasActiveFocus());
+        // Mouse: back by its hint, then combine by its hint.
+        clickHint("rangeMergeKeysPart:back"); QTRY_VERIFY(!shown("rangeNoteMerge")); QVERIFY(editor->property("sessionOpen").toBool());
+        call("readerFocus"); key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge"));
+        clickHint("rangeMergeKeysPart:combine"); QTRY_VERIFY(!editor->property("sessionOpen").toBool());
+        bible->selectVerses(2, 5); QCOMPARE(bible->noteText(), QString("Destination\n\nSource"));
+        // Keyboard: enter on the focused Combine button combines too.
+        bible->selectVerses(6, 6); QVERIFY(bible->toggleBookmark()); bible->setNoteText("Six");
+        bible->selectVerses(6, 7); bible->setNoteText("Seven"); bible->selectVerses(6, 6); call("readerFocus");
+        run("editRange"); QTRY_VERIFY(opened("rangeChooser")); QTest::qWait(60);
+        click(QStringLiteral("rangeChoice:John 3:6")); QTRY_VERIFY(shown("rangeContinue")); key(Qt::Key_Return);
+        QTRY_VERIFY(editor->property("active").toBool()); QTRY_VERIFY(prop("readerKeys").toBool()); call("readerFocus");
+        key(Qt::Key_J); key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge")); QTRY_VERIFY(item("rangeMergeCombine")->hasActiveFocus());
+        key(Qt::Key_Return); QTRY_VERIFY(!editor->property("sessionOpen").toBool());
+        bible->selectVerses(6, 7); QCOMPARE(bible->noteText(), QString("Seven\n\nSix"));
+    }
 };
 
 int main(int argc, char **argv) {

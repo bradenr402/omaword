@@ -160,6 +160,20 @@ Item {
         }
         finish(true)
     }
+    // Back from the component form to the list of overlapping ranges.
+    readonly property bool canChooseAnother: !!source && ranges.length > 1 && !active
+    function chooseAnother() {
+        if (!canChooseAnother) { app.rejected(); return }
+        source = null
+        message = ""
+        Qt.callLater(function() { chooser.focusRow(0) })
+    }
+    // Combine notes: esc steps back to moving the range (the session stays).
+    function mergeBack() {
+        pending = null
+        merge.close()
+        app.readerFocus()
+    }
     function cancel() {
         if (!sessionOpen || restoring) return
         const initial = original
@@ -363,6 +377,7 @@ Item {
         Shortcut { sequence: "N"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggle("note") }
         Shortcut { sequence: "T"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggle("tags") }
         Shortcut { sequence: "A"; enabled: chooser.visible && !!editor.source; onActivated: editor.toggleAll() }
+        Shortcut { sequence: "Backspace"; enabled: chooser.visible && !!editor.source; onActivated: editor.chooseAnother() }
         contentItem: Column {
             id: chooserContent
             spacing: 12 * editor.uiScale
@@ -470,7 +485,8 @@ Item {
                 RangeButton {
                     objectName: "rangeChooseAnother"
                     text: "Choose another range"; visible: !!editor.source && editor.ranges.length > 1; focusPolicy: Qt.NoFocus
-                    onClicked: { editor.source = null; Qt.callLater(function() { chooser.focusRow(0) }) }
+                    keyHint: KeyNotation.format("Backspace")
+                    onClicked: editor.chooseAnother()
                 }
                 RangeButton { objectName: "rangeContinue"; text: "Continue"; emphasized: true; visible: !!editor.source; focusPolicy: Qt.NoFocus; enabled: editor.hasComponents && !editor.bible.busy; onClicked: editor.begin() }
             }
@@ -495,7 +511,8 @@ Item {
                         const row = editor.componentRows[chooser.focusedRow]
                         if (row) editor.toggle(row.kind, row.id)
                     }, editor.componentRows.length > 0], ["A", editor.allSelected ? "deselect all" : "select all", function() { editor.toggleAll() }],
-                        ["Return", "continue", function() { editor.begin() }, editor.hasComponents && !editor.bible.busy], cancel])
+                        ["Return", "continue", function() { editor.begin() }, editor.hasComponents && !editor.bible.busy],
+                        editor.canChooseAnother ? ["Backspace", "another range", function() { editor.chooseAnother() }] : null, cancel])
                 }
             }
         }
@@ -503,12 +520,22 @@ Item {
     RangeDialog {
         id: merge
         objectName: "rangeNoteMerge"
-        // Focus at once, while the modal is still fading in.
-        onVisibleChanged: if (visible) { contentItem.forceActiveFocus() }
+        // Combine is focused at once, while the modal is still fading in: enter
+        // combines, esc steps back to moving the range, ← → move between buttons.
+        onVisibleChanged: if (visible) { mergeCombine.forceActiveFocus() }
         contentItem: ColumnLayout {
-            Keys.onEscapePressed: editor.cancel()
+            Keys.onEscapePressed: editor.mergeBack()
             // The two notes scroll by key (j k ↑ ↓ pgup pgdn ctrl d/u home end).
-            Keys.onPressed: function(event) { editor.app.scrollKey(mergeScroll.contentItem, event) }
+            Keys.onPressed: function(event) {
+                if ((event.key === Qt.Key_Left || event.key === Qt.Key_Right) && event.modifiers === Qt.NoModifier) {
+                    const buttons = [mergeBackButton, mergeCancel, mergeCombine]
+                    const at = buttons.findIndex(function(button) { return button.activeFocus })
+                    buttons[((at < 0 ? 2 : at) + (event.key === Qt.Key_Right ? 1 : 2)) % 3].forceActiveFocus()
+                    event.accepted = true
+                    return
+                }
+                editor.app.scrollKey(mergeScroll.contentItem, event)
+            }
             RangeText { text: "Combine notes?"; font.pixelSize: 20 * editor.uiScale }
             RangeText { text: "Both ranges have notes. Combine keeps both, separated by a blank line." }
             ScrollView {
@@ -531,8 +558,19 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                RangeButton { objectName: "rangeMergeCancel"; text: "Cancel"; onClicked: editor.cancel() }
-                RangeButton { objectName: "rangeMergeCombine"; text: "Combine and save"; emphasized: true; enabled: !editor.bible.busy; onClicked: editor.commit(true) }
+                RangeButton { id: mergeBackButton; objectName: "rangeMergeBack"; text: "Back"; keyHint: KeyNotation.format("Escape"); onClicked: editor.mergeBack() }
+                RangeButton { id: mergeCancel; objectName: "rangeMergeCancel"; text: "Cancel"; onClicked: editor.cancel() }
+                RangeButton { id: mergeCombine; objectName: "rangeMergeCombine"; text: "Combine and save"; emphasized: true; enabled: !editor.bible.busy; onClicked: editor.commit(true) }
+            }
+            FineRule { Layout.fillWidth: true }
+            HintRow {
+                objectName: "rangeMergeKeys"
+                Layout.fillWidth: true
+                theme: editor.desktop
+                pixelSize: 11 * editor.uiScale
+                parts: [[["Left", "Right"], "choose"], [["J", "K"], "scroll"],
+                    ["Return", "combine", function() { editor.commit(true) }, !editor.bible.busy && !!editor.pending],
+                    ["Escape", "back", function() { editor.mergeBack() }]]
             }
         }
     }
