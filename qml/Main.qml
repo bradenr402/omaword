@@ -3133,6 +3133,8 @@ ApplicationWindow {
         if (versionDialog.step === 2 && ![Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].includes(event.key)
                 && scrollKey(versionSummaryScroll.contentItem as Flickable, event)) return
         if (event.modifiers !== Qt.NoModifier) return
+        // In the search field, home and end move the caret, not the list.
+        if (versionSearch.activeFocus && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) return
         const keys = [Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown]
         if (versionDialog.step === 2) keys.push(Qt.Key_Left, Qt.Key_Right)
         if (!keys.includes(event.key)) return
@@ -3407,7 +3409,7 @@ ApplicationWindow {
         if (!versionDialog.removing) return [[["Up", "Down"], "choose"], [actionKeys("addVersion")[0], "add", app.addVersionFromPicker, ready],
             reimport ? [actionKeys("reimportVersion")[0], "re-import", function() { app.reimportVersion(app.reimportableVersion()) }, ready && !catalog.busy] : null,
             select, ["Escape", "cancel", function() { versionDialog.close() }]]
-        return [[["Up", "Down"], "choose"], [["Home", "End"], "jump"], select, versionDialog.step > 0 ? back : null, ["Escape", "cancel", function() { versionDialog.close() }]]
+        return [[["Up", "Down"], "choose"], versionSearch.activeFocus ? null : [["Home", "End"], "jump"], select, versionDialog.step > 0 ? back : null, ["Escape", "cancel", function() { versionDialog.close() }]]
     }
     function savedHintParts() {
         const entry = focusedSavedEntry()

@@ -1764,6 +1764,22 @@ private slots:
         key(Qt::Key_Slash); type("zz"); key(Qt::Key_Return);
         clickHint("studyHintsPart:close"); QTRY_VERIFY(!shown("relatedDrawer"));
     }
+    void versionsSearchHomeAndEndMoveTheCaret() {
+        run("removeVersion"); QTRY_VERIFY(opened("versionDialog"));
+        auto search = item("versionSearch"); QTRY_VERIFY(search->hasActiveFocus());
+        type("ac");
+        key(Qt::Key_Home); QCOMPARE(search->property("cursorPosition").toInt(), 0);
+        key(Qt::Key_End); QCOMPARE(search->property("cursorPosition").toInt(), 2);
+        // The list's home/end hint shows only where those keys move the list.
+        QVERIFY(!object("versionHints")->property("plainText").toString().contains("jump"));
+        item("versionResults")->forceActiveFocus();
+        QTRY_VERIFY(object("versionHints")->property("plainText").toString().contains("home end jump"));
+        // Mouse: clicking into the field puts the caret where clicked, and home still moves it.
+        QTest::mouseClick(window, Qt::LeftButton, {}, search->mapToScene(QPointF(search->width() - 8, search->height() / 2)).toPoint());
+        QTRY_VERIFY(search->hasActiveFocus()); QCOMPARE(search->property("cursorPosition").toInt(), 2);
+        key(Qt::Key_Home); QCOMPARE(search->property("cursorPosition").toInt(), 0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }

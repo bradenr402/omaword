@@ -4851,8 +4851,10 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("aboutDialog","visible").toBool());
         bible->setNoteText("KJV annotation to delete");
         key(Qt::Key_V,Qt::ControlModifier); QTRY_VERIFY(item("versionSearch")->hasActiveFocus());
-        key(Qt::Key_End); QCOMPARE(prop("versionResults","currentIndex").toInt(),1);
-        key(Qt::Key_Home); QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
+        // In the search field home and end move the caret; the page keys move the list.
+        key(Qt::Key_End); QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
+        key(Qt::Key_PageDown); QCOMPARE(prop("versionResults","currentIndex").toInt(),1);
+        key(Qt::Key_PageUp); QCOMPARE(prop("versionResults","currentIndex").toInt(),0);
         type("NET"); key(Qt::Key_Return,Qt::ShiftModifier);
         QCOMPARE(bible->versionId(),QString("eng-kjv2006"));
         key(Qt::Key_Return); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
