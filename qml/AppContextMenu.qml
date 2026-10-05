@@ -179,6 +179,7 @@ Popup {
                     anchors.fill: parent
                     enabled: !row.separator
                     hoverEnabled: true
+                    cursorShape: row.active ? Qt.PointingHandCursor : Qt.ArrowCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     // Follow real pointer motion, not a cursor resting where the menu appears.
                     onPositionChanged: if (row.active) menu.currentIndex = row.index

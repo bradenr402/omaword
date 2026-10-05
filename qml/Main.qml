@@ -4363,7 +4363,9 @@ ApplicationWindow {
         }
         onClicked: openMarker()
         MouseArea {
+            objectName: marker.objectName + "Hit"
             anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
             acceptedButtons: Qt.LeftButton | Qt.RightButton
             onClicked: function(mouse) {
                 if (mouse.button === Qt.RightButton) {
@@ -5589,7 +5591,16 @@ ApplicationWindow {
                                     color: desktop.foreground
                                     font.pixelSize: 13 * app.scale
                                 }
-                                MouseArea { anchors.fill: parent; onClicked: app.acceptLinkSuggestion(suggestion.index) }
+                                // Hover chooses the row (its tint), like ↑ ↓; a click inserts it.
+                                MouseArea {
+                                    objectName: "noteLinkSuggestionMouse" + suggestion.index
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onEntered: app.linkSuggestionIndex = suggestion.index
+                                    onPositionChanged: app.linkSuggestionIndex = suggestion.index
+                                    onClicked: app.acceptLinkSuggestion(suggestion.index)
+                                }
                             }
                         }
                     }

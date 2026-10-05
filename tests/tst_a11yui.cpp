@@ -1,6 +1,7 @@
 #include <QtTest/QTest>
 #include <QApplication>
 #include <QClipboard>
+#include <QColor>
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QFile>
@@ -1684,6 +1685,10 @@ private slots:
     }
     // ── Phase 4: low
 
+    QQuickItem *mouseAreaOf(QQuickItem *owner) const {
+        for (auto child : owner->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) return child;
+        return nullptr;
+    }
     void outlineAndMarginNoteTooltipsNameTheirKeys() {
         window->resize(1700, 900); QTRY_COMPARE(window->width(), 1700);
         bible->selectVerses(16, 16); bible->setNoteText("See John 3:5 and https://example.org"); bible->setMarginNotes(true);
@@ -1825,6 +1830,40 @@ private slots:
         // Keyboard: enter on the focused button opens management; a click does too.
         key(Qt::Key_Return); QTRY_COMPARE(object("tagsUi")->property("page").toString(), QString("manage"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
+    }
+    void pointingHandsAndHoveredSuggestions() {
+        bible->selectVerses(5, 5); QVERIFY(bible->toggleBookmark());
+        navigate("John 3:3");
+        // Mouse: rails, menu rows, and chips show a pointing hand.
+        QTRY_VERIFY(item("bookmarkMarker5Hit"));
+        QCOMPARE(item("bookmarkMarker5Hit")->cursor().shape(), Qt::PointingHandCursor);
+        clickAt(versePoint(3), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        auto row = item("contextMenuItem:copy"); QVERIFY(row);
+        QCOMPARE(mouseAreaOf(row)->cursor().shape(), Qt::PointingHandCursor);
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
+        const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
+        QVERIFY(QMetaObject::invokeMethod(object("tagsUi"), "openStudy", Q_ARG(QVariant, "related"), Q_ARG(QVariant, QVariant())));
+        QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyChip:" + alpha));
+        QCOMPARE(mouseAreaOf(item("studyChip:" + alpha))->cursor().shape(), Qt::PointingHandCursor);
+        QVERIFY(QMetaObject::invokeMethod(object("relatedDrawer"), "close")); QTRY_VERIFY(!shown("relatedDrawer"));
+        // [[ suggestions: hovering one chooses it (tint); a click inserts it.
+        navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("[[jn 3:1"); QTRY_VERIFY(prop("linkSuggesting").toBool());
+        // This small fixture ranks one passage per query: offer a second one.
+        window->setProperty("linkSuggestions", bible->referenceCandidates("jn 3:1", 6) + bible->referenceCandidates("gen 1:2", 6));
+        QTRY_VERIFY(item("noteLinkSuggestionMouse1"));
+        auto second = item("noteLinkSuggestion1"); auto hover = item("noteLinkSuggestionMouse1");
+        QCOMPARE(hover->cursor().shape(), Qt::PointingHandCursor);
+        QCOMPARE(prop("linkSuggestionIndex").toInt(), 0);
+        QTest::mouseMove(window, center(second) + QPoint(1, 0)); QTest::mouseMove(window, center(second));
+        QTRY_COMPARE(prop("linkSuggestionIndex").toInt(), 1);
+        QVERIFY(second->property("color").value<QColor>().alpha() > 0);
+        shot("link-suggestion-hover");
+        // Keyboard: ↑ still moves the choice; enter inserts it.
+        key(Qt::Key_Up); QCOMPARE(prop("linkSuggestionIndex").toInt(), 0);
+        const QString chosen = value(prop("linkSuggestions")).toList().at(1).toMap()["reference"].toString();
+        click(second); QTRY_VERIFY(!prop("linkSuggesting").toBool());
+        QVERIFY(item("noteEditor")->property("text").toString().startsWith(chosen));
     }
     // ── Phase 5: new
 
