@@ -485,7 +485,7 @@ Item {
                 RangeButton {
                     objectName: "rangeChooseAnother"
                     text: "Choose another range"; visible: !!editor.source && editor.ranges.length > 1; focusPolicy: Qt.NoFocus
-                    keyHint: KeyNotation.format("Backspace")
+                    hint: text + " · " + KeyNotation.format("Backspace")
                     onClicked: editor.chooseAnother()
                 }
                 RangeButton { objectName: "rangeContinue"; text: "Continue"; emphasized: true; visible: !!editor.source; focusPolicy: Qt.NoFocus; enabled: editor.hasComponents && !editor.bible.busy; onClicked: editor.begin() }
@@ -558,7 +558,7 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                RangeButton { id: mergeBackButton; objectName: "rangeMergeBack"; text: "Back"; keyHint: KeyNotation.format("Escape"); onClicked: editor.mergeBack() }
+                RangeButton { id: mergeBackButton; objectName: "rangeMergeBack"; text: "Back"; hint: "Back to moving the range · " + KeyNotation.format("Escape"); onClicked: editor.mergeBack() }
                 RangeButton { id: mergeCancel; objectName: "rangeMergeCancel"; text: "Cancel"; onClicked: editor.cancel() }
                 RangeButton { id: mergeCombine; objectName: "rangeMergeCombine"; text: "Combine and save"; emphasized: true; enabled: !editor.bible.busy; onClicked: editor.commit(true) }
             }
