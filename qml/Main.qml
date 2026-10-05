@@ -1024,13 +1024,6 @@ ApplicationWindow {
         return html.split('<span class="wj">').join('<span class="wj" style="color:' + wordsOfJesusColor + '">')
     }
     function tagsPlainText(tags) { return Array.from(tags || []).map(function(t) { return t.name }).join(", ") }
-    component TagGlyph: AnnotationGlyph {
-        kind: "tag"
-        implicitWidth: 12 * app.scale
-        implicitHeight: 14 * app.scale
-        width: implicitWidth; height: implicitHeight
-        ink: desktop.accent
-    }
     Menu {
         id: verseTagMenu
         objectName: "verseTagMenu"
