@@ -23,8 +23,9 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC |
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (`lastSound`/`playCount` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds) |
-| `qml/Main.qml` | Reader, palettes, Notes, Annotations, Desk, settings, catalog, About |
-| `qml/TagsPanel.qml` | Tag picker/management (modal), Annotations Tags summary, Study drawer (tabs Related / Cross-references / Footnotes; `relatedDrawer` objectName and `related` action id kept) |
+| `qml/Main.qml` | Reader, palettes, Notes, Annotations (one list for all four tabs; Tags rows grouped under tag headings), Desk, settings, catalog, About |
+| `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Annotations and Study drawers, which stay open) and the Study drawer (tabs Cross-references / Footnotes / Tags; the Tags tab keeps the internal id `related`, as do `relatedDrawer` and the `related` action). Study → Tags roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
+| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Annotations and Study: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk and History: their count) |
 | `qml/RangeEditor.qml` | Annotation range editing session |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |

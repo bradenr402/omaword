@@ -207,9 +207,9 @@ These also work, but stay out of the in-app list:
 ### Studying
 - Bookmark, highlight, tag, and write Markdown notes; notes save as you type.
 - In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` follows one), and Notes lists the other notes that link to a passage.
-- The Study panel (`shift S`) shows **Related** passages that share tags, **Cross-references**, and the chapter's **Footnotes**. Footnotes also appear as small marks in the text.
+- The Study panel (`shift S`) follows the passage you are reading: its **Cross-references**, the chapter's **Footnotes**, and **Tags** — other passages you tagged the same way, ranked by shared tags. The passage's tags sit above the list as chips: `space` turns one off, `shift space` shows only it, `0` turns them all back on, and `a` includes every installed version. Footnotes also appear as small marks in the text.
 - The Desk (`d`, `shift D`) collects passages for side-by-side study across windows and versions.
-- Annotations → Tags summarizes tags on the current range. **Manage tags** (`ctrl t`) renames, deletes, or merges them; names are shared across versions, assignments belong to one version.
+- Annotations → Tags lists every tagged passage in this version, grouped by tag, and marks the ones `here` at your reading position; `t` edits a row's tags and `delete` removes just that tag. **Manage tags** (`ctrl t`) renames, deletes, or merges them; names are shared across versions, assignments belong to one version.
 
 ### Feel
 - Annotations look like pen and highlighter marks.
