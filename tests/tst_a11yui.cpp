@@ -265,6 +265,15 @@ class A11yUiTest : public QObject
         QVERIFY(window->grabWindow().save(directory + "/" + name + ".png"));
     }
 
+    // Clicks a hint part once it is clickable and its row has settled (a Flow
+    // lays parts out on the next polish after a row appears or changes).
+    void clickHint(const QString &name) {
+        QTRY_VERIFY2(item(name) && item(name)->property("clickable").toBool(), qPrintable(name));
+        QPointF last(-1, -1);
+        QTRY_VERIFY([&] { QTest::qWait(20); const auto at = item(name)->mapToScene(QPointF()); const bool settled = at == last; last = at; return settled; }());
+        click(item(name));
+    }
+
 private slots:
     void initTestCase() {
         source = fixtures.filePath("access_usfm.zip"); QVERIFY(edition(source));
@@ -375,60 +384,60 @@ private slots:
         QVERIFY(item("deskList")->hasActiveFocus());
         // Keyboard: the key itself still works.
         QGuiApplication::clipboard()->clear(); key(Qt::Key_Y); QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(current));
-        click(item("deskHintsPart:remove")); QCOMPARE(bible->desk().size(), 1);
+        clickHint("deskHintsPart:remove"); QCOMPARE(bible->desk().size(), 1);
         key(Qt::Key_Delete); QCOMPARE(bible->desk().size(), 0);
         // Nothing left to open: those parts stop being clickable.
         QTRY_VERIFY(!item("deskHintsPart:open")->property("clickable").toBool());
         QVERIFY(!item("deskHintsPart:clean")->property("clickable").toBool());
-        click(item("deskHintsPart:close")); QTRY_VERIFY(!shown("deskDrawer"));
+        clickHint("deskHintsPart:close"); QTRY_VERIFY(!shown("deskDrawer"));
     }
     void everyPanelHintRowIsClickable() {
         // Palette: esc close and enter select.
         run("books"); QTRY_VERIFY(opened("passagePalette"));
         QVERIFY(!item("paletteHintsPart:choose")->property("clickable").toBool());
-        click(item("paletteHintsPart:close")); QTRY_VERIFY(!shown("passagePalette"));
+        clickHint("paletteHintsPart:close"); QTRY_VERIFY(!shown("passagePalette"));
         run("books"); QTRY_VERIFY(opened("passagePalette")); type("john 3:16");
-        click(item("paletteHintsPart:select")); QTRY_VERIFY(!shown("passagePalette"));
+        clickHint("paletteHintsPart:select"); QTRY_VERIFY(!shown("passagePalette"));
         QCOMPARE(bible->selectionReference(), QString("John 3:16"));
         // Help: a disabled (explanation) row cannot be selected by its hint.
         run("help"); QTRY_VERIFY(opened("helpDialog")); type("click");
         QTRY_VERIFY(!item("keybindingHintsPart:select")->property("clickable").toBool());
-        click(item("keybindingHintsPart:close")); QTRY_VERIFY(!shown("helpDialog"));
+        clickHint("keybindingHintsPart:close"); QTRY_VERIFY(!shown("helpDialog"));
         // Versions: cancel by its hint.
         run("switchVersion"); QTRY_VERIFY(opened("versionDialog"));
         QVERIFY(item("versionHintsPart:select")->property("clickable").toBool());
-        click(item("versionHintsPart:cancel")); QTRY_VERIFY(!shown("versionDialog"));
+        clickHint("versionHintsPart:cancel"); QTRY_VERIFY(!shown("versionDialog"));
         // Reading settings: increase / reset.
         run("settings"); QTRY_VERIFY(opened("settingsDialog"));
         const int size = bible->fontSize();
-        click(item("fontSizeHintsPart:increase")); QCOMPARE(bible->fontSize(), size + 1);
-        click(item("fontSizeHintsPart:reset")); QCOMPARE(bible->fontSize(), 18);
-        click(item("lineHeightHintsPart:increase")); QCOMPARE(bible->lineHeight(), 1.6);
-        click(item("lineHeightHintsPart:reset")); QCOMPARE(bible->lineHeight(), 1.5);
+        clickHint("fontSizeHintsPart:increase"); QCOMPARE(bible->fontSize(), size + 1);
+        clickHint("fontSizeHintsPart:reset"); QCOMPARE(bible->fontSize(), 18);
+        clickHint("lineHeightHintsPart:increase"); QCOMPARE(bible->lineHeight(), 1.6);
+        clickHint("lineHeightHintsPart:reset"); QCOMPARE(bible->lineHeight(), 1.5);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
         // Annotations: open the current row by its hint.
         QVERIFY(bible->navigate("John 3:9")); bible->selectVerses(9, 9); QVERIFY(bible->toggleBookmark());
         navigate("John 1:1");
         run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
         QTRY_VERIFY(item("savedHintsPart:open")->property("clickable").toBool());
-        click(item("savedHintsPart:open")); QTRY_VERIFY(!shown("savedDrawer"));
+        clickHint("savedHintsPart:open"); QTRY_VERIFY(!shown("savedDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 3:9"));
         // Confirmations: cancel by the hint, confirm with enter on the focused button.
         QVERIFY(bible->addToDesk()); run("desk"); QTRY_VERIFY(opened("deskDrawer"));
         key(Qt::Key_Delete, Qt::ShiftModifier); QTRY_VERIFY(opened("cleanDeskConfirmation"));
-        click(item("cleanDeskHintsPart:cancel")); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
+        clickHint("cleanDeskHintsPart:cancel"); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
         QCOMPARE(bible->desk().size(), 1);
         key(Qt::Key_Delete, Qt::ShiftModifier); QTRY_VERIFY(opened("cleanDeskConfirmation"));
         key(Qt::Key_Right); QVERIFY(item("cleanDeskConfirm")->hasActiveFocus());
-        click(item("cleanDeskHintsPart:select")); QTRY_VERIFY(bible->desk().isEmpty());
+        clickHint("cleanDeskHintsPart:select"); QTRY_VERIFY(bible->desk().isEmpty());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
         // Study and the tag picker.
         run("related"); QTRY_VERIFY(opened("relatedDrawer"));
         QVERIFY(!item("studyHintsPart:tabs")->property("clickable").toBool());
-        click(item("studyHintsPart:close")); QTRY_VERIFY(!shown("relatedDrawer"));
+        clickHint("studyHintsPart:close"); QTRY_VERIFY(!shown("relatedDrawer"));
         run("tags"); QTRY_VERIFY(opened("tagsSurface")); type("Grace");
-        click(item("tagsHintsPart:toggle / create")); QTRY_COMPARE(bible->tags().size(), 1);
-        click(item("tagsHintsPart:close")); QTRY_VERIFY(!shown("tagsSurface"));
+        clickHint("tagsHintsPart:toggle / create"); QTRY_COMPARE(bible->tags().size(), 1);
+        clickHint("tagsHintsPart:close"); QTRY_VERIFY(!shown("tagsSurface"));
     }
     void everyListRowSharesOneMenu() {
         const QStringList shared = {"open", "copy", "copyPlain", "desk"};
@@ -694,11 +703,11 @@ private slots:
         // The status bar's hints are clickable: o swap, enter save, esc cancel.
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
         QVERIFY(item("rangeEditHintsPart:save")->property("clickable").toBool());
-        key(Qt::Key_J); click(item("rangeEditHintsPart:swap")); QCOMPARE(object("rangeEditor")->property("endpoint").toString(), QString("start"));
-        click(item("rangeEditHintsPart:save")); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        key(Qt::Key_J); clickHint("rangeEditHintsPart:swap"); QCOMPARE(object("rangeEditor")->property("endpoint").toString(), QString("start"));
+        clickHint("rangeEditHintsPart:save"); QTRY_VERIFY(!prop("rangeEditing").toBool());
         QCOMPARE(bible->collection().first().toMap()["end"].toInt(), 7);
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
-        click(item("rangeEditHintsPart:cancel")); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        clickHint("rangeEditHintsPart:cancel"); QTRY_VERIFY(!prop("rangeEditing").toBool());
     }
     void searchPaletteLoadsMoreByKeyAndHint() {
         auto results = item("paletteResults");
@@ -725,14 +734,18 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         run("books"); key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         search();
-        for (int i = 0; i < 30 && results->property("currentIndex").toInt() < 92; ++i) key(Qt::Key_PageDown);
-        QCOMPARE(results->property("count").toInt(), 100);
-        key(Qt::Key_PageDown); QTRY_COMPARE(results->property("count").toInt(), 167);
+        // pgdn pages through the loaded rows; paging past the last loads the next page.
+        int pages = 0;
+        for (; pages < 200 && results->property("count").toInt() == 100; ++pages) {
+            key(Qt::Key_PageDown); QCoreApplication::processEvents();
+        }
+        QTRY_COMPARE(results->property("count").toInt(), 167);
+        QVERIFY(pages > 1); QVERIFY(results->property("currentIndex").toInt() > 99);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         // Mouse: the "↓ more" hint loads the next page.
         run("books"); key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         search();
-        click(item("paletteHintsPart:more")); QTRY_COMPARE(results->property("count").toInt(), 167);
+        clickHint("paletteHintsPart:more"); QTRY_COMPARE(results->property("count").toInt(), 167);
     }
     void reimportFromVersionsByKeyAndButton() {
         const QString id = bible->versionId();
@@ -757,7 +770,7 @@ private slots:
         run("switchVersion"); QTRY_VERIFY(opened("versionDialog"));
         QTRY_VERIFY(item("versionHintsPart:re-import") && item("versionHintsPart:re-import")->property("clickable").toBool());
         QTest::qWait(50);
-        click(item("versionHintsPart:re-import")); QTRY_COMPARE(catalog->requests, QStringList{id});
+        clickHint("versionHintsPart:re-import"); QTRY_COMPARE(catalog->requests, QStringList{id});
         catalog->cancel(); key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
     }
     void escapeFinallyClearsTheErrorBanner() {
@@ -826,8 +839,8 @@ private slots:
         QVERIFY(item("noteEditor")->property("text").toString().startsWith("John 3:1"));
         // Mouse: the editor's tab hint and the list's open hint.
         item("noteEditor")->setProperty("text", QString());
-        click(item("notesHintsPart:linked from")); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
-        key(Qt::Key_J); click(item("linkedHintsPart:open")); QTRY_COMPARE(bible->selectionReference(), QString("John 1:7"));
+        clickHint("notesHintsPart:linked from"); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        key(Qt::Key_J); clickHint("linkedHintsPart:open"); QTRY_COMPARE(bible->selectionReference(), QString("John 1:7"));
     }
     void focusModeFooterRevealsInPlace() {
         const QPointF searchAt = item("searchControl")->mapToScene(QPointF());
@@ -894,9 +907,9 @@ private slots:
         clickAt(elsewhere); QTRY_VERIFY(!prop("findPromptOpen").toBool());
         QVERIFY(prop("acceptedSearchQuery").toString().isEmpty()); QCOMPARE(bible->selectionReference(), QString("John 3:2"));
         // The hints are buttons: enter accept, esc cancel.
-        find("text 3:5 with"); click(item("chapterFindHintsPart:accept")); QTRY_VERIFY(!prop("findPromptOpen").toBool());
+        find("text 3:5 with"); clickHint("chapterFindHintsPart:accept"); QTRY_VERIFY(!prop("findPromptOpen").toBool());
         QCOMPARE(bible->selectionReference(), QString("John 3:5"));
-        find("text 3:9 with"); click(item("chapterFindHintsPart:cancel")); QTRY_VERIFY(!prop("findPromptOpen").toBool());
+        find("text 3:9 with"); clickHint("chapterFindHintsPart:cancel"); QTRY_VERIFY(!prop("findPromptOpen").toBool());
         QCOMPARE(bible->selectionReference(), QString("John 3:5"));
         // Keyboard: tab cycles prompt → accept → cancel → prompt (the field keeps
         // the keyboard; the marked hint shows a focus ring); shift tab goes back.
