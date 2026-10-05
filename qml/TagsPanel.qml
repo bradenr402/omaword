@@ -586,7 +586,7 @@ Item {
             ["Down", "passages"], ["Escape", "close", escape]]
         return [tabs, ["Return", "open", function() { panel.openTagged(panel.visibleResults[resultList.currentIndex]) }, listKeys], ["T", "tag", tag[2], tag[3]],
             otherVersions ? ["A", allVersions ? "this version" : "all versions", function() { panel.toggleAllVersions() }, relatedMoveKeys] : null,
-            ["/", "search", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", studyQuery.length ? "clear" : "close", escape]]
+            ["/", "search", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", "close", escape]]
     }
     // The picker's enter: create or toggle from the search field, toggle in the list.
     function pickerEnter() {
@@ -671,11 +671,11 @@ Item {
         if (tagList.count) { tagList.currentIndex = Math.max(0, at); tagList.forceActiveFocus() }
         else search.forceActiveFocus()
     }
-    // Study: esc in the search field leaves it, keeping the query; esc with a
-    // query clears it; otherwise esc closes the panel.
+    // Study: esc in the search field leaves it, keeping the query; otherwise
+    // esc closes the panel, as in Annotations (reopening roots Study afresh,
+    // clearing the query).
     function handleStudyEscape() {
         if (studySearch.activeFocus) leaveStudySearch()
-        else if (tagsTab && studyQuery.length) { studyQuery = ""; studySearchOpen = false; focusResults() }
         else relatedDrawer.close()
     }
     Connections {

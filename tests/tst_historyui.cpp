@@ -464,7 +464,6 @@ private slots:
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
         type("jk"); QCOMPARE(item("studySearch")->property("text").toString(), QString("jk"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
-        key(Qt::Key_Escape); QCOMPARE(study->property("studyQuery").toString(), QString());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
         // A clicked chip holds focus; j still moves back to the results.
         openRelated();

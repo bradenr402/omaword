@@ -4211,10 +4211,7 @@ private slots:
         QCOMPARE(prop("tagsUi","studyQuery").toString(),QString("zq"));
         QTRY_VERIFY(item("studyTagCount")->isVisible());
         QCOMPARE(prop("studyTagCount","text").toString(),QString::fromUtf8("0 of 1 passage · “zq”"));
-        // esc with a query clears it; the next closes.
-        key(Qt::Key_Escape); QCOMPARE(prop("tagsUi","studyQuery").toString(),QString());
-        QVERIFY(prop("relatedDrawer","visible").toBool());
-        QCOMPARE(prop("studyTagCount","text").toString(),QString("1 passage"));
+        // The next esc closes, as in Annotations.
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
     }

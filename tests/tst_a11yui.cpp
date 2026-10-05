@@ -1742,6 +1742,28 @@ private slots:
         QTest::qWait(50); click(item("setupImport")); QTRY_VERIFY(opened("importGuide"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
     }
+    void studyTagsEscapeClosesLikeAnnotations() {
+        bible->selectVerses(7, 7); const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
+        bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true));
+        navigate("John 3:3");
+        auto tags = object("tagsUi");
+        auto openTags = [&] {
+            QVERIFY(QMetaObject::invokeMethod(tags, "openStudy", Q_ARG(QVariant, "related"), Q_ARG(QVariant, QVariant())));
+            QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        };
+        openTags();
+        // Keyboard: / searches; esc leaves the field keeping the query; the next esc closes.
+        key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus()); type("zz");
+        key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        QCOMPARE(tags->property("studyQuery").toString(), QString("zz"));
+        QVERIFY(object("studyHints")->property("plainText").toString().contains("esc close"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer")); QTRY_VERIFY(readerFocused());
+        // Reopened, the query is gone.
+        openTags(); QCOMPARE(tags->property("studyQuery").toString(), QString());
+        // Mouse: the esc hint closes too.
+        key(Qt::Key_Slash); type("zz"); key(Qt::Key_Return);
+        clickHint("studyHintsPart:close"); QTRY_VERIFY(!shown("relatedDrawer"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }

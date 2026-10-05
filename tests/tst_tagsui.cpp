@@ -577,7 +577,9 @@ private slots:
         QTRY_VERIFY(refs().isEmpty());
         QCOMPARE(item("studyTagsEmpty")->property("text").toString(), QString::fromUtf8("No passages match “gracezz”."));
         key(Qt::Key_Down); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
-        key(Qt::Key_Escape); QCOMPARE(prop("studyQuery").toString(), QString());
+        // esc closes, as in Annotations; reopening clears the query.
+        key(Qt::Key_Escape); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
+        openTagsTab(); QCOMPARE(prop("studyQuery").toString(), QString());
         QCOMPARE(refs().size(), 2);
         // The shared row menu (Open, Copy, Copy plain text, Desk), then Edit tags…, Edit range. No delete.
         key(Qt::Key_Menu);
