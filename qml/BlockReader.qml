@@ -376,8 +376,14 @@ Item {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
             preventStealing: true
-            cursorShape: Qt.IBeamCursor
+            // Over a verse number: a pointing hand and "Select verse N" tooltip.
+            hoverEnabled: true
+            property int hoveredNumber: 0
+            property point hoverPoint: Qt.point(0, 0)
+            cursorShape: hoveredNumber > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+            onExited: hoveredNumber = 0
             onPressed: function(mouse) {
+                hoveredNumber = 0
                 if (mouse.button !== Qt.LeftButton) return
                 root.pressed = true
                 root.origin = mapToItem(root.viewport, mouse.x, mouse.y)
@@ -386,7 +392,10 @@ Item {
                 root.pressedVerse = root.hit(mouse.x, mouse.y)
             }
             onPositionChanged: function(mouse) {
-                if (!root.pressed) return
+                if (!root.pressed) {
+                    if (!pressedButtons) { hoveredNumber = root.numberAt(mouse.x, mouse.y); hoverPoint = Qt.point(mouse.x, mouse.y) }
+                    return
+                }
                 root.pointer = mapToItem(root.viewport, mouse.x, mouse.y)
                 // Qt exposes this runtime style hint without QML property metadata.
                 // qmllint disable missing-property
@@ -418,6 +427,15 @@ Item {
                     root.controller.selectVerse(number, false)
                     root.controller.openNotes(true)
                 } else root.selectWordAt(mouse.x, mouse.y)
+            }
+            AppToolTip {
+                objectName: "blockNumberTip"
+                theme: root.theme
+                uiScale: root.controller.scale
+                x: mouseArea.hoverPoint.x + 12 * uiScale
+                y: mouseArea.hoverPoint.y + 18 * uiScale
+                visible: mouseArea.hoveredNumber > 0 && !root.pressed && !root.backend.focusMode
+                text: "Select verse " + mouseArea.hoveredNumber + " · " + KeyNotation.format("Shift+Click") + " extends"
             }
         }
     }

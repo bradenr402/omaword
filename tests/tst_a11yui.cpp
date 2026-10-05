@@ -1865,6 +1865,24 @@ private slots:
         click(second); QTRY_VERIFY(!prop("linkSuggesting").toBool());
         QVERIFY(item("noteEditor")->property("text").toString().startsWith(chosen));
     }
+    void blockVerseNumbersExplainSelecting() {
+        setMode("block"); navigate("John 3:16");
+        QRectF rect; auto blockBody = item("blockBody");
+        QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<BlockDocument *>()->positionFor(17)));
+        const QPoint number = blockBody->mapToScene(QPointF(rect.x() + 3, rect.center().y())).toPoint();
+        auto tip = object("blockNumberTip"); QVERIFY(tip);
+        // Mouse: hovering a verse number shows the tooltip and a pointing hand.
+        QTest::mouseMove(window, number + QPoint(1, 0)); QTest::mouseMove(window, number);
+        QTRY_VERIFY(tip->property("visible").toBool());
+        QCOMPARE(tip->property("text").toString(), QStringLiteral("Select verse 17 · shift click extends"));
+        shot("block-number-tooltip");
+        // The click selects; shift click extends.
+        clickAt(number); QTRY_COMPARE(bible->selectionReference(), QString("John 3:17"));
+        // Text away from numbers shows none.
+        QTest::mouseMove(window, charPoint(16, 10)); QTRY_VERIFY(!tip->property("visible").toBool());
+        // Keyboard: the same selection by j and shift J.
+        call("readerFocus"); key(Qt::Key_J, Qt::ShiftModifier); QTRY_COMPARE(bible->selectionReference(), QString("John 3:17–18"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }
