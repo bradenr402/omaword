@@ -211,7 +211,10 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 - Paint-only overlays (never alter text formats, layout, selection, or copy):
   - Hand-drawn marks (`HandDrawn.js`): deterministic seeded paths (seed from
     kind/version/reference/segment, no `Math.random`) so repaint/scroll is stable.
-  - Highlights, cursor-range context shading, search matches.
+  - Annotation tints: every bookmark/highlight/note/tag range covering a verse
+    adds one hand-drawn accent layer (`HandDrawn.tintCount`/`tintRuns`, 4.5%
+    each, capped at 3), joined across verses that keep the layer; highlights,
+    then search matches, paint over them.
   - Focus-mode dimming: follows the cursor instantly; only entering/leaving fades.
   - Jump pulse and copy flash rects. Reduce motion disables pulses/flashes/fades.
   - Programmatic scrolls to a verse (`scrollToVerse`, `zz`/`zt`/`zb`, search,
@@ -231,7 +234,7 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 - Words of Jesus: `<span class="wj">` gets an inline color (desktop `color1`,
   i.e. Omarchy `color1`/`red`, else accent) only while the setting is on;
   layout is unchanged.
-- Focus mode hides decoration cells (incl. footnote markers), rails, and context shading.
+- Focus mode hides decoration cells (incl. footnote markers), rails, and annotation tints.
 - Margins (off by default; hidden in focus mode and range editing): one
   `Margins.space()` split. Margin notes win: they may shift the reader column
   left (only in chapters that have notes) and sit right after their connector;

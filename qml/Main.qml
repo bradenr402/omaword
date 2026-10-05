@@ -2347,18 +2347,6 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
-    // Row metadata already represents range membership, including chapter
-    // continuations. Match canonical identities rather than source display names.
-    readonly property var cursorContextScopes: {
-        if (bible.readingMode !== "paragraph" || continuousReader || bible.focusMode) return []
-        const row = Array.from(bible.verses).find(function(verse) { return verse.number === bible.cursorVerse })
-        return row ? Array.from(row.bookmarkRanges || []).concat(Array.from(row.tagRanges || []), Array.from(row.noteRanges || [])) : []
-    }
-    function rowInCursorContext(row) {
-        return Array.from(row.bookmarkRanges || []).concat(Array.from(row.tagRanges || []), Array.from(row.noteRanges || [])).some(function(range) {
-            return cursorContextScopes.some(function(scope) { return sameTagScope(range, scope) })
-        })
-    }
     function openVersions(removing) {
         if (rangeEditing) return
         if (bible.busy || !flushNote()) return
@@ -3632,15 +3620,38 @@ ApplicationWindow {
                                     height: verseRow.height
                                     visible: ranges.length > 0 && !bible.focusMode && app.inlineNoteMarks
                                 }
-                                Rectangle {
-                                    objectName: "contextSegment" + verseRow.modelData.number
+                                // Annotation tint: one translucent layer per covering range
+                                // (HandDrawn.tintCount, capped), joined with neighbouring rows
+                                // that keep the layer; highlights paint on top.
+                                Canvas {
+                                    id: annotationTint
+                                    objectName: "annotationTint" + verseRow.modelData.number
+                                    readonly property int layers: bible.focusMode ? 0 : HandDrawn.tintCount(verseRow.modelData)
+                                    readonly property int layersBefore: verseRow.index > 0 ? HandDrawn.tintCount(bible.verses[verseRow.index - 1]) : 0
+                                    readonly property int layersAfter: HandDrawn.tintCount(bible.verses[verseRow.index + 1])
                                     x: verseRow.gutter - 9 * app.readerScale
-                                    y: verseHeading.height
                                     width: verseRow.width - x
-                                    height: verseBody.height + 3
-                                    visible: !verseRow.selected && !verseRow.modelData.highlighted && app.rowInCursorContext(verseRow.modelData)
-                                    color: app.tint(desktop.accent, 0.06)
-                                    radius: 0
+                                    height: verseRow.height
+                                    visible: layers > 0
+                                    property color ink: desktop.accent
+                                    readonly property var paintKey: [layers, layersBefore, layersAfter, width, height, verseHeading.height,
+                                        verseBody.height, app.readerScale, bible.versionId]
+                                    onPaintKeyChanged: requestPaint()
+                                    onInkChanged: requestPaint()
+                                    onPaint: {
+                                        const ctx = getContext("2d")
+                                        ctx.reset()
+                                        const k = app.readerScale
+                                        ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, HandDrawn.tintAlpha())
+                                        for (let layer = 1; layer <= layers; ++layer) {
+                                            const before = layersBefore >= layer, after = layersAfter >= layer
+                                            const top = before ? 0 : verseHeading.height
+                                            const bottom = after ? height : verseHeading.height + verseBody.height + 3
+                                            HandDrawn.highlighterBand(ctx, Qt.rect(0, top, width, bottom - top),
+                                                HandDrawn.seed("tint", bible.versionId, layer, verseRow.modelData.number), k,
+                                                { top: !before, bottom: !after })
+                                        }
+                                    }
                                 }
                                 Rectangle {
                                     objectName: "jumpPulse" + verseRow.modelData.number

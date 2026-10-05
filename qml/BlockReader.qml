@@ -22,7 +22,6 @@ Item {
     property alias mapping: document
     property var annotationRanges: []
     property var inlineMarkers: []
-    property var contextRanges: []
     readonly property var searchSegments: controller.searchSegments || []
     onSearchSegmentsChanged: if (!destroying) searchPaint.requestPaint()
     readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
@@ -63,6 +62,8 @@ Item {
     // Margin notes shown: rebuild without note cells (one reflow per toggle)
     // rather than leave blank, unpainted gaps in the text.
     readonly property bool noteMarks: controller.inlineNoteMarks === undefined || !!controller.inlineNoteMarks
+    // Annotation tint layers per verse (HandDrawn.tintCount), none in focus mode.
+    readonly property var tintCounts: backend.focusMode ? [] : Array.from(backend.verses).map(function(v) { return HandDrawn.tintCount(v) })
     readonly property bool numbers: backend.showVerseNumbers && !backend.focusMode
     readonly property bool headings: backend.showHeadings && !backend.focusMode
     // Display copies of the verses: words of Jesus colored (format only).
@@ -91,8 +92,6 @@ Item {
     }
     function refreshGeometry() {
         if (!destroying) {
-            contextRanges = backend.focusMode ? [] : document.contextRanges(backend.verses, backend.cursorVerse,
-                                                                           backend.selectedStart, backend.selectedEnd)
             paint.requestPaint()
             searchPaint.requestPaint()
             // Motion geometry is computed only while it can be seen, keeping
@@ -185,10 +184,8 @@ Item {
         property int last: root.backend.selectedEnd
         property color accent: root.theme.accent
         property bool focused: root.backend.focusMode
-        property int cursorVerse: root.backend.cursorVerse
-        property var contextRanges: root.contextRanges
-        onCursorVerseChanged: if (!root.destroying) geometryTimer.restart()
-        onContextRangesChanged: requestPaint()
+        property var tintCounts: root.tintCounts
+        onTintCountsChanged: requestPaint()
         onAnnotationsChanged: requestPaint()
         onFirstChanged: if (!root.destroying) geometryTimer.restart()
         onLastChanged: if (!root.destroying) geometryTimer.restart()
@@ -236,17 +233,19 @@ Item {
                     }
                 }
             }
-            for (const ref in ranges) draw(ranges[ref].start, ranges[ref].end, false, ref)
-            if (!focused) {
-                ctx.fillStyle = root.controller.tint(accent, 0.06)
-                for (let c = 0; c < contextRanges.length; ++c) {
-                    const range = contextRanges[c]
-                    const rects = document.rectangles(range.start, range.end)
-                    for (let i = 0; i < rects.length; ++i)
-                        HandDrawn.highlighterBand(ctx, rects[i], HandDrawn.seed("context", version, range.start, range.end, i), k,
-                            { top: true, bottom: true, left: i === 0, right: i === rects.length - 1 })
+            // Tints first: each covering range adds a layer; highlights go on top.
+            ctx.fillStyle = root.controller.tint(accent, HandDrawn.tintAlpha())
+            for (const run of HandDrawn.tintRuns(tintCounts)) {
+                if (!spans[run.first] || !spans[run.last]) continue
+                const rects = document.rectangles(spans[run.first].start, spans[run.last].end)
+                for (let i = 0; i < rects.length; ++i) {
+                    const r = rects[i]
+                    HandDrawn.highlighterBand(ctx, Qt.rect(r.x - leftInset, r.y, r.width + leftInset, r.height),
+                        HandDrawn.seed("tint", version, run.layer, spans[run.first].number, i), k,
+                        { top: true, bottom: true, left: i === 0, right: i === rects.length - 1 })
                 }
             }
+            for (const ref in ranges) draw(ranges[ref].start, ranges[ref].end, false, ref)
             const selected = Array.from(spans).filter(function(s) { return first > 0 && s.number >= first && s.number <= last })
             if (selected.length) draw(selected[0].start, selected[selected.length - 1].end, true, "")
         }

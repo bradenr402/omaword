@@ -5141,52 +5141,53 @@ private slots:
         QCOMPARE(bible->tagScope(),scope);
         QVERIFY(!window->property("verseMode").toBool());
     }
-    void paragraphFallbackRangeContext() {
+    void annotationTintsInVerseRows() {
         QVERIFY(bible->ready());
-        QVERIFY(!bible->property("hasParagraphs").toBool());
         reference("John 3:1-4"); QVERIFY(bible->toggleBookmark());
         reference("John 3:3-6");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Context").isEmpty());
         reference("John 3:2"); QVERIFY(bible->toggleHighlight());
+        reference("John 3:4"); bible->setNoteText("Fourth");
         reference("John 3:8-9"); QVERIFY(bible->toggleBookmark());
         reference("John 3:3");
-        bible->setReadingMode("paragraph");
+        bible->setReadingMode("verse");
         QTRY_VERIFY(!window->property("continuousReader").toBool());
-        QVERIFY(item("verseBody1"));
-        QVERIFY(!bible->property("verses").toList().first().toMap().value("paragraphStart").toBool());
-        const auto shaded = [this](int verse) {
-            auto segment = item(qPrintable("contextSegment" + QString::number(verse)));
-            return segment && segment->isVisible();
+        const auto layers = [this](int verse) {
+            auto tint = item(qPrintable("annotationTint" + QString::number(verse)));
+            return tint && tint->isVisible() ? tint->property("layers").toInt() : 0;
         };
-        QTRY_VERIFY(shaded(1));
-        QVERIFY(!shaded(2)); // Persistent highlight keeps its stronger fill.
-        QVERIFY(!shaded(3)); // Active selection keeps its stronger fill.
-        QVERIFY(shaded(4)); QVERIFY(shaded(5)); QVERIFY(shaded(6));
-        QVERIFY(!shaded(7)); QVERIFY(!shaded(8)); QVERIFY(!shaded(9));
-        QCOMPARE(prop("contextSegment4","color").value<QColor>().alpha(),15);
-        QCOMPARE(prop("contextSegment5","color").value<QColor>(),prop("contextSegment4","color").value<QColor>());
-        const auto context = item("contextSegment4");
-        QVERIFY(context->width() > 0 && context->height() > 0);
-        QVERIFY(context->parentItem()->boundingRect().contains(context->mapRectToItem(context->parentItem(),context->boundingRect())));
-        bible->selectVerses(5,5);
-        QTRY_VERIFY(!shaded(1));
-        QVERIFY(shaded(3)); QVERIFY(shaded(4)); QVERIFY(!shaded(5)); QVERIFY(shaded(6));
-        bible->selectVerses(4,5);
-        QTRY_VERIFY(!shaded(4)); QVERIFY(!shaded(5)); QVERIFY(shaded(3)); QVERIFY(shaded(6));
-        bible->selectVerses(7,7);
-        for (int verse = 1; verse <= 9; ++verse) QVERIFY(!shaded(verse));
-        bible->selectVerses(3,3);
-        bible->setReadingMode("verse"); QTRY_VERIFY(!shaded(1));
-        bible->setReadingMode("paragraph"); QTRY_VERIFY(shaded(1));
-        bible->setFocusMode(true); QTRY_VERIFY(!shaded(1));
-        bible->setFocusMode(false); QTRY_VERIFY(shaded(1));
+        // Bookmark, highlight, note, and tag ranges each add a layer, capped at three;
+        // the selection and cursor change nothing (no context shading).
+        const QList<int> expected = {1,2,2,3,1,1,0,1,1,0};
+        for (int verse = 1; verse <= expected.size(); ++verse) QTRY_COMPARE(layers(verse),expected[verse - 1]);
+        QVERIFY(item("highlightPaint2:John 3:2")); // The highlight still paints on top.
+        QVERIFY(!item("contextSegment4"));
+        bible->selectVerses(7,7); QTest::qWait(50);
+        for (int verse = 1; verse <= expected.size(); ++verse) QCOMPARE(layers(verse),expected[verse - 1]);
+        const auto tint = item("annotationTint4");
+        QVERIFY(tint->inherits("QQuickCanvasItem"));
+        QVERIFY(tint->width() > 0 && tint->height() > 0);
+        const auto light = [&]() {
+            auto grab = tint->grabToImage(); QVERIFY(grab);
+            QSignalSpy ready(grab.data(),&QQuickItemGrabResult::ready); QVERIFY(ready.wait(2000));
+            const auto image = grab->image();
+            QVERIFY(image.pixelColor(image.width() / 2,image.height() / 2).alpha() > 0);
+            QVERIFY(image.pixelColor(image.width() / 2,image.height() / 2).alpha() < 60);
+        };
+        light();
+        // Visual check (OMAWORD_UI_SCREENSHOTS): every layout.
+        for (const QString mode : {"verse","paragraph","block"}) {
+            bible->setReadingMode(mode); QTest::qWait(150);
+            capture("annotation-tints-" + mode);
+        }
+        bible->setReadingMode("verse"); QTRY_VERIFY(!window->property("continuousReader").toBool());
+        bible->setFocusMode(true); QTRY_COMPARE(layers(4),0);
+        bible->setFocusMode(false); QTRY_COMPARE(layers(4),3);
+        // A range entering from the previous chapter tints its first rows too.
         reference("John 3:36-4:2"); QVERIFY(bible->toggleBookmark());
-        const auto scope = bible->tagScope();
         reference("John 4:1");
-        QTRY_VERIFY(shaded(2)); QVERIFY(!shaded(1)); QVERIFY(!shaded(3));
-        const auto range = bible->verses().first().toMap().value("bookmarkRanges").toList().first().toMap();
-        for (auto it = scope.cbegin(); it != scope.cend(); ++it) QCOMPARE(range.value(it.key()),it.value());
-        QVERIFY(range.value("bookmarkContinuesBefore").toBool());
+        QTRY_COMPARE(layers(1),1); QCOMPARE(layers(2),1); QCOMPARE(layers(3),0);
+        QCOMPARE(item("annotationTint1")->property("layersBefore").toInt(),0);
     }
     void bookmarkRangeMarkers() {
         reference("John 3:16-18");

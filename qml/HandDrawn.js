@@ -235,6 +235,32 @@ function bandPolygon(rect, s, scale, opts) {
     return pts
 }
 
+// Annotation tints (paint only): each bookmark, highlight, note, or tag range
+// covering a verse adds one translucent layer of the accent, capped so text
+// stays readable. Highlights still paint their stronger band on top.
+function tintAlpha() { return 0.045 }
+function tintLayers() { return 3 }
+function tintCount(verse) {
+    if (!verse) return 0
+    const count = function(list) { return list ? list.length : 0 }
+    return Math.min(tintLayers(), count(verse.bookmarkRanges) + count(verse.highlightRanges)
+        + count(verse.noteRanges) + count(verse.tagRanges))
+}
+// counts: per-verse layer counts in reading order -> [{layer, first, last}],
+// the runs of consecutive indexes with at least `layer` layers.
+function tintRuns(counts) {
+    const runs = []
+    for (let layer = 1; layer <= tintLayers(); ++layer) {
+        let first = -1
+        for (let i = 0; i <= counts.length; ++i) {
+            const on = i < counts.length && counts[i] >= layer
+            if (on && first < 0) first = i
+            if (!on && first >= 0) { runs.push({ layer: layer, first: first, last: i - 1 }); first = -1 }
+        }
+    }
+    return runs
+}
+
 // Highlighter band in ctx.fillStyle. Returns its polygon.
 function highlighterBand(ctx, rect, s, scale, opts) {
     const pts = bandPolygon(rect, s, scale, opts)

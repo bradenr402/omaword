@@ -785,43 +785,54 @@ ApplicationWindow {
         QTRY_VERIFY(kinds().contains("note:open"));
         QCOMPARE(mapping->spans().last().toMap()["end"].toInt(), withNotes);
     }
-    void contextUnionContinuationAndFocus() {
+    void annotationTintsStackCapAndFocus() {
         QVariantList verses;
         for (int i = 1; i <= 7; ++i) {
-            QVariantList bookmarks, tags, notes;
+            QVariantList bookmarks, tags, notes, highlights;
             if (i <= 4) bookmarks.append(bookmark("Cross-chapter",false,i == 4));
             if (i >= 2 && i <= 5) tags.append(QVariantMap{{"reference","Overlap"},{"continuesBefore",i != 2},{"continuesAfter",i != 5}});
             if (i == 7) bookmarks.append(bookmark("Unrelated",true,true));
             if (i >= 3 && i <= 6) notes.append(noteRange("Note extension",i == 3,i == 6));
+            if (i == 4) highlights.append(QVariantMap{{"reference","Marked"}});
             verses.append(QVariantMap{{"number",i},{"text",QString("Verse %1.").arg(i)},
-                {"bookmarkRanges",bookmarks},{"tagRanges",tags},{"noteRanges",notes}});
+                {"bookmarkRanges",bookmarks},{"tagRanges",tags},{"noteRanges",notes},{"highlightRanges",highlights}});
         }
         backend->setProperty("verses",verses);
         backend->setProperty("cursorVerse",3);
         backend->setProperty("selectedStart",3); backend->setProperty("selectedEnd",3);
-        QTRY_COMPARE(list("contextRanges").size(),2);
-        auto ranges = list("contextRanges");
-        QCOMPARE(ranges[0].toMap()["start"].toInt(),mapping->positionFor(1));
-        QCOMPARE(ranges[0].toMap()["end"],mapping->spans()[1].toMap()["end"]);
-        QCOMPARE(ranges[1].toMap()["start"].toInt(),mapping->positionFor(4));
-        QCOMPARE(ranges[1].toMap()["end"],mapping->spans()[5].toMap()["end"]);
-        QVERIFY(item("blockInlineMarker:bookmark:continuation:Cross-chapter"));
+        // Each covering range adds a layer; four ranges (incl. a highlight) cap at three.
+        QTRY_COMPARE(list("tintCounts"),QVariantList({1,2,3,3,2,1,1}));
+        QTRY_VERIFY(item("blockInlineMarker:bookmark:continuation:Cross-chapter"));
         QVERIFY(!item("blockInlineMarker:bookmark:open:Cross-chapter"));
         QVERIFY(item("blockInlineMarker:bookmark:close:Cross-chapter"));
+        // Paint only: more layers read darker; the cursor does not change it.
+        auto paint = item("blockRangeBackground"); QVERIFY(paint);
+        const auto alphaAt = [&](int verse) {
+            const auto span = mapping->spans()[verse - 1].toMap();
+            const auto rect = mapping->rectangles(span["start"].toInt(),span["end"].toInt()).first().toMap();
+            auto grab = paint->grabToImage(); if (!grab) return -1;
+            QSignalSpy ready(grab.data(),&QQuickItemGrabResult::ready);
+            if (!ready.wait(2000)) return -1;
+            // Canvas pixels match document coordinates (it is offset by its left inset).
+            return grab->image().pixelColor(qRound(rect["x"].toDouble() + paint->property("leftInset").toDouble() + 4),
+                                            qRound(rect["y"].toDouble() + rect["height"].toDouble() / 2)).alpha();
+        };
+        backend->setProperty("selectedStart",0); backend->setProperty("selectedEnd",0); QTest::qWait(50);
+        const int one = alphaAt(1), two = alphaAt(2), three = alphaAt(3), six = alphaAt(6);
+        QVERIFY2(one > 0 && two > one && three > two, qPrintable(QString("%1 %2 %3").arg(one).arg(two).arg(three)));
+        QCOMPARE(six, one);
+        QVERIFY(three < 60); // Capped: stays subtle.
+        if (!qEnvironmentVariableIsEmpty("OMAWORD_ANNOTATION_SCREENSHOT"))
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWORD_ANNOTATION_SCREENSHOT") + ".tints.png"));
         backend->setProperty("cursorVerse",6);
-        QTRY_COMPARE(list("contextRanges").size(),1);
-        QCOMPARE(list("contextRanges")[0].toMap()["start"].toInt(),mapping->positionFor(4));
-        QCOMPARE(list("contextRanges")[0].toMap()["end"],mapping->spans()[4].toMap()["end"]);
-        backend->setProperty("cursorVerse",7);
-        QTRY_VERIFY(list("contextRanges").isEmpty());
-        backend->setProperty("cursorVerse",3);
-        QTRY_COMPARE(list("contextRanges").size(),2);
+        QTest::qWait(50);
+        QCOMPARE(alphaAt(1), one);
         backend->setProperty("focusMode",true);
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
-        QTRY_VERIFY(list("contextRanges").isEmpty());
+        QTRY_VERIFY(list("tintCounts").isEmpty());
         backend->setProperty("focusMode",false);
         QTRY_COMPARE(list("inlineMarkers").size(),8);
-        QTRY_COMPARE(list("contextRanges").size(),2);
+        QTRY_COMPARE(list("tintCounts").size(),7);
         QSignalSpy geometry(mapping,&BlockDocument::geometryChanged);
         QTest::qWait(100);
         QCOMPARE(geometry.count(),0); // Painting/selection cannot feed a layout loop.
@@ -1153,6 +1164,8 @@ QtObject {
     function line(a) { return HandDrawn.linePoints(0, 10, 200, 10, a[0], a[1], a[2]) }
     function band(a) { return HandDrawn.bandPolygon(Qt.rect(4, 6, 120, 22), a[0], a[1], { top: true, bottom: true, left: true, right: true }) }
     function rect(a) { return HandDrawn.wavyRect(null, 0, 0, 60, 24, a[0], a[1], { width: 1 }) }
+    function tintCount(a) { return HandDrawn.tintCount(a[0]) }
+    function tintRuns(a) { return HandDrawn.tintRuns(a[0]) }
 }
 )",QUrl::fromLocalFile(QFileInfo(helper).absolutePath() + "/HelperHarness.qml"));
         std::unique_ptr<QObject> object(component.create());
@@ -1208,6 +1221,18 @@ QtObject {
                 QVERIFY(p["x"].toDouble() - half >= 0 && p["x"].toDouble() + half <= 60);
                 QVERIFY(p["y"].toDouble() - half >= 0 && p["y"].toDouble() + half <= 24);
             }
+        // Tints: one layer per covering range of any kind, capped at three.
+        const QVariantMap one{{"bookmarkRanges",QVariantList{QVariantMap{}}}};
+        QCOMPARE(call("tintCount",{QVariantMap{}}).toInt(),0);
+        QCOMPARE(call("tintCount",{one}).toInt(),1);
+        QCOMPARE(call("tintCount",{QVariantMap{{"bookmarkRanges",QVariantList{QVariantMap{}}},{"highlightRanges",QVariantList{QVariantMap{}}},
+            {"noteRanges",QVariantList{QVariantMap{}}},{"tagRanges",QVariantList{QVariantMap{},QVariantMap{}}}}}).toInt(),3);
+        QStringList runs;
+        for (const auto &value : call("tintRuns",{QVariantList{1,2,0,3,3,1}}).toList()) {
+            const auto run = value.toMap();
+            runs << QString("%1:%2-%3").arg(run["layer"].toInt()).arg(run["first"].toInt()).arg(run["last"].toInt());
+        }
+        QCOMPARE(runs,QStringList({"1:0-1","1:3-5","2:1-1","2:3-4","3:3-4"}));
     }
     void handDrawnMarksDeterministicAndBounded() {
         backend->setProperty("showVerseNumbers",false);

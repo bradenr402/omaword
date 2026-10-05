@@ -407,38 +407,6 @@ QVariantList BlockDocument::inlineDecorations() const
     return result;
 }
 
-QVariantList BlockDocument::contextRanges(const QVariantList &verses, int cursorVerse,
-                                         int selectedStart, int selectedEnd) const
-{
-    auto keys = [](const QVariantMap &verse) {
-        QSet<QString> result;
-        for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("note"), QStringLiteral("tag")})
-            for (const auto &entry : verse.value(kind + "Ranges").toList())
-                result.insert(kind + ':' + entry.toMap().value("reference").toString());
-        return result;
-    };
-    QSet<QString> active;
-    for (const auto &verse : verses)
-        if (verse.toMap().value("number").toInt() == cursorVerse) active = keys(verse.toMap());
-    QVariantList result;
-    bool adjacent = false;
-    for (int i = 0; i < m_spans.size() && i < verses.size(); ++i) {
-        const auto span = m_spans[i].toMap();
-        const int number = span.value("number").toInt();
-        const bool covered = number != cursorVerse && !(selectedStart > 0 && number >= selectedStart && number <= selectedEnd)
-            && keys(verses[i].toMap()).intersects(active);
-        if (covered) {
-            if (adjacent) {
-                auto range = result.last().toMap();
-                range["end"] = span.value("end");
-                result.last() = range;
-            } else result.append(QVariantMap{{"start",span.value("start")}, {"end",span.value("end")}});
-        }
-        adjacent = covered;
-    }
-    return result;
-}
-
 QVariantList BlockDocument::annotations(const QVariantList &verses, const QVariantList &collection,
                                        int book, int chapter) const
 {

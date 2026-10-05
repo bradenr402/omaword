@@ -90,7 +90,7 @@ a fake `hyprctl` and temporary theme state.
 - **tagsui**: picker, Annotations summary, Related, management, Main integration.
 - **ranges**: atomic range moves, collisions, stale tokens, rollback.
 - **rangesui**: range editor UI, entry points, cancellation/restore, note confirmation.
-- **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, context shading.
+- **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, annotation tints.
 - **desktop**: async compositor rounding and themed tooltips.
 - **sound**: sound effects and settings.
 - **windows**: multiple readers, shared commits, draft conflicts, closing.

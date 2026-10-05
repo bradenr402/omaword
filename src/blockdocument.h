@@ -35,9 +35,6 @@ public:
     // to y, bracketHeight excludes proportional line leading. paintWidth excludes
     // the reserved textGap; bracketX is its logical origin, mirrored when rtl.
     Q_INVOKABLE QVariantList inlineDecorations() const;
-    // Union of cursor-containing bookmark/note/tag ranges, excluding selected verses.
-    Q_INVOKABLE QVariantList contextRanges(const QVariantList &verses, int cursorVerse,
-                                           int selectedStart = 0, int selectedEnd = 0) const;
     Q_INVOKABLE int verseAt(int position) const;
     Q_INVOKABLE int verseAtPoint(double x, double y) const;
     Q_INVOKABLE int positionFor(int verse) const;
