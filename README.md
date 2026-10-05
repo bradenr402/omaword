@@ -143,6 +143,9 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `?`: Keybindings
 - `ctrl n`: New window
 - `ctrl i`: Add version from Versions
+- `enter`: Add version: install the highlighted version
+- `shift enter`: Add version: its Details & Attribution
+- `ctrl i`: Add version: import a USFM ZIP
 - `ctrl shift I`: Re-import the highlighted version (Versions)
 
 ### Reading

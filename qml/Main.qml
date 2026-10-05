@@ -3240,6 +3240,10 @@ ApplicationWindow {
         { id: "newWindow", group: "Palettes and windows", title: "New window", sequences: ["Ctrl+N"], scope: "global", command: true },
         // Bound by the Versions dialog itself.
         { id: "addVersion", group: "Palettes and windows", title: "Add version from Versions", sequences: ["Ctrl+I"], scope: "versions", explanation: true },
+        // Bound by the Add version guide itself.
+        { id: "guideInstall", group: "Palettes and windows", title: "Add version: install the highlighted version", sequences: ["Return"], scope: "importGuide", explanation: true },
+        { id: "guideDetails", group: "Palettes and windows", title: "Add version: its Details & Attribution", sequences: ["Shift+Return"], scope: "importGuide", explanation: true },
+        { id: "guideImport", group: "Palettes and windows", title: "Add version: import a USFM ZIP", sequences: ["Ctrl+I"], scope: "importGuide", explanation: true },
         { id: "reimportVersion", group: "Palettes and windows", title: "Re-import the highlighted version (Versions)", sequences: ["Ctrl+Shift+I"], scope: "versions", explanation: true },
         { id: "focus", group: "Reading", title: "Focus mode", sequences: ["F"], setting: "focusMode", command: true },
         { id: "numbers", group: "Reading", title: "Show verse numbers", sequences: ["Alt+N"], setting: "showVerseNumbers", command: true },
@@ -3297,7 +3301,7 @@ ApplicationWindow {
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
-    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters", "tags", "rangeEditor"].includes(action.scope) }
+    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters", "tags", "rangeEditor", "importGuide"].includes(action.scope) }
     function actionById(id) { return actions.find(function(entry) { return entry.id === id }) }
     function actionKeys(action) {
         if (typeof action === "string") action = actionById(action)
@@ -3456,6 +3460,7 @@ ApplicationWindow {
         if (action.scope === "desk") return "Desk panel only"
         if (action.scope === "noteEditor") return "Notes editor"
         if (action.scope === "characters") return "Character selection · " + keyText("characterVisual")
+        if (action.scope === "importGuide") return "Add version guide"
         if (action.scope === "rangeEditor") return "Range editing (" + keyText("editRange") + ")"
         if (action.scope === "tags") return "Tag picker · Manage tags (" + keyText("manageTags") + ")"
         return "Reader · outside text editing and dialogs"
@@ -7375,10 +7380,52 @@ ApplicationWindow {
         id: importGuide
         objectName: "importGuide"
         property bool choosePending: false
+        // The highlighted catalog row: ↑ ↓ from the search field choose, enter
+        // installs it, shift enter shows its Details & Attribution.
+        property int catalogIndex: 0
+        readonly property var catalogEntry: catalogResults.model[catalogIndex] || null
+        function moveCatalog(delta) {
+            if (!catalogResults.count) { sounds.play("boundary"); return }
+            const next = Math.max(0, Math.min(catalogResults.count - 1, catalogIndex + delta))
+            if (next === catalogIndex) sounds.play("boundary")
+            catalogIndex = next
+            const row = catalogResults.itemAt(catalogIndex)
+            const flick = importGuideScroll.contentItem as Flickable
+            if (!row || !flick) return
+            const y = row.mapToItem(flick.contentItem, 0, 0).y
+            if (y < flick.contentY) flick.contentY = y
+            else if (y + row.height > flick.contentY + flick.height) flick.contentY = y + row.height - flick.height
+        }
+        function installCurrent() {
+            if (!catalogEntry || bible.busy || catalog.busy) { app.rejected(); return }
+            app.installVersion(catalogEntry.id)
+        }
+        function showCurrentDetails() {
+            if (!catalogEntry) { app.rejected(); return }
+            catalogDetails.entry = catalogEntry
+            catalogDetails.open()
+        }
+        function chooseZip() {
+            if (bible.busy || catalog.busy || !app.flushNote()) { app.rejected(); return }
+            choosePending = true
+            close()
+        }
+        function guideKey(event) {
+            const mods = event.modifiers & ~Qt.KeypadModifier
+            const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+            if (mods === Qt.NoModifier && event.key === Qt.Key_Down) moveCatalog(1)
+            else if (mods === Qt.NoModifier && event.key === Qt.Key_Up) moveCatalog(-1)
+            else if (mods === Qt.NoModifier && enter) installCurrent()
+            else if (mods === Qt.ShiftModifier && enter) showCurrentDetails()
+            else if (mods === Qt.ControlModifier && event.key === Qt.Key_I) chooseZip()
+            else return false
+            event.accepted = true
+            return true
+        }
         readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 360))
         height: Math.min(650 * app.scale, app.height - 48)
         // Focus at once, while the modal is still fading in.
-        onVisibleChanged: if (visible) { catalogSearch.text = ""; catalogSearch.forceActiveFocus() }
+        onVisibleChanged: if (visible) { catalogSearch.text = ""; catalogIndex = 0; catalogSearch.forceActiveFocus() }
         onClosed: {
             const choose = choosePending
             choosePending = false
@@ -7402,8 +7449,15 @@ ApplicationWindow {
                 background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: catalogSearch.activeFocus ? desktop.accent : desktop.border }
                 placeholderText: "Search versions…"
                 Accessible.name: "Search versions"
-                // Paging keys scroll the guide; arrows and letters stay with the field.
+                onTextChanged: importGuide.catalogIndex = 0
+                // ctrl i imports a ZIP even while the Versions dialog lies below.
+                Keys.onShortcutOverride: function(event) {
+                    if ((event.modifiers & ~Qt.KeypadModifier) === Qt.ControlModifier && event.key === Qt.Key_I) event.accepted = true
+                }
+                // ↑ ↓ choose a version, enter installs, shift enter shows details,
+                // ctrl i imports a ZIP; paging keys scroll the guide.
                 Keys.onPressed: function(event) {
+                    if (importGuide.guideKey(event)) return
                     const paging = [Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)
                         || (event.modifiers === Qt.ControlModifier && [Qt.Key_D, Qt.Key_U].includes(event.key))
                     if (paging) app.scrollKey(importGuideScroll.contentItem as Flickable, event)
@@ -7427,26 +7481,44 @@ ApplicationWindow {
                             const query = catalogSearch.text.trim().toLowerCase()
                             return !query || (entry.name + " " + entry.abbreviation).toLowerCase().includes(query)
                         })
-                        delegate: ColumnLayout {
+                        delegate: Item {
                             id: catalogRow
                             required property var modelData
+                            required property int index
+                            readonly property bool current: index === importGuide.catalogIndex
+                            objectName: "catalogRow:" + modelData.id
                             Layout.fillWidth: true
+                            implicitWidth: catalogRowContent.implicitWidth
+                            implicitHeight: catalogRowContent.implicitHeight
+                            Rectangle {
+                                objectName: "catalogRowTint:" + catalogRow.modelData.id
+                                anchors.fill: parent
+                                anchors.margins: -4 * app.scale
+                                visible: catalogRow.current
+                                color: app.tint(desktop.accent, 0.11)
+                                radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                            }
+                            MouseArea { anchors.fill: parent; acceptedButtons: Qt.LeftButton; onClicked: importGuide.catalogIndex = catalogRow.index }
+                        ColumnLayout {
+                            id: catalogRowContent
+                            width: parent.width
                             spacing: 6 * app.scale
                             Label { text: catalogRow.modelData.abbreviation + " · " + catalogRow.modelData.name; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                             RowLayout {
                                 Layout.fillWidth: true
                                 Label { objectName: "catalogInstalled:" + catalogRow.modelData.id; visible: app.installedVersion(catalogRow.modelData.id); text: "Installed"; color: desktop.accent; font.pixelSize: 12 * app.scale }
                                 Item { Layout.fillWidth: true }
-                                QuietButton { objectName: "catalogDetails:" + catalogRow.modelData.id; text: "Details & Attribution"; font.pixelSize: 12 * importGuide.uiScale; compact: true; onClicked: { catalogDetails.entry = catalogRow.modelData; catalogDetails.open() } }
+                                QuietButton { objectName: "catalogDetails:" + catalogRow.modelData.id; text: "Details & Attribution"; font.pixelSize: 12 * importGuide.uiScale; compact: true; onClicked: { importGuide.catalogIndex = catalogRow.index; catalogDetails.entry = catalogRow.modelData; catalogDetails.open() } }
                                 QuietButton {
                                     objectName: "catalogInstall:" + catalogRow.modelData.id
                                     text: "Install"; compact: true; emphasized: true
                                     font.pixelSize: 12 * importGuide.uiScale
                                     enabled: !bible.busy && !catalog.busy
-                                    onClicked: app.installVersion(catalogRow.modelData.id)
+                                    onClicked: { importGuide.catalogIndex = catalogRow.index; app.installVersion(catalogRow.modelData.id) }
                                 }
                             }
                             FineRule { Layout.fillWidth: true }
+                        }
                         }
                     }
                     Label { visible: catalogResults.count === 0; text: "No matching versions"; color: desktop.muted; Layout.fillWidth: true }
@@ -7482,8 +7554,20 @@ ApplicationWindow {
                     font.pixelSize: 14 * importGuide.uiScale
                     emphasized: true
                     enabled: !bible.busy && !catalog.busy
+                    tip: "Import a local USFM ZIP · " + KeyNotation.format("Ctrl+I")
                     onClicked: { if (bible.busy || catalog.busy || !app.flushNote()) return; importGuide.choosePending = true; importGuide.close() }
                 }
+            }
+            HintRow {
+                objectName: "importGuideHints"
+                Layout.fillWidth: true
+                theme: desktop
+                pixelSize: 11 * importGuide.uiScale
+                parts: [[["Up", "Down"], "choose"],
+                    ["Return", "install", function() { importGuide.installCurrent() }, !!importGuide.catalogEntry && !bible.busy && !catalog.busy],
+                    ["Shift+Return", "details", function() { importGuide.showCurrentDetails() }, !!importGuide.catalogEntry],
+                    ["Ctrl+I", "import ZIP…", function() { importGuide.chooseZip() }, !bible.busy && !catalog.busy],
+                    ["Escape", "close", function() { importGuide.close() }]]
             }
         }
     }

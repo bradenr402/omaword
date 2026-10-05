@@ -1329,6 +1329,41 @@ private slots:
         QVERIFY(toolTipOf(item("previewButton"))->property("text").toString().contains("alt v"));
         QDesktopServices::unsetUrlHandler("https");
     }
+    void addVersionGuideKeys() {
+        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"name", "King James Version"}, {"abbreviation", "KJV"}, {"copyright", "Public domain"}, {"detailsUrl", "https://ebible.org/kjv"}},
+                            QVariantMap{{"id", "engweb"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}, {"copyright", "Public domain"}, {"detailsUrl", "https://ebible.org/web"}}};
+        emit catalog->changed();
+        run("import"); QTRY_VERIFY(opened("importGuide")); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
+        auto guide = object("importGuide");
+        QCOMPARE(guide->property("catalogIndex").toInt(), 0); QVERIFY(item("catalogRowTint:engkjv")->isVisible());
+        // Keyboard: ↑ ↓ choose (stopping at the ends), enter installs.
+        key(Qt::Key_Down); QCOMPARE(guide->property("catalogIndex").toInt(), 1); QVERIFY(item("catalogRowTint:engweb")->isVisible());
+        key(Qt::Key_Down); QCOMPARE(guide->property("catalogIndex").toInt(), 1); QCOMPARE(lastSound(), QString("boundary"));
+        key(Qt::Key_Up); QCOMPARE(guide->property("catalogIndex").toInt(), 0);
+        key(Qt::Key_Return); QCOMPARE(catalog->requests, QStringList{"engkjv"});
+        catalog->busy = false; emit catalog->changed();
+        // shift enter shows Details & Attribution; closing it returns to the search.
+        key(Qt::Key_Down); key(Qt::Key_Return, Qt::ShiftModifier); QTRY_VERIFY(opened("catalogDetails"));
+        QCOMPARE(value(object("catalogDetails")->property("entry")).toMap()["id"].toString(), QString("engweb"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("catalogDetails")); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
+        // Typing filters and starts again at the first match.
+        type("web"); QCOMPARE(guide->property("catalogIndex").toInt(), 0);
+        QVERIFY(object("importGuideHints")->property("plainText").toString().contains("shift enter details"));
+        // ctrl i goes to the ZIP picker.
+        key(Qt::Key_I, Qt::ControlModifier); QTRY_VERIFY(!shown("importGuide"));
+        QTRY_VERIFY(object("importDialog")->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(object("importDialog"), "close"));
+        QTRY_VERIFY(!object("importDialog")->property("visible").toBool());
+        // Mouse: a click chooses a row; the hint parts act on it.
+        run("import"); QTRY_VERIFY(opened("importGuide"));
+        auto row = item("catalogRow:engweb"); shot("add-version-guide"); clickAt(row->mapToScene(QPointF(row->width() - 20, 6)).toPoint());
+        QCOMPARE(guide->property("catalogIndex").toInt(), 1); QVERIFY(!shown("catalogDetails"));
+        clickHint("importGuideHintsPart:install"); QCOMPARE(catalog->requests, QStringList({"engkjv", "engweb"}));
+        catalog->busy = false; emit catalog->changed();
+        clickHint("importGuideHintsPart:details"); QTRY_VERIFY(opened("catalogDetails"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("catalogDetails"));
+        clickHint("importGuideHintsPart:close"); QTRY_VERIFY(!shown("importGuide"));
+    }
 };
 
 int main(int argc, char **argv) {
