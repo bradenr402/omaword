@@ -421,20 +421,24 @@ private slots:
         QVERIFY(qAbs(prop("scale").toDouble() - 8.0 / 18) < 1e-9);
         QCOMPARE(item("verseBody1")->property("font").value<QFont>().pixelSize(), 8);
     }
-    // Related: j/k and the arrows walk the source tags and the results as one
-    // list, from wherever the panel's keyboard focus is.
+    // Study → Tags: j/k and the arrows walk the results; up from the first
+    // result climbs into the passage's tag chips, where ←/→ (h/l) move between
+    // chips instead of switching tabs and j/↓ returns to the results.
     void relatedListKeys() {
         navigate("John 1:2"); const auto alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
         const auto beta = bible->createAndAssignTag(bible->tagScope(), "Beta");
         for (auto r : {"John 1:5", "John 1:8", "John 1:12", "John 1:20", "John 2:3"}) { navigate(r); QVERIFY(bible->setTag(bible->tagScope(), alpha, true)); }
         navigate("John 1:2");
-        auto results = object("tagResults"), tags = object("tagList");
+        auto results = object("tagResults");
+        auto study = object("tagsUi");
         const auto openRelated = [&]() {
             call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+            if (study->property("studyTab").toString() != "related") key(Qt::Key_H);
+            QTRY_COMPARE(study->property("studyTab").toString(), QString("related"));
             QTRY_COMPARE(results->property("count").toInt(), 5); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         };
         openRelated();
-        QCOMPARE(tags->property("count").toInt(), 2);
+        QVERIFY(item("studyChip:" + alpha)->isVisible()); QVERIFY(item("studyChip:" + beta)->isVisible());
         QCOMPARE(results->property("currentIndex").toInt(), 0);
         key(Qt::Key_J); QCOMPARE(results->property("currentIndex").toInt(), 1);
         key(Qt::Key_Down); QCOMPARE(results->property("currentIndex").toInt(), 2);
@@ -443,30 +447,31 @@ private slots:
         for (int i = 0; i < 8; ++i) key(Qt::Key_J);
         QCOMPARE(results->property("currentIndex").toInt(), 4); QVERIFY(item("tagResults")->hasActiveFocus());
         for (int i = 0; i < 4; ++i) key(Qt::Key_K);
-        QCOMPARE(results->property("currentIndex").toInt(), 0);
-        key(Qt::Key_K); QCOMPARE(results->property("currentIndex").toInt(), 0); QVERIFY(item("tagResults")->hasActiveFocus());
-        // In the source tags: j/k step through them, down into the results, up into search.
-        item("tagList")->forceActiveFocus(); tags->setProperty("currentIndex", 0);
-        key(Qt::Key_J); QCOMPARE(tags->property("currentIndex").toInt(), 1); QVERIFY(item("tagList")->hasActiveFocus());
-        key(Qt::Key_K); QCOMPARE(tags->property("currentIndex").toInt(), 0);
-        key(Qt::Key_Down); QCOMPARE(tags->property("currentIndex").toInt(), 1);
+        QCOMPARE(results->property("currentIndex").toInt(), 0); QVERIFY(item("tagResults")->hasActiveFocus());
+        // Into the chips: ←/→ and h/l move between them; the tab stays put.
+        key(Qt::Key_K); QTRY_VERIFY(item("studyChip:" + alpha)->hasActiveFocus());
+        key(Qt::Key_L); QVERIFY(item("studyChip:" + beta)->hasActiveFocus());
+        key(Qt::Key_Right); QVERIFY(item("studyChip:" + beta)->hasActiveFocus());
+        key(Qt::Key_Left); QVERIFY(item("studyChip:" + alpha)->hasActiveFocus());
+        QCOMPARE(study->property("studyTab").toString(), QString("related"));
         key(Qt::Key_J); QVERIFY(item("tagResults")->hasActiveFocus()); QCOMPARE(results->property("currentIndex").toInt(), 0);
-        item("tagList")->forceActiveFocus(); tags->setProperty("currentIndex", 1);
-        key(Qt::Key_Up); QCOMPARE(tags->property("currentIndex").toInt(), 0);
-        key(Qt::Key_K); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        // tab and shift tab cycle results and chips.
+        key(Qt::Key_Tab); QVERIFY(item("studyChip:" + alpha)->hasActiveFocus());
+        key(Qt::Key_Tab); QVERIFY(item("tagResults")->hasActiveFocus());
+        key(Qt::Key_Backtab); QVERIFY(item("studyChip:" + alpha)->hasActiveFocus());
+        key(Qt::Key_Down); QVERIFY(item("tagResults")->hasActiveFocus());
         // Typing owns j and k in the search field.
-        type("jk"); QCOMPARE(item("tagSearch")->property("text").toString(), QString("jk"));
+        key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
+        type("jk"); QCOMPARE(item("studySearch")->property("text").toString(), QString("jk"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        key(Qt::Key_Escape); QCOMPARE(study->property("studyQuery").toString(), QString());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
-        // A clicked tag holds focus; j/k still move (the original failure).
+        // A clicked chip holds focus; j still moves back to the results.
         openRelated();
-        QTest::mouseClick(window, Qt::LeftButton, {}, item("tag:" + alpha)->mapToScene(QPointF(10, 10)).toPoint());
-        QTRY_VERIFY(item("tagList")->hasActiveFocus());
-        const int from = tags->property("currentIndex").toInt();
-        key(Qt::Key_J);
-        QVERIFY(tags->property("currentIndex").toInt() != from || item("tagResults")->hasActiveFocus());
+        QTest::mouseClick(window, Qt::LeftButton, {}, item("studyChip:" + beta)->mapToScene(QPointF(10, 10)).toPoint());
+        QTRY_VERIFY(item("studyChip:" + beta)->hasActiveFocus());
+        key(Qt::Key_J); QVERIFY(item("tagResults")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
-        Q_UNUSED(beta)
     }
     // g, shift G, ctrl d/u (5), ctrl f/b and pgdn/pgup (10) in every list panel;
     // never while typing in a panel's search field.
@@ -511,25 +516,20 @@ private slots:
         QCOMPARE(object("savedSearch")->property("text").toString().toLower(), QString("g")); // Typed, not a motion.
         QVERIFY(item("savedSearch")->hasActiveFocus());
         object("savedSearch")->setProperty("text", QString()); key(Qt::Key_Escape); QTRY_VERIFY(!item("savedSearch")->hasActiveFocus());
-        // Annotations · Tags tab: g and shift G reach the first and last range.
+        // Annotations · Tags tab: the same list and motions (25 tagged ranges).
         key(Qt::Key_H); QTRY_COMPARE(prop("collectionTab").toInt(), 3);
-        QTRY_VERIFY(item("summaryMotionKeys")->property("active").toBool());
-        key(Qt::Key_G, Qt::ShiftModifier);
-        auto lastFocus = window->activeFocusItem(); QVERIFY(lastFocus); const auto lastName = lastFocus->objectName();
-        key(Qt::Key_G); auto firstFocus = window->activeFocusItem(); QVERIFY(firstFocus && firstFocus != lastFocus);
-        key(Qt::Key_D, Qt::ControlModifier); QVERIFY(window->activeFocusItem() != firstFocus);
-        key(Qt::Key_U, Qt::ControlModifier); QCOMPARE(window->activeFocusItem(), firstFocus);
-        key(Qt::Key_PageDown); key(Qt::Key_PageDown); key(Qt::Key_PageDown); key(Qt::Key_PageDown); key(Qt::Key_PageDown);
-        QCOMPARE(window->activeFocusItem()->objectName(), lastName);
+        QTRY_COMPARE(saved->property("count").toInt(), 25);
+        expectMotions(saved, "annotations tags");
         key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
-        // Related: the results.
+        // Study → Tags: the results.
         call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+        if (object("tagsUi")->property("studyTab").toString() != "related") key(Qt::Key_H);
         QTRY_COMPARE(object("tagResults")->property("count").toInt(), 24); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         expectMotions(object("tagResults"), "related");
-        key(Qt::Key_Slash); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
-        key(Qt::Key_G); QCOMPARE(object("tagSearch")->property("text").toString(), QString("g"));
+        key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
+        key(Qt::Key_G); QCOMPARE(object("studySearch")->property("text").toString(), QString("g"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
         // The reader keeps its own meanings once the panels are closed.
         call("readerFocus"); navigate("John 1:20"); key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(bible->cursorVerse(), 25);
     }

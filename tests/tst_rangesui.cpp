@@ -306,7 +306,8 @@ private slots:
         const auto source = bible->tagScope(); QVERIFY(!bible->createAndAssignTag(source, "Tab test").isEmpty());
         key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         key(Qt::Key_H); QCOMPARE(window->property("collectionTab").toInt(), 3);
-        key(Qt::Key_J); QVERIFY(item("summaryTag:" + bible->tags().first().toMap().value("id").toString())->hasActiveFocus());
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        key(Qt::Key_J); QCOMPARE(object("collectionList")->property("currentIndex").toInt(), 0);
         key(Qt::Key_Left); QCOMPARE(window->property("collectionTab").toInt(), 2);
         key(Qt::Key_Right); QCOMPARE(window->property("collectionTab").toInt(), 3);
         key(Qt::Key_L); QCOMPARE(window->property("collectionTab").toInt(), 0);

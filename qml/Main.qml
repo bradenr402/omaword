@@ -73,11 +73,11 @@ ApplicationWindow {
         let focused = activeFocusItem
         while (focused && focused !== collectionList) {
             const row = focused as SavedEntry
-            if (row) { openRangeEditor(row.modelData, ["bookmark", "highlight", "note"][collectionTab]); return }
+            if (row) { openRangeEditor(row.modelData, ["bookmark", "highlight", "note", "tag"][collectionTab]); return }
             focused = focused.parent
         }
         const entry = collectionList.model[collectionList.currentIndex]
-        if (entry) openRangeEditor(entry, ["bookmark", "highlight", "note"][collectionTab])
+        if (entry) openRangeEditor(entry, ["bookmark", "highlight", "note", "tag"][collectionTab])
     }
     onNotesOpenChanged: clearCount()
     property bool notePreview: false
@@ -924,7 +924,19 @@ ApplicationWindow {
         collectionList.currentIndex = row
         collectionList.forceActiveFocus()
         const ready = !rangeEditing && !bible.busy
-        const kind = ["bookmark", "highlight", "note"][collectionTab]
+        const kind = ["bookmark", "highlight", "note", "tag"][collectionTab]
+        if (collectionTab === 3) {
+            contextMenu.show("annotation", [
+                { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { app.openSaved(entry) } },
+                { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { app.openPassageTags(tagsUi.snapshot(entry)) } },
+                { id: "editRange", text: "Edit range", shortcut: menuKey("editRange"), enabled: ready, run: function() { app.openRangeEditor(entry, kind) } },
+                { id: "removeTag", text: "Remove " + entry.group + "…", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.requestRemoveTag(entry, row) } },
+                menuDivider,
+                { id: "copy", text: "Copy", shortcut: KeyNotation.format("Y"), enabled: !bible.busy, run: function() { app.copyScope(entry) } },
+                { id: "desk", text: deskRowFor(entry) ? "Remove from Desk" : "Add to Desk", shortcut: KeyNotation.format("D"), enabled: ready, run: function() { app.toggleScopeDesk(entry) } }
+            ], sceneX, sceneY)
+            return
+        }
         contextMenu.show("annotation", [
             { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { app.openSaved(entry) } },
             { id: "editRange", text: "Edit range", shortcut: menuKey("editRange"), enabled: ready, run: function() { app.openRangeEditor(entry, kind) } },
@@ -2208,10 +2220,53 @@ ApplicationWindow {
         positionTimer.restart()
     }
     function collectionForTab() {
+        if (collectionTab === 3) return taggedRows()
         return Array.from(bible.collection).filter(function(entry) {
             return (collectionTab === 0 && entry.bookmark)
                 || (collectionTab === 1 && entry.highlight) || (collectionTab === 2 && entry.note.length > 0)
         })
+    }
+    // Annotations → Tags: every tagged passage in this version, grouped by tag
+    // (tag name order), each group in canonical order. A passage with several
+    // tags appears once per tag.
+    property var savedTagExcerpts: ({})
+    function rangeKey(scope) { return [scope.versionId, scope.book, scope.chapter, scope.start, scope.endBook, scope.endChapter, scope.end].join(":") }
+    function refreshTagExcerpts() {
+        const ids = Array.from(bible.tags).map(function(tag) { return tag.id })
+        const excerpts = {}
+        if (ids.length && bible.versionId) Array.from(bible.taggedPassages(ids, false, bible.versionId)).forEach(function(row) {
+            excerpts[app.rangeKey(row)] = row.excerpt || ""
+        })
+        savedTagExcerpts = excerpts
+    }
+    function taggedRows() {
+        const ranges = Array.from(bible.collection).filter(function(entry) { return entry.tags && entry.tags.length > 0 })
+        const rows = []
+        Array.from(bible.tags).forEach(function(tag) {
+            ranges.forEach(function(range) {
+                if (!Array.from(range.tags).some(function(other) { return other.id === tag.id })) return
+                rows.push(Object.assign({}, range, { group: tag.name, groupId: tag.id,
+                    excerpt: app.savedTagExcerpts[app.rangeKey(range)] || "" }))
+            })
+        })
+        return rows
+    }
+    // The reader's range ("here" rows): the selection, else nothing.
+    function verseKey(book, chapter, verse) { return (book * 1000 + chapter) * 1000 + verse }
+    function savedHere(entry) {
+        if (!entry || !hasSelection || entry.versionId !== bible.versionId) return false
+        const scope = bible.tagScope()
+        if (!scope || !scope.start) return false
+        return verseKey(entry.book, entry.chapter, entry.start) <= verseKey(scope.endBook, scope.endChapter, scope.end)
+            && verseKey(scope.book, scope.chapter, scope.start) <= verseKey(entry.endBook, entry.endChapter, entry.end)
+    }
+    readonly property var savedHereKey: [bible.versionId, bible.selectionReference, bible.selectedStart, bible.selectedEnd, bible.passage]
+    // Opening the Tags tab starts at the first row here, else the first row.
+    function initialSavedRow() {
+        if (collectionTab !== 3) return collectionList.count ? 0 : -1
+        const rows = collectionList.model || []
+        const here = rows.findIndex(function(entry) { return app.savedHere(entry) })
+        return here >= 0 ? here : rows.length ? 0 : -1
     }
     // Annotations search: reference, note, and tag names, case-insensitive.
     property string savedQuery: ""
@@ -2219,12 +2274,21 @@ ApplicationWindow {
     function clearSavedQuery() { savedQuery = ""; savedSearch.text = "" }
     function savedMatches(entry, query) {
         if (!query.length) return true
-        return [entry.reference, entry.note || "", tagsPlainText(entry.tags), entry.excerpt || ""]
-            .join("\n").toLowerCase().indexOf(query.toLowerCase()) >= 0
+        // Tags: a match on the tag's name keeps its whole group.
+        const fields = collectionTab === 3 ? [entry.reference, entry.note || "", entry.group, entry.excerpt || ""]
+            : [entry.reference, entry.note || "", tagsPlainText(entry.tags), entry.excerpt || ""]
+        return fields.join("\n").toLowerCase().indexOf(query.toLowerCase()) >= 0
     }
     function filteredCollection() {
         const query = savedQuery.trim()
-        return collectionForTab().filter(function(entry) { return app.savedMatches(entry, query) })
+        const rows = collectionForTab().filter(function(entry) { return app.savedMatches(entry, query) })
+        if (collectionTab !== 3) return rows
+        // Section headings: "name · count" over the rows shown.
+        const counts = {}
+        rows.forEach(function(row) { counts[row.groupId] = (counts[row.groupId] || 0) + 1 })
+        return rows.map(function(row, index) {
+            return Object.assign(row, { groupCount: counts[row.groupId], firstOfGroup: index === 0 || rows[index - 1].groupId !== row.groupId })
+        })
     }
     // The search field appears once a tab holds more than ten items, and stays
     // while it has a query.
@@ -2239,7 +2303,6 @@ ApplicationWindow {
         else savedDrawer.close()
     }
     function moveSaved(delta) {
-        if (collectionTab === 3) return
         if (collectionList.count > 0) {
             collectionList.currentIndex = Math.max(0, Math.min(collectionList.count - 1, collectionList.currentIndex + delta))
             collectionList.positionViewAtIndex(collectionList.currentIndex, ListView.Contain)
@@ -2249,10 +2312,10 @@ ApplicationWindow {
     }
     function filterSaved(delta) {
         const tab = (collectionTab + delta + 4) % 4
-        if (tab === 3) { clearSavedQuery(); openTagsBrowser(); return }
         clearSavedQuery()
         collectionTab = tab
-        collectionList.currentIndex = collectionList.count > 0 ? 0 : -1
+        if (tab === 3) refreshTagExcerpts()
+        collectionList.currentIndex = initialSavedRow()
         moveSaved(0)
     }
     function openSaved(entry) {
@@ -2263,7 +2326,7 @@ ApplicationWindow {
         endJump(from)
         syncNote()
         savedDrawer.close()
-        if (entry.note.length > 0) openNotes(false)
+        if (entry.note.length > 0 && collectionTab !== 3) openNotes(false)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
@@ -2278,6 +2341,8 @@ ApplicationWindow {
         }
         let entry = focused instanceof SavedEntry ? (focused as SavedEntry).modelData : collectionList.model[row]
         if (!entry || bible.busy) return
+        // Tags: removes only this row's tag from its range.
+        if (collectionTab === 3) { requestRemoveTag(entry, row); return }
         // Freeze identity before flushing drafts can publish a replacement model.
         const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
             book: entry.book, chapter: entry.chapter, start: entry.start,
@@ -2285,6 +2350,18 @@ ApplicationWindow {
         if (!flushNote() || bible.busy || !savedScopeExists(scope)) return
         deleteConfirmation.scope = scope
         deleteConfirmation.row = row
+        deleteConfirmation.open()
+    }
+    function requestRemoveTag(entry, row) {
+        if (rangeEditing || !entry || !entry.groupId || bible.busy) return
+        const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
+            book: entry.book, chapter: entry.chapter, start: entry.start,
+            endBook: entry.endBook, endChapter: entry.endChapter, end: entry.end })
+        if (!flushNote() || bible.busy) return
+        deleteConfirmation.tag = { id: entry.groupId, name: entry.group }
+        deleteConfirmation.scope = scope
+        deleteConfirmation.row = row
+        if (!deleteScopeValid()) { deleteConfirmation.tag = null; deleteConfirmation.scope = null; return }
         deleteConfirmation.open()
     }
     function savedScopeExists(scope) {
@@ -2296,6 +2373,9 @@ ApplicationWindow {
             })
     }
     function deleteScopeValid() {
+        const tag = deleteConfirmation.tag
+        if (tag) return savedScopeExists(deleteConfirmation.scope)
+            && Array.from(bible.tagsForScope(deleteConfirmation.scope, false)).some(function(other) { return other.id === tag.id })
         return savedScopeExists(deleteConfirmation.scope)
     }
     function invalidateDeleteSaved() {
@@ -2311,6 +2391,15 @@ ApplicationWindow {
         if (!flushNote() || bible.busy) return
         if (!deleteScopeValid() || deleteConfirmation.scope !== scope) {
             invalidateDeleteSaved()
+            return
+        }
+        if (deleteConfirmation.tag) {
+            const tag = deleteConfirmation.tag
+            if (!bible.setTag(scope, tag.id, false)) { sounds.play("error"); return }
+            notify(tag.name + " removed from " + (scope.reference || "passage"), true)
+            sounds.play("remove")
+            deleteConfirmation.close()
+            Qt.callLater(function() { collectionList.currentIndex = Math.min(row, collectionList.count - 1) })
             return
         }
         if (deleteConfirmation.noteOnly) {
@@ -5169,7 +5258,7 @@ ApplicationWindow {
         // Esc is handled below: it first leaves the search field.
         closePolicy: closing || deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnPressOutside
         readonly property bool tabKeys: shown && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
-        readonly property bool collectionKeys: tabKeys && app.collectionTab !== 3
+        readonly property bool collectionKeys: tabKeys
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
         Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
@@ -5191,8 +5280,16 @@ ApplicationWindow {
         onAboutToShow: { const reopening = visible; if (!closing) app.clearSavedQuery(); closing = false; if (reopening) focusContent() }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.focusSavedList() }
-        onVisibleChanged: if (visible && !closing) focusContent()
+        onVisibleChanged: if (visible && !closing) {
+            if (app.collectionTab === 3) { app.refreshTagExcerpts(); collectionList.currentIndex = app.initialSavedRow() }
+            focusContent()
+        }
         onClosed: { closing = false; app.restorePanelFocus() }
+        Connections {
+            target: bible
+            enabled: savedDrawer.visible && app.collectionTab === 3
+            function onTagsChanged() { app.refreshTagExcerpts() }
+        }
         contentItem: ColumnLayout {
             objectName: "savedContent"
             Shortcut {
@@ -5213,6 +5310,14 @@ ApplicationWindow {
             Shortcut { sequence: "Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry()) }
             Shortcut { sequence: "Shift+Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry(), true) }
             Shortcut { sequence: "D"; enabled: savedDrawer.collectionKeys; onActivated: app.toggleScopeDesk(app.focusedSavedEntry()) }
+            // Tags: t edits the row's tags over the drawer; ctrl t manages tags.
+            Shortcut {
+                objectName: "savedTagKey"
+                sequence: "T"
+                enabled: savedDrawer.collectionKeys && app.collectionTab === 3 && !bible.busy && !!app.focusedSavedEntry()
+                onActivated: app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry()))
+            }
+            Shortcut { sequences: app.actionKeys("manageTags"); enabled: savedDrawer.collectionKeys && app.collectionTab === 3 && !bible.busy; onActivated: tagsUi.openManage() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
                 enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0
@@ -5269,7 +5374,6 @@ ApplicationWindow {
             }
             ListView {
                 id: collectionList
-                visible: app.collectionTab !== 3
                 objectName: "collectionList"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -5278,15 +5382,37 @@ ApplicationWindow {
                 model: app.filteredCollection()
                 onModelChanged: currentIndex = count > 0 ? Math.max(0, Math.min(currentIndex, count - 1)) : -1
                 ScrollBar.vertical: OverlayScrollbar { id: savedScrollbar; objectName: "savedScrollbar" }
-                delegate: SavedEntry {
+                // Tags rows sit under "name · count" headings; headings are part
+                // of the row's block, so j/k and the motions never stop on them.
+                delegate: Column {
+                    id: savedBlock
+                    required property var modelData
+                    required property int index
+                    width: collectionList.width
+                    Label {
+                        objectName: "savedTagGroup:" + (savedBlock.modelData.group || "")
+                        visible: app.collectionTab === 3 && !!savedBlock.modelData.firstOfGroup
+                        width: parent.width
+                        text: (savedBlock.modelData.group || "") + " · " + (savedBlock.modelData.groupCount || 0)
+                        textFormat: Text.PlainText
+                        color: desktop.muted
+                        font.pixelSize: 12 * app.scale; font.weight: Font.Medium
+                        elide: Text.ElideRight
+                        leftPadding: 12 * app.scale
+                        topPadding: savedBlock.index ? 10 * app.scale : 0
+                        bottomPadding: 4 * app.scale
+                    }
+                SavedEntry {
                     id: savedEntry
-                    objectName: "savedEntry" + modelData.reference
+                    modelData: savedBlock.modelData
+                    index: savedBlock.index
+                    objectName: app.collectionTab === 3 ? "savedTagEntry:" + modelData.group + ":" + modelData.reference : "savedEntry" + modelData.reference
                     focusPolicy: Qt.StrongFocus
                     width: collectionList.width
                     padding: 12 * app.scale
                     height: savedContent.implicitHeight + topPadding + bottomPadding
                     clip: true
-                    highlighted: ListView.isCurrentItem
+                    highlighted: collectionList.currentIndex === savedBlock.index
                     onClicked: app.openSaved(modelData)
                     TapHandler {
                         acceptedButtons: Qt.RightButton
@@ -5299,6 +5425,11 @@ ApplicationWindow {
                     readonly property bool showBookmark: app.collectionTab === 0 && !!modelData.bookmark
                     readonly property bool showHighlight: app.collectionTab === 1 && !!modelData.highlight
                     readonly property bool showNote: app.collectionTab === 2 && modelData.note.length > 0
+                    readonly property bool showTag: app.collectionTab === 3
+                    // Tags: the reader's range (equal or overlapping) is "here".
+                    readonly property bool here: { app.savedHereKey; return showTag && app.savedHere(modelData) }
+                    // Other tags on the range; omitted when the group's tag is its only one.
+                    readonly property string otherTags: showTag && Array.from(modelData.tags || []).length > 1 ? app.tagsPlainText(modelData.tags).replace(/, /g, " · ") : ""
                     contentItem: RowLayout {
                         id: savedContent
                         objectName: "savedEntryContent" + savedEntry.modelData.reference
@@ -5306,14 +5437,35 @@ ApplicationWindow {
                         ColumnLayout {
                             Layout.alignment: Qt.AlignTop
                             spacing: 7 * app.scale
-                            visible: savedEntry.showBookmark || savedEntry.showNote
+                            visible: savedEntry.showBookmark || savedEntry.showNote || savedEntry.showTag
                             BookmarkGlyph { objectName: "savedBookmark" + savedEntry.modelData.reference; visible: savedEntry.showBookmark; Layout.alignment: Qt.AlignHCenter }
                             NoteGlyph { objectName: "savedNote" + savedEntry.modelData.reference; visible: savedEntry.showNote; Layout.alignment: Qt.AlignHCenter }
+                            AnnotationGlyph {
+                                objectName: "savedTag" + savedEntry.modelData.reference
+                                visible: savedEntry.showTag
+                                kind: "tag"; ink: desktop.accent
+                                implicitWidth: 14 * app.scale; implicitHeight: 16 * app.scale
+                                Layout.alignment: Qt.AlignHCenter
+                            }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 7 * app.scale
-                            Label { text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8 * app.scale
+                                Label { text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                                Label {
+                                    objectName: "savedHere" + savedEntry.modelData.reference
+                                    visible: savedEntry.here
+                                    text: "here"
+                                    color: desktop.accent
+                                    font.pixelSize: 11 * app.scale
+                                    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                }
+                            }
+                            Label { objectName: "savedTagLine" + savedEntry.modelData.reference; text: savedEntry.otherTags; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; elide: Text.ElideRight; Layout.fillWidth: true }
+                            Label { objectName: "savedExcerpt" + savedEntry.modelData.reference; text: savedEntry.showTag ? app.leftToRightText(savedEntry.modelData.excerpt || "") : ""; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 13 * app.scale; maximumLineCount: 1; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
                             Label { objectName: "savedNoteText" + savedEntry.modelData.reference; text: savedEntry.showNote ? savedEntry.modelData.note.replace(/\s+/g, " ") : ""; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
                         }
                     }
@@ -5348,11 +5500,16 @@ ApplicationWindow {
                         }
                     }
                 }
+                }
                 Label {
                     objectName: "savedEmpty"
                     anchors.centerIn: parent
                     width: parent.width - 24
-                    text: app.savedQuery.trim().length && app.collectionForTab().length ? "No matching annotations."
+                    text: app.collectionTab === 3
+                        ? (app.savedQuery.trim().length && app.collectionForTab().length ? "No matching tagged passages."
+                            : Array.from(bible.tags).some(function(tag) { return tag.count > 0 }) ? "No tagged passages in " + bible.versionAbbreviation + ". Tags in other versions stay with them."
+                            : "No tagged passages yet. Press " + app.keyText("tags") + " on a passage to tag it.")
+                        : app.savedQuery.trim().length && app.collectionForTab().length ? "No matching annotations."
                         : ["No bookmarks yet.", "No highlights yet.", "No notes yet."][app.collectionTab] || ""
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
@@ -5814,6 +5971,8 @@ ApplicationWindow {
         id: deleteConfirmation
         objectName: "deleteConfirmation"
         property var scope: null
+        // Annotations → Tags: {id, name} of the one tag to remove.
+        property var tag: null
         readonly property string reference: scope ? scope.reference : ""
         readonly property string versionId: scope ? scope.versionId : ""
         property int row: -1
@@ -5831,22 +5990,30 @@ ApplicationWindow {
         }
         onClosed: {
             scope = null
+            tag = null
             row = -1
             noteOnly = false
             deleteFocusTimer.restart()
         }
         contentItem: ColumnLayout {
             spacing: 18 * app.scale
-            Label { objectName: "deleteTitle"; text: deleteConfirmation.noteOnly ? "Delete note?" : "Delete annotations?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { objectName: "deleteReference"; text: deleteConfirmation.reference; textFormat: Text.PlainText; color: desktop.accent; font.pixelSize: 16 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { objectName: "deleteExplanation"; text: deleteConfirmation.noteOnly ? "This deletes the note for this exact reference. Bookmarks, highlights, and tags stay."
+            Label {
+                objectName: "deleteTitle"
+                text: deleteConfirmation.tag ? "Remove " + deleteConfirmation.tag.name + " from " + deleteConfirmation.reference + "?"
+                    : deleteConfirmation.noteOnly ? "Delete note?" : "Delete annotations?"
+                textFormat: Text.PlainText
+                color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            Label { objectName: "deleteReference"; visible: !deleteConfirmation.tag; text: deleteConfirmation.reference; textFormat: Text.PlainText; color: desktop.accent; font.pixelSize: 16 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { objectName: "deleteExplanation"; text: deleteConfirmation.tag ? "Only this tag is removed from this exact range. Its other tags, marks, and note stay."
+                : deleteConfirmation.noteOnly ? "This deletes the note for this exact reference. Bookmarks, highlights, and tags stay."
                 : "This deletes all marks (bookmark and highlight), the note, and tags for this exact reference."; color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 QuietButton { id: deleteCancel; objectName: "deleteCancel"; text: "Cancel"; onClicked: deleteConfirmation.close(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
-                QuietButton { id: deleteConfirm; objectName: "deleteConfirm"; text: "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
+                QuietButton { id: deleteConfirm; objectName: "deleteConfirm"; text: deleteConfirmation.tag ? "Remove" : "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved(); Keys.onReturnPressed: clicked(); Keys.onEnterPressed: clicked() }
             }
         }
     }
