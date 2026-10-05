@@ -1852,6 +1852,12 @@ ApplicationWindow {
         flushNote()
     }
     function readerFocus() { readerSurface.forceActiveFocus() }
+    function focusSetup() { if (setupScroll.visible && !dialogOpen) setupImport.forceActiveFocus() }
+    // A conflict appearing in Notes puts the keyboard on its choices.
+    onNoteConflictChanged: if (noteConflict) Qt.callLater(function() {
+        if (!app.noteConflict || !notesDrawer.shown || app.dialogOpen) return
+        if (noteRetry.enabled) noteRetry.forceActiveFocus(); else noteUseSaved.forceActiveFocus()
+    })
     function focusWithin(container) {
         for (let item = activeFocusItem; item; item = item.parent) if (item === container) return true
         return false
@@ -5175,6 +5181,9 @@ ApplicationWindow {
                 objectName: "setupScroll"
                 anchors.fill: parent
                 visible: !bible.ready && !bible.busy
+                // The setup screen starts on Add version (unless a dialog has the keyboard).
+                onVisibleChanged: if (visible) Qt.callLater(app.focusSetup)
+                Component.onCompleted: if (visible) Qt.callLater(app.focusSetup)
                 contentWidth: availableWidth
                 contentHeight: setupContent.implicitHeight + 64
                 clip: true
@@ -5195,7 +5204,7 @@ ApplicationWindow {
                     lineHeight: 1.4
                     Layout.fillWidth: true
                 }
-                QuietButton { objectName: "setupImport"; text: "Add version"; emphasized: true; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 6; onClicked: app.runCommand("import") }
+                QuietButton { id: setupImport; objectName: "setupImport"; text: "Add version"; emphasized: true; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 6; onClicked: app.runCommand("import") }
                 Label { objectName: "setupPrivacy"; text: "All your Bible versions, highlights, bookmarks, and notes stay on this device."; color: desktop.muted; font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 QuietButton { objectName: "setupAbout"; text: "About & Attribution"; compact: true; Layout.alignment: Qt.AlignHCenter; onClicked: aboutDialog.open() }
             }
@@ -5319,12 +5328,14 @@ ApplicationWindow {
                         }
                         RowLayout {
                             QuietButton {
+                                id: noteRetry
                                 objectName: "noteRetry"
                                 text: "Save my draft"; tip: "Replace the saved note with your draft"
                                 enabled: app.noteScopeMatches && app.hasSelection && !bible.busy
                                 onClicked: app.retryNote()
                             }
                             QuietButton {
+                                id: noteUseSaved
                                 objectName: "noteUseSaved"
                                 text: "Use saved text"
                                 onClicked: app.loadSavedNote()
@@ -7866,6 +7877,8 @@ ApplicationWindow {
         fileMode: FileDialog.OpenFile
         nameFilters: ["JSON backup (*.json)"]
         onAccepted: app.requestRestore(selectedFile)
+        // Cancelled: the keyboard returns to the panel or reader it came from.
+        onRejected: app.restorePanelFocus()
     }
 
     ModalCard {

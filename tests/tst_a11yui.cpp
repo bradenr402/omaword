@@ -1712,6 +1712,36 @@ private slots:
         item("noteEditor")->setProperty("cursorPosition", 6);
         key(Qt::Key_Return, Qt::AltModifier); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5"));
     }
+    void focusReturnsAfterRestoreConflictAndSetup() {
+        // Keyboard: esc cancels the restore file dialog; the reader has the keyboard again.
+        run("restore"); QTRY_VERIFY(object("restoreDialog")->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(object("restoreDialog"), "reject"));
+        QTRY_VERIFY(!object("restoreDialog")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
+        // From an open panel, the panel gets it back.
+        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+        QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, "restore")));
+        QTRY_VERIFY(object("restoreDialog")->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(object("restoreDialog"), "reject"));
+        QTRY_VERIFY(!readerFocused() && window->activeFocusItem() && (focusWithin("collectionList") || focusWithin("savedSearch") || focusName() == "collectionList"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        // A note conflict puts the keyboard on its choices.
+        navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        window->setProperty("noteConflict", true);
+        QTRY_VERIFY(item("noteRetry")->hasActiveFocus());
+        shot("note-conflict-focus");
+        key(Qt::Key_Return); QTRY_VERIFY(!window->property("noteConflict").toBool());
+        // Mouse: Use saved text.
+        window->setProperty("noteConflict", true); QTRY_VERIFY(item("noteRetry")->hasActiveFocus());
+        QTest::qWait(50); click(item("noteUseSaved")); QTRY_VERIFY(!window->property("noteConflict").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));
+        // The setup screen starts on Add version: enter opens the guide; so does a click.
+        QVERIFY(bible->removeVersion(bible->versionId(), true)); QTRY_VERIFY(!bible->ready());
+        QTRY_VERIFY(item("setupImport")->isVisible()); QTRY_VERIFY(item("setupImport")->hasActiveFocus());
+        key(Qt::Key_Return); QTRY_VERIFY(opened("importGuide"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
+        QTest::qWait(50); click(item("setupImport")); QTRY_VERIFY(opened("importGuide"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }
