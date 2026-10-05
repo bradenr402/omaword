@@ -3814,6 +3814,7 @@ ApplicationWindow {
             }
         }
         Rectangle {
+            objectName: "errorBanner"
             Layout.fillWidth: true
             implicitHeight: errorRow.implicitHeight + 20
             radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
@@ -3826,7 +3827,7 @@ ApplicationWindow {
                 anchors.leftMargin: 24
                 spacing: 16
                 Label { objectName: "errorMessage"; text: bible.error; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
-                QuietButton { text: "Dismiss"; compact: true; onClicked: bible.clearError() }
+                QuietButton { objectName: "errorDismiss"; text: "Dismiss"; compact: true; tip: "Dismiss · " + KeyNotation.format("Escape"); onClicked: bible.clearError() }
             }
         }
         Item {
@@ -7172,6 +7173,8 @@ ApplicationWindow {
             // Visual mode or a multi-verse range collapses to the cursor before
             // Escape leaves focus mode; a single-verse selection does not block it.
             const range = app.verseMode || (app.hasSelection && bible.selectedStart !== bible.selectedEnd)
+            // With nothing else to dismiss, the last esc clears the error banner.
+            if (!range && !bible.focusMode && bible.error.length) { bible.clearError(); app.readerFocus(); return }
             if (range || !bible.focusMode) {
                 if (!app.flushNote()) return
                 if (app.verseMode || app.hasSelection) app.setVisualMode(false)

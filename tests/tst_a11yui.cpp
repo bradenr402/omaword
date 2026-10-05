@@ -731,6 +731,19 @@ private slots:
         click(item("versionHintsPart:re-import")); QTRY_COMPARE(catalog->requests, QStringList{id});
         catalog->cancel(); key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
     }
+    void escapeFinallyClearsTheErrorBanner() {
+        // Keyboard: esc first drops a pending count, then clears the banner.
+        QVERIFY(!bible->navigate("Nowhere 99")); QVERIFY(!bible->error().isEmpty());
+        QTRY_VERIFY(item("errorBanner")->isVisible());
+        type("3"); QCOMPARE(prop("verseCount").toString(), QString("3"));
+        key(Qt::Key_Escape); QCOMPARE(prop("verseCount").toString(), QString()); QVERIFY(!bible->error().isEmpty());
+        key(Qt::Key_Escape); QVERIFY(bible->error().isEmpty()); QTRY_VERIFY(!item("errorBanner")->isVisible());
+        // Mouse: Dismiss clears it; its tooltip names esc.
+        QVERIFY(!bible->navigate("Nowhere 99")); QTRY_VERIFY(item("errorBanner")->isVisible());
+        auto dismiss = item("errorDismiss"); QTRY_VERIFY(dismiss->width() > 0); QTest::qWait(50);
+        QCOMPARE(toolTipOf(dismiss)->property("text").toString(), QString::fromUtf8("Dismiss · esc"));
+        click(dismiss); QVERIFY(bible->error().isEmpty()); QVERIFY(readerFocused());
+    }
 };
 
 int main(int argc, char **argv) {
