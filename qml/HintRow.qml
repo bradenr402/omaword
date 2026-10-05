@@ -20,6 +20,8 @@ Flow {
     readonly property var entries: KeyNotation.hintParts(parts)
     readonly property string text: KeyNotation.hint(parts, theme.foreground, theme.muted)
     readonly property string plainText: KeyNotation.hintPlain(parts)
+    // The muted ink of the labels (keys are in the foreground), as on the plain hint.
+    readonly property color color: theme.muted
     // The focusable parts, in order (tab cycling in the chapter find prompt).
     function partItems() {
         const items = []
@@ -29,8 +31,11 @@ Flow {
         }
         return items
     }
-    // The same gap the plain hint used between parts: three no-break spaces and a space.
-    spacing: gap.advanceWidth
+    // The same gap the plain hint used between parts (three no-break spaces and
+    // a space) trails each part but the last. Flow spacing would also open the
+    // same gap between wrapped lines.
+    readonly property real gapWidth: gap.advanceWidth
+    spacing: 0
     TextMetrics { id: gap; font.family: row.theme.fontFamily; font.pixelSize: row.pixelSize; text: "\u00a0\u00a0\u00a0 " }
     component HintPart: Item {
         required property var modelData
@@ -45,7 +50,8 @@ Flow {
             readonly property bool hovered: mouse.containsMouse
             function activate() { if (clickable) modelData.run() }
             objectName: row.objectName.length ? row.objectName + "Part:" + modelData.label : ""
-            implicitWidth: label.implicitWidth
+            readonly property real trailing: index < repeater.count - 1 ? row.gapWidth : 0
+            implicitWidth: label.implicitWidth + trailing
             implicitHeight: label.implicitHeight
             width: Math.min(implicitWidth, Math.max(1, row.width))
             height: label.height
@@ -62,7 +68,7 @@ Flow {
             }
             Rectangle {
                 objectName: part.objectName.length ? part.objectName + ":tint" : ""
-                anchors.fill: parent
+                anchors.fill: label
                 anchors.leftMargin: -3
                 anchors.rightMargin: -3
                 z: -1
@@ -74,7 +80,7 @@ Flow {
             }
             Text {
                 id: label
-                width: part.width
+                width: Math.max(1, part.width - part.trailing)
                 text: KeyNotation.hint([[part.modelData.sequences, part.modelData.label]], row.theme.foreground, row.theme.muted)
                 textFormat: Text.StyledText
                 wrapMode: Text.Wrap
@@ -84,7 +90,7 @@ Flow {
             }
             MouseArea {
                 id: mouse
-                anchors.fill: parent
+                anchors.fill: label
                 enabled: part.clickable
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
