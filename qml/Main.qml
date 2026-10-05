@@ -228,8 +228,8 @@ ApplicationWindow {
         if (rangeEditing) return
         if (bible.busy || !flushNote()) return
         clearCount()
-        if (manage) tagsUi.openBrowser(true)
-        else tagsUi.openSummary()
+        if (manage) tagsUi.openManage()
+        else { collectionTab = 3; savedDrawer.open() }
     }
     readonly property alias tagsUi: tagsUi
     readonly property var tagBackend: bible
@@ -238,10 +238,6 @@ ApplicationWindow {
         id: tagsUi
         objectName: "tagsUi"
         app: app; bible: app.tagBackend; desktop: app.tagDesktop
-        embeddedHost: annotationsTagsHost
-        summaryQuery: app.savedQuery
-        onBrowserRequested: { app.collectionTab = 3; savedDrawer.open() }
-        onBrowserClosed: savedDrawer.close()
     }
     onVerseModeChanged: clearCount()
     property string verseCount: ""
@@ -955,6 +951,8 @@ ApplicationWindow {
             { id: "desk", text: deskRowFor(entry) ? "Remove from Desk" : "Add to Desk", enabled: ready, run: function() { app.toggleScopeDesk(entry) } }
         ], sceneX, sceneY)
     }
+    // Panels outside Main (Study) show their rows' menus through here.
+    function showContextMenu(kind, entries, sceneX, sceneY) { contextMenu.show(kind, entries, sceneX, sceneY) }
     AppContextMenu {
         id: contextMenu
         uiScale: app.scale
@@ -2230,12 +2228,11 @@ ApplicationWindow {
     }
     // The search field appears once a tab holds more than ten items, and stays
     // while it has a query.
-    readonly property int savedTabTotal: collectionTab === 3 ? tagsUi.summaryTotal : collectionForTab().length
+    readonly property int savedTabTotal: collectionForTab().length
     readonly property bool savedSearchVisible: savedTabTotal > 10 || savedQuery.length > 0
     function focusSavedSearch() { if (savedSearchVisible) savedSearch.forceActiveFocus() }
     function focusSavedList() {
-        if (collectionTab === 3) tagsUi.focusSummary()
-        else moveSaved(0)
+        moveSaved(0)
     }
     function escapeSaved() {
         if (savedSearch.activeFocus) focusSavedList()
@@ -2253,7 +2250,6 @@ ApplicationWindow {
     function filterSaved(delta) {
         const tab = (collectionTab + delta + 4) % 4
         if (tab === 3) { clearSavedQuery(); openTagsBrowser(); return }
-        tagsUi.embeddedClosed()
         clearSavedQuery()
         collectionTab = tab
         collectionList.currentIndex = collectionList.count > 0 ? 0 : -1
@@ -2553,6 +2549,12 @@ ApplicationWindow {
         { id: "listDesk", group: "Lists", title: "Add item to Desk, or remove it", sequences: ["D"], scope: "list", explanation: true },
         { id: "listEditRange", group: "Lists", title: "Edit item's annotation range", sequences: ["Shift+E"], scope: "list", explanation: true },
         { id: "listRemove", group: "Lists", title: "Remove item", sequences: ["Delete", "Backspace"], scope: "list", explanation: true },
+        { id: "listTag", group: "Lists", title: "Edit the item's tags (Annotations and Study Tags)", sequences: ["T"], scope: "list", explanation: true },
+        { id: "studyChips", group: "Lists", title: "Between Study Tags results and tag chips", sequences: ["Tab", "Shift+Tab"], scope: "list", explanation: true },
+        { id: "studyChipToggle", group: "Lists", title: "Turn a Study tag chip on or off", sequences: ["Space"], scope: "list", explanation: true },
+        { id: "studyChipSolo", group: "Lists", title: "Show only this chip's tag, or every tag again", sequences: ["Shift+Space"], scope: "list", explanation: true },
+        { id: "studyChipsAll", group: "Lists", title: "Turn every Study tag chip back on", sequences: ["0"], scope: "list", explanation: true },
+        { id: "studyAllVersions", group: "Lists", title: "Study Tags in all installed versions, or this one", sequences: ["A"], scope: "list", explanation: true },
         { id: "listSearch", group: "Lists", title: "Search the list (Annotations, Study's Tags)", sequences: ["/"], scope: "list", explanation: true },
         { id: "listPreviousTab", group: "Lists", title: "Previous tab (Annotations, Study)", sequences: ["H", "Left"], scope: "list", explanation: true },
         { id: "listNextTab", group: "Lists", title: "Next tab (Annotations, Study)", sequences: ["L", "Right"], scope: "list", explanation: true },
@@ -5190,7 +5192,7 @@ ApplicationWindow {
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.focusSavedList() }
         onVisibleChanged: if (visible && !closing) focusContent()
-        onClosed: { closing = false; tagsUi.embeddedClosed(); app.restorePanelFocus() }
+        onClosed: { closing = false; app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "savedContent"
             Shortcut {
@@ -5264,13 +5266,6 @@ ApplicationWindow {
                 Keys.onReturnPressed: app.focusSavedList()
                 Keys.onEnterPressed: app.focusSavedList()
                 Accessible.name: "Search annotations"
-            }
-            Item {
-                id: annotationsTagsHost
-                objectName: "annotationsTagsHost"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                visible: app.collectionTab === 3
             }
             ListView {
                 id: collectionList

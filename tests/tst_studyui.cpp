@@ -351,21 +351,27 @@ private slots:
     void studyTabsAndKeys() {
         navigate("John 1:1");
         openStudy();
-        QCOMPARE(object("tagsTitle")->property("text").toString(), QString("Study"));
-        QCOMPARE(tab(), QString("related"));
-        for (int i = 0; i < 3; ++i) QVERIFY(item("studyTab" + QString::number(i))->isVisible());
-        // → and l step forward, ← and h back, wrapping like Annotations.
-        key(Qt::Key_Right); QCOMPARE(tab(), QString("crossrefs"));
+        QCOMPARE(object("studyTitle")->property("text").toString(), QString("Study"));
+        // Cross-references · Footnotes · Tags; a window's first Study opens on Cross-references.
+        QCOMPARE(tab(), QString("crossrefs"));
+        const QStringList labels = {"Cross-references", "Footnotes", "Tags"};
+        for (int i = 0; i < 3; ++i) {
+            QVERIFY(item("studyTab" + QString::number(i))->isVisible());
+            QCOMPARE(item("studyTab" + QString::number(i))->property("text").toString(), labels[i]);
+        }
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_L); QCOMPARE(tab(), QString("footnotes"));
-        key(Qt::Key_Right); QCOMPARE(tab(), QString("related"));
-        key(Qt::Key_Left); QCOMPARE(tab(), QString("footnotes"));
+        // → and l step forward, ← and h back, wrapping like Annotations.
+        key(Qt::Key_Right); QCOMPARE(tab(), QString("footnotes"));
+        key(Qt::Key_L); QCOMPARE(tab(), QString("related"));
+        key(Qt::Key_Right); QCOMPARE(tab(), QString("crossrefs"));
+        key(Qt::Key_Left); QCOMPARE(tab(), QString("related"));
+        key(Qt::Key_H); QCOMPARE(tab(), QString("footnotes"));
         key(Qt::Key_H); QCOMPARE(tab(), QString("crossrefs"));
         // Cross references: only the source's own \\x targets, in source order.
         QStringList references;
         for (const auto &row : rows()) references << row.toMap()["reference"].toString();
         QCOMPARE(references, QStringList({"Genesis 1:1", "John 1:14", "John 1:2", "Matthew 1:23", "John 1:18", "Matthew 1:2\u20133"}));
-        QVERIFY(!item("tagSearch")->isVisible()); QVERIFY(!item("tagResults")->isVisible());
+        QVERIFY(!item("studySearch")->isVisible()); QVERIFY(!item("tagResults")->isVisible()); QVERIFY(!item("studyChips")->isVisible());
         // Shared list keys and motions.
         QCOMPARE(studyIndex(), 0);
         key(Qt::Key_J); QCOMPARE(studyIndex(), 1);
@@ -382,7 +388,8 @@ private slots:
         const int desk = bible->desk().size();
         key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(), desk + 1);
         QCOMPARE(bible->desk().last().toMap()["reference"].toString(), QString("John 1:14"));
-        // Enter opens the row as a History jump and keeps Study open on its pinned source.
+        // Enter opens the row as a History jump and keeps Study open on its passage
+        // (opening from inside the panel never re-roots it while it has focus).
         const int jumps = prop("jumpStack").toList().size();
         key(Qt::Key_Return);
         QTRY_COMPARE(bible->selectionReference(), QString("John 1:14"));
@@ -407,10 +414,11 @@ private slots:
         QTRY_COMPARE(bible->selectionReference(), QString("John 3:3"));
         QTRY_VERIFY(item("studyRow:0")->property("atCursor").toBool());
         QVERIFY(studyOpen());
-        // Related keeps its tag search; / is inert on the other tabs.
-        key(Qt::Key_Slash); QVERIFY(!item("tagSearch")->hasActiveFocus());
+        // Tags keeps its passage search; / is inert on the other tabs.
+        key(Qt::Key_Slash); QTest::qWait(50); QVERIFY(!item("studySearch")->isVisible());
         key(Qt::Key_Right); QCOMPARE(tab(), QString("related"));
-        QVERIFY(item("tagSearch")->isVisible());
+        key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("studySearch")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
         // shift L no longer opens the panel.
         call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTest::qWait(100); QVERIFY(!studyOpen());
@@ -467,7 +475,7 @@ private slots:
             QTRY_VERIFY2(!item(first) || !item(first)->isVisible(), qPrintable(mode));
             bible->setFocusMode(false);
             QTRY_VERIFY(item(first) && item(first)->isVisible());
-            panel()->setProperty("studyTab", "related");
+            panel()->setProperty("studyTab", "crossrefs");
         }
     }
 };

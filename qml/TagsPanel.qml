@@ -5,24 +5,25 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "KeyNotation.js" as KeyNotation
 
+// Two surfaces share the tag state: the modal tag picker (with Manage tags)
+// and the Study drawer (Cross-references · Footnotes · Tags). The picker may
+// open over the Study and Annotations drawers; they stay open beneath it.
 Item {
     id: panel
     required property var app
     required property var bible
     required property var desktop
 
-    property Item embeddedHost: null
-    signal browserRequested()
-    signal browserClosed()
-    property string hostKind: "none"
-    readonly property bool browserVisible: hostKind === "browser" && !!embeddedHost && embeddedHost.visible
+    readonly property string hostKind: surface.visible ? "picker" : relatedDrawer.visible ? "related" : "none"
     readonly property bool visibleModal: surface.visible || relatedDrawer.visible
     readonly property bool pickerVisible: surface.visible
-    readonly property bool relatedShown: relatedDrawer.visible && !relatedDrawer.closing && hostKind === "related"
-    readonly property bool contentVisible: visibleModal || browserVisible
-    readonly property bool scopePinned: hostKind === "picker" && surface.visible && editingScope !== null
+    readonly property bool relatedShown: relatedDrawer.visible && !relatedDrawer.closing
+    readonly property bool contentVisible: visibleModal
+    readonly property bool scopePinned: surface.visible && editingScope !== null
     property var editingScope: null
-    property var summaryScope: null
+    // Study's root passage: the reader's passage when Study opened. It follows
+    // the reader, except that opening a row from inside the panel keeps it
+    // (while the panel keeps focus) so the list stays put.
     property var relatedSource: null
     // The shared panel header's subtitle (Annotations and Study): the reader's
     // selection, or its chapter when nothing is selected — never blank.
@@ -39,7 +40,8 @@ Item {
     property var crossRows: []
     readonly property var footnoteRows: Array.from(bible.footnotes || [])
     readonly property var studyRows: studyTab === "crossrefs" ? crossRows : studyTab === "footnotes" ? footnoteRows : []
-    readonly property bool studyListTab: page === "related" && studyTab !== "related"
+    readonly property bool studyListTab: relatedDrawer.visible && studyTab !== "related"
+    readonly property bool tagsTab: relatedDrawer.visible && studyTab === "related"
     function setStudyTab(tab, note) {
         if (studyTabs.indexOf(tab) < 0) return
         studyTab = tab
@@ -75,37 +77,155 @@ Item {
         studyList.currentIndex = index
         openTagged(studyScope(row))
     }
+
+    // ── Study → Tags: "Where else have I tagged what this passage is about?"
+    // Chips are the root's tags: exact-range tags, then tags on overlapping
+    // ranges. Results are the other passages sharing any chip that is on,
+    // ranked by shared count, then canonical order (the backend's order).
+    property var rootChips: []
+    property var chipOff: []
+    property bool allVersions: false
+    property var allResults: []
+    property var results: []
+    property bool chipsExpanded: false
+    property int chipLimit: 1000
+    property int chipIndex: 0
+    property string studyQuery: ""
+    property bool studySearchOpen: false
+    readonly property var onIds: rootChips.filter(function(chip) { return panel.chipOff.indexOf(chip.id) < 0 })
+        .map(function(chip) { return chip.id })
+    readonly property bool otherVersions: Array.from(bible.versions).length > 1
+    readonly property var visibleResults: results.filter(function(entry) { return panel.resultMatches(entry) })
+    readonly property int hiddenChips: chipsExpanded ? 0 : Math.max(0, rootChips.length - chipLimit)
+    function chipCount(id) {
+        return allResults.filter(function(entry) {
+            return Array.from(entry.tags || []).some(function(tag) { return tag.id === id })
+        }).length
+    }
+    function resultMatches(entry) {
+        const query = studyQuery.trim().toLowerCase()
+        return !query.length || [entry.reference, tagNames(entry.tags), entry.excerpt || ""].join("\n").toLowerCase().indexOf(query) >= 0
+    }
+    function resetChips() {
+        let chips = []
+        if (installed(relatedSource)) {
+            Array.from(bible.tagsForScope(relatedSource, false)).forEach(function(tag) {
+                chips.push({ id: tag.id, name: tag.name, overlap: false, reference: "" })
+            })
+            Array.from(bible.tagsForScope(relatedSource, true)).forEach(function(range) {
+                if (sameRange(range, relatedSource)) return
+                Array.from(range.tags).forEach(function(tag) {
+                    if (!chips.some(function(chip) { return chip.id === tag.id }))
+                        chips.push({ id: tag.id, name: tag.name, overlap: true, reference: range.reference })
+                })
+            })
+        }
+        const ids = chips.map(function(chip) { return chip.id })
+        chipOff = chipOff.filter(function(id) { return ids.indexOf(id) >= 0 })
+        rootChips = chips
+        chipLimit = 1000
+        chipIndex = Math.min(chipIndex, Math.max(0, chips.length - 1))
+    }
+    function refreshTagResults() {
+        const ids = rootChips.map(function(chip) { return chip.id })
+        allResults = installed(relatedSource) && ids.length ? Array.from(bible.relatedPassages(relatedSource, ids, false, allVersions)) : []
+        results = installed(relatedSource) && onIds.length ? Array.from(bible.relatedPassages(relatedSource, onIds, false, allVersions)) : []
+        if (resultList.currentIndex >= resultList.count) resultList.currentIndex = resultList.count - 1
+        if (resultList.currentIndex < 0 && resultList.count) resultList.currentIndex = 0
+    }
+    function setChipOff(ids) {
+        chipOff = ids
+        refreshTagResults()
+        resultList.currentIndex = resultList.count ? 0 : -1
+    }
+    function toggleChip(id) {
+        const off = chipOff.slice()
+        const index = off.indexOf(id)
+        if (index < 0) off.push(id); else off.splice(index, 1)
+        setChipOff(off)
+    }
+    // Solo: only this chip on; soloing it again turns every chip back on.
+    function soloChip(id) {
+        if (onIds.length === 1 && onIds[0] === id) setChipOff([])
+        else setChipOff(rootChips.map(function(chip) { return chip.id }).filter(function(other) { return other !== id }))
+    }
+    function restoreChips() { setChipOff([]) }
+    function toggleAllVersions() {
+        allVersions = !allVersions
+        refreshTagResults()
+    }
+    readonly property bool chipFocused: !!app.activeFocusItem && app.activeFocusItem.studyChip === true
+    function chipItems() {
+        const items = []
+        for (let i = 0; i < chipRepeater.count; ++i) {
+            const cell = chipRepeater.itemAt(i)
+            // The cell's only Button is its chip.
+            if (cell && cell.visible) items.push(cell.children[cell.children.length - 1])
+        }
+        if (moreChips.visible) items.push(moreChips)
+        return items
+    }
+    function focusChips() {
+        const items = chipItems()
+        if (!items.length) return false
+        items[Math.max(0, Math.min(items.length - 1, chipIndex))].forceActiveFocus()
+        return true
+    }
+    function moveChip(delta) {
+        const items = chipItems()
+        if (!items.length) return
+        const current = items.indexOf(app.activeFocusItem)
+        chipIndex = Math.max(0, Math.min(items.length - 1, (current < 0 ? chipIndex : current) + delta))
+        items[chipIndex].forceActiveFocus()
+    }
+    function showStudySearch() {
+        if (!tagsTab) return
+        studySearchOpen = true
+        Qt.callLater(function() { studySearch.forceActiveFocus() })
+    }
+    function leaveStudySearch() {
+        studySearchOpen = false
+        focusResults()
+    }
+    function tagCurrentResult() {
+        if (resultList.activeFocus || !chipFocused) {
+            const entry = visibleResults[resultList.currentIndex]
+            if (entry) { app.openPassageTags(panel.snapshot(entry)); return }
+        }
+        if (!rootChips.length && installed(relatedSource)) app.openPassageTags(panel.snapshot(relatedSource))
+    }
+    function openResultMenu(index, sceneX, sceneY) {
+        const entry = visibleResults[index]
+        if (!entry || typeof app.showContextMenu !== "function") return
+        resultList.currentIndex = index
+        resultList.forceActiveFocus()
+        const ready = !app.rangeEditing && !bible.busy
+        app.showContextMenu("study", [
+            { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { panel.openTagged(entry) } },
+            { id: "copy", text: "Copy", shortcut: KeyNotation.format("Y"), enabled: !bible.busy, run: function() { panel.app.copyScope(entry) } },
+            { id: "desk", text: typeof app.deskRowFor === "function" && app.deskRowFor(entry) ? "Remove from Desk" : "Add to Desk",
+                shortcut: KeyNotation.format("D"), enabled: ready, run: function() { panel.app.toggleScopeDesk(entry) } },
+            { separator: true },
+            { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { panel.app.openPassageTags(panel.snapshot(entry)) } },
+            { id: "editRange", text: "Edit range", shortcut: KeyNotation.format("Shift+E"), enabled: ready, run: function() { panel.app.openRangeEditor(entry, "tag") } }
+        ], sceneX, sceneY)
+    }
+
+    // ── Picker
     property string page: "picker"
-    property string returnPage: "browser"
     property string query: ""
     property var allTags: []
     property var exactIds: []
     property var exactTags: []
     property var overlaps: []
-    property var summaryIds: []
-    property var filterIds: []
-    property var sourceIds: []
-    property var results: []
-    property bool matchAll: false
-    property bool allVersions: false
     property bool scopeValid: false
     property string message: ""
     property string managedId: ""
     property string mergeTarget: ""
     property var confirmation: null
-    // Annotations → Tags search (Main owns the field): filters the summary's
-    // overlapping ranges and related passages.
-    property string summaryQuery: ""
-    readonly property int summaryTotal: overlaps.length + results.length
-    function summaryMatches(entry) {
-        const query = summaryQuery.trim().toLowerCase()
-        return !query.length || [entry.reference, tagNames(entry.tags), entry.excerpt || ""].join("\n").toLowerCase().indexOf(query) >= 0
-    }
-    readonly property var visibleOverlaps: overlaps.filter(function(entry) { return panel.summaryMatches(entry) })
-    readonly property var visibleResults: results.filter(function(entry) { return panel.summaryMatches(entry) })
-    function focusSummary() { body.forceActiveFocus() }
     readonly property real uiScale: app && app.scale > 0 ? app.scale : desktop.textScale
     readonly property real controlScale: Math.min(uiScale, 1.4, Math.max(1, body.width / 440))
+    readonly property real studyScale: Math.min(uiScale, 1.4, Math.max(1, studyBody.width / 440))
     readonly property var filteredTags: allTags.filter(function(tag) {
         return fold(tag.name).indexOf(fold(query)) !== -1
     })
@@ -159,60 +279,20 @@ Item {
         // Reopening another exact range ends the previous editing session first.
         if (editingScope && !sameRange(editingScope, captured)) releaseEditing()
         editingScope = captured
-        relatedDrawer.close()
-        hostKind = "picker"
-        browserClosed()
         page = "picker"
         query = ""
         message = ""
         confirmation = null
-        filterIds = []
         refresh()
         surface.open()
         Qt.callLater(function() { search.forceActiveFocus() })
         return true
     }
-    function openBrowser(manage = false) {
-        if (!manage) return openSummary()
+    // Manage tags (ctrl t): the picker's management page.
+    function openManage() {
         if (!open()) return false
-        panel.manage()
+        manage()
         return true
-    }
-    function openSummary(scope = null) {
-        if (!canAct() || !embeddedHost) return false
-        const captured = snapshot(scope || bible.tagScope())
-        if (captured && !installed(captured)) return false
-        releaseEditing()
-        hostKind = "browser"
-        surface.close()
-        relatedDrawer.close()
-        summaryScope = captured
-        page = "summary"
-        query = ""
-        message = ""
-        confirmation = null
-        filterIds = []
-        refresh()
-        browserRequested()
-        Qt.callLater(function() { body.forceActiveFocus() })
-        return true
-    }
-    function followSelection() {
-        // The summary follows focus; an editing session always keeps its snapshot.
-        if (!browserVisible || page !== "summary") return
-        if (!canAct()) return
-        const captured = snapshot(bible.tagScope())
-        if (captured && !installed(captured)) return
-        summaryScope = captured
-        confirmation = null
-        message = ""
-        refresh()
-    }
-    function embeddedClosed() {
-        if (hostKind !== "browser") return
-        hostKind = "none"
-        confirmation = null
-        summaryScope = null
     }
     function openRelated() { return openStudy("", null) }
     // Opens Study on a tab ("" keeps the last one), optionally at a footnote {verse, seq}.
@@ -221,61 +301,58 @@ Item {
         setStudyTab(tab || studyTab, note)
         return true
     }
+    // Study → Tags with one chip soloed (a tag chip clicked elsewhere).
     function openRelatedForTag(id, source) {
-        return showRelated(source, id)
+        if (!showRelated(source || bible.tagScope())) return false
+        if (id && rootChips.some(function(chip) { return chip.id === id })) soloChip(id)
+        setStudyTab("related")
+        return true
     }
-    function showRelated(source, id = "") {
+    function showRelated(source) {
         if (!canAct()) return false
         const captured = snapshot(source)
         if (!installed(captured)) return false
-        if (id && !Array.from(bible.tags).some(function(tag) { return tag.id === id })) return false
         releaseEditing()
-        hostKind = "related"
         surface.close()
-        // Close Annotations before opening/focusing the exclusive Related drawer.
-        browserClosed()
-        relatedSource = captured
-        page = "related"
-        query = ""
-        message = ""
-        matchAll = false
-        allVersions = false
-        confirmation = null
-        allTags = Array.from(bible.tags)
-        resetSourceTags()
-        if (id) filterIds = [id]
-        refresh()
+        rootAt(captured)
         relatedDrawer.open()
         // The list, not the search field, takes focus: / searches.
         Qt.callLater(function() { panel.focusResults() })
         return true
     }
-    function resetSourceTags() {
-        let ids = []
-        if (installed(relatedSource)) {
-            Array.from(bible.tagsForScope(relatedSource, true)).forEach(function(range) {
-                Array.from(range.tags).forEach(function(tag) { if (ids.indexOf(tag.id) < 0) ids.push(tag.id) })
-            })
-        }
-        sourceIds = ids
-        filterIds = ids.slice()
-    }
-    function useCurrent() {
-        if (!canAct()) return
-        const captured = snapshot(bible.tagScope())
-        if (!installed(captured)) return
+    // (Re)roots Study on a passage: every chip on, this version, no search.
+    function rootAt(captured) {
         relatedSource = captured
-        query = ""
         message = ""
-        resetSourceTags()
-        refresh()
+        allVersions = false
+        chipOff = []
+        chipIndex = 0
+        chipsExpanded = false
+        chipLimit = 1000
+        studyQuery = ""
+        studySearchOpen = false
+        allTags = Array.from(bible.tags)
+        resetChips()
+        refreshTagResults()
+        refreshStudy()
+        resultList.currentIndex = resultList.count ? 0 : -1
+    }
+    // Study follows the reader's passage, but not while the panel itself has
+    // the keyboard: opening a row from inside keeps the list where it was.
+    function followSelection() {
+        if (!relatedShown || pickerVisible || focusInStudy()) return
+        const captured = snapshot(bible.tagScope())
+        if (!installed(captured) || sameRange(captured, relatedSource)) return
+        rootAt(captured)
     }
     function close() {
-        if (hostKind === "picker") surface.close()
-        else if (hostKind === "related") relatedDrawer.close()
-        else if (hostKind === "browser") { embeddedClosed(); browserClosed() }
+        if (surface.visible) surface.close()
+        else if (relatedDrawer.visible) relatedDrawer.close()
     }
-    function closeForFocusMode() { close() }
+    function closeForFocusMode() {
+        surface.close()
+        relatedDrawer.close()
+    }
     function textInputActive() {
         let focused = app.activeFocusItem
         while (focused) {
@@ -283,34 +360,6 @@ Item {
             focused = focused.parent
         }
         return false
-    }
-    function focusedSummaryScope() {
-        let focused = app.activeFocusItem
-        while (focused && focused !== body) {
-            if (focused.rangeEditScope) return focused.rangeEditScope
-            focused = focused.parent
-        }
-        return summaryScope
-    }
-    function moveSummary(delta) {
-        const buttons = []
-        function collect(item) {
-            Array.from(item.children).forEach(function(child) {
-                if (!child.visible) return
-                if (child instanceof Button && child.enabled) buttons.push(child)
-                else collect(child)
-            })
-        }
-        collect(summaryContent)
-        if (!buttons.length) return
-        const current = buttons.indexOf(app.activeFocusItem)
-        const index = Math.max(0, Math.min(buttons.length - 1, current + delta))
-        const target = buttons[index]
-        target.forceActiveFocus()
-        const y = target.mapToItem(summaryContent, 0, 0).y
-        if (y < summaryView.contentY) summaryView.contentY = y
-        else if (y + target.height > summaryView.contentY + summaryView.height)
-            summaryView.contentY = y + target.height - summaryView.height
     }
     function updateTagList() {
         // Replacing a JS-array model destroys delegates and resets ListView's
@@ -334,52 +383,29 @@ Item {
     function refresh() {
         allTags = Array.from(bible.tags)
         const validIds = allTags.map(function(tag) { return tag.id })
-        filterIds = filterIds.filter(function(id) { return validIds.indexOf(id) >= 0 })
-        sourceIds = sourceIds.filter(function(id) { return validIds.indexOf(id) >= 0 })
         if (managedId && validIds.indexOf(managedId) < 0) managedId = ""
         if (mergeTarget && validIds.indexOf(mergeTarget) < 0) mergeTarget = ""
         if (confirmation && (!tagById(confirmation.id) || tagById(confirmation.id).name !== confirmation.name
                 || (confirmation.action === "merge" && (!tagById(confirmation.target) || tagById(confirmation.target).name !== confirmation.targetName))))
             confirmation = null
-        const scope = page === "summary" ? summaryScope : editingScope
-        scopeValid = installed(scope)
-        exactTags = scopeValid ? Array.from(bible.tagsForScope(scope, false)) : []
+        scopeValid = installed(editingScope)
+        exactTags = scopeValid ? Array.from(bible.tagsForScope(editingScope, false)) : []
         exactIds = exactTags.map(function(tag) { return tag.id })
-        overlaps = scopeValid ? Array.from(bible.tagsForScope(scope, true)).filter(function(range) {
-            return !sameRange(range, scope)
+        overlaps = scopeValid ? Array.from(bible.tagsForScope(editingScope, true)).filter(function(range) {
+            return !panel.sameRange(range, panel.editingScope)
         }) : []
-        let ids = exactIds.slice()
-        overlaps.forEach(function(range) {
-            Array.from(range.tags).forEach(function(tag) { if (ids.indexOf(tag.id) < 0) ids.push(tag.id) })
-        })
-        summaryIds = ids
-        refreshResults()
-    }
-    function refreshResults() {
-        if (page === "related") {
-            results = installed(relatedSource)
-                ? Array.from(bible.relatedPassages(relatedSource, filterIds, matchAll, allVersions)) : []
+        if (relatedDrawer.visible) {
+            resetChips()
+            refreshTagResults()
             refreshStudy()
         }
-        else if (page === "summary") results = installed(summaryScope) && summaryIds.length
-            ? Array.from(bible.relatedPassages(summaryScope, summaryIds, false, false)) : []
-        else results = []
     }
     function toggleTag(id) {
-        if (page === "summary") return
-        if (!tagById(id)) return
+        if (!tagById(id) || !surface.visible) return
         if (page === "manage") {
             managedId = id
             renameInput.text = tagById(id).name
             mergeTarget = ""
-            return
-        }
-        if (page !== "picker") {
-            const ids = filterIds.slice()
-            const index = ids.indexOf(id)
-            if (index < 0) ids.push(id); else ids.splice(index, 1)
-            filterIds = ids
-            refreshResults()
             return
         }
         if (!scopeValid || !canAct() || !installed(editingScope)) return
@@ -390,7 +416,7 @@ Item {
         app.tagActionCompleted(captured)
     }
     function createFromQuery() {
-        if (!validName || page !== "picker" || !scopeValid || !canAct() || !installed(editingScope)) return
+        if (!validName || !surface.visible || page !== "picker" || !scopeValid || !canAct() || !installed(editingScope)) return
         const captured = snapshot(editingScope)
         if (!bible.createAndAssignTag(captured, query)) { failed(); return }
         query = ""
@@ -409,16 +435,12 @@ Item {
         if (edit) {
             // Main captures Visual-mode completion context for the new exact range.
             app.openPassageTags(captured)
-        } else if (page === "summary") {
-            summaryScope = captured
-            refresh()
-        } else if (page !== "related") close()
-        Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
+        } else if (surface.visible) surface.close()
+        Qt.callLater(function() { panel.app.scrollToVerse(panel.bible.cursorVerse, true) })
         return true
     }
     function manage() {
-        if (hostKind !== "picker") return
-        returnPage = page
+        if (!surface.visible) return
         page = "manage"
         query = ""
         managedId = ""
@@ -427,7 +449,7 @@ Item {
     }
     function back() {
         confirmation = null
-        page = returnPage
+        page = "picker"
         query = ""
         message = ""
         refresh()
@@ -461,35 +483,19 @@ Item {
         if (tagById(managedId)) renameInput.text = tagById(managedId).name
         search.forceActiveFocus()
     }
-    readonly property bool summaryKeys: browserVisible && !visibleModal && !app.rangeEditing && !app.contextMenuOpen && !textInputActive()
-    readonly property bool relatedKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen && !textInputActive()
-        && !relatedDrawer.closing && !tagList.activeFocus
-    readonly property bool listKeys: !bible.busy && ((summaryKeys && page === "summary")
-        || (relatedKeys && (studyListTab ? studyList.currentIndex >= 0 : resultList.currentIndex >= 0)))
-    function listScope() {
-        if (page === "related") return studyListTab ? studyScope(studyRows[studyList.currentIndex]) : results[resultList.currentIndex] || null
-        return focusedSummaryScope()
-    }
-    // Related: j/k and the arrows move within the focused list. In the source
-    // tags they step down into the results and up into the search field. The
-    // tags used to swallow the keys: they had no j/k, and relatedKeys stood
-    // down while they held focus, so nothing moved.
+    // Study keys: off while typing, behind the picker or a menu, and while closing.
     readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen
-        && !textInputActive() && !relatedDrawer.closing
+        && !textInputActive()
+    readonly property bool relatedKeys: relatedMoveKeys
+    readonly property bool listKeys: !bible.busy && relatedKeys && !chipFocused
+        && (studyListTab ? studyList.currentIndex >= 0 : resultList.currentIndex >= 0 && resultList.count > 0)
+    function listScope() {
+        return studyListTab ? studyScope(studyRows[studyList.currentIndex]) : visibleResults[resultList.currentIndex] || null
+    }
     function moveRelated(delta) {
         if (studyListTab) { moveStudy(delta); return }
-        const tags = tagList.visible ? tagList.count : 0
-        if (tagList.activeFocus) {
-            const next = (tagList.currentIndex < 0 ? (delta > 0 ? -1 : 0) : tagList.currentIndex) + delta
-            if (next < 0) { search.forceActiveFocus(); return }
-            if (next >= tags) {
-                if (resultList.count) { resultList.currentIndex = 0; resultList.positionViewAtIndex(0, ListView.Contain); resultList.forceActiveFocus() }
-                return
-            }
-            tagList.currentIndex = next
-            tagList.forceActiveFocus()
-            return
-        }
+        // Up from the first result climbs into the chips.
+        if (delta < 0 && (resultList.currentIndex <= 0 || !resultList.count) && focusChips()) return
         moveResult(delta)
     }
     function moveStudy(delta) {
@@ -499,15 +505,17 @@ Item {
         studyList.forceActiveFocus()
     }
     function moveResult(delta) {
-        if (!resultList.count) return
+        if (!resultList.count) { resultList.forceActiveFocus(); return }
         resultList.currentIndex = Math.max(0, Math.min(resultList.count - 1, resultList.currentIndex + delta))
         resultList.positionViewAtIndex(resultList.currentIndex, ListView.Contain)
         resultList.forceActiveFocus()
     }
-    function focusInBody() {
-        for (let item = app.activeFocusItem; item; item = item.parent) if (item === body) return true
+    function focusIn(container) {
+        for (let item = app.activeFocusItem; item; item = item.parent) if (item === container) return true
         return false
     }
+    function focusInBody() { return focusIn(body) || focusIn(studyBody) }
+    function focusInStudy() { return focusIn(studyBody) }
     function focusResults() {
         if (studyListTab) {
             if (studyList.count && studyList.currentIndex < 0) studyList.currentIndex = 0
@@ -517,21 +525,24 @@ Item {
         if (resultList.count && resultList.currentIndex < 0) resultList.currentIndex = 0
         resultList.forceActiveFocus()
     }
-    function focusSearch() {
-        if (page === "related" && hostKind === "related" && studyTab === "related") search.forceActiveFocus()
-    }
-    // One esc closes the picker. In Related, esc first leaves the search
-    // field (keeping its query); the next esc closes the panel.
+    function focusSearch() { showStudySearch() }
+    // One esc closes the picker (a pending confirmation first).
     function handleEscape() {
         if (confirmation) { confirmation = null; search.forceActiveFocus() }
-        else if (page === "related" && search.activeFocus) focusResults()
-        else close()
+        else surface.close()
+    }
+    // Study: esc in the search field leaves it, keeping the query; esc with a
+    // query clears it; otherwise esc closes the panel.
+    function handleStudyEscape() {
+        if (studySearch.activeFocus) leaveStudySearch()
+        else if (tagsTab && studyQuery.length) { studyQuery = ""; studySearchOpen = false; focusResults() }
+        else relatedDrawer.close()
     }
     Connections {
         target: panel.bible
         function onTagsChanged() { if (panel.contentVisible) panel.refresh() }
         function onVersionsChanged() { if (panel.contentVisible) panel.refresh() }
-        function onVersionChanged() { if (panel.contentVisible) panel.refreshResults() }
+        function onVersionChanged() { if (panel.relatedShown) panel.refreshTagResults() }
         function onVersesChanged() {
             // Footnotes follow the chapter; keep the current row in range.
             if (panel.studyTab === "footnotes" && studyList.currentIndex >= studyList.count) studyList.currentIndex = studyList.count - 1
@@ -550,10 +561,8 @@ Item {
         property bool chosen: false
         property string hint: ""
         property bool wrapText: false
-        // Tag chips: one step smaller with a visible resting outline and tint.
-        property bool chip: false
         font.family: panel.desktop.fontFamily
-        font.pixelSize: (chip ? 12 : 13) * panel.controlScale
+        font.pixelSize: 13 * panel.controlScale
         padding: 8 * panel.controlScale
         implicitHeight: Math.max(34 * panel.controlScale, contentItem.implicitHeight + topPadding + bottomPadding)
         contentItem: Text {
@@ -566,18 +575,89 @@ Item {
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            color: control.down || control.chosen || control.hovered ? panel.desktop.surface
-                : control.chip ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.08) : "transparent"
-            // Quiet like the app's other buttons: a border only marks focus or a chosen toggle;
-            // chips keep a resting desktop border so they read as tags before hover.
-            border.width: control.activeFocus || control.chosen || control.chip ? 1 : 0
-            border.color: control.activeFocus || control.chosen ? panel.desktop.accent
-                : control.chip && (control.hovered || control.down) ? panel.desktop.muted : panel.desktop.border
+            color: control.down || control.chosen || control.hovered ? panel.desktop.surface : "transparent"
+            // Quiet like the app's other buttons: a border only marks focus or a chosen toggle.
+            border.width: control.activeFocus || control.chosen ? 1 : 0
+            border.color: panel.desktop.accent
             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
         AppToolTip { theme: panel.desktop; uiScale: panel.uiScale; text: control.hint; visible: text.length > 0 && (control.hovered || control.activeFocus) }
+    }
+    // Study's tag chips: "name N" (N muted: other passages with the tag). On
+    // chips keep a light accent tint; off chips are a bare outline, muted.
+    component StudyChip: Button {
+        id: chip
+        required property var modelData
+        required property int index
+        readonly property bool studyChip: true
+        readonly property bool on: panel.onIds.indexOf(modelData.id) >= 0
+        objectName: "studyChip:" + modelData.id
+        focusPolicy: Qt.StrongFocus
+        hoverEnabled: true
+        font.family: panel.desktop.fontFamily
+        font.pixelSize: 12 * panel.studyScale
+        padding: 7 * panel.studyScale
+        topPadding: 4 * panel.studyScale
+        bottomPadding: 4 * panel.studyScale
+        implicitHeight: 28 * panel.studyScale
+        contentItem: Row {
+            spacing: 5 * panel.studyScale
+            Text {
+                text: chip.modelData.name
+                textFormat: Text.PlainText
+                font: chip.font
+                color: chip.on ? panel.desktop.foreground : panel.desktop.muted
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, studyBody.width * 0.6)
+                elide: Text.ElideRight
+            }
+            Text {
+                objectName: "studyChipCount:" + chip.modelData.id
+                text: String(panel.chipCount(chip.modelData.id))
+                font: chip.font
+                color: panel.desktop.muted
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+        background: Rectangle {
+            color: chipMouse.pressed ? panel.desktop.surface
+                : chip.on ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, chip.hovered ? 0.14 : 0.08)
+                : chip.hovered ? panel.desktop.surface : "transparent"
+            border.width: 1
+            border.color: chip.activeFocus ? panel.desktop.accent : chip.hovered ? panel.desktop.muted : panel.desktop.border
+            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+        }
+        onActiveFocusChanged: if (activeFocus) panel.chipIndex = Math.max(0, panel.chipItems().indexOf(chip))
+        // Click toggles; shift click solos the chip (again: every chip back on).
+        MouseArea {
+            id: chipMouse
+            anchors.fill: parent
+            onClicked: function(mouse) {
+                chip.forceActiveFocus()
+                if (mouse.modifiers & Qt.ShiftModifier) panel.soloChip(chip.modelData.id)
+                else panel.toggleChip(chip.modelData.id)
+            }
+        }
+        Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                event.accepted = true
+                if (event.isAutoRepeat) return
+                if (event.modifiers & Qt.ShiftModifier) panel.soloChip(modelData.id)
+                else panel.toggleChip(modelData.id)
+            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                event.accepted = true
+                panel.focusResults()
+            }
+        }
+        Keys.onReleased: function(event) { if (event.key === Qt.Key_Space) event.accepted = true }
+        AppToolTip {
+            theme: panel.desktop; uiScale: panel.uiScale
+            text: chip.modelData.overlap ? "on " + chip.modelData.reference + " (overlapping range)" : ""
+            visible: text.length > 0 && chip.hovered
+        }
+        Accessible.name: modelData.name + (on ? "" : ", off")
     }
     component TagInput: TextField {
         id: input
@@ -591,7 +671,7 @@ Item {
         background: Rectangle {
             color: panel.desktop.background
             border.color: input.activeFocus ? panel.desktop.accent : panel.desktop.border
-            radius: panel.desktop.cornerRadius
+            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
     }
     component TagScrollbar: ScrollBar {
@@ -617,57 +697,17 @@ Item {
                 color: panel.desktop.muted
                 radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
                 opacity: bar.hovered || bar.pressed ? 0.8 : linger.running ? 0.5 : 0.2
-                Behavior on width { NumberAnimation { duration: 120 } }
-                Behavior on opacity { NumberAnimation { duration: 200 } }
+                Behavior on width { NumberAnimation { duration: panel.app.reduceMotion ? 0 : 120 } }
+                Behavior on opacity { NumberAnimation { duration: panel.app.reduceMotion ? 0 : 200 } }
             }
         }
         background: Item {}
     }
-    component SummaryChips: Flow {
-        id: chips
-        required property var tags
-        required property string prefix
-        spacing: 6 * panel.controlScale
-        Repeater {
-            model: chips.tags
-            delegate: TagButton {
-                required property var modelData
-                objectName: chips.prefix + modelData.id
-                text: modelData.name
-                width: Math.min(implicitWidth, chips.width)
-                wrapText: true
-                chip: true
-                onClicked: panel.openRelatedForTag(modelData.id, panel.summaryScope)
-            }
-        }
-    }
-    component SummaryRange: ColumnLayout {
-        id: range
-        required property var entry
-        required property string prefix
-        readonly property var rangeEditScope: entry
-        spacing: 4 * panel.controlScale
-        TagButton {
-            objectName: range.prefix + range.entry.reference
-            Layout.fillWidth: true
-            text: range.entry.reference
-            wrapText: true
-            onClicked: panel.openTagged(range.entry)
-        }
-        SummaryChips {
-            Layout.fillWidth: true
-            tags: range.entry.tags
-            prefix: range.prefix + range.entry.reference + ":tag:"
-        }
-        TagText {
-            Layout.fillWidth: true
-            visible: text.length > 0
-            text: range.entry.excerpt || ""
-            lineHeight: panel.bible.lineHeight > 0 ? panel.bible.lineHeight / 1.5 * 1.25 : 1.25
-            maximumLineCount: 3
-            elide: Text.ElideRight
-            color: panel.desktop.muted
-        }
+    component FineRule: Rectangle {
+        Layout.fillWidth: true
+        implicitHeight: 1
+        color: panel.desktop.border
+        opacity: 0.65
     }
     Drawer {
         id: relatedDrawer
@@ -696,78 +736,45 @@ Item {
             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
         Overlay.modal: Rectangle { color: Qt.rgba(panel.desktop.background.r, panel.desktop.background.g, panel.desktop.background.b, 0.65) }
-        contentItem: Item { id: relatedHost }
         onClosed: {
-            if (panel.hostKind !== "related") return
-            panel.hostKind = "none"
-            panel.confirmation = null
+            panel.studySearchOpen = false
             panel.app.restorePanelFocus()
         }
-    }
-    Popup {
-        id: surface
-        objectName: "tagsSurface"
-        parent: Overlay.overlay
-        width: Math.min(780 * panel.uiScale, parent ? parent.width - 24 : 780)
-        height: Math.min(760 * panel.uiScale, parent ? parent.height - 24 : 760)
-        x: parent ? (parent.width - width) / 2 : 0
-        y: parent ? (parent.height - height) / 2 : 0
-        padding: 16 * panel.uiScale
-        modal: true
-        focus: true
-        // Esc or a click on the scrim closes it (a pending confirmation first
-        // needs esc or its own buttons).
-        closePolicy: panel.confirmation ? Popup.NoAutoClose : Popup.CloseOnPressOutside
-        // A modal: fades in, closes at once.
-        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: panel.app.fadeMs || 0; easing.type: Easing.OutQuad } }
-        exit: null
-        onClosed: {
-            if (panel.hostKind !== "picker") return
-            panel.hostKind = "none"
-            panel.confirmation = null
-            panel.editingScope = null
-            panel.app.editingPanelClosed()
-            panel.app.restorePanelFocus()
-        }
-        background: Rectangle {
-            color: panel.desktop.background
-            border.color: panel.desktop.border
-            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
-        }
-        Overlay.modal: Rectangle { color: Qt.rgba(panel.desktop.background.r, panel.desktop.background.g, panel.desktop.background.b, 0.72) }
-        contentItem: Item { id: pickerHost }
-    }
-        ColumnLayout {
-            id: body
-            objectName: "tagsBody"
-            parent: panel.hostKind === "browser" ? panel.embeddedHost : panel.hostKind === "related" ? relatedHost : pickerHost
-            anchors.fill: parent
-            visible: panel.contentVisible
-            spacing: 8 * panel.controlScale
-            Keys.onEscapePressed: panel.handleEscape()
-            Shortcut { sequence: "Shift+E"; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.app.openRangeEditor(panel.focusedSummaryScope(), "tag") }
-            Shortcut { sequences: ["J", "Down"]; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.moveSummary(1) }
-            Shortcut { sequences: ["K", "Up"]; enabled: panel.browserVisible && !panel.visibleModal && !panel.app.rangeEditing && !panel.textInputActive(); onActivated: panel.moveSummary(-1) }
-            // Shared list keys on the focused summary range or Related result.
+        contentItem: ColumnLayout {
+            id: studyBody
+            objectName: "studyBody"
+            spacing: 8 * panel.studyScale
+            Keys.onEscapePressed: panel.handleStudyEscape()
+            // Tabs: ←/→ (h/l), except while a chip has the keyboard: there they move between chips.
+            Shortcut { objectName: "studyTabPrevious"; sequences: ["H", "Left"]; enabled: panel.relatedMoveKeys && !panel.chipFocused; onActivated: panel.stepStudyTab(-1) }
+            Shortcut { objectName: "studyTabNext"; sequences: ["L", "Right"]; enabled: panel.relatedMoveKeys && !panel.chipFocused; onActivated: panel.stepStudyTab(1) }
+            Shortcut { sequences: ["H", "Left"]; enabled: panel.relatedMoveKeys && panel.chipFocused; onActivated: panel.moveChip(-1) }
+            Shortcut { sequences: ["L", "Right"]; enabled: panel.relatedMoveKeys && panel.chipFocused; onActivated: panel.moveChip(1) }
+            Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedMoveKeys; onActivated: { if (panel.chipFocused) panel.focusResults(); else panel.moveRelated(1) } }
+            Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedMoveKeys && !panel.chipFocused; onActivated: panel.moveRelated(-1) }
+            // Shared list keys on the current row.
             Shortcut { sequence: "Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope()) }
             Shortcut { sequence: "Shift+Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope(), true) }
             Shortcut { sequence: "D"; enabled: panel.listKeys; onActivated: panel.app.toggleScopeDesk(panel.listScope()) }
-            Shortcut { sequences: ["Delete", "Backspace"]; enabled: panel.listKeys && !panel.studyListTab; onActivated: panel.app.removeMarkerAnnotation(panel.listScope(), "tag") }
-            Shortcut { sequence: "Shift+E"; enabled: panel.relatedKeys && !panel.studyListTab && resultList.currentIndex >= 0; onActivated: panel.app.openRangeEditor(panel.listScope(), "tag") }
-            Shortcut { objectName: "studyTabPrevious"; sequences: ["H", "Left"]; enabled: panel.relatedMoveKeys; onActivated: panel.stepStudyTab(-1) }
-            Shortcut { objectName: "studyTabNext"; sequences: ["L", "Right"]; enabled: panel.relatedMoveKeys; onActivated: panel.stepStudyTab(1) }
-            Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveRelated(1) }
-            Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveRelated(-1) }
-            // g, shift G, ctrl d/u, ctrl f/b, pgdn/pgup: the Tags tab's ranges, Related's results.
-            ListMotionKeys {
-                objectName: "summaryMotionKeys"
-                active: panel.browserVisible && panel.page === "summary" && !panel.visibleModal && !panel.app.rangeEditing && !panel.app.contextMenuOpen && !panel.textInputActive()
-                count: 1000
-                onMove: function(delta) { panel.moveSummary(delta) }
+            Shortcut { sequence: "Shift+E"; enabled: panel.listKeys && panel.tagsTab; onActivated: panel.app.openRangeEditor(panel.listScope(), "tag") }
+            // Tags tab: t tags the row (or, with no tags yet, the passage), a
+            // toggles all installed versions, 0 turns every chip back on.
+            Shortcut { objectName: "studyTagKey"; sequence: "T"; enabled: panel.relatedMoveKeys && panel.tagsTab && !panel.bible.busy; onActivated: panel.tagCurrentResult() }
+            Shortcut { objectName: "studyAllVersionsKey"; sequence: "A"; enabled: panel.relatedMoveKeys && panel.tagsTab; onActivated: panel.toggleAllVersions() }
+            Shortcut { objectName: "studyChipsAllKey"; sequence: "0"; enabled: panel.relatedMoveKeys && panel.tagsTab && (panel.chipFocused || resultList.activeFocus); onActivated: panel.restoreChips() }
+            Shortcut { sequence: "/"; enabled: panel.relatedMoveKeys && panel.tagsTab; onActivated: panel.showStudySearch() }
+            Shortcut {
+                sequences: ["Menu", "Shift+F10"]
+                enabled: panel.relatedMoveKeys && panel.tagsTab && !panel.chipFocused && resultList.currentItem !== null
+                onActivated: {
+                    const point = resultList.currentItem.mapToItem(null, 24 * panel.uiScale, Math.min(resultList.currentItem.height, 28 * panel.uiScale))
+                    panel.openResultMenu(resultList.currentIndex, point.x, point.y)
+                }
             }
+            // g, shift G, ctrl d/u, ctrl f/b, pgdn/pgup on the current tab's list.
             ListMotionKeys {
                 objectName: "relatedMotionKeys"
-                active: panel.relatedMoveKeys && !panel.studyListTab
+                active: panel.relatedMoveKeys && panel.tagsTab && !panel.chipFocused
                 count: resultList.count
                 onMove: function(delta) { if (resultList.currentIndex < 0) resultList.currentIndex = 0; panel.moveResult(delta) }
             }
@@ -777,334 +784,288 @@ Item {
                 count: studyList.count
                 onMove: function(delta) { if (studyList.currentIndex < 0) studyList.currentIndex = 0; panel.moveStudy(delta) }
             }
-            Shortcut { sequence: "/"; enabled: panel.relatedShown && panel.studyTab === "related" && !panel.pickerVisible && !panel.app.contextMenuOpen && !panel.textInputActive(); onActivated: panel.focusSearch() }
-            // Study: the shared panel header, following the reader's passage.
             PanelHeader {
                 objectName: "studyHeader"
                 Layout.fillWidth: true
-                visible: panel.page === "related"
                 theme: panel.desktop
                 title: "Study"
                 subtitle: panel.passageSubtitle
-                uiScale: panel.uiScale
+                uiScale: panel.studyScale
                 titleName: "studyTitle"
                 subtitleName: "studyPassage"
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                visible: panel.page === "picker" || panel.page === "manage"
-                TagText {
-                    objectName: "tagsTitle"
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    text: panel.page === "picker" ? (panel.editingScope ? panel.editingScope.reference + " · " + panel.versionName(panel.editingScope) : "Tags")
-                        : panel.page === "manage" ? "Manage tags" : "Tags"
-                    font.pixelSize: 14 * panel.controlScale
-                }
-                TagButton { text: "Back"; visible: panel.page === "manage"; onClicked: panel.back() }
-                TagButton { objectName: "manageTags"; text: "Manage"; visible: panel.page === "picker"; onClicked: panel.manage() }
             }
             PanelTabs {
                 id: studyTabRow
                 objectName: "studyTabs"
                 Layout.fillWidth: true
-                visible: panel.page === "related"
                 labels: panel.studyTitles
                 theme: panel.desktop
-                uiScale: panel.controlScale
+                uiScale: panel.studyScale
                 namePrefix: "studyTab"
                 // ←/→ (h/l) drive the tabs; clicks still switch.
                 focusable: false
                 currentIndex: panel.studyTabs.indexOf(panel.studyTab)
                 onActivated: index => panel.setStudyTab(panel.studyTabs[index])
             }
-            Flickable {
-                id: summaryView
-                objectName: "tagSummary"
+            TagText {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
-                visible: panel.page === "summary"
-                clip: true
-                contentWidth: width
-                contentHeight: summaryContent.implicitHeight
-                boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: TagScrollbar {}
-                ColumnLayout {
-                    id: summaryContent
-                    width: summaryView.width - 20 * panel.controlScale
-                    spacing: 12 * panel.controlScale
-                    TagText {
-                        objectName: "summaryEmpty"
-                        Layout.fillWidth: true
-                        visible: panel.summaryIds.length === 0
-                        text: "No tags on this passage or overlapping ranges."
-                        color: panel.desktop.muted
+                visible: panel.studyTab !== "footnotes" && !panel.installed(panel.relatedSource)
+                objectName: "studyScopePrompt"
+                text: "This source version is no longer installed. Choose a current passage to continue."
+                color: panel.desktop.muted
+            }
+            // Tags tab: this passage's tags as chips.
+            Flow {
+                id: chipFlow
+                objectName: "studyChips"
+                Layout.fillWidth: true
+                Layout.topMargin: 4 * panel.studyScale
+                visible: panel.tagsTab && panel.rootChips.length > 0
+                spacing: 6 * panel.studyScale
+                // At most two lines: chips that would wrap further fold into "+N".
+                onWidthChanged: panel.chipLimit = 1000
+                onPositioningComplete: {
+                    if (panel.chipsExpanded || panel.chipLimit <= 1) return
+                    const chipHeight = 28 * panel.studyScale
+                    let bottom = 0
+                    for (let i = 0; i < children.length; ++i) {
+                        const child = children[i]
+                        if (child.visible && child.width > 0) bottom = Math.max(bottom, child.y + child.height)
                     }
-                    TagText {
-                        Layout.fillWidth: true
-                        visible: panel.summaryIds.length > 0
-                        text: "Tags on this range"
-                    }
-                    SummaryChips {
-                        objectName: "summaryExactTags"
-                        Layout.fillWidth: true
-                        visible: panel.exactTags.length > 0
-                        tags: panel.exactTags
-                        prefix: "summaryTag:"
-                    }
-                    TagText {
-                        Layout.fillWidth: true
-                        visible: panel.summaryIds.length > 0 && panel.exactTags.length === 0
-                        text: "No tags attached to this exact range."
-                        color: panel.desktop.muted
-                    }
-                    TagText {
-                        Layout.fillWidth: true
-                        visible: panel.overlaps.length > 0
-                        text: "Tags on overlapping ranges"
-                    }
-                    Repeater {
-                        model: panel.page === "summary" ? panel.visibleOverlaps : []
-                        delegate: SummaryRange {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            entry: modelData
-                            prefix: "summaryOverlap:"
+                    if (bottom > 2 * chipHeight + spacing + 1)
+                        panel.chipLimit = Math.min(panel.chipLimit, panel.rootChips.length) - 1
+                }
+                Repeater {
+                    id: chipRepeater
+                    model: panel.rootChips
+                    // Exact-range tags first; a muted · leads the overlapping ones.
+                    delegate: Row {
+                        id: chipCell
+                        required property var modelData
+                        required property int index
+                        readonly property bool leading: modelData.overlap && index > 0 && !panel.rootChips[index - 1].overlap
+                        visible: panel.chipsExpanded || index < panel.chipLimit
+                        spacing: chipFlow.spacing
+                        Text {
+                            objectName: "studyChipSeparator"
+                            visible: chipCell.leading
+                            height: cellChip.height
+                            verticalAlignment: Text.AlignVCenter
+                            text: "·"
+                            color: panel.desktop.muted
+                            font.family: panel.desktop.fontFamily
+                            font.pixelSize: 14 * panel.studyScale
                         }
+                        StudyChip { id: cellChip; modelData: chipCell.modelData; index: chipCell.index }
                     }
-                    TagText {
-                        Layout.fillWidth: true
-                        visible: panel.summaryIds.length > 0
-                        text: "Other passages with these tags"
+                }
+                Button {
+                    id: moreChips
+                    objectName: "studyChipsMore"
+                    readonly property bool studyChip: true
+                    visible: panel.hiddenChips > 0
+                    focusPolicy: Qt.StrongFocus
+                    hoverEnabled: true
+                    implicitHeight: 28 * panel.studyScale
+                    padding: 7 * panel.studyScale
+                    topPadding: 4 * panel.studyScale
+                    bottomPadding: 4 * panel.studyScale
+                    font.family: panel.desktop.fontFamily
+                    font.pixelSize: 12 * panel.studyScale
+                    text: "+" + panel.hiddenChips
+                    contentItem: Text { text: moreChips.text; font: moreChips.font; color: panel.desktop.muted; verticalAlignment: Text.AlignVCenter }
+                    background: Rectangle {
+                        color: moreChips.hovered || moreChips.down ? panel.desktop.surface : "transparent"
+                        border.width: 1
+                        border.color: moreChips.activeFocus ? panel.desktop.accent : panel.desktop.border
+                        radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
                     }
-                    Repeater {
-                        model: panel.page === "summary" ? panel.visibleResults : []
-                        delegate: SummaryRange {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            entry: modelData
-                            prefix: "summaryPassage:"
-                        }
+                    onClicked: { panel.chipsExpanded = true; Qt.callLater(panel.focusChips) }
+                    Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) { event.accepted = true; panel.focusResults() }
+                        else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; moreChips.clicked() }
                     }
-                    TagText {
-                        Layout.fillWidth: true
-                        visible: panel.summaryIds.length > 0 && panel.visibleResults.length === 0
-                        text: "No other passages in this version."
-                        color: panel.desktop.muted
-                    }
+                    Accessible.name: panel.hiddenChips + " more tags"
                 }
             }
             TagText {
+                objectName: "studyTagCount"
                 Layout.fillWidth: true
-                visible: (panel.page === "picker" && !panel.scopeValid) || (panel.page === "related" && panel.studyTab !== "footnotes" && !panel.installed(panel.relatedSource))
-                objectName: "tagScopePrompt"
-                text: panel.page === "picker" && !panel.editingScope
-                    ? "Select a passage to add or remove tags."
-                    : "This source version is no longer installed. Choose a current passage to continue."
+                visible: panel.tagsTab && !panel.studySearchOpen && panel.onIds.length > 0 && panel.results.length > 0
+                font.pixelSize: 12 * panel.studyScale
                 color: panel.desktop.muted
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                visible: panel.confirmation !== null
-                TagText {
-                    Layout.fillWidth: true
-                    text: !panel.confirmation ? "" : panel.confirmation.action === "delete"
-                        ? "Delete “" + panel.confirmation.name + "” and its assignments in every version?"
-                        : panel.confirmation.action === "merge" ? "Merge “" + panel.confirmation.name + "” into “" + panel.confirmation.targetName + "” in every version? The source tag will be removed."
-                        : "Rename “" + panel.confirmation.name + "” to “" + panel.confirmation.newName + "” everywhere?"
-                }
-                RowLayout {
-                    TagButton { id: cancelManagement; objectName: "cancelTagManagement"; text: "Cancel"; onClicked: { panel.confirmation = null; search.forceActiveFocus() } }
-                    TagButton { objectName: "confirmTagManagement"; text: "Confirm"; enabled: !panel.bible.busy; onClicked: panel.confirmManagement() }
+                elide: Text.ElideRight
+                maximumLineCount: 1
+                text: {
+                    const total = panel.results.length
+                    const noun = total === 1 ? " passage" : " passages"
+                    const query = panel.studyQuery.trim()
+                    return (query.length ? panel.visibleResults.length + " of " + total + noun + " · “" + query + "”" : total + noun)
+                        + (panel.allVersions ? " · all versions" : "")
                 }
             }
             TagInput {
-                id: search
-                objectName: "tagSearch"
+                id: studySearch
+                objectName: "studySearch"
                 Layout.fillWidth: true
-                visible: panel.page !== "summary" && panel.confirmation === null && !panel.studyListTab
-                placeholderText: panel.page === "picker" ? "Find or create a tag…" : "Filter tags…"
-                text: panel.query
-                onTextEdited: panel.query = text
-                onAccepted: {
-                    if (panel.page === "picker" && panel.validName) panel.createFromQuery()
-                    else if (tagList.count) panel.toggleTag(panel.filteredTags[Math.max(0, tagList.currentIndex)].id)
-                }
-                Keys.onDownPressed: { if (tagList.count) { tagList.currentIndex = 0; tagList.forceActiveFocus() } }
-            }
-            RowLayout {
-                id: filters
-                objectName: "tagFilters"
-                Layout.fillWidth: true
-                spacing: 4 * panel.controlScale
-                visible: panel.page === "related" && panel.studyTab === "related"
-                TagButton { objectName: "tagMatchAny"; text: "Any"; chosen: !panel.matchAll; onClicked: { panel.matchAll = false; panel.refreshResults() } }
-                TagButton { objectName: "tagMatchAll"; text: "All"; chosen: panel.matchAll; onClicked: { panel.matchAll = true; panel.refreshResults() } }
-                Rectangle { objectName: "tagFilterDivider"; Layout.preferredWidth: 1; Layout.preferredHeight: 24 * panel.controlScale; Layout.leftMargin: 4 * panel.controlScale; Layout.rightMargin: 4 * panel.controlScale; color: panel.desktop.border }
-                TagButton { objectName: "tagSourceVersion"; text: (panel.page === "related" ? panel.versionName(panel.relatedSource) : panel.bible.versionAbbreviation) + " only"; chosen: !panel.allVersions; hint: panel.page === "related" ? "Pinned source version" : "Active version"; onClicked: { panel.allVersions = false; panel.refreshResults() } }
-                TagButton { objectName: "tagAllVersions"; text: "All versions"; chosen: panel.allVersions; onClicked: { panel.allVersions = true; panel.refreshResults() } }
-                Item { Layout.fillWidth: true }
-            }
-            TagButton {
-                objectName: "tagUseCurrent"
-                Layout.fillWidth: true
-                text: "Find related to current passage"
-                wrapText: true
-                hint: "Replace the pinned source with the currently focused passage and its tags."
-                visible: panel.page === "related" && panel.studyTab !== "footnotes"
-                onClicked: panel.useCurrent()
-            }
-            ListView {
-                id: tagList
-                objectName: "tagList"
-                Layout.fillWidth: true
-                Layout.fillHeight: panel.page === "picker" || panel.page === "manage"
-                Layout.preferredHeight: Math.min(150 * panel.controlScale, body.height * 0.22)
-                Layout.minimumHeight: 34 * panel.controlScale
-                visible: panel.page !== "summary" && panel.confirmation === null && !panel.studyListTab
-                clip: true
-                spacing: 4 * panel.uiScale
-                model: []
-                currentIndex: -1
-                property bool updatingModel: false
-                onCurrentIndexChanged: {
-                    if (!updatingModel && currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
-                }
-                keyNavigationEnabled: true
-                activeFocusOnTab: true
-                Keys.onSpacePressed: { if (currentIndex >= 0) panel.toggleTag(panel.filteredTags[currentIndex].id) }
-                Keys.onReturnPressed: { if (currentIndex >= 0) panel.toggleTag(panel.filteredTags[currentIndex].id) }
-                Keys.onEnterPressed: { if (currentIndex >= 0) panel.toggleTag(panel.filteredTags[currentIndex].id) }
-                Keys.onUpPressed: { if (currentIndex <= 0) search.forceActiveFocus(); else decrementCurrentIndex() }
-                ScrollBar.vertical: TagScrollbar { objectName: "tagListScrollbar" }
-                delegate: TagButton {
-                    id: tagDelegate
-                    required property var modelData
-                    required property int index
-                    objectName: "tag:" + modelData.id
-                    width: tagList.width
-                    chosen: panel.page === "manage" ? panel.managedId === modelData.id
-                        : (panel.page === "picker" ? panel.exactIds : panel.filterIds).indexOf(modelData.id) >= 0
-                    text: (chosen ? "✓  " : "    ") + modelData.name + " · " + modelData.count
-                    hint: modelData.name
-                    enabled: panel.page !== "picker" || (panel.scopeValid && !panel.bible.busy)
-                    onClicked: { tagList.currentIndex = index; panel.toggleTag(modelData.id) }
-                    background: Rectangle {
-                        // Like the app's other lists: the current row is a tinted fill, never an accent border.
-                        color: tagDelegate.activeFocus || (tagList.activeFocus && tagList.currentIndex === tagDelegate.index)
-                            ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
-                            : tagDelegate.chosen || tagDelegate.hovered ? panel.desktop.surface : "transparent"
-                        border.width: 0
-                        radius: panel.desktop.cornerRadius
-                    }
-                }
-                TagText { anchors.centerIn: parent; visible: tagList.count === 0; text: panel.allTags.length ? "No matching tags" : "No tags yet"; color: panel.desktop.muted }
-            }
-            TagButton {
-                objectName: "createPassageTag"
-                Layout.fillWidth: true
-                visible: panel.page === "picker" && panel.query.length > 0
-                enabled: panel.validName && panel.scopeValid && !panel.bible.busy
-                text: "Create / assign “" + panel.query.trim() + "”"
-                onClicked: panel.createFromQuery()
-            }
-            TagText {
-                visible: panel.page === "picker" && panel.overlaps.length > 0
-                text: "Other overlapping ranges · assignments are separate"
-                color: panel.desktop.muted
-                Layout.fillWidth: true
-            }
-            ListView {
-                id: overlapList
-                objectName: "tagOverlaps"
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(100 * panel.controlScale, body.height * 0.18, contentHeight)
-                visible: panel.page === "picker" && panel.overlaps.length > 0
-                model: panel.overlaps
-                clip: true
-                ScrollBar.vertical: TagScrollbar { objectName: "tagOverlapsScrollbar" }
-                delegate: RowLayout {
-                    id: overlapDelegate
-                    required property var modelData
-                    width: overlapList.width
-                    TagText { Layout.fillWidth: true; text: overlapDelegate.modelData.reference + " · " + panel.tagNames(overlapDelegate.modelData.tags) }
-                    TagButton { objectName: "openTagOverlap:" + overlapDelegate.modelData.reference; text: "Open"; onClicked: panel.openTagged(overlapDelegate.modelData) }
-                    TagButton { objectName: "editTagOverlap:" + overlapDelegate.modelData.reference; text: "Edit tags"; onClicked: panel.openTagged(overlapDelegate.modelData, true) }
-                }
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                visible: panel.page === "manage" && panel.managedId.length > 0 && panel.confirmation === null
-                TagText { Layout.fillWidth: true; text: panel.tagById(panel.managedId) ? panel.tagById(panel.managedId).name : "" }
-                RowLayout {
-                    Layout.fillWidth: true
-                    TagInput { id: renameInput; objectName: "tagRenameInput"; Layout.fillWidth: true; placeholderText: "New name"; onAccepted: panel.requestManagement("rename") }
-                    TagButton { objectName: "renameTag"; text: "Rename…"; onClicked: panel.requestManagement("rename") }
-                    TagButton { objectName: "deleteTag"; text: "Delete…"; onClicked: panel.requestManagement("delete") }
-                }
-                TagText { text: "Merge into"; color: panel.desktop.muted }
-                ListView {
-                    id: mergeList
-                    objectName: "tagMergeTargets"
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 100 * panel.uiScale
-                    clip: true
-                    model: panel.allTags.filter(function(tag) { return tag.id !== panel.managedId })
-                    ScrollBar.vertical: TagScrollbar { objectName: "tagMergeScrollbar" }
-                    delegate: TagButton {
-                        required property var modelData
-                        objectName: "mergeTarget:" + modelData.id
-                        width: mergeList.width
-                        text: modelData.name
-                        chosen: panel.mergeTarget === modelData.id
-                        onClicked: panel.mergeTarget = modelData.id
-                    }
-                }
-                TagButton { objectName: "mergeTags"; text: "Merge…"; enabled: panel.mergeTarget.length > 0; onClicked: panel.requestManagement("merge") }
-            }
-            TagText {
-                visible: panel.page === "related" && panel.studyTab === "related"
-                Layout.fillWidth: true
-                text: panel.filterIds.length ? panel.results.length + " passages · " + panel.tagNames(panel.allTags.filter(function(tag) { return panel.filterIds.indexOf(tag.id) >= 0 }))
-                    : "Choose one or more tags"
-                color: panel.desktop.muted
+                visible: panel.tagsTab && panel.studySearchOpen
+                font.pixelSize: 13 * panel.studyScale
+                padding: 8 * panel.studyScale
+                placeholderText: "Search passages…"
+                text: panel.studyQuery
+                onTextEdited: { panel.studyQuery = text; resultList.currentIndex = resultList.count ? 0 : -1 }
+                onAccepted: panel.leaveStudySearch()
+                Keys.onDownPressed: panel.leaveStudySearch()
+                Keys.onEscapePressed: panel.leaveStudySearch()
+                onActiveFocusChanged: if (!activeFocus && !panel.studyQuery.length) panel.studySearchOpen = false
+                Accessible.name: "Search passages"
             }
             ListView {
                 id: resultList
                 objectName: "tagResults"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                visible: panel.page === "related" && panel.studyTab === "related"
+                visible: panel.tagsTab
                 clip: true
-                spacing: 8 * panel.uiScale
-                model: panel.results
+                spacing: 4 * panel.studyScale
+                model: panel.visibleResults
                 currentIndex: count ? 0 : -1
                 activeFocusOnTab: true
-                keyNavigationEnabled: true
-                Keys.onReturnPressed: { if (currentIndex >= 0) panel.openTagged(panel.results[currentIndex]) }
-                Keys.onEnterPressed: { if (currentIndex >= 0) panel.openTagged(panel.results[currentIndex]) }
+                keyNavigationEnabled: false
+                Keys.onReturnPressed: { if (currentIndex >= 0) panel.openTagged(panel.visibleResults[currentIndex]) }
+                Keys.onEnterPressed: { if (currentIndex >= 0) panel.openTagged(panel.visibleResults[currentIndex]) }
+                Keys.onTabPressed: function(event) { event.accepted = panel.focusChips() }
+                Keys.onBacktabPressed: function(event) { event.accepted = panel.focusChips() }
                 ScrollBar.vertical: TagScrollbar { objectName: "tagResultsScrollbar" }
-                delegate: TagButton {
+                delegate: ItemDelegate {
                     id: resultDelegate
                     required property var modelData
                     required property int index
+                    readonly property bool current: resultList.currentIndex === index && !panel.chipFocused
+                    readonly property bool otherVersion: modelData.versionId !== (panel.relatedSource ? panel.relatedSource.versionId : "")
                     objectName: "tagResult:" + index
-                    width: resultList.width
-                    chosen: resultList.activeFocus && resultList.currentIndex === index
-                    onClicked: { resultList.currentIndex = index; panel.openTagged(modelData) }
+                    width: resultList.width - 12 * panel.studyScale
+                    focusPolicy: Qt.NoFocus
+                    hoverEnabled: true
+                    padding: 10 * panel.studyScale
+                    onClicked: { resultList.currentIndex = index; resultList.forceActiveFocus(); panel.openTagged(modelData) }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: function(eventPoint) { panel.openResultMenu(resultDelegate.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                    }
                     contentItem: Column {
-                        spacing: 4 * panel.uiScale
-                        TagText { width: parent.width; text: resultDelegate.modelData.reference + " · " + resultDelegate.modelData.versionAbbreviation + " · " + resultDelegate.modelData.sharedCount + " shared" }
-                        TagText { width: parent.width; text: panel.tagNames(resultDelegate.modelData.tags); color: panel.desktop.accent }
-                        TagText { width: parent.width; text: resultDelegate.modelData.excerpt || ""; lineHeight: panel.bible.lineHeight > 0 ? panel.bible.lineHeight / 1.5 * 1.25 : 1.25; maximumLineCount: 3; elide: Text.ElideRight; color: panel.desktop.muted }
+                        spacing: 3 * panel.studyScale
+                        Text {
+                            objectName: "tagResultReference:" + resultDelegate.index
+                            width: parent.width
+                            text: resultDelegate.modelData.reference + (panel.allVersions && resultDelegate.otherVersion ? " · " + resultDelegate.modelData.versionAbbreviation : "")
+                            textFormat: Text.PlainText
+                            color: panel.desktop.foreground
+                            font.family: panel.desktop.fontFamily
+                            font.pixelSize: 14 * panel.studyScale
+                            elide: Text.ElideRight
+                        }
+                        // The row's tags: shared ones in the accent, the rest muted. Inert.
+                        Text {
+                            objectName: "tagResultTags:" + resultDelegate.index
+                            width: parent.width
+                            textFormat: Text.StyledText
+                            text: Array.from(resultDelegate.modelData.tags || []).map(function(tag) {
+                                return '<font color="' + (panel.onIds.indexOf(tag.id) >= 0 ? panel.desktop.accent : panel.desktop.muted) + '">'
+                                    + KeyNotation.escapeHtml(tag.name) + "</font>"
+                            }).join('<font color="' + panel.desktop.muted + '"> · </font>')
+                            font.family: panel.desktop.fontFamily
+                            font.pixelSize: 12 * panel.studyScale
+                            wrapMode: Text.Wrap
+                        }
+                        Text {
+                            width: parent.width
+                            visible: text.length > 0
+                            text: resultDelegate.modelData.excerpt || ""
+                            textFormat: Text.PlainText
+                            color: panel.desktop.muted
+                            font.family: panel.desktop.fontFamily
+                            font.pixelSize: 13 * panel.studyScale
+                            lineHeight: 1.2
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                        }
+                    }
+                    background: Rectangle {
+                        color: resultDelegate.current ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
+                            : resultDelegate.hovered ? panel.desktop.surface : "transparent"
+                        border.width: 0
+                        radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
                     }
                 }
-                TagText { anchors.centerIn: parent; visible: resultList.count === 0 && panel.filterIds.length > 0; text: "No matching passages"; color: panel.desktop.muted }
+                ColumnLayout {
+                    objectName: "studyTagsEmptyState"
+                    anchors.centerIn: parent
+                    width: parent.width - 24 * panel.studyScale
+                    visible: resultList.count === 0 && panel.installed(panel.relatedSource)
+                    spacing: 10 * panel.studyScale
+                    TagText {
+                        objectName: "studyTagsEmpty"
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        font.pixelSize: 13 * panel.studyScale
+                        color: panel.desktop.muted
+                        text: !panel.relatedSource ? ""
+                            : !panel.rootChips.length ? "No tags on " + panel.relatedSource.reference + "."
+                            : !panel.onIds.length ? "Turn on a tag to see passages."
+                            : panel.results.length ? "No passages match “" + panel.studyQuery.trim() + "”."
+                            : "No other passages are tagged " + panel.rootChips.filter(function(chip) { return panel.onIds.indexOf(chip.id) >= 0 })
+                                .map(function(chip) { return chip.name }).join(", ") + "."
+                    }
+                    TagText {
+                        objectName: "studyTagsVersionsHint"
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        visible: panel.rootChips.length > 0 && panel.onIds.length > 0 && !panel.results.length && !panel.allVersions && panel.otherVersions
+                        textFormat: Text.StyledText
+                        text: KeyNotation.hint([["A", "include other versions"]], panel.desktop.foreground, panel.desktop.muted)
+                        font.pixelSize: 12 * panel.studyScale
+                    }
+                    Button {
+                        id: addTags
+                        objectName: "studyAddTags"
+                        Layout.alignment: Qt.AlignHCenter
+                        visible: !panel.rootChips.length
+                        hoverEnabled: true
+                        focusPolicy: Qt.StrongFocus
+                        implicitHeight: 32 * panel.studyScale
+                        padding: 10 * panel.studyScale
+                        font.family: panel.desktop.fontFamily
+                        font.pixelSize: 13 * panel.studyScale
+                        text: "Add tags…"
+                        contentItem: Text {
+                            textFormat: Text.StyledText
+                            text: KeyNotation.escapeHtml(addTags.text) + "&nbsp;&nbsp;" + '<font color="' + panel.desktop.muted + '">'
+                                + KeyNotation.escapeHtml(KeyNotation.format("T")) + "</font>"
+                            font: addTags.font
+                            color: panel.desktop.foreground
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+                            color: addTags.down ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.16)
+                                : addTags.hovered ? panel.desktop.surface : "transparent"
+                            border.width: addTags.activeFocus ? 1 : 0
+                            border.color: panel.desktop.accent
+                        }
+                        onClicked: panel.app.openPassageTags(panel.snapshot(panel.relatedSource))
+                        Keys.onReturnPressed: clicked()
+                        Keys.onEnterPressed: clicked()
+                    }
+                }
             }
             TagText {
                 objectName: "studyCount"
                 visible: panel.studyListTab
                 Layout.fillWidth: true
+                font.pixelSize: 12 * panel.studyScale
                 text: panel.studyTab === "crossrefs"
                     ? (panel.crossRows.length + (panel.crossRows.length === 1 ? " cross reference" : " cross references") + " in " + panel.bible.versionAbbreviation)
                     : (panel.footnoteRows.length + (panel.footnoteRows.length === 1 ? " footnote" : " footnotes") + " in " + panel.bible.passage + " · " + panel.bible.versionAbbreviation)
@@ -1178,26 +1139,230 @@ Item {
                     color: panel.desktop.muted
                 }
             }
-            Item { Layout.fillHeight: true; visible: panel.confirmation !== null }
-            TagText { objectName: "tagMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.message }
-            Rectangle {
+            TagText { objectName: "studyMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.relatedShown ? panel.message : "" }
+            FineRule {}
+            TagText {
                 Layout.fillWidth: true
-                implicitHeight: 1
-                visible: panel.page !== "summary"
-                color: panel.desktop.border
-                opacity: 0.65
+                objectName: "studyHints"
+                textFormat: Text.StyledText
+                text: KeyNotation.hint(!panel.tagsTab
+                    ? [[["Left", "Right"], "tabs"], ["Return", panel.studyTab === "footnotes" ? "go to verse" : "open"], ["Y", "copy"], ["D", "Desk"], ["Escape", "close"]]
+                    : studySearch.activeFocus ? [[["Return", "Down"], "passages"], ["Escape", "leave search"]]
+                    : !panel.rootChips.length ? [[["Left", "Right"], "tabs"], ["T", "add tags"], ["Escape", "close"]]
+                    : panel.chipFocused ? [[["Left", "Right"], "chips"], ["Space", "toggle"], ["Shift+Space", "solo"], ["0", "all"], ["Down", "passages"], ["Escape", "close"]]
+                    : [[["Left", "Right"], "tabs"], ["Return", "open"], ["T", "tag"], panel.otherVersions ? ["A", panel.allVersions ? "this version" : "all versions"] : null,
+                        ["/", "search"], ["Escape", panel.studyQuery.length ? "clear" : "close"]],
+                    panel.desktop.foreground, panel.desktop.muted)
+                font.pixelSize: 11 * panel.studyScale
+                color: panel.desktop.muted
+            }
+        }
+    }
+    Popup {
+        id: surface
+        objectName: "tagsSurface"
+        parent: Overlay.overlay
+        // Above the side drawers it may open over (Annotations, Study).
+        z: 10
+        width: Math.min(780 * panel.uiScale, parent ? parent.width - 24 : 780)
+        height: Math.min(760 * panel.uiScale, parent ? parent.height - 24 : 760)
+        x: parent ? (parent.width - width) / 2 : 0
+        y: parent ? (parent.height - height) / 2 : 0
+        padding: 16 * panel.uiScale
+        modal: true
+        focus: true
+        // Esc or a click on the scrim closes it (a pending confirmation first
+        // needs esc or its own buttons).
+        closePolicy: panel.confirmation ? Popup.NoAutoClose : Popup.CloseOnPressOutside
+        // A modal: fades in, closes at once.
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: panel.app.fadeMs || 0; easing.type: Easing.OutQuad } }
+        exit: null
+        onClosed: {
+            panel.confirmation = null
+            panel.editingScope = null
+            panel.app.editingPanelClosed()
+            panel.app.restorePanelFocus()
+        }
+        background: Rectangle {
+            color: panel.desktop.background
+            border.color: panel.desktop.border
+            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+        }
+        Overlay.modal: Rectangle { color: Qt.rgba(panel.desktop.background.r, panel.desktop.background.g, panel.desktop.background.b, 0.72) }
+        contentItem: ColumnLayout {
+            id: body
+            objectName: "tagsBody"
+            spacing: 8 * panel.controlScale
+            Keys.onEscapePressed: panel.handleEscape()
+            RowLayout {
+                Layout.fillWidth: true
+                TagText {
+                    objectName: "tagsTitle"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: panel.page === "manage" ? "Manage tags"
+                        : panel.editingScope ? panel.editingScope.reference + " · " + panel.versionName(panel.editingScope) : "Tags"
+                    font.pixelSize: 14 * panel.controlScale
+                }
+                TagButton { text: "Back"; visible: panel.page === "manage"; onClicked: panel.back() }
+                TagButton { objectName: "manageTags"; text: "Manage"; visible: panel.page === "picker"; onClicked: panel.manage() }
             }
             TagText {
                 Layout.fillWidth: true
-                visible: panel.page !== "summary"
+                visible: panel.page === "picker" && !panel.scopeValid
+                objectName: "tagScopePrompt"
+                text: !panel.editingScope
+                    ? "Select a passage to add or remove tags."
+                    : "This source version is no longer installed. Choose a current passage to continue."
+                color: panel.desktop.muted
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: panel.confirmation !== null
+                TagText {
+                    Layout.fillWidth: true
+                    text: !panel.confirmation ? "" : panel.confirmation.action === "delete"
+                        ? "Delete “" + panel.confirmation.name + "” and its assignments in every version?"
+                        : panel.confirmation.action === "merge" ? "Merge “" + panel.confirmation.name + "” into “" + panel.confirmation.targetName + "” in every version? The source tag will be removed."
+                        : "Rename “" + panel.confirmation.name + "” to “" + panel.confirmation.newName + "” everywhere?"
+                }
+                RowLayout {
+                    TagButton { id: cancelManagement; objectName: "cancelTagManagement"; text: "Cancel"; onClicked: { panel.confirmation = null; search.forceActiveFocus() } }
+                    TagButton { objectName: "confirmTagManagement"; text: "Confirm"; enabled: !panel.bible.busy; onClicked: panel.confirmManagement() }
+                }
+            }
+            TagInput {
+                id: search
+                objectName: "tagSearch"
+                Layout.fillWidth: true
+                visible: panel.confirmation === null
+                placeholderText: panel.page === "picker" ? "Find or create a tag…" : "Filter tags…"
+                text: panel.query
+                onTextEdited: panel.query = text
+                onAccepted: {
+                    if (panel.page === "picker" && panel.validName) panel.createFromQuery()
+                    else if (tagList.count) panel.toggleTag(panel.filteredTags[Math.max(0, tagList.currentIndex)].id)
+                }
+                Keys.onDownPressed: { if (tagList.count) { tagList.currentIndex = 0; tagList.forceActiveFocus() } }
+            }
+            ListView {
+                id: tagList
+                objectName: "tagList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 34 * panel.controlScale
+                visible: panel.confirmation === null
+                clip: true
+                spacing: 4 * panel.uiScale
+                model: []
+                currentIndex: -1
+                property bool updatingModel: false
+                onCurrentIndexChanged: {
+                    if (!updatingModel && currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+                }
+                keyNavigationEnabled: true
+                activeFocusOnTab: true
+                Keys.onSpacePressed: { if (currentIndex >= 0) panel.toggleTag(panel.filteredTags[currentIndex].id) }
+                Keys.onReturnPressed: { if (currentIndex >= 0) panel.toggleTag(panel.filteredTags[currentIndex].id) }
+                Keys.onEnterPressed: { if (currentIndex >= 0) panel.toggleTag(panel.filteredTags[currentIndex].id) }
+                Keys.onUpPressed: { if (currentIndex <= 0) search.forceActiveFocus(); else decrementCurrentIndex() }
+                ScrollBar.vertical: TagScrollbar { objectName: "tagListScrollbar" }
+                delegate: TagButton {
+                    id: tagDelegate
+                    required property var modelData
+                    required property int index
+                    objectName: "tag:" + modelData.id
+                    width: tagList.width
+                    chosen: panel.page === "manage" ? panel.managedId === modelData.id : panel.exactIds.indexOf(modelData.id) >= 0
+                    text: (chosen ? "✓  " : "    ") + modelData.name + " · " + modelData.count
+                    hint: modelData.name
+                    enabled: panel.page !== "picker" || (panel.scopeValid && !panel.bible.busy)
+                    onClicked: { tagList.currentIndex = index; panel.toggleTag(modelData.id) }
+                    background: Rectangle {
+                        // Like the app's other lists: the current row is a tinted fill, never an accent border.
+                        color: tagDelegate.activeFocus || (tagList.activeFocus && tagList.currentIndex === tagDelegate.index)
+                            ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
+                            : tagDelegate.chosen || tagDelegate.hovered ? panel.desktop.surface : "transparent"
+                        border.width: 0
+                        radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+                    }
+                }
+                TagText { anchors.centerIn: parent; visible: tagList.count === 0; text: panel.allTags.length ? "No matching tags" : "No tags yet"; color: panel.desktop.muted }
+            }
+            TagButton {
+                objectName: "createPassageTag"
+                Layout.fillWidth: true
+                visible: panel.page === "picker" && panel.query.length > 0
+                enabled: panel.validName && panel.scopeValid && !panel.bible.busy
+                text: "Create / assign “" + panel.query.trim() + "”"
+                onClicked: panel.createFromQuery()
+            }
+            TagText {
+                visible: panel.page === "picker" && panel.overlaps.length > 0
+                text: "Other overlapping ranges · assignments are separate"
+                color: panel.desktop.muted
+                Layout.fillWidth: true
+            }
+            ListView {
+                id: overlapList
+                objectName: "tagOverlaps"
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(100 * panel.controlScale, body.height * 0.18, contentHeight)
+                visible: panel.page === "picker" && panel.overlaps.length > 0
+                model: panel.overlaps
+                clip: true
+                ScrollBar.vertical: TagScrollbar { objectName: "tagOverlapsScrollbar" }
+                delegate: RowLayout {
+                    id: overlapDelegate
+                    required property var modelData
+                    width: overlapList.width
+                    TagText { Layout.fillWidth: true; text: overlapDelegate.modelData.reference + " · " + panel.tagNames(overlapDelegate.modelData.tags) }
+                    TagButton { objectName: "openTagOverlap:" + overlapDelegate.modelData.reference; text: "Open"; onClicked: panel.openTagged(overlapDelegate.modelData) }
+                    TagButton { objectName: "editTagOverlap:" + overlapDelegate.modelData.reference; text: "Edit tags"; onClicked: panel.openTagged(overlapDelegate.modelData, true) }
+                }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: panel.page === "manage" && panel.managedId.length > 0 && panel.confirmation === null
+                TagText { Layout.fillWidth: true; text: panel.tagById(panel.managedId) ? panel.tagById(panel.managedId).name : "" }
+                RowLayout {
+                    Layout.fillWidth: true
+                    TagInput { id: renameInput; objectName: "tagRenameInput"; Layout.fillWidth: true; placeholderText: "New name"; onAccepted: panel.requestManagement("rename") }
+                    TagButton { objectName: "renameTag"; text: "Rename…"; onClicked: panel.requestManagement("rename") }
+                    TagButton { objectName: "deleteTag"; text: "Delete…"; onClicked: panel.requestManagement("delete") }
+                }
+                TagText { text: "Merge into"; color: panel.desktop.muted }
+                ListView {
+                    id: mergeList
+                    objectName: "tagMergeTargets"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 100 * panel.uiScale
+                    clip: true
+                    model: panel.allTags.filter(function(tag) { return tag.id !== panel.managedId })
+                    ScrollBar.vertical: TagScrollbar { objectName: "tagMergeScrollbar" }
+                    delegate: TagButton {
+                        required property var modelData
+                        objectName: "mergeTarget:" + modelData.id
+                        width: mergeList.width
+                        text: modelData.name
+                        chosen: panel.mergeTarget === modelData.id
+                        onClicked: panel.mergeTarget = modelData.id
+                    }
+                }
+                TagButton { objectName: "mergeTags"; text: "Merge…"; enabled: panel.mergeTarget.length > 0; onClicked: panel.requestManagement("merge") }
+            }
+            Item { Layout.fillHeight: true; visible: panel.confirmation !== null }
+            TagText { objectName: "tagMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.message }
+            FineRule {}
+            TagText {
+                Layout.fillWidth: true
                 objectName: "tagsHints"
                 textFormat: Text.StyledText
                 text: KeyNotation.hint(panel.page === "picker" ? [["Space", "toggle"], ["Return", "toggle / create"], ["Escape", "close"]]
-                    : panel.page === "related" ? (panel.studyTab === "related" ? [[["Left", "Right"], "tabs"], ["/", "search"], ["Return", "open"], ["Escape", "close"]]
-                        : [[["Left", "Right"], "tabs"], ["Return", panel.studyTab === "footnotes" ? "go to verse" : "open"], ["Y", "copy"], ["D", "Desk"], ["Escape", "close"]])
-                    : [["Return", "open"], ["Escape", "close"]], panel.desktop.foreground, panel.desktop.muted)
+                    : [["Return", "choose"], ["Escape", "close"]], panel.desktop.foreground, panel.desktop.muted)
                 font.pixelSize: 11 * panel.controlScale
                 color: panel.desktop.muted
             }
         }
+    }
 }

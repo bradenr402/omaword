@@ -157,6 +157,12 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `d`: Add item to Desk, or remove it
 - `shift E`: Edit item's annotation range
 - `delete` · `backspace`: Remove item
+- `t`: Edit the item's tags (Annotations and Study Tags)
+- `tab` · `shift tab`: Between Study Tags results and tag chips
+- `space`: Turn a Study tag chip on or off
+- `shift space`: Show only this chip's tag, or every tag again
+- `0`: Turn every Study tag chip back on
+- `a`: Study Tags in all installed versions, or this one
 - `/`: Search the list (Annotations, Study's Tags)
 - `h` · `←`: Previous tab (Annotations, Study)
 - `l` · `→`: Next tab (Annotations, Study)
