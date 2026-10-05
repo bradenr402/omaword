@@ -1390,6 +1390,29 @@ private slots:
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
         }
     }
+    void markersHaveLargerHitAreas() {
+        for (const QString mode : {"verse", "block"}) {
+            setMode(mode); navigate("John 3:3"); bible->clearSelection();
+            auto marker = visualPrefix(window->contentItem(), mode == "verse" ? "verseFootnoteMark:3." : "blockInlineMarker:footnote:");
+            auto hit = visualPrefix(window->contentItem(), mode == "verse" ? "verseFootnoteHit:3." : "blockInlineHit:footnote:");
+            QVERIFY(marker && hit);
+            // Larger than the mark, and the text did not move.
+            QVERIFY(hit->width() > marker->width() + 6); QVERIFY(hit->height() > marker->height() + 6);
+            // Mouse: a click just beside the drawn cell still opens the footnote.
+            const QPointF edge = marker->mapToScene(QPointF(marker->width() + 3, marker->height() / 2));
+            clickAt(edge.toPoint()); QTRY_VERIFY(opened("relatedDrawer"));
+            QCOMPARE(bible->selectionReference(), QString("John 3:3"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+        }
+        // Inline annotation markers too (flowing layouts).
+        bible->selectVerses(5, 6); QVERIFY(bible->toggleBookmark()); navigate("John 3:3");
+        setMode("block");
+        auto glyph = visualPrefix(window->contentItem(), "blockInlineMarker:bookmark:open");
+        auto glyphHit = visualPrefix(window->contentItem(), "blockInlineHit:bookmark:open");
+        QVERIFY(glyph && glyphHit); QVERIFY(glyphHit->width() > glyph->width() + 6);
+        // Keyboard: the opening marker still takes tab and opens on enter.
+        glyph->forceActiveFocus(); key(Qt::Key_Return); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5–6"));
+    }
 };
 
 int main(int argc, char **argv) {

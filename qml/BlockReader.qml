@@ -533,7 +533,10 @@ Item {
             }
             MouseArea {
                 id: inlineMouse
+                objectName: "blockInlineHit:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
+                // A larger, invisible target than the narrow cell (layout unchanged).
                 anchors.fill: parent
+                anchors.margins: -(root.controller.markerHitMargin || 0)
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 cursorShape: Qt.PointingHandCursor

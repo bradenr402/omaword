@@ -2099,6 +2099,9 @@ ApplicationWindow {
         if (sidePanel === "related") { tagsUi.setStudyTab("footnotes", { verse: verse, seq: seq }); return }
         if (leaveSidePanel("related")) tagsUi.openStudy("footnotes", { verse: verse, seq: seq })
     }
+    // Footnote and inline annotation markers take clicks a little beyond their
+    // drawn cell: a larger, invisible target that never moves the text.
+    readonly property real markerHitMargin: 5 * readerScale
     // Footnote markers stay out of the tab order; their tooltips name the key.
     readonly property string footnoteHint: "Click to read it in Study · " + KeyNotation.format("Shift+S") + " → Footnotes"
     function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
@@ -4807,7 +4810,10 @@ ApplicationWindow {
                                         }
                                         MouseArea {
                                             id: footnoteMouse
+                                            objectName: "verseFootnoteHit:" + verseRow.modelData.number + "." + footnoteMarker.modelData.seq
+                                            // A larger, invisible target than the small mark (layout unchanged).
                                             anchors.fill: parent
+                                            anchors.margins: -app.markerHitMargin
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: app.openFootnote(verseRow.modelData.number, footnoteMarker.modelData.seq)
