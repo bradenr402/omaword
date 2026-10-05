@@ -105,7 +105,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `w`: Write a note
 - `t`: Tag passage
 - `d`: Add to Desk
-- `shift E`: Edit annotation range
+- `shift E`: Edit the selection's annotation range
 - `backspace`: Edit range: choose another overlapping range
 - `esc`: Edit range: back from Combine notes to moving the range
 - `ctrl t`: Manage tags
@@ -183,7 +183,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `y`: Copy item as quotation
 - `shift Y`: Copy item as plain text
 - `d`: Add item to Desk, or remove it
-- `shift E`: Edit item's annotation range
+- `shift E`: Edit item's annotation range (Annotations, Study's Tags)
 - `delete` · `backspace`: Remove item
 - `t`: Edit the item's tags (Annotations and Study Tags)
 - `tab` · `shift tab`: Between Study Tags results and tag chips
@@ -191,7 +191,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `shift space`: Show only this tag (a Study tag chip), or all tags again
 - `0`: Show all tags (Study tag chips)
 - `a`: Study Tags in all installed versions, or this one
-- `/`: Search the list (Annotations, Study's Tags)
+- `/`: Search the list (Annotations tabs with more than 10 items, Study's Tags)
 - `h` · `←`: Previous tab (Annotations, Study)
 - `l` · `→`: Next tab (Annotations, Study)
 - `shift delete` · `shift backspace`: Clean Desk

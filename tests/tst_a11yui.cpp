@@ -1780,6 +1780,19 @@ private slots:
         key(Qt::Key_Home); QCOMPARE(search->property("cursorPosition").toInt(), 0);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
     }
+    void helpTitlesSayWhereKeysWork() {
+        // Keyboard: search Keybindings for the clarified rows.
+        run("help"); QTRY_VERIFY(opened("helpDialog")); type("range");
+        QTRY_VERIFY(item("keybindingEdit the selection's annotation range"));
+        QTRY_VERIFY(item("keybindingEdit item's annotation range (Annotations, Study's Tags)"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
+        run("help"); QTRY_VERIFY(opened("helpDialog")); type("search the list");
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = item("keybindingSearch the list (Annotations tabs with more than 10 items, Study's Tags)")) != nullptr);
+        // Mouse: hovering the row names its scope.
+        QTest::qWait(50); QTest::mouseMove(window, center(row)); QTRY_VERIFY(toolTipOf(row)->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
+    }
     // ── Phase 5: new
 
     int matchCount() const { return value(prop("searchMatches")).toList().size(); }
