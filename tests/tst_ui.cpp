@@ -412,7 +412,8 @@ private slots:
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("reading settings"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
-        QTRY_VERIFY(item("lineHeightSlider")->hasActiveFocus());
+        // Focus starts at the top: the first switch.
+        QTRY_VERIFY(item("settingfocus")->hasActiveFocus());
         QCOMPARE(prop("fontSizeValue","text").toString(),QString("18"));
         QCOMPARE(prop("fontSizeSlider","from").toInt(),8);
         QCOMPARE(prop("fontSizeSlider","to").toInt(),40);
@@ -680,12 +681,12 @@ private slots:
         key(Qt::Key_L,Qt::AltModifier); QCOMPARE(bible->readingMode(),QString("paragraph"));
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
-        type("reading mode");
+        type("layout");
         QTRY_COMPARE(prop("paletteHintreadingMode","text").toString(),QString("Paragraph · alt l"));
         key(Qt::Key_Return); QTRY_COMPARE(bible->readingMode(),QString("verse"));
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
-        type("reading mode");
-        QTRY_VERIFY(item("keybindingReading mode"));
+        type("layout");
+        QTRY_VERIFY(item("keybindingLayout"));
         key(Qt::Key_Return); QTRY_COMPARE(bible->readingMode(),QString("block"));
         key(Qt::Key_R,Qt::ControlModifier); QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         QTest::qWait(100);
@@ -1219,7 +1220,8 @@ private slots:
         QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
         type("reading settings"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
-        QTRY_VERIFY(item("lineHeightSlider")->hasActiveFocus());
+        QTRY_VERIFY(item("settingfocus")->hasActiveFocus());
+        item("lineHeightSlider")->forceActiveFocus();
         QCOMPARE(bible->lineHeight(),1.5);
         QCOMPARE(prop("lineHeightSlider","from").toDouble(),1.0);
         QCOMPARE(prop("lineHeightSlider","to").toDouble(),3.0);
@@ -3625,7 +3627,7 @@ private slots:
             key(toggle.first,modifiers); checkToast(toggle.second + (initiallyOn ? " on" : " off"));
         }
         for (const auto mode : {"Block","Paragraph","Verse"}) {
-            key(Qt::Key_L,Qt::AltModifier); checkToast(QString("Reading mode ") + mode);
+            key(Qt::Key_L,Qt::AltModifier); checkToast(QString("Layout ") + mode);
             QTRY_VERIFY(!window->property("restoringPosition").toBool());
         }
         const auto previousToast = prop("toast","text");
@@ -4040,7 +4042,7 @@ private slots:
             {"switchVersion","Switch version","ctrl v"},
             {"bibleSearch","Search Bible","ctrl /"}, {"help","Keybindings","?"},
             {"numbers","Show verse numbers","alt n"}, {"headings","Show headings","alt h"},
-            {"versePicker","Verse picker","alt p"}, {"readingMode","Reading mode","alt l"},
+            {"versePicker","Verse picker","alt p"}, {"readingMode","Layout","alt l"},
             {"soundEffects","Sound effects","alt s"}, {"reduceMotion","Animations","alt m"},
             {"lineMore","Increase line height","ctrl alt ="}, {"lineLess","Decrease line height","ctrl alt -"},
             {"lineReset","Reset line height","ctrl alt 0"}, {"manageTags","Manage tags","ctrl t"},

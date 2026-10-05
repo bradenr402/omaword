@@ -3302,10 +3302,10 @@ ApplicationWindow {
         { id: "chapterOutline", group: "Reading", title: "Chapter outline", sequences: ["Alt+O"], setting: "chapterOutline", command: true },
         // alt w: w writes a note; alt w shows notes in the margin.
         { id: "marginNotes", group: "Reading", title: "Margin notes", sequences: ["Alt+W"], setting: "marginNotes", command: true },
-        { id: "readingMode", group: "Reading", title: "Reading mode", sequences: ["Alt+L"], command: true },
+        { id: "readingMode", group: "Reading", title: "Layout", sequences: ["Alt+L"], command: true },
         { id: "soundEffects", group: "Reading", title: "Sound effects", sequences: ["Alt+S"], scope: "global", command: true },
         { id: "reduceMotion", group: "Reading", title: "Animations", sequences: ["Alt+M"], scope: "global", command: true },
-        { id: "larger", group: "Reading", title: "Larger text", sequences: ["Ctrl++", "Ctrl+="] },
+        { id: "larger", group: "Reading", title: "Larger text", sequences: ["Ctrl+="], aliases: ["Ctrl++"], aliasReason: "the zoom-in key in most apps (shift = on many layouts)." },
         { id: "smaller", group: "Reading", title: "Smaller text", sequences: ["Ctrl+-"] },
         { id: "resetText", group: "Reading", title: "Reset text size", sequences: ["Ctrl+0"] },
         { id: "lineMore", group: "Reading", title: "Increase line height", sequences: ["Ctrl+Alt+="] },
@@ -3780,7 +3780,7 @@ ApplicationWindow {
             const modes = ["paragraph", "verse", "block"]
             const previousMode = bible.readingMode
             bible.setReadingMode(modes[(modes.indexOf(bible.readingMode) + 1) % modes.length])
-            if (bible.readingMode !== previousMode) notify("Reading mode " + readingModeName(bible.readingMode), true)
+            if (bible.readingMode !== previousMode) notify("Layout " + readingModeName(bible.readingMode), true)
             break
         }
         case "focus": bible.setFocusMode(!bible.focusMode); break
@@ -3895,6 +3895,35 @@ ApplicationWindow {
         helpDialog.close()
     }
 
+    // The layout icons (footer layout button, Reading settings' Layout
+    // choices), drawn on a 24×24 canvas path already begun.
+    function focusFirstSetting() {
+        for (let i = 0; i < settingSwitches.count; ++i) {
+            const control = settingSwitches.itemAt(i)
+            if (control && control.enabled && control.visible) { control.forceActiveFocus(); return }
+        }
+        lineHeightSlider.forceActiveFocus()
+    }
+    function paintLayoutGlyph(ctx, mode) {
+        if (mode === "verse") {
+            // Verse: separate short rows, each with a small number tick.
+            for (const y of [5, 12, 19]) {
+                ctx.moveTo(3, y - 1.5); ctx.lineTo(3, y + 1.5)
+                ctx.moveTo(8, y); ctx.lineTo(y === 12 ? 17 : 21, y)
+            }
+        } else if (mode === "paragraph") {
+            // Paragraph: two text blocks, each first line indented.
+            ctx.moveTo(8, 3); ctx.lineTo(21, 3)
+            ctx.moveTo(3, 7); ctx.lineTo(21, 7)
+            ctx.moveTo(3, 11); ctx.lineTo(14, 11)
+            ctx.moveTo(8, 17); ctx.lineTo(21, 17)
+            ctx.moveTo(3, 21); ctx.lineTo(17, 21)
+        } else if (mode === "block") {
+            // Block: one solid run of lines.
+            for (const y of [4, 8.5, 13, 17.5]) { ctx.moveTo(3, y); ctx.lineTo(21, y) }
+            ctx.moveTo(3, 22); ctx.lineTo(12, 22)
+        }
+    }
     component QuietButton: Button {
         id: button
         property bool emphasized: false
@@ -4186,23 +4215,8 @@ ApplicationWindow {
                         ctx.moveTo(2, 13); ctx.lineTo(8, 13); ctx.lineTo(9.5, 16)
                         ctx.lineTo(14.5, 16); ctx.lineTo(16, 13); ctx.lineTo(22, 13)
                         ctx.lineTo(22, 21); ctx.lineTo(2, 21); ctx.closePath()
-                    } else if (glyph === "layout-verse") {
-                        // Verse: separate short rows, each with a small number tick.
-                        for (const y of [5, 12, 19]) {
-                            ctx.moveTo(3, y - 1.5); ctx.lineTo(3, y + 1.5)
-                            ctx.moveTo(8, y); ctx.lineTo(y === 12 ? 17 : 21, y)
-                        }
-                    } else if (glyph === "layout-paragraph") {
-                        // Paragraph: two text blocks, each first line indented.
-                        ctx.moveTo(8, 3); ctx.lineTo(21, 3)
-                        ctx.moveTo(3, 7); ctx.lineTo(21, 7)
-                        ctx.moveTo(3, 11); ctx.lineTo(14, 11)
-                        ctx.moveTo(8, 17); ctx.lineTo(21, 17)
-                        ctx.moveTo(3, 21); ctx.lineTo(17, 21)
-                    } else if (glyph === "layout-block") {
-                        // Block: one solid run of lines.
-                        for (const y of [4, 8.5, 13, 17.5]) { ctx.moveTo(3, y); ctx.lineTo(21, y) }
-                        ctx.moveTo(3, 22); ctx.lineTo(12, 22)
+                    } else if (glyph.startsWith("layout-")) {
+                        app.paintLayoutGlyph(ctx, glyph.slice(7))
                     } else if (glyph === "history") {
                         // A clock face with hands at ten past.
                         ctx.arc(12, 12, 9.5, 0, 2 * Math.PI)
@@ -7334,7 +7348,8 @@ ApplicationWindow {
         width: Math.min(480 * app.scale, app.width - 48)
         height: Math.min(settingsContent.implicitHeight + 48, app.height - 48)
         // Focus at once, while the modal is still fading in.
-        onVisibleChanged: if (visible) { lineHeightSlider.forceActiveFocus() }
+        // Focus starts at the top: the first switch, scrolled into view.
+        onVisibleChanged: if (visible) { settingsScroll.contentItem.contentY = 0; app.focusFirstSetting() }
         onClosed: app.restorePanelFocus()
         contentItem: KeyScrollView {
             id: settingsScroll
@@ -7349,6 +7364,7 @@ ApplicationWindow {
                 Label { text: "Reading settings"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true }
             }
             Repeater {
+                id: settingSwitches
                 model: app.actions.filter(function(action) { return !!action.setting })
                 delegate: SettingSwitch {
                     required property var modelData
@@ -7383,9 +7399,11 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
+            // The on/off switches above; the layout and sliders below.
+            FineRule { objectName: "settingsSwitchesRule"; Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Reading mode"; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true }
+                Label { objectName: "readingModeTitle"; text: "Layout"; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true }
                 Label { objectName: "readingModeKey"; text: app.keyRich("readingMode"); textFormat: Text.StyledText; color: desktop.muted; font.pixelSize: 12 * app.scale }
             }
             RowLayout {
@@ -7395,7 +7413,10 @@ ApplicationWindow {
                 Repeater {
                     model: ["paragraph", "verse", "block"]
                     delegate: QuietButton {
+                        id: layoutChoice
                         required property string modelData
+                        readonly property real iconSize: 16 * app.scale
+                        readonly property real iconGap: 6 * app.scale
                         objectName: "readingMode:" + modelData
                         text: app.readingModeName(modelData)
                         checkable: true
@@ -7404,8 +7425,32 @@ ApplicationWindow {
                         emphasized: checked
                         compact: true
                         Layout.fillWidth: true
+                        // Room for the icon, keeping icon and name centred together.
+                        leftPadding: 10 + iconSize + iconGap
+                        rightPadding: 10
                         onClicked: bible.setReadingMode(modelData)
-                        Accessible.name: text + " reading mode"
+                        Accessible.name: text + " layout"
+                        // The footer layout button's icon for this layout, left of its name.
+                        Canvas {
+                            objectName: "readingModeIcon:" + layoutChoice.modelData
+                            width: layoutChoice.iconSize
+                            height: width
+                            x: layoutChoice.leftPadding + (layoutChoice.availableWidth - layoutChoice.contentItem.implicitWidth) / 2 - width - layoutChoice.iconGap
+                            y: (layoutChoice.height - height) / 2
+                            property color ink: !layoutChoice.enabled ? desktop.muted : layoutChoice.emphasized ? desktop.accent : desktop.foreground
+                            onInkChanged: requestPaint()
+                            onPaint: {
+                                const ctx = getContext("2d")
+                                ctx.reset()
+                                ctx.scale(width / 24, height / 24)
+                                ctx.strokeStyle = ink
+                                ctx.lineWidth = 1.8
+                                ctx.lineCap = "square"
+                                ctx.beginPath()
+                                app.paintLayoutGlyph(ctx, layoutChoice.modelData)
+                                ctx.stroke()
+                            }
+                        }
                     }
                 }
             }

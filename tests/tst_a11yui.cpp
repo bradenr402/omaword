@@ -1717,6 +1717,55 @@ private slots:
         find("born ag(ai)n"); QTRY_COMPARE(matchCount(), 1); clickAt(outsidePoint("chapterFind", -1));
         QTRY_VERIFY(!prop("findPromptOpen").toBool()); QCOMPARE(prop("acceptedSearchQuery").toString(), QString("born ag(ai)n"));
     }
+    void readingSettingsLayoutAndKeys() {
+        run("settings"); QTRY_VERIFY(opened("settingsDialog"));
+        QTest::qWait(60);
+        // Focus starts at the top.
+        QTRY_VERIFY(item("settingfocus")->hasActiveFocus()); QCOMPARE(contentY("settingsScroll"), 0.0);
+        // Layout, with the footer's icons beside each choice.
+        QCOMPARE(object("readingModeTitle")->property("text").toString(), QString("Layout"));
+        for (const QString mode : {"paragraph", "verse", "block"}) {
+            auto icon = item("readingModeIcon:" + mode), button = item("readingMode:" + mode);
+            QVERIFY(icon && icon->isVisible());
+            auto label = qvariant_cast<QQuickItem *>(button->property("contentItem"));
+            const qreal textLeft = label->x() + (label->width() - label->implicitWidth()) / 2;
+            QVERIFY2(icon->x() + icon->width() <= textLeft && icon->x() >= 0, qPrintable(mode));
+        }
+        // A rule under the switches, above the layout.
+        auto rule = item("settingsSwitchesRule"); QVERIFY(rule && rule->isVisible());
+        const qreal ruleY = rule->mapToScene(QPointF()).y();
+        QVERIFY(item("settingmarginNotes")->mapToScene(QPointF(0, item("settingmarginNotes")->height())).y() <= ruleY);
+        QVERIFY(item("readingModeTitle")->mapToScene(QPointF()).y() >= ruleY);
+        // ctrl = is the listed increase key; ctrl + still works.
+        const QString hints = object("fontSizeHints")->property("plainText").toString();
+        QVERIFY2(hints.contains("ctrl = increase") && !hints.contains("ctrl +"), qPrintable(hints));
+        const int size = bible->fontSize();
+        key(Qt::Key_Equal, Qt::ControlModifier); QCOMPARE(bible->fontSize(), size + 1);
+        key(Qt::Key_Plus, Qt::ControlModifier); QCOMPARE(bible->fontSize(), size + 2);
+        key(Qt::Key_0, Qt::ControlModifier);
+        shot("reading-settings");
+        // Keyboard: tab reaches every control in order and wraps to the top.
+        QStringList order;
+        for (int i = 0; i < 30; ++i) {
+            key(Qt::Key_Tab); const QString name = focusName();
+            if (name == "settingfocus") break;
+            order << name;
+        }
+        for (const QString name : {"settingnumbers", "settingmarginNotes", "readingMode:paragraph", "readingMode:verse", "readingMode:block",
+                 "fontSizeSlider", "lineHeightSlider"})
+            QVERIFY2(order.contains(name), qPrintable(order.join(", ")));
+        QVERIFY(order.indexOf("settingmarginNotes") < order.indexOf("readingMode:paragraph"));
+        QVERIFY(order.indexOf("readingMode:block") < order.indexOf("fontSizeSlider"));
+        // Keyboard: a focused layout choice takes enter; a switch takes space.
+        item("readingMode:block")->forceActiveFocus(); key(Qt::Key_Return); QCOMPARE(bible->readingMode(), QString("block"));
+        item("settingnumbers")->forceActiveFocus(); const bool numbers = bible->showVerseNumbers();
+        key(Qt::Key_Space); QCOMPARE(bible->showVerseNumbers(), !numbers);
+        // Mouse: a click on each.
+        click(item("readingMode:verse")); QCOMPARE(bible->readingMode(), QString("verse"));
+        click(item("settingnumbers")); QCOMPARE(bible->showVerseNumbers(), numbers);
+        QVERIFY(opened("settingsDialog"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
+    }
 };
 
 int main(int argc, char **argv) {

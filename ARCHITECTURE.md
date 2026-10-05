@@ -223,6 +223,9 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 - Panel- and mode-local keys are catalog rows with a non-global `scope`
   (`characters`, `tags`, `rangeEditor`, `importGuide`, `versions`, `list`, …):
   listed in Keybindings and the README, bound by their owner, never globally.
+- `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
+  settings → Layout (`readingMode`, still the id) draws `paintLayoutGlyph`, the
+  footer layout button's icons.
 - With a drawer side panel open (Annotations, Desk, History, Study), the keys
   of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
   keyboard to the reader, close the panel, then act (`runKey`) — so the

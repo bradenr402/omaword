@@ -158,10 +158,10 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt j`: Highlight words of Jesus
 - `alt o`: Chapter outline
 - `alt w`: Margin notes
-- `alt l`: Reading mode
+- `alt l`: Layout
 - `alt s`: Sound effects
 - `alt m`: Animations
-- `ctrl +` · `ctrl =`: Larger text
+- `ctrl =`: Larger text
 - `ctrl -`: Smaller text
 - `ctrl 0`: Reset text size
 - `ctrl alt =`: Increase line height
@@ -215,13 +215,14 @@ These also work, but stay out of the in-app list:
 - `20G` (Go to verse number): Vim's go-to-line.
 - `ctrl shift P` (Open commands): the command palette key in VS Code and its kin.
 - `F1` (Keybindings): the help key in most desktop apps.
+- `ctrl +` (Larger text): the zoom-in key in most apps (shift = on many layouts).
 
 <!-- shortcuts:end -->
 
 ## Features
 
 ### Reading
-- Paragraph, Verse, and Block layouts (`alt l`), with optional verse numbers and headings.
+- Paragraph, Verse, and Block layouts (`alt l`, or Reading settings → Layout), with optional verse numbers and headings.
 - Focus mode (`f`) dims everything but the current verse and keeps it 40% down the window, like a typewriter. The footer then shows only the focus button; rest the pointer on it (or tab to it) to reveal the rest in place.
 - **Highlight words of Jesus** (`alt j`) colors them with your theme's palette, where the version marks them (KJV).
 - Wide windows add margins: a sticky **Chapter outline** of the chapter and its section headings on the left (`alt o`; `{` / `}` jump between headings, `{` ending at the top of the chapter), and **Margin notes** on the right (`alt w`), each joined to its passage by hand-drawn braces and an arrow. Margin notes take priority and may move the text left; both are off by default.
