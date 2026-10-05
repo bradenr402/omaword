@@ -11,6 +11,7 @@
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QStyleHints>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlRecord>
@@ -1887,11 +1888,15 @@ private slots:
     void ctrlClickOpensNoteLinks() {
         navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         auto editor = item("noteEditor"); editor->setProperty("text", QStringLiteral("Compare John 3:5 here"));
+        // Wait for the drawer to settle before taking the link's position.
+        QTRY_COMPARE(object("notesDrawer")->property("position").toReal(), 1.0); QTest::qWait(50);
         QRectF rect; QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, 10));
         const QPoint link = editor->mapToScene(rect.center()).toPoint();
         // Mouse: a plain click only places the caret.
         clickAt(link); QCOMPARE(bible->selectionReference(), QString("John 3:16"));
-        // ctrl click opens the passage; Notes stays open.
+        const int caret = editor->property("cursorPosition").toInt(); QVERIFY2(caret >= 8 && caret <= 16, qPrintable(QString::number(caret))); // on the link
+        // ctrl click opens the passage; Notes stays open. (Apart from the first click: not a double click.)
+        QTest::qWait(QGuiApplication::styleHints()->mouseDoubleClickInterval() + 50);
         QTest::mouseClick(window, Qt::LeftButton, Qt::ControlModifier, link); QCoreApplication::processEvents();
         QTRY_COMPARE(bible->selectionReference(), QString("John 3:5")); QVERIFY(opened("notesDrawer"));
         // Keyboard: alt enter at the cursor does the same (Notes is now on 3:5's empty note).
