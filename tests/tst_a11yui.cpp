@@ -621,6 +621,40 @@ private slots:
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
         click(item("rangeEditHintsPart:cancel")); QTRY_VERIFY(!prop("rangeEditing").toBool());
     }
+    void searchPaletteLoadsMoreByKeyAndHint() {
+        auto results = item("paletteResults");
+        auto search = [&] {
+            key(Qt::Key_Slash, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette"));
+            type("access"); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
+            QTRY_COMPARE(results->property("count").toInt(), 100); QCOMPARE(bible->searchResultCount(), 167);
+        };
+        search();
+        // The hint row offers ↓ more while a page is left.
+        QVERIFY(item("paletteHintsPart:more") && item("paletteHintsPart:more")->property("clickable").toBool());
+        // Keyboard: end reaches the last loaded row, end again loads the next page.
+        key(Qt::Key_Down); key(Qt::Key_End); QCOMPARE(results->property("currentIndex").toInt(), 99);
+        key(Qt::Key_End); QTRY_COMPARE(results->property("count").toInt(), 167);
+        QCOMPARE(results->property("currentIndex").toInt(), 100);
+        QTRY_VERIFY(!item("paletteHintsPart:more"));
+        key(Qt::Key_Home); QCOMPARE(results->property("currentIndex").toInt(), 0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        // ↓ past the last row and pgdn load too.
+        run("books"); key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        search();
+        key(Qt::Key_Down); key(Qt::Key_End); key(Qt::Key_Down);
+        QTRY_COMPARE(results->property("count").toInt(), 167); QCOMPARE(results->property("currentIndex").toInt(), 100);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        run("books"); key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        search();
+        for (int i = 0; i < 30 && results->property("currentIndex").toInt() < 92; ++i) key(Qt::Key_PageDown);
+        QCOMPARE(results->property("count").toInt(), 100);
+        key(Qt::Key_PageDown); QTRY_COMPARE(results->property("count").toInt(), 167);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        // Mouse: the "↓ more" hint loads the next page.
+        run("books"); key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        search();
+        click(item("paletteHintsPart:more")); QTRY_COMPARE(results->property("count").toInt(), 167);
+    }
 };
 
 int main(int argc, char **argv) {

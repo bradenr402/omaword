@@ -2791,7 +2791,8 @@ ApplicationWindow {
             ["Escape", "cancel", function() { rangeEditor.cancel() }, rangeEditor.sessionOpen]]
     }
     function paletteHintParts() {
-        return [[["Up", "Down"], "choose"], ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
+        return [[["Up", "Down"], "choose"], paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
+            ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
             paletteBook > 0 ? ["Left", "back", app.backToBooks] : null, ["Escape", "close", app.escapePalette]]
     }
     function versionHintParts() {
@@ -3054,11 +3055,44 @@ ApplicationWindow {
         paletteResults.currentIndex = 0
         referenceInput.forceActiveFocus()
     }
+    // Bible search loads results a page at a time: moving past the last loaded
+    // row (↓, pgdn, end) loads the next page and continues into it.
+    readonly property bool paletteMoreResults: paletteTextMode && paletteSearchCurrent && !bible.searchBusy
+        && paletteResults.count > 0 && paletteResults.count < bible.searchResultCount
+    function loadMorePalette(target) {
+        if (!paletteMoreResults) { sounds.play("boundary"); return false }
+        const row = target === undefined ? paletteResults.count : target
+        bible.loadMoreSearchResults()
+        paletteResults.currentIndex = Math.max(0, Math.min(paletteResults.count - 1, row))
+        paletteResults.positionViewAtIndex(paletteResults.currentIndex, ListView.Contain)
+        paletteArrowUsed = true
+        return true
+    }
+    // Pages through the results; end jumps to the last row (once browsing the
+    // list), then on into the next loaded page; home to the first.
+    function paletteListKey(event) {
+        if (event.modifiers !== Qt.NoModifier) return false
+        const page = Math.max(1, Math.floor(paletteResults.height / (44 * scale)))
+        if (event.key === Qt.Key_PageDown) movePalette(page)
+        else if (event.key === Qt.Key_PageUp) movePalette(-page)
+        else if (event.key === Qt.Key_End && paletteArrowUsed) {
+            if (paletteResults.currentIndex >= paletteResults.count - 1) loadMorePalette()
+            else movePalette(paletteResults.count - 1 - paletteResults.currentIndex)
+        } else if (event.key === Qt.Key_Home && paletteArrowUsed) movePalette(-paletteResults.currentIndex)
+        else return false
+        event.accepted = true
+        return true
+    }
     function movePalette(delta) {
         paletteArrowUsed = true
         if (delta < 0 && paletteResults.currentIndex <= 0 && paletteBack.visible) {
             paletteResults.currentIndex = -1
             paletteBack.forceActiveFocus()
+            return
+        }
+        if (delta > 0 && paletteResults.currentIndex + delta > paletteResults.count - 1 && paletteMoreResults) {
+            loadMorePalette(paletteResults.currentIndex + delta)
+            referenceInput.forceActiveFocus()
             return
         }
         paletteResults.currentIndex = Math.max(0, Math.min(paletteResults.count - 1, paletteResults.currentIndex + delta))
@@ -5275,6 +5309,7 @@ ApplicationWindow {
                         app.scheduleBibleSearch(); paletteResults.currentIndex = 0
                     }
                     Keys.onPressed: function(event) {
+                        if (app.paletteListKey(event)) return
                         const mode = event.modifiers === Qt.ControlModifier
                             ? ({ [Qt.Key_K]: "books", [Qt.Key_Slash]: "bibleSearch", [Qt.Key_Space]: "commands" })[event.key] : undefined
                         if (mode) { event.accepted = true; app.runCommand(mode); return }
@@ -5326,6 +5361,7 @@ ApplicationWindow {
                     onAccepted: app.acceptPalette()
                     Keys.onDownPressed: app.movePalette(1)
                     Keys.onUpPressed: app.movePalette(-1)
+
                     Keys.onLeftPressed: function(event) {
                         event.accepted = !app.paletteTextMode && event.modifiers === Qt.NoModifier && app.paletteBook > 0
                             && selectedText.length === 0 && (!text.length || cursorPosition === 0 || app.paletteArrowUsed)
