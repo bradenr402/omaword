@@ -7682,6 +7682,8 @@ ApplicationWindow {
             }
             HintRow {
                 objectName: "importGuideHints"
+                // Short windows keep the room for the catalog (the keys still work).
+                visible: importGuide.height >= 520 * importGuide.uiScale
                 Layout.fillWidth: true
                 theme: desktop
                 pixelSize: 11 * importGuide.uiScale
