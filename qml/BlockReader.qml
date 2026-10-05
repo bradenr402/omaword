@@ -156,6 +156,21 @@ Item {
     property point pointer
     property int anchor: 0
     property int pressedVerse: 0
+    // Double click: a verse number opens Notes on that verse; text selects the
+    // word under the pointer (the release ending the double click keeps it).
+    property bool wordClick: false
+    function numberAt(x, y) {
+        if (!numbers) return 0
+        const position = body.positionAt(x, y)
+        const span = Array.from(document.spans).find(function(s) { return position >= s.start && position < s.textStart })
+        return span ? span.number : 0
+    }
+    function selectWordAt(x, y) {
+        controller.clearTextSelection()
+        body.cursorPosition = body.positionAt(x, y)
+        body.selectWord()
+        wordClick = body.selectionStart !== body.selectionEnd
+    }
     function updateDrag() {
         const p = body.mapFromItem(viewport, pointer.x, pointer.y)
         body.select(anchor, body.positionAt(p.x, p.y))
@@ -382,7 +397,8 @@ Item {
             }
             onReleased: function(mouse) {
                 if (mouse.button === Qt.LeftButton) {
-                    if (!root.dragging) root.controller.selectVerse(root.pressedVerse, !!(mouse.modifiers & Qt.ShiftModifier))
+                    if (root.wordClick) root.wordClick = false
+                    else if (!root.dragging) root.controller.selectVerse(root.pressedVerse, !!(mouse.modifiers & Qt.ShiftModifier))
                     root.cancelDrag()
                 } else if (mouse.button === Qt.MiddleButton) {
                     root.controller.copyClickedVerse(root.hit(mouse.x, mouse.y), false)
@@ -394,8 +410,11 @@ Item {
             onCanceled: root.cancelDrag()
             onDoubleClicked: function(mouse) {
                 if (mouse.button !== Qt.LeftButton) return
-                root.controller.selectVerse(root.hit(mouse.x, mouse.y), false)
-                root.controller.openNotes(true)
+                const number = root.numberAt(mouse.x, mouse.y)
+                if (number > 0) {
+                    root.controller.selectVerse(number, false)
+                    root.controller.openNotes(true)
+                } else root.selectWordAt(mouse.x, mouse.y)
             }
         }
     }

@@ -776,7 +776,21 @@ ApplicationWindow {
         }
         freeSelectedText = pieces.join("\n")
     }
+    // Double-clicking verse text selects the word under the pointer (the verse
+    // number opens Notes). The release that ends the double click keeps it.
+    property bool wordClick: false
+    function selectWordAt(index, source, mouse) {
+        const row = verseRepeater.itemAt(index) as VerseItem
+        if (!row || !row.body) return
+        clearTextSelection()
+        const p = row.body.mapFromItem(source, mouse.x, mouse.y)
+        row.body.cursorPosition = row.body.positionAt(p.x, p.y)
+        row.body.selectWord()
+        freeSelectedText = row.body.selectedText.replace(/[\uFFFC\u2060]/g, "")
+        wordClick = freeSelectedText.length > 0
+    }
     function finishTextDrag(number, mouse) {
+        if (wordClick) { wordClick = false; draggingText = false; dragAnchorRow = -1; return }
         if (!draggingText) { clearTextSelection(); selectVerse(number, !!(mouse.modifiers & Qt.ShiftModifier)) }
         draggingText = false
         dragAnchorRow = -1
@@ -4916,6 +4930,7 @@ ApplicationWindow {
                                             else { const p = bodyMouse.mapToItem(null, mouse.x, mouse.y); app.openPassageMenu(verseRow.modelData.number, p.x, p.y) }
                                         }
                                         onCanceled: { app.draggingText = false; app.dragAnchorRow = -1 }
+                                        onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) app.selectWordAt(verseRow.index, bodyMouse, mouse) }
                                     }
                                 }
                             }

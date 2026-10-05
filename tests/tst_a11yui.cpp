@@ -1533,6 +1533,35 @@ private slots:
         click(counter, Qt::RightButton); menuKeyTo("clearSearch");
         QTRY_VERIFY(prop("acceptedSearchQuery").toString().isEmpty()); QVERIFY(!shown("searchMatchCount"));
     }
+    void doubleClickNumbersOpenNotesAndTextSelectsWords() {
+        for (const QString mode : {"verse", "block", "paragraph"}) {
+            setMode(mode); navigate("John 3:16"); call("readerFocus");
+            const QString v16 = verseText(16);
+            // Mouse: double-clicking a word selects it; Notes stays closed.
+            const int loved = v16.indexOf("loved");
+            QTest::mouseDClick(window, Qt::LeftButton, {}, charPoint(16, loved + 1)); QTest::qWait(30);
+            QTRY_COMPARE(prop("freeSelectedText").toString(), QString("loved"));
+            QVERIFY2(!opened("notesDrawer"), qPrintable(mode));
+            // ctrl c then copies it as a quotation.
+            key(Qt::Key_C, Qt::ControlModifier);
+            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“…loved…”\n\n—John 3:16"));
+            // Mouse: double-clicking the verse number opens Notes on that verse.
+            QPoint number;
+            if (mode == "verse") number = item("verseNumber17")->mapToScene(QPointF(8, 12)).toPoint();
+            else {
+                QRectF rect; auto blockBody = item("blockBody");
+                QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<BlockDocument *>()->positionFor(17)));
+                number = blockBody->mapToScene(QPointF(rect.x() + 3, rect.center().y())).toPoint();
+            }
+            QTest::mouseDClick(window, Qt::LeftButton, {}, number);
+            QTRY_VERIFY2(opened("notesDrawer"), qPrintable(mode)); QCOMPARE(bible->cursorVerse(), 17);
+            QVERIFY(prop("freeSelectedText").toString().isEmpty());
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+            // Keyboard: w writes a note; shift V and iw select a word.
+            call("readerFocus"); key(Qt::Key_W); QTRY_VERIFY(opened("notesDrawer"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        }
+    }
 };
 
 int main(int argc, char **argv) {
