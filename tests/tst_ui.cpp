@@ -1267,7 +1267,7 @@ private slots:
         QVERIFY(!item("keybindingsClose"));
         QCOMPARE(search->width(),item("keybindingResults")->width());
         type("chapter");
-        QCOMPARE(prop("keybindingResults","count").toInt(),6);
+        QCOMPARE(prop("keybindingResults","count").toInt(),7);
         QVERIFY(item("keybindingFind in chapter"));
         key(Qt::Key_Down); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),1);
         key(Qt::Key_Up); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
