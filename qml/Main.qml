@@ -5277,6 +5277,11 @@ ApplicationWindow {
                     }
                     Keys.onReturnPressed: clicked()
                     Keys.onEnterPressed: clicked()
+                    // Each tab shows only its own annotation kind: Bookmarks the
+                    // bookmark, Highlights the highlight mark, Notes the note.
+                    readonly property bool showBookmark: app.collectionTab === 0 && !!modelData.bookmark
+                    readonly property bool showHighlight: app.collectionTab === 1 && !!modelData.highlight
+                    readonly property bool showNote: app.collectionTab === 2 && modelData.note.length > 0
                     contentItem: RowLayout {
                         id: savedContent
                         objectName: "savedEntryContent" + savedEntry.modelData.reference
@@ -5284,17 +5289,15 @@ ApplicationWindow {
                         ColumnLayout {
                             Layout.alignment: Qt.AlignTop
                             spacing: 7 * app.scale
-                            visible: savedEntry.modelData.bookmark || savedEntry.modelData.note.length > 0 || (savedEntry.modelData.tags || []).length > 0
-                            BookmarkGlyph { objectName: "savedBookmark" + savedEntry.modelData.reference; visible: savedEntry.modelData.bookmark; Layout.alignment: Qt.AlignHCenter }
-                            NoteGlyph { objectName: "savedNote" + savedEntry.modelData.reference; visible: savedEntry.modelData.note.length > 0; Layout.alignment: Qt.AlignHCenter }
-                            TagGlyph { objectName: "savedTag" + savedEntry.modelData.reference; visible: (savedEntry.modelData.tags || []).length > 0; Layout.alignment: Qt.AlignHCenter }
+                            visible: savedEntry.showBookmark || savedEntry.showNote
+                            BookmarkGlyph { objectName: "savedBookmark" + savedEntry.modelData.reference; visible: savedEntry.showBookmark; Layout.alignment: Qt.AlignHCenter }
+                            NoteGlyph { objectName: "savedNote" + savedEntry.modelData.reference; visible: savedEntry.showNote; Layout.alignment: Qt.AlignHCenter }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 7 * app.scale
                             Label { text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                            Label { text: savedEntry.modelData.note.replace(/\s+/g, " "); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                            Label { objectName: "savedTags" + savedEntry.modelData.reference; text: app.tagsPlainText(savedEntry.modelData.tags); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            Label { objectName: "savedNoteText" + savedEntry.modelData.reference; text: savedEntry.showNote ? savedEntry.modelData.note.replace(/\s+/g, " ") : ""; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
                         }
                     }
                     background: Rectangle {
@@ -5305,7 +5308,7 @@ ApplicationWindow {
                         Canvas {
                             // The reader's hand-drawn highlight accent: same pen and seed.
                             objectName: "savedHighlight" + savedEntry.modelData.reference
-                            visible: !!savedEntry.modelData.highlight
+                            visible: savedEntry.showHighlight
                             width: 3 * app.scale
                             height: parent.height
                             property color ink: desktop.accent

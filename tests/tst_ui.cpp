@@ -1538,14 +1538,26 @@ private slots:
         type("annotations panel"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         QTest::qWait(100);
-        auto bookmark = item("savedBookmarkJohn 3:16");
-        auto note = item("savedNoteJohn 3:16");
-        QVERIFY(bookmark && note && bookmark->isVisible() && note->isVisible());
-        QVERIFY(note->mapToScene(QPointF()).y() >= bookmark->mapToScene(QPointF(0,bookmark->height())).y());
-        QVERIFY(item("savedHighlightJohn 3:16")->isVisible());
-        QVERIFY(item("savedHighlightJohn 3:16")->inherits("QQuickCanvasItem"));
+        // Each tab shows only its own annotation on a passage that has all three.
+        const auto shown = [&](const char *name) { auto found = item(qPrintable(QString(name) + "John 3:16")); return found && found->isVisible(); };
+        QCOMPARE(window->property("collectionTab").toInt(),0);
+        QVERIFY(shown("savedBookmark")); QVERIFY(!shown("savedNote")); QVERIFY(!shown("savedNoteText")); QVERIFY(!shown("savedHighlight"));
+        QVERIFY(!item("savedTagJohn 3:16")); QVERIFY(!item("savedTagsJohn 3:16"));
         if (qEnvironmentVariableIsSet("OMAWORD_SAVED_SCREENSHOT"))
-            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWORD_SAVED_SCREENSHOT")));
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWORD_SAVED_SCREENSHOT") + "-bookmarks.png"));
+        click(item("savedTab1")); QTRY_COMPARE(window->property("collectionTab").toInt(),1); QTest::qWait(50);
+        QVERIFY(shown("savedHighlight")); QVERIFY(item("savedHighlightJohn 3:16")->inherits("QQuickCanvasItem"));
+        QVERIFY(!shown("savedBookmark")); QVERIFY(!shown("savedNote")); QVERIFY(!shown("savedNoteText"));
+        if (qEnvironmentVariableIsSet("OMAWORD_SAVED_SCREENSHOT"))
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWORD_SAVED_SCREENSHOT") + "-highlights.png"));
+        click(item("savedTab2")); QTRY_COMPARE(window->property("collectionTab").toInt(),2); QTest::qWait(50);
+        QVERIFY(shown("savedNote")); QVERIFY(shown("savedNoteText"));
+        QCOMPARE(item("savedNoteTextJohn 3:16")->property("text").toString(),QString("Delete this exact note"));
+        QVERIFY(!shown("savedBookmark")); QVERIFY(!shown("savedHighlight"));
+        if (qEnvironmentVariableIsSet("OMAWORD_SAVED_SCREENSHOT"))
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWORD_SAVED_SCREENSHOT") + "-notes.png"));
+        click(item("savedTab0")); QTRY_COMPARE(window->property("collectionTab").toInt(),0);
+        item("collectionList")->forceActiveFocus(); QTest::qWait(50);
         const auto before = bible->collection();
         const auto selection = bible->selectionReference();
         key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
@@ -5478,8 +5490,8 @@ private slots:
         reference("John 3:1");
         QVERIFY(bible->toggleBookmark());
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Glyph").isEmpty());
-        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        auto glyph = item("savedTagJohn 3:1"); QVERIFY(glyph && glyph->isVisible());
+        // Annotations rows no longer show tag glyphs; check the reader rail's.
+        auto glyph = item("tagGlyph1"); QTRY_VERIFY(glyph && glyph->isVisible());
         QTest::qWait(100);
         auto grab = glyph->grabToImage(QSize(120,140)); QVERIFY(grab);
         QSignalSpy ready(grab.data(),&QQuickItemGrabResult::ready);
