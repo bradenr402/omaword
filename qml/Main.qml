@@ -6409,19 +6409,19 @@ ApplicationWindow {
                     modelData: savedBlock.modelData
                     index: savedBlock.index
                     objectName: app.collectionTab === 3 ? "savedTagEntry:" + modelData.group + ":" + modelData.reference : "savedEntry" + modelData.reference
-                    focusPolicy: Qt.StrongFocus
+                    // Like Desk and History rows: the list keeps the keyboard (tab
+                    // never stops on a row); the current row is the list's.
+                    focusPolicy: Qt.NoFocus
                     width: collectionList.width
                     padding: 12 * app.scale
                     height: savedContent.implicitHeight + topPadding + bottomPadding
                     clip: true
                     highlighted: collectionList.currentIndex === savedBlock.index
-                    onClicked: app.openSaved(modelData)
+                    onClicked: { collectionList.currentIndex = savedBlock.index; app.openSaved(modelData) }
                     TapHandler {
                         acceptedButtons: Qt.RightButton
                         onTapped: function(eventPoint) { app.openSavedMenu(savedEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
                     }
-                    Keys.onReturnPressed: clicked()
-                    Keys.onEnterPressed: clicked()
                     // Each tab shows only its own annotation kind: Bookmarks the
                     // bookmark, Highlights the highlight mark, Notes the note.
                     readonly property bool showBookmark: app.collectionTab === 0 && !!modelData.bookmark

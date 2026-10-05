@@ -1278,6 +1278,25 @@ private slots:
         click("confirmTagManagement"); QTRY_VERIFY(tagId("Gamma").isEmpty());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
     }
+    void annotationRowsTakeNoFocus() {
+        for (const int verse : {5, 7}) { bible->selectVerses(verse, verse); QVERIFY(bible->toggleBookmark()); }
+        navigate("John 3:3");
+        run("annotations"); QTRY_VERIFY(opened("savedDrawer")); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        auto row = item("savedEntryJohn 3:5"); QVERIFY(row);
+        QCOMPARE(row->property("focusPolicy").toInt(), int(Qt::NoFocus));
+        // Keyboard: j/k and tab never put a row in focus.
+        key(Qt::Key_J); QVERIFY(item("collectionList")->hasActiveFocus());
+        QCOMPARE(item("collectionList")->property("currentIndex").toInt(), 1);
+        key(Qt::Key_Tab); QVERIFY(!focusName().startsWith("savedEntry"));
+        // Mouse: a right click makes the row current without focusing it.
+        call("moveSaved", 0); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        click(row, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(item("collectionList")->property("currentIndex").toInt(), 0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus()); QVERIFY(!row->hasActiveFocus());
+        // Mouse: a click opens the row's passage.
+        click(item("savedEntryJohn 3:7")); QTRY_COMPARE(bible->selectionReference(), QString("John 3:7"));
+    }
 };
 
 int main(int argc, char **argv) {
