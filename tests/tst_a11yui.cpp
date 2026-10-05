@@ -337,6 +337,76 @@ private slots:
         click(item("tagsHintsPart:toggle / create")); QTRY_COMPARE(bible->tags().size(), 1);
         click(item("tagsHintsPart:close")); QTRY_VERIFY(!shown("tagsSurface"));
     }
+    void everyListRowSharesOneMenu() {
+        const QStringList shared = {"open", "copy", "copyPlain", "desk"};
+        // Desk (mouse): Open · Copy · Copy plain text · Remove from Desk.
+        QVERIFY(bible->navigate("John 3:5")); QVERIFY(bible->addToDesk()); navigate("John 3:3");
+        run("desk"); QTRY_VERIFY(opened("deskDrawer"));
+        click(item("deskEntry0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), shared);
+        QCOMPARE(menuShortcut("copyPlain"), QString("shift Y")); QCOMPARE(menuShortcut("desk"), QString("d"));
+        QGuiApplication::clipboard()->clear(); chooseMenu("copyPlain");
+        QTRY_VERIFY(!QGuiApplication::clipboard()->text().isEmpty());
+        QVERIFY(!QGuiApplication::clipboard()->text().contains("John 3:5"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        // History (keyboard): the menu key opens the row menu with Remove after a divider.
+        QVERIFY(bible->recordHistory()); run("history"); QTRY_VERIFY(opened("historyDrawer"));
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), (shared + QStringList{"|", "remove"}));
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("historyDrawer"));
+        // Annotations rows: the shared four, then Edit range and Delete.
+        bible->selectVerses(3, 3); QVERIFY(bible->toggleBookmark());
+        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), (shared + QStringList{"|", "editRange", "delete"}));
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        // Study Cross-references: mouse and keyboard.
+        navigate("John 1:1"); run("related"); QTRY_VERIFY(opened("relatedDrawer"));
+        QTRY_VERIFY(item("studyRow:0") && item("studyRow:0")->isVisible());
+        click(item("studyRow:0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), shared);
+        QGuiApplication::clipboard()->clear(); chooseMenu("copy");
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("Genesis 1:1"));
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool()); QCOMPARE(menuIds(), shared);
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
+        // Footnotes rows too.
+        key(Qt::Key_L); QTRY_COMPARE(object("tagsUi")->property("studyTab").toString(), QString("footnotes"));
+        navigate("John 3:3"); run("related"); QTRY_VERIFY(opened("relatedDrawer"));
+        QTRY_VERIFY(item("studyRow:0") && item("studyRow:0")->isVisible());
+        click(item("studyRow:0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), shared);
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+    }
+    void paletteRecentsAndLinkedNotesHaveRowMenus() {
+        // Recent searches: Search again · Copy · Copy plain text (no Desk; no list keys shown).
+        QVERIFY(bible->recordQuery("loved"));
+        key(Qt::Key_Slash, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette"));
+        QTRY_VERIFY(prop("paletteTextMode").toBool());
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), (QStringList{"open", "copy", "copyPlain"}));
+        QCOMPARE(menuShortcut("copy"), QString());
+        QGuiApplication::clipboard()->clear(); chooseMenu("copy");
+        QTRY_COMPARE(QGuiApplication::clipboard()->text(), QString("loved"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        // Recent passages (mouse).
+        QVERIFY(bible->navigate("John 2:4")); QVERIFY(bible->recordHistory()); navigate("John 3:3");
+        run("books"); QTRY_VERIFY(opened("passagePalette"));
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = qobject_cast<QQuickItem *>(item("paletteResults")->property("currentItem").value<QObject *>())));
+        click(row, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), (QStringList{"open", "copy", "copyPlain", "desk"}));
+        chooseMenu("open"); QTRY_VERIFY(!shown("passagePalette"));
+        QCOMPARE(bible->selectionReference(), QString("John 2:4"));
+        // Notes → Linked from rows.
+        QVERIFY(bible->navigate("John 1:5")); bible->selectVerses(5, 5); bible->setNoteText("See John 3:16 for this.");
+        navigate("John 3:16"); bible->selectVerses(16, 16);
+        run("notes"); QTRY_VERIFY(opened("notesDrawer"));
+        QTRY_VERIFY(item("linkedFromRow0") && item("linkedFromRow0")->isVisible());
+        click(item("linkedFromRow0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), (QStringList{"open", "copy", "copyPlain", "desk"}));
+        chooseMenu("open"); QTRY_COMPARE(bible->selectionReference(), QString("John 1:5"));
+    }
 };
 
 int main(int argc, char **argv) {

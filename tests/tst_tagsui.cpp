@@ -579,10 +579,10 @@ private slots:
         key(Qt::Key_Down); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         key(Qt::Key_Escape); QCOMPARE(prop("studyQuery").toString(), QString());
         QCOMPARE(refs().size(), 2);
-        // The context menu: Open, Copy, Desk, Edit tags…, Edit range. No delete.
+        // The shared row menu (Open, Copy, Copy plain text, Desk), then Edit tags…, Edit range. No delete.
         key(Qt::Key_Menu);
         QCOMPARE(root->property("menuKind").toString(), QString("study"));
-        QCOMPARE(variant(root->property("menuEntries")).toStringList(), (QStringList{"open", "copy", "desk", "|", "tags", "editRange"}));
+        QCOMPARE(variant(root->property("menuEntries")).toStringList(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "editRange"}));
         key(Qt::Key_Delete); QCOMPARE(bible->tagsForScope(first).size(), 2);
         // y copies; shift E edits the row's range.
         key(Qt::Key_Y); QCOMPARE(variant(root->property("copied")).toMap()["start"], first["start"]);
@@ -926,7 +926,7 @@ private slots:
         QStringList menuIds;
         for (const auto &entry : variant(root->findChild<QObject *>("contextMenu")->property("layout")).toList())
             menuIds << (entry.toMap().value("separator").toBool() ? QString("|") : entry.toMap().value("id").toString());
-        QCOMPARE(menuIds, (QStringList{"open", "tags", "editRange", "removeTag", "|", "copy", "desk"}));
+        QCOMPARE(menuIds, (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "editRange", "removeTag"}));
         key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("contextMenu")->property("visible").toBool());
         // t: the picker on the row's range, over the drawer, which stays.
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());

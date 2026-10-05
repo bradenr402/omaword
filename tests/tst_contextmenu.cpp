@@ -477,14 +477,14 @@ private slots:
         openDesk();
         rightClick(item("deskText0")); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("desk"));
-        QCOMPARE(ids(), (QStringList{"open", "copy", "|", "remove"}));
+        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk"}));
         QGuiApplication::clipboard()->setText("replace me");
         clickEntry("copy");
         QVERIFY(QGuiApplication::clipboard()->text().contains("John 1:1"));
         QVERIFY(deskOpen()); QTRY_VERIFY(item("deskList")->hasActiveFocus());
         key(Qt::Key_F10, Qt::ShiftModifier); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("desk"));
-        clickEntry("remove");
+        clickEntry("desk");
         QTRY_VERIFY(bible->desk().isEmpty());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         // Annotations panel row.
@@ -494,7 +494,7 @@ private slots:
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("annotation"));
-        QCOMPARE(ids(), (QStringList{"open", "editRange", "|", "desk", "|", "delete"}));
+        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "editRange", "delete"}));
         clickEntry("desk");
         QVERIFY2(bible->desk().size() == 1, qPrintable(object("toast")->property("text").toString() + " / " + bible->error() + " / " + QString::number(menu()->property("x").toDouble()) + "," + QString::number(menu()->property("y").toDouble())));
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
@@ -515,7 +515,7 @@ private slots:
         auto row = object("paletteResults")->property("currentItem").value<QQuickItem *>();
         rightClick(row); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("search"));
-        QCOMPARE(ids(), (QStringList{"open", "copy", "|", "desk"}));
+        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk"}));
         QGuiApplication::clipboard()->setText("replace me");
         clickEntry("copy");
         QVERIFY(QGuiApplication::clipboard()->text().contains("John"));

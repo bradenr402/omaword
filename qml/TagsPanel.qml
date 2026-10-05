@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "KeyNotation.js" as KeyNotation
+import "RowMenu.js" as RowMenu
 
 // Two surfaces share the tag state: the modal tag picker (with Manage tags)
 // and the Study drawer (Cross-references · Footnotes · Tags). The picker may
@@ -200,15 +201,19 @@ Item {
         resultList.currentIndex = index
         resultList.forceActiveFocus()
         const ready = !app.rangeEditing && !bible.busy
-        app.showContextMenu("study", [
-            { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { panel.openTagged(entry) } },
-            { id: "copy", text: "Copy", shortcut: KeyNotation.format("Y"), enabled: !bible.busy, run: function() { panel.app.copyScope(entry) } },
-            { id: "desk", text: typeof app.deskRowFor === "function" && app.deskRowFor(entry) ? "Remove from Desk" : "Add to Desk",
-                shortcut: KeyNotation.format("D"), enabled: ready, run: function() { panel.app.toggleScopeDesk(entry) } },
-            { separator: true },
-            { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { panel.app.openPassageTags(panel.snapshot(entry)) } },
-            { id: "editRange", text: "Edit range", shortcut: KeyNotation.format("Shift+E"), enabled: ready, run: function() { panel.app.openRangeEditor(entry, "tag") } }
-        ], sceneX, sceneY)
+        app.showContextMenu("study", RowMenu.entries(app, { busy: bible.busy, scope: entry, open: function() { panel.openTagged(entry) },
+            extras: [{ id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { panel.app.openPassageTags(panel.snapshot(entry)) } },
+                { id: "editRange", text: "Edit range", shortcut: KeyNotation.format("Shift+E"), enabled: ready, run: function() { panel.app.openRangeEditor(entry, "tag") } }] }),
+            sceneX, sceneY)
+    }
+    // Cross-references and Footnotes rows: the shared row menu on the row's passage.
+    function openStudyMenu(index, sceneX, sceneY) {
+        const row = studyRows[index]
+        if (!row || typeof app.showContextMenu !== "function") return
+        studyList.currentIndex = index
+        studyList.forceActiveFocus()
+        app.showContextMenu("study", RowMenu.entries(app, { busy: bible.busy, scope: studyScope(row),
+            openText: studyTab === "footnotes" ? "Go to verse" : "Open", open: function() { panel.openStudyRow(index) } }), sceneX, sceneY)
     }
 
     // ── Picker
@@ -811,6 +816,14 @@ Item {
                     panel.openResultMenu(resultList.currentIndex, point.x, point.y)
                 }
             }
+            Shortcut {
+                sequences: ["Menu", "Shift+F10"]
+                enabled: panel.relatedMoveKeys && panel.studyListTab && studyList.currentItem !== null
+                onActivated: {
+                    const point = studyList.currentItem.mapToItem(null, 24 * panel.uiScale, Math.min(studyList.currentItem.height, 28 * panel.uiScale))
+                    panel.openStudyMenu(studyList.currentIndex, point.x, point.y)
+                }
+            }
             // g, shift G, ctrl d/u, ctrl f/b, pgdn/pgup on the current tab's list.
             ListMotionKeys {
                 objectName: "relatedMotionKeys"
@@ -1140,6 +1153,10 @@ Item {
                     width: studyList.width
                     chosen: studyList.activeFocus && studyList.currentIndex === index
                     onClicked: panel.openStudyRow(index)
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: function(eventPoint) { panel.openStudyMenu(studyDelegate.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                    }
                     background: Rectangle {
                         color: studyDelegate.chosen ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
                             : studyDelegate.atCursor ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.06)

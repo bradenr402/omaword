@@ -8,6 +8,7 @@ import QtQml
 import "HandDrawn.js" as HandDrawn
 import "KeyNotation.js" as KeyNotation
 import "Margins.js" as Margins
+import "RowMenu.js" as RowMenu
 // qmllint disable import
 import OmaWord.Reader 1.0
 // qmllint enable import
@@ -909,14 +910,11 @@ ApplicationWindow {
         if (!entry) return
         deskList.currentIndex = row
         moveDesk(0)
-        const ready = !rangeEditing && !bible.busy
         const id = entry.id
-        contextMenu.show("desk", [
-            { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready && entry.available, run: function() { app.openDeskItem(id) } },
-            { id: "copy", text: "Copy", shortcut: KeyNotation.format("Y"), enabled: ready && entry.available, run: function() { app.copyDeskItem(id) } },
-            menuDivider,
-            { id: "remove", text: "Remove from Desk", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeDeskItem(id) } }
-        ], sceneX, sceneY)
+        contextMenu.show("desk", RowMenu.entries(app, { busy: bible.busy, scope: entry,
+            open: function() { app.openDeskItem(id) }, canOpen: entry.available, canCopy: entry.available,
+            copy: function() { app.copyDeskItem(id) }, copyPlain: function() { app.copyDeskItem(id, true) },
+            inDesk: true, desk: function() { app.removeDeskItem(id) } }), sceneX, sceneY)
     }
     function openSavedMenu(row, sceneX, sceneY) {
         const entry = collectionList.model[row]
@@ -925,43 +923,55 @@ ApplicationWindow {
         collectionList.forceActiveFocus()
         const ready = !rangeEditing && !bible.busy
         const kind = ["bookmark", "highlight", "note", "tag"][collectionTab]
-        if (collectionTab === 3) {
-            contextMenu.show("annotation", [
-                { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { app.openSaved(entry) } },
-                { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { app.openPassageTags(tagsUi.snapshot(entry)) } },
-                { id: "editRange", text: "Edit range", shortcut: menuKey("editRange"), enabled: ready, run: function() { app.openRangeEditor(entry, kind) } },
-                { id: "removeTag", text: "Remove " + entry.group + "…", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.requestRemoveTag(entry, row) } },
-                menuDivider,
-                { id: "copy", text: "Copy", shortcut: KeyNotation.format("Y"), enabled: !bible.busy, run: function() { app.copyScope(entry) } },
-                { id: "desk", text: deskRowFor(entry) ? "Remove from Desk" : "Add to Desk", shortcut: KeyNotation.format("D"), enabled: ready, run: function() { app.toggleScopeDesk(entry) } }
-            ], sceneX, sceneY)
-            return
-        }
-        contextMenu.show("annotation", [
-            { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { app.openSaved(entry) } },
-            { id: "editRange", text: "Edit range", shortcut: menuKey("editRange"), enabled: ready, run: function() { app.openRangeEditor(entry, kind) } },
-            menuDivider,
-            { id: "desk", text: deskRowFor(entry) ? "Remove from Desk" : "Add to Desk", enabled: ready, run: function() { app.toggleScopeDesk(entry) } },
-            menuDivider,
+        const editRange = { id: "editRange", text: "Edit range", shortcut: menuKey("editRange"), enabled: ready, run: function() { app.openRangeEditor(entry, kind) } }
+        const extras = collectionTab === 3 ? [
+            { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { app.openPassageTags(tagsUi.snapshot(entry)) } },
+            editRange,
+            { id: "removeTag", text: "Remove " + entry.group + "…", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.requestRemoveTag(entry, row) } }
+        ] : [editRange,
             { id: "delete", text: "Delete…", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() {
                 collectionList.currentIndex = row
                 collectionList.forceActiveFocus()
                 app.requestDeleteSaved()
-            } }
-        ], sceneX, sceneY)
+            } }]
+        contextMenu.show("annotation", RowMenu.entries(app, { busy: bible.busy, scope: entry,
+            open: function() { app.openSaved(entry) }, extras: extras }), sceneX, sceneY)
+    }
+    // Palette rows with a passage (search results, recent passages) or a
+    // recent search share the row menu; y, shift Y, d type in the input, so
+    // the menu shows only enter.
+    function paletteRowMenu(entry) {
+        if (!entry) return null
+        if (entry.recentQuery) {
+            const query = entry.recentQuery
+            const copy = function() { app.copyText(query, "Search “" + query + "”") }
+            return RowMenu.entries(app, { busy: bible.busy, keys: false, desk: false, openText: "Search again",
+                open: function() { app.activatePaletteEntry(entry) }, copy: copy, copyPlain: copy })
+        }
+        if (entry.recent) {
+            const scope = historyScope(entry.recent)
+            return RowMenu.entries(app, { busy: bible.busy, keys: false, scope: scope,
+                open: function() { app.openRecentPassage(entry.recent) } })
+        }
+        if (paletteTextMode && entry.reference && entry.start)
+            return RowMenu.entries(app, { busy: bible.busy, keys: false, scope: entry,
+                open: function() { app.acceptBibleResult(entry) } })
+        return null
     }
     function openSearchMenu(row, sceneX, sceneY) {
         const entry = paletteResults.model[row]
-        if (!paletteTextMode || !entry) return
+        const entries = paletteRowMenu(entry)
+        if (!entries) return
         paletteResults.currentIndex = row
         paletteArrowUsed = true
-        const ready = !rangeEditing && !bible.busy
-        contextMenu.show("search", [
-            { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { app.acceptBibleResult(entry) } },
-            { id: "copy", text: "Copy", enabled: !bible.busy, run: function() { app.copyScope(entry) } },
-            menuDivider,
-            { id: "desk", text: deskRowFor(entry) ? "Remove from Desk" : "Add to Desk", enabled: ready, run: function() { app.toggleScopeDesk(entry) } }
-        ], sceneX, sceneY)
+        contextMenu.show("search", entries, sceneX, sceneY)
+    }
+    // Copies plain text that is not a passage (a recent search).
+    function copyText(text, label) {
+        if (!text.length || bible.busy) { sounds.play("error"); return }
+        bible.copyText(text)
+        notify(label + " copied", true)
+        sounds.play("chime")
     }
     // Panels outside Main (Study) show their rows' menus through here.
     function showContextMenu(kind, entries, sceneX, sceneY) { contextMenu.show(kind, entries, sceneX, sceneY) }
@@ -1165,6 +1175,13 @@ ApplicationWindow {
         syncNote()
         pulseDestination()
         return true
+    }
+    // Notes → Linked from rows: the shared row menu on the linking note's passage.
+    function openLinkedMenu(index, sceneX, sceneY) {
+        const row = linkedFrom[index]
+        if (!row) return
+        contextMenu.show("linked", RowMenu.entries(app, { busy: bible.busy, scope: row, keys: false,
+            open: function() { app.openLinkedNote(row) } }), sceneX, sceneY)
     }
     function textInputActive() {
         let item = activeFocusItem
@@ -2126,14 +2143,12 @@ ApplicationWindow {
         const ready = !rangeEditing && !bible.busy
         const id = entry.id
         const scope = historyScope(entry)
-        contextMenu.show("history", [
-            { id: "open", text: "Open", shortcut: KeyNotation.format("Return"), enabled: ready && entry.available, run: function() { app.openHistoryItem(id) } },
-            { id: "copy", text: "Copy", shortcut: KeyNotation.format("Y"), enabled: ready && entry.available, run: function() { app.copyHistoryItem(id) } },
-            menuDivider,
-            { id: "desk", text: scope && deskRowFor(scope) ? "Remove from Desk" : "Add to Desk", shortcut: KeyNotation.format("D"), enabled: ready && !!scope, run: function() { app.toggleHistoryDesk(id) } },
-            menuDivider,
-            { id: "remove", text: "Remove from History", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeHistoryItem(id) } }
-        ], sceneX, sceneY)
+        contextMenu.show("history", RowMenu.entries(app, { busy: bible.busy, scope: scope,
+            open: function() { app.openHistoryItem(id) }, canOpen: entry.available, canCopy: entry.available && !!scope,
+            copy: function() { app.copyHistoryItem(id) }, copyPlain: function() { app.copyHistoryItem(id, true) },
+            desk: function() { app.toggleHistoryDesk(id) }, canDesk: entry.available && !!scope,
+            extras: [{ id: "remove", text: "Remove from History", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeHistoryItem(id) } }] }),
+            sceneX, sceneY)
     }
     function savePosition() {
         if (!restoringPosition && bible.ready) {
@@ -4550,6 +4565,10 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 padding: 6 * app.scale
                                 onClicked: app.openLinkedNote(modelData)
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: function(eventPoint) { app.openLinkedMenu(linkedRow.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                                }
                                 contentItem: ColumnLayout {
                                     spacing: 2
                                     Label { text: linkedRow.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true; elide: Text.ElideRight }
@@ -5069,7 +5088,7 @@ ApplicationWindow {
         Shortcut { sequence: "Shift+Tab"; enabled: passagePalette.visible && !contextMenu.visible; onActivated: app.cyclePaletteMode(-1) }
         Shortcut {
             sequences: ["Menu", "Shift+F10"]
-            enabled: passagePalette.visible && app.paletteTextMode && app.paletteTextQuery.length > 0 && !contextMenu.visible && paletteResults.currentIndex >= 0
+            enabled: passagePalette.visible && !contextMenu.visible && paletteResults.currentIndex >= 0 && !!app.paletteRowMenu(paletteResults.model[paletteResults.currentIndex])
             onActivated: { const p = app.sceneRowPoint(paletteResults.currentItem); app.openSearchMenu(paletteResults.currentIndex, p.x, p.y) }
         }
         // Fades in with input focus already live (ModalCard); closes at once.
@@ -5243,7 +5262,7 @@ ApplicationWindow {
                     onClicked: app.activatePaletteEntry(modelData)
                     TapHandler {
                         acceptedButtons: Qt.RightButton
-                        enabled: app.paletteTextMode && !paletteEntry.modelData.recentQuery
+                        enabled: !!paletteEntry.modelData.recentQuery || !!paletteEntry.modelData.recent || app.paletteTextMode
                         onTapped: function(eventPoint) { app.openSearchMenu(paletteEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
                     }
                     contentItem: ColumnLayout {
