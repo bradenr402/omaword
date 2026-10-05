@@ -215,9 +215,11 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 - Panel- and mode-local keys are catalog rows with a non-global `scope`
   (`characters`, `tags`, `rangeEditor`, `importGuide`, `versions`, `list`, …):
   listed in Keybindings and the README, bound by their owner, never globally.
-- With a side panel open, `panelLeavingActions` (palettes, dialogs, reading
-  toggles) move the keyboard to the reader, close the panel, then act — so the
-  drawer's exit cannot hand focus back over what opened. Catalog shortcuts
+- With a drawer side panel open (Annotations, Desk, History, Study), the keys
+  of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
+  keyboard to the reader, close the panel, then act (`runKey`) — so the
+  drawer's exit cannot hand focus back over what opened. Notes is not modal:
+  they act over it. Dispatch from Keybindings or Commands never closes panels. Catalog shortcuts
   recheck `shortcutEnabled` on activation (a popup's focus change can leave the
   binding stale).
 

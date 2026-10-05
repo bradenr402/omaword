@@ -1482,12 +1482,16 @@ private slots:
             key(Qt::Key_T, Qt::ControlModifier); QTRY_VERIFY(opened("tagsSurface")); QVERIFY(shown("deskDrawer"));
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
         }
-        // Notes: from the preview (not while typing) a toggle closes Notes too.
+        // Notes is not modal: from the preview (not while typing) the palette opens
+        // over it and returns to it, and a reading toggle acts with it open.
         call("readerFocus"); key(Qt::Key_Escape); run("notes"); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_K, Qt::ControlModifier); QVERIFY(!shown("passagePalette")); QVERIFY(opened("notesDrawer"));
         key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
-        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QTRY_VERIFY(!shown("notesDrawer"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(shown("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
+        const bool numbers = bible->showVerseNumbers();
+        key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), !numbers); QVERIFY(opened("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         // Mouse: a click outside an open panel only closes it (the footer button underneath does not act).
         call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
         click("searchControl"); QTRY_VERIFY(!shown("deskDrawer")); QVERIFY(!shown("passagePalette"));

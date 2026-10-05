@@ -526,8 +526,9 @@ ApplicationWindow {
     readonly property string sidePanel: notesOpen ? "notes" : savedDrawer.shown ? "annotations"
         : deskDrawer.shown ? "desk" : historyDrawer.shown ? "history" : tagsUi.relatedShown ? "related" : ""
     readonly property var panelActions: ["notes", "annotations", "desk", "related", "history"]
-    // With a side panel open, these keys close it first and then act:
-    // palettes, dialogs, and reading toggles.
+    // With a drawer side panel open (Annotations, Desk, History, Study), these
+    // keys close it first and then act: palettes, dialogs, and reading toggles.
+    // With Notes open (outside the editor) they act over it.
     readonly property var panelLeavingActions: ["books", "bibleSearch", "commands", "help", "settings", "switchVersion",
         "about", "import", "removeVersion", "focus", "numbers", "headings", "versePicker", "wordsOfJesus", "chapterOutline",
         "marginNotes", "readingMode", "soundEffects", "reduceMotion"]
@@ -3712,8 +3713,10 @@ ApplicationWindow {
     // toggle keys close the panel first. The keyboard leaves the panel before
     // it closes, so its exit cannot hand focus back over what opens next.
     // (Dispatch from Keybindings or Commands keeps the panel, as before.)
+    // Notes is not modal: palettes and dialogs open over it and return to it,
+    // and the reading toggles act with it open.
     function runKey(action) {
-        if (sidePanel.length && panelLeavingActions.includes(action) && actionAvailable(action)) {
+        if (sidePanel.length && sidePanel !== "notes" && panelLeavingActions.includes(action) && actionAvailable(action)) {
             if (!flushNote()) return
             readerFocus()
             if (!leaveSidePanel("")) { restorePanelFocus(); return }

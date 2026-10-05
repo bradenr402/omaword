@@ -5706,7 +5706,7 @@ private slots:
         key(Qt::Key_H,Qt::ControlModifier);
         key(Qt::Key_D,Qt::ControlModifier);
         key(Qt::Key_N,Qt::ControlModifier);
-        key(Qt::Key_K,Qt::ControlModifier);
+        // (ctrl k now closes the panel and opens the palette: a11yui globalKeysLeaveSidePanels.)
         QCOMPARE(navigation.count(),0); QCOMPARE(selection.count(),0);
         QCOMPARE(bible->collection(),collection);
         QCOMPARE(prop("reading","contentY").toDouble(),position);
