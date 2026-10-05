@@ -146,6 +146,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `enter`: Add version: install the highlighted version
 - `shift enter`: Add version: its Details & Attribution
 - `ctrl i`: Add version: import a USFM ZIP
+- `backspace`: Back a step in Remove version (Versions)
 - `ctrl shift I`: Re-import the highlighted version (Versions)
 
 ### Reading

@@ -1436,6 +1436,24 @@ private slots:
         QTRY_VERIFY(bible->fontSize() > 30);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
     }
+    void versionsBackspaceStepsBack() {
+        run("removeVersion"); QTRY_VERIFY(opened("versionDialog"));
+        auto dialog = object("versionDialog");
+        // Typing in the search keeps backspace.
+        QTRY_VERIFY(focusName() == "versionSearch"); type("o"); key(Qt::Key_Backspace);
+        QCOMPARE(dialog->property("step").toInt(), 0); QVERIFY(item("versionSearch")->property("text").toString().isEmpty());
+        key(Qt::Key_Return); QTRY_COMPARE(dialog->property("step").toInt(), 1);
+        QVERIFY(object("versionHints")->property("plainText").toString().contains("backspace back"));
+        key(Qt::Key_Return); QTRY_COMPARE(dialog->property("step").toInt(), 2);
+        // Keyboard: backspace steps back a page at a time.
+        key(Qt::Key_Backspace); QCOMPARE(dialog->property("step").toInt(), 1);
+        key(Qt::Key_Backspace); QCOMPARE(dialog->property("step").toInt(), 0);
+        QTRY_VERIFY(focusName() == "versionSearch");
+        // Mouse: the hint part steps back too.
+        key(Qt::Key_Return); QTRY_COMPARE(dialog->property("step").toInt(), 1);
+        clickHint("versionHintsPart:back"); QCOMPARE(dialog->property("step").toInt(), 0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
+    }
 };
 
 int main(int argc, char **argv) {

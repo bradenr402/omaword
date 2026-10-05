@@ -3080,6 +3080,13 @@ ApplicationWindow {
             if (event.modifiers === Qt.NoModifier) acceptVersion()
             return
         }
+        // Backspace (never while typing in the search) steps back a page.
+        if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier && !textInputActive()) {
+            event.accepted = true
+            if (versionDialog.step > 0 && !bible.busy) backVersion()
+            else rejected()
+            return
+        }
         // The removal summary scrolls by key; arrows still move between Cancel and Confirm.
         if (versionDialog.step === 2 && ![Qt.Key_Up, Qt.Key_Down, Qt.Key_Left, Qt.Key_Right].includes(event.key)
                 && scrollKey(versionSummaryScroll.contentItem as Flickable, event)) return
@@ -3249,6 +3256,7 @@ ApplicationWindow {
         { id: "guideInstall", group: "Palettes and windows", title: "Add version: install the highlighted version", sequences: ["Return"], scope: "importGuide", explanation: true },
         { id: "guideDetails", group: "Palettes and windows", title: "Add version: its Details & Attribution", sequences: ["Shift+Return"], scope: "importGuide", explanation: true },
         { id: "guideImport", group: "Palettes and windows", title: "Add version: import a USFM ZIP", sequences: ["Ctrl+I"], scope: "importGuide", explanation: true },
+        { id: "versionBackKey", group: "Palettes and windows", title: "Back a step in Remove version (Versions)", sequences: ["Backspace"], scope: "versions", explanation: true },
         { id: "reimportVersion", group: "Palettes and windows", title: "Re-import the highlighted version (Versions)", sequences: ["Ctrl+Shift+I"], scope: "versions", explanation: true },
         { id: "focus", group: "Reading", title: "Focus mode", sequences: ["F"], setting: "focusMode", command: true },
         { id: "numbers", group: "Reading", title: "Show verse numbers", sequences: ["Alt+N"], setting: "showVerseNumbers", command: true },
@@ -3350,13 +3358,14 @@ ApplicationWindow {
     }
     function versionHintParts() {
         const ready = !bible.busy
-        if (versionDialog.step === 2) return [[["Left", "Right"], "choose"], ["Return", "select", app.acceptVersion, ready], ["Escape", "cancel", function() { versionDialog.close() }]]
+        const back = ["Backspace", "back", app.backVersion, ready]
+        if (versionDialog.step === 2) return [[["Left", "Right"], "choose"], ["Return", "select", app.acceptVersion, ready], back, ["Escape", "cancel", function() { versionDialog.close() }]]
         const select = ["Return", "select", app.acceptVersion, ready && versionResults.currentIndex >= 0 && versionResults.count > 0]
         const reimport = reimportableVersion()
         if (!versionDialog.removing) return [[["Up", "Down"], "choose"], [actionKeys("addVersion")[0], "add", app.addVersionFromPicker, ready],
             reimport ? [actionKeys("reimportVersion")[0], "re-import", function() { app.reimportVersion(app.reimportableVersion()) }, ready && !catalog.busy] : null,
             select, ["Escape", "cancel", function() { versionDialog.close() }]]
-        return [[["Up", "Down"], "choose"], [["Home", "End"], "jump"], select, ["Escape", "cancel", function() { versionDialog.close() }]]
+        return [[["Up", "Down"], "choose"], [["Home", "End"], "jump"], select, versionDialog.step > 0 ? back : null, ["Escape", "cancel", function() { versionDialog.close() }]]
     }
     function savedHintParts() {
         const entry = focusedSavedEntry()
