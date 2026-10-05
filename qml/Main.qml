@@ -795,10 +795,24 @@ ApplicationWindow {
             menuAction("chapterFind", "Find in chapter", "chapterFind")
         ]
     }
+    // While an annotation range is being moved, the menu offers the session's
+    // own actions (the same keys as the status bar), then the copies.
+    function rangeEditMenuEntries() {
+        const ready = rangeEditor.active && !rangeEditor.visibleModal && !bible.busy
+        return [
+            { id: "saveRange", text: "Save range", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { rangeEditor.accept() } },
+            { id: "swapEnds", text: "Swap ends", shortcut: KeyNotation.format("O"), enabled: ready, run: function() { rangeEditor.swap() } },
+            { id: "cancelRange", text: "Cancel", shortcut: KeyNotation.format("Escape"), enabled: rangeEditor.sessionOpen, run: function() { rangeEditor.cancel() } },
+            menuDivider,
+            menuAction("copy", "Copy quotation", "copy"),
+            menuAction("copyPlain", "Copy plain text", "copyPlain")
+        ]
+    }
     // Right-click outside the selection selects that verse; inside keeps the range.
     function openPassageMenu(number, sceneX, sceneY) {
         if (!bible.ready || bible.busy) return
         clearCount()
+        if (rangeEditor.active) { contextMenu.show("rangeEdit", rangeEditMenuEntries(), sceneX, sceneY); return }
         if (!rangeEditing && number > 0) {
             const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
             if (!inside) {
@@ -824,6 +838,11 @@ ApplicationWindow {
     }
     function openPassageMenuAtCursor() {
         if (!bible.ready || bible.busy) return
+        if (rangeEditor.active) {
+            const at = verseMenuPoint(bible.cursorVerse)
+            contextMenu.show("rangeEdit", rangeEditMenuEntries(), at.x, at.y)
+            return
+        }
         if (!hasSelection) {
             const rows = Array.from(bible.verses)
             const number = bible.cursorVerse > 0 ? bible.cursorVerse : rows.length ? rows[0].number : 0
@@ -2866,7 +2885,7 @@ ApplicationWindow {
     function actionAvailable(action) {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action || action.explanation || bible.busy) return false
-        if (rangeEditing && !["newWindow", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)) return false
+        if (rangeEditing && !["newWindow", "contextMenu", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)) return false
         if (action.id === "copyText") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection

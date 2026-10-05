@@ -555,20 +555,27 @@ private slots:
         QCOMPARE(item("contextMenuShortcut:copy")->property("color").value<QColor>(), QColor("#808080"));
         escape();
         QVERIFY(menu()->setProperty("theme", QVariant::fromValue(static_cast<QObject *>(desktop.get()))));
-        // During range editing only copies stay enabled; disabled items are muted and skipped.
+        // During range editing the menu offers the session's actions, then the copies.
         bible->selectVerses(2, 2); QVERIFY(bible->toggleBookmark()); call("readerFocus");
         key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
         rightClick(versePoint(2)); QTRY_VERIFY(menuOpen());
+        QCOMPARE(target(), QString("rangeEdit"));
         QVERIFY(entry("copy").value("enabled").toBool());
-        QVERIFY(!entry("bookmark").value("enabled").toBool());
-        QCOMPARE(item("contextMenuLabel:bookmark")->property("color").value<QColor>(), desktop->property("muted").value<QColor>());
-        key(Qt::Key_End); QCOMPARE(menu()->property("currentIndex").toInt(), 1);
-        pressEntry("bookmark");
-        QVERIFY(menuOpen()); // disabled: nothing runs
-        QVERIFY(bible->collection().size() == 1);
+        QVERIFY(entry("saveRange").value("enabled").toBool());
         escape();
         QVERIFY(prop("rangeEditing").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        // Disabled items are muted and skipped; pressing one runs nothing.
+        const QJSValue entries = engine->evaluate("[{ id: 'first', text: 'First' }, { separator: true }, { id: 'off', text: 'Off', enabled: false }]");
+        QVERIFY(QMetaObject::invokeMethod(window, "showContextMenu", Q_ARG(QVariant, QString("test")), Q_ARG(QVariant, QVariant::fromValue(entries)),
+            Q_ARG(QVariant, 200), Q_ARG(QVariant, 200)));
+        QTRY_VERIFY(menuOpen());
+        QVERIFY(!entry("off").value("enabled").toBool());
+        QCOMPARE(item("contextMenuLabel:off")->property("color").value<QColor>(), desktop->property("muted").value<QColor>());
+        key(Qt::Key_End); QCOMPARE(menu()->property("currentIndex").toInt(), 0);
+        pressEntry("off");
+        QVERIFY(menuOpen()); // disabled: nothing runs
+        escape();
     }
 };
 

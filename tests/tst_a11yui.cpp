@@ -587,6 +587,40 @@ private slots:
         QVERIFY(qAbs(menu()->property("x").toReal() - there.x()) < 2);
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
     }
+    // ── Phase 2: critical and high
+
+    void rangeEditingMenuAndHints() {
+        bible->selectVerses(5, 5); QVERIFY(bible->toggleBookmark()); call("readerFocus");
+        // Keyboard: shift E, j, then the menu key offers Save · Swap · Cancel; enter saves.
+        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
+        key(Qt::Key_J); QCOMPARE(bible->selectedEnd(), 6);
+        // The status bar keeps its one-line height: title and hints share a row.
+        QVERIFY2(item("rangeEditStatus")->height() < 100, qPrintable(QString::number(item("rangeEditStatus")->height())));
+        QCOMPARE(item("rangeEditHints")->mapToScene(QPointF()).y(), item("rangeEditTitle")->mapToScene(QPointF()).y());
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), (QStringList{"saveRange", "swapEnds", "cancelRange", "|", "copy", "copyPlain"}));
+        QCOMPARE(menuShortcut("saveRange"), QString("enter")); QCOMPARE(menuShortcut("swapEnds"), QString("o"));
+        QCOMPARE(menuShortcut("cancelRange"), QString("esc"));
+        key(Qt::Key_Return); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        QCOMPARE(bible->collection().first().toMap()["end"].toInt(), 6);
+        // Mouse: right-click a verse while moving; Swap ends, then Cancel restores.
+        navigate("John 3:5"); bible->selectVerses(5, 6); call("readerFocus");
+        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
+        const int cursor = bible->cursorVerse();
+        clickAt(versePoint(7), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(bible->selectedStart(), 5); QCOMPARE(bible->selectedEnd(), 6);
+        chooseMenu("swapEnds"); QVERIFY(bible->cursorVerse() != cursor);
+        clickAt(versePoint(7), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        chooseMenu("cancelRange"); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        // The status bar's hints are clickable: o swap, enter save, esc cancel.
+        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
+        QVERIFY(item("rangeEditHintsPart:save")->property("clickable").toBool());
+        key(Qt::Key_J); click(item("rangeEditHintsPart:swap")); QCOMPARE(object("rangeEditor")->property("endpoint").toString(), QString("start"));
+        click(item("rangeEditHintsPart:save")); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        QCOMPARE(bible->collection().first().toMap()["end"].toInt(), 7);
+        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
+        click(item("rangeEditHintsPart:cancel")); QTRY_VERIFY(!prop("rangeEditing").toBool());
+    }
 };
 
 int main(int argc, char **argv) {
