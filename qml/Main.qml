@@ -5217,9 +5217,16 @@ ApplicationWindow {
                 onActivated: { const p = app.sceneRowPoint(collectionList.currentItem); app.openSavedMenu(collectionList.currentIndex, p.x, p.y) }
             }
             spacing: (savedDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
-            RowLayout {
+            PanelHeader {
+                objectName: "savedHeader"
                 Layout.fillWidth: true
-                Label { objectName: "savedTitle"; text: "Annotations"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                theme: desktop
+                title: "Annotations"
+                subtitle: tagsUi.passageSubtitle
+                uiScale: app.scale
+                titleScale: app.controlScale
+                titleName: "savedTitle"
+                subtitleName: "savedPassage"
             }
             PanelTabs {
                 id: savedTabs
@@ -5432,11 +5439,15 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                ColumnLayout {
+                PanelHeader {
                     Layout.fillWidth: true
-                    spacing: 2 * app.scale
-                    Label { objectName: "deskTitle"; text: "Desk"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                    Label { objectName: "deskCount"; text: deskList.count === 1 ? "1 passage" : deskList.count + " passages"; color: desktop.muted; font.pixelSize: 12 * app.scale }
+                    theme: desktop
+                    title: "Desk"
+                    subtitle: deskList.count === 1 ? "1 passage" : deskList.count + " passages"
+                    uiScale: app.scale
+                    titleScale: app.controlScale
+                    titleName: "deskTitle"
+                    subtitleName: "deskCount"
                 }
                 QuietButton {
                     objectName: "deskClean"
@@ -5628,11 +5639,15 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                ColumnLayout {
+                PanelHeader {
                     Layout.fillWidth: true
-                    spacing: 2 * app.scale
-                    Label { objectName: "historyTitle"; text: "History"; font.pixelSize: 24 * app.controlScale; font.weight: Font.Medium; color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                    Label { objectName: "historyCount"; text: historyList.count === 1 ? "1 passage" : historyList.count + " passages"; color: desktop.muted; font.pixelSize: 12 * app.scale }
+                    theme: desktop
+                    title: "History"
+                    subtitle: historyList.count === 1 ? "1 passage" : historyList.count + " passages"
+                    uiScale: app.scale
+                    titleScale: app.controlScale
+                    titleName: "historyTitle"
+                    subtitleName: "historyCount"
                 }
                 QuietButton {
                     objectName: "historyClear"

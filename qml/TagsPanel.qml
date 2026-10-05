@@ -24,6 +24,10 @@ Item {
     property var editingScope: null
     property var summaryScope: null
     property var relatedSource: null
+    // The shared panel header's subtitle (Annotations and Study): the reader's
+    // selection, or its chapter when nothing is selected — never blank.
+    readonly property string passageSubtitle: (bible.selectedStart > 0 && bible.selectionReference
+        ? bible.selectionReference : bible.passage) + (bible.versionAbbreviation ? " · " + bible.versionAbbreviation : "")
     // Study panel (the Related drawer, now tabbed): Related tag passages, the
     // pinned source's cross references, and the current chapter's footnotes.
     // ←/→ (h/l) switch tabs; every tab shares the list keys and motions.
@@ -772,17 +776,28 @@ Item {
                 onMove: function(delta) { if (studyList.currentIndex < 0) studyList.currentIndex = 0; panel.moveStudy(delta) }
             }
             Shortcut { sequence: "/"; enabled: panel.relatedShown && panel.studyTab === "related" && !panel.pickerVisible && !panel.app.contextMenuOpen && !panel.textInputActive(); onActivated: panel.focusSearch() }
+            // Study: the shared panel header, following the reader's passage.
+            PanelHeader {
+                objectName: "studyHeader"
+                Layout.fillWidth: true
+                visible: panel.page === "related"
+                theme: panel.desktop
+                title: "Study"
+                subtitle: panel.passageSubtitle
+                uiScale: panel.uiScale
+                titleName: "studyTitle"
+                subtitleName: "studyPassage"
+            }
             RowLayout {
                 Layout.fillWidth: true
+                visible: panel.page === "picker" || panel.page === "manage"
                 TagText {
                     objectName: "tagsTitle"
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     text: panel.page === "picker" ? (panel.editingScope ? panel.editingScope.reference + " · " + panel.versionName(panel.editingScope) : "Tags")
-                        : panel.page === "related" ? "Study"
-                        : panel.page === "summary" ? (panel.summaryScope ? panel.summaryScope.reference + " · " + panel.versionName(panel.summaryScope) : "Tags")
                         : panel.page === "manage" ? "Manage tags" : "Tags"
-                    font.pixelSize: (panel.page === "related" ? 25 * panel.uiScale : 14 * panel.controlScale)
+                    font.pixelSize: 14 * panel.controlScale
                 }
                 TagButton { text: "Back"; visible: panel.page === "manage"; onClicked: panel.back() }
                 TagButton { objectName: "manageTags"; text: "Manage"; visible: panel.page === "picker"; onClicked: panel.manage() }
@@ -800,13 +815,6 @@ Item {
                 focusable: false
                 currentIndex: panel.studyTabs.indexOf(panel.studyTab)
                 onActivated: index => panel.setStudyTab(panel.studyTabs[index])
-            }
-            TagText {
-                objectName: "relatedSourceLabel"
-                Layout.fillWidth: true
-                visible: panel.page === "related" && panel.studyTab !== "footnotes"
-                text: panel.relatedSource ? panel.relatedSource.reference + " · " + panel.versionName(panel.relatedSource) : ""
-                color: panel.desktop.muted
             }
             Flickable {
                 id: summaryView
