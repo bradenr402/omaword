@@ -843,6 +843,9 @@ ApplicationWindow {
                 return { id: kind[1], text: kind[2] + (many ? " (choose)" : ""), enabled: ready,
                     run: function() { app.openCursorRanges(kind[0], sceneX, sceneY) } }
             })
+        // The selection holds annotations: their range can be edited from here (shift E).
+        if (bible.ready && Array.from(bible.annotationRanges(bible.tagScope())).length)
+            entries.push(menuAction("editRange", "Edit range", "editRange"))
         return entries.length ? [menuDivider].concat(entries) : []
     }
     function selectedTextEntries() {

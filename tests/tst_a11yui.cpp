@@ -838,8 +838,9 @@ private slots:
         call("readerFocus");
         // Keyboard: the menu adds Open bookmark (two overlap: a chooser) and Open note.
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds().mid(menuIds().size() - 3), (QStringList{"|", "openBookmark", "openNote"}));
-        key(Qt::Key_End); key(Qt::Key_Return); QTRY_VERIFY(opened("notesDrawer"));
+        // Then Edit range, as the selection is annotated.
+        QCOMPARE(menuIds().mid(menuIds().size() - 4), (QStringList{"|", "openBookmark", "openNote", "editRange"}));
+        menuKeyTo("openNote"); QTRY_VERIFY(opened("notesDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 3:5"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         // Mouse: right-click, Open bookmark, then pick the wider range in the chooser.
@@ -1898,6 +1899,21 @@ private slots:
         navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         item("noteEditor")->setProperty("cursorPosition", 10);
         key(Qt::Key_Return, Qt::AltModifier); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5"));
+    }
+    void passageMenuEditsTheSelectionsRange() {
+        bible->selectVerses(5, 5); QVERIFY(bible->toggleBookmark());
+        // No annotations here: no Edit range.
+        navigate("John 3:3"); clickAt(versePoint(3), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QVERIFY(!menuIds().contains("editRange"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
+        // Mouse: on the bookmark, Edit range (shift E) starts editing.
+        navigate("John 3:5"); clickAt(versePoint(5), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QVERIFY(menuIds().contains("editRange")); QCOMPARE(menuShortcut("editRange"), QString("shift E"));
+        chooseMenu("editRange"); QTRY_VERIFY(prop("rangeEditing").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        // Keyboard: the menu key and the same row.
+        navigate("John 3:5"); key(Qt::Key_Menu); menuKeyTo("editRange"); QTRY_VERIFY(prop("rangeEditing").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
     }
     // ── Phase 5: new
 
