@@ -24,22 +24,24 @@ Flow {
     function partItems() {
         const items = []
         for (let i = 0; i < repeater.count; ++i) {
-            const part = repeater.itemAt(i)
-            if (part && part["clickable"]) items.push(part)
+            const part = repeater.itemAt(i) as HintPart
+            if (part && part.clickable) items.push(part)
         }
         return items
     }
     // The same gap the plain hint used between parts: three no-break spaces and a space.
     spacing: gap.advanceWidth
     TextMetrics { id: gap; font.family: row.theme.fontFamily; font.pixelSize: row.pixelSize; text: "\u00a0\u00a0\u00a0 " }
+    component HintPart: Item {
+        required property var modelData
+        readonly property bool clickable: typeof modelData.run === "function" && modelData.enabled
+    }
     Repeater {
         id: repeater
         model: row.entries
-        delegate: Item {
+        delegate: HintPart {
             id: part
-            required property var modelData
             required property int index
-            readonly property bool clickable: typeof modelData.run === "function" && modelData.enabled
             readonly property bool hovered: mouse.containsMouse
             function activate() { if (clickable) modelData.run() }
             objectName: row.objectName.length ? row.objectName + "Part:" + modelData.label : ""
