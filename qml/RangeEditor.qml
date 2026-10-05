@@ -475,23 +475,27 @@ Item {
                 RangeButton { objectName: "rangeContinue"; text: "Continue"; emphasized: true; visible: !!editor.source; focusPolicy: Qt.NoFocus; enabled: editor.hasComponents && !editor.bible.busy; onClicked: editor.begin() }
             }
             FineRule { id: chooserRule; objectName: "rangeChooserRule"; width: parent.width }
-            RangeText {
+            // Clickable like every hint row: each part runs what its key would.
+            HintRow {
                 id: chooserKeys
                 objectName: "rangeChooserKeys"
                 width: parent.width
-                color: editor.desktop.muted
-                font.pixelSize: 11 * editor.uiScale
-                // No-break spaces keep each key with its verb when the row wraps.
-                textFormat: Text.StyledText
-                text: KeyNotation.hint(keyHints, editor.desktop.foreground, editor.desktop.muted)
-                readonly property var keyHints: {
-                    if (!editor.source) return [[["Up", "Down"], "choose"], ["Return", "select"], ["Escape", "cancel"]]
+                theme: editor.desktop
+                pixelSize: 11 * editor.uiScale
+                parts: {
+                    const cancel = ["Escape", "cancel", function() { editor.cancel() }]
+                    if (!editor.source) return [[["Up", "Down"], "choose"], ["Return", "select", function() { chooser.continueChoice() }, editor.ranges.length > 0], cancel]
                     const hints = []
-                    if (editor.presentKinds.indexOf("bookmark") >= 0) hints.push(["M", "bookmark"])
-                    if (editor.presentKinds.indexOf("highlight") >= 0) hints.push(["X", "highlight"])
-                    if (editor.presentKinds.indexOf("tags") >= 0) hints.push(["T", "tags"])
-                    if (editor.presentKinds.indexOf("note") >= 0) hints.push(["N", "note"])
-                    return hints.concat([[["Up", "Down"], "choose"], ["Space", "toggle"], ["A", editor.allSelected ? "deselect all" : "select all"], ["Return", "continue"], ["Escape", "cancel"]])
+                    const toggle = function(kind) { return function() { editor.toggle(kind) } }
+                    if (editor.presentKinds.indexOf("bookmark") >= 0) hints.push(["M", "bookmark", toggle("bookmark")])
+                    if (editor.presentKinds.indexOf("highlight") >= 0) hints.push(["X", "highlight", toggle("highlight")])
+                    if (editor.presentKinds.indexOf("tags") >= 0) hints.push(["T", "tags", toggle("tags")])
+                    if (editor.presentKinds.indexOf("note") >= 0) hints.push(["N", "note", toggle("note")])
+                    return hints.concat([[["Up", "Down"], "choose"], ["Space", "toggle", function() {
+                        const row = editor.componentRows[chooser.focusedRow]
+                        if (row) editor.toggle(row.kind, row.id)
+                    }, editor.componentRows.length > 0], ["A", editor.allSelected ? "deselect all" : "select all", function() { editor.toggleAll() }],
+                        ["Return", "continue", function() { editor.begin() }, editor.hasComponents && !editor.bible.busy], cancel])
                 }
             }
         }

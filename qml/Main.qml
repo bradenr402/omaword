@@ -2690,6 +2690,64 @@ ApplicationWindow {
         button.keyActivated = false
         if (!byKey && button.activeFocus) restorePanelFocus()
     }
+    // Clickable hint rows (HintRow): [keys, label, run, enabled] per part. A
+    // part runs what its key would, and is clickable only while that works
+    // with the current focus. Navigation parts have no run.
+    function rangeEditHintParts() {
+        const ready = rangeEditor.active && !rangeEditor.visibleModal && !bible.busy
+        return [["O", "swap", function() { rangeEditor.swap() }, ready], ["Return", "save", function() { rangeEditor.accept() }, ready],
+            ["Escape", "cancel", function() { rangeEditor.cancel() }, rangeEditor.sessionOpen]]
+    }
+    function paletteHintParts() {
+        return [[["Up", "Down"], "choose"], ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
+            paletteBook > 0 ? ["Left", "back", app.backToBooks] : null, ["Escape", "close", app.escapePalette]]
+    }
+    function versionHintParts() {
+        const ready = !bible.busy
+        if (versionDialog.step === 2) return [[["Left", "Right"], "choose"], ["Return", "select", app.acceptVersion, ready], ["Escape", "cancel", function() { versionDialog.close() }]]
+        const select = ["Return", "select", app.acceptVersion, ready && versionResults.currentIndex >= 0 && versionResults.count > 0]
+        if (!versionDialog.removing) return [[["Up", "Down"], "choose"], [actionKeys("addVersion")[0], "add", app.addVersionFromPicker, ready],
+            select, ["Escape", "cancel", function() { versionDialog.close() }]]
+        return [[["Up", "Down"], "choose"], [["Home", "End"], "jump"], select, ["Escape", "cancel", function() { versionDialog.close() }]]
+    }
+    function savedHintParts() {
+        const entry = focusedSavedEntry()
+        const ready = !!entry && !bible.busy && !rangeEditing
+        const search = savedSearchVisible ? ["/", "search", app.focusSavedSearch] : null
+        const close = ["Escape", "close", app.escapeSaved]
+        const open = ["Return", "open", function() { app.openSaved(app.focusedSavedEntry()) }, ready]
+        const copy = ["Y", "copy", function() { app.copyScope(app.focusedSavedEntry()) }, !!entry && !bible.busy]
+        const desk = ["D", "Desk", function() { app.toggleScopeDesk(app.focusedSavedEntry()) }, ready]
+        const range = ["Shift+E", "range", app.editSavedRange, ready]
+        if (collectionTab === 3) return [[["Left", "Right"], "tabs"], open,
+            ["T", "tags", function() { app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry())) }, ready],
+            ["Delete", "remove tag", app.requestDeleteSaved, ready], copy, desk, range,
+            [actionKeys("manageTags")[0], "manage", function() { tagsUi.openManage() }, !bible.busy && !rangeEditing], search, close]
+        return [[["Left", "Right"], "tabs"], open, copy, desk, range, ["Delete", "delete", app.requestDeleteSaved, ready], search, close]
+    }
+    function deskHintParts() {
+        const entry = deskList.model[deskList.currentIndex]
+        const ready = !!entry && !bible.busy && !rangeEditing
+        return [[["Up", "Down"], "choose"], ["Return", "open", function() { app.openDeskItem(entry.id) }, ready && entry.available],
+            ["Y", "copy", function() { app.copyDeskItem(entry.id) }, ready && entry.available],
+            ["Delete", "remove", function() { app.removeDeskItem(entry.id) }, ready],
+            [actionKeys("cleanDesk")[0], "clean", app.requestCleanDesk, deskList.count > 0 && !bible.busy && !rangeEditing],
+            ["Escape", "close", function() { deskDrawer.close() }]]
+    }
+    function historyHintParts() {
+        const entry = historyList.model[historyList.currentIndex]
+        const ready = !!entry && !bible.busy && !rangeEditing
+        return [[["Up", "Down"], "choose"], ["Return", "open", function() { app.openHistoryItem(entry.id) }, ready && entry.available],
+            ["Y", "copy", function() { app.copyHistoryItem(entry.id) }, ready && entry.available],
+            ["Delete", "remove", function() { app.removeHistoryItem(entry.id) }, ready],
+            [actionKeys("historyClearKeys")[0], "clear", app.requestClearHistory, historyList.count > 0 && !bible.busy && !rangeEditing],
+            ["Escape", "close", function() { historyDrawer.close() }]]
+    }
+    // Confirmations: arrows move between Cancel and Confirm; enter presses the focused one.
+    function confirmationHintParts(cancel, confirm, dialog) {
+        return [[["Left", "Right"], "choose"], ["Return", "select", function() { (confirm.activeFocus ? confirm : cancel).clicked() },
+            !bible.busy && (cancel.activeFocus || (confirm.activeFocus && confirm.enabled))], ["Escape", "cancel", function() { dialog.close() }]]
+    }
     function hintRow(parts) { return KeyNotation.hint(parts, desktop.foreground, desktop.muted) }
     function hintPlain(parts) { return KeyNotation.hintPlain(parts) }
     function actionHint(action) {
@@ -3558,14 +3616,24 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 8
                 spacing: 2
-                Label {
+                Flow {
                     Layout.fillWidth: true
-                    objectName: "rangeEditHints"
-                    text: "Edit range · " + rangeEditor.endpoint + "&nbsp;&nbsp;&nbsp; " + app.hintRow([["O", "swap"], ["Return", "save"], ["Escape", "cancel"]])
-                    textFormat: Text.StyledText
-                    color: desktop.accent
-                    wrapMode: Text.Wrap
-                    font.pixelSize: 13 * app.scale
+                    spacing: rangeEditKeys.spacing
+                    Label {
+                        objectName: "rangeEditTitle"
+                        text: "Edit range · " + rangeEditor.endpoint
+                        textFormat: Text.PlainText
+                        color: desktop.accent
+                        font.pixelSize: 13 * app.scale
+                    }
+                    HintRow {
+                        id: rangeEditKeys
+                        objectName: "rangeEditHints"
+                        width: Math.min(implicitWidth, parent.width)
+                        theme: desktop
+                        pixelSize: 13 * app.scale
+                        parts: app.rangeEditHintParts()
+                    }
                 }
                 Label {
                     objectName: "rangeEditScope"
@@ -4456,15 +4524,14 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                         }
                     }
-                    Label {
+                    HintRow {
                         objectName: "notesHints"
                         visible: noteEditor.activeFocus && (app.linkSuggesting || !!app.noteLinkAtCursor)
-                        text: app.linkSuggesting ? app.hintRow([[["Up", "Down"], "choose"], ["Return", "insert"], ["Escape", "dismiss"]])
-                            : app.hintRow([["Alt+Return", "open link"]])
-                        textFormat: Text.StyledText
-                        color: desktop.muted
-                        font.pixelSize: 11 * app.scale
-                        wrapMode: Text.Wrap
+                        theme: desktop
+                        parts: app.linkSuggesting ? [[["Up", "Down"], "choose"], ["Return", "insert", function() { app.acceptLinkSuggestion() }, app.linkSuggestions.length > 0],
+                                ["Escape", "dismiss", app.dismissLinkSuggestions]]
+                            : [["Alt+Return", "open link", app.openNoteLinkAtCursor]]
+                        pixelSize: 11 * app.scale
                         Layout.fillWidth: true
                     }
                     ColumnLayout {
@@ -4943,14 +5010,12 @@ ApplicationWindow {
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
             FineRule { Layout.fillWidth: true }
-            Label {
+            HintRow {
                 objectName: "versionHints"
-                text: app.hintRow(versionDialog.step === 2 ? [[["Left", "Right"], "choose"], ["Return", "select"], ["Escape", "cancel"]]
-                    : !versionDialog.removing ? [[["Up", "Down"], "choose"], [app.actionKeys("addVersion")[0], "add"], ["Return", "select"], ["Escape", "cancel"]]
-                    : [[["Up", "Down"], "choose"], [["Home", "End"], "jump"], ["Return", "select"], ["Escape", "cancel"]])
-                textFormat: Text.StyledText
-                color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
-                Layout.fillWidth: true; wrapMode: Text.Wrap
+                theme: desktop
+                parts: app.versionHintParts()
+                pixelSize: 11 * versionDialog.uiScale
+                Layout.fillWidth: true
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -5253,14 +5318,12 @@ ApplicationWindow {
             FineRule { Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                Label {
+                HintRow {
                     objectName: "paletteHints"
-                    text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "select"], app.paletteBook > 0 ? ["Left", "back"] : null, ["Escape", "close"]])
-                    textFormat: Text.StyledText
-                    color: desktop.muted
-                    font.pixelSize: 11 * app.scale
+                    theme: desktop
+                    parts: app.paletteHintParts()
+                    pixelSize: 11 * app.scale
                     Layout.fillWidth: true
-                    wrapMode: Text.Wrap
                 }
             }
         }
@@ -5548,16 +5611,13 @@ ApplicationWindow {
                 }
             }
             // Each tab's keys, above the footer (dropped when the drawer is too short for its list).
-            Label {
+            HintRow {
                 objectName: "savedHints"
                 visible: savedDrawer.height >= 420 * app.scale
-                text: app.hintRow(app.collectionTab === 3
-                    ? [[["Left", "Right"], "tabs"], ["Return", "open"], ["T", "tags"], ["Delete", "remove tag"], ["Y", "copy"], ["D", "Desk"],
-                        ["Shift+E", "range"], [app.actionKeys("manageTags")[0], "manage"], app.savedSearchVisible ? ["/", "search"] : null, ["Escape", "close"]]
-                    : [[["Left", "Right"], "tabs"], ["Return", "open"], ["Y", "copy"], ["D", "Desk"], ["Shift+E", "range"], ["Delete", "delete"],
-                        app.savedSearchVisible ? ["/", "search"] : null, ["Escape", "close"]])
-                textFormat: Text.StyledText
-                color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+                theme: desktop
+                parts: app.savedHintParts()
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
             FineRule { Layout.fillWidth: true }
             RowLayout {
@@ -5729,11 +5789,12 @@ ApplicationWindow {
             Label { objectName: "deskError"; text: bible.error; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             FineRule { Layout.fillWidth: true }
             // No-break spaces keep each key with its verb when the row wraps.
-            Label {
+            HintRow {
                 objectName: "deskHints"
-                text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "open"], ["Y", "copy"], ["Delete", "remove"], [app.actionKeys("cleanDesk")[0], "clean"], ["Escape", "close"]])
-                textFormat: Text.StyledText
-                color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+                theme: desktop
+                parts: app.deskHintParts()
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
         }
     }
@@ -5770,6 +5831,13 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 QuietButton { id: cleanDeskCancel; objectName: "cleanDeskCancel"; text: "Cancel"; onClicked: cleanDeskConfirmation.close() }
                 QuietButton { id: cleanDeskConfirm; objectName: "cleanDeskConfirm"; text: "Clean Desk"; emphasized: true; onClicked: app.confirmCleanDesk() }
+            }
+            HintRow {
+                objectName: "cleanDeskHints"
+                theme: desktop
+                parts: app.confirmationHintParts(cleanDeskCancel, cleanDeskConfirm, cleanDeskConfirmation)
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
         }
     }
@@ -5960,11 +6028,12 @@ ApplicationWindow {
             }
             Label { objectName: "historyError"; text: bible.error; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             FineRule { Layout.fillWidth: true }
-            Label {
+            HintRow {
                 objectName: "historyHints"
-                text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "open"], ["Y", "copy"], ["Delete", "remove"], [app.actionKeys("historyClearKeys")[0], "clear"], ["Escape", "close"]])
-                textFormat: Text.StyledText
-                color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+                theme: desktop
+                parts: app.historyHintParts()
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
         }
     }
@@ -6001,6 +6070,13 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 QuietButton { id: clearHistoryCancel; objectName: "clearHistoryCancel"; text: "Cancel"; onClicked: clearHistoryConfirmation.close() }
                 QuietButton { id: clearHistoryConfirm; objectName: "clearHistoryConfirm"; text: "Clear History"; emphasized: true; onClicked: app.confirmClearHistory() }
+            }
+            HintRow {
+                objectName: "clearHistoryHints"
+                theme: desktop
+                parts: app.confirmationHintParts(clearHistoryCancel, clearHistoryConfirm, clearHistoryConfirmation)
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
         }
     }
@@ -6052,6 +6128,13 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 QuietButton { id: deleteCancel; objectName: "deleteCancel"; text: "Cancel"; onClicked: deleteConfirmation.close() }
                 QuietButton { id: deleteConfirm; objectName: "deleteConfirm"; text: deleteConfirmation.tag ? "Remove" : "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved() }
+            }
+            HintRow {
+                objectName: "deleteHints"
+                theme: desktop
+                parts: app.confirmationHintParts(deleteCancel, deleteConfirm, deleteConfirmation)
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
         }
     }
@@ -6165,7 +6248,15 @@ ApplicationWindow {
                 }
             }
             FineRule { objectName: "keybindingFooterRule"; Layout.fillWidth: true }
-            Label { objectName: "keybindingHints"; text: app.hintRow([[["Up", "Down"], "choose"], ["Return", "select"], ["Escape", "close"]]); textFormat: Text.StyledText; color: desktop.muted; font.pixelSize: 11 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            HintRow {
+                objectName: "keybindingHints"
+                theme: desktop
+                readonly property var current: keybindingResults.model[keybindingResults.currentIndex]
+                parts: [[["Up", "Down"], "choose"], ["Return", "select", () => app.activateKeybinding(current), !!current && app.actionAvailable(current)],
+                    ["Escape", "close", () => helpDialog.close()]]
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
+            }
         }
     }
 
@@ -6265,7 +6356,15 @@ ApplicationWindow {
                 onMoved: bible.setFontSize(Math.round(value))
                 Accessible.name: "Font size"
             }
-            Label { objectName: "fontSizeHints"; text: app.hintRow([[app.actionKeys("smaller")[0], "decrease"], [app.actionKeys("larger")[0], "increase"], [app.actionKeys("resetText")[0], "reset"]]); textFormat: Text.StyledText; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            HintRow {
+                objectName: "fontSizeHints"
+                theme: desktop
+                parts: ["smaller", "larger", "resetText"].map(function(id, index) {
+                    return [app.actionKeys(id)[0], ["decrease", "increase", "reset"][index], () => app.runCommand(id), app.actionAvailable(id)]
+                })
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
+            }
             RowLayout {
                 Layout.fillWidth: true
                 Label { text: "Line height"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
@@ -6282,7 +6381,15 @@ ApplicationWindow {
                 onMoved: bible.setLineHeight(Math.round(value * 10) / 10)
                 Accessible.name: "Line height"
             }
-            Label { objectName: "lineHeightHints"; text: app.hintRow([[app.actionKeys("lineLess")[0], "decrease"], [app.actionKeys("lineMore")[0], "increase"], [app.actionKeys("lineReset")[0], "reset"]]); textFormat: Text.StyledText; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            HintRow {
+                objectName: "lineHeightHints"
+                theme: desktop
+                parts: ["lineLess", "lineMore", "lineReset"].map(function(id, index) {
+                    return [app.actionKeys(id)[0], ["decrease", "increase", "reset"][index], () => app.runCommand(id), app.actionAvailable(id)]
+                })
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
+            }
         }
         }
     }
@@ -6558,6 +6665,14 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { restoreCancel.forceActiveFocus() }
+        Shortcut {
+            sequences: ["Left", "Up", "Right", "Down"]
+            enabled: restoreConfirmation.opened && !errorDialog.visible
+            onActivated: {
+                if (restoreCancel.activeFocus) restoreConfirm.forceActiveFocus()
+                else restoreCancel.forceActiveFocus()
+            }
+        }
         onClosed: { backupFile = ""; app.restorePanelFocus() }
         contentItem: ColumnLayout {
             spacing: 18
@@ -6602,11 +6717,19 @@ ApplicationWindow {
                     onClicked: restoreConfirmation.close()
                 }
                 QuietButton {
+                    id: restoreConfirm
                     objectName: "restoreConfirm"
                     text: "Restore"
                     emphasized: true
                     onClicked: app.confirmRestore()
                 }
+            }
+            HintRow {
+                objectName: "restoreHints"
+                theme: desktop
+                parts: app.confirmationHintParts(restoreCancel, restoreConfirm, restoreConfirmation)
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
         }
     }

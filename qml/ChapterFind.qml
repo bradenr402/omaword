@@ -3,7 +3,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "KeyNotation.js" as KeyNotation
 
 Rectangle {
     id: root
@@ -34,6 +33,9 @@ Rectangle {
         input.selectAll()
     }
     function cancelPending() { debounce.stop() }
+    function accept() { debounce.stop(); root.accepted(input.text) }
+    function cancel() { debounce.stop(); root.canceled() }
+    readonly property string query: input.text
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 12 * root.uiScale; anchors.rightMargin: 12 * root.uiScale
@@ -52,8 +54,8 @@ Rectangle {
             padding: 0
             background: Item {}
             onTextEdited: debounce.restart()
-            onAccepted: { debounce.stop(); root.accepted(text) }
-            Keys.onEscapePressed: { debounce.stop(); root.canceled() }
+            onAccepted: root.accept()
+            Keys.onEscapePressed: root.cancel()
             Accessible.name: "Find literal text in this chapter"
         }
         Label {
@@ -64,14 +66,15 @@ Rectangle {
             Layout.maximumWidth: root.width * 0.3
             elide: Text.ElideRight
         }
-        Label {
+        HintRow {
+            id: hints
             objectName: "chapterFindHints"
-            text: KeyNotation.hint([["Return", "accept"], ["Escape", "cancel"]], root.theme.foreground, root.theme.muted)
-            textFormat: Text.StyledText
+            theme: root.theme
+            parts: [["Return", "accept", function() { root.accept() }], ["Escape", "cancel", function() { root.cancel() }]]
             visible: root.width > 600 * root.uiScale
             // Same gap between the counter and the hints as between hint pairs.
             Layout.leftMargin: 16 * root.uiScale
-            color: root.theme.muted; font.pixelSize: 11 * root.uiScale
+            pixelSize: 11 * root.uiScale
         }
     }
     Timer { id: debounce; interval: 150; onTriggered: root.preview(input.text) }

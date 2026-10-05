@@ -65,12 +65,15 @@ function richList(sequences, foreground, muted) {
     }).join('<font color="' + muted + '">' + escapeHtml(separator) + "</font>")
 }
 
-// Hint rows: parts are [sequences, label]; several sequences in one part
-// read as a set ("↑ ↓ choose"). Pairs never break internally.
+// Hint rows: parts are [sequences, label, run, enabled]; several sequences
+// in one part read as a set ("↑ ↓ choose"). Pairs never break internally.
+// `run` (optional) makes the part clickable in HintRow while `enabled`
+// (default true) holds; parts without it are display only.
 function hintParts(parts) {
-    return Array.from(parts).filter(function(part) { return !!part }).map(function(part) {
+    return Array.from(parts || []).filter(function(part) { return !!part }).map(function(part) {
         var keys = typeof part[0] === "string" ? [part[0]] : Array.from(part[0])
-        return { keys: keys.map(format).join(" "), label: part[1] }
+        return { keys: keys.map(format).join(" "), label: part[1], sequences: keys,
+            run: typeof part[2] === "function" ? part[2] : null, enabled: part[3] !== false }
     })
 }
 function hintPlain(parts) {

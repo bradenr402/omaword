@@ -257,6 +257,86 @@ private slots:
         for (int i = 0; i < 12 && !reached; ++i) { key(Qt::Key_Tab); reached = focusName() == "helpControl" || focusName() == "modeControl" || focusName() == "searchControl"; }
         QVERIFY(reached);
     }
+    void hintPartsAreClickableOnlyWhenTheyAct() {
+        QVERIFY(bible->navigate("John 3:5")); QVERIFY(bible->addToDesk());
+        QVERIFY(bible->navigate("John 3:7")); QVERIFY(bible->addToDesk());
+        navigate("John 3:3");
+        run("desk"); QTRY_VERIFY(opened("deskDrawer")); QTRY_VERIFY(item("deskList")->hasActiveFocus());
+        auto choose = item("deskHintsPart:choose"), copy = item("deskHintsPart:copy");
+        QVERIFY(choose && copy);
+        QVERIFY(!choose->property("clickable").toBool()); QVERIFY(copy->property("clickable").toBool());
+        // The row reads as before: the same markup.
+        QVERIFY(object("deskHints")->property("text").toString().contains("shift&nbsp;delete"));
+        // Unhovered parts show no tint; hovering a clickable one tints it under a pointing hand.
+        auto tint = item("deskHintsPart:copy:tint"); QVERIFY(tint); QVERIFY(!tint->isVisible());
+        QTest::mouseMove(window, center(copy)); QTRY_VERIFY(tint->isVisible());
+        QQuickItem *area = nullptr;
+        for (auto child : copy->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) area = child;
+        QVERIFY(area); QCOMPARE(area->cursor().shape(), Qt::PointingHandCursor);
+        QTest::mouseMove(window, center(choose)); QTRY_VERIFY(!tint->isVisible());
+        QVERIFY(!item("deskHintsPart:choose:tint")->isVisible());
+        // Mouse: a part runs what its key does, and the keyboard stays in the list.
+        const QString current = bible->desk().at(item("deskList")->property("currentIndex").toInt()).toMap()["reference"].toString();
+        QGuiApplication::clipboard()->clear();
+        click(copy); QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(current));
+        QVERIFY(item("deskList")->hasActiveFocus());
+        // Keyboard: the key itself still works.
+        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y); QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(current));
+        click(item("deskHintsPart:remove")); QCOMPARE(bible->desk().size(), 1);
+        key(Qt::Key_Delete); QCOMPARE(bible->desk().size(), 0);
+        // Nothing left to open: those parts stop being clickable.
+        QTRY_VERIFY(!item("deskHintsPart:open")->property("clickable").toBool());
+        QVERIFY(!item("deskHintsPart:clean")->property("clickable").toBool());
+        click(item("deskHintsPart:close")); QTRY_VERIFY(!shown("deskDrawer"));
+    }
+    void everyPanelHintRowIsClickable() {
+        // Palette: esc close and enter select.
+        run("books"); QTRY_VERIFY(opened("passagePalette"));
+        QVERIFY(!item("paletteHintsPart:choose")->property("clickable").toBool());
+        click(item("paletteHintsPart:close")); QTRY_VERIFY(!shown("passagePalette"));
+        run("books"); QTRY_VERIFY(opened("passagePalette")); type("john 3:16");
+        click(item("paletteHintsPart:select")); QTRY_VERIFY(!shown("passagePalette"));
+        QCOMPARE(bible->selectionReference(), QString("John 3:16"));
+        // Help: a disabled (explanation) row cannot be selected by its hint.
+        run("help"); QTRY_VERIFY(opened("helpDialog")); type("click");
+        QTRY_VERIFY(!item("keybindingHintsPart:select")->property("clickable").toBool());
+        click(item("keybindingHintsPart:close")); QTRY_VERIFY(!shown("helpDialog"));
+        // Versions: cancel by its hint.
+        run("switchVersion"); QTRY_VERIFY(opened("versionDialog"));
+        QVERIFY(item("versionHintsPart:select")->property("clickable").toBool());
+        click(item("versionHintsPart:cancel")); QTRY_VERIFY(!shown("versionDialog"));
+        // Reading settings: increase / reset.
+        run("settings"); QTRY_VERIFY(opened("settingsDialog"));
+        const int size = bible->fontSize();
+        click(item("fontSizeHintsPart:increase")); QCOMPARE(bible->fontSize(), size + 1);
+        click(item("fontSizeHintsPart:reset")); QCOMPARE(bible->fontSize(), 18);
+        click(item("lineHeightHintsPart:increase")); QCOMPARE(bible->lineHeight(), 1.6);
+        click(item("lineHeightHintsPart:reset")); QCOMPARE(bible->lineHeight(), 1.5);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
+        // Annotations: open the current row by its hint.
+        QVERIFY(bible->navigate("John 3:9")); bible->selectVerses(9, 9); QVERIFY(bible->toggleBookmark());
+        navigate("John 1:1");
+        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+        QTRY_VERIFY(item("savedHintsPart:open")->property("clickable").toBool());
+        click(item("savedHintsPart:open")); QTRY_VERIFY(!shown("savedDrawer"));
+        QCOMPARE(bible->selectionReference(), QString("John 3:9"));
+        // Confirmations: cancel by the hint, confirm with enter on the focused button.
+        QVERIFY(bible->addToDesk()); run("desk"); QTRY_VERIFY(opened("deskDrawer"));
+        key(Qt::Key_Delete, Qt::ShiftModifier); QTRY_VERIFY(opened("cleanDeskConfirmation"));
+        click(item("cleanDeskHintsPart:cancel")); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
+        QCOMPARE(bible->desk().size(), 1);
+        key(Qt::Key_Delete, Qt::ShiftModifier); QTRY_VERIFY(opened("cleanDeskConfirmation"));
+        key(Qt::Key_Right); QVERIFY(item("cleanDeskConfirm")->hasActiveFocus());
+        click(item("cleanDeskHintsPart:select")); QTRY_VERIFY(bible->desk().isEmpty());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        // Study and the tag picker.
+        run("related"); QTRY_VERIFY(opened("relatedDrawer"));
+        QVERIFY(!item("studyHintsPart:tabs")->property("clickable").toBool());
+        click(item("studyHintsPart:close")); QTRY_VERIFY(!shown("relatedDrawer"));
+        run("tags"); QTRY_VERIFY(opened("tagsSurface")); type("Grace");
+        click(item("tagsHintsPart:toggle / create")); QTRY_COMPARE(bible->tags().size(), 1);
+        click(item("tagsHintsPart:close")); QTRY_VERIFY(!shown("tagsSurface"));
+    }
 };
 
 int main(int argc, char **argv) {

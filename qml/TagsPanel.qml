@@ -483,6 +483,43 @@ Item {
         if (tagById(managedId)) renameInput.text = tagById(managedId).name
         search.forceActiveFocus()
     }
+    // Clickable hint rows (HintRow): each part runs what its key would.
+    function currentChip() {
+        const chip = chipItems()[chipIndex]
+        return chip && chip.modelData ? chip.modelData : null
+    }
+    function studyHintParts() {
+        const tabs = [["Left", "Right"], "tabs"]
+        const escape = function() { panel.handleStudyEscape() }
+        if (!tagsTab) return [tabs, ["Return", studyTab === "footnotes" ? "go to verse" : "open", function() { panel.openStudyRow(studyList.currentIndex) }, listKeys],
+            ["Y", "copy", function() { panel.app.copyScope(panel.listScope()) }, listKeys],
+            ["D", "Desk", function() { panel.app.toggleScopeDesk(panel.listScope()) }, listKeys], ["Escape", "close", escape]]
+        if (studySearch.activeFocus) return [[["Return", "Down"], "passages", function() { panel.leaveStudySearch() }], ["Escape", "leave search", function() { panel.leaveStudySearch() }]]
+        const tag = ["T", "add tags", function() { panel.tagCurrentResult() }, relatedMoveKeys && !bible.busy]
+        if (!rootChips.length) return [tabs, tag, ["Escape", "close", escape]]
+        const chip = currentChip()
+        if (chipFocused) return [[["Left", "Right"], "chips"], ["Space", "toggle", function() { panel.toggleChip(chip.id) }, !!chip],
+            ["Shift+Space", "solo", function() { panel.soloChip(chip.id) }, !!chip], ["0", "all", function() { panel.restoreChips() }],
+            ["Down", "passages"], ["Escape", "close", escape]]
+        return [tabs, ["Return", "open", function() { panel.openTagged(panel.visibleResults[resultList.currentIndex]) }, listKeys], ["T", "tag", tag[2], tag[3]],
+            otherVersions ? ["A", allVersions ? "this version" : "all versions", function() { panel.toggleAllVersions() }, relatedMoveKeys] : null,
+            ["/", "search", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", studyQuery.length ? "clear" : "close", escape]]
+    }
+    // The picker's enter: create or toggle from the search field, toggle in the list.
+    function pickerEnter() {
+        if (search.activeFocus) {
+            if (page === "picker" && validName) createFromQuery()
+            else if (tagList.count) toggleTag(filteredTags[Math.max(0, tagList.currentIndex)].id)
+        } else if (tagList.currentIndex >= 0 && filteredTags[tagList.currentIndex]) toggleTag(filteredTags[tagList.currentIndex].id)
+    }
+    function pickerHintParts() {
+        const inList = !search.activeFocus && tagList.currentIndex >= 0 && tagList.currentIndex < tagList.count
+        const enter = search.activeFocus ? (page === "picker" && validName && scopeValid) || tagList.count > 0 : inList
+        const escape = ["Escape", "close", function() { panel.handleEscape() }]
+        if (page !== "picker") return [["Return", "choose", function() { panel.pickerEnter() }, enter && !bible.busy], escape]
+        return [["Space", "toggle", function() { panel.pickerEnter() }, inList && scopeValid && !bible.busy],
+            ["Return", "toggle / create", function() { panel.pickerEnter() }, enter && scopeValid && !bible.busy], escape]
+    }
     // Study keys: off while typing, behind the picker or a menu, and while closing.
     readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen
         && !textInputActive()
@@ -1023,14 +1060,14 @@ Item {
                             : "No other passages are tagged " + panel.rootChips.filter(function(chip) { return panel.onIds.indexOf(chip.id) >= 0 })
                                 .map(function(chip) { return chip.name }).join(", ") + "."
                     }
-                    TagText {
+                    HintRow {
                         objectName: "studyTagsVersionsHint"
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.maximumWidth: parent.width
                         visible: panel.rootChips.length > 0 && panel.onIds.length > 0 && !panel.results.length && !panel.allVersions && panel.otherVersions
-                        textFormat: Text.StyledText
-                        text: KeyNotation.hint([["A", "include other versions"]], panel.desktop.foreground, panel.desktop.muted)
-                        font.pixelSize: 12 * panel.studyScale
+                        theme: panel.desktop
+                        parts: [["A", "include other versions", function() { panel.toggleAllVersions() }, panel.relatedMoveKeys]]
+                        pixelSize: 12 * panel.studyScale
                     }
                     Button {
                         id: addTags
@@ -1147,20 +1184,12 @@ Item {
             }
             TagText { objectName: "studyMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.relatedShown ? panel.message : "" }
             FineRule {}
-            TagText {
+            HintRow {
                 Layout.fillWidth: true
                 objectName: "studyHints"
-                textFormat: Text.StyledText
-                text: KeyNotation.hint(!panel.tagsTab
-                    ? [[["Left", "Right"], "tabs"], ["Return", panel.studyTab === "footnotes" ? "go to verse" : "open"], ["Y", "copy"], ["D", "Desk"], ["Escape", "close"]]
-                    : studySearch.activeFocus ? [[["Return", "Down"], "passages"], ["Escape", "leave search"]]
-                    : !panel.rootChips.length ? [[["Left", "Right"], "tabs"], ["T", "add tags"], ["Escape", "close"]]
-                    : panel.chipFocused ? [[["Left", "Right"], "chips"], ["Space", "toggle"], ["Shift+Space", "solo"], ["0", "all"], ["Down", "passages"], ["Escape", "close"]]
-                    : [[["Left", "Right"], "tabs"], ["Return", "open"], ["T", "tag"], panel.otherVersions ? ["A", panel.allVersions ? "this version" : "all versions"] : null,
-                        ["/", "search"], ["Escape", panel.studyQuery.length ? "clear" : "close"]],
-                    panel.desktop.foreground, panel.desktop.muted)
-                font.pixelSize: 11 * panel.studyScale
-                color: panel.desktop.muted
+                theme: panel.desktop
+                parts: panel.studyHintParts()
+                pixelSize: 11 * panel.studyScale
             }
         }
     }
@@ -1245,10 +1274,7 @@ Item {
                 placeholderText: panel.page === "picker" ? "Find or create a tag…" : "Filter tags…"
                 text: panel.query
                 onTextEdited: panel.query = text
-                onAccepted: {
-                    if (panel.page === "picker" && panel.validName) panel.createFromQuery()
-                    else if (tagList.count) panel.toggleTag(panel.filteredTags[Math.max(0, tagList.currentIndex)].id)
-                }
+                onAccepted: panel.pickerEnter()
                 Keys.onDownPressed: { if (tagList.count) { tagList.currentIndex = 0; tagList.forceActiveFocus() } }
             }
             ListView {
@@ -1360,14 +1386,12 @@ Item {
             Item { Layout.fillHeight: true; visible: panel.confirmation !== null }
             TagText { objectName: "tagMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.message }
             FineRule {}
-            TagText {
+            HintRow {
                 Layout.fillWidth: true
                 objectName: "tagsHints"
-                textFormat: Text.StyledText
-                text: KeyNotation.hint(panel.page === "picker" ? [["Space", "toggle"], ["Return", "toggle / create"], ["Escape", "close"]]
-                    : [["Return", "choose"], ["Escape", "close"]], panel.desktop.foreground, panel.desktop.muted)
-                font.pixelSize: 11 * panel.controlScale
-                color: panel.desktop.muted
+                theme: panel.desktop
+                parts: panel.pickerHintParts()
+                pixelSize: 11 * panel.controlScale
             }
         }
     }
