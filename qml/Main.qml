@@ -3182,6 +3182,11 @@ ApplicationWindow {
         { id: "toggleDesk", group: "Annotate", title: "Add to Desk", sequences: ["D"], command: true },
         { id: "editRange", group: "Annotate", title: "Edit annotation range", sequences: ["Shift+E"], command: true },
         { id: "manageTags", group: "Annotate", title: "Manage tags", sequences: ["Ctrl+T"], command: true },
+        // Bound by the tag picker's Manage tags page itself.
+        { id: "manageRename", group: "Annotate", title: "Manage tags: rename the chosen tag", sequences: ["Return"], scope: "tags", explanation: true },
+        { id: "manageDelete", group: "Annotate", title: "Manage tags: delete a tag", sequences: ["Delete"], scope: "tags", explanation: true },
+        { id: "manageMerge", group: "Annotate", title: "Manage tags: choose a tag to merge into", sequences: ["Ctrl+M"], scope: "tags", explanation: true },
+        { id: "manageBack", group: "Annotate", title: "Manage tags: back to the picker (empty filter)", sequences: ["Backspace"], scope: "tags", explanation: true },
         // Bound by the note editor itself.
         { id: "noteLinkSuggest", group: "Annotate", title: "Suggest a passage to link (in a note)", sequences: ["[, ["], scope: "noteEditor" },
         { id: "openNoteLink", group: "Annotate", title: "Open the passage link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
@@ -3264,7 +3269,7 @@ ApplicationWindow {
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
-    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters"].includes(action.scope) }
+    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters", "tags"].includes(action.scope) }
     function actionById(id) { return actions.find(function(entry) { return entry.id === id }) }
     function actionKeys(action) {
         if (typeof action === "string") action = actionById(action)
@@ -3382,6 +3387,8 @@ ApplicationWindow {
         // panels, the palette, modals, find, and text fields included.
         if (textSizeActions.includes(action.id)) return !errorDialog.visible
         if (findPromptOpen) return false
+        // Inside the tag picker ctrl t switches between the picker and Manage.
+        if (action.id === "manageTags" && tagsUi.pickerVisible) return !tagsUi.confirmation && !errorDialog.visible
         // Character selection owns the reader's keys (charKey); window keys
         // (palettes, dialogs) still work and end it as they take the keyboard.
         if (charMode && readerBase && action.scope !== "global" && action.scope !== "palette") return false
@@ -3421,6 +3428,7 @@ ApplicationWindow {
         if (action.scope === "desk") return "Desk panel only"
         if (action.scope === "noteEditor") return "Notes editor"
         if (action.scope === "characters") return "Character selection · " + keyText("characterVisual")
+        if (action.scope === "tags") return "Tag picker · Manage tags (" + keyText("manageTags") + ")"
         return "Reader · outside text editing and dialogs"
     }
     function filteredKeybindings() {
@@ -3691,7 +3699,7 @@ ApplicationWindow {
         case "bookmark": markPassage(false); break
         case "highlight": markPassage(true); break
         case "tags": openPassageTags(); break
-        case "manageTags": openTagsBrowser(true); break
+        case "manageTags": if (tagsUi.pickerVisible) tagsUi.togglePage(); else openTagsBrowser(true); break
         case "related":
             // Study needs a passage; after opening a chapter nothing is selected yet,
             // so study the first verse, as entering Visual mode does.

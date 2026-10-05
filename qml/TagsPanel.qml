@@ -414,6 +414,8 @@ Item {
             managedId = id
             renameInput.text = tagById(id).name
             mergeTarget = ""
+            // Choosing a tag (enter or click) goes on to its new name.
+            Qt.callLater(function() { panel.focusRename() })
             return
         }
         if (!scopeValid || !canAct() || !installed(editingScope)) return
@@ -463,6 +465,58 @@ Item {
         refresh()
         search.forceActiveFocus()
     }
+    // Manage tags by key: enter renames the chosen tag (its field takes the
+    // keyboard), delete asks to delete it, ctrl m picks a merge target
+    // (j k ↑ ↓, enter merges), backspace in an empty filter and ctrl t go back
+    // to the picker (ctrl t in the picker opens Manage).
+    function focusRename() {
+        if (page !== "manage" || !tagById(managedId) || confirmation) return
+        renameInput.forceActiveFocus()
+        renameInput.selectAll()
+    }
+    // The tag a management key acts on: the list's current row, else the chosen tag.
+    function managementTarget() {
+        if (tagList.activeFocus || (tagList.currentItem && tagList.currentItem.activeFocus)) {
+            const row = filteredTags[tagList.currentIndex]
+            if (row) return row.id
+        }
+        return managedId
+    }
+    function requestDeleteTag() {
+        const id = managementTarget()
+        if (page !== "manage" || !tagById(id) || confirmation) { app.rejected(); return }
+        if (id !== managedId) { managedId = id; renameInput.text = tagById(id).name; mergeTarget = "" }
+        requestManagement("delete")
+    }
+    function focusMerge() {
+        if (page !== "manage" || !tagById(managedId) || confirmation || !mergeList.count) { app.rejected(); return }
+        const at = mergeList.model.findIndex(function(tag) { return tag.id === panel.mergeTarget })
+        mergeList.currentIndex = Math.max(0, at)
+        mergeList.forceActiveFocus()
+    }
+    function moveMerge(delta) {
+        if (!mergeList.count) return
+        mergeList.currentIndex = Math.max(0, Math.min(mergeList.count - 1, mergeList.currentIndex + delta))
+        mergeList.positionViewAtIndex(mergeList.currentIndex, ListView.Contain)
+    }
+    function chooseMerge() {
+        const tag = mergeList.model[mergeList.currentIndex]
+        if (!tag) { app.rejected(); return }
+        mergeTarget = tag.id
+        requestManagement("merge")
+    }
+    // One ctrl t is one switch: inside the popup Qt can deliver the window
+    // shortcut twice for a single press (override, then the unhandled press).
+    property bool pageToggled: false
+    function togglePage() {
+        if (pageToggled) return
+        pageToggled = true
+        Qt.callLater(function() { panel.pageToggled = false })
+        if (confirmation || !surface.visible) { app.rejected(); return }
+        if (page === "picker") manage()
+        else back()
+    }
+    readonly property bool manageFieldFocused: renameInput.activeFocus || mergeList.activeFocus
     function requestManagement(action) {
         const tag = tagById(managedId)
         if (!tag || !canAct()) return
@@ -524,9 +578,22 @@ Item {
         const inList = !search.activeFocus && tagList.currentIndex >= 0 && tagList.currentIndex < tagList.count
         const enter = search.activeFocus ? (page === "picker" && validName && scopeValid) || tagList.count > 0 : inList
         const escape = ["Escape", "close", function() { panel.handleEscape() }]
-        if (page !== "picker") return [["Return", "choose", function() { panel.pickerEnter() }, enter && !bible.busy], escape]
+        if (confirmation) return [[["Left", "Right"], "choose"], ["Return", "confirm", function() { panel.confirmManagement() }, !bible.busy],
+            ["Escape", "cancel", function() { panel.handleEscape() }]]
+        const pageKey = ["Ctrl+T", page === "picker" ? "manage" : "picker", function() { panel.togglePage() }]
+        if (page !== "picker") {
+            const chosen = !!tagById(managedId)
+            if (mergeList.activeFocus) return [[["J", "K"], "choose"], ["Return", "merge…", function() { panel.chooseMerge() }, mergeList.count > 0 && !bible.busy],
+                ["Escape", "back", function() { panel.handleEscape() }]]
+            if (renameInput.activeFocus) return [["Return", "rename…", function() { panel.requestManagement("rename") }, chosen && !bible.busy],
+                ["Ctrl+M", "merge", function() { panel.focusMerge() }, chosen && mergeList.count > 0], ["Escape", "back", function() { panel.handleEscape() }]]
+            return [["Return", "rename", function() { panel.pickerEnter() }, enter && !bible.busy],
+                ["Delete", "delete…", function() { panel.requestDeleteTag() }, (inList || chosen) && !bible.busy],
+                ["Ctrl+M", "merge", function() { panel.focusMerge() }, chosen && mergeList.count > 0],
+                search.activeFocus && !query.length ? ["Backspace", "back", function() { panel.back() }] : pageKey, escape]
+        }
         return [["Space", "toggle", function() { panel.pickerEnter() }, inList && scopeValid && !bible.busy],
-            ["Return", "toggle / create", function() { panel.pickerEnter() }, enter && scopeValid && !bible.busy], escape]
+            ["Return", "toggle / create", function() { panel.pickerEnter() }, enter && scopeValid && !bible.busy], pageKey, escape]
     }
     // Study keys: off while typing, behind the picker or a menu, and while closing.
     readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen
@@ -574,7 +641,14 @@ Item {
     // One esc closes the picker (a pending confirmation first).
     function handleEscape() {
         if (confirmation) { confirmation = null; search.forceActiveFocus() }
+        // From the rename field or merge list, back to the tag list first.
+        else if (page === "manage" && manageFieldFocused) focusTagList()
         else surface.close()
+    }
+    function focusTagList() {
+        const at = filteredTags.findIndex(function(tag) { return tag.id === panel.managedId })
+        if (tagList.count) { tagList.currentIndex = Math.max(0, at); tagList.forceActiveFocus() }
+        else search.forceActiveFocus()
     }
     // Study: esc in the search field leaves it, keeping the query; esc with a
     // query clears it; otherwise esc closes the panel.
@@ -628,8 +702,10 @@ Item {
         }
         // A focused button owns enter and space (never a window shortcut).
         Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
-        Keys.onReturnPressed: clicked()
-        Keys.onEnterPressed: clicked()
+        // keyActivated: this click came from enter (a merge target merges at once).
+        property bool keyActivated: false
+        Keys.onReturnPressed: { keyActivated = true; clicked(); keyActivated = false }
+        Keys.onEnterPressed: { keyActivated = true; clicked(); keyActivated = false }
         AppToolTip { theme: panel.desktop; uiScale: panel.uiScale; text: control.hint; visible: text.length > 0 && (control.hovered || control.activeFocus) }
     }
     // Study's tag chips: "name N" (N muted: other passages with the tag). On
@@ -1249,6 +1325,25 @@ Item {
             objectName: "tagsBody"
             spacing: 8 * panel.controlScale
             Keys.onEscapePressed: panel.handleEscape()
+            // ctrl m (merge target), delete (delete the tag); ctrl t (pages) is
+            // the window's Manage tags key (Main's runCommand toggles the page):
+            // keys bubble here from the field and lists, which leave them alone.
+            Keys.onPressed: function(event) {
+                const mods = event.modifiers & ~Qt.KeypadModifier
+                if (event.key === Qt.Key_M && mods === Qt.ControlModifier && panel.page === "manage" && !panel.confirmation) panel.focusMerge()
+                else if (event.key === Qt.Key_Delete && mods === Qt.NoModifier && panel.page === "manage" && !panel.confirmation && !panel.textInputActive()) panel.requestDeleteTag()
+                else return
+                event.accepted = true
+            }
+            // The confirmation's ← → ↑ ↓ move between Cancel and Confirm.
+            Shortcut {
+                sequences: ["Left", "Right", "Up", "Down"]
+                enabled: surface.opened && !!panel.confirmation
+                onActivated: {
+                    if (cancelManagement.activeFocus) confirmManagementButton.forceActiveFocus()
+                    else cancelManagement.forceActiveFocus()
+                }
+            }
             RowLayout {
                 Layout.fillWidth: true
                 TagText {
@@ -1283,7 +1378,7 @@ Item {
                 }
                 RowLayout {
                     TagButton { id: cancelManagement; objectName: "cancelTagManagement"; text: "Cancel"; onClicked: { panel.confirmation = null; search.forceActiveFocus() } }
-                    TagButton { objectName: "confirmTagManagement"; text: "Confirm"; enabled: !panel.bible.busy; onClicked: panel.confirmManagement() }
+                    TagButton { id: confirmManagementButton; objectName: "confirmTagManagement"; text: "Confirm"; enabled: !panel.bible.busy; onClicked: panel.confirmManagement() }
                 }
             }
             TagInput {
@@ -1296,6 +1391,13 @@ Item {
                 onTextEdited: panel.query = text
                 onAccepted: panel.pickerEnter()
                 Keys.onDownPressed: { if (tagList.count) { tagList.currentIndex = 0; tagList.forceActiveFocus() } }
+                // Backspace in an empty Manage filter goes back to the picker.
+                Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier && !text.length && panel.page === "manage") {
+                        event.accepted = true
+                        panel.back()
+                    }
+                }
             }
             ListView {
                 id: tagList
@@ -1392,13 +1494,38 @@ Item {
                     clip: true
                     model: panel.allTags.filter(function(tag) { return tag.id !== panel.managedId })
                     ScrollBar.vertical: TagScrollbar { objectName: "tagMergeScrollbar" }
+                    currentIndex: -1
+                    activeFocusOnTab: true
+                    Keys.onPressed: function(event) {
+                        if (event.modifiers !== Qt.NoModifier) return
+                        if (event.key === Qt.Key_J || event.key === Qt.Key_Down) panel.moveMerge(1)
+                        else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) panel.moveMerge(-1)
+                        else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) panel.chooseMerge()
+                        else return
+                        event.accepted = true
+                    }
                     delegate: TagButton {
+                        id: mergeDelegate
                         required property var modelData
+                        required property int index
                         objectName: "mergeTarget:" + modelData.id
                         width: mergeList.width
                         text: modelData.name
+                        focusPolicy: Qt.NoFocus
                         chosen: panel.mergeTarget === modelData.id
-                        onClicked: panel.mergeTarget = modelData.id
+                        onClicked: {
+                            mergeList.currentIndex = index
+                            panel.mergeTarget = modelData.id
+                            if (keyActivated) panel.chooseMerge()
+                        }
+                        background: Rectangle {
+                            color: mergeList.activeFocus && mergeList.currentIndex === mergeDelegate.index
+                                ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
+                                : mergeDelegate.chosen || mergeDelegate.hovered ? panel.desktop.surface : "transparent"
+                            border.width: mergeDelegate.chosen ? 1 : 0
+                            border.color: panel.desktop.accent
+                            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+                        }
                     }
                 }
                 TagButton { objectName: "mergeTags"; text: "Merge…"; enabled: panel.mergeTarget.length > 0; onClicked: panel.requestManagement("merge") }

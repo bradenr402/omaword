@@ -1219,6 +1219,65 @@ private slots:
         key(Qt::Key_Return); QTRY_VERIFY(!editor->property("sessionOpen").toBool());
         bible->selectVerses(6, 7); QCOMPARE(bible->noteText(), QString("Seven\n\nSix"));
     }
+    QString tagId(const QString &name) const {
+        for (const auto &tag : bible->tags()) if (tag.toMap()["name"].toString() == name) return tag.toMap()["id"].toString();
+        return {};
+    }
+    void manageTagsByKeyAndMouse() {
+        const auto scope = bible->tagScope();
+        for (const auto &name : {"Alpha", "Beta", "Gamma"}) QVERIFY(!bible->createAndAssignTag(scope, name).isEmpty());
+        auto tags = object("tagsUi");
+        // ctrl t opens Manage; inside the picker ctrl t switches pages.
+        key(Qt::Key_T, Qt::ControlModifier); QTRY_VERIFY(opened("tagsSurface"));
+        QCOMPARE(tags->property("page").toString(), QString("manage"));
+        key(Qt::Key_T, Qt::ControlModifier); QCOMPARE(tags->property("page").toString(), QString("picker"));
+        QVERIFY(object("tagsHints")->property("plainText").toString().contains("ctrl t manage"));
+        key(Qt::Key_T, Qt::ControlModifier); QCOMPARE(tags->property("page").toString(), QString("manage"));
+        // Enter chooses a tag and focuses its new name.
+        QTRY_VERIFY(item("tagSearch")->hasActiveFocus()); type("alp"); key(Qt::Key_Return);
+        QTRY_VERIFY(item("tagRenameInput")->hasActiveFocus());
+        QCOMPARE(item("tagRenameInput")->property("selectedText").toString(), QString("Alpha"));
+        type("aleph"); key(Qt::Key_Return);
+        QTRY_VERIFY(item("cancelTagManagement")->hasActiveFocus());
+        // The confirmation's arrows move between Cancel and Confirm.
+        key(Qt::Key_Right); QVERIFY(item("confirmTagManagement")->hasActiveFocus());
+        key(Qt::Key_Left); QVERIFY(item("cancelTagManagement")->hasActiveFocus());
+        key(Qt::Key_Down); key(Qt::Key_Return);
+        QTRY_VERIFY(!tagId("aleph").isEmpty()); QVERIFY(tagId("Alpha").isEmpty());
+        // Backspace in the empty filter goes back to the picker.
+        QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
+        for (int i = 0; i < 3; ++i) key(Qt::Key_Backspace); // "alp" first
+        QCOMPARE(tags->property("page").toString(), QString("manage"));
+        key(Qt::Key_Backspace); QCOMPARE(tags->property("page").toString(), QString("picker"));
+        // Delete asks to delete the current tag; esc cancels.
+        key(Qt::Key_T, Qt::ControlModifier); QCOMPARE(tags->property("page").toString(), QString("manage"));
+        key(Qt::Key_Down); QTRY_VERIFY(item("tagList")->hasActiveFocus());
+        key(Qt::Key_Delete); QTRY_VERIFY(tags->property("confirmation").isValid());
+        QCOMPARE(value(tags->property("confirmation")).toMap()["action"].toString(), QString("delete"));
+        key(Qt::Key_Escape); QTRY_VERIFY(value(tags->property("confirmation")).isNull() || !value(tags->property("confirmation")).isValid());
+        QVERIFY(opened("tagsSurface"));
+        // ctrl m picks a merge target with j/k; enter asks to merge.
+        key(Qt::Key_Down); key(Qt::Key_Return); QTRY_VERIFY(item("tagRenameInput")->hasActiveFocus());
+        const QString source = tags->property("managedId").toString(); QVERIFY(!source.isEmpty());
+        key(Qt::Key_M, Qt::ControlModifier); QTRY_VERIFY(item("tagMergeTargets")->hasActiveFocus());
+        QCOMPARE(item("tagMergeTargets")->property("currentIndex").toInt(), 0);
+        key(Qt::Key_J); QCOMPARE(item("tagMergeTargets")->property("currentIndex").toInt(), 1);
+        key(Qt::Key_K); QCOMPARE(item("tagMergeTargets")->property("currentIndex").toInt(), 0);
+        key(Qt::Key_Return);
+        QTRY_COMPARE(value(tags->property("confirmation")).toMap()["action"].toString(), QString("merge"));
+        // Mouse: Confirm merges.
+        const int before = bible->tags().size();
+        click("confirmTagManagement"); QTRY_COMPARE(bible->tags().size(), before - 1);
+        // Mouse: the hint parts switch pages and ask to delete.
+        clickHint("tagsHintsPart:back"); QCOMPARE(tags->property("page").toString(), QString("picker"));
+        clickHint("tagsHintsPart:manage"); QCOMPARE(tags->property("page").toString(), QString("manage"));
+        click(item("tag:" + tagId("Gamma"))); QTRY_VERIFY(item("tagRenameInput")->hasActiveFocus());
+        clickHint("tagsHintsPart:merge"); QTRY_VERIFY(item("tagMergeTargets")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(item("tagList")->hasActiveFocus());
+        clickHint("tagsHintsPart:delete…"); QTRY_COMPARE(value(tags->property("confirmation")).toMap()["action"].toString(), QString("delete"));
+        click("confirmTagManagement"); QTRY_VERIFY(tagId("Gamma").isEmpty());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
+    }
 };
 
 int main(int argc, char **argv) {

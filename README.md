@@ -107,6 +107,10 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `d`: Add to Desk
 - `shift E`: Edit annotation range
 - `ctrl t`: Manage tags
+- `enter`: Manage tags: rename the chosen tag
+- `delete`: Manage tags: delete a tag
+- `ctrl m`: Manage tags: choose a tag to merge into
+- `backspace`: Manage tags: back to the picker (empty filter)
 - `[[`: Suggest a passage to link (in a note)
 - `alt enter`: Open the passage link at the cursor (in a note)
 - `tab` · `shift tab`: Between a note and its Linked from list (in a note)
