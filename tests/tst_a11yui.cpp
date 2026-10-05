@@ -704,10 +704,10 @@ private slots:
         // ...while a right click elsewhere closes it and opens the new menu there at once.
         QTRY_VERIFY(prop("readerKeys").toBool()); QTRY_VERIFY(readerFocused());
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        const QPoint there = versePoint(8);
+        const QPoint there = versePoint(2);
         clickAt(there, Qt::RightButton);
         QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(bible->selectedStart(), 8);
+        QCOMPARE(bible->selectedStart(), 2);
         QVERIFY(qAbs(menu()->property("x").toReal() - there.x()) < 2);
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
     }
@@ -1523,6 +1523,7 @@ private slots:
         auto counterMouse = item("searchMatchCountMouse"); QCOMPARE(counterMouse->cursor().shape(), Qt::PointingHandCursor);
         QTest::mouseMove(window, center(counter)); QTRY_VERIFY(toolTipOf(counter)->property("visible").toBool());
         QVERIFY(toolTipOf(counter)->property("text").toString().contains("shift click"));
+        QTRY_VERIFY(prop("searchMatchIndex").toInt() >= 0); QTest::qWait(50);
         const int first = prop("searchMatchIndex").toInt();
         click(counter); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first + 1);
         click(counter, Qt::LeftButton, Qt::ShiftModifier); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first);

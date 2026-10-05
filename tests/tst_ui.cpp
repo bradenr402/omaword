@@ -1420,7 +1420,7 @@ private slots:
         auto list = item("keybindingResults");
         auto bar = item("keybindingScrollbar");
         QVERIFY(list && bar && item("keybindingFooterRule"));
-        QCOMPARE(item("keybindingNavigate to a passage")->width(),list->width());
+        QCOMPARE(item("keybindingPrevious verse")->width(),list->width());
         QCOMPARE(prop("keybindingFooterRule","height").toDouble(),1.0);
         QVERIFY(bar->width() >= 18);
         const int count = prop("keybindingResults","count").toInt();
@@ -5332,6 +5332,8 @@ private slots:
         item("tagRenameInput")->forceActiveFocus(); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("tagRenameInput","selectedText").toString(),QString("Context tag"));
         QVERIFY(prop("tagsUi","visibleModal").toBool());
+        // esc in the rename field returns to the tag list; the next esc closes.
+        key(Qt::Key_Escape); QTRY_VERIFY(item("tagList")->hasActiveFocus()); QVERIFY(prop("tagsUi","visibleModal").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
         auto related = item("relatedControl"); QVERIFY(related && related->isVisible());
         const auto relatedBounds = related->mapRectToScene(related->boundingRect());
