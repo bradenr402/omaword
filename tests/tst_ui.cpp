@@ -5599,11 +5599,12 @@ private slots:
             key(Qt::Key_A,Qt::ShiftModifier);
             QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         }
-        for (auto activation : {Qt::Key_Space,Qt::Key_Return,Qt::Key_Enter}) {
-            QVERIFY(tabTo("savedEntryJohn 3:2"));
-            // Tab focus and list selection are independent; activate the focused row.
-            object("collectionList")->setProperty("currentIndex",0);
-            QCOMPARE(window->activeFocusItem(),item("savedEntryJohn 3:2"));
+        for (auto activation : {Qt::Key_Return,Qt::Key_Enter}) {
+            // Rows never take the keyboard (like Desk and History): the list's
+            // current row opens.
+            QCOMPARE(item("savedEntryJohn 3:2")->property("focusPolicy").toInt(),int(Qt::NoFocus));
+            object("collectionList")->setProperty("currentIndex",1);
+            item("collectionList")->forceActiveFocus();
             key(activation);
             QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
             QCOMPARE(bible->selectionReference(),QString("John 3:2"));
@@ -5629,12 +5630,10 @@ private slots:
         reference("John 3:3"); bible->toggleBookmark();
         key(Qt::Key_A,Qt::ShiftModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        for (int i = 0; i < 40 && window->activeFocusItem() != item("savedEntryJohn 3:2"); ++i)
-            key(Qt::Key_Tab);
-        QCOMPARE(window->activeFocusItem(),item("savedEntryJohn 3:2"));
-        object("collectionList")->setProperty("currentIndex",0);
-        QCOMPARE(window->activeFocusItem(),item("savedEntryJohn 3:2"));
-        QVERIFY(prop("savedEntryJohn 3:1","highlighted").toBool());
+        // Rows never take the keyboard: delete acts on the list's current row.
+        object("collectionList")->setProperty("currentIndex",1);
+        item("collectionList")->forceActiveFocus();
+        QVERIFY(prop("savedEntryJohn 3:2","highlighted").toBool());
         key(Qt::Key(deleteKey));
         QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
         QCOMPARE(prop("deleteReference","text").toString(),QString("John 3:2"));
