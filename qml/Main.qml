@@ -1689,7 +1689,8 @@ ApplicationWindow {
         id: modalGhost
         objectName: "modalGhost"
         duration: app.reduceMotion ? 0 : 85
-        endScale: 0.97
+        // Modals are large: a slight scale reads as the same motion as a menu's.
+        endScale: 0.985
         dimmed: true
         dimColor: app.tint(desktop.background, 0.72)
         suppressDim: app.dialogOpen
