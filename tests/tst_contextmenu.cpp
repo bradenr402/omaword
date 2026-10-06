@@ -271,7 +271,7 @@ private slots:
         QFETCH(QString, mode);
         setLayout(mode);
         // Visual range 2–4, then right-click inside: the range is kept.
-        navigate("John 1:2"); key(Qt::Key_V); key(Qt::Key_J); key(Qt::Key_J);
+        navigate("John 1:2"); key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_J);
         QCOMPARE(bible->selectedStart(), 2); QCOMPARE(bible->selectedEnd(), 4);
         rightClick(versePoint(3));
         QTRY_VERIFY(menuOpen());
@@ -427,7 +427,7 @@ private slots:
         clickEntry("highlight");
         QVERIFY(bible->selectionHighlighted());
         // A Visual range completes after an action, exactly like the key.
-        navigate("John 1:4"); key(Qt::Key_V); key(Qt::Key_J);
+        navigate("John 1:4"); key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J);
         QVERIFY(prop("verseMode").toBool());
         rightClick(versePoint(5)); QTRY_VERIFY(menuOpen());
         QCOMPARE(bible->selectedStart(), 4); QCOMPARE(bible->selectedEnd(), 5);

@@ -241,7 +241,7 @@ private slots:
             QCOMPARE(veil->acceptedMouseButtons(), Qt::NoButton);
         } else QVERIFY(item("chapterTitle")->opacity() < 1);
         // A visual range keeps the whole range undimmed.
-        key(Qt::Key_V); key(Qt::Key_J); settle();
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); settle();
         QCOMPARE(dim(5), 0.0); QCOMPARE(dim(6), 0.0); QVERIFY(dim(7) > 0.5); QVERIFY(dim(4) > 0.5);
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!bible->focusMode());
         settle();
@@ -253,7 +253,7 @@ private slots:
         navigate("John 1:5");
         key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
         // Visual mode: the first Escape leaves Visual at the cursor.
-        key(Qt::Key_V); key(Qt::Key_J); key(Qt::Key_J);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_J);
         QVERIFY(prop("verseMode").toBool()); QCOMPARE(bible->selectedStart(), 5); QCOMPARE(bible->selectedEnd(), 7);
         key(Qt::Key_Escape);
         QVERIFY(bible->focusMode()); QVERIFY(!prop("verseMode").toBool());
@@ -269,7 +269,7 @@ private slots:
         key(Qt::Key_Escape); QVERIFY(!bible->focusMode());
         // A pending count is still cleared before the range.
         key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
-        key(Qt::Key_V); key(Qt::Key_J); type("3");
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); type("3");
         key(Qt::Key_Escape); QCOMPARE(prop("verseCount").toString(), QString()); QVERIFY(prop("verseMode").toBool());
         key(Qt::Key_Escape); QVERIFY(!prop("verseMode").toBool()); QVERIFY(bible->focusMode());
         key(Qt::Key_Escape); QVERIFY(!bible->focusMode());
@@ -407,7 +407,7 @@ private slots:
         setLayout(mode); navigate("John 1:4");
         key(Qt::Key_Y); expectFlash(4, 4);
         key(Qt::Key_Y, Qt::ShiftModifier); expectFlash(4, 4);
-        key(Qt::Key_V); key(Qt::Key_J); key(Qt::Key_C, Qt::ControlModifier); expectFlash(4, 5);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_C, Qt::ControlModifier); expectFlash(4, 5);
         navigate("John 1:2");
         QTest::mouseClick(window, Qt::MiddleButton, {}, versePoint(6)); QCoreApplication::processEvents();
         expectFlash(6, 6);

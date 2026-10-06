@@ -1996,7 +1996,7 @@ private slots:
             key(down == Qt::Key_J ? Qt::Key_K : Qt::Key_Up);
             QCOMPARE(bible->cursorVerse(),16);
         }
-        key(Qt::Key_V);
+        key(Qt::Key_V, Qt::ShiftModifier);
         QVERIFY(window->property("verseMode").toBool());
         key(Qt::Key_J); key(Qt::Key_Down);
         QCOMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),18);
@@ -2005,7 +2005,7 @@ private slots:
         key(Qt::Key_Up); key(Qt::Key_Up);
         QCOMPARE(bible->selectedStart(),15); QCOMPARE(bible->selectedEnd(),16);
         QCOMPARE(bible->cursorVerse(),15);
-        key(Qt::Key_V);
+        key(Qt::Key_V, Qt::ShiftModifier);
         QVERIFY(!window->property("verseMode").toBool());
         QCOMPARE(bible->selectedStart(),15); QCOMPARE(bible->selectedEnd(),15);
         for (auto shifted : {Qt::Key_J,Qt::Key_K,Qt::Key_Down,Qt::Key_Up}) {
@@ -2022,10 +2022,10 @@ private slots:
             QCOMPARE(bible->selectedEnd(),bible->cursorVerse());
         }
         reference("John 3:16-18");
-        key(Qt::Key_V); key(Qt::Key_K);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_K);
         QCOMPARE(bible->selectedStart(),17); QCOMPARE(bible->selectedEnd(),18);
         reference("John 3");
-        key(Qt::Key_V); key(Qt::Key_J);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J);
         QCOMPARE(bible->selectedStart(),1); QCOMPARE(bible->selectedEnd(),2);
     }
     void visualActionsCompleteFullRange_data() {
@@ -2039,7 +2039,7 @@ private slots:
         QFETCH(QString,mode); QFETCH(Qt::Key,action);
         bible->setReadingMode(mode);
         reference("John 3:35");
-        key(Qt::Key_V); type("3j");
+        key(Qt::Key_V, Qt::ShiftModifier); type("3j");
         const auto reference = bible->selectionReference();
         QCOMPARE(reference,QString("John 3:35–4:2"));
         const auto scope = bible->tagScope();
@@ -2059,7 +2059,7 @@ private slots:
     }
     void visualFailedMarksAndPinnedNotes() {
         reference("John 3:16");
-        key(Qt::Key_V); key(Qt::Key_J);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J);
         const auto scope = bible->tagScope();
         const auto reference = bible->selectionReference();
         const auto tag = bible->createAndAssignTag(scope,"Retained tag");
@@ -2106,7 +2106,7 @@ private slots:
         QCOMPARE(bible->selectionTags().size(),1);
         // Opening and canceling without a write leaves Visual and the range intact.
         item("readerSurface")->forceActiveFocus();
-        key(Qt::Key_V); key(Qt::Key_K);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_K);
         const auto canceled = bible->selectionReference();
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
@@ -2115,7 +2115,7 @@ private slots:
     }
     void visualTagPinAndStalePanel() {
         reference("John 3:16");
-        key(Qt::Key_V); key(Qt::Key_J);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J);
         const auto scope = bible->tagScope();
         const auto reference = bible->selectionReference();
         const auto first = bible->createTag("First <b>tag</b>");
@@ -2151,7 +2151,7 @@ private slots:
         QCOMPARE(bible->selectionReference(),QString("John 3:17"));
         QVERIFY(bible->openTaggedPassage(scope));
         item("readerSurface")->forceActiveFocus();
-        key(Qt::Key_V); key(Qt::Key_K);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_K);
         key(Qt::Key_T); QTRY_VERIFY(prop("tagsUi","scopePinned").toBool());
         // A context change while the picker is open must not complete or collapse
         // a new range, even if it later returns to the same displayed reference.
@@ -3562,7 +3562,7 @@ private slots:
 
         for (bool visual : {false,true}) {
             reference("John 3:34");
-            if (visual) key(Qt::Key_V);
+            if (visual) key(Qt::Key_V, Qt::ShiftModifier);
             type("4j");
             QCOMPARE(bible->chapter(),4); QCOMPARE(bible->cursorVerse(),2);
             QCOMPARE(bible->crossChapterSelection(),visual);
@@ -3586,7 +3586,7 @@ private slots:
             reference("John 3:1");
             type("2"); key(forward,modifiers); QCOMPARE(bible->cursorVerse(),1 + 2 * step);
             type("2"); key(backward,modifiers); QCOMPARE(bible->cursorVerse(),1);
-            reference("John 3:34"); key(Qt::Key_V);
+            reference("John 3:34"); key(Qt::Key_V, Qt::ShiftModifier);
             type("2"); key(forward,modifiers); QCOMPARE(bible->cursorVerse(),36);
             type("2"); key(forward,modifiers);
             QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:34–4:1"));
@@ -3636,7 +3636,8 @@ private slots:
                 {Qt::Key_H,"Show headings"},{Qt::Key_P,"Verse picker"},
                 {Qt::Key_V,"Visual selection"}}) {
             const bool initiallyOn = toggle.first != Qt::Key_V;
-            const auto modifiers = toggle.first == Qt::Key_V ? Qt::NoModifier : Qt::AltModifier;
+            // shift V: verse (Visual) selection; v selects characters.
+            const auto modifiers = toggle.first == Qt::Key_V ? Qt::ShiftModifier : Qt::AltModifier;
             key(toggle.first,modifiers); checkToast(toggle.second + (initiallyOn ? " off" : " on"));
             key(toggle.first,modifiers); checkToast(toggle.second + (initiallyOn ? " on" : " off"));
         }
@@ -3739,7 +3740,7 @@ private slots:
                 const auto modifiers = forward == Qt::Key_PageDown ? Qt::NoModifier : Qt::ControlModifier;
                 const int step = forward == Qt::Key_D ? 5 : 10;
                 reference("John 3:34");
-                if (visual) key(Qt::Key_V);
+                if (visual) key(Qt::Key_V, Qt::ShiftModifier);
                 key(forward,modifiers);
                 QCOMPARE(bible->chapter(),3); QCOMPARE(bible->cursorVerse(),36);
                 key(forward,modifiers);

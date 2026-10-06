@@ -563,7 +563,7 @@ private slots:
         QVERIFY(settledY() != y);
         key(Qt::Key_Escape); QCOMPARE(bible->tagScope(), scope); QCOMPARE(prop("acceptedSearchQuery").toString(), QString("alpha"));
         QCOMPARE(settledY(), y);
-        key(Qt::Key_V); key(Qt::Key_K, Qt::ShiftModifier); QVERIFY(prop("verseMode").toBool()); const int cursor = bible->cursorVerse();
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_K, Qt::ShiftModifier); QVERIFY(prop("verseMode").toBool()); const int cursor = bible->cursorVerse();
         key(Qt::Key_Slash); QTRY_VERIFY(prop("findPromptOpen").toBool()); QVERIFY(!prop("verseMode").toBool());
         QCOMPARE(bible->selectedStart(), cursor); QCOMPARE(bible->selectedEnd(), cursor);
         QCOMPARE(object("chapterFindInput")->property("selectedText").toString(), QString("alpha"));

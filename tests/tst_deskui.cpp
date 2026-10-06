@@ -192,7 +192,7 @@ private slots:
         QVERIFY(desk().isEmpty()); QVERIFY(!bible->currentInDesk());
         QVERIFY(toast().contains("removed from Desk"));
         // Visual range: the whole range is added, then Visual completes.
-        key(Qt::Key_V); key(Qt::Key_J); key(Qt::Key_J);
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_J);
         QVERIFY(prop("verseMode").toBool());
         const auto range = bible->selectionReference();
         QVERIFY(range != reference);

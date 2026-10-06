@@ -18,7 +18,7 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 | `src/biblebackend.*` | Per-reader `bible`: active text, references, annotations, tags, Desk, prefs, library ops, backup/export |
 | `src/scripturesearch.*` | Normalized, cancellable Bible-wide search on a worker pool |
 | `src/searchdocument.*` | Offset mapping into rich text (both directions); LTR forcing helpers |
-| `src/textselection.*` | Character selection (`shift V`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
+| `src/textselection.*` | Character selection (`v`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
 | `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing |
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC |

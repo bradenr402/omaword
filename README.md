@@ -74,8 +74,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 - `click`: Select verse
 - `shift click`: Select a range
-- `v`: Toggle visual selection
-- `shift V`: Select characters (Vim charwise visual)
+- `shift V`: Toggle visual selection
+- `v`: Select characters (Vim charwise visual)
 - `h` · `l`: Characters: left, right (across verses)
 - `w` · `b` · `e` · `ge`: Characters: by word
 - `shift W` · `shift B` · `shift E`: Characters: by WORD (no spaces)
@@ -240,7 +240,7 @@ These also work, but stay out of the in-app list:
 ### Studying
 - Bookmark, highlight, tag, and write Markdown notes; notes save as you type. `alt v` switches a note between Write and Preview.
 - In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
-- Quote part of a passage: `shift V` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.
+- Quote part of a passage: `v` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.
 - The Study panel (`shift S`) follows the passage you are reading: its **Cross-references**, the chapter's **Footnotes**, and **Tags** — other passages you tagged the same way, ranked by shared tags. The passage's tags sit above the list as chips: `space` turns one off, `shift space` shows only it, `0` turns them all back on, and `a` includes every installed version. Footnotes also appear as small marks in the text.
 - The Desk (`d`, `shift D`) collects passages for side-by-side study across windows and versions.
 - Annotations → Tags lists every tagged passage in this version, grouped by tag, and marks the ones `here` at your reading position; `t` edits a row's tags and `delete` removes just that tag. **Manage tags** (`ctrl t`) renames, deletes, or merges them; names are shared across versions, assignments belong to one version.
@@ -253,8 +253,8 @@ These also work, but stay out of the in-app list:
 ### Keyboard and mouse
 - Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Desk), and `menu` or `shift F10` opens it from the keyboard.
 - Footer and dialog buttons take the keyboard by `tab` only; a focused button takes `enter` and `space`. Scrollable dialogs scroll with `j` `k`, `pgup` `pgdn`, `ctrl d` `ctrl u`, `home` `end`.
-- Clicking outside a panel, dialog, or picker only closes it (in Edit range and confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open moves the menu there. Keys and disabled rows that cannot act sound an error. Mouse back closes the top dialog.
-- Text fields use the app's own menu (Cut · Copy · Paste · Select all; in a note also Open link and Preview). Right-clicking selected text keeps it only when the click is on it; the passage menu (`menu`) keeps a `shift V` selection, and its copy entries copy it.
+- Clicking outside a panel, dialog, or picker only closes it (in Edit range and confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error. Mouse back closes the top dialog.
+- Text fields use the app's own menu (Cut · Copy · Paste · Select all; in a note also Open link and Preview). Right-clicking selected text keeps it only when the click is on it; the passage menu (`menu`) keeps a `v` selection, and its copy entries copy it.
 - If a note changes in another window while you type, typing is not interrupted: `ctrl s` keeps your draft, `ctrl shift S` takes the saved text.
 - With Annotations, Desk, History, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl r`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. The passage menu offers **Edit range** when the selection is annotated, and tooltips on the outline, margin notes, and verse numbers name their keys.
 

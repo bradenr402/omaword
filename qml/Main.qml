@@ -875,7 +875,7 @@ ApplicationWindow {
         return true
     }
 
-    // ── Character selection (shift V): Vim's charwise visual over the source
+    // ── Character selection (v): Vim's charwise visual over the source
     // text of the chapter. Positions are {verse, offset}: a verse number and a
     // UTF-16 offset into that verse's plain text, shared by all three layouts;
     // each layout maps them into its own document (SearchDocument per Verse
@@ -1205,7 +1205,10 @@ ApplicationWindow {
         // Named keys are motions, never count digits (home is 0's motion, not a 0).
         const named = { [Qt.Key_Left]: "h", [Qt.Key_Right]: "l", [Qt.Key_Up]: "k", [Qt.Key_Down]: "j", [Qt.Key_Home]: "0", [Qt.Key_End]: "$" }
         const isNamed = named[event.key] !== undefined
-        const text = named[event.key] || event.text
+        let text = named[event.key] || event.text
+        // A shifted letter is its capital even where the event's text is not.
+        if (!isNamed && (mods & Qt.ShiftModifier) && event.key >= Qt.Key_A && event.key <= Qt.Key_Z && text.length === 1)
+            text = text.toUpperCase()
         if (!text.length) { clearCount(); rejected(); return true }
         if (charPending.length) {
             const pending = charPending
@@ -1231,8 +1234,9 @@ ApplicationWindow {
         case "o": charSwap(); break
         case "y": copyCharSelection(false); break
         case "Y": copyCharSelection(true); break
-        case "V": endCharMode(); readerFocus(); break
-        case "v": endCharMode(); setVisualMode(true); readerFocus(); break
+        // v (its own key) leaves; shift V switches to verse (Visual) selection.
+        case "v": endCharMode(); readerFocus(); break
+        case "V": endCharMode(); setVisualMode(true); readerFocus(); break
         default: clearCount(); rejected()
         }
         return true
@@ -3495,8 +3499,8 @@ ApplicationWindow {
         { id: "mouseForward", group: "History", title: "Forward to the next jump", sequences: ["ForwardClick"], explanation: true },
         { id: "selectVerse", group: "Select", title: "Select verse", sequences: ["Click"], explanation: true },
         { id: "selectRange", group: "Select", title: "Select a range", sequences: ["Shift+Click"], explanation: true },
-        { id: "visual", group: "Select", title: "Toggle visual selection", sequences: ["V"] },
-        { id: "characterVisual", group: "Select", title: "Select characters (Vim charwise visual)", sequences: ["Shift+V"] },
+        { id: "visual", group: "Select", title: "Toggle visual selection", sequences: ["Shift+V"] },
+        { id: "characterVisual", group: "Select", title: "Select characters (Vim charwise visual)", sequences: ["V"] },
         // Bound by character selection itself (charKey).
         { id: "charMove", group: "Select", title: "Characters: left, right (across verses)", sequences: ["H", "L"], scope: "characters", explanation: true },
         { id: "charWords", group: "Select", title: "Characters: by word", sequences: ["W", "B", "E", "G, E"], scope: "characters", explanation: true },
@@ -4842,7 +4846,7 @@ ApplicationWindow {
                 Label { Layout.fillWidth: true; text: rangeEditor.message; visible: text.length > 0; color: desktop.foreground; wrapMode: Text.Wrap; textFormat: Text.PlainText }
             }
         }
-        // Character selection (shift V): the mode, its keys, and what is selected.
+        // Character selection (v): the mode, its keys, and what is selected.
         Rectangle {
             objectName: "characterStatus"
             Layout.fillWidth: true
