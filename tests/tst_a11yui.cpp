@@ -924,6 +924,69 @@ private slots:
         QTRY_VERIFY(editor->hasActiveFocus());
         type("kept"); QCOMPARE(bible->noteText(), QString("kept"));
     }
+    // Previous / next chapter buttons at the reader's outer edges.
+    void chapterEdgeButtons() {
+        window->resize(1400, 820); QTRY_COMPARE(window->width(), 1400);
+        navigate("John 2:5"); QTest::qWait(80);
+        auto previous = item("chapterPreviousButton"), next = item("chapterNextButton");
+        QVERIFY(previous && next);
+        QTRY_VERIFY(previous->isVisible() && next->isVisible());
+        QCOMPARE(previous->opacity(), 1.0); QVERIFY(previous->isEnabled() && next->isEnabled());
+        auto rect = [](QQuickItem *target) { return target->mapRectToScene(QRectF(0, 0, target->width(), target->height())); };
+        const auto column = rect(item("readerColumn")), surface = rect(item("readerSurface"));
+        // Outer edges, vertically centred in the viewport, clear of the text.
+        QVERIFY(rect(previous).left() < 12 * prop("controlScale").toDouble() + 1);
+        QVERIFY(rect(next).right() > surface.right() - 12 * prop("controlScale").toDouble() - item("readerScrollbar")->width() - 1);
+        const double middle = surface.top() + (surface.height() - prop("floatingSafety").toDouble()) / 2;
+        QVERIFY(qAbs(rect(previous).center().y() - middle) <= 1); QVERIFY(qAbs(rect(next).center().y() - middle) <= 1);
+        QVERIFY(rect(previous).right() <= column.left()); QVERIFY(rect(next).left() >= column.right());
+        // Quiet: no background until hovered; tooltips name h / l.
+        auto background = [](QQuickItem *button) { return button->property("background").value<QQuickItem *>()->property("color").value<QColor>(); };
+        QCOMPARE(background(previous).alpha(), 0);
+        QTest::mouseMove(window, center(previous)); QTRY_VERIFY(background(previous).alpha() > 0);
+        QTRY_VERIFY(toolTipOf(previous)->property("visible").toBool());
+        QVERIFY(previous->property("tip").toString().startsWith("Previous chapter · h"));
+        QVERIFY(next->property("tip").toString().startsWith("Next chapter · l"));
+        shot("chapter-buttons");
+        // Mouse: a click steps the chapter; the jump stack (History) is untouched.
+        const auto stack = prop("jumpStack").toList(); const int at = prop("jumpIndex").toInt();
+        click(next); QTRY_COMPARE(bible->chapter(), 3); QVERIFY(readerFocused());
+        click(previous); QTRY_COMPARE(bible->chapter(), 2);
+        click(previous); QTRY_COMPARE(bible->chapter(), 1);
+        QCOMPARE(prop("jumpStack").toList(), stack); QCOMPARE(prop("jumpIndex").toInt(), at);
+        // Bible start and end: disabled.
+        navigate("Genesis 1:1"); QTRY_VERIFY(!previous->isEnabled()); QVERIFY(next->isEnabled());
+        click(previous); QCOMPARE(bible->book(), 1); QCOMPARE(bible->chapter(), 1);
+        navigate("John 3:1"); QTRY_VERIFY(!next->isEnabled()); QVERIFY(previous->isEnabled());
+        // Keyboard: never tab stops (h / l are the keys).
+        call("readerFocus");
+        for (int i = 0; i < 40; ++i) { key(Qt::Key_Tab); QVERIFY(focusName() != "chapterPreviousButton" && focusName() != "chapterNextButton"); }
+        call("readerFocus"); key(Qt::Key_H); QTRY_COMPARE(bible->chapter(), 2);
+        // The outline and margin notes keep clear of them.
+        bible->setChapterOutline(true); bible->selectVerses(5, 5); bible->setNoteText("A margin note here.");
+        bible->setMarginNotes(true); QTest::qWait(200);
+        QTRY_VERIFY(item("chapterOutline")->isVisible());
+        QVERIFY(!rect(item("chapterOutline")).intersects(rect(previous)));
+        if (auto note = item("marginNote:" + bible->selectionReference()); note && note->isVisible()) QVERIFY(!rect(note).intersects(rect(next)));
+        QVERIFY(previous->isVisible() && next->isVisible());
+        shot("chapter-buttons-margins");
+        bible->setMarginNotes(false); bible->setChapterOutline(false);
+        // Focus mode: hidden until the pointer is over one; a click right then is ignored.
+        QTest::mouseMove(window, QPoint(700, 300)); call("readerFocus");
+        key(Qt::Key_F); QVERIFY(bible->focusMode()); QTRY_COMPARE(next->opacity(), 0.0); QVERIFY(!next->isEnabled());
+        QTest::mouseMove(window, center(previous)); QTRY_COMPARE(previous->opacity(), 1.0); QVERIFY(previous->isEnabled());
+        const int chapter = bible->chapter();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, center(previous)); QCoreApplication::processEvents();
+        QCOMPARE(bible->chapter(), chapter);
+        QTest::qWait(350); click(previous); QTRY_COMPARE(bible->chapter(), chapter - 1);
+        QTest::mouseMove(window, QPoint(700, 300)); QTRY_COMPARE(previous->opacity(), 0.0);
+        key(Qt::Key_F); QVERIFY(!bible->focusMode());
+        // Narrow windows: hidden rather than over the text.
+        window->resize(700, 820); QTRY_COMPARE(window->width(), 700);
+        QTRY_VERIFY(!previous->isVisible()); QVERIFY(!next->isVisible());
+        shot("chapter-buttons-narrow");
+        window->resize(1200, 820);
+    }
     void focusModeFooterRevealsInPlace() {
         const QPointF searchAt = item("searchControl")->mapToScene(QPointF());
         const QPointF deskAt = item("deskControl")->mapToScene(QPointF());

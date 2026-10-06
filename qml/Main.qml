@@ -2142,9 +2142,29 @@ ApplicationWindow {
     // "{" before the note text.
     readonly property real marginBraceWidth: 9 * readerScale
     readonly property real marginTextRight: marginSpace.columnX + readerColumnWidth - 9
+    // Previous/next chapter buttons at the reader's outer edges, vertically
+    // centred in the viewport. The outline and margin notes keep clear of
+    // them; they hide where they would cover the text (narrow windows), and in
+    // focus mode until the pointer is over them (then, like the footer, their
+    // clicks wait 300 ms). Mouse only: h and l are the keys.
+    readonly property real chapterNavSize: 40 * controlScale
+    readonly property real chapterNavEdge: 6 * controlScale
+    readonly property real chapterNavReserve: chapterNavEdge + chapterNavSize + 6 * controlScale
+    readonly property real chapterNavScrollbar: readerScrollbar.visible ? readerScrollbar.width : 0
+    readonly property bool chapterNavFits: bible.ready && marginSpace.columnX >= chapterNavReserve
+        && marginSpace.columnX + readerColumnWidth <= reading.width - chapterNavReserve - chapterNavScrollbar
+    readonly property var chapterBounds: {
+        const books = Array.from(bible.books)
+        if (!books.length) return { first: true, last: true }
+        const head = books[0], tail = books[books.length - 1]
+        const firstChapters = Array.from(head.chapterNumbers || []), lastChapters = Array.from(tail.chapterNumbers || [])
+        return { first: bible.book === head.id && bible.chapter === firstChapters[0],
+                 last: bible.book === tail.id && bible.chapter === lastChapters[lastChapters.length - 1] }
+    }
     readonly property var marginSpace: Margins.space({
         width: reading.width, columnX: readerNaturalX, columnWidth: readerColumnWidth,
-        minLeft: readerSideInset, leftInset: 24 * readerScale, rightInset: Math.max(28 * readerScale, footerRightInset),
+        minLeft: readerSideInset, leftInset: Math.max(24 * readerScale, chapterNavReserve),
+        rightInset: Math.max(28 * readerScale, footerRightInset, chapterNavReserve + chapterNavScrollbar),
         wantNotes: marginNoteEntries.length > 0, connectorWidth: 3 * readerScale + 2 * marginBraceWidth + 34 * readerScale,
         notesMin: 170 * readerScale, notesPreferred: 250 * readerScale, notesMax: 330 * readerScale,
         wantOutline: outlineHeadings.length > 0, outlineGap: 12 * readerScale,
@@ -4574,7 +4594,11 @@ ApplicationWindow {
                     ctx.lineCap = "square"
                     ctx.lineJoin = "miter"
                     ctx.beginPath()
-                    if (glyph === "search") {
+                    if (glyph === "chevron-left") {
+                        ctx.moveTo(15, 5); ctx.lineTo(8, 12); ctx.lineTo(15, 19)
+                    } else if (glyph === "chevron-right") {
+                        ctx.moveTo(9, 5); ctx.lineTo(16, 12); ctx.lineTo(9, 19)
+                    } else if (glyph === "search") {
                         ctx.arc(10.5, 10.5, 7, 0, 2 * Math.PI)
                         ctx.moveTo(15.45, 15.45); ctx.lineTo(20, 20)
                     } else if (glyph === "help") {
@@ -4947,6 +4971,56 @@ ApplicationWindow {
                     if (app.readerKeys && event.key !== Qt.Key_Shift && event.key !== Qt.Key_Control && event.key !== Qt.Key_Alt) app.clearCount()
                 }
 
+                // Previous / next chapter at the outer edges (chapterNavFits).
+                Repeater {
+                    model: [{ id: "previousChapter", glyph: "chevron-left", name: "chapterPreviousButton", delta: -1 },
+                            { id: "nextChapter", glyph: "chevron-right", name: "chapterNextButton", delta: 1 }]
+                    delegate: Item {
+                        id: chapterNav
+                        required property var modelData
+                        readonly property bool before: modelData.delta < 0
+                        objectName: modelData.name + "Zone"
+                        z: 5
+                        width: app.chapterNavReserve
+                        height: Math.max(app.chapterNavSize * 3, 120 * app.controlScale)
+                        x: before ? 0 : readerSurface.width - width - app.chapterNavScrollbar
+                        y: (readerSurface.height - app.floatingSafety - height) / 2
+                        visible: app.chapterNavFits && !app.findPromptOpen
+                        // Focus mode: hidden until the pointer is here.
+                        readonly property bool revealed: !bible.focusMode || zone.containsMouse || chapterButton.hovered
+                        onRevealedChanged: if (revealed && bible.focusMode) guard.restart()
+                        Timer { id: guard; interval: 300 }
+                        MouseArea {
+                            id: zone
+                            anchors.fill: parent
+                            acceptedButtons: Qt.NoButton
+                            hoverEnabled: true
+                            onWheel: function(wheel) { wheel.accepted = false }
+                        }
+                        FloatingButton {
+                            id: chapterButton
+                            objectName: chapterNav.modelData.name
+                            glyph: chapterNav.modelData.glyph
+                            persistent: true
+                            focusPolicy: Qt.NoFocus
+                            x: chapterNav.before ? app.chapterNavEdge : chapterNav.width - width - app.chapterNavEdge
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: app.chapterNavSize
+                            height: app.chapterNavSize
+                            readonly property bool atEnd: chapterNav.before ? app.chapterBounds.first : app.chapterBounds.last
+                            available: chapterNav.revealed && !atEnd && !app.rangeEditing && !bible.busy && !app.modalOpen
+                            opacity: chapterNav.revealed ? 1 : 0
+                            tip: (chapterNav.before ? "Previous chapter" : "Next chapter") + " · " + app.keyText(chapterNav.modelData.id)
+                            onClicked: { app.chapterStep(chapterNav.modelData.delta); app.readerFocus() }
+                            MouseArea {
+                                anchors.fill: parent
+                                z: 10
+                                visible: guard.running
+                                acceptedButtons: Qt.AllButtons
+                            }
+                        }
+                    }
+                }
                 Flickable {
                     id: reading
                     objectName: "reading"
