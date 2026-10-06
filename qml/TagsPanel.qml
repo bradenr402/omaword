@@ -832,6 +832,11 @@ Item {
             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
         }
     }
+    // Rows stay clear of a list's scrollbar while it shows (as Main's scrollGutter).
+    function gutter(list) {
+        const bar = list ? list.ScrollBar.vertical : null
+        return bar && bar.visible ? bar.width : 0
+    }
     component TagScrollbar: ScrollBar {
         id: bar
         implicitWidth: 18 * panel.controlScale
@@ -1132,7 +1137,7 @@ Item {
                     readonly property bool current: resultList.currentIndex === index && !panel.chipFocused
                     readonly property bool otherVersion: modelData.versionId !== (panel.relatedSource ? panel.relatedSource.versionId : "")
                     objectName: "tagResult:" + index
-                    width: resultList.width - 12 * panel.studyScale
+                    width: resultList.width - Math.max(12 * panel.studyScale, panel.gutter(resultList))
                     focusPolicy: Qt.NoFocus
                     hoverEnabled: true
                     padding: 10 * panel.studyScale
@@ -1524,7 +1529,7 @@ Item {
                 delegate: RowLayout {
                     id: overlapDelegate
                     required property var modelData
-                    width: overlapList.width
+                    width: overlapList.width - panel.gutter(overlapList)
                     TagText { Layout.fillWidth: true; text: overlapDelegate.modelData.reference + " · " + panel.tagNames(overlapDelegate.modelData.tags) }
                     TagButton { objectName: "openTagOverlap:" + overlapDelegate.modelData.reference; text: "Open"; onClicked: panel.openTagged(overlapDelegate.modelData) }
                     TagButton { objectName: "editTagOverlap:" + overlapDelegate.modelData.reference; text: "Edit tags"; onClicked: panel.openTagged(overlapDelegate.modelData, true) }
@@ -1564,7 +1569,7 @@ Item {
                         required property var modelData
                         required property int index
                         objectName: "mergeTarget:" + modelData.id
-                        width: mergeList.width
+                        width: mergeList.width - panel.gutter(mergeList)
                         text: modelData.name
                         focusPolicy: Qt.NoFocus
                         chosen: panel.mergeTarget === modelData.id

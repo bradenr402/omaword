@@ -458,7 +458,8 @@ Item {
                 ScrollBar.vertical: RangeScrollbar { objectName: "rangeChoiceScrollbar" }
                 Column {
                     id: choices
-                    width: choiceScroll.availableWidth
+                    // Clear of the scrollbar while it shows.
+                    width: choiceScroll.availableWidth - (choiceScroll.ScrollBar.vertical.visible ? choiceScroll.ScrollBar.vertical.width : 0)
                     spacing: 12 * editor.uiScale
                     Repeater {
                         id: sourceChoices
@@ -587,7 +588,7 @@ Item {
                 ScrollBar.vertical: RangeScrollbar { objectName: "rangeMergeScrollbar" }
                 ColumnLayout {
                     id: noteTexts
-                    width: parent.width
+                    width: parent.width - (mergeScroll.ScrollBar.vertical.visible ? mergeScroll.ScrollBar.vertical.width : 0)
                     RangeText { text: "Source note"; font.bold: true }
                     RangeText { objectName: "rangeSourceNote"; text: editor.pending ? editor.pending.preview.sourceNote : "" }
                     RangeText { text: "Destination note"; font.bold: true }

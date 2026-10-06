@@ -1426,7 +1426,9 @@ private slots:
         auto list = item("keybindingResults");
         auto bar = item("keybindingScrollbar");
         QVERIFY(list && bar && item("keybindingFooterRule"));
-        QCOMPARE(item("keybindingPrevious verse")->width(),list->width());
+        // Rows keep clear of the scrollbar while it shows.
+        QTRY_VERIFY(bar->isVisible());
+        QCOMPARE(item("keybindingPrevious verse")->width(),list->width() - bar->width());
         QCOMPARE(prop("keybindingFooterRule","height").toDouble(),1.0);
         QVERIFY(bar->width() >= 18);
         const int count = prop("keybindingResults","count").toInt();

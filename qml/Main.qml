@@ -6707,10 +6707,9 @@ ApplicationWindow {
                     id: paletteEntry
                     required property var modelData
                     required property int index
-                    width: paletteResults.width
+                    // Clear of the overlay scrollbar while it shows.
+                    width: paletteResults.width - app.scrollGutter(paletteResults)
                     height: app.paletteTextMode ? searchResultContent.implicitHeight + 20 * app.scale : 44 * app.scale
-                    // Keep right-aligned hints clear of the overlay scrollbar.
-                    rightPadding: leftPadding + (paletteResults.ScrollBar.vertical.visible ? 12 * app.scale : 0)
                     highlighted: ListView.isCurrentItem
                     // Unavailable rows read muted and stay clickable: a click sounds the error.
                     readonly property bool available: !modelData.action || app.actionAvailable(modelData.action)
@@ -7689,7 +7688,8 @@ ApplicationWindow {
                     id: keybindingRow
                     required property var modelData
                     objectName: "keybinding" + modelData.title
-                    width: keybindingResults.width
+                    // Clear of the scrollbar while it shows.
+                    width: keybindingResults.width - app.scrollGutter(keybindingResults)
                     height: keybindingContent.implicitHeight + 20 * app.scale
                     // Unavailable rows read muted; a click sounds the error (activateKeybinding).
                     readonly property bool available: app.actionAvailable(modelData)
