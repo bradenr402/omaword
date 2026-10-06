@@ -1,3 +1,4 @@
+#include "testenvironment.h"
 #include <QTest>
 #include "desktop.h"
 

@@ -13,3 +13,4 @@ SOURCES += ../src/scripturesearch.cpp
 HEADERS += ../src/scripturesearch.h
 SOURCES += ../src/textselection.cpp
 HEADERS += ../src/textselection.h
+HEADERS += testenvironment.h

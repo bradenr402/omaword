@@ -82,6 +82,7 @@ for variable in OMAWORD_TEST_NET_ZIP OMAWORD_TEST_KJV_ZIP OMAWORD_TEST_KJV; do
     fi
 done
 mkdir -p -- "$log_dir"
+real_home=$(realpath -m -- "${HOME:-/nonexistent}")
 run_suite() {
     local suite=$1
     shift
@@ -89,6 +90,17 @@ run_suite() {
     cd -- "$build_dir/${directories[$suite]}"
     qmake6 "$root/tests/${projects[$suite]}.pro"
     make -j"$build_jobs"
+    # Tests never see the user's real HOME or XDG directories (live theme, data).
+    local sandbox="$build_dir/test-home/$suite" name
+    rm -rf -- "$sandbox"
+    for name in HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_STATE_HOME XDG_RUNTIME_DIR; do
+        mkdir -p -m 700 -- "$sandbox/$name"
+        export "$name=$sandbox/$name"
+    done
+    case $XDG_STATE_HOME/ in
+        "$real_home"/.local/*|"$real_home"/.config/*|"$real_home"/.cache/*)
+            printf 'Refusing to run %s: XDG_STATE_HOME reaches the real user state.\n' "$suite" >&2; return 1 ;;
+    esac
     OMAWORD_SOUND=0 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software "./tst_${projects[$suite]}" "$@"
 }
 

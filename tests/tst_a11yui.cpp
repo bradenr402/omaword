@@ -1,3 +1,4 @@
+#include "testenvironment.h"
 #include <QtTest/QTest>
 #include <QApplication>
 #include <QClipboard>
@@ -995,7 +996,10 @@ private slots:
         const QList<QPair<QString, QByteArray>> themes = {
             {"dark", "background = \"#1e1e2e\"\nforeground = \"#cdd6f4\"\naccent = \"#89b4fa\"\ncolor3 = \"#f9e2af\"\n"},
             {"light", "background = \"#faf8f2\"\nforeground = \"#262626\"\naccent = \"#3a6fb0\"\ncolor3 = \"#e0b000\"\n"}};
+        // Never the user's live theme: the state directory must be the test's own.
+        QVERIFY(TestEnvironment::isolated());
         const QString themeDir = qEnvironmentVariable("XDG_STATE_HOME") + "/omarchy/current/theme";
+        QVERIFY(!TestEnvironment::reachesRealUserState(themeDir));
         QVERIFY(QDir().mkpath(themeDir));
         navigate("John 3:2"); bible->selectVerses(2, 4); QVERIFY(bible->toggleHighlight());
         bible->selectVerses(16, 16); QVERIFY(bible->toggleHighlight());
@@ -1042,6 +1046,7 @@ private slots:
             }
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         }
+        QVERIFY(!TestEnvironment::reachesRealUserState(themeDir));
         QFile::remove(themeDir + "/colors.toml"); QVERIFY(QMetaObject::invokeMethod(desktop.get(), "refresh"));
     }
     void focusModeFooterRevealsInPlace() {

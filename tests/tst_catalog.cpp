@@ -1,3 +1,4 @@
+#include "testenvironment.h"
 #include <QtTest>
 
 #include "versioncatalog.h"

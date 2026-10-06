@@ -5,7 +5,7 @@ root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 workspace=$(mktemp -d "${TMPDIR:-/tmp}/omaword-runner-test.XXXXXX")
 running=
 trap 'if [[ -n $running ]]; then kill "$running" 2>/dev/null || true; wait "$running" 2>/dev/null || true; fi; rm -rf -- "$workspace"' EXIT
-export STATE="$workspace/state"
+export STATE="$workspace/state" REAL_HOME="$HOME"
 mkdir -p "$workspace/checkout/bin" "$workspace/checkout/tests" "$workspace/tools" "$STATE"
 cp "$root/bin/test" "$workspace/checkout/bin/test"
 for project in backend ui search searchui deskui historyui studyui a11yui marginsui motion contextmenu searchrender tags tagsui ranges rangesui sound desktop usfm catalog blockannotations singleinstance windows; do
@@ -46,6 +46,10 @@ if [[ $phase == test ]]; then
     done
     [[ -z ${OMAWORD_TEST_USFM_DIR:-} || $OMAWORD_TEST_USFM_DIR == "$USFM_DIRECTORY" ]]
     [[ $QT_QPA_PLATFORM == offscreen && $QT_QUICK_BACKEND == software && $OMAWORD_SOUND == 0 ]]
+    # The suite's user directories are its own sandbox, never the real home's state.
+    for variable in HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_STATE_HOME XDG_RUNTIME_DIR; do
+        [[ ${!variable} == */test-home/*/"$variable" && -d ${!variable} && ${!variable} != "$REAL_HOME"/.local/* ]] || { printf 'unisolated %s\n' "$variable"; exit 92; }
+    done
 fi
 if [[ ${HOLD:-0} == 1 ]]; then
     printf '%s\n' "$BASHPID" > "$STATE/held"

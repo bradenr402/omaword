@@ -1,3 +1,4 @@
+#include "testenvironment.h"
 #include <QtTest/QTest>
 #include "biblebackend.h"
 #include <QFile>

@@ -12,3 +12,4 @@ SOURCES += ../src/soundeffects.cpp
 HEADERS += ../src/soundeffects.h
 SOURCES += ../src/textselection.cpp
 HEADERS += ../src/textselection.h
+HEADERS += testenvironment.h

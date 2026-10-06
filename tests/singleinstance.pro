@@ -5,3 +5,4 @@ TARGET = tst_singleinstance
 INCLUDEPATH += ../src
 SOURCES += tst_singleinstance.cpp ../src/singleinstance.cpp
 HEADERS += ../src/singleinstance.h
+HEADERS += testenvironment.h

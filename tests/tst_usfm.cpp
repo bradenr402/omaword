@@ -1,3 +1,4 @@
+#include "testenvironment.h"
 #include "usfmimporter.h"
 #include "biblebooks.h"
 #include <QtTest/QTest>

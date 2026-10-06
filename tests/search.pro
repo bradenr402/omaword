@@ -11,3 +11,4 @@ SOURCES += tst_search.cpp ../src/scripturesearch.cpp ../src/biblebackend.cpp ../
 HEADERS += ../src/scripturesearch.h ../src/biblebackend.h ../src/usfmimporter.h ../src/biblebooks.h
 SOURCES += ../src/textselection.cpp
 HEADERS += ../src/textselection.h
+HEADERS += testenvironment.h

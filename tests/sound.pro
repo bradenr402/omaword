@@ -7,3 +7,4 @@ TARGET = tst_sound
 INCLUDEPATH += ../src
 SOURCES += tst_sound.cpp ../src/soundeffects.cpp
 HEADERS += ../src/soundeffects.h
+HEADERS += testenvironment.h

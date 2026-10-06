@@ -8,3 +8,4 @@ PKGCONFIG += libarchive
 INCLUDEPATH += ../src
 SOURCES += tst_usfm.cpp ../src/usfmimporter.cpp ../src/biblebooks.cpp
 HEADERS += ../src/usfmimporter.h ../src/biblebooks.h
+HEADERS += testenvironment.h

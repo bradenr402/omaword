@@ -10,3 +10,4 @@ catalog_resource.files = ../resources/catalog.json
 catalog_resource.prefix = /resources
 catalog_resource.base = ../resources
 RESOURCES += catalog_resource
+HEADERS += testenvironment.h

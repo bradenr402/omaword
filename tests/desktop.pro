@@ -7,3 +7,4 @@ TARGET = tst_desktop
 INCLUDEPATH += ../src
 SOURCES += tst_desktop.cpp ../src/desktop.cpp
 HEADERS += ../src/desktop.h
+HEADERS += testenvironment.h
