@@ -3635,10 +3635,15 @@ ApplicationWindow {
         return [["O", "swap", function() { rangeEditor.swap() }, ready], ["Return", "save", function() { rangeEditor.accept() }, ready],
             ["Escape", "cancel", function() { rangeEditor.cancel() }, rangeEditor.sessionOpen]]
     }
+    // ← steps back to the book list only where the palette's keys take it
+    // (in the input: nothing selected and the caret at the start, or browsing).
+    readonly property bool paletteLeftGoesBack: !paletteTextMode && paletteBook > 0
+        && (!referenceInput.activeFocus || (referenceInput.selectedText.length === 0
+            && (!referenceInput.text.length || referenceInput.cursorPosition === 0 || paletteArrowUsed)))
     function paletteHintParts() {
         return [[["Up", "Down"], "choose"], paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
             ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
-            paletteBook > 0 ? ["Left", "back", app.backToBooks] : null,
+            paletteLeftGoesBack ? ["Left", "back", app.backToBooks] : null,
             // tab / shift tab cycle Passage → Search → Command.
             bible.ready ? ["Tab", "mode", function() { app.cyclePaletteMode(1) }] : null, ["Escape", "close", app.escapePalette]]
     }
@@ -6684,7 +6689,8 @@ ApplicationWindow {
                 emphasized: activeFocus
                 onClicked: app.backToBooks()
                 Keys.onDownPressed: { paletteResults.currentIndex = -1; app.movePalette(1) }
-                Keys.onUpPressed: {}
+                // Nothing above Back.
+                Keys.onUpPressed: app.rejected()
             }
             ListView {
                 id: paletteResults
@@ -7654,12 +7660,16 @@ ApplicationWindow {
                 onTextChanged: { keybindingResults.currentIndex = 0; keybindingResults.positionViewAtBeginning() }
                 Keys.onUpPressed: app.moveKeybinding(-1)
                 Keys.onDownPressed: app.moveKeybinding(1)
+                // home / end move the caret in a typed search (with nothing typed,
+                // where there is no caret to move, the list's first / last row);
+                // pgup / pgdn page the list.
                 Keys.onPressed: function(event) {
                     if (event.modifiers !== Qt.NoModifier) return
-                    if ([Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)) {
-                        if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown)
-                            app.pageKeybindings(event.key === Qt.Key_PageDown ? 1 : -1)
-                        else app.keybindingEdge(event.key === Qt.Key_End)
+                    if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
+                        app.pageKeybindings(event.key === Qt.Key_PageDown ? 1 : -1)
+                        event.accepted = true
+                    } else if (!text.length && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) {
+                        app.keybindingEdge(event.key === Qt.Key_End)
                         event.accepted = true
                     }
                 }
@@ -8002,6 +8012,13 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 12 * importGuide.uiScale
+            // The guide's keys work from anywhere in it (buttons, rows), not
+            // just the search field: ↑ ↓ choose, enter installs, shift enter
+            // details, ctrl i imports a ZIP (keys a focused control leaves alone).
+            Keys.onShortcutOverride: function(event) {
+                if ((event.modifiers & ~Qt.KeypadModifier) === Qt.ControlModifier && event.key === Qt.Key_I) event.accepted = true
+            }
+            Keys.onPressed: function(event) { importGuide.guideKey(event) }
             Label { text: "Add version"; color: desktop.foreground; font.pixelSize: 22 * importGuide.uiScale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             TextField {
                 id: catalogSearch
