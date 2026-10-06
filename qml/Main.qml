@@ -5460,6 +5460,8 @@ ApplicationWindow {
                     onActivatedTop: if (bible.verses.length) app.jumpToHeading(bible.verses[0].number)
                     scrollKey: app.scrollKey
                     onLeave: app.readerFocus()
+                    onBoundary: sounds.play("boundary")
+                    onStepHeading: function(direction) { app.runCommand(direction > 0 ? "nextHeading" : "previousHeading") }
                     titleTip: "Jump to the chapter top · " + app.menuKey("previousHeading") + " steps back to it"
                     entryTip: "Jump to this section · " + app.menuKey("previousHeading") + " " + app.menuKey("nextHeading") + " step between sections"
                 }

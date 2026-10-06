@@ -20,10 +20,45 @@ Item {
     // Reached by tab from the reader: scroll keys move the outline; esc
     // (or tab onward) leaves it. `scrollKey(flickable, event)` is the app's.
     signal leave()
+    // { } step between sections from the outline too (the app's heading keys).
+    signal stepHeading(int direction)
     property var scrollKey: null
     activeFocusOnTab: true
+    // The keyboard's entry: 0 the title, i + 1 heading i. It starts on the
+    // current section; ↑ ↓ (j k) move it, enter (space) jumps there.
+    property int keyIndex: 0
+    readonly property int currentIndex: {
+        for (let i = 0; i < headings.length; ++i) if (headings[i].verse === current) return i + 1
+        return 0
+    }
+    onActiveFocusChanged: if (activeFocus) keyIndex = currentIndex
+    onCurrentIndexChanged: if (activeFocus) keyIndex = currentIndex
+    function moveKey(delta) {
+        const next = Math.max(0, Math.min(headings.length, keyIndex + delta))
+        if (next === keyIndex) return false
+        keyIndex = next
+        const entry = next === 0 ? titleEntry : entries.itemAt(next - 1)
+        if (entry && entry.y < list.contentY) list.contentY = entry.y
+        else if (entry && entry.y + entry.height > list.contentY + list.height) list.contentY = Math.min(list.contentHeight - list.height, entry.y + entry.height - list.height)
+        return true
+    }
+    function activateKey() {
+        if (keyIndex === 0) root.activatedTop()
+        else if (headings[keyIndex - 1]) root.activated(headings[keyIndex - 1].verse)
+    }
+    signal boundary()
     Keys.onEscapePressed: root.leave()
-    Keys.onPressed: function(event) { if (root.scrollKey) root.scrollKey(list, event) }
+    Keys.onPressed: function(event) {
+        const plain = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
+        if (plain && [Qt.Key_Up, Qt.Key_Down, Qt.Key_J, Qt.Key_K].includes(event.key)) {
+            if (!root.moveKey(event.key === Qt.Key_Down || event.key === Qt.Key_J ? 1 : -1)) root.boundary()
+            event.accepted = true
+        } else if (plain && [Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space].includes(event.key)) {
+            root.activateKey(); event.accepted = true
+        } else if (event.text === "{" || event.text === "}") {
+            root.stepHeading(event.text === "}" ? 1 : -1); event.accepted = true
+        } else if (root.scrollKey) root.scrollKey(list, event)
+    }
     Rectangle {
         objectName: "outlineFocus"
         anchors.fill: parent
@@ -70,6 +105,13 @@ Item {
                 Accessible.name: root.title + (isCurrent ? ", current" : "")
                 Accessible.onPressAction: root.activatedTop()
                 Rectangle {
+                    objectName: "outlineTitleKey"
+                    anchors.fill: parent
+                    visible: root.activeFocus && root.keyIndex === 0
+                    color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.11)
+                    radius: Math.min(root.theme.cornerRadius || 0, height / 2)
+                }
+                Rectangle {
                     objectName: "outlineTitleMark"
                     visible: titleEntry.isCurrent
                     x: 0
@@ -112,6 +154,7 @@ Item {
                 delegate: Item {
                     id: entry
                     required property var modelData
+                    required property int index
                     readonly property int verse: modelData.verse
                     readonly property bool isCurrent: root.current === verse
                     objectName: "outlineEntry:" + verse
@@ -120,6 +163,13 @@ Item {
                     Accessible.role: Accessible.Button
                     Accessible.name: "Section " + modelData.text + (isCurrent ? ", current" : "")
                     Accessible.onPressAction: root.activated(entry.verse)
+                    Rectangle {
+                        objectName: "outlineEntryKey:" + entry.verse
+                        anchors.fill: parent
+                        visible: root.activeFocus && root.keyIndex === entry.index + 1
+                        color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.11)
+                        radius: Math.min(root.theme.cornerRadius || 0, height / 2)
+                    }
                     Rectangle {
                         objectName: "outlineCurrentMark"
                         visible: entry.isCurrent
