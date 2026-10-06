@@ -30,7 +30,7 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 | `qml/RangeEditor.qml` | Annotation range editing session |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
-| `qml/AppContextMenu.qml`, `qml/AppToolTip.qml`, `qml/RowMenu.js` | Shared context menu and themed tooltip; `RowMenu.entries` builds every list row's menu (Open · Copy · Copy plain text · Desk, then the row's extras) |
+| `qml/AppContextMenu.qml`, `qml/AppToolTip.qml`, `qml/RowMenu.js` | Shared context menu (scrolls when taller than the window; also replaces Qt's text-field menu via `ContextMenu.menu: null` → `openTextMenu`) and themed tooltip; `RowMenu.entries` builds every list row's menu (Open · Copy · Copy plain text · Desk, then the row's extras) |
 | `qml/PanelTabs.qml` | Shared tab row (Annotations, Study, palette Passage/Search/Command): sizing, selected accent tint, focus outline |
 | `qml/ChapterFind.qml`, `qml/SearchHighlights.qml` | `/` chapter find; match overlay painting |
 | `qml/HintRow.qml` | Every panel/modal key hint row: parts `[keys, label, run, enabled]`; parts with `run` are clickable while enabled (hover tint, pointing hand), navigation parts never; `text` keeps the plain styled markup |
