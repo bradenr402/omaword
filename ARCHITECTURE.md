@@ -314,8 +314,10 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   they hide when the column would reach them; in focus mode they appear only
   under the pointer (300 ms click guard).
 - Range editing marks the moving endpoint verse (`rangeEndpointGeometry`) with
-  one large accent caret flag: the start's at the top-left of its first line,
-  the end's at the bottom-right of its last line (no underline).
+  an accent selection handle at the edge of its text (after the number in
+  flowing layouts): a caret spanning the line and a round knob in the line gap,
+  above the start's first line or below the end's last line; the knob is sized
+  to the gap (`readerLineGap`) and tucked a quarter into the line.
 - Keyboard focus hand-off: a `QuietButton`/`FloatingButton` pressed by key that
   hides itself passes the keyboard to its `focusTarget` (else `restorePanelFocus`).
   Modal outside clicks: `RangeEditor`'s dialogs close on press outside and route

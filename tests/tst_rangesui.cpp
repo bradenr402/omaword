@@ -756,16 +756,23 @@ private slots:
         QCOMPARE(geometry().value("endpoint").toString(), QString("end"));
         QVERIFY(!item("rangeEndpointUnderline0"));
         const double k = prop("readerScale").toDouble();
-        QVERIFY(caret->width() >= 4 * k - 1); QVERIFY(item("rangeEndpointFlag")->width() >= 12 * k - 1);
+        const auto column = item("readerColumn"), bar = item("rangeEndpointBar"), knob = item("rangeEndpointKnob");
+        QVERIFY(bar && knob); QVERIFY(bar->width() >= 3 * k - 1); QVERIFY(knob->width() >= 6 * k - 1);
+        QCOMPARE(knob->width(), knob->height());
         const auto rects = geometry().value("rects").toList(); QVERIFY(!rects.isEmpty());
         const auto last = rects.last().toMap();
-        QVERIFY(qAbs(caret->mapToItem(item("readerColumn"), QPointF(caret->width() / 2, 0)).x() - (last["x"].toDouble() + last["width"].toDouble())) <= 2);
-        // Bottom-right: spans the last line and hangs below it, its flag at the bottom.
-        const auto column = item("readerColumn"), flag = item("rangeEndpointFlag");
-        QVERIFY(qAbs(caret->mapToItem(column, QPointF(0, 0)).y() - last["y"].toDouble()) <= 1);
-        QVERIFY(caret->mapToItem(column, QPointF(0, caret->height())).y() > last["y"].toDouble() + last["height"].toDouble());
-        QVERIFY(qAbs(flag->mapToItem(column, QPointF(0, flag->height())).y() - caret->mapToItem(column, QPointF(0, caret->height())).y()) <= 1);
-        QVERIFY(flag->mapToItem(column, QPointF(flag->width(), 0)).x() <= caret->mapToItem(column, QPointF(caret->width(), 0)).x() + 1);
+        const double lastBottom = last["y"].toDouble() + last["height"].toDouble();
+        auto centerX = [&](QQuickItem *part) { return part->mapToItem(column, QPointF(part->width() / 2, 0)).x(); };
+        auto topY = [&](QQuickItem *part) { return part->mapToItem(column, QPointF(0, 0)).y(); };
+        auto bottomY = [&](QQuickItem *part) { return part->mapToItem(column, QPointF(0, part->height())).y(); };
+        // Bar and knob share the moving edge: the end of the verse's last line of text.
+        QVERIFY(qAbs(centerX(bar) - (last["x"].toDouble() + last["width"].toDouble())) <= 2);
+        QVERIFY(qAbs(centerX(knob) - centerX(bar)) <= 1);
+        // The end's handle: the caret spans the last line, the knob hangs below it,
+        // tucked at most a quarter into the line (beside the descent, clear of the text).
+        QVERIFY(qAbs(topY(bar) - last["y"].toDouble()) <= 1);
+        QVERIFY(bottomY(knob) > lastBottom); QVERIFY(topY(knob) >= lastBottom - knob->height() * 0.25 - 1);
+        QVERIFY(bottomY(bar) <= bottomY(knob) && bottomY(bar) >= topY(knob));
         shot("endpoint-" + mode + "-end");
         // Keyboard: j moves the end; the marker follows.
         key(Qt::Key_J); QTRY_COMPARE(geometry().value("verse").toInt(), 5);
@@ -774,10 +781,19 @@ private slots:
         QTRY_COMPARE(geometry().value("verse").toInt(), 2);
         const auto first = geometry().value("rects").toList().first().toMap();
         QVERIFY(qAbs(caret->mapToItem(item("readerColumn"), QPointF(caret->width() / 2, 0)).x() - first["x"].toDouble()) <= 2);
-        // Top-left: rises above the first line, its flag at the top.
-        QVERIFY(caret->mapToItem(column, QPointF(0, 0)).y() < first["y"].toDouble());
-        QVERIFY(qAbs(caret->mapToItem(column, QPointF(0, caret->height())).y() - (first["y"].toDouble() + first["height"].toDouble())) <= 1);
-        QVERIFY(qAbs(flag->mapToItem(column, QPointF(0, 0)).y() - caret->mapToItem(column, QPointF(0, 0)).y()) <= 1);
+        // The start's handle mirrors the end's: the knob rides above the first line.
+        QVERIFY(qAbs(centerX(knob) - centerX(bar)) <= 1);
+        QVERIFY(topY(knob) < first["y"].toDouble()); QVERIFY(bottomY(knob) <= first["y"].toDouble() + knob->height() * 0.25 + 1);
+        QVERIFY(qAbs(bottomY(bar) - (first["y"].toDouble() + first["height"].toDouble())) <= 1);
+        QVERIFY(topY(bar) >= topY(knob) && topY(bar) <= bottomY(knob));
+        if (mode != "verse") {
+            // In flowing layouts the caret marks the verse's text, after its number:
+            // the whole verse (number included) starts further left.
+            auto reader = object("blockLoader")->property("item").value<QObject *>(); QVERIFY(reader);
+            QVariant whole; QVERIFY(QMetaObject::invokeMethod(reader, "verseRangeRects", Q_RETURN_ARG(QVariant, whole), Q_ARG(QVariant, 2), Q_ARG(QVariant, 2)));
+            const auto wholeFirst = value(whole).toList().first().toMap();
+            QVERIFY(first["x"].toDouble() > item("blockBody")->mapToItem(column, QPointF(wholeFirst["x"].toDouble(), 0)).x() + 2);
+        }
         const double startX = caretX();
         shot("endpoint-" + mode + "-start");
         // Mouse: the swap hint swaps back to the end.

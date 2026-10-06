@@ -571,6 +571,8 @@ ApplicationWindow {
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
+    // The gap between two lines of one paragraph (line spacing above the font's height).
+    readonly property real readerLineGap: Math.max(0, readerLineHeight - readerMetrics.height)
     readonly property real observedLineHeight: bible.lineHeight
     // Passage text in panels follows the reader's line height proportionally:
     // 1.25 at the default 1.5, so the panels stay compact but track the setting.
@@ -2288,9 +2290,10 @@ ApplicationWindow {
         rangeEndpointTimer.restart()
         if (charMode) charReapplyTimer.restart()
     }
-    // Range editing: the verse whose endpoint moves (the cursor) gets a large
-    // accent caret flag at the moving edge (its start's top-left or its end's
-    // bottom-right), apart from the range's tint. readerColumn coordinates.
+    // Range editing: the verse whose endpoint moves (the cursor) gets an accent
+    // selection handle at the moving edge of its text: a caret with a round knob
+    // above its start or below its end, apart from the range's tint.
+    // readerColumn coordinates.
     property var rangeEndpointGeometry: null
     Timer { id: rangeEndpointTimer; interval: 0; onTriggered: app.updateRangeEndpoint() }
     readonly property var rangeEndpointKey: [rangeEditor.active, rangeEditor.endpoint, bible.verses, readerColumn.width, app.readerScale, app.readerLineHeight]
@@ -2305,7 +2308,7 @@ ApplicationWindow {
         if (index < 0) { rangeEndpointGeometry = null; return }
         const block = blockLoader.item as BlockReader
         let rects = []
-        if (block) rects = Array.from(block.verseRangeRects(verse, verse)).map(function(r) {
+        if (block) rects = Array.from(block.verseTextRects(verse)).map(function(r) {
             const p = block.body.mapToItem(readerColumn, r.x, r.y)
             return { x: p.x, y: p.y, width: r.width, height: r.height }
         })
@@ -5603,48 +5606,41 @@ ApplicationWindow {
                         width: readerColumn.width
                         height: readerColumn.height
                         visible: !!geometry && app.rangeEditing
-                        // The caret at the moving edge, with a flag pointing into the verse:
-                        // the start's at the top-left of its first line, the end's at the
-                        // bottom-right of its last line.
+                        // A selection handle at the moving edge: a caret spanning the line
+                        // with a round knob in the line gap, above the start's first line or
+                        // below the end's last line (the two are mirror images).
                         Item {
                             id: rangeEndpointCaret
                             objectName: "rangeEndpointCaret"
                             readonly property var edge: rangeEndpointMarker.geometry ? rangeEndpointMarker.geometry.edge : null
                             readonly property bool atStart: !!rangeEndpointMarker.geometry && rangeEndpointMarker.geometry.endpoint === "start"
-                            readonly property real barWidth: Math.max(3, Math.round(4 * rangeEndpointMarker.k))
-                            readonly property real overhang: Math.round(5 * rangeEndpointMarker.k)
+                            readonly property real k: rangeEndpointMarker.k
+                            readonly property real barWidth: Math.max(2, Math.round(3 * k))
+                            // The knob fits the line gap where it can (6–11 px at scale 1),
+                            // tucked a quarter into the line beside the text's ascent or descent.
+                            readonly property real knob: Math.round(Math.max(6 * k, Math.min(11 * k, app.readerLineGap / 0.75)))
+                            readonly property real tuck: Math.round(knob * 0.25)
                             visible: !!edge
-                            x: edge ? Math.round(edge.x - barWidth / 2) : 0
-                            y: edge ? (atStart ? edge.y - overhang : edge.y) : 0
-                            width: barWidth
-                            height: edge ? edge.height + overhang : 0
+                            x: edge ? Math.round(edge.x - knob / 2) : 0
+                            y: edge ? (atStart ? edge.y - knob + tuck : edge.y) : 0
+                            width: knob
+                            height: edge ? edge.height + knob - tuck : 0
                             Rectangle {
-                                anchors.fill: parent
+                                objectName: "rangeEndpointBar"
+                                x: Math.round((parent.width - width) / 2)
+                                y: rangeEndpointCaret.atStart ? Math.round(rangeEndpointCaret.knob / 2) : 0
+                                width: rangeEndpointCaret.barWidth
+                                height: parent.height - Math.round(rangeEndpointCaret.knob / 2)
                                 radius: width / 2
                                 color: desktop.accent
                             }
-                            Canvas {
-                                objectName: "rangeEndpointFlag"
-                                readonly property real size: Math.round(12 * rangeEndpointMarker.k)
-                                property color ink: desktop.accent
-                                readonly property bool pointsRight: rangeEndpointCaret.atStart
-                                x: pointsRight ? parent.width - 1 : 1 - size
-                                y: pointsRight ? 0 : parent.height - size
-                                width: size
-                                height: size
-                                onInkChanged: requestPaint()
-                                onPointsRightChanged: requestPaint()
-                                onSizeChanged: requestPaint()
-                                onPaint: {
-                                    const ctx = getContext("2d")
-                                    ctx.reset()
-                                    ctx.fillStyle = ink
-                                    ctx.beginPath()
-                                    if (pointsRight) { ctx.moveTo(0, 0); ctx.lineTo(width, 0); ctx.lineTo(0, height) }
-                                    else { ctx.moveTo(width, height); ctx.lineTo(0, height); ctx.lineTo(width, 0) }
-                                    ctx.closePath()
-                                    ctx.fill()
-                                }
+                            Rectangle {
+                                objectName: "rangeEndpointKnob"
+                                y: rangeEndpointCaret.atStart ? 0 : parent.height - height
+                                width: rangeEndpointCaret.knob
+                                height: width
+                                radius: width / 2
+                                color: desktop.accent
                             }
                         }
                     }

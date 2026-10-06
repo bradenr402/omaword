@@ -127,6 +127,11 @@ Item {
         return out
     }
     // Line rectangles of verses first..last in the shared layout (paint only).
+    // Line rectangles of one verse's text only (no number or decoration cells).
+    function verseTextRects(number) {
+        const span = Array.from(document.spans).find(function(s) { return s.number === number })
+        return span ? document.rectangles(span.textStart, span.textEnd) : []
+    }
     function verseRangeRects(first, last) {
         if (first <= 0) return []
         const spans = Array.from(document.spans).filter(function(s) { return s.number >= first && s.number <= last })
