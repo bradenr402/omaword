@@ -15,6 +15,10 @@ Rectangle {
     signal preview(string query)
     signal accepted(string query)
     signal canceled()
+    // A key with nothing to do (tab with the hints hidden): the owner sounds the error.
+    signal rejected()
+    // Right click (or the menu key) in the field: the app's text menu.
+    signal textMenu(Item field, point position)
     // Fade only: closed prompts take no input while fading out.
     property int fadeDuration: 120
     visible: opacity > 0
@@ -40,10 +44,20 @@ Rectangle {
     property int hintFocus: -1
     function cycle(delta) {
         const count = hints.visible ? hints.partItems().length : 0
+        if (!count) { root.rejected(); return }
         hintFocus = ((hintFocus + 1 + delta) % (count + 1) + count + 1) % (count + 1) - 1
     }
     function cancel() { debounce.stop(); root.canceled() }
     readonly property string query: input.text
+    // A click on the prompt's own chrome (its padding, "/", the counter)
+    // stays in the prompt: it neither accepts nor reaches the reader below.
+    MouseArea {
+        objectName: "chapterFindChrome"
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        onPressed: input.forceActiveFocus()
+        onWheel: function(wheel) { wheel.accepted = false }
+    }
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 12 * root.uiScale; anchors.rightMargin: 12 * root.uiScale
@@ -52,6 +66,8 @@ Rectangle {
         TextField {
             id: input
             objectName: "chapterFindInput"
+            ContextMenu.menu: null
+            ContextMenu.onRequested: function(position) { root.textMenu(input, position) }
             Layout.fillWidth: true; Layout.minimumWidth: 0
             color: root.theme.foreground
             placeholderText: "Find in chapter · regex, \\c any case"

@@ -816,6 +816,9 @@ Item {
     }
     component TagInput: TextField {
         id: input
+        // The app's text menu, not Qt's built-in one.
+        ContextMenu.menu: null
+        ContextMenu.onRequested: function(position) { if (typeof panel.app.openTextMenu === "function") panel.app.openTextMenu(input, position) }
         font.family: panel.desktop.fontFamily
         font.pixelSize: 14 * panel.controlScale
         color: panel.desktop.foreground

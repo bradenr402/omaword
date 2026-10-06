@@ -1327,6 +1327,67 @@ ApplicationWindow {
         }
         return Qt.point(point.x, Math.max(view.y, Math.min(view.y + reading.height - 24 * readerScale, point.y)))
     }
+    // The menu key (shift F10) in a text field opens its text menu at the caret.
+    Shortcut {
+        objectName: "textMenuKey"
+        // Application context: modal popups (palette, dialogs) hold text fields too.
+        context: Qt.ApplicationShortcut
+        sequences: ["Menu", "Shift+F10"]
+        enabled: app.active && app.textInputActive() && !app.contextMenuOpen
+        onActivated: {
+            const field = app.activeFocusItem
+            if (!field || typeof field.positionToRectangle !== "function") { app.rejected(); return }
+            const r = field.positionToRectangle(field.cursorPosition)
+            app.openTextMenu(field, Qt.point(r.x, r.y + r.height))
+        }
+    }
+    // Text fields use the app's menu, never Qt's built-in editing menu
+    // (ContextMenu.menu: null): Cut · Copy · Paste · Select all, and in the
+    // note editor Open link and Preview. `position` is in the field's coordinates.
+    function openTextMenu(field, position) {
+        if (!field) return
+        const point = field.mapToItem(null, position.x, position.y)
+        const editable = !field.readOnly && field.enabled
+        const selected = field.selectedText.length > 0
+        let entries = [
+            { id: "cut", text: "Cut", shortcut: KeyNotation.format("Ctrl+X"), enabled: editable && selected, run: function() { field.cut() } },
+            { id: "copyField", text: "Copy", shortcut: KeyNotation.format("Ctrl+C"), enabled: selected, run: function() { field.copy() } },
+            { id: "paste", text: "Paste", shortcut: KeyNotation.format("Ctrl+V"), enabled: editable && field.canPaste, run: function() { field.paste() } },
+            { id: "selectAll", text: "Select all", shortcut: KeyNotation.format("Ctrl+A"), enabled: field.length > 0, run: function() { field.selectAll() } }
+        ]
+        if (field === noteEditor) {
+            // The link under the pointer (else at the caret) opens as alt enter does.
+            const at = field.positionAt(position.x, position.y)
+            if (!selected) field.cursorPosition = at
+            entries = entries.concat([menuDivider,
+                { id: "openLink", text: "Open link", shortcut: menuKey("openNoteLink"), enabled: !!noteLinkAtCursor || noteUrlAtCursor.length > 0,
+                    run: function() { app.openNoteLinkAtCursor() } },
+                { id: "preview", text: "Preview", shortcut: menuKey("notePreview"), enabled: hasSelection, run: function() { app.toggleNotePreview() } }])
+        } else if (field === notePreviewText) {
+            entries = entries.concat([menuDivider,
+                { id: "write", text: "Write", shortcut: menuKey("notePreview"), enabled: hasSelection, run: function() { app.toggleNotePreview() } }])
+        }
+        field.forceActiveFocus()
+        contextMenu.show("text", entries, point.x, point.y)
+    }
+    function openPassageMenuAt(sceneX, sceneY) {
+        if (!bible.ready || bible.busy) return
+        clearCount()
+        if (rangeEditor.active) { contextMenu.show("rangeEdit", rangeEditMenuEntries(), sceneX, sceneY); return }
+        if (freeSelectedText.length) {
+            if (pointInSelectedText(sceneX, sceneY)) {
+                contextMenu.show("passage", selectedTextEntries().concat(passageMenuEntries(sceneX, sceneY)), sceneX, sceneY)
+                return
+            }
+            clearTextSelection()
+        }
+        if (!hasSelection && !rangeEditing) {
+            const rows = Array.from(bible.verses)
+            const number = bible.cursorVerse > 0 ? bible.cursorVerse : rows.length ? rows[0].number : 0
+            if (number > 0) selectVerse(number, false)
+        }
+        contextMenu.show("passage", passageMenuEntries(sceneX, sceneY), sceneX, sceneY)
+    }
     function openPassageMenuAtCursor() {
         if (!bible.ready || bible.busy) return
         if (rangeEditor.active) {
@@ -4676,6 +4737,20 @@ ApplicationWindow {
                         enabled: visible
                     }
 
+                    // Right click on the reader's empty places (gutters, headings,
+                    // the chapter title, below the text, through the outline): the
+                    // passage menu at the pointer, for the current selection (else
+                    // the cursor verse). Under the text, whose rows take their own.
+                    MouseArea {
+                        objectName: "readerBackgroundMenu"
+                        width: reading.width
+                        height: Math.max(reading.contentHeight, reading.height)
+                        acceptedButtons: Qt.RightButton
+                        onClicked: function(mouse) {
+                            const p = mapToItem(null, mouse.x, mouse.y)
+                            app.openPassageMenuAt(p.x, p.y)
+                        }
+                    }
                     Column {
                         id: readerColumn
                         objectName: "readerColumn"
@@ -5461,6 +5536,8 @@ ApplicationWindow {
                             contentWidth: availableWidth
                             TextArea {
                                 id: noteEditor
+                                ContextMenu.menu: null
+                                ContextMenu.onRequested: function(position) { app.openTextMenu(noteEditor, position) }
                                 objectName: "noteEditor"
                                 width: parent.width
                                 color: desktop.foreground
@@ -5534,6 +5611,8 @@ ApplicationWindow {
                             contentWidth: availableWidth
                             TextArea {
                                 id: notePreviewText
+                                ContextMenu.menu: null
+                                ContextMenu.onRequested: function(position) { app.openTextMenu(notePreviewText, position) }
                                 objectName: "notePreview"
                                 width: parent.width
                                 // Focusable for reading by key: the scroll keys move the preview.
@@ -6001,6 +6080,8 @@ ApplicationWindow {
         onPreview: function(query) { app.previewChapterFind(query) }
         onAccepted: function(query) { app.acceptChapterFind(query) }
         onCanceled: app.cancelChapterFind()
+        onRejected: sounds.play("error")
+        onTextMenu: function(field, position) { app.openTextMenu(field, position) }
     }
     // The match counter acts like n / shift N: click the next match, shift
     // click the previous; right click for Next / Previous / Clear search.
@@ -6095,6 +6176,8 @@ ApplicationWindow {
                 spacing: 8 * versionDialog.uiScale
                 TextField {
                     id: versionSearch
+                    ContextMenu.menu: null
+                    ContextMenu.onRequested: function(position) { app.openTextMenu(versionSearch, position) }
                     objectName: "versionSearch"
                     enabled: !bible.busy
                     Layout.fillWidth: true
@@ -6307,6 +6390,8 @@ ApplicationWindow {
                 implicitHeight: referenceInput.implicitHeight
                 TextField {
                     id: referenceInput
+                    ContextMenu.menu: null
+                    ContextMenu.onRequested: function(position) { app.openTextMenu(referenceInput, position) }
                     objectName: "referenceInput"
                     anchors.fill: parent
                     implicitHeight: 38 * app.scale
@@ -6652,6 +6737,8 @@ ApplicationWindow {
             FineRule { Layout.fillWidth: true }
             TextField {
                 id: savedSearch
+                ContextMenu.menu: null
+                ContextMenu.onRequested: function(position) { app.openTextMenu(savedSearch, position) }
                 objectName: "savedSearch"
                 Layout.fillWidth: true
                 visible: app.savedSearchVisible
@@ -7381,6 +7468,8 @@ ApplicationWindow {
             RowLayout {
             TextField {
                 id: keybindingSearch
+                ContextMenu.menu: null
+                ContextMenu.onRequested: function(position) { app.openTextMenu(keybindingSearch, position) }
                 objectName: "keybindingSearch"
                 Layout.fillWidth: true
                 implicitHeight: 42 * app.scale
@@ -7742,6 +7831,8 @@ ApplicationWindow {
             Label { text: "Add version"; color: desktop.foreground; font.pixelSize: 22 * importGuide.uiScale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             TextField {
                 id: catalogSearch
+                ContextMenu.menu: null
+                ContextMenu.onRequested: function(position) { app.openTextMenu(catalogSearch, position) }
                 objectName: "catalogSearch"
                 Layout.fillWidth: true
                 implicitHeight: 42 * importGuide.uiScale
