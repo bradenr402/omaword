@@ -1832,6 +1832,13 @@ ApplicationWindow {
         sounds.play("boundary")
         return false
     }
+    // Keybindings → [[: types [[ at the editor's cursor, which opens the suggestions.
+    function startNoteLink() {
+        if (!notesOpen || !hasSelection) { rejected(); return }
+        if (notePreview) notePreview = false
+        noteEditor.forceActiveFocus()
+        noteEditor.insert(noteEditor.cursorPosition, "[[")
+    }
     // alt v: Write ↔ Preview, from the editor or anywhere in the Notes panel.
     function toggleNotePreview() {
         if (!notesOpen || !hasSelection) { rejected(); return }
@@ -1867,6 +1874,8 @@ ApplicationWindow {
         const row = linkedFrom[index]
         if (!row) return
         linkedList.currentIndex = index
+        // The menu names the list's keys (y, shift Y, d): the list holds the keyboard.
+        linkedList.forceActiveFocus()
         contextMenu.show("linked", RowMenu.entries(app, { busy: bible.busy, scope: row,
             open: function() { app.openLinkedNote(row) } }), sceneX, sceneY)
     }
@@ -1884,6 +1893,9 @@ ApplicationWindow {
         let action = null
         if (plain && (event.key === Qt.Key_J || event.key === Qt.Key_Down)) action = function() { app.moveLinked(1) }
         else if (plain && (event.key === Qt.Key_K || event.key === Qt.Key_Up)) action = function() { app.moveLinked(-1) }
+        else if (plain && (event.key === Qt.Key_G || event.key === Qt.Key_Home)) action = function() { app.moveLinked(-linkedList.currentIndex) }
+        else if ((mods === Qt.ShiftModifier && event.key === Qt.Key_G) || (plain && event.key === Qt.Key_End))
+            action = function() { app.moveLinked(app.linkedFrom.length - 1 - linkedList.currentIndex) }
         else if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) action = function() { if (row) app.openLinkedNote(row); else app.rejected() }
         else if (plain && event.key === Qt.Key_Y) action = function() { app.copyScope(row) }
         else if (mods === Qt.ShiftModifier && event.key === Qt.Key_Y) action = function() { app.copyScope(row, true) }
@@ -1903,8 +1915,15 @@ ApplicationWindow {
     }
     function moveLinked(delta) {
         const next = linkedList.currentIndex + delta
-        if (next < 0 || next >= linkedFrom.length) { sounds.play("boundary"); return }
+        if (delta === 0 || next < 0 || next >= linkedFrom.length) { sounds.play("boundary"); return }
         linkedList.currentIndex = next
+        // Keep the current row in view in the Notes pane.
+        const row = linkedRepeater.itemAt(next)
+        const view = notesScroll.contentItem as Flickable
+        if (!row || !view) return
+        const top = row.mapToItem(view.contentItem, 0, 0).y
+        if (top < view.contentY) view.contentY = Math.max(0, top - 8)
+        else if (top + row.height > view.contentY + view.height) view.contentY = Math.min(view.contentHeight - view.height, top + row.height - view.height + 8)
     }
     // Scroll keys for scrollable dialogs and panes: j k ↑ ↓ a line, pgup pgdn
     // a page, ctrl d/u half a page, home end the ends. Returns whether it acted.
@@ -2007,12 +2026,24 @@ ApplicationWindow {
         flushNote()
     }
     function readerFocus() { readerSurface.forceActiveFocus() }
+    // The next (or previous) item on the tab chain from `item`, or the error.
+    function focusNext(item, forward) {
+        const next = item.nextItemInFocusChain(forward)
+        if (next && next !== item) next.forceActiveFocus(forward ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+        else rejected()
+    }
     function focusSetup() { if (setupScroll.visible && !dialogOpen) setupImport.forceActiveFocus() }
-    // A conflict appearing in Notes puts the keyboard on its choices.
+    // A conflict appearing in Notes puts the keyboard on its choices, unless
+    // the note editor has it: typing is never interrupted. There ctrl s (save
+    // my draft) and ctrl shift S (use saved text) resolve it, as the hint
+    // row and the buttons' tooltips say.
     onNoteConflictChanged: if (noteConflict) Qt.callLater(function() {
-        if (!app.noteConflict || !notesDrawer.shown || app.dialogOpen) return
+        if (!app.noteConflict || !notesDrawer.shown || app.dialogOpen || noteEditor.activeFocus) return
         if (noteRetry.enabled) noteRetry.forceActiveFocus(); else noteUseSaved.forceActiveFocus()
     })
+    readonly property bool canKeepDraft: noteConflict && noteScopeMatches && hasSelection && !bible.busy
+    function keepNoteDraft() { if (canKeepDraft) retryNote(); else rejected() }
+    function useSavedNote() { if (noteConflict) loadSavedNote(); else rejected() }
     function focusWithin(container) {
         for (let item = activeFocusItem; item; item = item.parent) if (item === container) return true
         return false
@@ -3468,6 +3499,8 @@ ApplicationWindow {
         { id: "openNoteLink", group: "Annotate", title: "Open the passage or web link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
         { id: "noteLinkClick", group: "Annotate", title: "Open the passage or web link clicked (in a note)", sequences: ["Ctrl+Click"], scope: "noteEditor", explanation: true },
         { id: "notePreview", group: "Annotate", title: "Switch a note between Write and Preview (Notes panel)", sequences: ["Alt+V"], scope: "noteEditor" },
+        { id: "noteKeepDraft", group: "Annotate", title: "Note changed in another window: save my draft (in a note)", sequences: ["Ctrl+S"], scope: "noteEditor" },
+        { id: "noteUseSaved", group: "Annotate", title: "Note changed in another window: use the saved text (in a note)", sequences: ["Ctrl+Shift+S"], scope: "noteEditor" },
         { id: "noteLinkedFrom", group: "Annotate", title: "Between a note and its Linked from list (in a note)", sequences: ["Tab", "Shift+Tab"], scope: "noteEditor" },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
@@ -3702,6 +3735,11 @@ ApplicationWindow {
         if (action.id === "copyText" || action.id === "copyTextPlain") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
+        // Notes editor keys, run from Keybindings: they act in an open Notes panel.
+        if (["noteLinkSuggest", "openNoteLink", "notePreview"].includes(action.id)) return notesOpen && hasSelection
+        if (action.id === "noteKeepDraft") return notesOpen && canKeepDraft
+        if (action.id === "noteUseSaved") return notesOpen && noteConflict
+        if (action.id === "noteLinkedFrom") return notesOpen && hasSelection && linkedFrom.length > 0
         return bible.ready || !!action.setting
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
@@ -3969,6 +4007,12 @@ ApplicationWindow {
         case "copyText": if (freeSelectedText.length) copySelectedText(false); else copyPassage(false); break
         case "copyTextPlain": if (freeSelectedText.length) copySelectedText(true); else copyPassage(true); break
         case "characterVisual": beginCharMode(); break
+        case "noteLinkSuggest": startNoteLink(); break
+        case "openNoteLink": openNoteLinkAtCursor(); break
+        case "notePreview": toggleNotePreview(); break
+        case "noteKeepDraft": keepNoteDraft(); noteEditor.forceActiveFocus(); break
+        case "noteUseSaved": useSavedNote(); noteEditor.forceActiveFocus(); break
+        case "noteLinkedFrom": if (linkedList.activeFocus) noteEditor.forceActiveFocus(); else focusLinkedFrom(); break
         case "larger": bible.setFontSize(readerSize + 1); break
         case "smaller": bible.setFontSize(readerSize - 1); break
         case "resetText": bible.setFontSize(18); break
@@ -5526,7 +5570,8 @@ ApplicationWindow {
                     x: 22
                     y: 22
                     width: notesScroll.availableWidth - 44
-                    height: Math.max(notesPanel.height - 44, (app.noteConflict ? 700 : 440) * app.scale)
+                    // Grows past the panel (and scrolls) when a long Linked from list needs it.
+                    height: Math.max(notesPanel.height - 44, (app.noteConflict ? 700 : 440) * app.scale, implicitHeight)
                     spacing: 16
                     RowLayout {
                         Layout.fillWidth: true
@@ -5572,7 +5617,8 @@ ApplicationWindow {
                             QuietButton {
                                 id: noteRetry
                                 objectName: "noteRetry"
-                                text: "Save my draft"; tip: "Replace the saved note with your draft"
+                                text: "Save my draft"; tip: "Replace the saved note with your draft · " + app.keyText("noteKeepDraft") + " in the note"
+                                focusTarget: noteEditor
                                 enabled: app.noteScopeMatches && app.hasSelection && !bible.busy
                                 onClicked: app.retryNote()
                             }
@@ -5580,6 +5626,8 @@ ApplicationWindow {
                                 id: noteUseSaved
                                 objectName: "noteUseSaved"
                                 text: "Use saved text"
+                                tip: "Replace your draft with the saved note · " + app.keyText("noteUseSaved") + " in the note"
+                                focusTarget: noteEditor
                                 onClicked: app.loadSavedNote()
                             }
                         }
@@ -5595,6 +5643,9 @@ ApplicationWindow {
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        // The editor keeps a usable height however long Linked from grows.
+                        Layout.minimumHeight: 160 * app.scale
+                        Layout.preferredHeight: 160 * app.scale
                         OverlayScrollView {
                             id: noteEditorScroll
                             objectName: "noteEditorScroll"
@@ -5633,14 +5684,27 @@ ApplicationWindow {
                                 onCursorPositionChanged: app.updateLinkSuggestions()
                                 Keys.onPressed: function(event) {
                                     const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                                    // Tab never types: it accepts a [[ suggestion, else moves to Linked from.
+                                    // Tab never types: it accepts a [[ suggestion, else moves to
+                                    // Linked from, else to the next control; shift tab to the previous
+                                    // one (Write, Preview, Bookmark, … are on the tab chain).
                                     if (event.key === Qt.Key_Tab && event.modifiers === Qt.NoModifier) {
                                         event.accepted = true
                                         if (app.linkSuggesting && app.linkSuggestions.length) app.acceptLinkSuggestion()
-                                        else app.focusLinkedFrom()
+                                        else if (app.linkedFrom.length) app.focusLinkedFrom()
+                                        else app.focusNext(noteEditor, true)
                                         return
                                     }
-                                    if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && event.modifiers === Qt.ShiftModifier)) { event.accepted = true; return }
+                                    if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && event.modifiers === Qt.ShiftModifier)) {
+                                        event.accepted = true
+                                        app.focusNext(noteEditor, false)
+                                        return
+                                    }
+                                    // A conflict with another window: ctrl s keeps this draft, ctrl shift S takes the saved text.
+                                    if (event.key === Qt.Key_S && (event.modifiers === Qt.ControlModifier || event.modifiers === (Qt.ControlModifier | Qt.ShiftModifier))) {
+                                        event.accepted = true
+                                        if (event.modifiers & Qt.ShiftModifier) app.useSavedNote(); else app.keepNoteDraft()
+                                        return
+                                    }
                                     if (enter && event.modifiers === Qt.AltModifier) {
                                         event.accepted = true
                                         app.openNoteLinkAtCursor()
@@ -5717,6 +5781,8 @@ ApplicationWindow {
                         parts: app.linkSuggesting ? [[["Up", "Down"], "choose"], ["Return", "insert", function() { app.acceptLinkSuggestion() }, app.linkSuggestions.length > 0],
                                 ["Escape", "dismiss", app.dismissLinkSuggestions]]
                             : notePreviewText.activeFocus ? [[["J", "K"], "scroll"], [app.actionKeys("notePreview")[0], "write", app.toggleNotePreview]]
+                            : app.noteConflict ? [[app.actionKeys("noteKeepDraft")[0], "save my draft", app.keepNoteDraft, app.canKeepDraft],
+                                [app.actionKeys("noteUseSaved")[0], "use saved text", app.useSavedNote]]
                             : [app.noteLinkAtCursor || app.noteUrlAtCursor.length ? ["Alt+Return", "open link", app.openNoteLinkAtCursor] : null,
                                 [app.actionKeys("notePreview")[0], "preview", app.toggleNotePreview],
                                 app.linkedFrom.length ? [app.actionKeys("noteLinkedFrom")[0], "linked from", app.focusLinkedFrom] : null]
@@ -8436,7 +8502,8 @@ ApplicationWindow {
         objectName: "notePreviewShortcut"
         context: Qt.ApplicationShortcut
         sequences: app.actionKeys("notePreview")
-        enabled: app.active && app.notesOpen && app.hasSelection && app.focusWithin(notesDrawer.contentItem) && !app.modalOpen
+        // Without a selection there is no note: the key sounds the error.
+        enabled: app.active && app.notesOpen && app.focusWithin(notesDrawer.contentItem) && !app.modalOpen
         onActivated: app.toggleNotePreview()
     }
     Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }

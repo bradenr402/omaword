@@ -117,6 +117,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt enter`: Open the passage or web link at the cursor (in a note)
 - `ctrl click`: Open the passage or web link clicked (in a note)
 - `alt v`: Switch a note between Write and Preview (Notes panel)
+- `ctrl s`: Note changed in another window: save my draft (in a note)
+- `ctrl shift S`: Note changed in another window: use the saved text (in a note)
 - `tab` · `shift tab`: Between a note and its Linked from list (in a note)
 
 ### Copy
