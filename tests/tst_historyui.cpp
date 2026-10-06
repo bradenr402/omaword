@@ -465,11 +465,10 @@ private slots:
         type("jk"); QCOMPARE(item("studySearch")->property("text").toString(), QString("jk"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
-        // A clicked chip holds focus; j still moves back to the results.
-        openRelated();
+        // A clicked chip toggles without taking the keyboard: the results keep it.
+        openRelated(); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         QTest::mouseClick(window, Qt::LeftButton, {}, item("studyChip:" + beta)->mapToScene(QPointF(10, 10)).toPoint());
-        QTRY_VERIFY(item("studyChip:" + beta)->hasActiveFocus());
-        key(Qt::Key_J); QVERIFY(item("tagResults")->hasActiveFocus());
+        QVERIFY(!item("studyChip:" + beta)->hasActiveFocus()); QVERIFY(item("tagResults")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
     }
     // g, shift G, ctrl d/u (5), ctrl f/b and pgdn/pgup (10) in every list panel;

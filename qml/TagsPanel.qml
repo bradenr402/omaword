@@ -217,7 +217,9 @@ Item {
             const entry = visibleResults[resultList.currentIndex]
             if (entry) { app.openPassageTags(panel.snapshot(entry)); return }
         }
-        if (!rootChips.length && installed(relatedSource)) app.openPassageTags(panel.snapshot(relatedSource))
+        // From a chip (or with no chips): the Study passage's own tags.
+        if ((chipFocused || !rootChips.length) && installed(relatedSource)) { app.openPassageTags(panel.snapshot(relatedSource)); return }
+        app.rejected()
     }
     function openResultMenu(index, sceneX, sceneY) {
         const entry = visibleResults[index]
@@ -583,6 +585,7 @@ Item {
         const chip = currentChip()
         if (chipFocused) return [[["Left", "Right"], "chips"], ["Space", "toggle", function() { panel.toggleChip(chip.id) }, !!chip],
             ["Shift+Space", "show only this tag", function() { panel.soloChip(chip.id) }, !!chip], ["0", "show all tags", function() { panel.restoreChips() }],
+            ["T", "tag passage", tag[2], tag[3] && installed(relatedSource)],
             ["Down", "passages"], ["Escape", "close", escape]]
         return [tabs, ["Return", "open", function() { panel.openTagged(panel.visibleResults[resultList.currentIndex]) }, listKeys], ["T", "tag", tag[2], tag[3]],
             otherVersions ? ["A", allVersions ? "this version" : "all versions", function() { panel.toggleAllVersions() }, relatedMoveKeys] : null,
@@ -599,7 +602,9 @@ Item {
         const inList = !search.activeFocus && tagList.currentIndex >= 0 && tagList.currentIndex < tagList.count
         const enter = search.activeFocus ? (page === "picker" && validName && scopeValid) || tagList.count > 0 : inList
         const escape = ["Escape", "close", function() { panel.handleEscape() }]
-        if (confirmation) return [[["Left", "Right"], "choose"], ["Return", "confirm", function() { panel.confirmManagement() }, !bible.busy],
+        // Confirmation: enter presses the focused button (Cancel first), as other confirmations do.
+        if (confirmation) return [[["Left", "Right"], "choose"], ["Return", "select", function() { (confirmManagementButton.activeFocus ? confirmManagementButton : cancelManagement).clicked() },
+                cancelManagement.activeFocus || (confirmManagementButton.activeFocus && !bible.busy)],
             ["Escape", "cancel", function() { panel.handleEscape() }]]
         const pageKey = ["Ctrl+T", page === "picker" ? "manage" : "picker", function() { panel.togglePage() }]
         if (page !== "picker") {
@@ -729,7 +734,8 @@ Item {
         property bool keyActivated: false
         Keys.onReturnPressed: { keyActivated = true; clicked(); keyActivated = false }
         Keys.onEnterPressed: { keyActivated = true; clicked(); keyActivated = false }
-        AppToolTip { theme: panel.desktop; uiScale: panel.uiScale; text: control.hint; visible: text.length > 0 && (control.hovered || control.activeFocus) }
+        // Focus shows the tip only when the keyboard put it there (a click does not).
+        AppToolTip { theme: panel.desktop; uiScale: panel.uiScale; text: control.hint; visible: text.length > 0 && (control.hovered || (control.activeFocus && control.focusReason !== Qt.MouseFocusReason)) }
     }
     // Study's tag chips: "name N" (N muted: other passages with the tag). On
     // chips keep a light accent tint; off chips are a bare outline, muted.
@@ -784,8 +790,9 @@ Item {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             acceptedButtons: Qt.LeftButton | Qt.RightButton
+            // A click leaves the keyboard on the results (or where it was), not on the chip.
             onClicked: function(mouse) {
-                chip.forceActiveFocus()
+                if (chip.activeFocus) panel.focusResults()
                 if (mouse.button === Qt.RightButton) {
                     const p = mapToItem(null, mouse.x, mouse.y)
                     panel.chipMenu(chip.modelData, p.x, p.y)
@@ -809,8 +816,8 @@ Item {
         AppToolTip {
             theme: panel.desktop; uiScale: panel.uiScale
             text: (chip.modelData.overlap ? "On " + chip.modelData.reference + " (overlapping range)\n" : "")
-                + "click: turn on/off · " + KeyNotation.format("Shift+Click") + ": show only this tag"
-            visible: chipMouse.containsMouse || chip.activeFocus
+                + "Click: turn on/off · " + KeyNotation.format("Shift+Click") + ": show only this tag"
+            visible: chipMouse.containsMouse || (chip.activeFocus && chip.focusReason !== Qt.MouseFocusReason)
         }
         Accessible.name: modelData.name + (on ? "" : ", off")
     }
@@ -1059,15 +1066,23 @@ Item {
                         else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; moreChips.clicked() }
                     }
                     Accessible.name: panel.hiddenChips + " more tags"
+                    HoverHandler { cursorShape: Qt.PointingHandCursor }
+                    AppToolTip {
+                        theme: panel.desktop; uiScale: panel.uiScale
+                        text: "Show " + panel.hiddenChips + " more " + (panel.hiddenChips === 1 ? "tag" : "tags")
+                        visible: moreChips.hovered || (moreChips.activeFocus && moreChips.focusReason !== Qt.MouseFocusReason)
+                    }
                 }
             }
             TagText {
                 objectName: "studyTagCount"
                 // Clickable: opens the passage search; right click for its menu.
+                // Over the text only (not the rest of the row).
                 MouseArea {
                     id: studyCountMouse
                     objectName: "studyTagCountMouse"
-                    anchors.fill: parent
+                    width: Math.min(parent.width, parent.contentWidth)
+                    height: parent.height
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -1086,7 +1101,8 @@ Item {
                 Layout.fillWidth: true
                 visible: panel.tagsTab && !panel.studySearchOpen && panel.onIds.length > 0 && panel.results.length > 0
                 font.pixelSize: 12 * panel.studyScale
-                color: panel.desktop.muted
+                // Hover reads as a link.
+                color: studyCountMouse.containsMouse ? panel.desktop.foreground : panel.desktop.muted
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 text: {
@@ -1288,6 +1304,8 @@ Item {
                     // The cursor verse's footnotes stay marked while the list moves.
                     readonly property bool atCursor: footnote && modelData.verse === panel.bible.cursorVerse
                     objectName: "studyRow:" + index
+                    // The list holds the keyboard (j k, enter); rows never take it.
+                    focusPolicy: Qt.NoFocus
                     // Clear of the scrollbar while it shows.
                     width: studyList.width - (studyList.ScrollBar.vertical.visible ? studyList.ScrollBar.vertical.width : 0)
                     chosen: studyList.activeFocus && studyList.currentIndex === index
@@ -1362,9 +1380,17 @@ Item {
         padding: 16 * panel.uiScale
         modal: true
         focus: true
-        // Esc or a click on the scrim closes it (a pending confirmation first
-        // needs esc or its own buttons).
+        // Esc or a click on the scrim closes it; during a confirmation a click
+        // on the scrim cancels the confirmation instead (as esc does).
         closePolicy: panel.confirmation ? Popup.NoAutoClose : Popup.CloseOnPressOutside
+        // Presses anywhere over the open picker (Overlay.onPressed fires for
+        // both): one inside marks itself first through a passive PointHandler.
+        property bool pressInside: false
+        Overlay.onPressed: Qt.callLater(function() {
+            const outside = !surface.pressInside
+            surface.pressInside = false
+            if (outside && surface.opened && panel.confirmation && !panel.app.contextMenuOpen) panel.handleEscape()
+        })
         // A modal: fades in, closes at once.
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: panel.app.fadeMs || 0; easing.type: Easing.OutQuad } }
         exit: null
@@ -1378,6 +1404,15 @@ Item {
             color: panel.desktop.background
             border.color: panel.desktop.border
             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+            // Over the whole picker, above its content (reparented to the
+            // popup's item): sees every press inside without taking it.
+            Item {
+                parent: body.parent
+                width: surface.width
+                height: surface.height
+                z: 100
+                PointHandler { onActiveChanged: if (active) surface.pressInside = true }
+            }
         }
         Overlay.modal: Rectangle { color: Qt.rgba(panel.desktop.background.r, panel.desktop.background.g, panel.desktop.background.b, 0.72) }
         contentItem: ColumnLayout {
@@ -1486,7 +1521,9 @@ Item {
                     required property var modelData
                     required property int index
                     objectName: "tag:" + modelData.id
-                    width: tagList.width
+                    // The list holds the keyboard; rows never become tab stops.
+                    focusPolicy: Qt.NoFocus
+                    width: tagList.width - panel.gutter(tagList)
                     chosen: panel.page === "manage" ? panel.managedId === modelData.id : panel.exactIds.indexOf(modelData.id) >= 0
                     text: (chosen ? "✓  " : "    ") + modelData.name + " · " + modelData.count
                     hint: modelData.name

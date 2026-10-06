@@ -3725,7 +3725,8 @@ ApplicationWindow {
         if (textSizeActions.includes(action.id)) return !errorDialog.visible
         if (findPromptOpen) return false
         // Inside the tag picker ctrl t switches between the picker and Manage.
-        if (action.id === "manageTags" && tagsUi.pickerVisible) return !tagsUi.confirmation && !errorDialog.visible
+        // (During a confirmation it sounds the error: togglePage rejects it.)
+        if (action.id === "manageTags" && tagsUi.pickerVisible) return !errorDialog.visible
         // Character selection owns the reader's keys (charKey); window keys
         // (palettes, dialogs) still work and end it as they take the keyboard.
         if (charMode && readerBase && action.scope !== "global" && action.scope !== "palette") return false
