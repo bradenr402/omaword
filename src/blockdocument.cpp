@@ -112,6 +112,9 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     const QFontMetricsF bodyMetrics(m_document->defaultFont());
     const double em = decorationSize > 0 ? decorationSize : bodyMetrics.height();
     QTextCursor cursor(m_document);
+    // One edit: the document (and the TextEdit showing it) lays out once,
+    // not after every insertion.
+    cursor.beginEditBlock();
     QTextBlockFormat paragraph;
     paragraph.setLineHeight(lineHeight * 100, QTextBlockFormat::ProportionalHeight);
     // Hebrew-first paragraphs and headings stay in an LTR paragraph.
@@ -300,6 +303,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         m_spans.append(QVariantMap{{"number",verse.value("number")}, {"start",start},
                                   {"textStart",textStart}, {"textEnd",textEnd}, {"end",cursor.position()}});
     }
+    cursor.endEditBlock();
     emit spansChanged();
     emit geometryChanged();
 }
