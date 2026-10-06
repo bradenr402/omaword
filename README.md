@@ -176,8 +176,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 - `j` · `↓`: Next item
 - `k` · `↑`: Previous item
-- `g`: First item
-- `shift G`: Last item
+- `g` · `home`: First item
+- `shift G` · `end`: Last item
 - `ctrl d`: Down 5 items
 - `ctrl u`: Up 5 items
 - `ctrl f` · `pgdn`: Down 10 items

@@ -3551,8 +3551,8 @@ ApplicationWindow {
         // List panels (Annotations, Desk, History, Study) bind these themselves.
         { id: "listNext", group: "Lists", title: "Next item", sequences: ["J", "Down"], scope: "list", explanation: true },
         { id: "listPrevious", group: "Lists", title: "Previous item", sequences: ["K", "Up"], scope: "list", explanation: true },
-        { id: "listFirst", group: "Lists", title: "First item", sequences: ["G"], scope: "list", explanation: true },
-        { id: "listLast", group: "Lists", title: "Last item", sequences: ["Shift+G"], scope: "list", explanation: true },
+        { id: "listFirst", group: "Lists", title: "First item", sequences: ["G", "Home"], scope: "list", explanation: true },
+        { id: "listLast", group: "Lists", title: "Last item", sequences: ["Shift+G", "End"], scope: "list", explanation: true },
         { id: "listHalfDown", group: "Lists", title: "Down 5 items", sequences: ["Ctrl+D"], scope: "list", explanation: true },
         { id: "listHalfUp", group: "Lists", title: "Up 5 items", sequences: ["Ctrl+U"], scope: "list", explanation: true },
         { id: "listPageDown", group: "Lists", title: "Down 10 items", sequences: ["Ctrl+F", "PgDown"], scope: "list", explanation: true },
@@ -6869,7 +6869,8 @@ ApplicationWindow {
             Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(-1) }
             Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(1) }
             Shortcut { sequence: "Shift+E"; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.editSavedRange() }
-            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.shown && !deleteConfirmation.visible && app.focusWithin(collectionList); onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
+            // enter opens the current row from anywhere in the drawer (a focused button takes its own enter).
+            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
             Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.requestDeleteSaved() }
             // Shared list keys: y quotation, shift Y plain text, d Desk.
             Shortcut { sequence: "Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry()) }
@@ -7152,8 +7153,6 @@ ApplicationWindow {
             Shortcut { sequences: ["J", "Down"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-1) }
             ListMotionKeys { objectName: "deskMotionKeys"; active: deskDrawer.listKeys; count: deskList.count; onMove: function(delta) { app.moveDesk(delta) } }
-            Shortcut { sequence: "Home"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-deskList.count) }
-            Shortcut { sequence: "End"; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(deskList.count) }
             Shortcut { sequences: ["Return", "Enter"]; enabled: deskDrawer.listKeys && app.activeFocusItem === deskList; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.openDeskItem(entry.id); else sounds.play("error") } }
             Shortcut { sequence: "Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id); else sounds.play("error") } }
             Shortcut { sequence: "Shift+Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id, true); else sounds.play("error") } }
@@ -7360,8 +7359,6 @@ ApplicationWindow {
             Shortcut { sequences: ["J", "Down"]; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(-1) }
             ListMotionKeys { objectName: "historyMotionKeys"; active: historyDrawer.listKeys; count: historyList.count; onMove: function(delta) { app.moveHistory(delta) } }
-            Shortcut { sequence: "Home"; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(-historyList.count) }
-            Shortcut { sequence: "End"; enabled: historyDrawer.listKeys; onActivated: app.moveHistory(historyList.count) }
             Shortcut { sequences: ["Return", "Enter"]; enabled: historyDrawer.listKeys && historyList.activeFocus; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.openHistoryItem(entry.id); else sounds.play("error") } }
             Shortcut { sequence: "Y"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.copyHistoryItem(entry.id); else sounds.play("error") } }
             Shortcut { sequence: "Shift+Y"; enabled: historyDrawer.listKeys; onActivated: { const entry = app.currentHistoryEntry(); if (entry) app.copyHistoryItem(entry.id, true); else sounds.play("error") } }
