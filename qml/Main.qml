@@ -55,7 +55,7 @@ ApplicationWindow {
         pendingActionCollapse = null
         clearCount()
         clearTextSelection()
-        notesDrawer.close()
+        dismissNotesDrawer()
         tagsUi.close()
         savedDrawer.close()
         verseTagMenu.close()
@@ -2751,9 +2751,16 @@ ApplicationWindow {
         }
     }
     function focusNoteEnd() { noteEditor.forceActiveFocus(); noteEditor.cursorPosition = noteEditor.length }
+    // Closes the Notes drawer with the keyboard already outside it: a drawer
+    // that closes with focus hands it back when its exit ends, over whatever
+    // opened meanwhile (a palette typed into during the exit).
+    function dismissNotesDrawer() {
+        if (notesDrawer.visible && focusWithin(notesDrawer.contentItem.parent)) readerFocus()
+        notesDrawer.close()
+    }
     function closeNotes() {
         if (!flushNote()) return false
-        notesDrawer.close()
+        dismissNotesDrawer()
         editingPanelClosed()
         return true
     }
@@ -3558,7 +3565,7 @@ ApplicationWindow {
         selectionAnchor = 0
         syncNote()
         if (bible.ready) restorePosition(hasSelection)
-        else notesDrawer.close()
+        else dismissNotesDrawer()
         versionDialog.close()
         if (deskRemoved > 0)
             notify("Removed " + abbreviation + " · " + deskRemoved + (deskRemoved === 1 ? " Desk item" : " Desk items") + " removed too", true)
