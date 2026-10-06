@@ -452,12 +452,29 @@ private slots:
             key(Qt::Key_Escape); QVERIFY2(!dialog->property("visible").toBool(), name);
             call("readerFocus");
         }
-        // Desk: list focus while sliding/fading in; reopen during close.
+        QTRY_VERIFY_WITH_TIMEOUT(!ghost("modalGhost")->property("running").toBool(), 1000);
+        // Desk: list focus while sliding/fading in (the full slide); reopen during close.
         navigate("John 1:2"); key(Qt::Key_D);
         auto desk = object("deskDrawer");
         key(Qt::Key_D, Qt::ShiftModifier);
         QVERIFY(desk->property("visible").toBool()); QVERIFY(!desk->property("opened").toBool());
         QVERIFY(item("deskList")->hasActiveFocus());
+        QVERIFY(desk->property("position").toDouble() < 0.5);
+        QTRY_VERIFY(desk->property("opened").toBool());
+        // Exit is subtler than entrance: a short slide and a quicker fade.
+        {
+            QElapsedTimer timer; timer.start();
+            key(Qt::Key_Escape);
+            double lowest = 1;
+            while (desk->property("visible").toBool() && timer.elapsed() < 1000) {
+                lowest = qMin(lowest, desk->property("position").toDouble());
+                QTest::qWait(5);
+            }
+            QVERIFY(!desk->property("visible").toBool());
+            QVERIFY2(lowest >= 0.84, qPrintable(QString::number(lowest)));
+            QVERIFY2(timer.elapsed() < 400, qPrintable(QString::number(timer.elapsed())));
+        }
+        key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(desk->property("position").toDouble() < 0.5);
         QTRY_VERIFY(desk->property("opened").toBool());
         key(Qt::Key_Escape);
         QVERIFY(desk->property("visible").toBool()); QVERIFY(!desk->property("shown").toBool());
@@ -568,7 +585,7 @@ private slots:
         key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(object("deskDrawer")->property("visible").toBool());
         QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
         QCOMPARE(object("deskDrawer")->property("opacity").toDouble(), 1.0);
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY_WITH_TIMEOUT(!object("deskDrawer")->property("visible").toBool(), 60);
         call("readerFocus");
         key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
         QTest::qWait(30);

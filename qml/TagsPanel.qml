@@ -897,9 +897,16 @@ Item {
         property bool closing: false
         onAboutToShow: closing = false
         onAboutToHide: closing = true
-        // A side panel: slides in and out, unless Reduce motion is on.
-        enter: Transition { NumberAnimation { property: "position"; duration: panel.app.reduceMotion ? 0 : 220; easing.type: Easing.OutCubic } }
-        exit: Transition { NumberAnimation { property: "position"; duration: panel.app.reduceMotion ? 0 : 180; easing.type: Easing.InCubic } }
+        // A side panel, like the app's: enter slides fully and fades in;
+        // exit is subtler (a short slide, a quicker fade). Instant without animations.
+        enter: Transition {
+            NumberAnimation { property: "position"; to: 1; duration: panel.app.panelEnterMs || 0; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "opacity"; to: 1; duration: panel.app.panelEnterMs || 0; easing.type: Easing.OutQuad }
+        }
+        exit: Transition {
+            NumberAnimation { property: "position"; to: panel.app.panelExitPosition || 0; duration: panel.app.panelExitMs || 0; easing.type: Easing.InCubic }
+            NumberAnimation { property: "opacity"; to: 0; duration: panel.app.panelExitMs || 0; easing.type: Easing.InQuad }
+        }
         background: Rectangle {
             color: panel.desktop.background
             border.color: panel.desktop.border
@@ -907,6 +914,7 @@ Item {
         }
         Overlay.modal: Rectangle { color: Qt.rgba(panel.desktop.background.r, panel.desktop.background.g, panel.desktop.background.b, 0.65) }
         onClosed: {
+            position = 0
             panel.studySearchOpen = false
             panel.app.restorePanelFocus()
         }

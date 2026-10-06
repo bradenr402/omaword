@@ -639,6 +639,10 @@ ApplicationWindow {
     // app-wide on `sounds`) collapses every duration to an instant change.
     readonly property bool reduceMotion: sounds.reduceMotion
     readonly property int fadeMs: reduceMotion ? 0 : 140
+    // Side panels: enter 180 ms over the full slide; exit 120 ms over a short one.
+    readonly property int panelEnterMs: reduceMotion ? 0 : 180
+    readonly property int panelExitMs: reduceMotion ? 0 : 120
+    readonly property real panelExitPosition: reduceMotion ? 0 : 0.85
     readonly property real focusDimOpacity: 0.32
     // Focus mode keeps the selection, else the cursor verse, at full strength.
     readonly property int focusFirst: bible.selectedStart > 0 ? bible.selectedStart : bible.cursorVerse
@@ -5795,13 +5799,15 @@ ApplicationWindow {
         // (`shown`), so reader keys and a reopen work during its exit animation.
         property bool closing: false
         readonly property bool shown: visible && !closing
+        // Enter: the full slide and a fade, ease-out; exit, subtler: a short
+        // slide and a quicker fade, ease-in (app.panelEnterMs / panelExitMs).
         enter: Transition {
-            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+            NumberAnimation { property: "position"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "opacity"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutQuad }
         }
         exit: Transition {
-            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+            NumberAnimation { property: "position"; to: app.panelExitPosition; duration: app.panelExitMs; easing.type: Easing.InCubic }
+            NumberAnimation { property: "opacity"; to: 0; duration: app.panelExitMs; easing.type: Easing.InQuad }
         }
         // While closing, a drawer must not keep its Escape grab: the next Escape
         // belongs to the reader (or range editor) immediately.
@@ -5820,7 +5826,7 @@ ApplicationWindow {
             color: app.tint(desktop.background, 0.65)
         }
         Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
-        onClosed: { closing = false; app.editingPanelClosed(); app.restorePanelFocus() }
+        onClosed: { closing = false; position = 0; app.editingPanelClosed(); app.restorePanelFocus() }
         contentItem: Rectangle {
                 id: notesPanel
                 objectName: "notesPanel"
@@ -7080,13 +7086,15 @@ ApplicationWindow {
         // (`shown`), so reader keys and a reopen work during its exit animation.
         property bool closing: false
         readonly property bool shown: visible && !closing
+        // Enter: the full slide and a fade, ease-out; exit, subtler: a short
+        // slide and a quicker fade, ease-in (app.panelEnterMs / panelExitMs).
         enter: Transition {
-            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+            NumberAnimation { property: "position"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "opacity"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutQuad }
         }
         exit: Transition {
-            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+            NumberAnimation { property: "position"; to: app.panelExitPosition; duration: app.panelExitMs; easing.type: Easing.InCubic }
+            NumberAnimation { property: "opacity"; to: 0; duration: app.panelExitMs; easing.type: Easing.InQuad }
         }
         // While closing, a drawer must not keep its Escape grab: the next Escape
         // belongs to the reader (or range editor) immediately.
@@ -7098,7 +7106,7 @@ ApplicationWindow {
             if (app.collectionTab === 3) { app.refreshTagExcerpts(); collectionList.currentIndex = app.initialSavedRow() }
             focusContent()
         }
-        onClosed: { closing = false; app.restorePanelFocus() }
+        onClosed: { closing = false; position = 0; app.restorePanelFocus() }
         Connections {
             target: bible
             enabled: savedDrawer.visible && app.collectionTab === 3
@@ -7391,13 +7399,15 @@ ApplicationWindow {
         // (`shown`), so reader keys and a reopen work during its exit animation.
         property bool closing: false
         readonly property bool shown: visible && !closing
+        // Enter: the full slide and a fade, ease-out; exit, subtler: a short
+        // slide and a quicker fade, ease-in (app.panelEnterMs / panelExitMs).
         enter: Transition {
-            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+            NumberAnimation { property: "position"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "opacity"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutQuad }
         }
         exit: Transition {
-            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+            NumberAnimation { property: "position"; to: app.panelExitPosition; duration: app.panelExitMs; easing.type: Easing.InCubic }
+            NumberAnimation { property: "opacity"; to: 0; duration: app.panelExitMs; easing.type: Easing.InQuad }
         }
         // While closing, a drawer must not keep its Escape grab: the next Escape
         // belongs to the reader (or range editor) immediately.
@@ -7405,7 +7415,7 @@ ApplicationWindow {
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.restoreDeskRow(); app.moveDesk(0) }
         onVisibleChanged: if (visible && !closing) focusContent()
-        onClosed: { closing = false; app.restorePanelFocus() }
+        onClosed: { closing = false; position = 0; app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "deskContent"
             spacing: (deskDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
@@ -7599,19 +7609,21 @@ ApplicationWindow {
         Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
         property bool closing: false
         readonly property bool shown: visible && !closing
+        // Enter: the full slide and a fade, ease-out; exit, subtler: a short
+        // slide and a quicker fade, ease-in (app.panelEnterMs / panelExitMs).
         enter: Transition {
-            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
+            NumberAnimation { property: "position"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "opacity"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutQuad }
         }
         exit: Transition {
-            SmoothedAnimation { velocity: app.reduceMotion ? 100000 : 5 }
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: app.fadeMs; easing.type: Easing.InQuad }
+            NumberAnimation { property: "position"; to: app.panelExitPosition; duration: app.panelExitMs; easing.type: Easing.InCubic }
+            NumberAnimation { property: "opacity"; to: 0; duration: app.panelExitMs; easing.type: Easing.InQuad }
         }
         onAboutToShow: { const reopening = visible; closing = false; app.historySelectedId = -1; app.historyRow = 0; if (reopening) focusContent() }
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.restoreHistoryRow(); app.moveHistory(0) }
         onVisibleChanged: if (visible && !closing) focusContent()
-        onClosed: { closing = false; app.restorePanelFocus() }
+        onClosed: { closing = false; position = 0; app.restorePanelFocus() }
         contentItem: ColumnLayout {
             objectName: "historyContent"
             spacing: (historyDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
