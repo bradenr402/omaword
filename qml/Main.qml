@@ -1584,7 +1584,28 @@ ApplicationWindow {
             else rejected()
             return
         }
-        if (sidePanel.length && !dialogOpen && !rangeEditing) {
+        // A modal: back closes the top one (a step back where it has steps).
+        if (dialogOpen) {
+            if (forward) { rejected(); return }
+            if (errorDialog.visible) errorDialog.close()
+            else if (catalogDetails.visible) catalogDetails.close()
+            else if (deleteConfirmation.visible) deleteConfirmation.close()
+            else if (cleanDeskConfirmation.visible) cleanDeskConfirmation.close()
+            else if (clearHistoryConfirmation.visible) clearHistoryConfirmation.close()
+            else if (restoreConfirmation.visible) restoreConfirmation.close()
+            else if (verseTagMenu.visible) verseTagMenu.close()
+            else if (tagsUi.pickerVisible) tagsUi.handleEscape()
+            else if (rangeEditor.visibleModal) { if (rangeEditor.pending) rangeEditor.mergeBack(); else rangeEditor.cancel() }
+            else if (backupScope.visible) backupScope.close()
+            else if (importGuide.visible) importGuide.close()
+            else if (versionDialog.visible) { if (versionDialog.step > 0) backVersion(); else versionDialog.close() }
+            else if (helpDialog.visible) helpDialog.close()
+            else if (settingsDialog.visible) settingsDialog.close()
+            else if (aboutDialog.visible) aboutDialog.close()
+            else rejected()
+            return
+        }
+        if (sidePanel.length && !rangeEditing) {
             if (forward) rejected()
             else if (leaveSidePanel("")) readerFocus()
             return
