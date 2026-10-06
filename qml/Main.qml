@@ -6220,13 +6220,18 @@ ApplicationWindow {
         anchors.margins: app.footerMargin
         spacing: 0
         visible: !app.findPromptOpen
+        // Focus, then the mode, then Keybindings (which hides when cramped).
         FloatingButton {
-            objectName: "helpControl"
-            glyph: "help"
-            tip: "Keybindings · " + app.keyText("help")
-            visible: !app.footerCollapsed
-            available: !app.rangeEditing && !bible.busy && !app.modalOpen
-            onClicked: helpDialog.open()
+            id: focusControl
+            objectName: "focusControl"
+            glyph: "focus"
+            // The one footer button focus mode always shows.
+            persistent: true
+            selected: bible.focusMode
+            visible: app.footerShowsFocus
+            available: !bible.busy && !app.modalOpen && app.actionAvailable("focus")
+            tip: (bible.focusMode ? "Focus mode · leave" : "Focus mode") + " · " + app.keyText("focus")
+            onClicked: { app.runCommand("focus"); app.readerFocus() }
         }
         FloatingButton {
             id: modeControl
@@ -6245,16 +6250,12 @@ ApplicationWindow {
             }
         }
         FloatingButton {
-            id: focusControl
-            objectName: "focusControl"
-            glyph: "focus"
-            // The one footer button focus mode always shows.
-            persistent: true
-            selected: bible.focusMode
-            visible: app.footerShowsFocus
-            available: !bible.busy && !app.modalOpen && app.actionAvailable("focus")
-            tip: (bible.focusMode ? "Focus mode · leave" : "Focus mode") + " · " + app.keyText("focus")
-            onClicked: { app.runCommand("focus"); app.readerFocus() }
+            objectName: "helpControl"
+            glyph: "help"
+            tip: "Keybindings · " + app.keyText("help")
+            visible: !app.footerCollapsed
+            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            onClicked: helpDialog.open()
         }
     }
     Row {

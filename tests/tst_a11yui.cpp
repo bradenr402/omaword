@@ -902,17 +902,18 @@ private slots:
         for (int i = 0; i < 30 && !reached; ++i) { key(Qt::Key_Tab); reached = focusName() == "focusControl"; }
         QVERIFY(reached); QVERIFY(!prop("footerQuiet").toBool()); QVERIFY(item("searchControl")->isEnabled());
         QVERIFY(!prop("footerGuard").toBool());
+        key(Qt::Key_Tab); QCOMPARE(focusName(), QString("modeControl")); QVERIFY(!prop("footerQuiet").toBool());
+        key(Qt::Key_Tab); QCOMPARE(focusName(), QString("helpControl"));
         key(Qt::Key_Tab); QCOMPARE(focusName(), QString("searchControl")); QVERIFY(!prop("footerQuiet").toBool());
         call("readerFocus"); QVERIFY(prop("footerQuiet").toBool());
         // Space on the focused focus button leaves focus mode.
         for (int i = 0; i < 30 && focusName() != "focusControl"; ++i) key(Qt::Key_Tab);
         key(Qt::Key_Space); QVERIFY(!bible->focusMode()); QVERIFY(!prop("footerQuiet").toBool());
         QCOMPARE(item("searchControl")->mapToScene(QPointF()), searchAt);
-        // Mouse: resting on the footer reveals it after 250 ms; a click in the next 300 ms is ignored.
+        // Mouse: the pointer on the footer reveals it at once; a click in the next 300 ms is ignored.
         call("readerFocus"); key(Qt::Key_F); QVERIFY(bible->focusMode());
         QTest::mouseMove(window, center(item("layoutControl")));
-        QTest::qWait(120); QVERIFY(prop("footerQuiet").toBool());
-        QTRY_VERIFY(!prop("footerQuiet").toBool()); QVERIFY(prop("footerGuard").toBool());
+        QVERIFY(!prop("footerQuiet").toBool()); QVERIFY(prop("footerGuard").toBool());
         const QString mode = bible->readingMode();
         click(item("layoutControl")); QCOMPARE(bible->readingMode(), mode);
         QTRY_VERIFY(!prop("footerGuard").toBool());

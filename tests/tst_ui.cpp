@@ -4410,7 +4410,7 @@ private slots:
     }
     void footerOrderAndResponsiveLayout() {
         reference("1 Thessalonians 5:16-18");
-        const QStringList names = {"helpControl","modeControl","searchControl","passageControl","versionControl",
+        const QStringList names = {"focusControl","modeControl","helpControl","searchControl","passageControl","versionControl",
             "layoutControl","savedControl","relatedControl","historyControl","deskControl","footerMore"};
         window->setMinimumWidth(320);
         struct Case { int width; int height; double scale; bool stacked; bool layout; bool collapsed; };
@@ -4469,7 +4469,12 @@ private slots:
                 QCOMPARE(item("deskControl")->mapRectToScene(item("deskControl")->boundingRect()).bottom(),modeBottom);
                 QVERIFY(location.right() <= x("deskControl"));
             }
-            if (!entry.collapsed) QCOMPARE(x("modeControl"),x("helpControl") + w("helpControl"));
+            // Left group: focus (where it fits), the mode, then Keybindings.
+            if (item("focusControl")->isVisible()) {
+                QCOMPARE(x("focusControl"),x("leftActions"));
+                QCOMPARE(x("modeControl"),x("focusControl") + w("focusControl"));
+            } else QCOMPARE(x("modeControl"),x("leftActions"));
+            if (!entry.collapsed) QCOMPARE(x("helpControl"),x("modeControl") + w("modeControl"));
             QCOMPARE(x("passageControl"),x("searchControl") + w("searchControl"));
             QCOMPARE(x("versionControl"),x("passageControl") + w("passageControl"));
             if (entry.layout) QVERIFY(x("versionControl") < x("layoutControl"));
