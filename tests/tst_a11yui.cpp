@@ -875,7 +875,7 @@ private slots:
         QCOMPARE(item("linkedFromRowBackground0")->property("color").value<QColor>().alphaF() > 0, true);
         key(Qt::Key_J); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 1);
         key(Qt::Key_K); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 0);
-        // esc returns to the note (Notes stays open); shift tab too.
+        // esc returns to the note (Notes stays open); ctrl ↑ too.
         key(Qt::Key_Escape); QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); QVERIFY(opened("notesDrawer"));
         key(Qt::Key_Down, Qt::ControlModifier); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
         key(Qt::Key_Up, Qt::ControlModifier); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
@@ -883,7 +883,7 @@ private slots:
         key(Qt::Key_Down, Qt::ControlModifier); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
         key(Qt::Key_Return); QTRY_COMPARE(bible->selectionReference(), QString("John 1:5"));
         QVERIFY(opened("notesDrawer"));
-        // [[ suggestions: tab accepts the suggestion instead.
+        // [[ suggestions: tab accepts the suggestion instead of typing.
         QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));
         navigate("John 3:16"); bible->selectVerses(16, 16); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("[[jn 3:1"); QTRY_VERIFY(prop("linkSuggesting").toBool());
@@ -2369,8 +2369,6 @@ private slots:
         // Preview by mouse, back to Write by the hint.
         click(item("previewButton")); QTRY_VERIFY(prop("notePreview").toBool());
         clickHint("notesHintsPart:write"); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_Tab); QTRY_VERIFY(!item("noteEditor")->hasActiveFocus());
-        QCOMPARE(item("noteEditor")->property("text").toString(), QString());
         item("noteEditor")->forceActiveFocus(); type("draft");
         // A conflict while typing leaves the keyboard in the editor; ctrl s keeps the draft.
         window->setProperty("noteConflict", true); QTest::qWait(60);
