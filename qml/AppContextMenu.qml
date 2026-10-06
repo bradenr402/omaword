@@ -34,7 +34,9 @@ Popup {
     modal: false
     dim: false
     focus: true
-    padding: 4 * uiScale
+    // Whole pixels everywhere so the current row's highlight sits exactly as
+    // far from the left border as from the right one at every scale.
+    padding: Math.round(4 * uiScale)
     closePolicy: Popup.CloseOnEscape
     // Outside the menu a left (or middle) press only closes it, acting on
     // nothing underneath. A right press closes it and falls through (returns
@@ -47,14 +49,14 @@ Popup {
     // focus restoration never wait on animation.
     enter: null
     exit: null
-    width: Math.ceil(rowWidth + leftPadding + rightPadding)
+    width: rowWidth + leftPadding + rightPadding
     readonly property real rowWidth: {
         let widest = 180 * uiScale
         for (const entry of entries) {
             if (entry.separator) continue
             widest = Math.max(widest, metrics.advanceWidth(entry.text) + metrics.advanceWidth(entry.shortcut || "") + 52 * uiScale)
         }
-        return widest
+        return Math.ceil(widest)
     }
     FontMetrics { id: metrics; font.family: menu.theme.fontFamily; font.pixelSize: 13 * menu.uiScale }
 
@@ -74,8 +76,8 @@ Popup {
         const full = entries.reduce(function(sum, entry) { return sum + rowHeight(entry) }, topPadding + bottomPadding)
         // Taller than the window: the menu scrolls inside it.
         const height = area ? Math.min(full, area.height) : full
-        x = Math.max(0, Math.min(sceneX, (area ? area.width : sceneX + width) - width))
-        y = Math.max(0, Math.min(sceneY, (area ? area.height : sceneY + height) - height))
+        x = Math.round(Math.max(0, Math.min(sceneX, (area ? area.width : sceneX + width) - width)))
+        y = Math.round(Math.max(0, Math.min(sceneY, (area ? area.height : sceneY + height) - height)))
         open()
         scroller.contentY = 0
         revealCurrent()

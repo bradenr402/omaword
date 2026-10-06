@@ -1,4 +1,5 @@
 #include <QtTest/QTest>
+#include <cmath>
 #include <utility>
 #include <QApplication>
 #include <QClipboard>
@@ -330,6 +331,49 @@ private slots:
             QTRY_VERIFY(!menuOpen());
             QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         }
+    }
+    // The current row's highlight is inset equally on the left and right at
+    // every scale, whether it is reached by mouse or by key.
+    void highlightInsetsAreSymmetric_data() {
+        QTest::addColumn<double>("scale");
+        for (double scale : {1.0, 1.1, 1.25, 1.33, 1.5, 1.75}) QTest::newRow(qPrintable(QString::number(scale))) << scale;
+    }
+    void highlightInsetsAreSymmetric() {
+        QFETCH(double, scale);
+        desktop->setProperty("textScale", scale); QCoreApplication::processEvents();
+        auto check = [&](int index) {
+            auto highlight = item("contextMenuHighlight" + QString::number(index));
+            auto background = item("contextMenuBackground");
+            QVERIFY(highlight && highlight->isVisible() && background);
+            const auto rect = highlight->mapRectToItem(background, highlight->boundingRect());
+            const double left = rect.left(), right = background->width() - rect.right();
+            QVERIFY2(qAbs(left - right) < 0.01, qPrintable(QString("%1 vs %2").arg(left).arg(right)));
+            QVERIFY(left > 0);
+            // Whole pixels in the scene, so nothing rounds unevenly.
+            const auto scene = highlight->mapToScene(QPointF());
+            QCOMPARE(scene.x(), std::round(scene.x()));
+            QCOMPARE(highlight->width(), std::round(highlight->width()));
+        };
+        // Keyboard-opened, then moved by key.
+        key(Qt::Key_Menu); QTRY_VERIFY(menuOpen());
+        check(0); key(Qt::Key_Down); check(1);
+        escape();
+        // Mouse-opened at a fractional-looking point, hovered row.
+        rightClick(versePoint(3)); QTRY_VERIFY(menuOpen());
+        auto row = item("contextMenuItem:bookmark");
+        QTest::mouseMove(window, row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+        QTRY_COMPARE(menu()->property("currentIndex").toInt(), passageIds.indexOf("bookmark"));
+        check(passageIds.indexOf("bookmark"));
+        // Visual check: OMAWORD_SHOTS saves the menu, magnified.
+        if (const auto directory = qEnvironmentVariable("OMAWORD_SHOTS"); !directory.isEmpty()) {
+            QTest::qWait(30);
+            auto background = item("contextMenuBackground");
+            const auto rect = background->mapRectToScene(background->boundingRect()).toAlignedRect().adjusted(-2, -2, 2, 2);
+            const auto image = window->grabWindow().copy(rect);
+            QVERIFY(image.scaled(image.size() * 3, Qt::KeepAspectRatio, Qt::FastTransformation)
+                .save(directory + "/menu-inset-" + QString::number(scale) + ".png"));
+        }
+        escape();
     }
     void keyboardNavigationAndEscape() {
         QTest::mouseMove(window, QPoint(window->width() / 2 + 200, window->height() - 120));
