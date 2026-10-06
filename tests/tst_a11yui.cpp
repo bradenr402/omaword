@@ -2193,6 +2193,24 @@ private slots:
         key(Qt::Key_Left); QTRY_COMPARE(prop("paletteBook").toInt(), 0);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
     }
+    // The chapter title scales with the Text size, keeping its proportion to the verse text.
+    void chapterTitleScalesWithTextSize() {
+        navigate("John 3:1"); call("setReaderY", 0);
+        auto title = item("chapterTitle"); QVERIFY(title);
+        const int original = bible->fontSize();
+        auto size = [&] { return title->property("font").value<QFont>().pixelSize(); };
+        auto verseSize = [&] { return item("verseBody1")->property("font").value<QFont>().pixelSize(); };
+        bible->setFontSize(18); QTRY_COMPARE(bible->fontSize(), 18);
+        const int base = size(); const double ratio = double(base) / verseSize(); const double pad = title->property("bottomPadding").toDouble();
+        bible->setFontSize(27); QTRY_VERIFY(size() > base);
+        QVERIFY(qAbs(size() - 1.5 * base) <= 1);
+        QVERIFY(qAbs(double(size()) / verseSize() - ratio) < 0.06);
+        QVERIFY(qAbs(title->property("bottomPadding").toDouble() - 1.5 * pad) <= 1);
+        shot("chapter-title-large");
+        // Keyboard: ctrl minus shrinks it again.
+        key(Qt::Key_Minus, Qt::ControlModifier); QTRY_VERIFY(size() < qRound(1.5 * base));
+        bible->setFontSize(original);
+    }
 
     // ── Phase 5: new
 

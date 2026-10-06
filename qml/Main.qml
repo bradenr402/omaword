@@ -5143,11 +5143,12 @@ ApplicationWindow {
                             text: bible.passage
                             // Hover: the accent, as a link (a click opens the chapter list).
                             color: chapterTitleMouse.containsMouse ? desktop.accent : desktop.foreground
-                            font.pixelSize: 34 * app.readerScale
+                            // Scales with the Text size, in proportion to the verse text.
+                            font.pixelSize: 34 * app.readerScale * app.fontScale
                             font.weight: Font.Medium
-                            font.letterSpacing: -0.9
+                            font.letterSpacing: -0.9 * app.fontScale
                             leftPadding: app.verseGutter
-                            bottomPadding: 24 * app.readerScale
+                            bottomPadding: 24 * app.readerScale * app.fontScale
                             width: parent.width
                             wrapMode: Text.Wrap
                             // Click: the Passage palette at this book's chapter list.
