@@ -59,13 +59,18 @@ Item {
             }
         }
     }
+    // The layout's focus state: the controller's focusLayout (flipped once per
+    // focus transition, see Main.applyFocusLayout), else the backend's.
+    readonly property bool focusLayout: controller.focusLayout === undefined ? backend.focusMode : !!controller.focusLayout
     // Margin notes shown: rebuild without note cells (one reflow per toggle)
-    // rather than leave blank, unpainted gaps in the text.
-    readonly property bool noteMarks: controller.inlineNoteMarks === undefined || !!controller.inlineNoteMarks
+    // rather than leave blank, unpainted gaps in the text. Focus mode builds
+    // no annotation cells at all, so margins coming or going there never
+    // rebuild.
+    readonly property bool noteMarks: focusLayout || controller.inlineNoteMarks === undefined || !!controller.inlineNoteMarks
     // Annotation tint layers per verse (HandDrawn.tintCount), none in focus mode.
     readonly property var tintCounts: backend.focusMode ? [] : Array.from(backend.verses).map(function(v) { return HandDrawn.tintCount(v) })
-    readonly property bool numbers: backend.showVerseNumbers && !backend.focusMode
-    readonly property bool headings: backend.showHeadings && !backend.focusMode
+    readonly property bool numbers: backend.showVerseNumbers && !focusLayout
+    readonly property bool headings: backend.showHeadings && !focusLayout
     // Display copies of the verses: words of Jesus colored (format only).
     function displayVerses() {
         if (!controller.verseHtml) return backend.verses
@@ -78,27 +83,39 @@ Item {
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart,
             bookmarkRanges: v.bookmarkRanges, noteRanges: v.noteRanges, tagRanges: v.tagRanges, footnotes: v.footnotes }
-    })) + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + backend.focusMode + noteMarks + controller.readerSize + root.readerScale + controller.scale
+    })) + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + focusLayout + noteMarks + controller.readerSize + root.readerScale + controller.scale
     height: body.height
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
+    // Document builds so far (tests: one reflow per toggle).
+    property int rebuildCount: 0
     function rebuild() {
         if (destroying) return
+        ++rebuildCount
         // A character selection survives (text size, line height): the
         // controller reselects it from source positions after the build.
         if (controller.relayoutTextSelection) controller.relayoutTextSelection(); else controller.clearTextSelection()
         cancelDrag()
         document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode,
-                       !backend.focusMode, controller.readerSize * root.readerScale, noteMarks)
+                       !focusLayout, controller.readerSize * root.readerScale, noteMarks)
         layoutDirty = true
         geometryTimer.restart()
+    }
+    // Runs a pending rebuild and geometry refresh now rather than on the
+    // timers' next turn: a transition measures the new layout before the
+    // frame that first shows it.
+    function settle() {
+        if (destroying) return
+        if (rebuildTimer.running) { rebuildTimer.stop(); rebuild() }
+        if (geometryTimer.running) { geometryTimer.stop(); refreshGeometry() }
     }
     function refreshGeometry() {
         if (!destroying) {
             paint.requestPaint()
             searchPaint.requestPaint()
             // Motion geometry is computed only while it can be seen, keeping
-            // drag-autoscroll refreshes as cheap as before.
-            if (backend.focusMode) updateDimRects()
+            // drag-autoscroll refreshes as cheap as before. The focus veil
+            // still fading out after a rebuild keeps its holes on the text.
+            if (backend.focusMode || dimLayer.visible) updateDimRects()
             pulseRects = pulseActive ? verseRangeRects(pulseFirst, pulseLast) : []
             flashRects = flashActive ? verseRangeRects(flashFirst, flashLast) : []
             updateAnnotations()
@@ -125,6 +142,15 @@ Item {
             else out.push({ number: span.number, top: top, bottom: bottom })
         }
         return out
+    }
+    // verseExtents for one verse (null when it has no lines).
+    function verseExtent(number) {
+        let top = Infinity, bottom = -Infinity
+        for (const span of Array.from(document.spans)) {
+            if (span.number !== number) continue
+            for (const rect of document.rectangles(span.start, span.end)) { top = Math.min(top, rect.y); bottom = Math.max(bottom, rect.y + rect.height) }
+        }
+        return top < Infinity ? { number: number, top: top, bottom: bottom } : null
     }
     // Line rectangles of verses first..last in the shared layout (paint only).
     // Line rectangles of one verse's text only (no number or decoration cells).
@@ -302,7 +328,8 @@ Item {
     readonly property bool dimShown: backend.focusMode
     onPulseActiveChanged: if (!destroying && pulseActive) geometryTimer.restart()
     onFlashActiveChanged: if (!destroying && flashActive) geometryTimer.restart()
-    onDimShownChanged: if (!destroying && dimShown) geometryTimer.restart()
+    // The veil's holes only: the layout itself is refreshed by its own rebuild.
+    onDimShownChanged: if (!destroying && dimShown) updateDimRects()
     onPulseFirstChanged: if (!destroying) geometryTimer.restart()
     onPulseLastChanged: if (!destroying) geometryTimer.restart()
     onFlashFirstChanged: if (!destroying) geometryTimer.restart()

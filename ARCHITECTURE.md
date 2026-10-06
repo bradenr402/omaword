@@ -301,6 +301,18 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   i.e. Omarchy `color1`/`red`, else accent) only while the setting is on;
   layout is unchanged.
 - Focus mode hides decoration cells (incl. footnote markers), rails, and annotation tints.
+- Focus mode's layout (no headings, verse numbers, decoration cells, margins,
+  scrollbar or footer room) follows `focusLayout`, which `applyFocusLayout`
+  flips in one step that settles the new layout before its first frame: the
+  single rebuild runs at once (`BlockReader.settle`; `BlockDocument::build`
+  is one edit block, so the TextEdit lays out once), margins are re-placed,
+  and the reading position (the cursor verse while on screen, else the top
+  verse) keeps its place on screen through the reflow, even past the content's
+  ends for a moment; entering then slides it to the typewriter line, and a
+  reader at the chapter top slides back to it. Paint-only effects (dimming,
+  the quiet footer) follow `bible.focusMode`. The column and the chapter
+  buttons (re-centred without the footer's room) glide (`marginSlide`,
+  `chapterNavGlide`) from wherever they are, so toggles retarget.
 - Focus mode keeps the footer quiet: only the focus button shows; the others keep
   their places hidden and disabled. Hovering the footer reveals them at once (their
   clicks wait 300 ms, so a click aimed at the focus button is never caught); hiding
@@ -347,9 +359,17 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   headings is current before the first one, and jumps to the chapter top);
   `{`/`}` step headings from the same verse (History jumps), `{` ending at the
   chapter top (`Margins.headingStep`'s `top`), even without headings. Toggling notes (`applyMarginNotes`, driven
-  by `bible.marginNotesChanged`) fades them in while the column slides left,
+  by an actual `bible.marginNotes` change) fades them in while the column slides left,
   or fades them out before it slides back (`marginSlideOffset`, 100 ms
-  ease-out); resizes and chapter changes jump, as does Disable animations.
+  ease-out). Entering focus mode, shown margins keep their split
+  (`leavingSpace`, `marginsLeaving`) and fade out (`marginExit`, 85 ms
+  ease-in) while moving with the gliding column (`marginDrift`); leaving it,
+  they are placed before they show and fade in where they settle
+  (`marginEnter`, 100 ms). Opacity is the notes' toggle level times that focus
+  level. A connector is clipped where the column's text, still gliding into
+  place beside waiting margins, would cover it (`marginCover`). Resizes,
+  chapter changes, range editing, and Disable animations end margin motion at
+  once (`settleMargins`).
 - Desktop corners come from async `hyprctl` polling; failure resets to 0.
   Highlight segments stay square.
 

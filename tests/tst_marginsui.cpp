@@ -1,20 +1,25 @@
 #include "testenvironment.h"
 #include <QtTest/QTest>
+#include <QAbstractAnimation>
 #include <QElapsedTimer>
 #include <QApplication>
 #include <QFile>
 #include <QFont>
+#include <QImage>
 #include <QJSEngine>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickStyle>
+#include <QQuickTextDocument>
 #include <QQuickWindow>
 #include <QTemporaryDir>
+#include <QTextStream>
 #include <archive.h>
 #include <archive_entry.h>
 #include "biblebackend.h"
+#include "blockdocument.h"
 #include "desktop.h"
 #include "soundeffects.h"
 
@@ -175,6 +180,224 @@ class MarginsUiTest : public QObject
             QVERIFY2(y + h <= i["top"].toDouble() + viewport + 0.5, qPrintable(QString("note %1 below its window").arg(order[k])));
             if (k) QVERIFY(y >= placed[order[k - 1]].toMap()["y"].toDouble() + placed[order[k - 1]].toMap()["height"].toDouble() + 10 - 0.5);
         }
+    }
+    // ---- Frame timelines (focus mode transitions) ---------------------------
+    // One sample per presented frame: what the reader showed, and whether the
+    // margins on screen matched the text they point at.
+    struct Frame {
+        double t = 0; bool focus = false;
+        double columnX = 0, slide = 0, navY = 0; // navY: the chapter buttons' zone
+        bool notes = false; double notesOpacity = 0;
+        bool outline = false; double outlineOpacity = 0, outlineX = 0;
+        // Painted notes: how many, the first one's x (reading coordinates),
+        // and the largest gap between a note's placement and its passage
+        // (top, line count) as laid out in this frame.
+        int shownNotes = 0; double noteX = 0, stale = 0;
+        // Painted connectors: the least room between the column's text edge
+        // and where a connector's ink may start (3 px when they touch).
+        double connectorGap = 1e9;
+        bool dimStale = false; // the focus veil's holes off the focused text
+        double cursorY = 0, contentY = 0, contentHeight = 0;
+        int rebuilds = 0; bool sliding = false;
+        bool sync = false; // sampled outside a frame (right after the trigger)
+    };
+    BlockDocument *blockMapping() const { return window->findChild<BlockDocument *>(); }
+    static QRectF caret(QObject *body, int position) {
+        QRectF rect; QMetaObject::invokeMethod(body, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, position));
+        return rect;
+    }
+    // A verse's first line, in viewport (reading) coordinates.
+    double verseTop(int verse) const {
+        auto reading = item("reading");
+        if (prop("continuousReader").toBool()) {
+            auto body = item("blockBody"); auto mapping = blockMapping();
+            if (!body || !mapping) return qQNaN();
+            return body->mapRectToItem(reading, caret(body, mapping->positionFor(verse))).y();
+        }
+        auto body = item("verseBody" + QString::number(verse));
+        return body ? body->mapToItem(reading, QPointF(0, 0)).y() : qQNaN();
+    }
+    Frame frame(double t) const {
+        Frame f; f.t = t; f.focus = bible->focusMode();
+        f.columnX = columnX(); f.slide = prop("marginSlideOffset").toDouble();
+        f.navY = item("chapterNextButtonZone")->y();
+        auto layer = item("marginLayer"), outline = item("chapterOutline"), reading = item("reading");
+        f.notes = layer->isVisible(); f.notesOpacity = layer->opacity();
+        f.outline = outline->isVisible(); f.outlineOpacity = outline->opacity(); f.outlineX = outline->x();
+        f.contentY = reading->property("contentY").toDouble(); f.contentHeight = reading->property("contentHeight").toDouble();
+        f.cursorY = verseTop(bible->cursorVerse());
+        f.sliding = object("readerSlide")->property("running").toBool();
+        if (auto reader = object("blockReader")) {
+            f.rebuilds = reader->property("rebuildCount").toInt();
+            auto veil = item("blockFocusDim");
+            if (veil->isVisible() && veil->opacity() > 0) {
+                QVariant live; QMetaObject::invokeMethod(reader, "verseRangeRects", Q_RETURN_ARG(QVariant, live),
+                    Q_ARG(QVariant, reader->property("dimFirst")), Q_ARG(QVariant, reader->property("dimLast")));
+                const auto holes = value(reader->property("dimRects")).toList(), rects = value(live).toList();
+                f.dimStale = holes.size() != rects.size();
+                for (int i = 0; !f.dimStale && i < holes.size(); ++i)
+                    f.dimStale = std::abs(holes[i].toMap()["y"].toDouble() - rects[i].toMap()["y"].toDouble()) > 0.5;
+            }
+        }
+        if (f.notes && f.notesOpacity > 0) {
+            const auto live = js("measureVerses").toList();
+            for (auto child : layer->childItems()) {
+                if (!child->objectName().startsWith("marginNote:") || !child->isVisible()) continue;
+                const auto place = value(child->property("place")).toMap();
+                const int first = value(child->property("modelData")).toMap()["first"].toInt();
+                if (!f.shownNotes++) f.noteX = child->mapToItem(reading, QPointF(0, 0)).x();
+                if (auto connector = visual(child, "marginConnector:" + value(child->property("modelData")).toMap()["reference"].toString()))
+                    f.connectorGap = std::min(f.connectorGap, connector->parentItem()->mapToItem(reading, QPointF(0, 0)).x()
+                        - (f.columnX + item("readerColumn")->width() - 9));
+                if (place["naturalLines"].toInt() != child->property("naturalLines").toInt()) f.stale = std::max(f.stale, 999.0);
+                for (const auto &e : live) if (e.toMap()["number"].toInt() == first)
+                    f.stale = std::max(f.stale, std::abs(e.toMap()["top"].toDouble() - place["passageTop"].toDouble()));
+            }
+        }
+        return f;
+    }
+    // Runs `trigger`, then samples every presented frame for `ms` of real time.
+    QList<Frame> record(const std::function<void()> &trigger, int ms) {
+        QList<Frame> frames; QElapsedTimer clock;
+        frames << frame(-1);
+        auto connection = connect(window, &QQuickWindow::frameSwapped, this, [&]() { frames << frame(clock.nsecsElapsed() / 1e6); }, Qt::DirectConnection);
+        clock.start(); trigger();
+        frames << frame(clock.nsecsElapsed() / 1e6); frames.last().sync = true;
+        QTest::qWait(ms);
+        disconnect(connection);
+        return frames;
+    }
+    static QString describe(const Frame &f) {
+        return QString("t=%1 focus=%2 x=%3 off=%4 navY=%19 notes=%5/%6 outline=%7/%8 shown=%9 noteX=%10 stale=%11 gap=%12 dimStale=%13 cursorY=%14 contentY=%15 height=%16 rebuilds=%17 slide=%18")
+            .arg(f.t, 6, 'f', 1).arg(int(f.focus)).arg(f.columnX, 6, 'f', 1).arg(f.slide, 6, 'f', 1)
+            .arg(int(f.notes)).arg(f.notesOpacity, 4, 'f', 2).arg(int(f.outline)).arg(f.outlineOpacity, 4, 'f', 2)
+            .arg(f.shownNotes).arg(f.noteX, 6, 'f', 1).arg(f.stale, 5, 'f', 1).arg(f.shownNotes ? f.connectorGap : 0, 5, 'f', 1)
+            .arg(int(f.dimStale)).arg(f.cursorY, 6, 'f', 1)
+            .arg(f.contentY, 7, 'f', 1).arg(f.contentHeight, 6, 'f', 0).arg(f.rebuilds).arg(int(f.sliding)).arg(f.navY, 5, 'f', 1) + (f.sync ? " (sync)" : "");
+    }
+    // OMAWORD_FOCUS_TIMELINE=<dir>: focus-timeline-<name>.txt per transition.
+    static void dump(const QString &name, const QList<Frame> &frames) {
+        const auto directory = qEnvironmentVariable("OMAWORD_FOCUS_TIMELINE");
+        if (directory.isEmpty()) return;
+        QFile file(directory + "/focus-timeline-" + name + ".txt");
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
+        QTextStream out(&file);
+        for (const auto &f : frames) out << describe(f) << '\n';
+    }
+    // Animation time under test control: animations advance only by step(),
+    // exactly `ms` at a time, however long a (software, loaded) frame takes.
+    struct StepDriver : QAnimationDriver {
+        qint64 now = 0;
+        qint64 elapsed() const override { return now; }
+        void start() override { now = 0; QAnimationDriver::start(); }
+        void step(int ms) { now += ms; advance(); }
+    };
+    // The frame before `actions[0]`, every frame presented while each action
+    // runs, and one per `ms` animation step: actions[i] runs after
+    // steps[i - 1] steps (rapid toggles), then steps.last() steps. With
+    // OMAWORD_FOCUS_TIMELINE, each step is also saved as
+    // <dir>/focus-frames/<name>-<step>.png.
+    QList<Frame> stepped(const QString &name, const QList<std::function<void()>> &actions, const QList<int> &steps, int ms = 8) {
+        const auto directory = qEnvironmentVariable("OMAWORD_FOCUS_TIMELINE");
+        if (!directory.isEmpty()) QDir().mkpath(directory + "/focus-frames");
+        StepDriver driver; driver.install();
+        // Whatever still animates (a scrollbar fading, a toast) ends first, so
+        // the transition's first step is exactly `ms`, not `ms` plus the time
+        // since that animation's last tick.
+        driver.step(1000); QCoreApplication::processEvents();
+        QList<Frame> frames; double now = -1; int step = 0; bool swapped = false;
+        auto connection = connect(window, &QQuickWindow::frameSwapped, this, [&]() { swapped = true; frames << frame(now); }, Qt::DirectConnection);
+        const auto present = [&]() {
+            swapped = false; window->update();
+            if (!QTest::qWaitFor([&]() { return swapped; }, 2000)) qWarning("no frame presented");
+            if (!directory.isEmpty()) window->grabWindow().save(QString("%1/focus-frames/%2-%3.png").arg(directory, name).arg(step, 2, 10, QChar('0')));
+        };
+        present();
+        now = 0;
+        for (int a = 0; a < actions.size(); ++a) {
+            actions[a](); present();
+            for (int i = 0; i < steps[a]; ++i) { now += ms; ++step; driver.step(ms); present(); }
+        }
+        disconnect(connection); driver.uninstall();
+        return frames;
+    }
+    QList<Frame> stepped(const QString &name, const std::function<void()> &trigger, int steps = 30) {
+        return stepped(name, QList<std::function<void()>>{trigger}, {steps});
+    }
+    // A focus mode transition (entering or leaving) as frames, against the
+    // contract: one coordinated motion, nothing stale, ending exact.
+    // - The column starts where it was (no jump), moves monotonically, at
+    //   most a quarter of the way per 8 ms step, and ends at `targetX`.
+    // - The cursor verse keeps its place through the reflow (the first frame
+    //   after the toggle is within 1 px of the last one before it), and from
+    //   then on moves only by scrolling: its content position never changes
+    //   again (|Δ(cursorY + contentY)| <= 1). 1 px allows for sub-pixel
+    //   rounding; any reflow moves it by a line (~27 px) or a heading (~50).
+    //   Entering (with a selection) it ends on the typewriter line, 40% down;
+    //   leaving it stays put.
+    // - Painted notes always match the layout in the same frame; notes and
+    //   the outline only fade (never pop), leaving with the column (their
+    //   offset from it unchanged) and arriving where they settle (static).
+    // - The chapter buttons glide to their new centre (focus mode has no
+    //   footer room) the same way, never jumping.
+    // - Paragraph/Block rebuild exactly once; the focus veil's holes stay on
+    //   the focused text.
+    void verifyTransition(const QList<Frame> &frames, bool entering, double targetX, double typewriterY, int rebuilds) {
+        QVERIFY(frames.size() > 3);
+        const Frame &before = frames.first(), &first = frames[1], &last = frames.last();
+        const QString where = describe(first);
+        QVERIFY2(std::abs(first.columnX - before.columnX) < 0.5, qPrintable("column jumped: " + where));
+        QVERIFY2(std::abs(first.cursorY - before.cursorY) <= 1, qPrintable("cursor verse jumped: " + where));
+        QVERIFY2(std::abs(first.navY - before.navY) < 0.5, qPrintable("chapter buttons jumped: " + where));
+        const double navDistance = std::abs(last.navY - before.navY), navDirection = last.navY > before.navY ? 1 : -1;
+        QVERIFY(navDistance > 10);
+        QCOMPARE(last.columnX, targetX);
+        QCOMPARE(last.slide, 0.0);
+        const double distance = std::abs(targetX - before.columnX), direction = targetX > before.columnX ? 1 : -1;
+        const Frame *firstNotes = nullptr;
+        for (int i = 1; i < frames.size(); ++i) {
+            const Frame &f = frames[i], &p = frames[i - 1];
+            const QString at = describe(f);
+            QVERIFY2((f.columnX - p.columnX) * direction >= -0.01, qPrintable("column turned back: " + at));
+            QVERIFY2(std::abs(f.columnX - p.columnX) <= 0.25 * distance + 0.5, qPrintable("column jumped: " + at));
+            QVERIFY2((f.navY - p.navY) * navDirection >= -0.01 && std::abs(f.navY - p.navY) <= 0.25 * navDistance + 0.5, qPrintable("chapter buttons jumped: " + at));
+            if (i > 1) QVERIFY2(std::abs(f.cursorY + f.contentY - p.cursorY - p.contentY) <= 1, qPrintable("text reflowed under the cursor verse: " + at));
+            if (entering && typewriterY >= 0) QVERIFY2((f.cursorY - p.cursorY) * (typewriterY - before.cursorY) >= -1, qPrintable("cursor verse turned back: " + at));
+            if (!entering) QVERIFY2(std::abs(f.cursorY - before.cursorY) <= 1, qPrintable("cursor verse moved: " + at));
+            QVERIFY2(f.stale <= 1, qPrintable("stale notes painted: " + at));
+            QVERIFY2(f.connectorGap >= 2.5, qPrintable("connector over the text: " + at));
+            QVERIFY2(!f.dimStale, qPrintable("focus veil off the focused text: " + at));
+            if (rebuilds >= 0) QVERIFY2(f.rebuilds - before.rebuilds <= 1, qPrintable("rebuilt twice: " + at));
+            const bool notes = f.notes && f.notesOpacity > 0, outline = f.outline && f.outlineOpacity > 0;
+            const bool hadNotes = p.notes && p.notesOpacity > 0;
+            if (entering) {
+                QVERIFY2(!notes || f.notesOpacity <= p.notesOpacity + 1e-9, qPrintable("notes faded back in: " + at));
+                QVERIFY2(!outline || f.outlineOpacity <= p.outlineOpacity + 1e-9, qPrintable("outline faded back in: " + at));
+                // Leaving with the column.
+                if (notes && hadNotes) QVERIFY2(std::abs((f.noteX - f.columnX) - (p.noteX - p.columnX)) < 0.5, qPrintable("notes apart from the column: " + at));
+                if (outline) QVERIFY2(std::abs((f.outlineX - f.columnX) - (before.outlineX - before.columnX)) < 0.5, qPrintable("outline apart from the column: " + at));
+            } else {
+                QVERIFY2(!hadNotes || f.notesOpacity >= p.notesOpacity - 1e-9, qPrintable("notes faded back out: " + at));
+                QVERIFY2(f.outlineOpacity >= p.outlineOpacity - 1e-9 || !f.outline, qPrintable("outline faded back out: " + at));
+                if (notes && !firstNotes) firstNotes = &f;
+                // Arriving where they settle, from transparent.
+                if (notes) QVERIFY2(std::abs(f.noteX - last.noteX) < 0.5, qPrintable("notes moving in: " + at));
+                if (notes && !hadNotes) QVERIFY2(f.notesOpacity < 0.5, qPrintable("notes popped in: " + at));
+                if (outline) QVERIFY2(std::abs(f.outlineX - last.outlineX) < 0.5, qPrintable("outline moving in: " + at));
+            }
+        }
+        if (entering) {
+            QVERIFY(!last.notes && !last.outline);
+            if (typewriterY >= 0) QVERIFY2(std::abs(last.cursorY - typewriterY) <= 1, qPrintable(describe(last)));
+        } else {
+            QVERIFY(firstNotes);
+            QVERIFY(last.notes && last.outline); QCOMPARE(last.notesOpacity, 1.0); QCOMPARE(last.outlineOpacity, 1.0);
+            QVERIFY(first.notesOpacity == 0 || !first.notes);
+        }
+        if (rebuilds >= 0) QCOMPARE(last.rebuilds - before.rebuilds, rebuilds);
+        for (const char *name : {"marginSlide", "marginExit", "marginEnter", "chapterNavGlide", "readerSlide"})
+            QVERIFY2(!object(name)->property("running").toBool(), name);
+        QVERIFY(!prop("marginsLeaving").toBool());
     }
 
 private slots:
@@ -795,6 +1018,118 @@ private slots:
         QTRY_COMPARE(bible->selectionReference(), QString("John 1:1"));
         QCOMPARE(jumpIndex(), jumps + 1);
         QVERIFY(!object("notesDrawer")->property("visible").toBool());
+    }
+
+    // ---- Focus mode with margins ----------------------------------------------
+    // Entering and leaving focus mode with margin notes and the outline on:
+    // frame by frame (verifyTransition), with rapid retargeting toggles and
+    // Disable animations. OMAWORD_FOCUS_TIMELINE=<dir> dumps every timeline
+    // (real time and stepped) and the stepped frames as PNGs.
+    void focusModeTransitions_data() {
+        QTest::addColumn<QString>("mode");
+        for (const char *mode : {"verse", "paragraph", "block"}) QTest::newRow(mode) << QString(mode);
+    }
+    void focusModeTransitions() {
+        QFETCH(QString, mode);
+        note("John 3:2", 2, 3, "Two verses with a note about the night visit.");
+        note("John 3:14", 14, 14, "Lifted up: compare the bronze serpent.");
+        note("John 3:16", 16, 17, "The heart of the chapter, and why it was sent.");
+        note("John 3:19", 19, 19, "Light and darkness.");
+        note("John 3:30", 30, 30, "Late in the chapter.");
+        bible->setMarginNotes(true); bible->setChapterOutline(true);
+        // Wide enough for both margins, narrow enough that the notes shift the column.
+        resize(1400, 900);
+        setMode(mode); navigate("John 3:16");
+        QTRY_VERIFY(notesShown()); QTRY_VERIFY(outlineShown()); QTRY_VERIFY(layout().size() >= 4);
+        const double shifted = columnX(), centred = window->property("readerNaturalX").toDouble();
+        QVERIFY2(centred - shifted > 40, qPrintable(QString::number(centred - shifted)));
+        const double typewriter = 0.4 * item("reading")->height();
+        const int rebuilds = mode == "verse" ? -1 : 1;
+        sounds->setProperty("reduceMotion", false);
+        // Real time, for the record only (frame pacing here is software rendering).
+        if (!qEnvironmentVariableIsEmpty("OMAWORD_FOCUS_TIMELINE")) {
+            dump(mode + "-enter", record([&]() { key(Qt::Key_F); }, 400));
+            dump(mode + "-leave", record([&]() { key(Qt::Key_F); }, 400));
+        }
+        QVERIFY(!bible->focusMode());
+        // From the chapter as navigated: the cursor verse near the top.
+        navigate("John 3:16"); QTRY_COMPARE(columnX(), shifted);
+        QVERIFY(QMetaObject::invokeMethod(window, "scrollToVerse", Q_ARG(QVariant, 16), Q_ARG(QVariant, true))); settle();
+        QVERIFY(std::abs(verseTop(16) - typewriter) > 100);
+        const auto enter = stepped(mode + "-enter", [&]() { key(Qt::Key_F); });
+        dump(mode + "-enter-stepped", enter);
+        QVERIFY(bible->focusMode());
+        verifyTransition(enter, true, centred, typewriter, rebuilds); if (QTest::currentTestFailed()) return;
+        // Scrolled a little in focus mode, so leaving shows the anchor hold.
+        QVERIFY(QMetaObject::invokeMethod(window, "setReaderY", Q_ARG(QVariant, item("reading")->property("contentY").toDouble() - 37))); settle();
+        const auto leave = stepped(mode + "-leave", [&]() { key(Qt::Key_F); });
+        dump(mode + "-leave-stepped", leave);
+        QVERIFY(!bible->focusMode());
+        verifyTransition(leave, false, shifted, -1, rebuilds); if (QTest::currentTestFailed()) return;
+        // At the chapter top the top stays: the verse holds through the
+        // reflow, then the reader slides back up to the title.
+        navigate("John 3:1"); QTRY_COMPARE(item("reading")->property("contentY").toDouble(), 0.0);
+        for (const bool entering : {true, false}) {
+            const QString name = mode + (entering ? "-top-enter" : "-top-leave");
+            const auto top = stepped(name, [&]() { key(Qt::Key_F); });
+            dump(name + "-stepped", top);
+            QCOMPARE(bible->focusMode(), entering);
+            QVERIFY2(std::abs(top[1].cursorY - top[0].cursorY) <= 1, qPrintable(describe(top[1])));
+            for (int i = 2; i < top.size(); ++i)
+                QVERIFY2(std::abs(top[i].cursorY + top[i].contentY - top[i - 1].cursorY - top[i - 1].contentY) <= 1, qPrintable(describe(top[i])));
+            QCOMPARE(top.last().contentY, 0.0);
+        }
+        navigate("John 3:16"); QTRY_COMPARE(columnX(), shifted);
+
+        // Rapid toggles retarget from wherever things are: no jumps, nothing
+        // stuck, one rebuild per toggle.
+        const auto toggle = [&]() { key(Qt::Key_F); };
+        const auto rapid = stepped(mode + "-rapid", {toggle, toggle, toggle, toggle, toggle}, {3, 2, 1, 4, 30});
+        dump(mode + "-rapid-stepped", rapid);
+        QVERIFY(bible->focusMode());
+        const double navSpan = std::abs(enter.last().navY - enter.first().navY);
+        for (int i = 1; i < rapid.size(); ++i) {
+            const Frame &f = rapid[i], &p = rapid[i - 1];
+            const QString at = describe(f);
+            QVERIFY2(std::abs(f.columnX - p.columnX) <= 0.25 * (centred - shifted) + 0.5, qPrintable("column jumped: " + at));
+            QVERIFY2(std::abs(f.navY - p.navY) <= 0.25 * navSpan + 0.5, qPrintable("chapter buttons jumped: " + at));
+            QVERIFY2(f.columnX >= shifted - 0.01 && f.columnX <= centred + 0.01, qPrintable("column overshot: " + at));
+            const double opacity = f.notes ? f.notesOpacity : 0, previous = p.notes ? p.notesOpacity : 0;
+            QVERIFY2(std::abs(opacity - previous) <= 0.3, qPrintable("notes popped: " + at));
+            QVERIFY2(f.stale <= 1, qPrintable("stale notes painted: " + at));
+            QVERIFY2(f.connectorGap >= 2.5, qPrintable("connector over the text: " + at));
+            QVERIFY2(!f.dimStale, qPrintable("focus veil off the focused text: " + at));
+            // Each toggle holds the cursor verse; between them it only scrolls.
+            if (f.focus != p.focus) QVERIFY2(std::abs(f.cursorY - p.cursorY) <= 1, qPrintable("cursor verse jumped: " + at));
+            else QVERIFY2(std::abs(f.cursorY + f.contentY - p.cursorY - p.contentY) <= 1, qPrintable("text reflowed under the cursor verse: " + at));
+        }
+        QCOMPARE(rapid.last().columnX, centred); QCOMPARE(rapid.last().slide, 0.0);
+        QVERIFY(!rapid.last().notes && !rapid.last().outline);
+        QVERIFY(std::abs(rapid.last().cursorY - typewriter) <= 1);
+        if (rebuilds > 0) QCOMPARE(rapid.last().rebuilds - rapid.first().rebuilds, 5);
+        QCOMPARE(prop("marginFocusLevel").toDouble(), 0.0);
+        QCOMPARE(rapid.last().navY, enter.last().navY);
+        for (const char *name : {"marginSlide", "marginExit", "marginEnter", "chapterNavGlide", "readerSlide"})
+            QVERIFY2(!object(name)->property("running").toBool(), name);
+        key(Qt::Key_F); QTRY_COMPARE(columnX(), shifted);
+        QTRY_COMPARE(item("marginLayer")->opacity(), 1.0); QCOMPARE(item("chapterOutline")->opacity(), 1.0);
+
+        // Disable animations: the final state in the first frame, still one
+        // rebuild and the reading position held.
+        sounds->setProperty("reduceMotion", true);
+        navigate("John 3:16"); settle();
+        const auto instantEnter = stepped(mode + "-instant-enter", [&]() { key(Qt::Key_F); }, 2);
+        const Frame &on = instantEnter[1];
+        QCOMPARE(on.columnX, centred); QVERIFY(!on.notes && !on.outline);
+        QVERIFY2(std::abs(on.cursorY - typewriter) <= 1, qPrintable(describe(on)));
+        if (rebuilds > 0) QCOMPARE(instantEnter.last().rebuilds - instantEnter.first().rebuilds, 1);
+        const auto instantLeave = stepped(mode + "-instant-leave", [&]() { key(Qt::Key_F); }, 2);
+        const Frame &off = instantLeave[1];
+        QCOMPARE(off.columnX, shifted); QVERIFY(off.notes && off.outline);
+        QCOMPARE(off.notesOpacity, 1.0); QCOMPARE(off.outlineOpacity, 1.0); QCOMPARE(off.stale, 0.0);
+        QVERIFY2(std::abs(off.cursorY - instantLeave.first().cursorY) <= 1, qPrintable(describe(off)));
+        if (rebuilds > 0) QCOMPARE(instantLeave.last().rebuilds - instantLeave.first().rebuilds, 1);
+        bible->setMarginNotes(false); bible->setChapterOutline(false);
     }
 };
 int main(int argc, char **argv) {

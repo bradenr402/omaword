@@ -423,7 +423,7 @@ ApplicationWindow {
         const index = Array.from(bible.verses).findIndex(function(row) { return row.number === segment.verse })
         const row = verseRepeater.itemAt(index) as VerseItem
         const rect = block ? block.searchRect(segment) : row ? row.searchOverlay.rectFor(segment.start, segment.length) : null
-        if (!rect || rect.height <= 0 || bible.focusMode) { scrollToVerse(segment.verse, false); return }
+        if (!rect || rect.height <= 0 || focusLayout) { scrollToVerse(segment.verse, false); return }
         const y = block ? blockLoader.mapToItem(readerColumn, rect.x, rect.y).y
             : row.body.mapToItem(readerColumn, rect.x, rect.y).y
         const available = Math.max(1, reading.height - Math.max(floatingSafety, findPromptOpen ? chapterFind.height : 0))
@@ -585,7 +585,7 @@ ApplicationWindow {
         draggingText = false
         dragAnchorRow = -1
     }
-    readonly property real floatingSafety: bible.focusMode ? 0 : Math.max(72 * systemScale, footerHeight + 2 * footerMargin)
+    readonly property real floatingSafety: focusLayout ? 0 : Math.max(72 * systemScale, footerHeight + 2 * footerMargin)
     readonly property real verseGutter: 76 * readerScale
     // Source rows, rather than numeric verse labels, define chapter intervals.
     // Union each kind's continuous coverage: overlapping logical ranges already
@@ -624,7 +624,11 @@ ApplicationWindow {
         readingModeRestoreTimer.restart()
     }
     readonly property bool observedFocusMode: bible.focusMode
-    onObservedFocusModeChanged: { toastTimer.stop(); footerHoverRevealed = false; footerHideTimer.stop(); Qt.callLater(app.applyFocusMode) }
+    onObservedFocusModeChanged: {
+        toastTimer.stop(); footerHoverRevealed = false; footerHideTimer.stop()
+        applyFocusLayout()
+        Qt.callLater(app.applyFocusMode)
+    }
     function applyFocusMode() {
         if (observedFocusMode) {
             if (!closeNotes()) { bible.setFocusMode(false); return }
@@ -632,8 +636,82 @@ ApplicationWindow {
             verseTagMenu.close()
             passagePalette.close(); savedDrawer.close(); helpDialog.close(); aboutDialog.close()
             if (!settingsDialog.visible) readerFocus()
-            if (hasSelection) Qt.callLater(function() { readerColumn.forceLayout(); app.scrollToVerse(bible.cursorVerse, false) })
         }
+    }
+    // Focus mode's layout (no headings, verse numbers, decoration cells,
+    // margins, or room for the footer) follows bible.focusMode through
+    // focusLayout, flipped in one step that settles the new layout before its
+    // first frame: one rebuild; the reading position keeps its place on
+    // screen, then (entering, with a selection) slides to the typewriter line;
+    // the column glides between its margin and centred places while the
+    // margins fade out with it, or fade in where they settle. Paint-only
+    // effects (dimming, the quiet footer) follow bible.focusMode itself.
+    property bool focusLayout: false // bible.focusMode on completion, then applyFocusLayout
+    function applyFocusLayout() {
+        const entering = bible.focusMode
+        if (focusLayout === entering) return
+        marginExit.stop(); marginEnter.stop()
+        if (!readerInitialized || !bible.ready) {
+            focusLayout = entering; marginsLeaving = false; marginFocusLevel = entering ? 0 : 1
+            return
+        }
+        const motion = !reduceMotion
+        const anchor = readingAnchor()
+        const atTop = reading.contentY <= 1
+        const fromX = readerColumn.x
+        // The chapter buttons' centre, less the part the layout moves.
+        const navFrom = chapterNavShift - floatingSafety / 2
+        const marginsShown = marginFocusLevel > 0 && (marginSpace.notes.visible || marginSpace.outline.visible)
+        // Entering, shown margins stay laid out (beside the reflowed text) while they fade.
+        if (entering) { leavingSpace = marginSpace; marginsLeaving = motion && marginsShown; focusLayout = true }
+        else { focusLayout = false; marginsLeaving = false }
+        settleReaderLayout()
+        if (anchor) holdReadingAnchor(anchor)
+        // Shown margins move with the column; hidden ones appear where they settle.
+        marginsAttached = motion && marginsShown
+        marginSlide.stop()
+        marginSlideOffset = motion ? fromX - columnTargetX : 0
+        if (marginSlideOffset !== 0) marginSlide.start()
+        chapterNavGlide.stop()
+        chapterNavShift = motion ? navFrom + floatingSafety / 2 : 0
+        if (chapterNavShift !== 0) chapterNavGlide.start()
+        if (entering && marginsLeaving) marginExit.start()
+        else if (!entering && motion) marginEnter.start()
+        else marginFocusLevel = entering ? 0 : 1
+        // Then the typewriter line (entering), the chapter top for a reader
+        // who was there, or back inside the content's ends.
+        if (entering && hasSelection) placeVerse(bible.cursorVerse, false, !motion)
+        else slideReader(atTop ? 0 : reading.contentY)
+    }
+    // A layout change applied now rather than on the timers' next turn: the
+    // Paragraph/Block rebuild, the column's positions, the margins placed
+    // (which the margin timer, restarted by the change, need not redo).
+    function settleReaderLayout() {
+        const block = blockLoader.item as BlockReader
+        if (block) block.settle()
+        readerColumn.forceLayout()
+        updateMargins()
+        marginTimer.stop()
+    }
+    // The verse holding the reading position, with its top's place in the
+    // viewport: the cursor verse while it is on screen, else the first one
+    // showing.
+    function readingAnchor() {
+        const top = reading.contentY, bottom = top + Math.max(1, reading.height - floatingSafety)
+        let anchor = hasSelection && !bible.crossChapterSelection ? measureVerse(bible.cursorVerse) : null
+        if (!anchor || anchor.bottom <= top || anchor.top >= bottom) {
+            const extents = measureVerses()
+            anchor = extents.find(function(e) { return e.bottom > top }) || extents[extents.length - 1] || null
+        }
+        return anchor ? { verse: anchor.number, offset: anchor.top - top } : null
+    }
+    // After a relayout, the anchor verse back at its place on screen, for a
+    // moment even past the content's ends (the slide that follows clamps).
+    function holdReadingAnchor(anchor) {
+        const extent = measureVerse(anchor.verse)
+        if (!extent) return
+        readerSlide.stop()
+        reading.contentY = extent.top - anchor.offset
     }
     readonly property real controlScale: Math.min(scale, 1.4)
     // Motion feedback is paint-only: opacity and translucent layers never change
@@ -668,7 +746,7 @@ ApplicationWindow {
     property real flashLevel: 0
     readonly property bool pulseActive: pulseAnimation.running
     readonly property bool flashActive: flashAnimation.running
-    onReduceMotionChanged: if (reduceMotion) { pulseAnimation.stop(); flashAnimation.stop(); pulseLevel = 0; flashLevel = 0 }
+    onReduceMotionChanged: if (reduceMotion) { pulseAnimation.stop(); flashAnimation.stop(); pulseLevel = 0; flashLevel = 0; settleMargins() }
     // Deferred so the pulse marks the final selection after navigation settles.
     function pulseDestination() { Qt.callLater(app.startPulse) }
     function startPulse() {
@@ -2159,12 +2237,17 @@ ApplicationWindow {
     // Margins (Margins.js): chapter outline on the left, margin notes on the
     // right. One space computation; notes win and may shift the column left,
     // the outline only takes what is left and never moves it. Both are off in
-    // focus mode.
+    // focus mode; entering it, they stay laid out while they fade out
+    // (marginsLeaving), as the column glides to its centred place.
     readonly property real readerSideInset: reading.width < 700 ? 24 : 48
     readonly property real readerRightInset: Math.max(readerSideInset, footerRightInset)
     readonly property real readerColumnWidth: Math.min(760 * readerScale, reading.width - readerSideInset - readerRightInset)
     readonly property real readerNaturalX: Math.min((reading.width - readerColumnWidth) / 2, reading.width - readerRightInset - readerColumnWidth)
-    readonly property bool marginsAllowed: bible.ready && !bible.focusMode && !rangeEditing
+    property bool marginsLeaving: false
+    // The split the leaving margins keep (focus mode's layout has no
+    // scrollbar or footer room to reserve).
+    property var leavingSpace: null
+    readonly property bool marginsAllowed: bible.ready && (!focusLayout || marginsLeaving) && !rangeEditing
     // bible.marginNotes as the margins show it: toggling off lags by the notes'
     // fade-out (applyMarginNotes) so they leave before the reader slides back.
     property bool marginNotesOn: false // set from bible.marginNotes on completion, then by applyMarginNotes
@@ -2228,7 +2311,7 @@ ApplicationWindow {
         else if (at < books.length - 1) { const after = Array.from(books[at + 1].chapterNumbers || []); if (after.length) next = entry(books[at + 1], after[0]) }
         return { previous: previous, next: next }
     }
-    readonly property var marginSpace: Margins.space({
+    readonly property var marginSpace: marginsLeaving && leavingSpace ? leavingSpace : Margins.space({
         width: reading.width, columnX: readerNaturalX, columnWidth: readerColumnWidth,
         minLeft: readerSideInset, leftInset: Math.max(24 * readerScale, chapterNavReserve),
         rightInset: Math.max(28 * readerScale, footerRightInset, chapterNavReserve + chapterNavScrollbar),
@@ -2253,34 +2336,71 @@ ApplicationWindow {
     Connections {
         target: bible
         function onVersesChanged() { app.scheduleMargins() }
-        function onMarginNotesChanged() { app.applyMarginNotes(bible.marginNotes) }
     }
+    // Another chapter (or version) ends margin motion at once.
+    readonly property string marginChapterKey: bible.versionId + ":" + bible.book + ":" + bible.chapter
+    onMarginChapterKeyChanged: settleMargins()
+    // An actual toggle only: every preference shares one notify signal.
+    readonly property bool observedMarginNotes: bible.marginNotes
+    onObservedMarginNotesChanged: applyMarginNotes(observedMarginNotes)
     // Toggling margin notes slides the reader to make or return room, and fades
-    // the notes in/out; resizes, chapter changes, and Disable animations jump.
+    // the notes in/out; resizes, chapter changes, range editing, and Disable
+    // animations jump (settleMargins).
     readonly property int marginSlideMs: reduceMotion ? 0 : 100
     property real marginSlideOffset: 0
-    NumberAnimation { id: marginSlide; objectName: "marginSlide"; target: app; property: "marginSlideOffset"; to: 0; duration: app.marginSlideMs; easing.type: Easing.OutCubic }
-    NumberAnimation { id: marginFade; target: marginLayer; property: "opacity"; duration: app.marginSlideMs; easing.type: Easing.OutCubic
-        onFinished: if (marginLayer.opacity === 0) app.slideMarginsTo(false) }
+    // Where the column rests: the margins' split, or centred while margins
+    // that focus mode turned off still fade out.
+    readonly property real columnTargetX: marginsLeaving ? readerNaturalX : marginSpace.columnX
+    // Margins shown when a motion starts move with the column, never apart
+    // from their text; hidden ones fade in where they settle.
+    property bool marginsAttached: false
+    readonly property real marginDrift: marginsAttached ? columnTargetX + marginSlideOffset - marginSpace.columnX : 0
+    // How far the column's text reaches past the margins' edge for it: a
+    // column still gliding into place beside margins that wait there.
+    readonly property real marginCover: Math.max(0, columnTargetX + marginSlideOffset - marginDrift - marginSpace.columnX)
+    // Margin opacity: the notes' own toggle times focus mode's fade of both margins.
+    property real marginNotesLevel: 1
+    property real marginFocusLevel: 1
+    NumberAnimation { id: marginSlide; objectName: "marginSlide"; target: app; property: "marginSlideOffset"; to: 0; duration: app.marginSlideMs; easing.type: Easing.OutCubic
+        onFinished: if (!app.marginsLeaving) app.marginsAttached = false }
+    NumberAnimation { id: marginFade; target: app; property: "marginNotesLevel"; duration: app.marginSlideMs; easing.type: Easing.OutCubic
+        onFinished: if (app.marginNotesLevel === 0) app.slideMarginsTo(false) }
+    // Focus mode: the margins' exit (quick and subtle, like a panel's) and entrance.
+    NumberAnimation { id: marginExit; objectName: "marginExit"; target: app; property: "marginFocusLevel"; to: 0; duration: app.panelExitMs; easing.type: Easing.InQuad
+        onFinished: { app.marginsLeaving = false; app.marginsAttached = false } }
+    NumberAnimation { id: marginEnter; objectName: "marginEnter"; target: app; property: "marginFocusLevel"; to: 1; duration: app.marginSlideMs; easing.type: Easing.OutCubic }
+    // Focus mode drops the footer's room, re-centring the chapter buttons:
+    // they glide there with the column.
+    property real chapterNavShift: 0
+    NumberAnimation { id: chapterNavGlide; objectName: "chapterNavGlide"; target: app; property: "chapterNavShift"; to: 0; duration: app.marginSlideMs; easing.type: Easing.OutCubic }
     function slideMarginsTo(on) {
-        const before = marginSpace.columnX + marginSlideOffset
+        const before = readerColumn.x
         marginNotesOn = on
         marginSlide.stop()
-        marginSlideOffset = reduceMotion ? 0 : before - marginSpace.columnX
+        marginSlideOffset = reduceMotion ? 0 : before - columnTargetX
         if (marginSlideOffset !== 0) marginSlide.start()
     }
     function applyMarginNotes(on) {
         marginFade.stop()
-        if (on === marginNotesOn && !(on && marginLayer.opacity < 1)) return
+        if (on === marginNotesOn && !(on && marginNotesLevel < 1)) return
         if (reduceMotion || !marginSpace.notes.visible && !on) {
-            marginLayer.opacity = 1; slideMarginsTo(on); return
+            marginNotesLevel = 1; slideMarginsTo(on); return
         }
         if (on) {
-            if (!marginNotesOn) marginLayer.opacity = 0
+            if (!marginNotesOn) marginNotesLevel = 0
             slideMarginsTo(true)
             marginFade.to = 1; marginFade.start()
         } else { marginFade.to = 0; marginFade.start() }
     }
+    // Margin motion ends at once: resizes, chapter changes, range editing.
+    function settleMargins() {
+        if (marginFade.running) { marginFade.stop(); marginNotesLevel = marginFade.to; if (!marginNotesLevel) marginNotesOn = false }
+        if (marginExit.running) { marginExit.stop(); marginFocusLevel = 0; marginsLeaving = false }
+        if (marginEnter.running) { marginEnter.stop(); marginFocusLevel = 1 }
+        marginSlide.stop(); marginSlideOffset = 0; marginsAttached = false
+        chapterNavGlide.stop(); chapterNavShift = 0
+    }
+    onRangeEditingChanged: settleMargins()
     Connections {
         target: reading
         function onHeightChanged() { app.scheduleMargins() }
@@ -2343,6 +2463,17 @@ ApplicationWindow {
         }
         return out
     }
+    // measureVerses for one verse (null when it is not laid out).
+    function measureVerse(number) {
+        const block = blockLoader.item as BlockReader
+        if (block) {
+            const extent = block.verseExtent(number)
+            const offset = extent ? block.body.mapToItem(readerColumn, 0, 0).y : 0
+            return extent ? { number: number, top: offset + extent.top, bottom: offset + extent.bottom } : null
+        }
+        const item = verseRepeater.itemAt(verseOrder(number)) as VerseItem
+        return item ? { number: number, top: item.y + item.textOffset, bottom: item.y + item.textOffset + item.textHeight } : null
+    }
     // Margins measure only while one is shown; `{`/`}` measure on demand.
     readonly property bool marginsMeasured: marginSpace.notes.visible || marginSpace.outline.visible
     onMarginsMeasuredChanged: scheduleMargins()
@@ -2384,12 +2515,14 @@ ApplicationWindow {
                 previous.bottom = split; current.top = split
             }
         }
-        marginLayout = placed.map(function(place, i) {
+        const layout = placed.map(function(place, i) {
             const note = { top: place.y, bottom: place.y + place.height }
             const passage = braces[i]
             return Object.assign({ key: keys[i].key, reference: keys[i].reference, passageTop: passage.top, passageBottom: passage.bottom,
                 naturalLines: items[i].lines, tips: Margins.tips(note, passage, { inset: 3 * readerScale, noteLines: place.lines, passageLine: readerLineHeight }) }, place)
         })
+        // Unchanged placements keep their connectors' paint.
+        if (JSON.stringify(layout) !== JSON.stringify(marginLayout)) marginLayout = layout
     }
     function marginPlacement(key) { return marginLayout.find(function(place) { return place.key === key }) || null }
     // Plain note text with exact passage links (as in the Notes preview).
@@ -2496,7 +2629,7 @@ ApplicationWindow {
     // sit over them; copy strips the cells, search maps around them.
     readonly property real footnoteCellWidth: Math.max(1, Math.round(readerSize * readerScale * 0.5))
     function footnoteHtml(html, notes) {
-        if (!notes || !notes.length || bible.focusMode) return html
+        if (!notes || !notes.length || focusLayout) return html
         const offsets = Array.from(notes).map(function(note) { return note.offset }).sort(function(a, b) { return a - b })
         const cell = '&#8288;<img src="qrc:/resources/cell.png" width="' + footnoteCellWidth + '" height="1">'
         let out = "", count = 0, next = 0, i = 0
@@ -3199,7 +3332,7 @@ ApplicationWindow {
         let extent = Math.min(textHeight, Math.max(1, available - 2 * margin))
         let target = readerTargetY()
         // Focus mode is a typewriter: the cursor verse stays 40% down.
-        if (bible.focusMode) target = y - 0.4 * reading.height
+        if (focusLayout) target = y - 0.4 * reading.height
         else if (alignTop || y < target + margin) target = y - margin
         else if (y + extent > target + available - margin) target = y + extent - available + margin
         if (instant) setReaderY(target)
@@ -5088,7 +5221,7 @@ ApplicationWindow {
                         width: app.chapterNavReserve
                         height: Math.max(app.chapterNavSize * 3, 120 * app.controlScale)
                         x: before ? 0 : readerSurface.width - width - app.chapterNavScrollbar
-                        y: (readerSurface.height - app.floatingSafety - height) / 2
+                        y: (readerSurface.height - app.floatingSafety - height) / 2 + app.chapterNavShift
                         visible: app.chapterNavFits && !app.findPromptOpen
                         // Focus mode: hidden until the pointer is here.
                         readonly property bool revealed: !bible.focusMode || zone.containsMouse || chapterButton.hovered
@@ -5138,6 +5271,7 @@ ApplicationWindow {
                     boundsBehavior: Flickable.StopAtBounds
                     flickableDirection: Flickable.VerticalFlick
                     onWidthChanged: {
+                        app.settleMargins()
                         if (app.hasSelection)
                             Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
                     }
@@ -5152,7 +5286,7 @@ ApplicationWindow {
                         anchors.bottom: parent.bottom
                         anchors.topMargin: 12 * app.readerScale
                         anchors.bottomMargin: app.floatingSafety + 12 * app.readerScale
-                        visible: !bible.focusMode && size < 1
+                        visible: !app.focusLayout && size < 1
                         enabled: visible
                     }
 
@@ -5176,7 +5310,7 @@ ApplicationWindow {
                         // Centered, but clear of the footer's stacked right column;
                         // margin notes may shift it left (app.marginSpace).
                         width: app.readerColumnWidth
-                        x: app.marginSpace.columnX + app.marginSlideOffset
+                        x: app.columnTargetX + app.marginSlideOffset
                         onHeightChanged: app.scheduleMargins()
                         onWidthChanged: app.scheduleMargins()
                         topPadding: 48 * app.readerScale
@@ -5244,7 +5378,7 @@ ApplicationWindow {
                                 Item {
                                     id: verseHeading
                                     objectName: "verseHeading" + verseRow.modelData.number
-                                    readonly property bool hasHeading: bible.showHeadings && !bible.focusMode && (verseRow.modelData.heading || "").length > 0
+                                    readonly property bool hasHeading: bible.showHeadings && !app.focusLayout && (verseRow.modelData.heading || "").length > 0
                                     width: parent.width - verseRow.gutter - 6
                                     x: verseRow.gutter
                                     // Measure text at a fixed width, independent of effective
@@ -5461,7 +5595,7 @@ ApplicationWindow {
                                     }
                                 }
                                 Repeater {
-                                    model: bible.focusMode ? [] : (verseRow.modelData.footnotes || [])
+                                    model: app.focusLayout ? [] : (verseRow.modelData.footnotes || [])
                                     delegate: Item {
                                         id: footnoteMarker
                                         required property var modelData
@@ -5648,9 +5782,11 @@ ApplicationWindow {
                     Item {
                         id: marginLayer
                         objectName: "marginLayer"
+                        x: app.marginDrift
                         width: reading.width
                         height: readerColumn.height
                         visible: app.marginSpace.notes.visible
+                        opacity: app.marginNotesLevel * app.marginFocusLevel
                         Repeater {
                             id: marginRepeater
                             model: app.marginNoteEntries
@@ -5724,43 +5860,53 @@ ApplicationWindow {
                                 }
                                 // "{" before the note, "}" after the passage text, and an
                                 // arrow between their tips (HandDrawn.js, seeded per note).
-                                Canvas {
-                                    id: connector
-                                    objectName: "marginConnector:" + marginNote.modelData.reference
-                                    readonly property real k: app.readerScale
-                                    readonly property real spanLeft: app.marginTextRight + 3 * k
-                                    readonly property real spanRight: marginNote.x - 5 * k
-                                    readonly property real spanTop: marginNote.place ? Math.min(marginNote.place.y, marginNote.place.passageTop) - 4 * k : 0
-                                    readonly property real spanBottom: marginNote.place ? Math.max(marginNote.place.y + marginNote.place.height, marginNote.place.passageBottom) + 4 * k : 0
-                                    property color ink: desktop.accent
-                                    // Scene geometry for tests: tips in marginLayer coordinates.
-                                    property var geometry: null
-                                    x: spanLeft - marginNote.x
-                                    y: spanTop - marginNote.y
-                                    width: Math.max(1, spanRight - spanLeft)
-                                    height: Math.max(1, spanBottom - spanTop)
-                                    readonly property var paintKey: [marginNote.place, width, height, x, y, bible.versionId]
-                                    onPaintKeyChanged: requestPaint()
-                                    onInkChanged: requestPaint()
-                                    onPaint: {
-                                        const ctx = getContext("2d")
-                                        ctx.reset()
-                                        const place = marginNote.place
-                                        if (!place) return
-                                        const s = HandDrawn.seed("marginNote", bible.versionId, marginNote.modelData.key)
-                                        const brace = app.marginBraceWidth
-                                        const noteMid = (place.y + place.y + place.height) / 2 + place.tips.note - spanTop
-                                        const passageMid = (place.passageTop + place.passageBottom) / 2 + place.tips.passage - spanTop
-                                        ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.85)
-                                        const close = HandDrawn.wavyBrace(ctx, 0, place.passageTop - spanTop, place.passageBottom - spanTop, passageMid,
-                                            brace, 1, HandDrawn.seed(s, "passage"), k)
-                                        const open = HandDrawn.wavyBrace(ctx, width - brace, place.y - spanTop, place.y + place.height - spanTop, noteMid,
-                                            brace, -1, HandDrawn.seed(s, "note"), k)
-                                        ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.7)
-                                        HandDrawn.wavyArrow(ctx, open.tip.x - 2 * k, open.tip.y, close.tip.x + 2.5 * k, close.tip.y,
-                                            HandDrawn.seed(s, "arrow"), k)
-                                        geometry = { noteTip: { x: open.tip.x + spanLeft, y: open.tip.y + spanTop }, passageTip: { x: close.tip.x + spanLeft, y: close.tip.y + spanTop },
-                                            arrowEnd: { x: close.tip.x + 2.5 * k + spanLeft, y: close.tip.y + spanTop } }
+                                // The column's text never runs under it: gliding into place
+                                // beside margins that wait there, the column uncovers it.
+                                Item {
+                                    id: connectorClip
+                                    readonly property real cover: Math.min(app.marginCover, connector.width)
+                                    clip: cover > 0
+                                    x: connector.spanLeft - marginNote.x + cover
+                                    y: connector.spanTop - marginNote.y
+                                    width: connector.width - cover
+                                    height: connector.height
+                                    Canvas {
+                                        id: connector
+                                        objectName: "marginConnector:" + marginNote.modelData.reference
+                                        readonly property real k: app.readerScale
+                                        readonly property real spanLeft: app.marginTextRight + 3 * k
+                                        readonly property real spanRight: marginNote.x - 5 * k
+                                        readonly property real spanTop: marginNote.place ? Math.min(marginNote.place.y, marginNote.place.passageTop) - 4 * k : 0
+                                        readonly property real spanBottom: marginNote.place ? Math.max(marginNote.place.y + marginNote.place.height, marginNote.place.passageBottom) + 4 * k : 0
+                                        property color ink: desktop.accent
+                                        // Scene geometry for tests: tips in marginLayer coordinates.
+                                        property var geometry: null
+                                        x: -connectorClip.cover
+                                        width: Math.max(1, spanRight - spanLeft)
+                                        height: Math.max(1, spanBottom - spanTop)
+                                        readonly property var paintKey: [marginNote.place, width, height, spanLeft, spanTop, bible.versionId]
+                                        onPaintKeyChanged: requestPaint()
+                                        onInkChanged: requestPaint()
+                                        onPaint: {
+                                            const ctx = getContext("2d")
+                                            ctx.reset()
+                                            const place = marginNote.place
+                                            if (!place) return
+                                            const s = HandDrawn.seed("marginNote", bible.versionId, marginNote.modelData.key)
+                                            const brace = app.marginBraceWidth
+                                            const noteMid = (place.y + place.y + place.height) / 2 + place.tips.note - spanTop
+                                            const passageMid = (place.passageTop + place.passageBottom) / 2 + place.tips.passage - spanTop
+                                            ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.85)
+                                            const close = HandDrawn.wavyBrace(ctx, 0, place.passageTop - spanTop, place.passageBottom - spanTop, passageMid,
+                                                brace, 1, HandDrawn.seed(s, "passage"), k)
+                                            const open = HandDrawn.wavyBrace(ctx, width - brace, place.y - spanTop, place.y + place.height - spanTop, noteMid,
+                                                brace, -1, HandDrawn.seed(s, "note"), k)
+                                            ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.7)
+                                            HandDrawn.wavyArrow(ctx, open.tip.x - 2 * k, open.tip.y, close.tip.x + 2.5 * k, close.tip.y,
+                                                HandDrawn.seed(s, "arrow"), k)
+                                            geometry = { noteTip: { x: open.tip.x + spanLeft, y: open.tip.y + spanTop }, passageTip: { x: close.tip.x + spanLeft, y: close.tip.y + spanTop },
+                                                arrowEnd: { x: close.tip.x + 2.5 * k + spanLeft, y: close.tip.y + spanTop } }
+                                        }
                                     }
                                 }
                             }
@@ -5771,7 +5917,8 @@ ApplicationWindow {
                     id: chapterOutline
                     objectName: "chapterOutline"
                     visible: app.marginSpace.outline.visible
-                    x: app.marginSpace.outline.x
+                    x: app.marginSpace.outline.x + app.marginDrift
+                    opacity: app.marginFocusLevel
                     y: 48 * app.readerScale
                     width: app.marginSpace.outline.width
                     height: Math.max(0, reading.height - app.floatingSafety - y - 12 * app.readerScale)
@@ -6357,7 +6504,7 @@ ApplicationWindow {
     readonly property bool footerFocusFits: bible.ready
         && (footerCenterFull + 2 * Math.max(footerLeftBase + footerButton, footerRightFull) + 2 * footerGroupGap <= footerAvailable
             || footerCenterMin + layoutControl.implicitWidth + 2 * (Math.max(footerLeftBase + footerButton, footerRightCount ? footerButton : 0) + footerGroupGap) <= footerAvailable)
-    readonly property bool footerShowsFocus: bible.ready && (footerFocusFits || bible.focusMode)
+    readonly property bool footerShowsFocus: bible.ready && (footerFocusFits || focusLayout)
     readonly property real footerLeftFull: footerLeftBase + (footerShowsFocus ? footerButton : 0)
     readonly property real footerRightFull: footerRightCount * footerButton
     readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
@@ -6376,7 +6523,7 @@ ApplicationWindow {
     readonly property bool footerCollapsed: footerStacked && bible.ready && footerCenterMin + 2 * footerSideReserve > footerAvailable
     readonly property real footerHeight: footerButton
     // Room the reader text leaves at the right edge for the stacked column.
-    readonly property real footerRightInset: footerStacked && !footerCollapsed && footerRightCount && !bible.focusMode
+    readonly property real footerRightInset: footerStacked && !footerCollapsed && footerRightCount && !focusLayout
         ? footerButton + footerMargin + 2 * footerGap : 0
     function footerPanelEntries() {
         const ready = !rangeEditing && bible.ready && !bible.busy
@@ -8878,7 +9025,10 @@ ApplicationWindow {
             else if (app.dwellPending && !historyDwellTimer.running) historyDwellTimer.restart()
         }
     }
-    Component.onCompleted: { marginNotesOn = bible.marginNotes; readerInitialized = true; syncNote(); restorePosition(); restartDwell(); scheduleMargins() }
+    Component.onCompleted: {
+        focusLayout = bible.focusMode; marginFocusLevel = focusLayout ? 0 : 1; marginNotesOn = bible.marginNotes
+        readerInitialized = true; syncNote(); restorePosition(); restartDwell(); scheduleMargins()
+    }
     onClosing: function(close) {
         if (rangeEditing) rangeEditor.cancel()
         if (rangeEditing) { close.accepted = false; return }
