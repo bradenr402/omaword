@@ -85,7 +85,7 @@ Item {
         if (destroying) return
         // A character selection survives (text size, line height): the
         // controller reselects it from source positions after the build.
-        controller.clearTextSelection(true)
+        if (controller.relayoutTextSelection) controller.relayoutTextSelection(); else controller.clearTextSelection()
         cancelDrag()
         document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode,
                        !backend.focusMode, controller.readerSize * root.readerScale, noteMarks)

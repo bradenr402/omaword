@@ -579,7 +579,7 @@ ApplicationWindow {
         // Replacing the rich document invalidates Qt's selection offsets.
         // Clear the shared clipboard source in the same update as the paint;
         // a character selection is mapped onto the new layout instead.
-        clearTextSelection(true)
+        relayoutTextSelection()
         draggingText = false
         dragAnchorRow = -1
     }
@@ -731,15 +731,16 @@ ApplicationWindow {
     property point dragOrigin
     property point dragPoint
     property string freeSelectedText: ""
-    // keepCharacters: a relayout (text size, line height) replaces the
-    // documents but keeps a character selection; it is reselected from its
-    // source positions once the new layout exists.
-    function clearTextSelection(keepCharacters) {
-        if (keepCharacters && charMode) Qt.callLater(app.reapplyCharSelection)
-        else {
-            freeSelectedText = ""
-            if (charMode) { charMode = false; charPending = ""; charAnchor = null; charCursor = null }
-        }
+    // A relayout (text size, line height) replaces the documents: a
+    // character selection is kept and reselected from its source positions
+    // once the new layout exists; anything else is cleared.
+    function relayoutTextSelection() {
+        if (charMode) Qt.callLater(app.reapplyCharSelection)
+        else clearTextSelection()
+    }
+    function clearTextSelection() {
+        freeSelectedText = ""
+        if (charMode) { charMode = false; charPending = ""; charAnchor = null; charCursor = null }
         let block = blockLoader.item as BlockReader
         if (block) block.clearSelection()
         for (let i = 0; i < verseRepeater.count; ++i) {
