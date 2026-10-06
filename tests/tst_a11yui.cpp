@@ -1015,9 +1015,18 @@ private slots:
                     QVERIFY2(band["height"].toDouble() > band["xHeight"].toDouble() && band["height"].toDouble() < 0.8 * line,
                              qPrintable(QString("%1 %2 %3").arg(band["height"].toDouble()).arg(band["xHeight"].toDouble()).arg(line)));
                     // Deterministic: a repaint draws the same pixels.
-                    const auto first = window->grabWindow();
-                    call("refreshHighlights"); QTest::qWait(150);
-                    QCOMPARE(window->grabWindow(), first);
+                    // Settle first (fades, slides), comparing the reader column only.
+                    const QRect column = item("readerColumn")->mapRectToScene(QRectF(0, 0, item("readerColumn")->width(), 400)).toAlignedRect()
+                        .intersected(QRect(QPoint(), window->size()));
+                    QImage first = window->grabWindow().copy(column);
+                    for (int i = 0; i < 20; ++i) {
+                        QTest::qWait(100);
+                        const QImage next = window->grabWindow().copy(column);
+                        if (next == first) break;
+                        first = next;
+                    }
+                    call("refreshHighlights");
+                    QTRY_VERIFY_WITH_TIMEOUT(window->grabWindow().copy(column) == first, 2000);
                 }
             }
             setMode("verse");

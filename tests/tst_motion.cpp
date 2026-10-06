@@ -583,6 +583,7 @@ private slots:
         const auto firstOrigin = menu()->property("origin").toPointF();
         const double firstX = menu()->property("x").toDouble(), firstY = menu()->property("y").toDouble();
         QTest::qWait(60);
+        auto ghost = object("menuGhost"); const int exits = ghost->property("exits").toInt();
         // Mouse: right press on another verse (outside the open menu), one event.
         const QRectF open(firstX, firstY, menu()->property("width").toDouble(), menu()->property("height").toDouble());
         int other = 6;
@@ -591,7 +592,8 @@ private slots:
         QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, versePoint(other)); QCoreApplication::processEvents();
         QVERIFY(menu()->property("visible").toBool()); QCOMPARE(menu()->property("opacity").toDouble(), 1.0);
         QCOMPARE(bible->selectionReference(), QString("John 1:%1").arg(other));
-        auto ghost = object("menuGhost"); QVERIFY(ghost->property("running").toBool());
+        // The old menu's exit started in the same event (under load it may already be over).
+        QCOMPARE(ghost->property("exits").toInt(), exits + 1);
         const auto exit = value(ghost->property("lastExit")).toMap();
         QVERIFY(qAbs(exit["x"].toDouble() - firstX) <= 1 && qAbs(exit["y"].toDouble() - firstY) <= 1);
         QVERIFY(qAbs(exit["originX"].toDouble() - firstOrigin.x()) <= 1 && qAbs(exit["originY"].toDouble() - firstOrigin.y()) <= 1);
@@ -607,8 +609,10 @@ private slots:
         // Keyboard: the menu key on an open menu closes it; it reopens at once.
         key(Qt::Key_Escape); QVERIFY(!menu()->property("visible").toBool());
         key(Qt::Key_Menu); QVERIFY(menu()->property("visible").toBool());
-        key(Qt::Key_Escape); QVERIFY(!menu()->property("visible").toBool());
-        key(Qt::Key_Menu); QVERIFY(menu()->property("visible").toBool()); QVERIFY(ghost->property("running").toBool());
+        QTest::qWait(40);
+        const int before = ghost->property("exits").toInt();
+        key(Qt::Key_Escape); QVERIFY(!menu()->property("visible").toBool()); QCOMPARE(ghost->property("exits").toInt(), before + 1);
+        key(Qt::Key_Menu); QVERIFY(menu()->property("visible").toBool());
         key(Qt::Key_Escape);
     }
     // Hover colors change at once (never animated), with animations on.

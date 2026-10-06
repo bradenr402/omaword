@@ -28,6 +28,8 @@ Item {
     readonly property bool running: first.shown || second.shown
     // The last exit, for tests: {x, y, width, height, originX, originY}.
     property var lastExit: null
+    // How many exits have started (tests).
+    property int exits: 0
     property int turn: 0
     property real popupZ: 0
 
@@ -51,6 +53,7 @@ Item {
         // The origin, clamped to the popup.
         const ox = Math.max(0, Math.min(source.width, o.x - at.x)), oy = Math.max(0, Math.min(source.height, o.y - at.y))
         popupZ = popup.z
+        exits += 1
         lastExit = { x: at.x, y: at.y, width: source.width, height: source.height, originX: at.x + ox, originY: at.y + oy }
         shot.start(at.x, at.y, source.width, source.height, ox, oy, dimmed && popup.modal)
     }
