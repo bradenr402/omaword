@@ -654,10 +654,10 @@ private slots:
         QTRY_COMPARE(item("paletteResults")->property("count").toInt(), 1);
         before = playCount(); key(Qt::Key_Return);
         QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before); QVERIFY(opened("passagePalette"));
-        // Mouse: a disabled row is skipped, nothing runs.
+        // Mouse: a click on a disabled row runs nothing and sounds the error.
         before = playCount();
         click(qobject_cast<QQuickItem *>(item("paletteResults")->property("currentItem").value<QObject *>()));
-        QCOMPARE(playCount(), before); QVERIFY(opened("passagePalette"));
+        QCOMPARE(playCount(), before + 1); QCOMPARE(lastSound(), QString("error")); QVERIFY(opened("passagePalette"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         // A disabled keybinding row.
         run("help"); QTRY_VERIFY(opened("helpDialog")); type("bookmark selection");

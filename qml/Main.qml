@@ -1468,6 +1468,7 @@ ApplicationWindow {
         uiScale: app.scale
         objectName: "contextMenu"
         theme: desktop
+        onRejected: sounds.play("error")
     }
     // The mouse's back and forward buttons, anywhere in the window: a menu
     // closes; the palette steps back toward its book list; an open side panel
@@ -6406,8 +6407,9 @@ ApplicationWindow {
                     // Keep right-aligned hints clear of the overlay scrollbar.
                     rightPadding: leftPadding + (paletteResults.ScrollBar.vertical.visible ? 12 * app.scale : 0)
                     highlighted: ListView.isCurrentItem
-                    enabled: !modelData.action || app.actionAvailable(modelData.action)
-                    onClicked: app.activatePaletteEntry(modelData)
+                    // Unavailable rows read muted and stay clickable: a click sounds the error.
+                    readonly property bool available: !modelData.action || app.actionAvailable(modelData.action)
+                    onClicked: { if (available) app.activatePaletteEntry(modelData); else app.rejected() }
                     TapHandler {
                         acceptedButtons: Qt.RightButton
                         enabled: !!paletteEntry.modelData.recentQuery || !!paletteEntry.modelData.recent || app.paletteTextMode
@@ -6418,7 +6420,7 @@ ApplicationWindow {
                         spacing: 6 * app.scale
                         RowLayout {
                             Layout.fillWidth: true
-                            Label { text: paletteEntry.modelData.title || ((paletteEntry.modelData.reference || "") + " · " + (paletteEntry.modelData.versionAbbreviation || "")); textFormat: Text.PlainText; color: paletteEntry.enabled ? desktop.foreground : desktop.muted; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 14 * app.scale }
+                            Label { text: paletteEntry.modelData.title || ((paletteEntry.modelData.reference || "") + " · " + (paletteEntry.modelData.versionAbbreviation || "")); textFormat: Text.PlainText; color: paletteEntry.available ? desktop.foreground : desktop.muted; Layout.fillWidth: true; elide: Text.ElideRight; font.pixelSize: 14 * app.scale }
                             Label { objectName: "paletteHint" + (paletteEntry.modelData.action || ""); text: paletteEntry.modelData.hint || ""; color: desktop.muted; font.pixelSize: 11 * app.scale }
                             Label {
                                 objectName: "paletteChevron" + paletteEntry.index
@@ -7383,8 +7385,8 @@ ApplicationWindow {
                     objectName: "keybinding" + modelData.title
                     width: keybindingResults.width
                     height: keybindingContent.implicitHeight + 20 * app.scale
-                    rightPadding: leftPadding + (keybindingScrollbar.visible ? 12 * app.scale : 0)
-                    enabled: app.actionAvailable(modelData)
+                    // Unavailable rows read muted; a click sounds the error (activateKeybinding).
+                    readonly property bool available: app.actionAvailable(modelData)
                     AppToolTip { theme: desktop; uiScale: app.scale; visible: keybindingRow.hovered; text: app.scopeTitle(keybindingRow.modelData) }
                     highlighted: ListView.isCurrentItem
                     onClicked: app.activateKeybinding(modelData)
@@ -7395,7 +7397,7 @@ ApplicationWindow {
                     id: keybindingContent
                     spacing: 12 * app.scale
                     Label {
-                        text: keybindingRow.modelData.title; color: keybindingRow.enabled ? desktop.foreground : desktop.muted
+                        text: keybindingRow.modelData.title; color: keybindingRow.available ? desktop.foreground : desktop.muted
                         font.pixelSize: 13 * app.scale; Layout.fillWidth: true
                         Layout.preferredWidth: keybindingRow.width * 0.48; wrapMode: Text.Wrap
                     }

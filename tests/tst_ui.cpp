@@ -804,7 +804,7 @@ private slots:
         key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
         type("write a note");
         QTRY_VERIFY(item("keybindingWrite a note"));
-        QVERIFY(!item("keybindingWrite a note")->isEnabled());
+        QVERIFY(!item("keybindingWrite a note")->property("available").toBool());
         key(Qt::Key_Return); QVERIFY(prop("helpDialog","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
         QVERIFY(!item("readerSurface")->isVisible());
@@ -1277,7 +1277,7 @@ private slots:
         capture("phase-b-keybindings-focused");
         key(Qt::Key_A,Qt::ControlModifier); type("Shift Click");
         QCOMPARE(prop("keybindingResults","count").toInt(),1);
-        QVERIFY(!item("keybindingSelect a range")->isEnabled());
+        QVERIFY(!item("keybindingSelect a range")->property("available").toBool());
         const auto selected = bible->selectionReference();
         key(Qt::Key_Return);
         QVERIFY(prop("helpDialog","opened").toBool());
@@ -1515,7 +1515,7 @@ private slots:
         type("panel");
         key(Qt::Key_Home); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
         key(Qt::Key_PageDown);
-        QVERIFY(current()->isEnabled());
+        QVERIFY(current()->property("available").toBool());
         const auto selectedAction = current()->property("modelData").toMap().value("id").toString();
         // The paged row is also the executable choice when focus stays in search.
         const QHash<QString,const char *> panels = {{"annotations","savedDrawer"},{"toggleNotes","notesDrawer"},{"related","relatedDrawer"}};
@@ -2539,7 +2539,7 @@ private slots:
         key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
         type("copy selected text as quotation");
         QTRY_VERIFY(item("keybindingCopy selected text as quotation (else the passage)"));
-        QVERIFY(item("keybindingCopy selected text as quotation (else the passage)")->isEnabled());
+        QVERIFY(item("keybindingCopy selected text as quotation (else the passage)")->property("available").toBool());
         key(Qt::Key_Return); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"copyText")));
         QCOMPARE(QApplication::clipboard()->text(),bible->copySelection());

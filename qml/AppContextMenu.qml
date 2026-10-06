@@ -21,6 +21,8 @@ Popup {
             : { id: entry.id, text: entry.text, shortcut: entry.shortcut || "", enabled: entry.enabled !== false }
     })
     signal triggered(string id)
+    // A click on a disabled row: the owner sounds the error.
+    signal rejected()
 
     parent: Overlay.overlay
     // Above drawers and dialogs that may be declared later in the window.
@@ -69,11 +71,27 @@ Popup {
         currentIndex = -1
         for (let i = 0; i < entries.length; ++i) if (enabledAt(i)) { currentIndex = i; break }
         const area = parent as Item
-        const height = entries.reduce(function(sum, entry) { return sum + (entry.separator ? 9 : 30) * uiScale }, topPadding + bottomPadding)
+        const full = entries.reduce(function(sum, entry) { return sum + rowHeight(entry) }, topPadding + bottomPadding)
+        // Taller than the window: the menu scrolls inside it.
+        const height = area ? Math.min(full, area.height) : full
         x = Math.max(0, Math.min(sceneX, (area ? area.width : sceneX + width) - width))
         y = Math.max(0, Math.min(sceneY, (area ? area.height : sceneY + height) - height))
         open()
+        scroller.contentY = 0
+        revealCurrent()
     }
+    function rowHeight(entry) { return (entry && entry.separator ? 9 : 30) * uiScale }
+    // Keeps the current row inside the visible part of a scrolling menu.
+    function revealCurrent() {
+        if (currentIndex < 0) return
+        let top = 0
+        for (let i = 0; i < currentIndex; ++i) top += rowHeight(entries[i])
+        const bottom = top + rowHeight(entries[currentIndex])
+        if (top < scroller.contentY) scroller.contentY = top
+        else if (bottom > scroller.contentY + scroller.height) scroller.contentY = bottom - scroller.height
+    }
+    onCurrentIndexChanged: revealCurrent()
+    height: Math.min(implicitHeight, (parent as Item) ? (parent as Item).height : implicitHeight)
     function move(delta) {
         if (!entries.length) return
         let index = currentIndex
@@ -108,9 +126,40 @@ Popup {
         border.width: 1
         radius: Math.min(menu.theme.cornerRadius || 0, width / 2, height / 2)
     }
-    contentItem: Column {
+    contentItem: Flickable {
+        id: scroller
         objectName: "contextMenuContent"
         focus: true
+        clip: true
+        implicitWidth: column.width
+        implicitHeight: column.height
+        contentWidth: column.width
+        contentHeight: column.height
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        interactive: contentHeight > height
+        ScrollBar.vertical: ScrollBar {
+            id: menuBar
+            objectName: "contextMenuScrollbar"
+            // The app's overlay scrollbar: a thin thumb over the rows' right edge.
+            implicitWidth: 18 * menu.uiScale
+            policy: ScrollBar.AlwaysOn
+            visible: size < 1
+            hoverEnabled: true
+            padding: 0
+            contentItem: Item {
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 4 * menu.uiScale
+                    height: parent.height
+                    width: menuBar.hovered || menuBar.pressed ? 10 * menu.uiScale : 4 * menu.uiScale
+                    color: menu.theme.muted
+                    radius: Math.min(menu.theme.cornerRadius || 0, width / 2, height / 2)
+                    opacity: 0.6
+                }
+            }
+            background: Item {}
+        }
         Keys.onPressed: function(event) {
             const plain = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
             if (!plain && !(event.key === Qt.Key_F10 && event.modifiers === Qt.ShiftModifier)
@@ -124,66 +173,73 @@ Popup {
             // Swallow everything else so reader shortcuts never act behind the menu.
             event.accepted = true
         }
-        Repeater {
-            model: menu.entries.length
-            delegate: Item {
-                id: row
-                required property int index
-                readonly property var entry: menu.entries[index] || ({})
-                readonly property bool separator: !!entry.separator
-                readonly property bool active: menu.enabledAt(index)
-                objectName: separator ? "contextMenuDivider" + index : "contextMenuItem:" + entry.id
-                width: menu.rowWidth
-                height: separator ? 9 * menu.uiScale : 30 * menu.uiScale
-                Accessible.role: separator ? Accessible.Separator : Accessible.MenuItem
-                Accessible.name: separator ? "" : entry.text
-                Rectangle {
-                    objectName: "contextMenuRule" + row.index
-                    visible: row.separator
-                    anchors.verticalCenter: parent.verticalCenter
-                    x: 6 * menu.uiScale
-                    width: parent.width - 12 * menu.uiScale
-                    height: 1
-                    color: menu.theme.border
-                }
-                Rectangle {
-                    objectName: "contextMenuHighlight" + row.index
-                    visible: !row.separator && row.active && menu.currentIndex === row.index
-                    anchors.fill: parent
-                    color: Qt.rgba(menu.theme.accent.r, menu.theme.accent.g, menu.theme.accent.b, 0.16)
-                    radius: Math.min(menu.theme.cornerRadius || 0, width / 2, height / 2)
-                }
-                Text {
-                    objectName: "contextMenuLabel:" + row.entry.id
-                    visible: !row.separator
-                    anchors.left: parent.left; anchors.leftMargin: 10 * menu.uiScale
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: row.entry.text || ""
-                    textFormat: Text.PlainText
-                    font: metrics.font
-                    color: row.active ? menu.theme.foreground : menu.theme.muted
-                }
-                Text {
-                    objectName: "contextMenuShortcut:" + row.entry.id
-                    visible: !row.separator && text.length > 0
-                    anchors.right: parent.right; anchors.rightMargin: 10 * menu.uiScale
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: row.entry.shortcut || ""
-                    textFormat: Text.PlainText
-                    horizontalAlignment: Text.AlignRight
-                    font.family: menu.theme.fontFamily
-                    font.pixelSize: 12 * menu.uiScale
-                    color: menu.theme.muted
-                }
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: !row.separator
-                    hoverEnabled: true
-                    cursorShape: row.active ? Qt.PointingHandCursor : Qt.ArrowCursor
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    // Follow real pointer motion, not a cursor resting where the menu appears.
-                    onPositionChanged: if (row.active) menu.currentIndex = row.index
-                    onClicked: menu.trigger(row.index)
+        Column {
+            id: column
+            objectName: "contextMenuColumn"
+            Repeater {
+                model: menu.entries.length
+                delegate: Item {
+                    id: row
+                    required property int index
+                    readonly property var entry: menu.entries[index] || ({})
+                    readonly property bool separator: !!entry.separator
+                    readonly property bool active: menu.enabledAt(index)
+                    objectName: separator ? "contextMenuDivider" + index : "contextMenuItem:" + entry.id
+                    width: menu.rowWidth
+                    height: separator ? 9 * menu.uiScale : 30 * menu.uiScale
+                    Accessible.role: separator ? Accessible.Separator : Accessible.MenuItem
+                    Accessible.name: separator ? "" : entry.text
+                    Rectangle {
+                        objectName: "contextMenuRule" + row.index
+                        visible: row.separator
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: 6 * menu.uiScale
+                        width: parent.width - 12 * menu.uiScale
+                        height: 1
+                        color: menu.theme.border
+                    }
+                    Rectangle {
+                        objectName: "contextMenuHighlight" + row.index
+                        visible: !row.separator && row.active && menu.currentIndex === row.index
+                        anchors.fill: parent
+                        color: Qt.rgba(menu.theme.accent.r, menu.theme.accent.g, menu.theme.accent.b, 0.16)
+                        radius: Math.min(menu.theme.cornerRadius || 0, width / 2, height / 2)
+                    }
+                    Text {
+                        objectName: "contextMenuLabel:" + row.entry.id
+                        visible: !row.separator
+                        anchors.left: parent.left; anchors.leftMargin: 10 * menu.uiScale
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: row.entry.text || ""
+                        textFormat: Text.PlainText
+                        font: metrics.font
+                        color: row.active ? menu.theme.foreground : menu.theme.muted
+                    }
+                    Text {
+                        objectName: "contextMenuShortcut:" + row.entry.id
+                        visible: !row.separator && text.length > 0
+                        anchors.right: parent.right; anchors.rightMargin: 10 * menu.uiScale
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: row.entry.shortcut || ""
+                        textFormat: Text.PlainText
+                        horizontalAlignment: Text.AlignRight
+                        font.family: menu.theme.fontFamily
+                        font.pixelSize: 12 * menu.uiScale
+                        color: menu.theme.muted
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        enabled: !row.separator
+                        hoverEnabled: true
+                        cursorShape: row.active ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        // Follow real pointer motion, not a cursor resting where the menu appears.
+                        onPositionChanged: if (row.active) menu.currentIndex = row.index
+                        onClicked: {
+                            if (row.active) menu.trigger(row.index)
+                            else menu.rejected()
+                        }
+                    }
                 }
             }
         }

@@ -460,7 +460,7 @@ private slots:
         for (const auto &title : {QString("Center current verse"), QString("Scroll current verse to top"), QString("Scroll current verse to bottom")}) {
             key(Qt::Key_A, Qt::ControlModifier); type(title);
             QTRY_VERIFY(item("keybinding" + title));
-            QVERIFY(item("keybinding" + title)->isEnabled());
+            QVERIFY(item("keybinding" + title)->property("available").toBool());
         }
         key(Qt::Key_Return); QTRY_VERIFY(!object("helpDialog")->property("visible").toBool());
         QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
