@@ -733,8 +733,9 @@ private slots:
         click("rangeEditHintsPart:swap"); QTRY_COMPARE(prop("endpoint").toString(), QString("end"));
         check("clicked");
     }
-    // The moving endpoint verse is marked apart from the range's tint: an
-    // accent underline on its lines and a caret flag at its moving edge.
+    // The moving endpoint verse is marked apart from the range's tint by a
+    // prominent caret flag (no underline): the start's at the top-left of its
+    // first line, the end's at the bottom-right of its last line.
     void activeEndpointMarker_data() {
         QTest::addColumn<QString>("mode");
         QTest::newRow("verse") << QString("verse"); QTest::newRow("paragraph") << QString("paragraph"); QTest::newRow("block") << QString("block");
@@ -753,11 +754,18 @@ private slots:
         // End: verse 4, caret at the right end of its last line.
         QTRY_COMPARE(geometry().value("verse").toInt(), 4);
         QCOMPARE(geometry().value("endpoint").toString(), QString("end"));
-        QVERIFY(item("rangeEndpointUnderline0") && item("rangeEndpointUnderline0")->isVisible());
-        QCOMPARE(item("rangeEndpointUnderline0")->property("color").value<QColor>(), desktop->property("accent").value<QColor>());
+        QVERIFY(!item("rangeEndpointUnderline0"));
+        const double k = prop("readerScale").toDouble();
+        QVERIFY(caret->width() >= 4 * k - 1); QVERIFY(item("rangeEndpointFlag")->width() >= 12 * k - 1);
         const auto rects = geometry().value("rects").toList(); QVERIFY(!rects.isEmpty());
         const auto last = rects.last().toMap();
         QVERIFY(qAbs(caret->mapToItem(item("readerColumn"), QPointF(caret->width() / 2, 0)).x() - (last["x"].toDouble() + last["width"].toDouble())) <= 2);
+        // Bottom-right: spans the last line and hangs below it, its flag at the bottom.
+        const auto column = item("readerColumn"), flag = item("rangeEndpointFlag");
+        QVERIFY(qAbs(caret->mapToItem(column, QPointF(0, 0)).y() - last["y"].toDouble()) <= 1);
+        QVERIFY(caret->mapToItem(column, QPointF(0, caret->height())).y() > last["y"].toDouble() + last["height"].toDouble());
+        QVERIFY(qAbs(flag->mapToItem(column, QPointF(0, flag->height())).y() - caret->mapToItem(column, QPointF(0, caret->height())).y()) <= 1);
+        QVERIFY(flag->mapToItem(column, QPointF(flag->width(), 0)).x() <= caret->mapToItem(column, QPointF(caret->width(), 0)).x() + 1);
         shot("endpoint-" + mode + "-end");
         // Keyboard: j moves the end; the marker follows.
         key(Qt::Key_J); QTRY_COMPARE(geometry().value("verse").toInt(), 5);
@@ -766,6 +774,10 @@ private slots:
         QTRY_COMPARE(geometry().value("verse").toInt(), 2);
         const auto first = geometry().value("rects").toList().first().toMap();
         QVERIFY(qAbs(caret->mapToItem(item("readerColumn"), QPointF(caret->width() / 2, 0)).x() - first["x"].toDouble()) <= 2);
+        // Top-left: rises above the first line, its flag at the top.
+        QVERIFY(caret->mapToItem(column, QPointF(0, 0)).y() < first["y"].toDouble());
+        QVERIFY(qAbs(caret->mapToItem(column, QPointF(0, caret->height())).y() - (first["y"].toDouble() + first["height"].toDouble())) <= 1);
+        QVERIFY(qAbs(flag->mapToItem(column, QPointF(0, 0)).y() - caret->mapToItem(column, QPointF(0, 0)).y()) <= 1);
         const double startX = caretX();
         shot("endpoint-" + mode + "-start");
         // Mouse: the swap hint swaps back to the end.

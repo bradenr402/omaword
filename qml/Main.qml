@@ -2272,9 +2272,9 @@ ApplicationWindow {
         rangeEndpointTimer.restart()
         if (charMode) charReapplyTimer.restart()
     }
-    // Range editing: the verse whose endpoint moves (the cursor) gets an accent
-    // underline on each of its lines and a caret flag at the moving edge (its
-    // start or end), apart from the range's tint. readerColumn coordinates.
+    // Range editing: the verse whose endpoint moves (the cursor) gets a large
+    // accent caret flag at the moving edge (its start's top-left or its end's
+    // bottom-right), apart from the range's tint. readerColumn coordinates.
     property var rangeEndpointGeometry: null
     Timer { id: rangeEndpointTimer; interval: 0; onTriggered: app.updateRangeEndpoint() }
     readonly property var rangeEndpointKey: [rangeEditor.active, rangeEditor.endpoint, bible.verses, readerColumn.width, app.readerScale, app.readerLineHeight]
@@ -5559,31 +5559,19 @@ ApplicationWindow {
                         width: readerColumn.width
                         height: readerColumn.height
                         visible: !!geometry && app.rangeEditing
-                        Repeater {
-                            model: rangeEndpointMarker.geometry ? rangeEndpointMarker.geometry.rects : []
-                            delegate: Rectangle {
-                                required property var modelData
-                                required property int index
-                                objectName: "rangeEndpointUnderline" + index
-                                x: modelData.x
-                                y: modelData.y + modelData.height - height
-                                width: modelData.width
-                                height: Math.max(2, Math.round(2 * rangeEndpointMarker.k))
-                                radius: height / 2
-                                color: desktop.accent
-                            }
-                        }
-                        // The caret at the moving edge, with a flag pointing into the verse.
+                        // The caret at the moving edge, with a flag pointing into the verse:
+                        // the start's at the top-left of its first line, the end's at the
+                        // bottom-right of its last line.
                         Item {
                             id: rangeEndpointCaret
                             objectName: "rangeEndpointCaret"
                             readonly property var edge: rangeEndpointMarker.geometry ? rangeEndpointMarker.geometry.edge : null
                             readonly property bool atStart: !!rangeEndpointMarker.geometry && rangeEndpointMarker.geometry.endpoint === "start"
-                            readonly property real barWidth: Math.max(2, Math.round(3 * rangeEndpointMarker.k))
-                            readonly property real overhang: Math.round(3 * rangeEndpointMarker.k)
+                            readonly property real barWidth: Math.max(3, Math.round(4 * rangeEndpointMarker.k))
+                            readonly property real overhang: Math.round(5 * rangeEndpointMarker.k)
                             visible: !!edge
                             x: edge ? Math.round(edge.x - barWidth / 2) : 0
-                            y: edge ? edge.y - overhang : 0
+                            y: edge ? (atStart ? edge.y - overhang : edge.y) : 0
                             width: barWidth
                             height: edge ? edge.height + overhang : 0
                             Rectangle {
@@ -5593,11 +5581,11 @@ ApplicationWindow {
                             }
                             Canvas {
                                 objectName: "rangeEndpointFlag"
-                                readonly property real size: Math.round(8 * rangeEndpointMarker.k)
+                                readonly property real size: Math.round(12 * rangeEndpointMarker.k)
                                 property color ink: desktop.accent
                                 readonly property bool pointsRight: rangeEndpointCaret.atStart
                                 x: pointsRight ? parent.width - 1 : 1 - size
-                                y: 0
+                                y: pointsRight ? 0 : parent.height - size
                                 width: size
                                 height: size
                                 onInkChanged: requestPaint()
@@ -5609,7 +5597,7 @@ ApplicationWindow {
                                     ctx.fillStyle = ink
                                     ctx.beginPath()
                                     if (pointsRight) { ctx.moveTo(0, 0); ctx.lineTo(width, 0); ctx.lineTo(0, height) }
-                                    else { ctx.moveTo(width, 0); ctx.lineTo(0, 0); ctx.lineTo(width, height) }
+                                    else { ctx.moveTo(width, height); ctx.lineTo(0, height); ctx.lineTo(width, 0) }
                                     ctx.closePath()
                                     ctx.fill()
                                 }
