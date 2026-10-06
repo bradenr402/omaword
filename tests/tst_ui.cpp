@@ -3875,8 +3875,9 @@ private slots:
         key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(!item("toast")->isVisible());
-        type("notes s "); key(Qt::Key_R,Qt::ControlModifier); key(Qt::Key_Space,Qt::ControlModifier);
-        key(Qt::Key_K,Qt::ControlModifier); key(Qt::Key_Question);
+        // Plain keys and the reader's Alt toggles type; window launchers
+        // (ctrl r, ctrl space, ctrl k, F1) close Notes first (below).
+        type("notes s "); key(Qt::Key_Question);
         QVERIFY(prop("noteEditor","text").toString().startsWith("notes s ?"));
         key(Qt::Key_H,Qt::AltModifier);
         item("noteEditor")->setProperty("text",QString("notes s ?"));
@@ -3909,6 +3910,12 @@ private slots:
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(!item("toast")->isVisible());
         QCOMPARE(bible->noteText(),QString("notes s ?pasted"));
+        // From the editor, ctrl r saves the draft, closes Notes, and opens Settings.
+        key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_End); type(" more"); key(Qt::Key_R,Qt::ControlModifier);
+        QTRY_VERIFY(prop("settingsDialog","opened").toBool()); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QCOMPARE(bible->noteText(),QString("notes s ?pasted more"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("settings"); key(Qt::Key_R,Qt::ControlModifier);
         QCOMPARE(prop("keybindingSearch","text").toString(),QString("settings"));

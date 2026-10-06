@@ -3892,6 +3892,10 @@ ApplicationWindow {
         // (palettes, dialogs) still work and end it as they take the keyboard.
         if (charMode && readerBase && action.scope !== "global" && action.scope !== "palette") return false
         if (zPending && action.sequences.some(function(sequence) { return ["Z", "T", "B"].includes(sequence) })) return false
+        // In the Notes editor, the palette and dialog launchers (Ctrl, F-keys)
+        // still work and close Notes first (runKey); its plain keys type.
+        if (noteEditorTyping() && noteEditorLaunchActions.includes(action.id))
+            return bible.ready && !modalOpen && !linkSuggesting
         // Typing owns every key, Ctrl and Alt included (ctrl v pastes); only the
         // palette's own mode keys still switch modes from its input.
         if (textInputActive() && !(action.scope === "palette" && passagePalette.visible)) return false
@@ -3908,6 +3912,11 @@ ApplicationWindow {
         return readerKeys
     }
     readonly property var textSizeActions: ["larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"]
+    // Launchers that work while typing a note: the palettes and dialogs on Ctrl
+    // or F-keys (help's ? types; its F1 alias launches). Ctrl v stays paste, so
+    // Switch version is not here; ctrl n and the Alt toggles stay the editor's.
+    readonly property var noteEditorLaunchActions: ["books", "bibleSearch", "commands", "settings", "help", "manageTags"]
+    function noteEditorTyping() { return notesOpen && !!noteEditor && noteEditor.activeFocus && !noteEditor.readOnly }
     function actionAvailable(action) {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action || action.explanation || bible.busy) return false
@@ -3929,6 +3938,8 @@ ApplicationWindow {
         if (action.scope === "versions") return "Versions dialog"
         if (action.explanation) return "Reader gesture"
         if (textSizeActions.includes(action.id)) return "Anywhere in this window · panels, dialogs, and while typing"
+        if (noteEditorLaunchActions.includes(action.id)) return (action.scope === "palette" ? "This window · passage and command search" : "This window")
+            + " · also while typing a note (" + (action.id === "help" ? KeyNotation.format("F1") + "; it closes Notes)" : "it closes Notes)")
         if (action.scope === "global") return "This window · also with the Notes panel open, but not while typing"
         if (action.scope === "palette") return "This window · passage and command search"
         if (action.scope === "notes") return "Reader or notes preview"
@@ -4140,6 +4151,12 @@ ApplicationWindow {
     // Notes is not modal: palettes and dialogs open over it and return to it,
     // and the reading toggles act with it open.
     function runKey(action) {
+        // From the Notes editor a launcher closes Notes first: its draft saves,
+        // and when it cannot, Notes stays open with its error and nothing opens.
+        if (noteEditorTyping() && noteEditorLaunchActions.includes(action)) {
+            if (!actionAvailable(action)) { sounds.play("error"); return }
+            if (!closeNotes()) { sounds.play("error"); return }
+        }
         if (sidePanel.length && sidePanel !== "notes" && panelLeavingActions.includes(action) && actionAvailable(action)) {
             if (!flushNote()) return
             readerFocus()

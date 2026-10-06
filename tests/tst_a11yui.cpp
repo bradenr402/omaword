@@ -904,6 +904,44 @@ private slots:
         navigate("John 3:16"); bible->selectVerses(16, 16); QTRY_VERIFY(item("linkedFromRow0") && item("linkedFromRow0")->isVisible());
         QTest::qWait(50); click(item("linkedFromRow0")); QTRY_COMPARE(bible->selectionReference(), QString("John 1:5"));
     }
+    // While typing a note, the palette and dialog launchers (Ctrl, F1) work
+    // again: each saves the draft and closes Notes, then opens. Plain keys
+    // (? included) still type. A draft that cannot save keeps Notes open.
+    void notesEditorLaunchers() {
+        struct Launcher { Qt::Key key; Qt::KeyboardModifiers modifiers; const char *surface; };
+        const QList<Launcher> launchers = {
+            {Qt::Key_K, Qt::ControlModifier, "passagePalette"}, {Qt::Key_Slash, Qt::ControlModifier, "passagePalette"},
+            {Qt::Key_Space, Qt::ControlModifier, "passagePalette"}, {Qt::Key_R, Qt::ControlModifier, "settingsDialog"},
+            {Qt::Key_F1, Qt::NoModifier, "helpDialog"}, {Qt::Key_T, Qt::ControlModifier, "tagsSurface"}};
+        int n = 0;
+        for (const auto &launcher : launchers) {
+            const QString tag = QString("%1 %2").arg(launcher.surface).arg(n);
+            navigate("John 3:16"); bible->selectVerses(16, 16); call("readerFocus");
+            key(Qt::Key_W); QTRY_VERIFY2(item("noteEditor")->hasActiveFocus(), qPrintable(tag));
+            item("noteEditor")->setProperty("text", QString());
+            const QString draft = QString("Draft %1").arg(++n);
+            type(draft.toLower());
+            key(launcher.key, launcher.modifiers);
+            QTRY_VERIFY2(shown(launcher.surface), qPrintable(tag));
+            QTRY_VERIFY2(!shown("notesDrawer"), qPrintable(tag));
+            QCOMPARE(bible->noteText(), draft.toLower());
+            key(Qt::Key_Escape); QTRY_VERIFY2(!shown(launcher.surface), qPrintable(tag));
+            if (shown("tagsSurface")) { key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface")); }
+        }
+        // Plain keys type: ? stays in the note; no Keybindings.
+        key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        item("noteEditor")->setProperty("text", QString());
+        QTest::keyClick(window, '?'); QTest::qWait(60);
+        QVERIFY(!shown("helpDialog")); QCOMPARE(item("noteEditor")->property("text").toString(), QString("?"));
+        QVERIFY(shown("notesDrawer"));
+        // A draft that cannot save (changed in another window): Notes stays, nothing opens.
+        window->setProperty("noteConflict", true); item("noteEditor")->setProperty("text", QString("unsaved draft")); QTest::qWait(60);
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); QVERIFY(window->property("noteConflict").toBool());
+        key(Qt::Key_K, Qt::ControlModifier); QTest::qWait(120);
+        QVERIFY(!shown("passagePalette")); QVERIFY(shown("notesDrawer"));
+        key(Qt::Key_S, Qt::ControlModifier); QTRY_VERIFY(!window->property("noteConflict").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));
+    }
     // Notes in Write mode keeps the editor focused: after clicks on the panel's
     // chrome, after its menus and dialogs close, and after Preview → Write.
     void notesEditorKeepsTheKeyboard() {
@@ -1731,10 +1769,10 @@ private slots:
             key(Qt::Key_T, Qt::ControlModifier); QTRY_VERIFY(opened("tagsSurface")); QVERIFY(shown("deskDrawer"));
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
         }
-        // Notes is not modal: from the preview (not while typing) the palette opens
-        // over it and returns to it, and a reading toggle acts with it open.
+        // Notes is not modal: from the preview the palette opens over it and
+        // returns to it, and a reading toggle acts with it open. (From the
+        // editor, ctrl k closes Notes first: notesEditorLaunchers.)
         call("readerFocus"); key(Qt::Key_Escape); run("notes"); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_K, Qt::ControlModifier); QVERIFY(!shown("passagePalette")); QVERIFY(opened("notesDrawer"));
         key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(shown("notesDrawer"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
