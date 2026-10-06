@@ -2637,7 +2637,7 @@ private slots:
         chooseMenu("preview"); QTRY_VERIFY(prop("notePreview").toBool());
     }
     void reauditContextMenuScrollsInShortWindows() {
-        window->resize(1000, 320); QTRY_COMPARE(window->height(), 320);
+        window->resize(1000, 260); QTRY_COMPARE(window->height(), 260);
         call("readerFocus"); key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
         auto content = item("contextMenuContent");
         QTRY_VERIFY(menu()->property("height").toReal() <= window->height());
