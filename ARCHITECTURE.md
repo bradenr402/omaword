@@ -280,7 +280,13 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 - Focus mode hides decoration cells (incl. footnote markers), rails, and annotation tints.
 - Focus mode keeps the footer quiet: only the focus button shows; the others keep
   their places hidden and disabled. Hovering the footer 250 ms reveals them (clicks
-  wait 300 ms more); keyboard focus entering the footer reveals them at once.
+  wait 300 ms more); hiding waits 200 ms so moving between the zone and a button
+  never flickers; keyboard focus entering the footer reveals them at once.
+- Keyboard focus hand-off: a `QuietButton`/`FloatingButton` pressed by key that
+  hides itself passes the keyboard to its `focusTarget` (else `restorePanelFocus`).
+  Modal outside clicks: `RangeEditor`'s dialogs close on press outside and route
+  it to esc's action (`outside`); the tag picker's confirmation watches
+  `Overlay.onPressed` with a passive `PointHandler` marking presses inside.
 - Margins (off by default; hidden in focus mode and range editing): one
   `Margins.space()` split. Margin notes win: they may shift the reader column
   left (only in chapters that have notes) and sit right after their connector;

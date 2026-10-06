@@ -607,7 +607,7 @@ ApplicationWindow {
         readingModeRestoreTimer.restart()
     }
     readonly property bool observedFocusMode: bible.focusMode
-    onObservedFocusModeChanged: { toastTimer.stop(); footerHoverRevealed = false; footerRevealTimer.stop(); Qt.callLater(app.applyFocusMode) }
+    onObservedFocusModeChanged: { toastTimer.stop(); footerHoverRevealed = false; footerRevealTimer.stop(); footerHideTimer.stop(); Qt.callLater(app.applyFocusMode) }
     function applyFocusMode() {
         if (observedFocusMode) {
             if (!closeNotes()) { bible.setFocusMode(false); return }
@@ -5993,13 +5993,21 @@ ApplicationWindow {
     readonly property bool footerGuard: footerGuardTimer.running
     Timer { id: footerRevealTimer; interval: 250; onTriggered: { app.footerHoverRevealed = true; footerGuardTimer.restart() } }
     Timer { id: footerGuardTimer; interval: 300 }
+    // Hiding waits briefly: moving between the zone and a button (or two
+    // buttons) passes through a frame where neither reports the pointer.
+    Timer { id: footerHideTimer; objectName: "footerHideTimer"; interval: 200; onTriggered: app.footerHoverRevealed = false }
     // The pointer is on the footer: its zone, or a (revealed) button over it.
-    function updateFooterHover() {
+    function footerHovered() {
         let hovered = footerZone.containsMouse
         for (const group of [leftActions, locationControls, floatingActions])
             for (const child of group.children) if (child.footerButton === true && child.hovered) hovered = true
+        return hovered
+    }
+    function updateFooterHover() {
+        const hovered = footerHovered()
+        if (hovered) footerHideTimer.stop()
         if (hovered && bible.focusMode && !footerHoverRevealed) { if (!footerRevealTimer.running) footerRevealTimer.restart() }
-        else if (!hovered) { footerRevealTimer.stop(); footerHoverRevealed = false }
+        else if (!hovered) { footerRevealTimer.stop(); if (footerHoverRevealed && !footerHideTimer.running) footerHideTimer.restart() }
     }
     function footerFocusChanged() { if (footerFocused) footerGuardTimer.stop() }
     readonly property real footerMargin: 16 * controlScale
@@ -6057,6 +6065,8 @@ ApplicationWindow {
         acceptedButtons: Qt.NoButton
         hoverEnabled: true
         onContainsMouseChanged: app.updateFooterHover()
+        // The wheel scrolls the reader beneath.
+        onWheel: function(wheel) { wheel.accepted = false }
     }
     Row {
         id: leftActions
