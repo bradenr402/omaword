@@ -2210,6 +2210,21 @@ ApplicationWindow {
         return { first: bible.book === head.id && bible.chapter === firstChapters[0],
                  last: bible.book === tail.id && bible.chapter === lastChapters[lastChapters.length - 1] }
     }
+    // The chapters h / l open (across book boundaries), or null at the Bible's bounds.
+    readonly property var chapterNeighbors: {
+        const books = Array.from(bible.books)
+        const at = books.findIndex(function(book) { return book.id === bible.book })
+        if (at < 0) return { previous: null, next: null }
+        function entry(book, chapter) { return { book: book.id, chapter: chapter, title: book.name + " " + chapter } }
+        const chapters = Array.from(books[at].chapterNumbers || [])
+        const index = chapters.indexOf(bible.chapter)
+        let previous = null, next = null
+        if (index > 0) previous = entry(books[at], chapters[index - 1])
+        else if (at > 0) { const before = Array.from(books[at - 1].chapterNumbers || []); if (before.length) previous = entry(books[at - 1], before[before.length - 1]) }
+        if (index >= 0 && index < chapters.length - 1) next = entry(books[at], chapters[index + 1])
+        else if (at < books.length - 1) { const after = Array.from(books[at + 1].chapterNumbers || []); if (after.length) next = entry(books[at + 1], after[0]) }
+        return { previous: previous, next: next }
+    }
     readonly property var marginSpace: Margins.space({
         width: reading.width, columnX: readerNaturalX, columnWidth: readerColumnWidth,
         minLeft: readerSideInset, leftInset: Math.max(24 * readerScale, chapterNavReserve),
@@ -5071,7 +5086,10 @@ ApplicationWindow {
                             readonly property bool atEnd: chapterNav.before ? app.chapterBounds.first : app.chapterBounds.last
                             available: chapterNav.revealed && !atEnd && !app.rangeEditing && !bible.busy && !app.modalOpen
                             opacity: chapterNav.revealed ? 1 : 0
-                            tip: (chapterNav.before ? "Previous chapter" : "Next chapter") + " · " + app.keyText(chapterNav.modelData.id)
+                            // The destination passage and its key; at the Bible's bounds, where it is.
+                            readonly property var destination: chapterNav.before ? app.chapterNeighbors.previous : app.chapterNeighbors.next
+                            tip: destination ? destination.title + " · " + app.keyText(chapterNav.modelData.id)
+                                : chapterNav.before ? "First chapter" : "Last chapter"
                             onClicked: { app.chapterStep(chapterNav.modelData.delta); app.readerFocus() }
                             MouseArea {
                                 anchors.fill: parent

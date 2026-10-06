@@ -951,8 +951,10 @@ private slots:
         QCOMPARE(background(previous).alpha(), 0);
         QTest::mouseMove(window, center(previous)); QTRY_VERIFY(background(previous).alpha() > 0);
         QTRY_VERIFY(toolTipOf(previous)->property("visible").toBool());
-        QVERIFY(previous->property("tip").toString().startsWith("Previous chapter · h"));
-        QVERIFY(next->property("tip").toString().startsWith("Next chapter · l"));
+        // The tips name the destination passage and its key.
+        QCOMPARE(bible->chapter(), 2);
+        QVERIFY2(previous->property("tip").toString().startsWith("John 1 · h"), qPrintable(previous->property("tip").toString()));
+        QVERIFY(next->property("tip").toString().startsWith("John 3 · l"));
         shot("chapter-buttons");
         // Mouse: a click steps the chapter; the jump stack (History) is untouched.
         const auto stack = prop("jumpStack").toList(); const int at = prop("jumpIndex").toInt();
@@ -961,9 +963,17 @@ private slots:
         click(previous); QTRY_COMPARE(bible->chapter(), 1);
         QCOMPARE(prop("jumpStack").toList(), stack); QCOMPARE(prop("jumpIndex").toInt(), at);
         // Bible start and end: disabled.
+        // Across books (the fixture has Genesis 1–2 and John 1–3).
+        navigate("Genesis 2:1"); QTRY_COMPARE(bible->chapter(), 2);
+        QTRY_VERIFY(next->property("tip").toString().startsWith("John 1 · l"));
+        QVERIFY(previous->property("tip").toString().startsWith("Genesis 1 · h"));
+        navigate("John 1:1"); QTRY_VERIFY(previous->property("tip").toString().startsWith("Genesis 2 · h"));
         navigate("Genesis 1:1"); QTRY_VERIFY(!previous->isEnabled()); QVERIFY(next->isEnabled());
+        QCOMPARE(previous->property("tip").toString(), QString("First chapter"));
+        QVERIFY(next->property("tip").toString().startsWith("Genesis 2 · l"));
         click(previous); QCOMPARE(bible->book(), 1); QCOMPARE(bible->chapter(), 1);
         navigate("John 3:1"); QTRY_VERIFY(!next->isEnabled()); QVERIFY(previous->isEnabled());
+        QCOMPARE(next->property("tip").toString(), QString("Last chapter"));
         // Keyboard: never tab stops (h / l are the keys).
         call("readerFocus");
         for (int i = 0; i < 40; ++i) { key(Qt::Key_Tab); QVERIFY(focusName() != "chapterPreviousButton" && focusName() != "chapterNextButton"); }
