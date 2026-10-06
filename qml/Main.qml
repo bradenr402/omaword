@@ -1257,12 +1257,7 @@ ApplicationWindow {
             menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "toggleDesk"),
             menuDivider,
             menuAction("related", "Study", "related"),
-            menuAction("chapterFind", "Find in chapter", "chapterFind"),
-            menuDivider,
-            menuAction("previousChapter", "Previous chapter", "previousChapter"),
-            menuAction("nextChapter", "Next chapter", "nextChapter"),
-            menuAction("previousHeading", "Previous heading", "previousHeading"),
-            menuAction("nextHeading", "Next heading", "nextHeading")
+            menuAction("chapterFind", "Find in chapter", "chapterFind")
         ].concat(openRangeEntries(sceneX, sceneY))
             .concat(bible.focusMode ? [menuDivider, menuAction("leaveFocus", "Leave focus mode", "focus")] : [])
     }

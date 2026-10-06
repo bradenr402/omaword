@@ -194,8 +194,7 @@ class ContextMenuTest : public QObject
             return (kind == "bookmark" ? QString("bookmarkMarker") : kind == "note" ? QString("verseNoteMarker") : QString("verseTagMarker")) + QString::number(verse);
         return "blockInlineMarker:" + kind + ":open:" + reference;
     }
-    const QStringList passageIds = {"copy", "copyPlain", "|", "bookmark", "highlight", "note", "tags", "|", "desk", "|", "related", "chapterFind",
-        "|", "previousChapter", "nextChapter", "previousHeading", "nextHeading"};
+    const QStringList passageIds = {"copy", "copyPlain", "|", "bookmark", "highlight", "note", "tags", "|", "desk", "|", "related", "chapterFind"};
     const QStringList markerIds = {"open", "|", "editRange", "remove", "|", "copy", "copyPlain", "|", "desk"};
 private slots:
     void initTestCase() {
@@ -251,7 +250,7 @@ private slots:
         QCOMPARE(entry("highlight").value("text").toString(), QString("Highlight"));
         QCOMPARE(entry("desk").value("text").toString(), QString("Add to Desk"));
         QCOMPARE(entry("note").value("text").toString(), QString("Write note"));
-        // Dividers are thin border-colored rules between the five groups.
+        // Dividers are thin border-colored rules between the four groups.
         int dividers = 0;
         for (int i = 0; i < passageIds.size(); ++i) {
             if (passageIds[i] != "|") continue;
@@ -261,7 +260,7 @@ private slots:
             QCOMPARE(rule->height(), 1.0);
             QCOMPARE(rule->property("color").value<QColor>(), desktop->property("border").value<QColor>());
         }
-        QCOMPARE(dividers, 4);
+        QCOMPARE(dividers, 3);
         escape();
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         QCOMPARE(bible->selectionReference(), QString("John 1:3"));

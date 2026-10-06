@@ -1525,16 +1525,13 @@ private slots:
     void passageMenuStepsAndClickableMatchCounter() {
         navigate("John 2:5");
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        for (const auto &id : {"previousChapter", "nextChapter", "previousHeading", "nextHeading"}) QVERIFY2(menuIds().contains(id), id);
-        QCOMPARE(menuShortcut("previousChapter"), QString("h")); QCOMPARE(menuShortcut("nextChapter"), QString("l"));
-        QCOMPARE(menuShortcut("previousHeading"), QString("{")); QCOMPARE(menuShortcut("nextHeading"), QString("}"));
-        // Keyboard: choose Next chapter in the menu.
-        menuKeyTo("nextChapter"); QTRY_COMPARE(bible->chapter(), 3);
-        // Mouse: Previous chapter, then Next heading.
-        clickAt(versePoint(5), Qt::RightButton); chooseMenu("previousChapter"); QTRY_COMPARE(bible->chapter(), 2);
-        navigate("John 2:5");
-        clickAt(versePoint(5), Qt::RightButton); chooseMenu("nextHeading"); QTRY_COMPARE(bible->cursorVerse(), 20);
-        clickAt(versePoint(20), Qt::RightButton); chooseMenu("previousHeading"); QTRY_VERIFY(bible->cursorVerse() < 20);
+        // Chapter and heading steps live on h/l and {/}, not in the passage menu.
+        for (const auto &id : {"previousChapter", "nextChapter", "previousHeading", "nextHeading"}) QVERIFY2(!menuIds().contains(id), id);
+        QCOMPARE(menuIds().last(), QString("chapterFind"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
+        clickAt(versePoint(5), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        for (const auto &id : {"previousChapter", "nextChapter", "previousHeading", "nextHeading"}) QVERIFY2(!menuIds().contains(id), id);
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
         // The match counter: click next, shift click previous, right click for a menu.
         navigate("John 3:1"); key(Qt::Key_Slash); type("access"); key(Qt::Key_Return);
         QTRY_VERIFY(shown("searchMatchCount"));
