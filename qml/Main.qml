@@ -2564,8 +2564,15 @@ ApplicationWindow {
         const key = keys.find(function(candidate) { return keyHold.isDown(candidate) })
         if (key === undefined) return
         holdAction = action; holdKey = key; holdPress = keyHold.press(key)
-        holdStartedAt = holdTickAt = Date.now()
         holdRepeated = false
+        holdTimer.stop()
+        // The hold window opens once the step's own deferred work (a chapter's
+        // layout) has run, so that stall never counts as holding the key.
+        Qt.callLater(app.openHoldWindow)
+    }
+    function openHoldWindow() {
+        if (!holdAction || keyHold.press(holdKey) !== holdPress) return
+        holdStartedAt = holdTickAt = Date.now()
         holdTimer.interval = 150
         holdTimer.restart()
     }
