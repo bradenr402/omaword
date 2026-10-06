@@ -247,6 +247,20 @@ ApplicationWindow {
     // swallows unrelated keys (digits, Ctrl+K) across focus changes.
     property bool zPending: false
     onActiveFocusItemChanged: clearCount()
+    // Notes in Write mode: the editor keeps the keyboard. A press anywhere on
+    // the panel's chrome (its buttons, labels, background; notesPanel's
+    // passive PointHandler) hands it straight back, as do closing menus and
+    // dialogs (restorePanelFocus, the menu's own restore) and Write. Only
+    // Linked from (ctrl ↓) takes it, until esc.
+    readonly property bool notesWriting: notesOpen && notesDrawer.shown && hasSelection && !notePreview && !dialogOpen && !modalOpen
+    onNotesWritingChanged: if (notesWriting) noteRefocusTimer.restart()
+    Timer { id: noteRefocusTimer; interval: 0; onTriggered: app.keepNoteEditorFocus() }
+    function keepNoteEditorFocus() {
+        if (!notesWriting || bible.busy || noteEditor.activeFocus || linkedList.activeFocus) return
+        const item = activeFocusItem
+        const chrome = !item || item === notesDrawer.contentItem.parent || focusWithin(notesDrawer.contentItem)
+        if (chrome && noteEditor.enabled) noteEditor.forceActiveFocus()
+    }
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
     readonly property int readerSize: bible.fontSize
@@ -1906,7 +1920,7 @@ ApplicationWindow {
         else if (mods === Qt.ShiftModifier && event.key === Qt.Key_Y) action = function() { app.copyScope(row, true) }
         else if (plain && event.key === Qt.Key_D) action = function() { app.toggleScopeDesk(row) }
         else if ((plain && (event.key === Qt.Key_Escape || event.key === Qt.Key_Tab)) || event.key === Qt.Key_Backtab
-                || (mods === Qt.ShiftModifier && event.key === Qt.Key_Tab))
+                || (mods === Qt.ShiftModifier && event.key === Qt.Key_Tab) || (mods === Qt.ControlModifier && event.key === Qt.Key_Up))
             action = function() { noteEditor.forceActiveFocus() }
         else if ((plain && event.key === Qt.Key_Menu) || (mods === Qt.ShiftModifier && event.key === Qt.Key_F10))
             action = function() {
@@ -3541,7 +3555,7 @@ ApplicationWindow {
         { id: "notePreview", group: "Annotate", title: "Switch a note between Write and Preview (Notes panel)", sequences: ["Alt+V"], scope: "noteEditor" },
         { id: "noteKeepDraft", group: "Annotate", title: "Note changed in another window: save my draft (in a note)", sequences: ["Ctrl+S"], scope: "noteEditor" },
         { id: "noteUseSaved", group: "Annotate", title: "Note changed in another window: use the saved text (in a note)", sequences: ["Ctrl+Shift+S"], scope: "noteEditor" },
-        { id: "noteLinkedFrom", group: "Annotate", title: "Between a note and its Linked from list (in a note)", sequences: ["Tab", "Shift+Tab"], scope: "noteEditor" },
+        { id: "noteLinkedFrom", group: "Annotate", title: "From a note to its Linked from list (esc returns)", sequences: ["Ctrl+Down"], scope: "noteEditor" },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
@@ -5722,6 +5736,11 @@ ApplicationWindow {
                 color: desktop.background
                 radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
                 Keys.onEscapePressed: function(event) { app.closeNotes(); event.accepted = true }
+                // A press on the panel's chrome returns the keyboard to the editor (Write mode).
+                PointHandler {
+                    objectName: "notesChromePress"
+                    onActiveChanged: if (!active && app.notesWriting) noteRefocusTimer.restart()
+                }
                 Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
                 OverlayScrollView {
                     id: notesScroll
@@ -5754,14 +5773,6 @@ ApplicationWindow {
                         font.weight: Font.Medium
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
-                    }
-                    RowLayout {
-                        visible: app.hasSelection
-                        spacing: 4
-                        QuietButton { text: bible.selectionBookmarked ? "Bookmarked" : "Bookmark"; emphasized: bible.selectionBookmarked; compact: true; onClicked: app.runCommand("bookmark"); tip: app.keyText("bookmark") }
-                        QuietButton { text: bible.selectionHighlighted ? "Highlighted" : "Highlight"; emphasized: bible.selectionHighlighted; compact: true; onClicked: app.runCommand("highlight"); tip: app.keyText("highlight") }
-                        Item { Layout.fillWidth: true }
-                        QuietButton { objectName: "notesCopy"; text: "Copy"; compact: true; onClicked: app.copyPassage(); tip: "Copy passage as quotation · " + app.keyText("copy") }
                     }
                     FineRule { Layout.fillWidth: true }
                     ColumnLayout {
@@ -5854,19 +5865,24 @@ ApplicationWindow {
                                 onCursorPositionChanged: app.updateLinkSuggestions()
                                 Keys.onPressed: function(event) {
                                     const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                                    // Tab never types: it accepts a [[ suggestion, else moves to
-                                    // Linked from, else to the next control; shift tab to the previous
-                                    // one (Write, Preview, Bookmark, … are on the tab chain).
-                                    if (event.key === Qt.Key_Tab && event.modifiers === Qt.NoModifier) {
+                                    // Tab types a tab (it accepts a [[ suggestion instead, below);
+                                    // shift tab takes one back. The editor keeps the keyboard.
+                                    if (event.key === Qt.Key_Tab && event.modifiers === Qt.NoModifier && !(app.linkSuggesting && app.linkSuggestions.length)) {
                                         event.accepted = true
-                                        if (app.linkSuggesting && app.linkSuggestions.length) app.acceptLinkSuggestion()
-                                        else if (app.linkedFrom.length) app.focusLinkedFrom()
-                                        else app.focusNext(noteEditor, true)
+                                        noteEditor.remove(noteEditor.selectionStart, noteEditor.selectionEnd)
+                                        noteEditor.insert(noteEditor.cursorPosition, "\t")
                                         return
                                     }
                                     if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && event.modifiers === Qt.ShiftModifier)) {
                                         event.accepted = true
-                                        app.focusNext(noteEditor, false)
+                                        const at = noteEditor.cursorPosition
+                                        if (at > 0 && noteEditor.getText(at - 1, at) === "\t") noteEditor.remove(at - 1, at)
+                                        return
+                                    }
+                                    // ctrl ↓: the Linked from list (esc comes back).
+                                    if (event.key === Qt.Key_Down && event.modifiers === Qt.ControlModifier && app.linkedFrom.length) {
+                                        event.accepted = true
+                                        app.focusLinkedFrom()
                                         return
                                     }
                                     // A conflict with another window: ctrl s keeps this draft, ctrl shift S takes the saved text.
@@ -5962,8 +5978,8 @@ ApplicationWindow {
                     ColumnLayout {
                         id: linkedList
                         objectName: "linkedFrom"
-                        // Reached by tab from the note: j k move, enter opens,
-                        // y / shift Y copy, d Desk, esc (or tab) returns to the note.
+                        // Reached by ctrl ↓ from the note: j k move, enter opens,
+                        // y / shift Y copy, d Desk, esc (or ctrl ↑, tab) returns to the note.
                         property int currentIndex: 0
                         visible: app.linkedFrom.length > 0
                         Layout.fillWidth: true

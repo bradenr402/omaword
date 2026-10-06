@@ -234,6 +234,10 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   they act over it. Dispatch from Keybindings or Commands never closes panels. Catalog shortcuts
   recheck `shortcutEnabled` on activation (a popup's focus change can leave the
   binding stale).
+- Notes in Write mode keeps the keyboard in the editor (`notesWriting` /
+  `keepNoteEditorFocus`): clicks on the panel's chrome and closing menus or
+  dialogs hand it back. `tab` types a tab (accepts a `[[` suggestion instead),
+  `ctrl ↓` moves to Linked from, `esc` returns.
 
 ### LTR forcing
 - All Scripture layouts are LTR even when a paragraph begins in Hebrew:

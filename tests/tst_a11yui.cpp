@@ -857,9 +857,17 @@ private slots:
         QVERIFY(bible->navigate("John 1:7")); bible->selectVerses(7, 7); bible->setNoteText("Also John 3:16.");
         navigate("John 3:16"); bible->selectVerses(16, 16); call("readerFocus");
         key(Qt::Key_W); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        // The editor hint names tab; tab moves to the list and never types.
+        // No Bookmark, Highlight, or Copy buttons in the panel.
+        QVERIFY(!item("notesCopy"));
+        // Tab types a tab; shift tab takes it back; the editor keeps the keyboard.
+        key(Qt::Key_Tab); QCOMPARE(item("noteEditor")->property("text").toString(), QString("\t"));
+        QVERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_Tab, Qt::ShiftModifier); QCOMPARE(item("noteEditor")->property("text").toString(), QString());
+        QVERIFY(item("noteEditor")->hasActiveFocus());
+        // The editor hint names ctrl ↓; it moves to the list and never types.
         QTRY_VERIFY(item("notesHintsPart:linked from"));
-        key(Qt::Key_Tab); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        QVERIFY(object("notesHints")->property("plainText").toString().contains(QStringLiteral("ctrl ↓ linked from")));
+        key(Qt::Key_Down, Qt::ControlModifier); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
         QCOMPARE(item("noteEditor")->property("text").toString(), QString());
         QVERIFY(item("linkedHints")->isVisible());
         QCOMPARE(item("linkedFromRowBackground0")->property("color").value<QColor>().alphaF() > 0, true);
@@ -867,10 +875,10 @@ private slots:
         key(Qt::Key_K); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 0);
         // esc returns to the note (Notes stays open); shift tab too.
         key(Qt::Key_Escape); QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); QVERIFY(opened("notesDrawer"));
-        key(Qt::Key_Tab); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
-        key(Qt::Key_Tab, Qt::ShiftModifier); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_Down, Qt::ControlModifier); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        key(Qt::Key_Up, Qt::ControlModifier); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         // Enter opens the linking note; Notes stays open on it.
-        key(Qt::Key_Tab); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        key(Qt::Key_Down, Qt::ControlModifier); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
         key(Qt::Key_Return); QTRY_COMPARE(bible->selectionReference(), QString("John 1:5"));
         QVERIFY(opened("notesDrawer"));
         // [[ suggestions: tab accepts the suggestion instead.
@@ -880,10 +888,39 @@ private slots:
         key(Qt::Key_Tab); QTRY_VERIFY(!prop("linkSuggesting").toBool());
         QVERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(item("noteEditor")->property("text").toString().startsWith("John 3:1"));
-        // Mouse: the editor's tab hint and the list's open hint.
+        QVERIFY(!item("noteEditor")->property("text").toString().contains('\t'));
+        // Mouse: the editor's hint, the list's open hint, and a click on a row.
         item("noteEditor")->setProperty("text", QString());
         clickHint("notesHintsPart:linked from"); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
         key(Qt::Key_J); clickHint("linkedHintsPart:open"); QTRY_COMPARE(bible->selectionReference(), QString("John 1:7"));
+        navigate("John 3:16"); bible->selectVerses(16, 16); QTRY_VERIFY(item("linkedFromRow0") && item("linkedFromRow0")->isVisible());
+        QTest::qWait(50); click(item("linkedFromRow0")); QTRY_COMPARE(bible->selectionReference(), QString("John 1:5"));
+    }
+    // Notes in Write mode keeps the editor focused: after clicks on the panel's
+    // chrome, after its menus and dialogs close, and after Preview → Write.
+    void notesEditorKeepsTheKeyboard() {
+        navigate("John 3:16"); bible->selectVerses(16, 16); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        auto editor = item("noteEditor");
+        // A click on the panel background, its title, and the Write button.
+        auto panel = item("notesPanel");
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, panel->mapToScene(QPointF(panel->width() - 6, 6)).toPoint());
+        QTRY_VERIFY(editor->hasActiveFocus());
+        click(item("writeButton")); QTRY_VERIFY(editor->hasActiveFocus());
+        // Preview, then back to Write by click and by key.
+        click(item("previewButton")); QTRY_VERIFY(prop("notePreview").toBool()); QVERIFY(!editor->hasActiveFocus());
+        click(item("writeButton")); QTRY_VERIFY(editor->hasActiveFocus());
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(prop("notePreview").toBool());
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(!prop("notePreview").toBool()); QTRY_VERIFY(editor->hasActiveFocus());
+        // The editor's own menu, and a dialog over Notes.
+        QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, editor->mapToScene(QPointF(20, 10)).toPoint());
+        QTRY_VERIFY(menu()->property("opened").toBool()); key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
+        QTRY_VERIFY(editor->hasActiveFocus());
+        run("help"); QTRY_VERIFY(shown("helpDialog")); key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
+        QTRY_VERIFY(editor->hasActiveFocus());
+        // A click on a label in the panel too; typing goes on in the editor.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, panel->mapToScene(QPointF(40, 30)).toPoint());
+        QTRY_VERIFY(editor->hasActiveFocus());
+        type("kept"); QCOMPARE(bible->noteText(), QString("kept"));
     }
     void focusModeFooterRevealsInPlace() {
         const QPointF searchAt = item("searchControl")->mapToScene(QPointF());
@@ -2163,10 +2200,13 @@ private slots:
     }
     void reauditNotesTabChainAndConflictKeys() {
         navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        // shift tab goes to the previous control; tab with no Linked from to the next; neither types.
-        key(Qt::Key_Tab, Qt::ShiftModifier); QTRY_VERIFY(!item("noteEditor")->hasActiveFocus());
-        QVERIFY(window->activeFocusItem()); QCOMPARE(focusName(), QString("previewButton"));
-        key(Qt::Key_Return); QTRY_VERIFY(prop("notePreview").toBool());
+        // Tab and shift tab stay in the editor (tab types a tab, shift tab removes it).
+        key(Qt::Key_Tab, Qt::ShiftModifier); QVERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_Tab); QVERIFY(item("noteEditor")->hasActiveFocus());
+        QCOMPARE(item("noteEditor")->property("text").toString(), QString("\t"));
+        key(Qt::Key_Tab, Qt::ShiftModifier); QCOMPARE(item("noteEditor")->property("text").toString(), QString());
+        // Preview by mouse, back to Write by the hint.
+        click(item("previewButton")); QTRY_VERIFY(prop("notePreview").toBool());
         clickHint("notesHintsPart:write"); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_Tab); QTRY_VERIFY(!item("noteEditor")->hasActiveFocus());
         QCOMPARE(item("noteEditor")->property("text").toString(), QString());
@@ -2195,7 +2235,7 @@ private slots:
         window->resize(1200, 560); QTRY_COMPARE(window->height(), 560);
         navigate("John 3:16"); bible->selectVerses(16, 16); call("readerFocus");
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_Tab); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
+        key(Qt::Key_Down, Qt::ControlModifier); QTRY_VERIFY(item("linkedFrom")->hasActiveFocus());
         // G: the last row, scrolled into view; g: the first.
         key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 13);
         auto last = item("linkedFromRow13"); auto view = item("notesScroll");

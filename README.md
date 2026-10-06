@@ -119,7 +119,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt v`: Switch a note between Write and Preview (Notes panel)
 - `ctrl s`: Note changed in another window: save my draft (in a note)
 - `ctrl shift S`: Note changed in another window: use the saved text (in a note)
-- `tab` · `shift tab`: Between a note and its Linked from list (in a note)
+- `ctrl ↓`: From a note to its Linked from list (esc returns)
 
 ### Copy
 
@@ -238,7 +238,7 @@ These also work, but stay out of the in-app list:
 - History (`shift H`) lists passages you stayed on for a few seconds, shared by every window. It never goes into backups, and Commands can clear or disable it.
 
 ### Studying
-- Bookmark, highlight, tag, and write Markdown notes; notes save as you type. `alt v` switches a note between Write and Preview.
+- Bookmark, highlight, tag, and write Markdown notes; notes save as you type. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from).
 - In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
 - Quote part of a passage: `v` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.
 - The Study panel (`shift S`) follows the passage you are reading: its **Cross-references**, the chapter's **Footnotes**, and **Tags** — other passages you tagged the same way, ranked by shared tags. The passage's tags sit above the list as chips: `space` turns one off, `shift space` shows only it, `0` turns them all back on, and `a` includes every installed version. Footnotes also appear as small marks in the text.

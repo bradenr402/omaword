@@ -2825,7 +2825,7 @@ private slots:
         QCOMPARE(window->property("selectionAnchor").toInt(),1);
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(bible->noteText(),QString("Keep this canonical range note"));
-        click(item("notesCopy")); QCOMPARE(QApplication::clipboard()->text(),quoted);
+        QVERIFY(!item("notesCopy"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_Equal,Qt::ControlModifier | Qt::AltModifier);
         QTRY_VERIFY(window->property("freeSelectedText").toString().isEmpty());
