@@ -1463,22 +1463,48 @@ ApplicationWindow {
     }
     // Bookmark, note, and tag markers in every layout. One choice targets
     // that range; several overlapping ranges keep Open's chooser and Edit range.
+    function sameScope(a, b) {
+        return !!a && !!b && ["versionId", "book", "chapter", "start", "endBook", "endChapter", "end"].every(function(key) { return a[key] === b[key] })
+    }
+    // Whether shift E (Edit range at the selection) edits exactly `scope`.
+    function editKeyEdits(scope) {
+        if (!hasSelection || !scope || Array.isArray(scope)) return false
+        const ranges = Array.from(bible.annotationRanges(bible.tagScope()))
+        return ranges.length === 1 && sameScope(ranges[0], scope)
+    }
+    // An action on one of overlapping ranges: run at once for one range, else
+    // a second menu at the same point asks which range.
+    function onMarkerScope(choices, run, sceneX, sceneY) {
+        if (choices.length === 1) { run(choices[0]); return }
+        contextMenu.show("markerChoice", choices.map(function(scope, index) {
+            return { id: "range:" + index, text: scope.reference || "Range " + (index + 1), enabled: !bible.busy, run: function() { run(scope) } }
+        }), sceneX, sceneY)
+    }
     function openMarkerMenu(choices, kind, openMarker, editScope, sceneX, sceneY) {
-        choices = Array.from(choices || [])
-        const scope = choices.length === 1 ? choices[0] : null
+        choices = Array.from(choices || []).filter(function(scope) { return !!scope })
+        const several = choices.length > 1
         const ready = !rangeEditing && !bible.busy
+        const which = several ? "…" : ""
+        // Edit range edits the clicked marker's range (a chooser for overlaps);
+        // its key is shown only where shift E would edit that same range.
+        const edited = editScope || (several ? choices : choices[0])
+        const removeText = kind === "bookmark" ? "Remove bookmark" : kind === "tag" ? "Remove tags" : "Delete note…"
         contextMenu.show("marker", [
             { id: "open", text: "Open", enabled: ready, run: openMarker },
             menuDivider,
-            { id: "editRange", text: "Edit range", shortcut: menuKey("editRange"), enabled: ready,
-                run: function() { app.openRangeEditor(editScope, kind) } },
-            { id: "remove", text: kind === "bookmark" ? "Remove bookmark" : kind === "tag" ? "Remove tags" : "Delete note…",
-                enabled: ready && !!scope, run: function() { app.removeMarkerAnnotation(scope, kind) } },
+            { id: "editRange", text: "Edit range", shortcut: editKeyEdits(edited) ? menuKey("editRange") : "", enabled: ready && !!edited,
+                run: function() { app.openRangeEditor(edited, kind) } },
+            { id: "remove", text: removeText + (several && !removeText.endsWith("…") ? which : ""), enabled: ready && choices.length > 0,
+                run: function() { app.onMarkerScope(choices, function(scope) { app.removeMarkerAnnotation(scope, kind) }, sceneX, sceneY) } },
             menuDivider,
-            { id: "copy", text: "Copy passage", enabled: !bible.busy && !!scope, run: function() { app.copyScope(scope) } },
+            { id: "copy", text: "Copy passage" + which, enabled: !bible.busy && choices.length > 0,
+                run: function() { app.onMarkerScope(choices, function(scope) { app.copyScope(scope) }, sceneX, sceneY) } },
+            { id: "copyPlain", text: "Copy plain text" + which, enabled: !bible.busy && choices.length > 0,
+                run: function() { app.onMarkerScope(choices, function(scope) { app.copyScope(scope, true) }, sceneX, sceneY) } },
             menuDivider,
-            { id: "desk", text: scope && deskRowFor(scope) ? "Remove from Desk" : "Add to Desk", enabled: ready && !!scope,
-                run: function() { app.toggleScopeDesk(scope) } }
+            { id: "desk", text: several ? "Add to Desk or remove…" : choices[0] && deskRowFor(choices[0]) ? "Remove from Desk" : "Add to Desk",
+                enabled: ready && choices.length > 0,
+                run: function() { app.onMarkerScope(choices, function(scope) { app.toggleScopeDesk(scope) }, sceneX, sceneY) } }
         ], sceneX, sceneY)
     }
     function openDeskMenu(row, sceneX, sceneY) {
@@ -3209,6 +3235,27 @@ ApplicationWindow {
         versionSearch.text = ""
         versionResults.currentIndex = 0
         versionDialog.open()
+    }
+    // Versions rows (choosing a version): Switch · Re-import · Details & Attribution · Remove…
+    function openVersionMenu(index, sceneX, sceneY) {
+        const entry = versionResults.model[index]
+        if (!entry || versionDialog.removing || versionDialog.step !== 0) return
+        versionResults.currentIndex = index
+        versionResults.forceActiveFocus()
+        const ready = !bible.busy && !rangeEditing
+        const details = catalogEntry(entry.id)
+        contextMenu.show("version", [
+            { id: "switch", text: entry.active ? "Current version" : "Switch to " + (entry.abbreviation || entry.name), shortcut: KeyNotation.format("Return"),
+                enabled: ready && !entry.active, run: function() { app.switchVersion(entry.id) } },
+            entry.needsReimport ? { id: "reimport", text: "Re-import", shortcut: menuKey("reimportVersion"), enabled: ready && !catalog.busy,
+                run: function() { app.reimportVersion(entry) } } : null,
+            { id: "details", text: "Details & Attribution", enabled: !!details,
+                run: function() { catalogDetails.entry = details; catalogDetails.open() } },
+            menuDivider,
+            { id: "removeVersion", text: "Remove…", enabled: ready, run: function() {
+                versionDialog.removing = true; versionDialog.chosen = entry; versionDialog.removeAnnotations = false
+                versionDialog.step = 1; versionResults.currentIndex = 0; versionResults.forceActiveFocus() } }
+        ].filter(function(item) { return !!item }), sceneX, sceneY)
     }
     function versionEntries() {
         if (versionDialog.step === 1) return [
@@ -6231,6 +6278,10 @@ ApplicationWindow {
                     highlighted: ListView.isCurrentItem
                     onClicked: { versionResults.currentIndex = index; versionResults.forceActiveFocus(); app.acceptVersion() }
                     Keys.onPressed: function(event) { app.versionKey(event) }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: function(eventPoint) { app.openVersionMenu(versionEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                    }
                     background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: versionEntry.highlighted ? app.tint(desktop.accent, 0.11) : versionEntry.hovered ? desktop.surface : "transparent" }
                     contentItem: ColumnLayout {
                         id: versionEntryContent

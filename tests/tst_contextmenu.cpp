@@ -196,7 +196,7 @@ class ContextMenuTest : public QObject
     }
     const QStringList passageIds = {"copy", "copyPlain", "|", "bookmark", "highlight", "note", "tags", "|", "desk", "|", "related", "chapterFind",
         "|", "previousChapter", "nextChapter", "previousHeading", "nextHeading"};
-    const QStringList markerIds = {"open", "|", "editRange", "remove", "|", "copy", "|", "desk"};
+    const QStringList markerIds = {"open", "|", "editRange", "remove", "|", "copy", "copyPlain", "|", "desk"};
 private slots:
     void initTestCase() {
         first = fixtures.filePath("engnet.zip"); second = fixtures.filePath("eng-kjv.zip");
@@ -416,7 +416,8 @@ private slots:
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("marker"));
         QCOMPARE(ids(), markerIds);
-        QCOMPARE(entry("editRange").value("shortcut").toString(), QString("shift E"));
+        // shift E edits the selection's range (here none): the key is not shown.
+        QCOMPARE(entry("editRange").value("shortcut").toString(), QString());
         QCOMPARE(entry("remove").value("text").toString(), QString("Remove bookmark"));
         QCOMPARE(entry("desk").value("text").toString(), QString("Add to Desk"));
         // Copy passage copies the marker's range without moving the reader.
@@ -440,6 +441,8 @@ private slots:
         clickEntry("open");
         QTRY_COMPARE(bible->selectionReference(), reference);
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
+        // With the marker's range selected, shift E edits it: the key shows.
+        QCOMPARE(entry("editRange").value("shortcut").toString(), QString("shift E"));
         clickEntry("remove");
         QTRY_VERIFY(bible->collection().isEmpty());
     }
