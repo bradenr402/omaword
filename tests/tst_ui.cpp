@@ -2173,10 +2173,13 @@ private slots:
         const auto second = bible->tagScope();
         QVERIFY(bible->setTag(second,tag,true));
         QVERIFY(bible->navigate("John 3:5"));
+        // Let the navigation's own position restore land first (it would win under load).
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
         QTest::qWait(150);
         QVERIFY(QMetaObject::invokeMethod(window,"scrollToVerse",Q_ARG(QVariant,1),Q_ARG(QVariant,true)));
         QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         QTRY_VERIFY(item("verseTagMarker1") && item("verseTagMarker1")->isVisible());
+        QTRY_VERIFY(item("verseTagMarker1")->mapToScene(QPointF()).y() >= 0);
         QCOMPARE(prop("verseTagMarker1","entries").value<QJSValue>().toVariant().toList().size(),2);
         click(item("verseTagMarker1"));
         QTRY_VERIFY(prop("verseTagMenu","opened").toBool());
