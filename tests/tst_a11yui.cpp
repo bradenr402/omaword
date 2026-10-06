@@ -927,6 +927,11 @@ private slots:
         QCOMPARE(menuIds().last(), QString("leaveFocus")); QCOMPARE(menuShortcut("leaveFocus"), QString("f"));
         chooseMenu("leaveFocus"); QVERIFY(!bible->focusMode());
         key(Qt::Key_F); QVERIFY(bible->focusMode());
+        // Straight onto the focus button: the reveal is immediate, the guard
+        // keeps the new buttons inert, and the focus button itself still acts.
+        QTest::mouseMove(window, QPoint(window->width() / 2, 200)); QTRY_VERIFY(prop("footerQuiet").toBool());
+        QTest::mouseMove(window, center(item("focusControl"))); QVERIFY(!prop("footerQuiet").toBool());
+        QVERIFY(prop("footerGuard").toBool());
         click(item("focusControl")); QVERIFY(!bible->focusMode()); QVERIFY(readerFocused());
         // A cramped footer keeps its folds: the focus button shows only in focus mode there.
         desktop->setProperty("textScale", 1.8); window->resize(640, 480); QTRY_COMPARE(window->width(), 640);

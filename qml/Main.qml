@@ -607,7 +607,7 @@ ApplicationWindow {
         readingModeRestoreTimer.restart()
     }
     readonly property bool observedFocusMode: bible.focusMode
-    onObservedFocusModeChanged: { toastTimer.stop(); footerHoverRevealed = false; footerRevealTimer.stop(); footerHideTimer.stop(); Qt.callLater(app.applyFocusMode) }
+    onObservedFocusModeChanged: { toastTimer.stop(); footerHoverRevealed = false; footerHideTimer.stop(); Qt.callLater(app.applyFocusMode) }
     function applyFocusMode() {
         if (observedFocusMode) {
             if (!closeNotes()) { bible.setFocusMode(false); return }
@@ -6127,15 +6127,15 @@ ApplicationWindow {
     // the footer stays one row tall. More cramped hides the layout button;
     // really cramped folds the right group into "…" and hides ?. The reader
     // keeps the footer row inside floatingSafety.
-    // Focus mode keeps the footer but shows only the focus button. Resting the
-    // pointer on the footer for 250 ms reveals the rest where they always sit
-    // (their clicks wait 300 ms more, so a click aimed at the text is not
-    // caught); keyboard focus entering the footer reveals it at once.
+    // Focus mode keeps the footer but shows only the focus button. The pointer
+    // on the footer reveals the rest at once, where they always sit (their
+    // clicks wait 300 ms, so a click aimed at the focus button or the text is
+    // not caught by a button that just appeared); keyboard focus entering the
+    // footer reveals it too.
     property bool footerHoverRevealed: false
     readonly property bool footerFocused: !!activeFocusItem && activeFocusItem.footerButton === true
     readonly property bool footerQuiet: bible.focusMode && !footerHoverRevealed && !footerFocused
     readonly property bool footerGuard: footerGuardTimer.running
-    Timer { id: footerRevealTimer; interval: 250; onTriggered: { app.footerHoverRevealed = true; footerGuardTimer.restart() } }
     Timer { id: footerGuardTimer; interval: 300 }
     // Hiding waits briefly: moving between the zone and a button (or two
     // buttons) passes through a frame where neither reports the pointer.
@@ -6150,8 +6150,8 @@ ApplicationWindow {
     function updateFooterHover() {
         const hovered = footerHovered()
         if (hovered) footerHideTimer.stop()
-        if (hovered && bible.focusMode && !footerHoverRevealed) { if (!footerRevealTimer.running) footerRevealTimer.restart() }
-        else if (!hovered) { footerRevealTimer.stop(); if (footerHoverRevealed && !footerHideTimer.running) footerHideTimer.restart() }
+        if (hovered && bible.focusMode && !footerHoverRevealed) { footerHoverRevealed = true; footerGuardTimer.restart() }
+        else if (!hovered) { if (footerHoverRevealed && !footerHideTimer.running) footerHideTimer.restart() }
     }
     function footerFocusChanged() { if (footerFocused) footerGuardTimer.stop() }
     readonly property real footerMargin: 16 * controlScale
