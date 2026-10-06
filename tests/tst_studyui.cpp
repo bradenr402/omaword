@@ -209,7 +209,7 @@ private slots:
     void init() {
         session = std::make_unique<QTemporaryDir>(); qputenv("XDG_DATA_HOME", session->path().toUtf8());
         bible = std::make_unique<BibleBackend>(); install(source); bible->setReadingMode("verse");
-        if (QByteArray(QTest::currentTestFunction()).startsWith("reimport")) {
+        if (QByteArray(QTest::currentTestFunction()).startsWith("reimport") || QByteArray(QTest::currentTestFunction()) == "wordsOfJesusUnsupported") {
             // An installed generation from before schema 4, with a note to keep.
             QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); bible->setNoteText("Kept note");
             const QString file = installedFile(); bible.reset();
@@ -290,6 +290,39 @@ private slots:
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
         key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
         QTRY_VERIFY(!item("versionReimport:study") || !item("versionReimport:study")->isVisible());
+    }
+    // A version without words-of-Jesus marks: the switch is last, disabled,
+    // and off whatever is stored; alt j explains instead of toggling.
+    void wordsOfJesusUnsupported() {
+        QVERIFY(!bible->hasWordsOfJesus());
+        bible->setWordsOfJesus(true); QVERIFY(bible->wordsOfJesus());
+        const int plays = sounds->playCount();
+        key(Qt::Key_J, Qt::AltModifier);
+        QTRY_COMPARE(object("toast")->property("text").toString(), "Words of Jesus are not marked in " + bible->versionAbbreviation());
+        QCOMPARE(sounds->lastSound(), QString("error")); QVERIFY(sounds->playCount() > plays);
+        QVERIFY(bible->wordsOfJesus());
+        bible->setWordsOfJesus(false);
+        key(Qt::Key_J, Qt::AltModifier); QVERIFY(!bible->wordsOfJesus());
+        bible->setWordsOfJesus(true);
+        key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
+        auto toggle = item("settingwordsOfJesus"); QVERIFY(toggle && toggle->isVisible());
+        QVERIFY(!toggle->isEnabled()); QVERIFY(!toggle->property("checked").toBool());
+        // Below Margin notes and directly above the hint.
+        auto margin = item("settingmarginNotes"), hint = item("wordsOfJesusUnmarked");
+        QVERIFY(hint->isVisible());
+        const auto content = toggle->parentItem();
+        QVERIFY(toggle->mapToItem(content, QPointF()).y() > margin->mapToItem(content, QPointF()).y());
+        const double gap = hint->mapToItem(content, QPointF()).y() - (toggle->mapToItem(content, QPointF()).y() + toggle->height());
+        QVERIFY2(gap >= 0 && gap < 20, qPrintable(QString::number(gap)));
+        for (auto child : content->childItems()) {
+            if (child == toggle || !child->isVisible() || child->metaObject()->indexOfProperty("catalogAction") < 0) continue;
+            QVERIFY2(child->mapToItem(content, QPointF()).y() < toggle->mapToItem(content, QPointF()).y(), qPrintable(child->objectName()));
+        }
+        // Tab never lands on it; a click does nothing.
+        for (int i = 0; i < 12; ++i) { key(Qt::Key_Tab); QVERIFY(!toggle->hasActiveFocus()); }
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, toggle->mapToScene(QPointF(toggle->width() - 20, toggle->height() / 2)).toPoint());
+        QCoreApplication::processEvents();
+        QVERIFY(bible->wordsOfJesus()); QVERIFY(!toggle->property("checked").toBool());
     }
     void reimportLocalFilePicker() {
         key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());

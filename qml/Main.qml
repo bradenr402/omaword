@@ -3534,10 +3534,11 @@ ApplicationWindow {
         { id: "numbers", group: "Reading", title: "Show verse numbers", sequences: ["Alt+N"], setting: "showVerseNumbers", command: true },
         { id: "headings", group: "Reading", title: "Show headings", sequences: ["Alt+H"], setting: "showHeadings", command: true },
         { id: "versePicker", group: "Reading", title: "Verse picker", sequences: ["Alt+P"], setting: "versePicker", command: true },
-        { id: "wordsOfJesus", group: "Reading", title: "Highlight words of Jesus", sequences: ["Alt+J"], setting: "wordsOfJesus", command: true },
         { id: "chapterOutline", group: "Reading", title: "Chapter outline", sequences: ["Alt+O"], setting: "chapterOutline", command: true },
         // alt w: w writes a note; alt w shows notes in the margin.
         { id: "marginNotes", group: "Reading", title: "Margin notes", sequences: ["Alt+W"], setting: "marginNotes", command: true },
+        // Last of the switches: right above Reading settings' "not marked" hint.
+        { id: "wordsOfJesus", group: "Reading", title: "Highlight words of Jesus", sequences: ["Alt+J"], setting: "wordsOfJesus", command: true },
         { id: "readingMode", group: "Reading", title: "Layout", sequences: ["Alt+L"], command: true },
         { id: "soundEffects", group: "Reading", title: "Sound effects", sequences: ["Alt+S"], scope: "global", command: true },
         { id: "reduceMotion", group: "Reading", title: "Animations", sequences: ["Alt+M"], scope: "global", command: true },
@@ -4038,7 +4039,15 @@ ApplicationWindow {
         case "numbers": bible.setShowVerseNumbers(!bible.showVerseNumbers); break
         case "headings": bible.setShowHeadings(!bible.showHeadings); break
         case "versePicker": bible.setVersePicker(!bible.versePicker); break
-        case "wordsOfJesus": bible.setWordsOfJesus(!bible.wordsOfJesus); break
+        case "wordsOfJesus":
+            // A version without \wj marks: say so; the setting stays as it is.
+            if (!bible.hasWordsOfJesus) {
+                notify("Words of Jesus are not marked in " + (bible.versionAbbreviation || "this version"), true)
+                sounds.play("error")
+                break
+            }
+            bible.setWordsOfJesus(!bible.wordsOfJesus)
+            break
         case "chapterOutline": bible.setChapterOutline(!bible.chapterOutline); break
         case "marginNotes": bible.setMarginNotes(!bible.marginNotes); break
         case "previousHeading": headingStep(-1, count); break
@@ -4302,8 +4311,11 @@ ApplicationWindow {
         required property var catalogAction
         objectName: "setting" + catalogAction.id
         text: catalogAction.title
-        checked: !!bible[catalogAction.setting]
-        enabled: app.actionAvailable(catalogAction)
+        // Words of Jesus in a version that does not mark them: off and disabled,
+        // whatever the stored setting.
+        readonly property bool unsupported: catalogAction.id === "wordsOfJesus" && bible.ready && !bible.hasWordsOfJesus
+        checked: !unsupported && !!bible[catalogAction.setting]
+        enabled: !unsupported && app.actionAvailable(catalogAction)
         implicitHeight: Math.max(40 * app.scale, settingLabel.implicitHeight + 16 * app.scale)
         padding: 0
         // Room inside the focus outline.
@@ -4339,7 +4351,7 @@ ApplicationWindow {
                 id: settingLabel
                 objectName: settingSwitch.objectName + "Label"
                 text: settingSwitch.text
-                color: desktop.foreground
+                color: settingSwitch.enabled ? desktop.foreground : desktop.muted
                 font.pixelSize: 13 * app.scale
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -7784,6 +7796,15 @@ ApplicationWindow {
                     Layout.fillWidth: true
                 }
             }
+            Label {
+                objectName: "wordsOfJesusUnmarked"
+                visible: bible.ready && !bible.hasWordsOfJesus
+                text: "Words of Jesus are not marked in this version" + (bible.textSchema > 0 && bible.textSchema < 4 ? " (re-import it in Versions to check)." : ".")
+                color: desktop.muted
+                font.pixelSize: 12 * app.scale
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
             Repeater {
                 model: Array.from(bible.versions).filter(function(version) { return version.needsReimport })
                 delegate: RowLayout {
@@ -7801,15 +7822,6 @@ ApplicationWindow {
                         onClicked: app.reimportVersion(reimportRow.modelData)
                     }
                 }
-            }
-            Label {
-                objectName: "wordsOfJesusUnmarked"
-                visible: bible.ready && !bible.hasWordsOfJesus
-                text: "Words of Jesus are not marked in this version" + (bible.textSchema > 0 && bible.textSchema < 4 ? " (re-import it in Versions to check)." : ".")
-                color: desktop.muted
-                font.pixelSize: 12 * app.scale
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
             }
             // The on/off switches above; the layout and sliders below.
             FineRule { objectName: "settingsSwitchesRule"; Layout.fillWidth: true }
