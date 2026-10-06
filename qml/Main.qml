@@ -1490,6 +1490,8 @@ ApplicationWindow {
         const which = several ? "…" : ""
         // Edit range edits the clicked marker's range (a chooser for overlaps);
         // its key is shown only where shift E would edit that same range.
+        // (Verse layout passes its edit scope as a list: one range is that range.)
+        if (Array.isArray(editScope) && editScope.length === 1) editScope = editScope[0]
         const edited = editScope || (several ? choices : choices[0])
         const removeText = kind === "bookmark" ? "Remove bookmark" : kind === "tag" ? "Remove tags" : "Delete note…"
         contextMenu.show("marker", [
