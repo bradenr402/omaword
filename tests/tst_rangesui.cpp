@@ -683,6 +683,55 @@ private slots:
         key(Qt::Key_Return); QTest::qWait(100); chooserBounds(true);
         key(Qt::Key_Escape); QVERIFY(!prop("sessionOpen").toBool());
     }
+    // Visual checks: with OMAWORD_SHOTS set to a directory, save the window.
+    void shot(const QString &name) {
+        const auto directory = qEnvironmentVariable("OMAWORD_SHOTS");
+        if (directory.isEmpty()) return;
+        QCoreApplication::processEvents(); QTest::qWait(40);
+        QVERIFY(window->grabWindow().save(directory + "/" + name + ".png"));
+    }
+    // The status bar's title never runs into its key hints, at any width or scale.
+    void editStatusLayout_data() {
+        QTest::addColumn<int>("width"); QTest::addColumn<double>("scale");
+        for (int width : {360, 520, 760, 1200}) for (double scale : {1.0, 1.5, 2.0})
+            QTest::newRow(qPrintable(QString("%1@%2").arg(width).arg(scale))) << width << scale;
+    }
+    void editStatusLayout() {
+        QFETCH(int, width); QFETCH(double, scale);
+        QVERIFY(bible->toggleBookmark()); const auto source = bible->tagScope();
+        open(source); begin();
+        desktop->setProperty("textScale", scale); window->resize(width, 700);
+        QTRY_COMPARE(window->width(), width); QTest::qWait(80);
+        auto title = item("rangeEditTitle"), hints = item("rangeEditHints"), status = item("rangeEditStatus");
+        QVERIFY(title && hints && status && status->isVisible());
+        auto check = [&](const QString &tag) {
+            QTest::qWait(40);
+            const auto t = title->mapRectToScene(QRectF(0, 0, title->width(), title->height()));
+            QVERIFY2(t.right() <= status->mapToScene(QPointF(status->width(), 0)).x() + 0.5, qPrintable(tag));
+            // The title shows whole or elided, never clipped by the hints.
+            QVERIFY2(title->property("truncated").toBool() || title->width() + 0.5 >= title->property("implicitWidth").toDouble(), qPrintable(tag));
+            for (auto part : hints->childItems()) {
+                if (!part->isVisible() || part->width() <= 0) continue;
+                const auto r = part->mapRectToScene(QRectF(0, 0, part->width(), part->height()));
+                QVERIFY2(!r.intersects(t), qPrintable(tag + " " + part->objectName()));
+                // A gap on the title's line, or the hints on their own lines below.
+                if (r.top() < t.bottom() - 1) QVERIFY2(r.left() >= t.right() + 8 * scale - 0.5, qPrintable(tag + " gap " + part->objectName()));
+                QVERIFY2(r.right() <= status->mapToScene(QPointF(status->width(), 0)).x() + 0.5, qPrintable(tag + " right " + part->objectName()));
+            }
+            // Everything stays inside the bar.
+            QVERIFY2(hints->mapToScene(QPointF(0, hints->height())).y() <= status->mapToScene(QPointF(0, status->height())).y() + 0.5, qPrintable(tag));
+        };
+        shot(QString("rangestatus-%1-%2-end").arg(width).arg(scale));
+        check("end");
+        QCOMPARE(prop("endpoint").toString(), QString("end"));
+        // Keyboard swap, then a mouse click on the swap hint.
+        key(Qt::Key_O); QTRY_COMPARE(prop("endpoint").toString(), QString("start"));
+        shot(QString("rangestatus-%1-%2-start").arg(width).arg(scale));
+        check("start");
+        QTRY_VERIFY(item("rangeEditHintsPart:swap")->property("clickable").toBool());
+        click("rangeEditHintsPart:swap"); QTRY_COMPARE(prop("endpoint").toString(), QString("end"));
+        check("clicked");
+    }
     void markerEntrypoints_data() {
         QTest::addColumn<QString>("mode");
         QTest::newRow("verse") << QString("verse"); QTest::newRow("block") << QString("block"); QTest::newRow("paragraph") << QString("paragraph");

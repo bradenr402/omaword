@@ -4761,14 +4761,25 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 8
                 spacing: 2
-                RowLayout {
+                // The title and its keys share a line while the title needs at
+                // most half the bar; otherwise the keys move to their own lines
+                // below. Either way a clear gap separates them (they used to touch).
+                GridLayout {
+                    id: rangeStatusTop
+                    readonly property real gap: 16 * app.scale
+                    readonly property bool sideBySide: rangeEditTitle.implicitWidth + gap <= width / 2
                     Layout.fillWidth: true
-                    spacing: rangeEditKeys.spacing
+                    columns: sideBySide ? 2 : 1
+                    columnSpacing: gap
+                    rowSpacing: 2
                     Label {
+                        id: rangeEditTitle
                         objectName: "rangeEditTitle"
                         Layout.alignment: Qt.AlignTop
+                        Layout.maximumWidth: rangeStatusTop.width
                         text: "Edit range · " + rangeEditor.endpoint
                         textFormat: Text.PlainText
+                        elide: Text.ElideRight
                         color: desktop.accent
                         font.pixelSize: 13 * app.scale
                     }
