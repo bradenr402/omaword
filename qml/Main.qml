@@ -3613,6 +3613,18 @@ ApplicationWindow {
         const byKey = button.keyActivated
         button.keyActivated = false
         if (!byKey && button.activeFocus) restorePanelFocus()
+        // Pressed by key, a button that hides itself (Dismiss, Save my draft,
+        // Retry…) would strand the keyboard on the scope above it: hand it on.
+        if (byKey) Qt.callLater(function() {
+            if (button.visible) return
+            const focus = app.activeFocusItem
+            let lost = !focus || !focus.visible
+            for (let at = button; at && !lost; at = at.parent) if (at === focus) lost = true
+            if (!lost) return
+            const target = button.focusTarget
+            if (target && target.visible && target.enabled) target.forceActiveFocus()
+            else app.restorePanelFocus()
+        })
     }
     // Clickable hint rows (HintRow): [keys, label, run, enabled] per part. A
     // part runs what its key would, and is clickable only while that works
@@ -4201,6 +4213,8 @@ ApplicationWindow {
         // Chrome buttons take the keyboard only by tab; a mouse click leaves it where it was.
         focusPolicy: Qt.TabFocus
         property bool keyActivated: false
+        // Where the keyboard goes when a key press hides this button (else restorePanelFocus).
+        property Item focusTarget: null
         Keys.onShortcutOverride: function(event) { app.buttonShortcutOverride(event) }
         Keys.onPressed: function(event) { if (event.key === Qt.Key_Space) button.keyActivated = true }
         Keys.onReturnPressed: function(event) { app.buttonEnter(button, event) }
@@ -4405,7 +4419,15 @@ ApplicationWindow {
         font.pixelSize: 13 * app.scale
         onPressed: app.clearCount()
         property bool keyActivated: false
-        Keys.onShortcutOverride: function(event) { app.buttonShortcutOverride(event) }
+        // Where the keyboard goes when a key press hides this button (else restorePanelFocus).
+        property Item focusTarget: null
+        // esc on a footer button first hands the keyboard back to the reader
+        // (or the open panel); the reader's esc rules apply from there.
+        Keys.onShortcutOverride: function(event) {
+            app.buttonShortcutOverride(event)
+            if (event.key === Qt.Key_Escape && (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier) event.accepted = true
+        }
+        Keys.onEscapePressed: function(event) { event.accepted = true; app.restorePanelFocus() }
         Keys.onPressed: function(event) { if (event.key === Qt.Key_Space) floatingButton.keyActivated = true }
         Keys.onReturnPressed: function(event) { app.buttonEnter(floatingButton, event) }
         Keys.onEnterPressed: function(event) { app.buttonEnter(floatingButton, event) }
@@ -4797,7 +4819,7 @@ ApplicationWindow {
                 anchors.leftMargin: 24
                 spacing: 16
                 Label { objectName: "errorMessage"; text: bible.error; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
-                QuietButton { objectName: "errorDismiss"; text: "Dismiss"; compact: true; tip: "Dismiss · " + KeyNotation.format("Escape"); onClicked: bible.clearError() }
+                QuietButton { objectName: "errorDismiss"; text: "Dismiss"; compact: true; focusTarget: readerSurface; tip: "Dismiss · " + KeyNotation.format("Escape"); onClicked: bible.clearError() }
             }
         }
         Item {
@@ -8070,8 +8092,8 @@ ApplicationWindow {
                 visible: catalog.busy || ((catalog.error.length > 0 || app.downloadMessage.length > 0) && app.downloadId.length > 0)
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                QuietButton { objectName: "catalogCancel"; text: "Cancel"; onClicked: app.cancelDownload() }
-                QuietButton { objectName: "catalogRetry"; text: "Retry"; visible: !catalog.busy; enabled: !bible.busy; onClicked: { if (app.pendingDownload.toString().length) app.importDownloaded(); else app.installVersion(app.downloadId) } }
+                QuietButton { objectName: "catalogCancel"; text: "Cancel"; focusTarget: catalogSearch; onClicked: app.cancelDownload() }
+                QuietButton { objectName: "catalogRetry"; text: "Retry"; focusTarget: catalogSearch; visible: !catalog.busy; enabled: !bible.busy; onClicked: { if (app.pendingDownload.toString().length) app.importDownloaded(); else app.installVersion(app.downloadId) } }
             }
             FineRule { Layout.fillWidth: true }
             RowLayout {
@@ -8109,7 +8131,7 @@ ApplicationWindow {
         id: catalogDetails
         objectName: "catalogDetails"
         property var entry: null
-        onClosed: { if (importGuide.visible) catalogSearch.forceActiveFocus(); else app.restorePanelFocus() }
+        onClosed: { if (importGuide.visible) catalogSearch.forceActiveFocus(); else if (versionDialog.visible) versionResults.forceActiveFocus(); else app.restorePanelFocus() }
         onVisibleChanged: if (visible) { detailsScroll.contentItem.contentY = 0; detailsScroll.forceActiveFocus() }
         contentItem: KeyScrollView {
             id: detailsScroll
@@ -8165,7 +8187,15 @@ ApplicationWindow {
         }
         contentItem: ColumnLayout {
             spacing: 12 * app.scale
-            Keys.onPressed: function(event) { app.scrollKey(backupScopeScroll.contentItem as Flickable, event) }
+            // ← → move between Cancel and Choose file…; the scroll keys scroll.
+            Keys.onPressed: function(event) {
+                if ((event.key === Qt.Key_Left || event.key === Qt.Key_Right) && event.modifiers === Qt.NoModifier) {
+                    if (backupCancel.activeFocus && backupChoose.enabled) backupChoose.forceActiveFocus(); else backupCancel.forceActiveFocus()
+                    event.accepted = true
+                    return
+                }
+                app.scrollKey(backupScopeScroll.contentItem as Flickable, event)
+            }
             Label {
                 text: "Save " + bible.versionAbbreviation + " annotation backup"
                 color: desktop.foreground; font.pixelSize: 22 * app.scale
@@ -8193,6 +8223,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 QuietButton {
+                    id: backupCancel
                     objectName: "backupCancel"
                     text: "Cancel"
                     onClicked: backupScope.close()
@@ -8205,6 +8236,14 @@ ApplicationWindow {
                     enabled: app.actionAvailable("backup")
                     onClicked: { if (!app.flushNote()) return; backupScope.choosePending = true; backupScope.close() }
                 }
+            }
+            HintRow {
+                objectName: "backupScopeHints"
+                theme: desktop
+                parts: [app.confirmationHintParts(backupCancel, backupChoose, backupScope)[0], [["J", "K"], "scroll"]]
+                    .concat(app.confirmationHintParts(backupCancel, backupChoose, backupScope).slice(1))
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
         }
     }
@@ -8317,7 +8356,14 @@ ApplicationWindow {
             spacing: 16 * app.scale
             Label { text: "Unable to complete action"; color: desktop.foreground; font.pixelSize: 22 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             Label { objectName: "focusedErrorMessage"; text: errorDialog.message; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; Accessible.role: Accessible.AlertMessage }
-            QuietButton { id: errorDismiss; text: "Dismiss"; Layout.alignment: Qt.AlignRight; onClicked: errorDialog.close() }
+            QuietButton { id: errorDismiss; objectName: "errorDialogDismiss"; text: "Dismiss"; Layout.alignment: Qt.AlignRight; onClicked: errorDialog.close() }
+            HintRow {
+                objectName: "errorDialogHints"
+                theme: desktop
+                parts: [["Return", "dismiss", function() { errorDialog.close() }], ["Escape", "close", function() { errorDialog.close() }]]
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
+            }
         }
     }
 
