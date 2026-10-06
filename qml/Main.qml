@@ -4157,6 +4157,11 @@ ApplicationWindow {
             if (gap < distance) { distance = gap; row = i }
         }
         if (row < 0) row = fallback
+        // A page showing the whole first (last) row takes it, so pgdn then
+        // pgup returns to the top whatever the row heights.
+        const edge = view.itemAtIndex(direction < 0 ? 0 : view.count - 1)
+        if (edge && edge.y >= top - 1 && edge.y + edge.height <= top + view.height + 1)
+            row = direction < 0 ? 0 : view.count - 1
         view.currentIndex = row
         view.contentY = top
     }

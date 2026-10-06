@@ -1443,6 +1443,10 @@ private slots:
         key(Qt::Key_PageUp);
         QCOMPARE(prop("keybindingResults","contentY").toDouble(),top);
         QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
+        // Likewise back to the last row from the end.
+        key(Qt::Key_End); key(Qt::Key_PageUp); key(Qt::Key_PageDown);
+        QCOMPARE(prop("keybindingResults","currentIndex").toInt(),count - 1);
+        key(Qt::Key_Home);
         const QPoint hover = bar->mapToScene(QPointF(bar->width()/2,bar->height()/2)).toPoint();
         QTest::mouseMove(window,hover);
         QTRY_VERIFY(bar->property("hovered").toBool());
@@ -1457,7 +1461,9 @@ private slots:
         QCOMPARE(prop("keybindingResults","count").toInt(),1);
         key(Qt::Key_A,Qt::ControlModifier); type("no such binding");
         QCOMPARE(prop("keybindingResults","count").toInt(),0);
-        key(Qt::Key_End); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),-1);
+        // In a typed search home / end move the caret, not the list.
+        key(Qt::Key_Home); QCOMPARE(item("keybindingSearch")->property("cursorPosition").toInt(),0);
+        key(Qt::Key_End); QCOMPARE(item("keybindingSearch")->property("cursorPosition").toInt(),15);
         key(Qt::Key_A,Qt::ControlModifier); type("reset line height");
         QCOMPARE(prop("keybindingResults","count").toInt(),1);
         bible->setLineHeight(2.0);
@@ -1514,7 +1520,9 @@ private slots:
         // Use executable panel rows for the dispatch check; their order/height
         // can change independently of the full-catalog geometry checks above.
         bible->selectVerses(1,1); // Study needs a selection to be executable.
-        type("panel");
+        // "study panel", not "panel": the Write/Preview row "(Notes panel)"
+        // is unavailable without an open note.
+        type("study panel");
         key(Qt::Key_Home); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
         key(Qt::Key_PageDown);
         QVERIFY(current()->property("available").toBool());
