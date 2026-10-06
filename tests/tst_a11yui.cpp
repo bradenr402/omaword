@@ -2468,6 +2468,8 @@ private slots:
         QTRY_VERIFY(readerY() > before);
     }
     void reauditChapterFindChromeClicks() {
+        // A settled chapter: a late text load would refresh the search and close the prompt.
+        navigate("John 3:1");
         call("readerFocus"); QTest::keyClick(window, '/'); QTRY_VERIFY(prop("findPromptOpen").toBool());
         type("words");
         auto find = item("chapterFind");
