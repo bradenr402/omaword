@@ -1327,13 +1327,16 @@ ApplicationWindow {
         }
         return Qt.point(point.x, Math.max(view.y, Math.min(view.y + reading.height - 24 * readerScale, point.y)))
     }
-    // The menu key (shift F10) in a text field opens its text menu at the caret.
+    // The menu key (shift F10) in a text field opens its text menu at the caret,
+    // except in the palette while its current row has a menu: the key opens
+    // that row's menu there (a right click on the field still gives the text menu).
     Shortcut {
         objectName: "textMenuKey"
         // Application context: modal popups (palette, dialogs) hold text fields too.
         context: Qt.ApplicationShortcut
         sequences: ["Menu", "Shift+F10"]
         enabled: app.active && app.textInputActive() && !app.contextMenuOpen
+            && !(passagePalette.visible && paletteResults.currentIndex >= 0 && !!app.paletteRowMenu(paletteResults.model[paletteResults.currentIndex]))
         onActivated: {
             const field = app.activeFocusItem
             if (!field || typeof field.positionToRectangle !== "function") { app.rejected(); return }
