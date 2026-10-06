@@ -38,7 +38,8 @@ int characterEnd(const QList<Verse> &verses, Position at);
 // poetry a newline, otherwise one space. Plain text is the selection as is.
 // A quotation replaces omitted text with an ellipsis where the selection
 // starts after a verse's start or ends before its end (trimming whitespace and
-// punctuation at the cut), numbers only verses whose beginning is selected
+// punctuation at the cut; the ellipsis is spaced from the words but not from
+// the quotation marks), numbers only verses whose beginning is selected
 // (never a single verse), and appends the reference.
 QString text(const QList<Verse> &verses, Position start, Position end, bool quotation,
              const QString &reference = QString());

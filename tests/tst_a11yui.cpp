@@ -1112,7 +1112,7 @@ private slots:
             keys("l"); keys("iw"); QVERIFY(charAt(charAnchor(), 16, 0)); QVERIFY(charAt(charCursor(), 16, 2));
             keys("aw"); QVERIFY(charAt(charCursor(), 16, 6));
             keys("y"); QVERIFY(!prop("charMode").toBool());
-            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“For God…”\n\n—John 3:16"));
+            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“For God …”\n\n—John 3:16"));
             QCOMPARE(lastSound(), QString("chime"));
             // Across a verse break: y quotes with the later verse's number, shift Y is plain.
             key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
@@ -1123,8 +1123,8 @@ private slots:
             QCOMPARE(QGuiApplication::clipboard()->text(), plain);
             key(Qt::Key_V); keys("wo)w"); QVERIFY(charAt(charCursor(), 17, 9));
             key(Qt::Key_C, Qt::ControlModifier);
-            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“…God so loved the world that he gave his Son. ¹⁷ Original a…”\n\n—John 3:16–17"));
-            key(Qt::Key_V, Qt::ShiftModifier); keys(")h"); keys("Y");
+            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“… God so loved the world that he gave his Son. ¹⁷ Original a …”\n\n—John 3:16–17"));
+            key(Qt::Key_V); keys(")h"); keys("Y");
             QCOMPARE(QGuiApplication::clipboard()->text(), v16);
             QVERIFY(warnings.isEmpty());
         }
@@ -1158,7 +1158,7 @@ private slots:
             QGuiApplication::clipboard()->clear();
             key(Qt::Key_C, Qt::ControlModifier);
             const QString quote = QGuiApplication::clipboard()->text();
-            QVERIFY2(quote.startsWith(QStringLiteral("“…God so loved")) && quote.endsWith(QStringLiteral("…”\n\n—John 3:16")), qPrintable(mode + ": " + quote));
+            QVERIFY2(quote.startsWith(QStringLiteral("“… God so loved")) && quote.endsWith(QStringLiteral(" …”\n\n—John 3:16")), qPrintable(mode + ": " + quote));
             QCOMPARE(toast(), QString("Selected text copied as quotation"));
             key(Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier);
             QCOMPARE(QGuiApplication::clipboard()->text(), prop("freeSelectedText").toString());
@@ -1168,7 +1168,7 @@ private slots:
             QCOMPARE(menuIds().mid(0, 2), QStringList({"copySelected", "copySelectedPlain"}));
             QCOMPARE(menuShortcut("copySelectedPlain"), QString("ctrl shift C"));
             QGuiApplication::clipboard()->clear(); chooseMenu("copySelected");
-            QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(QStringLiteral("“…God")));
+            QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(QStringLiteral("“… God")));
             // A drag across a verse break: the later verse is numbered.
             const QPoint end = charPoint(17, 7);
             drag(from, end); QTRY_VERIFY(!prop("freeSelectedText").toString().isEmpty());
@@ -1574,7 +1574,7 @@ private slots:
             QVERIFY2(!opened("notesDrawer"), qPrintable(mode));
             // ctrl c then copies it as a quotation.
             key(Qt::Key_C, Qt::ControlModifier);
-            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“…loved…”\n\n—John 3:16"));
+            QCOMPARE(QGuiApplication::clipboard()->text(), QStringLiteral("“… loved …”\n\n—John 3:16"));
             // Mouse: double-clicking the verse number opens Notes on that verse.
             QPoint number;
             if (mode == "verse") number = item("verseNumber17")->mapToScene(QPointF(8, 12)).toPoint();

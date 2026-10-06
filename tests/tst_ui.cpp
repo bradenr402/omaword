@@ -2795,8 +2795,8 @@ private slots:
         QCOMPARE(QApplication::clipboard()->text(),expected);
         // ctrl c quotes it: ellipses at the cut verses, numbers where a verse starts.
         key(Qt::Key_C,Qt::ControlModifier);
-        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“…café")),qPrintable(QApplication::clipboard()->text()));
-        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral("…”\n\n—John 3:1–3")));
+        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
+        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n—John 3:1–3")));
         key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),quoted);
         key(Qt::Key_Y,Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),plain);
         // With selected text, ctrl shift C copies that text; shift Y the passage.
@@ -3149,8 +3149,8 @@ private slots:
         item("readerSurface")->forceActiveFocus();
         QApplication::clipboard()->setText("replace again");
         key(Qt::Key_C,Qt::ControlModifier);
-        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“…café")),qPrintable(QApplication::clipboard()->text()));
-        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral("…”\n\n—John 3:1–3")));
+        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
+        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n—John 3:1–3")));
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),expected);
         // Middle clicks must not consume the free selection or alter the

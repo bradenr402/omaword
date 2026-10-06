@@ -295,7 +295,9 @@ QString text(const QList<Verse> &verses, Position start, Position end, bool quot
             if (cutStart) { int i = 0; while (i < trimmed.size() && cutChar(trimmed.at(i))) ++i; trimmed = trimmed.mid(i); }
             if (cutEnd) { int i = trimmed.size(); while (i > 0 && cutChar(trimmed.at(i - 1))) --i; trimmed.truncate(i); }
             if (trimmed.isEmpty() && (cutStart || cutEnd)) trimmed = piece.trimmed();
-            piece = (cutStart ? QStringLiteral("\u2026") : QString()) + trimmed + (cutEnd ? QStringLiteral("\u2026") : QString());
+            // "…" is spaced from the words, never from the quotation marks:
+            // "… so loved", "the world …", and "word … word" in between.
+            piece = (cutStart ? QStringLiteral("\u2026 ") : QString()) + trimmed + (cutEnd ? QStringLiteral(" \u2026") : QString());
             if (!single && !cutStart) piece = superscript(verses[v].number) + u' ' + piece;
         }
         body += piece;

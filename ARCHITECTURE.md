@@ -205,7 +205,8 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   `{verse, offset}` (`SourcePositionMap::sourceStart/sourceEnd`) and copied by
   `TextSelection::text`: `ctrl c`/`y` a quotation — `…` where the selection
   starts after a verse's first ink or ends before its last (whitespace and
-  punctuation trimmed at the cut), superscript numbers only for verses whose
+  punctuation trimmed at the cut; spaced from the words, never from the
+  quotation marks: `“… so loved`, `world …”`), superscript numbers only for verses whose
   beginning is selected and never for one verse, reference over the verses
   touched — `ctrl shift C`/`shift Y` plain text, never with ellipses. Joins
   follow the source as above; headings and decorations never copy.
