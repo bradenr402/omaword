@@ -457,6 +457,11 @@ private slots:
         const int size = bible->fontSize();
         clickHint("fontSizeHintsPart:increase"); QCOMPARE(bible->fontSize(), size + 1);
         clickHint("fontSizeHintsPart:reset"); QCOMPARE(bible->fontSize(), 18);
+        // The line height row may sit below the dialog's fold: scroll to it.
+        if (travel("settingsScroll") > 0) {
+            auto flick = object("settingsScroll")->property("contentItem").value<QObject *>(); QVERIFY(flick);
+            flick->setProperty("contentY", travel("settingsScroll")); QTRY_VERIFY(contentY("settingsScroll") > 0);
+        }
         clickHint("lineHeightHintsPart:increase"); QCOMPARE(bible->lineHeight(), 1.6);
         clickHint("lineHeightHintsPart:reset"); QCOMPARE(bible->lineHeight(), 1.5);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
