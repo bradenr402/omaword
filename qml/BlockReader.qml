@@ -435,7 +435,7 @@ Item {
                 x: mouseArea.hoverPoint.x + 12 * uiScale
                 y: mouseArea.hoverPoint.y + 18 * uiScale
                 visible: mouseArea.hoveredNumber > 0 && !root.pressed && !root.backend.focusMode
-                text: "Select verse " + mouseArea.hoveredNumber + " · " + KeyNotation.format("Shift+Click") + " extends"
+                text: "Select verse " + mouseArea.hoveredNumber + " · " + KeyNotation.format("Shift+Click") + " extends · " + KeyNotation.format("MiddleClick") + " copies"
             }
         }
     }
@@ -484,7 +484,7 @@ Item {
             required property var modelData
             readonly property bool opening: modelData.edge !== "close"
             readonly property bool footnote: modelData.kind === "footnote"
-            readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\n" + (root.controller.footnoteHint || "Click to read it in Study")
+            readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\n" + (root.controller.footnoteHint || "Click: read it in Study")
                 : (modelData.kind === "bookmark" ? "Bookmark" : modelData.kind === "note" ? "Note" : "Tag") + "\n"
                 + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
                 + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
@@ -494,8 +494,9 @@ Item {
             width: modelData.width; height: modelData.height
             z: 2
             visible: !root.backend.focusMode
-            // Footnotes stay out of the tab order (shift S opens Study → Footnotes).
-            activeFocusOnTab: opening && !footnote
+            // Out of the tab order, as in the Verse layout: the passage menu
+            // (menu key) opens the cursor's ranges; shift S opens Study → Footnotes.
+            activeFocusOnTab: false
             Keys.onPressed: function(event) {
                 if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Return || event.key === Qt.Key_Space)) {
                     root.openAnnotation(modelData)
@@ -574,9 +575,11 @@ Item {
             MouseArea {
                 id: inlineMouse
                 objectName: "blockInlineHit:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
-                // A larger, invisible target than the narrow cell (layout unchanged).
+                // A taller, invisible target than the narrow cell (layout unchanged):
+                // it grows above and below only, so it never covers the next word.
                 anchors.fill: parent
-                anchors.margins: -(root.controller.markerHitMargin || 0)
+                anchors.topMargin: -(root.controller.markerHitMargin || 0)
+                anchors.bottomMargin: -(root.controller.markerHitMargin || 0)
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 cursorShape: Qt.PointingHandCursor

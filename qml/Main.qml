@@ -1734,6 +1734,7 @@ ApplicationWindow {
                 }
                 Keys.onPressed: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
                 Keys.onReleased: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
+                HoverHandler { cursorShape: Qt.PointingHandCursor }
                 contentItem: Text { text: verseTagAction.text; textFormat: Text.PlainText; color: desktop.foreground; font: verseTagAction.font }
                 background: Rectangle {
                     implicitHeight: 36 * app.scale
@@ -2331,7 +2332,7 @@ ApplicationWindow {
     // drawn cell: a larger, invisible target that never moves the text.
     readonly property real markerHitMargin: 5 * readerScale
     // Footnote markers stay out of the tab order; their tooltips name the key.
-    readonly property string footnoteHint: "Click to read it in Study · " + KeyNotation.format("Shift+S") + " → Footnotes"
+    readonly property string footnoteHint: "Click: read it in Study · " + KeyNotation.format("Shift+S") + " → Footnotes"
     function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
     // Verse rows reserve footnote cells like BlockDocument: a word joiner and a
     // transparent image at each note's plain-text offset. Paint-only markers
@@ -4902,7 +4903,8 @@ ApplicationWindow {
                             objectName: "chapterTitle"
                             opacity: app.focusDimmedOpacity
                             text: bible.passage
-                            color: desktop.foreground
+                            // Hover: the accent, as a link (a click opens the chapter list).
+                            color: chapterTitleMouse.containsMouse ? desktop.accent : desktop.foreground
                             font.pixelSize: 34 * app.readerScale
                             font.weight: Font.Medium
                             font.letterSpacing: -0.9
@@ -5157,7 +5159,8 @@ ApplicationWindow {
                                     MouseArea {
                                         id: numberMouse
                                         anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
+                                        // Hidden numbers leave a blank gutter: no hand, no tooltip there.
+                                        cursorShape: numberLabel.visible ? Qt.PointingHandCursor : Qt.ArrowCursor
                                         hoverEnabled: true
                                         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                                         preventStealing: true
@@ -5178,8 +5181,8 @@ ApplicationWindow {
                                     AppToolTip {
                                         theme: desktop
                                         uiScale: app.scale
-                                        visible: numberMouse.containsMouse && !bible.focusMode
-                                        text: "Select verse " + verseRow.modelData.number + " · " + KeyNotation.format("Shift+Click") + " extends" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "") + (verseRow.modelData.hasTags ? "\nTagged" : "")
+                                        visible: numberMouse.containsMouse && numberLabel.visible
+                                        text: "Select verse " + verseRow.modelData.number + " · " + KeyNotation.format("Shift+Click") + " extends · " + KeyNotation.format("MiddleClick") + " copies" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "") + (verseRow.modelData.hasTags ? "\nTagged" : "")
                                     }
                                 }
                                 Repeater {
@@ -5208,9 +5211,11 @@ ApplicationWindow {
                                         MouseArea {
                                             id: footnoteMouse
                                             objectName: "verseFootnoteHit:" + verseRow.modelData.number + "." + footnoteMarker.modelData.seq
-                                            // A larger, invisible target than the small mark (layout unchanged).
+                                            // A taller, invisible target than the small mark (layout unchanged):
+                                            // above and below only, never over the neighboring words.
                                             anchors.fill: parent
-                                            anchors.margins: -app.markerHitMargin
+                                            anchors.topMargin: -app.markerHitMargin
+                                            anchors.bottomMargin: -app.markerHitMargin
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: app.openFootnote(verseRow.modelData.number, footnoteMarker.modelData.seq)
@@ -5390,7 +5395,7 @@ ApplicationWindow {
                                     theme: desktop
                                     uiScale: app.scale
                                     visible: marginNoteMouse.containsMouse && !noteText.hoveredLink
-                                    text: "Note on " + marginNote.modelData.reference + "\nClick to open it in Notes · " + app.menuKey("notes") + " on the selected passage"
+                                    text: "Note on " + marginNote.modelData.reference + "\nClick: open it in Notes · " + app.menuKey("notes") + " on the selected passage"
                                         + (noteText.text.indexOf("<a ") >= 0 ? "\nLinks: " + app.menuKey("openNoteLink") + " opens the one at the cursor in Notes" : "")
                                 }
                                 // "{" before the note, "}" after the passage text, and an
@@ -8057,11 +8062,20 @@ ApplicationWindow {
                                 objectName: "catalogRowTint:" + catalogRow.modelData.id
                                 anchors.fill: parent
                                 anchors.margins: -4 * app.scale
-                                visible: catalogRow.current
-                                color: app.tint(desktop.accent, 0.11)
+                                // Current: the accent tint; hovered: the surface tint.
+                                visible: catalogRow.current || catalogRowMouse.containsMouse
+                                color: catalogRow.current ? app.tint(desktop.accent, 0.11) : desktop.surface
                                 radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
                             }
-                            MouseArea { anchors.fill: parent; acceptedButtons: Qt.LeftButton; onClicked: importGuide.catalogIndex = catalogRow.index }
+                            MouseArea {
+                                id: catalogRowMouse
+                                objectName: "catalogRowMouse:" + catalogRow.modelData.id
+                                anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: importGuide.catalogIndex = catalogRow.index
+                            }
                         ColumnLayout {
                             id: catalogRowContent
                             width: parent.width
