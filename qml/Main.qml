@@ -7997,9 +7997,10 @@ ApplicationWindow {
                     }
                 }
             }
+            FineRule { objectName: "settingsTextSizeRule"; Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Font size"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
+                Label { objectName: "textSizeTitle"; text: "Text size"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
                 Item { Layout.fillWidth: true }
                 Label { objectName: "fontSizeValue"; text: bible.fontSize; color: desktop.accent; font.pixelSize: 14 * app.scale }
             }
@@ -8011,7 +8012,7 @@ ApplicationWindow {
                 snapMode: Slider.SnapAlways
                 value: bible.fontSize
                 onMoved: bible.setFontSize(Math.round(value))
-                Accessible.name: "Font size"
+                Accessible.name: "Text size"
             }
             HintRow {
                 objectName: "fontSizeHints"
@@ -8023,9 +8024,10 @@ ApplicationWindow {
                 pixelSize: 11 * app.scale
                 Layout.fillWidth: true
             }
+            FineRule { objectName: "settingsLineHeightRule"; Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                Label { text: "Line height"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
+                Label { objectName: "lineHeightTitle"; text: "Line height"; color: desktop.foreground; font.pixelSize: 13 * app.scale }
                 Item { Layout.fillWidth: true }
                 Label { objectName: "lineHeightValue"; text: bible.lineHeight.toFixed(1); color: desktop.accent; font.pixelSize: 14 * app.scale }
             }

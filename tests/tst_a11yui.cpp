@@ -24,6 +24,7 @@
 #include "blockdocument.h"
 #include "desktop.h"
 #include "soundeffects.h"
+#include <tuple>
 
 class MockCatalog : public QObject
 {
@@ -2030,6 +2031,18 @@ private slots:
         const qreal ruleY = rule->mapToScene(QPointF()).y();
         QVERIFY(item("settingmarginNotes")->mapToScene(QPointF(0, item("settingmarginNotes")->height())).y() <= ruleY);
         QVERIFY(item("readingModeTitle")->mapToScene(QPointF()).y() >= ruleY);
+        // The same rules between Layout and Text size, and Text size and Line height.
+        QCOMPARE(object("textSizeTitle")->property("text").toString(), QString("Text size"));
+        auto below = [&](const char *name) { auto target = item(name); return target->mapToScene(QPointF(0, target->height())).y(); };
+        auto top = [&](const char *name) { return item(name)->mapToScene(QPointF()).y(); };
+        for (const auto &[ruleName, above, under] : {std::tuple{"settingsTextSizeRule", "readingMode:block", "textSizeTitle"},
+                 std::tuple{"settingsLineHeightRule", "fontSizeHints", "lineHeightTitle"}}) {
+            auto fine = item(ruleName); QVERIFY2(fine && fine->isVisible(), ruleName);
+            QCOMPARE(fine->height(), rule->height()); QCOMPARE(fine->opacity(), rule->opacity());
+            QCOMPARE(fine->property("color"), rule->property("color"));
+            QCOMPARE(fine->width(), rule->width());
+            QVERIFY2(below(above) <= top(ruleName) && top(ruleName) + fine->height() <= top(under), ruleName);
+        }
         // ctrl = is the listed increase key; ctrl + still works.
         const QString hints = object("fontSizeHints")->property("plainText").toString();
         QVERIFY2(hints.contains("ctrl = increase") && !hints.contains("ctrl +"), qPrintable(hints));
