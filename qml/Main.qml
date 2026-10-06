@@ -577,8 +577,9 @@ ApplicationWindow {
     readonly property real panelLineHeight: bible.lineHeight > 0 ? bible.lineHeight / 1.5 * 1.25 : 1.25
     onObservedLineHeightChanged: {
         // Replacing the rich document invalidates Qt's selection offsets.
-        // Clear the shared clipboard source in the same update as the paint.
-        clearTextSelection()
+        // Clear the shared clipboard source in the same update as the paint;
+        // a character selection is mapped onto the new layout instead.
+        clearTextSelection(true)
         draggingText = false
         dragAnchorRow = -1
     }
@@ -715,9 +716,15 @@ ApplicationWindow {
     property point dragOrigin
     property point dragPoint
     property string freeSelectedText: ""
-    function clearTextSelection() {
-        freeSelectedText = ""
-        if (charMode) { charMode = false; charPending = ""; charAnchor = null; charCursor = null }
+    // keepCharacters: a relayout (text size, line height) replaces the
+    // documents but keeps a character selection; it is reselected from its
+    // source positions once the new layout exists.
+    function clearTextSelection(keepCharacters) {
+        if (keepCharacters && charMode) Qt.callLater(app.reapplyCharSelection)
+        else {
+            freeSelectedText = ""
+            if (charMode) { charMode = false; charPending = ""; charAnchor = null; charCursor = null }
+        }
         let block = blockLoader.item as BlockReader
         if (block) block.clearSelection()
         for (let i = 0; i < verseRepeater.count; ++i) {
@@ -1056,6 +1063,11 @@ ApplicationWindow {
         const first = bible.verses[0].number
         return bible.textMotion("", first, firstInk(first))
     }
+    function reapplyCharSelection() { if (charMode && charAnchor && charCursor) applyCharSelection() }
+    // Text size and scale reflow the Verse rows too: reselect once laid out.
+    readonly property var charLayoutKey: [readerSize, readerScale, bible.lineHeight]
+    onCharLayoutKeyChanged: if (charMode) charReapplyTimer.restart()
+    Timer { id: charReapplyTimer; interval: 0; onTriggered: app.reapplyCharSelection() }
     function endCharMode() {
         if (!charMode) return
         charMode = false
@@ -2186,7 +2198,11 @@ ApplicationWindow {
         target: reading
         function onHeightChanged() { app.scheduleMargins() }
     }
-    function scheduleMargins() { if (readerInitialized) marginTimer.restart(); rangeEndpointTimer.restart() }
+    function scheduleMargins() {
+        if (readerInitialized) marginTimer.restart()
+        rangeEndpointTimer.restart()
+        if (charMode) charReapplyTimer.restart()
+    }
     // Range editing: the verse whose endpoint moves (the cursor) gets an accent
     // underline on each of its lines and a caret flag at the moving edge (its
     // start or end), apart from the range's tint. readerColumn coordinates.

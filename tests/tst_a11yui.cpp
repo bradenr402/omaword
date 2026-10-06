@@ -5,6 +5,8 @@
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QFile>
+#include <QDir>
+#include <QRegularExpression>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -1183,6 +1185,54 @@ private slots:
             } else QVERIFY(item("blockBody")->property("selectedText").toString().contains("God so loved"));
             shot("characters-" + mode);
             key(Qt::Key_Escape);
+        }
+    }
+    // Text size and line height rebuild the layout but keep a character
+    // selection: same source positions, same text, reselected natively.
+    void characterSelectionSurvivesRelayout() {
+        for (const QString mode : {"verse", "block", "paragraph"}) {
+            setMode(mode); navigate("John 3:16"); bible->selectVerses(16, 16); call("readerFocus");
+            auto native = [&] {
+                if (mode != "verse") return item("blockBody")->property("selectedText").toString().remove(QChar(0x2060)).remove(QChar(0xFFFC)).simplified();
+                QStringList parts;
+                for (int verse = 1; verse <= 40; ++verse) if (auto body = item("verseBody" + QString::number(verse))) {
+                    const auto text = body->property("selectedText").toString().remove(QChar(0x2060)).remove(QChar(0xFFFC)).simplified();
+                    if (!text.isEmpty()) parts << text;
+                }
+                return parts.join(' ');
+            };
+            auto expectKept = [&](const QVariantMap &anchor, const QVariantMap &cursor, const QString &text, const QString &tag) {
+                QTest::qWait(150);
+                QVERIFY2(prop("charMode").toBool(), qPrintable(mode + " " + tag));
+                QCOMPARE(charAnchor(), anchor); QCOMPARE(charCursor(), cursor);
+                QCOMPARE(prop("freeSelectedText").toString(), text);
+                // Flowing layouts select their verse-number labels too.
+                QTRY_COMPARE(native().replace(QRegularExpression("(^|\\s)\\d+(?=\\s)"), "").simplified(), text.simplified());
+            };
+            // Keyboard: v, a few words across the verse break, then every size key.
+            key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
+            keys("w)we");
+            const auto anchor = charAnchor(), cursor = charCursor(); const QString text = prop("freeSelectedText").toString();
+            QVERIFY2(text.contains(' ') && cursor["verse"].toInt() == 17, qPrintable(text));
+            shot("relayout-" + mode + "-before");
+            const int size = bible->fontSize(); const double line = bible->lineHeight();
+            key(Qt::Key_Equal, Qt::ControlModifier); QCOMPARE(bible->fontSize(), size + 1); expectKept(anchor, cursor, text, "larger");
+            shot("relayout-" + mode + "-larger");
+            key(Qt::Key_Minus, Qt::ControlModifier | Qt::AltModifier); QVERIFY(bible->lineHeight() < line); expectKept(anchor, cursor, text, "line less");
+            key(Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), line); expectKept(anchor, cursor, text, "line more");
+            key(Qt::Key_Minus, Qt::ControlModifier); QCOMPARE(bible->fontSize(), size); expectKept(anchor, cursor, text, "smaller");
+            // Its keys still work afterwards.
+            keys("w"); QVERIFY(charCursor() != cursor); key(Qt::Key_Escape); QVERIFY(!prop("charMode").toBool());
+            // Mouse: a dragged selection turned into characters (v) survives too.
+            const QPoint from = charPoint(16, 4), to = charPoint(16, 16);
+            drag(from, to); QTRY_VERIFY(!prop("freeSelectedText").toString().isEmpty());
+            key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
+            const auto dragAnchor = charAnchor(), dragCursor = charCursor(); const QString dragged = prop("freeSelectedText").toString();
+            key(Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier); expectKept(dragAnchor, dragCursor, dragged, "mouse line more");
+            key(Qt::Key_0, Qt::ControlModifier); expectKept(dragAnchor, dragCursor, dragged, "mouse reset size");
+            key(Qt::Key_Minus, Qt::ControlModifier | Qt::AltModifier);
+            key(Qt::Key_Escape); QVERIFY(!prop("charMode").toBool());
+            bible->setFontSize(size); bible->setLineHeight(line);
         }
     }
     void characterSelectionByMouse() {

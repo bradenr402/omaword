@@ -214,8 +214,9 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   each layout maps them to its document and paints its native selection.
   Motions crossing verse breaks (breaks are whitespace) and text objects are
   pure C++ (`TextSelection`); lines (`j k 0 ^ $`) use the layout's geometry.
-  Leaving the chapter, layout, or reader keys (a modal) ends it; so does a
-  rebuild of the flowing document (text size, line height).
+  Leaving the chapter, layout, or reader keys (a modal) ends it. A relayout
+  (text size, line height, any document rebuild) keeps it: the source
+  positions are reselected in the new layout (`reapplyCharSelection`).
 
 - A finished mouse selection (drag end, double-clicked word) is offered as the
   PRIMARY selection (`bible.setPrimarySelection`, plain text).

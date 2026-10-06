@@ -83,7 +83,9 @@ Item {
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
     function rebuild() {
         if (destroying) return
-        controller.clearTextSelection()
+        // A character selection survives (text size, line height): the
+        // controller reselects it from source positions after the build.
+        controller.clearTextSelection(true)
         cancelDrag()
         document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode,
                        !backend.focusMode, controller.readerSize * root.readerScale, noteMarks)
