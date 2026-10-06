@@ -158,9 +158,9 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt n`: Show verse numbers
 - `alt h`: Show headings
 - `alt p`: Verse picker
-- `alt j`: Highlight words of Jesus
 - `alt o`: Chapter outline
 - `alt w`: Margin notes
+- `alt j`: Highlight words of Jesus
 - `alt l`: Layout
 - `alt s`: Sound effects
 - `alt m`: Animations

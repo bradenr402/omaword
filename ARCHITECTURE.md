@@ -30,6 +30,7 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
 | `qml/RangeEditor.qml` | Annotation range editing session |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
+| `qml/ExitGhost.qml` | Exit motion for popups that close at once (menus, modals): a frozen `ShaderEffectSource` picture that fades and shrinks toward the trigger, never taking input |
 | `qml/AppContextMenu.qml`, `qml/AppToolTip.qml`, `qml/RowMenu.js` | Shared context menu (scrolls when taller than the window; also replaces Qt's text-field menu via `ContextMenu.menu: null` → `openTextMenu`) and themed tooltip; `RowMenu.entries` builds every list row's menu (Open · Copy · Copy plain text · Desk, then the row's extras) |
 | `qml/PanelTabs.qml` | Shared tab row (Annotations, Study, palette Passage/Search/Command): sizing, selected accent tint, focus outline |
 | `qml/ChapterFind.qml`, `qml/SearchHighlights.qml` | `/` chapter find; match overlay painting |
@@ -279,9 +280,17 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
     retargets from the current position; `readerTargetY()` is the logical
     position (saved positions use it). User drags stop it. Focus mode keeps the
     cursor verse 40% down. Instant when animations are disabled.
-  - Popup motion: the context menu never animates; modals (palette, dialogs,
-    tag picker, range dialogs) fade in and close at once; side panels and
-    toasts animate both in and out.
+  - Popup motion (interfaces.dev: exits subtler than entrances, from their
+    trigger; frequent popups open instantly): menus and modals (palette,
+    dialogs, tag picker, range dialogs) open and close at once, so a closed
+    one stops counting as open, focus returns, and it (or another) reopens
+    immediately; `ExitGhost` (`menuGhost`, 110 ms toward the pointer or anchor
+    point; `modalGhost`, 120 ms toward the centre, with its dim) plays the
+    exit. A right click while a menu is open shows the new menu as the old
+    one's ghost leaves. Side panels enter with the full slide and a fade
+    (180 ms, ease-out) and exit with a short slide (to position 0.85) and a
+    quicker fade (120 ms, ease-in). Hover colors never animate. Disable
+    animations: no ghosts, instant panels.
 - Footnote markers reuse decoration cells at each note's plain-text offset
   (word joiner + transparent image): `BlockDocument` inserts them in
   Paragraph/Block; Verse rows insert `<img src="qrc:/resources/cell.png">` in
@@ -293,9 +302,19 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   layout is unchanged.
 - Focus mode hides decoration cells (incl. footnote markers), rails, and annotation tints.
 - Focus mode keeps the footer quiet: only the focus button shows; the others keep
-  their places hidden and disabled. Hovering the footer 250 ms reveals them (clicks
-  wait 300 ms more); hiding waits 200 ms so moving between the zone and a button
-  never flickers; keyboard focus entering the footer reveals them at once.
+  their places hidden and disabled. Hovering the footer reveals them at once (their
+  clicks wait 300 ms, so a click aimed at the focus button is never caught); hiding
+  waits 200 ms so moving between the zone and a button never flickers; keyboard
+  focus entering the footer reveals them too. The footer's left group is focus,
+  mode, Keybindings.
+- Chapter buttons (`chapterPreviousButton`/`chapterNextButton`): chevrons at the
+  reader's outer edges, centred in the viewport, mouse only (h/l are the keys),
+  disabled at the Bible's first/last chapter; steps are not History jumps. The
+  margins reserve their width (`chapterNavReserve` in `Margins.space` insets) and
+  they hide when the column would reach them; in focus mode they appear only
+  under the pointer (300 ms click guard).
+- Range editing marks the moving endpoint verse (`rangeEndpointGeometry`): an
+  accent underline under each of its lines and a caret flag at its moving edge.
 - Keyboard focus hand-off: a `QuietButton`/`FloatingButton` pressed by key that
   hides itself passes the keyboard to its `focusTarget` (else `restorePanelFocus`).
   Modal outside clicks: `RangeEditor`'s dialogs close on press outside and route
