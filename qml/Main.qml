@@ -2168,7 +2168,42 @@ ApplicationWindow {
         target: reading
         function onHeightChanged() { app.scheduleMargins() }
     }
-    function scheduleMargins() { if (readerInitialized) marginTimer.restart() }
+    function scheduleMargins() { if (readerInitialized) marginTimer.restart(); rangeEndpointTimer.restart() }
+    // Range editing: the verse whose endpoint moves (the cursor) gets an accent
+    // underline on each of its lines and a caret flag at the moving edge (its
+    // start or end), apart from the range's tint. readerColumn coordinates.
+    property var rangeEndpointGeometry: null
+    Timer { id: rangeEndpointTimer; interval: 0; onTriggered: app.updateRangeEndpoint() }
+    readonly property var rangeEndpointKey: [rangeEditor.active, rangeEditor.endpoint, bible.verses, readerColumn.width, app.readerScale, app.readerLineHeight]
+    onRangeEndpointKeyChanged: rangeEndpointTimer.restart()
+    Connections {
+        target: bible
+        function onSelectionChanged() { rangeEndpointTimer.restart() }
+    }
+    function updateRangeEndpoint() {
+        const verse = bible.cursorVerse
+        const index = rangeEditor.active ? verseOrder(verse) : -1
+        if (index < 0) { rangeEndpointGeometry = null; return }
+        const block = blockLoader.item as BlockReader
+        let rects = []
+        if (block) rects = Array.from(block.verseRangeRects(verse, verse)).map(function(r) {
+            const p = block.body.mapToItem(readerColumn, r.x, r.y)
+            return { x: p.x, y: p.y, width: r.width, height: r.height }
+        })
+        else {
+            const row = verseRowFor(verse)
+            if (row && row.searchOverlay) rects = row.searchOverlay.lineRects(0, String(bible.verses[index].text || "").length).map(function(r) {
+                const p = row.body.mapToItem(readerColumn, r.x, r.y)
+                return { x: p.x, y: p.y, width: r.width, height: r.height }
+            })
+        }
+        rects = rects.filter(function(r) { return r.width > 0 && r.height > 0 })
+        if (!rects.length) { rangeEndpointGeometry = null; return }
+        const start = rangeEditor.endpoint === "start"
+        const edge = start ? rects[0] : rects[rects.length - 1]
+        rangeEndpointGeometry = { verse: verse, endpoint: rangeEditor.endpoint, rects: rects,
+            edge: { x: start ? edge.x : edge.x + edge.width, y: edge.y, height: edge.height } }
+    }
     function measureVerses() {
         const rows = Array.from(bible.verses)
         const block = blockLoader.item as BlockReader
@@ -5352,6 +5387,74 @@ ApplicationWindow {
                             width: parent.width
                             wrapMode: Text.Wrap
                             padding: 24
+                        }
+                    }
+                    // Range editing: the moving endpoint (updateRangeEndpoint).
+                    Item {
+                        id: rangeEndpointMarker
+                        objectName: "rangeEndpointMarker"
+                        readonly property var geometry: app.rangeEndpointGeometry
+                        readonly property real k: app.readerScale
+                        x: readerColumn.x
+                        y: readerColumn.y
+                        width: readerColumn.width
+                        height: readerColumn.height
+                        visible: !!geometry && app.rangeEditing
+                        Repeater {
+                            model: rangeEndpointMarker.geometry ? rangeEndpointMarker.geometry.rects : []
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                objectName: "rangeEndpointUnderline" + index
+                                x: modelData.x
+                                y: modelData.y + modelData.height - height
+                                width: modelData.width
+                                height: Math.max(2, Math.round(2 * rangeEndpointMarker.k))
+                                radius: height / 2
+                                color: desktop.accent
+                            }
+                        }
+                        // The caret at the moving edge, with a flag pointing into the verse.
+                        Item {
+                            id: rangeEndpointCaret
+                            objectName: "rangeEndpointCaret"
+                            readonly property var edge: rangeEndpointMarker.geometry ? rangeEndpointMarker.geometry.edge : null
+                            readonly property bool atStart: !!rangeEndpointMarker.geometry && rangeEndpointMarker.geometry.endpoint === "start"
+                            readonly property real barWidth: Math.max(2, Math.round(3 * rangeEndpointMarker.k))
+                            readonly property real overhang: Math.round(3 * rangeEndpointMarker.k)
+                            visible: !!edge
+                            x: edge ? Math.round(edge.x - barWidth / 2) : 0
+                            y: edge ? edge.y - overhang : 0
+                            width: barWidth
+                            height: edge ? edge.height + overhang : 0
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: width / 2
+                                color: desktop.accent
+                            }
+                            Canvas {
+                                objectName: "rangeEndpointFlag"
+                                readonly property real size: Math.round(8 * rangeEndpointMarker.k)
+                                property color ink: desktop.accent
+                                readonly property bool pointsRight: rangeEndpointCaret.atStart
+                                x: pointsRight ? parent.width - 1 : 1 - size
+                                y: 0
+                                width: size
+                                height: size
+                                onInkChanged: requestPaint()
+                                onPointsRightChanged: requestPaint()
+                                onSizeChanged: requestPaint()
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.reset()
+                                    ctx.fillStyle = ink
+                                    ctx.beginPath()
+                                    if (pointsRight) { ctx.moveTo(0, 0); ctx.lineTo(width, 0); ctx.lineTo(0, height) }
+                                    else { ctx.moveTo(width, 0); ctx.lineTo(0, 0); ctx.lineTo(width, height) }
+                                    ctx.closePath()
+                                    ctx.fill()
+                                }
+                            }
                         }
                     }
                     // Margin notes scroll with the text, beside their passages.

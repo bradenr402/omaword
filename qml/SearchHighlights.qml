@@ -35,6 +35,14 @@ Item {
         document.attach(body.textDocument, sourceText)
         return document.documentRange(start, length)
     }
+    // Line boxes (body coordinates) of source [start, start + length).
+    function lineRects(start, length) {
+        document.attach(body.textDocument, sourceText)
+        const origin = bodyOrigin()
+        return Array.from(document.rectangles([{ start: start, length: length }])).map(function(r) {
+            return Qt.rect(r.x + origin.x, r.y + origin.y, r.width, r.height)
+        })
+    }
     function sourceAt(position, forward) {
         document.attach(body.textDocument, sourceText)
         return document.sourceAt(position, forward)

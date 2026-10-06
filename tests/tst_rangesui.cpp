@@ -732,6 +732,53 @@ private slots:
         click("rangeEditHintsPart:swap"); QTRY_COMPARE(prop("endpoint").toString(), QString("end"));
         check("clicked");
     }
+    // The moving endpoint verse is marked apart from the range's tint: an
+    // accent underline on its lines and a caret flag at its moving edge.
+    void activeEndpointMarker_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << QString("verse"); QTest::newRow("paragraph") << QString("paragraph"); QTest::newRow("block") << QString("block");
+    }
+    void activeEndpointMarker() {
+        QFETCH(QString, mode);
+        bible->setReadingMode(mode); QTest::qWait(150);
+        navigate("John 3:2-4");
+        QVERIFY(bible->toggleHighlight()); const auto source = bible->tagScope();
+        QVERIFY(!item("rangeEndpointMarker")->isVisible());
+        open(source); begin();
+        auto marker = item("rangeEndpointMarker"), caret = item("rangeEndpointCaret");
+        QTRY_VERIFY(marker->isVisible()); QVERIFY(caret->isVisible());
+        auto geometry = [&] { return value(window->property("rangeEndpointGeometry")).toMap(); };
+        auto caretX = [&] { return caret->mapToScene(QPointF(caret->width() / 2, 0)).x(); };
+        // End: verse 4, caret at the right end of its last line.
+        QTRY_COMPARE(geometry().value("verse").toInt(), 4);
+        QCOMPARE(geometry().value("endpoint").toString(), QString("end"));
+        QVERIFY(item("rangeEndpointUnderline0") && item("rangeEndpointUnderline0")->isVisible());
+        QCOMPARE(item("rangeEndpointUnderline0")->property("color").value<QColor>(), desktop->property("accent").value<QColor>());
+        const auto rects = geometry().value("rects").toList(); QVERIFY(!rects.isEmpty());
+        const auto last = rects.last().toMap();
+        QVERIFY(qAbs(caret->mapToItem(item("readerColumn"), QPointF(caret->width() / 2, 0)).x() - (last["x"].toDouble() + last["width"].toDouble())) <= 2);
+        shot("endpoint-" + mode + "-end");
+        // Keyboard: j moves the end; the marker follows.
+        key(Qt::Key_J); QTRY_COMPARE(geometry().value("verse").toInt(), 5);
+        // o swaps: the start (verse 2) is marked at its left edge.
+        key(Qt::Key_O); QTRY_COMPARE(geometry().value("endpoint").toString(), QString("start"));
+        QTRY_COMPARE(geometry().value("verse").toInt(), 2);
+        const auto first = geometry().value("rects").toList().first().toMap();
+        QVERIFY(qAbs(caret->mapToItem(item("readerColumn"), QPointF(caret->width() / 2, 0)).x() - first["x"].toDouble()) <= 2);
+        const double startX = caretX();
+        shot("endpoint-" + mode + "-start");
+        // Mouse: the swap hint swaps back to the end.
+        QTRY_VERIFY(item("rangeEditHintsPart:swap")->property("clickable").toBool());
+        click("rangeEditHintsPart:swap"); QTRY_COMPARE(geometry().value("endpoint").toString(), QString("end"));
+        QTRY_VERIFY(caretX() != startX);
+        // Text size: the marker follows the new layout.
+        key(Qt::Key_Equal, Qt::ControlModifier); QTest::qWait(200);
+        QTRY_COMPARE(geometry().value("verse").toInt(), 5);
+        const auto grown = geometry().value("rects").toList().last().toMap();
+        QVERIFY(qAbs(caret->mapToItem(item("readerColumn"), QPointF(caret->width() / 2, 0)).x() - (grown["x"].toDouble() + grown["width"].toDouble())) <= 2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("sessionOpen").toBool());
+        QTRY_VERIFY(!item("rangeEndpointMarker")->isVisible());
+    }
     void markerEntrypoints_data() {
         QTest::addColumn<QString>("mode");
         QTest::newRow("verse") << QString("verse"); QTest::newRow("block") << QString("block"); QTest::newRow("paragraph") << QString("paragraph");
