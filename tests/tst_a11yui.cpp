@@ -2686,7 +2686,8 @@ private slots:
         // A settled chapter: a late text load would refresh the search and close the prompt.
         navigate("John 3:1");
         call("readerFocus"); QTest::keyClick(window, '/'); QTRY_VERIFY(prop("findPromptOpen").toBool());
-        type("words");
+        // Let the typed preview settle, as the other find tests do.
+        type("words"); QTest::qWait(220);
         auto find = item("chapterFind");
         // Mouse: a click on the prompt's padding stays in the prompt.
         clickAt(find->mapToScene(QPointF(4, find->height() / 2)).toPoint());
