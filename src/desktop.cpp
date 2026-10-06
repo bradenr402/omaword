@@ -119,7 +119,7 @@ void Desktop::refresh() {
     QColor accent = palette.color(QPalette::Highlight);
     QColor muted = palette.color(QPalette::PlaceholderText);
     QColor border = palette.color(QPalette::Mid);
-    QColor color1;
+    QColor color1, color3;
     bool dark = background.lightnessF() < 0.5;
     QFile theme(m_themePath);
     if (theme.open(QIODevice::ReadOnly) && theme.size() < 65536) {
@@ -139,6 +139,8 @@ void Desktop::refresh() {
         muted = colors.value(QStringLiteral("muted"), foreground);
         // Palette slot 1 (ANSI red): `color1`, or `red` in named palettes.
         color1 = colors.value(QStringLiteral("color1"), colors.value(QStringLiteral("red")));
+        // Palette slot 3 (ANSI yellow): `color3`, or `yellow`.
+        color3 = colors.value(QStringLiteral("color3"), colors.value(QStringLiteral("yellow")));
         border = QColor::fromRgbF(background.redF() * .78 + foreground.redF() * .22,
             background.greenF() * .78 + foreground.greenF() * .22,
             background.blueF() * .78 + foreground.blueF() * .22);
@@ -158,13 +160,14 @@ void Desktop::refresh() {
         FcPatternDestroy(pattern);
     }
     if (!color1.isValid()) color1 = accent;
+    if (!color3.isValid()) color3 = accent;
     const QString directory = QFileInfo(m_themePath).absolutePath();
     if (QFile::exists(m_themePath) && !m_watcher.files().contains(m_themePath)) m_watcher.addPath(m_themePath);
     if (QDir(directory).exists() && !m_watcher.directories().contains(directory)) m_watcher.addPath(directory);
     if (background == m_background && foreground == m_foreground && surface == m_surface &&
-        accent == m_accent && muted == m_muted && border == m_border && color1 == m_color1 && family == m_fontFamily && dark == m_dark) return;
+        accent == m_accent && muted == m_muted && border == m_border && color1 == m_color1 && color3 == m_color3 && family == m_fontFamily && dark == m_dark) return;
     m_background = background; m_foreground = foreground; m_surface = surface;
-    m_accent = accent; m_color1 = color1; m_muted = muted; m_border = border; m_fontFamily = family; m_dark = dark;
+    m_accent = accent; m_color1 = color1; m_color3 = color3; m_muted = muted; m_border = border; m_fontFamily = family; m_dark = dark;
     emit changed();
 }
 

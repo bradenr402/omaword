@@ -146,6 +146,22 @@ private slots:
         {
             Desktop desktop(nullptr, command());
             QCOMPARE(desktop.property("color1").value<QColor>(), QColor("#112233"));
+            QCOMPARE(desktop.property("color3").value<QColor>(), QColor("#112233"));
+        }
+        // color3 (the highlighter ink): `color3`, else `yellow`, else the accent.
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write("accent = \"#112233\"\ncolor3 = \"#e5c07b\"\nyellow = \"#ffff00\"\n");
+        file.close();
+        {
+            Desktop desktop(nullptr, command());
+            QCOMPARE(desktop.property("color3").value<QColor>(), QColor("#e5c07b"));
+        }
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write("accent = \"#112233\"\nyellow = \"#f1fa8c\"\n");
+        file.close();
+        {
+            Desktop desktop(nullptr, command());
+            QCOMPARE(desktop.property("color3").value<QColor>(), QColor("#f1fa8c"));
         }
         QVERIFY(QFile::remove(file.fileName()));
     }

@@ -987,6 +987,54 @@ private slots:
         shot("chapter-buttons-narrow");
         window->resize(1200, 820);
     }
+    // Highlights look like a highlighter pen: translucent ink bands about the
+    // text's x-height (never the full line), uneven and deterministic, in
+    // every layout and the Highlights tab; text and layout never change.
+    void highlighterLook() {
+        // Omarchy themes (colors.toml under XDG_STATE_HOME): a dark and a light one.
+        const QList<QPair<QString, QByteArray>> themes = {
+            {"dark", "background = \"#1e1e2e\"\nforeground = \"#cdd6f4\"\naccent = \"#89b4fa\"\ncolor3 = \"#f9e2af\"\n"},
+            {"light", "background = \"#faf8f2\"\nforeground = \"#262626\"\naccent = \"#3a6fb0\"\ncolor3 = \"#e0b000\"\n"}};
+        const QString themeDir = qEnvironmentVariable("XDG_STATE_HOME") + "/omarchy/current/theme";
+        QVERIFY(QDir().mkpath(themeDir));
+        navigate("John 3:2"); bible->selectVerses(2, 4); QVERIFY(bible->toggleHighlight());
+        bible->selectVerses(16, 16); QVERIFY(bible->toggleHighlight());
+        bible->clearSelection();
+        for (const auto &theme : themes) {
+            { QFile file(themeDir + "/colors.toml"); QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate)); file.write(theme.second); }
+            QVERIFY(QMetaObject::invokeMethod(desktop.get(), "refresh"));
+            QTRY_COMPARE(desktop->property("dark").toBool(), theme.first == "dark");
+            for (const QString mode : {"verse", "paragraph", "block"}) {
+                setMode(mode); navigate("John 3:1"); bible->clearSelection(); call("readerFocus");
+                QTest::qWait(250);
+                shot("highlight-" + theme.first + "-" + mode);
+                if (!qEnvironmentVariableIsSet("OMAWORD_HIGHLIGHT_BEFORE")) {
+                    // The band sits about the x-height: taller than it, shorter than a line.
+                    const auto band = value(window->property("highlightBand")).toMap();
+                    const double line = prop("readerLineHeight").toDouble();
+                    QVERIFY2(band["height"].toDouble() > band["xHeight"].toDouble() && band["height"].toDouble() < 0.8 * line,
+                             qPrintable(QString("%1 %2 %3").arg(band["height"].toDouble()).arg(band["xHeight"].toDouble()).arg(line)));
+                    // Deterministic: a repaint draws the same pixels.
+                    const auto first = window->grabWindow();
+                    call("refreshHighlights"); QTest::qWait(150);
+                    QCOMPARE(window->grabWindow(), first);
+                }
+            }
+            setMode("verse");
+            run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+            window->setProperty("collectionTab", 1); QTRY_COMPARE(prop("collectionTab").toInt(), 1); QTest::qWait(200);
+            shot("highlight-" + theme.first + "-panel");
+            if (!qEnvironmentVariableIsSet("OMAWORD_HIGHLIGHT_BEFORE")) {
+                auto mark = item("savedHighlightJohn 3:16"); QVERIFY(mark && mark->isVisible());
+                // Behind the row's reference, not a bar at the row's edge.
+                auto label = item("savedReferenceJohn 3:16"); QVERIFY(label);
+                const auto m = mark->mapRectToScene(QRectF(0, 0, mark->width(), mark->height())), l = label->mapRectToScene(QRectF(0, 0, label->width(), label->height()));
+                QVERIFY(m.intersects(l)); QVERIFY(m.width() > 20);
+            }
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        }
+        QFile::remove(themeDir + "/colors.toml"); QVERIFY(QMetaObject::invokeMethod(desktop.get(), "refresh"));
+    }
     void focusModeFooterRevealsInPlace() {
         const QPointF searchAt = item("searchControl")->mapToScene(QPointF());
         const QPointF deskAt = item("deskControl")->mapToScene(QPointF());

@@ -264,6 +264,14 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
     adds one hand-drawn accent layer (`HandDrawn.tintCount`/`tintRuns`, 4.5%
     each, capped at 3), joined across verses that keep the layer; highlights,
     then search matches, paint over them.
+  - Highlights are a highlighter pen (`HandDrawn.highlighterStroke`): one
+    stroke per text line in the theme's yellow (`desktop.color3`, Omarchy
+    `color3`/`yellow`, else the accent), from a little above the x-height to a
+    little below the baseline (`HandDrawn.highlightBand`, from the reader
+    font's metrics; text sits at the top of its line box) — a feathered pass,
+    a chisel-tipped core that tapers at its ends, and a shorter second pass
+    darker where they overlap; seeded per range and line. No accent bar. The
+    Highlights tab draws the same stroke under each row's reference.
   - Focus-mode dimming: follows the cursor instantly; only entering/leaving fades.
   - Jump pulse and copy flash rects. Reduce motion disables pulses/flashes/fades.
   - Programmatic scrolls to a verse (`scrollToVerse`, `zz`/`zt`/`zb`, search,
@@ -306,7 +314,7 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   split lines shared by neighbouring passages; tips lean toward each other
   (`Margins.tips`, 0.35 × centre offset, clamped to 20%–80% of each brace's
   height; a one-line note `{` or one-line passage `}` keeps its tip centred);
-  their spines are the highlight accent's pen stroke
+  their spines are a steady pen stroke
   (`HandDrawn.linePoints` with `accentAmp`). Note text
   is StyledText with exact `passageLinks`. While margin notes show
   (`inlineNoteMarks` false), the reader drops its inline note marks: Verse

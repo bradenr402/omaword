@@ -18,6 +18,8 @@ class Desktop : public QObject {
     Q_PROPERTY(QColor accent MEMBER m_accent NOTIFY changed)
     // Omarchy palette color1 (words of Jesus); the accent when the theme has none.
     Q_PROPERTY(QColor color1 MEMBER m_color1 NOTIFY changed)
+    // Omarchy palette color3 (yellow, the highlighter ink); the accent when the theme has none.
+    Q_PROPERTY(QColor color3 MEMBER m_color3 NOTIFY changed)
     Q_PROPERTY(QColor border MEMBER m_border NOTIFY changed)
     Q_PROPERTY(QString fontFamily MEMBER m_fontFamily NOTIFY changed)
     Q_PROPERTY(double textScale MEMBER m_textScale NOTIFY changed)
@@ -46,7 +48,7 @@ private:
     void setCornerRadius(qreal radius);
     void readRoundingOutput();
     void failRoundingQuery();
-    QColor m_background, m_foreground, m_surface, m_muted, m_accent, m_border, m_color1;
+    QColor m_background, m_foreground, m_surface, m_muted, m_accent, m_border, m_color1, m_color3;
     QString m_fontFamily, m_themePath;
     double m_textScale = 1.0;
     qreal m_cornerRadius = 0;

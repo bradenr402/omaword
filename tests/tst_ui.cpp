@@ -2941,8 +2941,9 @@ private slots:
             const auto b = item(qPrintable(QString("highlightSegment%1:").arg(v+1) + range));
             QVERIFY(a && b);
             QCOMPARE(a->mapToScene(QPointF(0,a->height())).y(),b->mapToScene(QPointF()).y());
-            const auto accent = item(qPrintable(QString("highlightAccent%1:").arg(v) + range));
-            QVERIFY(accent); QCOMPARE(accent->height(),a->height());
+            // No accent bar: a highlighter stroke per line (highlightPaint).
+            QVERIFY(!item(qPrintable(QString("highlightAccent%1:").arg(v) + range)));
+            QVERIFY(item(qPrintable(QString("highlightPaint%1:").arg(v) + range)));
             QCOMPARE(a->property("radius").toDouble(),0.0);
             const auto selection = item(qPrintable(QString("selectionSegment%1").arg(v)));
             const auto next = item(qPrintable(QString("selectionSegment%1").arg(v+1)));
@@ -3033,8 +3034,8 @@ private slots:
             QCOMPARE(geometry(),before);
             auto label = item(qPrintable(QString("verseNumberLabel%1").arg(number)));
             auto hit = item(qPrintable(QString("verseNumber%1").arg(number)));
-            auto accent = item(qPrintable(QString("highlightAccent%1:John 3:%1").arg(number)));
-            QVERIFY(label && hit && accent);
+            auto paint = item(qPrintable(QString("highlightPaint%1:John 3:%1").arg(number)));
+            QVERIFY(label && hit && paint);
             // Exercise three digits on the real label without changing the
             // edition's canonical verse keys or expanding the fixture.
             if (number == 32) label->setProperty("text","119");
@@ -3043,7 +3044,7 @@ private slots:
             QCOMPARE(hit->x(),54 * scale); QCOMPARE(hit->width(),17 * scale);
             const auto bounds = label->mapRectToItem(hit->parentItem(),label->boundingRect());
             QVERIFY(bounds.left() > 50 * scale);
-            const auto border = accent->mapRectToItem(hit->parentItem(),accent->boundingRect());
+            const auto border = paint->mapRectToItem(hit->parentItem(),paint->boundingRect());
             QCOMPARE(border.left(),67 * scale);
             QVERIFY(bounds.right() <= border.left() + 0.01);
             auto grab = label->grabToImage(); QVERIFY(grab);
@@ -5364,7 +5365,7 @@ private slots:
         QVERIFY(relatedBounds.left() > modeBounds.right());
         QVERIFY(relatedBounds.left() > window->width() / 2);
         const auto helpBounds = item("helpControl")->mapRectToScene(item("helpControl")->boundingRect());
-        QCOMPARE(helpBounds.right(),modeBounds.left()); // Edge to edge.
+        QCOMPARE(helpBounds.left(),modeBounds.right()); // Edge to edge: focus, mode, then help.
         // Right group order: Annotations, Study, Desk (no Notes); a column when cramped.
         const auto scene = [this](const char *name) { return item(name)->mapRectToScene(item(name)->boundingRect()); };
         if (window->property("footerStacked").toBool()) {

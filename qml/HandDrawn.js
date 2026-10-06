@@ -274,6 +274,88 @@ function highlighterBand(ctx, rect, s, scale, opts) {
     return pts
 }
 
+// The highlighter band of a line of text, from its font metrics: from a
+// little above the x-height to a little below the baseline, offset from the
+// line's top (text sits at the top of its line box). {top, height, xHeight}
+function highlightBand(ascent, descent, xHeight) {
+    const x = xHeight > 0 ? xHeight : ascent * 0.5
+    const top = Math.max(0, ascent - 1.3 * x)
+    return { top: top, height: ascent + 0.45 * descent - top, xHeight: x }
+}
+
+// Highlighter pen (paint only). One stroke per line of text, inside `rect`
+// (the band about the x-height, see Main's highlightBand): a faint feathered
+// pass, the core pass with a chisel tip (slanted ends) that tapers slightly
+// at both ends, and a shorter second pass over part of the stroke, darker
+// where the passes overlap, as a pen run twice. `ink` is a color, `alpha` the
+// core's opacity. Deterministic per seed; every pass stays inside `bounds`
+// (default: rect grown by the feather). Returns the core polygon.
+function highlighterStroke(ctx, rect, ink, alpha, s, scale, opts) {
+    opts = opts || {}
+    const k = scale > 0 ? scale : 1
+    if (!rect || rect.width <= 0 || rect.height <= 0) return []
+    const rand = mulberry32(seed(s, "stroke"))
+    const rgba = function(a) { return Qt.rgba(ink.r, ink.g, ink.b, a) }
+    const grow = Math.min(1.2 * k, rect.height * 0.12)
+    const fill = function(points, a) {
+        if (!ctx || !points.length) return
+        ctx.fillStyle = rgba(a)
+        ctx.beginPath()
+        ctx.moveTo(points[0].x, points[0].y)
+        for (let i = 1; i < points.length; ++i) ctx.lineTo(points[i].x, points[i].y)
+        ctx.closePath()
+        ctx.fill()
+    }
+    // Feather: a faint, slightly larger pass with soft uneven edges.
+    fill(strokePolygon({ x: rect.x, y: rect.y - grow, width: rect.width, height: rect.height + 2 * grow },
+        seed(s, "feather"), k, 0.9 * k), alpha * 0.32)
+    const core = strokePolygon(rect, seed(s, "core"), k, 0.7 * k)
+    fill(core, alpha)
+    // A second, thinner pass over part of the stroke.
+    if (rect.width > 28 * k) {
+        const from = rand() * 0.3, to = 0.55 + rand() * 0.45
+        const h = rect.height * (0.55 + 0.2 * rand())
+        const y = rect.y + (rect.height - h) * (0.3 + 0.4 * rand())
+        fill(strokePolygon({ x: rect.x + rect.width * from, y: y, width: rect.width * (to - from), height: h },
+            seed(s, "again"), k, 0.5 * k), alpha * 0.45)
+    }
+    return core
+}
+
+// The outline of one highlighter pass inside rect: uneven top and bottom
+// edges, a chisel tip (the top edge starts and ends a little to the right of
+// the bottom one) and ends that narrow slightly.
+function strokePolygon(rect, s, scale, amp) {
+    const k = scale > 0 ? scale : 1
+    const x = rect.x, y = rect.y, w = rect.width, h = rect.height
+    if (w <= 0 || h <= 0) return []
+    const rand = mulberry32(s)
+    const a = Math.min(amp, h / 5)
+    const topWave = _wave(rand, k), bottomWave = _wave(rand, k)
+    const slant = Math.min(h * (0.28 + 0.1 * rand()), w / 4)
+    const taper = Math.min((6 + 4 * rand()) * k, w / 3)
+    const narrow = h * (0.16 + 0.08 * rand())
+    const edge = function(wave, d) { return a * (0.5 + 0.5 * _at(wave, d)) }
+    const squeeze = function(px, left, right) {
+        const u = Math.min(1, (px - left) / taper, (right - px) / taper)
+        return narrow * (1 - u) * (1 - u) / 2
+    }
+    const step = Math.max(1, 3 * k)
+    const count = Math.max(2, Math.ceil(w / step) + 1)
+    const pts = []
+    // Top edge, left to right, from x + slant to x + w.
+    for (let i = 0; i < count; ++i) {
+        const px = x + slant + (w - slant) * i / (count - 1)
+        pts.push({ x: px, y: y + edge(topWave, px) + squeeze(px, x + slant, x + w) })
+    }
+    // Bottom edge, right to left, from x + w - slant to x.
+    for (let i = count - 1; i >= 0; --i) {
+        const px = x + (w - slant) * i / (count - 1)
+        pts.push({ x: px, y: y + h - edge(bottomWave, px) - squeeze(px, x, x + w - slant) })
+    }
+    return pts
+}
+
 // Search matches: highlighter fill plus an inset pen outline for active (or
 // outlined) matches. Active paint wins where matches overlap.
 function searchMarks(ctx, rects, accent, outlined, scale, scope) {

@@ -1,4 +1,6 @@
 #include <QtTest/QTest>
+#include <QFontMetricsF>
+#include <QFont>
 #include <QSignalSpy>
 #include <QFileInfo>
 #include <QQmlComponent>
@@ -391,23 +393,24 @@ ApplicationWindow {
             const auto painted = state == 3 ? mapping->rectangles(0,spans.last().toMap()["end"].toInt()) : rects;
             for (const auto &entry : painted) {
                 const auto r = entry.toMap();
-                // Canvas is shifted five pixels left. Sample actual pixels of
-                // the accent, then the three-pixel low-alpha gap before text.
-                const int x = qCeil(r["x"].toDouble());
-                const int y = qCeil(r["y"].toDouble()) + 2;
-                if (y >= image.height()) continue;
-                // The pen accent wobbles inside its reserved left pixels.
-                int accentAlpha = 0;
-                for (int dy = 0; dy <= 2 && y + dy < image.height(); ++dy)
-                    for (int dx = -1; dx <= 2; ++dx) accentAlpha = qMax(accentAlpha,image.pixelColor(x+dx,y+dy).alpha());
-                QVERIFY(accentAlpha > 150);
-                QVERIFY(image.pixelColor(x+4,y).alpha() > 0);
-                QVERIFY(image.pixelColor(x+4,y).alpha() < 100);
-                const QRectF accent(r["x"].toDouble()-5,r["y"].toDouble(),2,r["height"].toDouble());
-                for (const auto &ink : textInkRects(doc,0,doc->characterCount()-1))
-                    QVERIFY2(!accent.intersects(ink),"Accent overlaps original glyph ink");
+                // Canvas is shifted five pixels left. A highlighter stroke sits
+                // about the x-height: inked mid-band, clear (tint only) at the
+                // line's top, never a bar left of the text.
+                QFontMetricsF metrics(body->property("font").value<QFont>());
+                const double top = qMax(0.0, metrics.ascent() - 1.3 * metrics.xHeight());
+                const double bandHeight = metrics.ascent() + 0.45 * metrics.descent() - top;
+                QVERIFY(bandHeight > metrics.xHeight() && bandHeight < r["height"].toDouble());
+                const int x = qCeil(r["x"].toDouble()) + 5 + qMin(12, int(r["width"].toDouble() / 2));
+                const int mid = qFloor(r["y"].toDouble() + top + bandHeight / 2);
+                if (mid >= image.height() || x >= image.width()) continue;
+                const int lineTop = qCeil(r["y"].toDouble());
+                QVERIFY2(image.pixelColor(x, mid).alpha() > 50, qPrintable(QString::number(image.pixelColor(x, mid).alpha())));
+                if (top > 3) QVERIFY2(image.pixelColor(x, lineTop).alpha() < 30, qPrintable(QString::number(image.pixelColor(x, lineTop).alpha())));
+                int barAlpha = 0;
+                for (int dx = 0; dx <= 2; ++dx) barAlpha = qMax(barAlpha, image.pixelColor(qCeil(r["x"].toDouble()) + dx, lineTop + 1).alpha());
+                QVERIFY2(barAlpha < 30, "No accent bar before the text");
                 if (state == 2) {
-                    const QRectF background(r["x"].toDouble()-5,r["y"].toDouble(),r["width"].toDouble()+5,r["height"].toDouble());
+                    const QRectF background(r["x"].toDouble(),r["y"].toDouble() + top,r["width"].toDouble(),bandHeight);
                     for (const auto &ink : textInkRects(doc,0,spans[0].toMap()["end"].toInt()))
                         QVERIFY2(!background.intersects(ink),"Highlight paints preceding verse ink");
                 }

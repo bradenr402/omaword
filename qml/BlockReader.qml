@@ -107,6 +107,7 @@ Item {
     }
     function cancelDrag() { dragging = false; pressed = false; autoscroll.stop() }
     function clearSelection() { body.deselect() }
+    function repaintAnnotations() { paint.requestPaint() }
     function verseRect(number) { return body.positionToRectangle(document.positionFor(number)) }
     function searchRect(segment) { return document.searchRect(segment) }
     function hit(x, y) { return document.verseAtPoint(x, y) }
@@ -202,6 +203,9 @@ Item {
         property color accent: root.theme.accent
         property bool focused: root.backend.focusMode
         property var tintCounts: root.tintCounts
+        FontMetrics { id: bandMetrics; font.family: root.theme.fontFamily; font.pixelSize: (root.controller.readerSize || 18) * root.readerScale }
+        readonly property var highlightLook: [bandMetrics.ascent, bandMetrics.xHeight, root.controller.highlightInk, root.controller.highlightAlpha]
+        onHighlightLookChanged: requestPaint()
         onTintCountsChanged: requestPaint()
         onAnnotationsChanged: requestPaint()
         onFirstChanged: if (!root.destroying) geometryTimer.restart()
@@ -227,27 +231,22 @@ Item {
             }
             const k = root.readerScale > 0 ? root.readerScale : 1
             const version = root.backend.versionId || ""
+            const band = HandDrawn.highlightBand(bandMetrics.ascent, bandMetrics.descent, bandMetrics.xHeight)
+            const ink = root.controller.highlightInk || root.theme.color3 || accent
+            const inkAlpha = root.controller.highlightAlpha || (root.theme.dark ? 0.34 : 0.36)
             function draw(start, end, selected, reference) {
                 const rects = document.rectangles(start, end)
                 for (let i = 0; i < rects.length; ++i) {
                     const r = rects[i]
-                    ctx.fillStyle = root.controller.tint(accent, selected ? 0.22 : 0.16)
                     if (selected) {
                         // The active selection is not an annotation mark.
+                        ctx.fillStyle = root.controller.tint(accent, 0.22)
                         ctx.fillRect(r.x - leftInset, r.y, r.width + leftInset, r.height)
                         continue
                     }
-                    const s = HandDrawn.seed("highlight", version, reference, i)
-                    HandDrawn.highlighterBand(ctx, Qt.rect(r.x - leftInset, r.y, r.width + leftInset, r.height), s, k,
-                        { top: true, bottom: true, right: i === rects.length - 1 })
-                    if (!focused) {
-                        // Pen accent inside its reserved two pixels plus gap.
-                        const amp = HandDrawn.accentAmp(k)
-                        const ax = r.x - leftInset + 1 + amp
-                        ctx.fillStyle = root.controller.tint(accent, 0.7)
-                        HandDrawn.wavyLine(ctx, ax, r.y, ax, r.y + r.height, HandDrawn.seed(s, "accent"), k,
-                            { width: 2, amp: amp, joinStart: i > 0, joinEnd: i < rects.length - 1 })
-                    }
+                    // A highlighter stroke per line, about the x-height (Main.highlightBand).
+                    HandDrawn.highlighterStroke(ctx, Qt.rect(r.x, r.y + band.top, r.width, Math.min(band.height, r.height - band.top)),
+                        ink, inkAlpha, HandDrawn.seed("highlight", version, reference, i), k)
                 }
             }
             // Tints first: each covering range adds a layer; highlights go on top.

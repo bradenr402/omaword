@@ -696,6 +696,17 @@ ApplicationWindow {
         NumberAnimation { target: app; property: "flashLevel"; to: 0; duration: 260; easing.type: Easing.InQuad }
     }
     FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.readerScale }
+    // Highlights: a highlighter pen in the theme's yellow (Omarchy color3,
+    // else the accent), one stroke per line about the x-height: from a
+    // little above it to a little below the baseline, never the full line,
+    // offset from the line's top (text sits at the top of its line box).
+    readonly property color highlightInk: desktop.color3 !== undefined && desktop.color3.valid ? desktop.color3 : desktop.accent
+    readonly property real highlightAlpha: desktop.dark ? 0.34 : 0.36
+    readonly property var highlightBand: highlightBandFor(readerMetrics)
+    function highlightBandFor(metrics) { return HandDrawn.highlightBand(metrics.ascent, metrics.descent, metrics.xHeight) }
+    // Repaints every highlight (tests: paint is deterministic).
+    signal highlightsRepaint()
+    function refreshHighlights() { highlightsRepaint(); const block = blockLoader.item as BlockReader; if (block) block.repaintAnnotations() }
     component VerseItem: Item {
         property real textOffset: 0
         property real textHeight: 0
@@ -5253,40 +5264,30 @@ ApplicationWindow {
                                         radius: 0
                                         // Painted as a highlighter band by highlightPaint.
                                         color: "transparent"
-                                        Item {
-                                            id: highlightAccent
-                                            objectName: "highlightAccent" + verseRow.modelData.number + ":" + parent.modelData.reference
-                                            width: 2; height: parent.height
-                                            visible: !bible.focusMode
-                                        }
                                         Canvas {
                                             id: highlightPaint
                                             objectName: "highlightPaint" + verseRow.modelData.number + ":" + parent.modelData.reference
                                             anchors.fill: parent
                                             readonly property var range: parent.modelData
-                                            property color ink: desktop.accent
-                                            readonly property var paintKey: [highlightAccent.visible, app.readerScale, width, height,
-                                                range.reference, range.highlightContinuesBefore, range.highlightContinuesAfter, bible.versionId]
+                                            property color ink: app.highlightInk
+                                            readonly property var paintKey: [app.readerScale, width, height, verseBody.width, verseBody.height, verseBody.y,
+                                                app.highlightBand, app.highlightAlpha, range.reference, bible.versionId]
                                             onPaintKeyChanged: requestPaint()
                                             onInkChanged: requestPaint()
+                                            Connections { target: app; function onHighlightsRepaint() { highlightPaint.requestPaint() } }
                                             onPaint: {
                                                 const ctx = getContext("2d")
                                                 ctx.reset()
                                                 const k = app.readerScale
-                                                const s = HandDrawn.seed("highlight", bible.versionId, range.reference)
-                                                const before = !!range.highlightContinuesBefore, after = !!range.highlightContinuesAfter
-                                                ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.16)
-                                                HandDrawn.highlighterBand(ctx, Qt.rect(0, 0, width, height),
-                                                    HandDrawn.seed(s, verseRow.modelData.number), k,
-                                                    { top: !before, bottom: !after })
-                                                if (!highlightAccent.visible) return
-                                                // Wobble stays right of the accent's left edge,
-                                                // inside its reserved three pixels before text.
-                                                const amp = HandDrawn.accentAmp(k)
-                                                ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.7)
-                                                HandDrawn.wavyLine(ctx, 1 + amp, 0, 1 + amp, height,
-                                                    HandDrawn.seed(s, "accent", verseRow.modelData.number), k,
-                                                    { width: 2, amp: amp, joinStart: before, joinEnd: after })
+                                                const s = HandDrawn.seed("highlight", bible.versionId, range.reference, verseRow.modelData.number)
+                                                const band = app.highlightBand
+                                                const lines = verseRow.searchOverlay ? verseRow.searchOverlay.lineRects(0, String(verseRow.modelData.text || "").length) : []
+                                                for (let i = 0; i < lines.length; ++i) {
+                                                    const r = lines[i]
+                                                    const p = verseBody.mapToItem(highlightPaint, r.x, r.y)
+                                                    HandDrawn.highlighterStroke(ctx, Qt.rect(p.x, p.y + band.top, r.width, band.height),
+                                                        ink, app.highlightAlpha, HandDrawn.seed(s, i), k)
+                                                }
                                             }
                                         }
                                     }
@@ -7270,7 +7271,41 @@ ApplicationWindow {
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 8 * app.scale
-                                Label { text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                                Label {
+                                    id: savedReference
+                                    objectName: "savedReference" + savedEntry.modelData.reference
+                                    text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground
+                                    font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap
+                                    FontMetrics { id: savedReferenceMetrics; font: savedReference.font }
+                                    // Highlights tab: the reader's highlighter stroke (same ink and seed) under the reference.
+                                    Canvas {
+                                        id: savedHighlight
+                                        objectName: "savedHighlight" + savedEntry.modelData.reference
+                                        z: -1
+                                        visible: savedEntry.showHighlight
+                                        x: -4 * app.scale
+                                        width: Math.min(savedReference.width, savedReference.contentWidth) + 8 * app.scale
+                                        height: savedReference.height
+                                        property color ink: app.highlightInk
+                                        readonly property var paintKey: [visible, app.scale, width, height, app.highlightAlpha,
+                                            savedEntry.modelData.reference, savedEntry.modelData.versionId, bible.versionId]
+                                        onPaintKeyChanged: requestPaint()
+                                        onInkChanged: requestPaint()
+                                        Connections { target: app; function onHighlightsRepaint() { savedHighlight.requestPaint() } }
+                                        onPaint: {
+                                            const ctx = getContext("2d")
+                                            ctx.reset()
+                                            if (!visible) return
+                                            const s = HandDrawn.seed("highlight", savedEntry.modelData.versionId || bible.versionId, savedEntry.modelData.reference)
+                                            const band = app.highlightBandFor(savedReferenceMetrics)
+                                            const lineHeight = savedReferenceMetrics.height
+                                            const lines = Math.max(1, savedReference.lineCount)
+                                            for (let i = 0; i < lines; ++i)
+                                                HandDrawn.highlighterStroke(ctx, Qt.rect(0, i * lineHeight + band.top, width, band.height),
+                                                    ink, app.highlightAlpha, HandDrawn.seed(s, "row", i), app.scale)
+                                        }
+                                    }
+                                }
                                 Label {
                                     objectName: "savedHere" + savedEntry.modelData.reference
                                     visible: savedEntry.here
@@ -7290,30 +7325,6 @@ ApplicationWindow {
                         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
                         // The current row is shown by its tinted fill alone, never an accent border.
                         border.width: 0
-                        Canvas {
-                            // The reader's hand-drawn highlight accent: same pen and seed.
-                            objectName: "savedHighlight" + savedEntry.modelData.reference
-                            visible: savedEntry.showHighlight
-                            width: 3 * app.scale
-                            height: parent.height
-                            property color ink: desktop.accent
-                            readonly property var paintKey: [visible, app.scale, width, height,
-                                savedEntry.modelData.reference, savedEntry.modelData.versionId, bible.versionId]
-                            onPaintKeyChanged: requestPaint()
-                            onInkChanged: requestPaint()
-                            onPaint: {
-                                const ctx = getContext("2d")
-                                ctx.reset()
-                                if (!visible) return
-                                const k = app.scale
-                                const amp = 0.6 * k
-                                const s = HandDrawn.seed("highlight", savedEntry.modelData.versionId || bible.versionId,
-                                    savedEntry.modelData.reference)
-                                ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, 0.7)
-                                HandDrawn.wavyLine(ctx, 1 + amp, 0, 1 + amp, height, HandDrawn.seed(s, "accent"), k,
-                                    { width: 2, amp: amp })
-                            }
-                        }
                     }
                 }
                 }
