@@ -1227,15 +1227,6 @@ Item {
                             : "No other passages are tagged " + panel.rootChips.filter(function(chip) { return panel.onIds.indexOf(chip.id) >= 0 })
                                 .map(function(chip) { return chip.name }).join(", ") + "."
                     }
-                    HintRow {
-                        objectName: "studyTagsVersionsHint"
-                        Layout.alignment: Qt.AlignHCenter
-                        Layout.maximumWidth: parent.width
-                        visible: panel.rootChips.length > 0 && panel.onIds.length > 0 && !panel.results.length && !panel.allVersions && panel.otherVersions
-                        theme: panel.desktop
-                        parts: [["A", "include other versions", function() { panel.toggleAllVersions() }, panel.relatedMoveKeys]]
-                        pixelSize: 12 * panel.studyScale
-                    }
                     Button {
                         id: addTags
                         objectName: "studyAddTags"

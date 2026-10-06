@@ -601,12 +601,20 @@ private slots:
         const auto lonely = scope(6, 6); bible->createAndAssignTag(lonely, "Lonely");
         openTagsTab();
         QCOMPARE(item("studyTagsEmpty")->property("text").toString(), QString("No other passages are tagged Lonely."));
-        QVERIFY(!item("studyTagsVersionsHint")->isVisible());
+        QVERIFY(!item("studyTagsVersionsHint"));
         invoke("closeForFocusMode"); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
         install(kjv); QVERIFY(bible->openTaggedPassage(lonely));
         openTagsTab();
-        QVERIFY(item("studyTagsVersionsHint")->isVisible());
-        QVERIFY(item("studyTagsVersionsHint")->property("text").toString().contains("include&nbsp;other&nbsp;versions"));
+        // The empty state no longer repeats the footer's a hint (it wrapped down the centre).
+        QVERIFY(!item("studyTagsVersionsHint"));
+        QVERIFY(item("studyTagsEmpty")->isVisible());
+        QVERIFY(item("studyHints")->property("text").toString().contains("all&nbsp;versions"));
+        // Keyboard and mouse still reach other versions through the footer hint.
+        key(Qt::Key_A); QTRY_VERIFY(panel->property("allVersions").toBool());
+        key(Qt::Key_A); QTRY_VERIFY(!panel->property("allVersions").toBool());
+        QTRY_VERIFY(item("studyHintsPart:all versions") && item("studyHintsPart:all versions")->property("clickable").toBool());
+        QTest::qWait(50); click("studyHintsPart:all versions"); QTRY_VERIFY(panel->property("allVersions").toBool());
+        key(Qt::Key_A); QTRY_VERIFY(!panel->property("allVersions").toBool());
         invoke("closeForFocusMode"); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
         // No tags: the passage, and t (or the button) adds some.
         const auto bare = scope(12, 12);
