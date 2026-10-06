@@ -850,9 +850,14 @@ ApplicationWindow {
     }
     function selectedTextEntries() {
         return [{ id: "copySelected", text: "Copy selected text", shortcut: menuKey("copyText"), enabled: !bible.busy,
-            run: function() { app.copySelectedText(false) } },
+            run: function() { app.copyMenuSelection(false) } },
             { id: "copySelectedPlain", text: "Copy selected plain text", shortcut: menuKey("copyTextPlain"), enabled: !bible.busy,
-            run: function() { app.copySelectedText(true) } }, menuDivider]
+            run: function() { app.copyMenuSelection(true) } }, menuDivider]
+    }
+    // Copying from the menu ends a character selection, as y does.
+    function copyMenuSelection(plainText) {
+        if (charMode) copyCharSelection(plainText)
+        else copySelectedText(plainText)
     }
     // Selected text (mouse-dragged or character selection): ctrl c copies it
     // as a quotation (ellipses at cut verses, numbers for verses whose start is
@@ -884,7 +889,9 @@ ApplicationWindow {
     property string charPending: ""
     readonly property string charChapterKey: bible.versionId + ":" + bible.book + ":" + bible.chapter + ":" + bible.readingMode
     onCharChapterKeyChanged: if (charMode) endCharMode()
-    onReaderBaseChanged: if (!readerBase && charMode) endCharMode()
+    // The passage menu opened from character selection keeps it (its copy
+    // entries copy it); anything else that takes the reader ends it.
+    onReaderBaseChanged: if (!readerBase && charMode && !(contextMenu.visible && contextMenu.target === "passage")) endCharMode()
     function verseText(number) {
         const row = Array.from(bible.verses).find(function(v) { return v.number === number })
         return row ? String(row.text || "") : ""
@@ -1174,14 +1181,32 @@ ApplicationWindow {
             else { endCharMode(); readerFocus() }
             return true
         }
+        // The passage menu at the cursor: its copy entries copy this selection.
+        if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (mods & Qt.ShiftModifier))) {
+            clearCount(); charPending = ""; openPassageMenuAtCursor(); return true
+        }
+        // Scroll keys scroll the reader; the cursor stays where it is.
+        const page = Math.max(readerLineHeight, reading.height - floatingSafety - 2 * readerLineHeight)
+        const scroll = mods === Qt.ControlModifier
+            ? { [Qt.Key_D]: page / 2, [Qt.Key_U]: -page / 2, [Qt.Key_F]: page, [Qt.Key_B]: -page }[event.key]
+            : mods === Qt.NoModifier ? { [Qt.Key_PageDown]: page, [Qt.Key_PageUp]: -page }[event.key] : undefined
+        if (scroll !== undefined) {
+            clearCount(); charPending = ""
+            const target = Math.max(0, Math.min(reading.contentHeight - reading.height, readerTargetY() + scroll))
+            if (Math.abs(target - readerTargetY()) < 1) sounds.play("boundary")
+            else slideReader(target)
+            return true
+        }
         if (mods & Qt.ControlModifier) {
             if (event.key === Qt.Key_C && !(mods & Qt.AltModifier)) { copyCharSelection(!!(mods & Qt.ShiftModifier)); return true }
-            return false
+            clearCount(); rejected(); return true
         }
-        if (mods & Qt.AltModifier) return false
+        if (mods & Qt.AltModifier) { clearCount(); rejected(); return true }
+        // Named keys are motions, never count digits (home is 0's motion, not a 0).
         const named = { [Qt.Key_Left]: "h", [Qt.Key_Right]: "l", [Qt.Key_Up]: "k", [Qt.Key_Down]: "j", [Qt.Key_Home]: "0", [Qt.Key_End]: "$" }
+        const isNamed = named[event.key] !== undefined
         const text = named[event.key] || event.text
-        if (!text.length) return false
+        if (!text.length) { clearCount(); rejected(); return true }
         if (charPending.length) {
             const pending = charPending
             charPending = ""
@@ -1193,7 +1218,7 @@ ApplicationWindow {
             else { clearCount(); rejected() }
             return true
         }
-        if (/^[1-9]$/.test(text) || (text === "0" && verseCount.length)) { countDigit(text); return true }
+        if (!isNamed && (/^[1-9]$/.test(text) || (text === "0" && verseCount.length))) { countDigit(text); return true }
         switch (text) {
         case "h": case "l": case "w": case "b": case "e": case "W": case "B": case "E": case "(": case ")": charMotion(text); break
         case "j": charLineStep(1); break
@@ -1259,10 +1284,15 @@ ApplicationWindow {
         if (!bible.ready || bible.busy) return
         clearCount()
         if (rangeEditor.active) { contextMenu.show("rangeEdit", rangeEditMenuEntries(), sceneX, sceneY); return }
-        // Text dragged with the mouse stays selected: the menu leads with copying it.
+        // Selected text (mouse-dragged or character selection) stays selected
+        // when the click is on it: the menu leads with copying it. A click
+        // elsewhere drops it and takes the verse path below.
         if (freeSelectedText.length) {
-            contextMenu.show("passage", selectedTextEntries().concat(passageMenuEntries(sceneX, sceneY)), sceneX, sceneY)
-            return
+            if (pointInSelectedText(sceneX, sceneY)) {
+                contextMenu.show("passage", selectedTextEntries().concat(passageMenuEntries(sceneX, sceneY)), sceneX, sceneY)
+                return
+            }
+            clearTextSelection()
         }
         if (!rangeEditing && number > 0) {
             const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
@@ -1272,6 +1302,16 @@ ApplicationWindow {
             }
         }
         contextMenu.show("passage", passageMenuEntries(sceneX, sceneY), sceneX, sceneY)
+    }
+    // Whether a scene point is on the selected text (its line, within a line
+    // height of a selected character).
+    function pointInSelectedText(sceneX, sceneY) {
+        const range = selectedSourceRange()
+        if (!range) return false
+        const p = readerColumn.mapFromItem(null, sceneX, sceneY)
+        const hit = charAtPoint(p.x, p.y)
+        if (!hit || Math.abs(hit.rect.x - p.x) > readerLineHeight) return false
+        return charCompare(hit.pos, range.start) >= 0 && charCompare(hit.pos, range.end) < 0
     }
     function verseMenuPoint(number) {
         const view = reading.mapToItem(null, 0, 0)
@@ -1299,7 +1339,10 @@ ApplicationWindow {
             const number = bible.cursorVerse > 0 ? bible.cursorVerse : rows.length ? rows[0].number : 0
             if (number > 0) selectVerse(number, false)
         }
-        const point = verseMenuPoint(bible.cursorVerse)
+        let point = verseMenuPoint(bible.cursorVerse)
+        // Character selection: at its cursor.
+        const rect = charMode ? charRect(charCursor) : null
+        if (rect) point = readerColumn.mapToItem(null, rect.x, rect.y + rect.height)
         contextMenu.show("passage", (freeSelectedText.length ? selectedTextEntries() : []).concat(passageMenuEntries(point.x, point.y)), point.x, point.y)
     }
     function sceneRowPoint(item) {
