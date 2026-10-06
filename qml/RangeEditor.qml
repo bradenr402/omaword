@@ -129,7 +129,7 @@ Item {
         moving = true
         coincidentEndpoint = "end"
         app.verseMode = false
-        chooser.close()
+        chooser.dismiss()
         app.clearCount()
         app.restorePanelFocus()
     }
@@ -154,7 +154,7 @@ Item {
         if (!bible.changeAnnotationRange(source, pending.destination, components, combine, pending.preview.destinationToken || "")) {
             message = bible.error || "Could not save this range. Your edit is still active."
             pending = null
-            merge.close()
+            merge.dismiss()
             app.restorePanelFocus()
             return
         }
@@ -171,7 +171,7 @@ Item {
     // Combine notes: esc steps back to moving the range (the session stays).
     function mergeBack() {
         pending = null
-        merge.close()
+        merge.dismiss()
         app.readerFocus()
     }
     function cancel() {
@@ -190,7 +190,7 @@ Item {
         if (!restored) {
             message = (bible.error || "Could not restore the original reading selection.") + " Press " + KeyNotation.format("Escape") + " to retry cancellation."
             pending = null
-            merge.close()
+            merge.dismiss()
             app.restorePanelFocus()
             return
         }
@@ -213,8 +213,8 @@ Item {
     function finish(saved) {
         moving = false
         sessionOpen = false
-        chooser.close()
-        merge.close()
+        chooser.dismiss()
+        merge.dismiss()
         pending = null
         message = ""
         app.clearCount()
@@ -268,7 +268,7 @@ Item {
         Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
         Keys.onReturnPressed: clicked()
         Keys.onEnterPressed: clicked()
-        AppToolTip { theme: editor.desktop; uiScale: editor.textScale; text: button.hint; visible: text.length > 0 && (button.hovered || button.activeFocus) }
+        AppToolTip { theme: editor.desktop; uiScale: editor.textScale; text: button.hint; visible: text.length > 0 && (button.hovered || (button.activeFocus && button.focusReason !== Qt.MouseFocusReason)) }
     }
     component RangeCheckBox: CheckBox {
         id: check
@@ -312,7 +312,7 @@ Item {
             theme: editor.desktop
             uiScale: editor.textScale
             text: KeyNotation.format("Space") + " toggles this tag; " + KeyNotation.format("T") + " toggles all tags"
-            visible: check.allTagsHint && (check.hovered || check.activeFocus)
+            visible: check.allTagsHint && (check.hovered || (check.activeFocus && check.focusReason !== Qt.MouseFocusReason))
         }
     }
     // The app's overlay scrollbar (Main's OverlayScrollbar): a thin thumb over
@@ -360,7 +360,14 @@ Item {
         padding: 24 * editor.uiScale
         modal: true
         focus: true
-        closePolicy: Popup.NoAutoClose
+        // A press outside acts as esc does (the owner's `outside`): it closes
+        // the dialog, never reaching what is underneath. The editor's own
+        // closes go through dismiss().
+        closePolicy: Popup.CloseOnPressOutside
+        property bool closingByCode: false
+        signal outside()
+        function dismiss() { closingByCode = true; close(); closingByCode = false }
+        onAboutToHide: if (!closingByCode) Qt.callLater(outside)
         background: Rectangle { color: editor.desktop.background; border.color: editor.desktop.border; radius: editor.desktop.cornerRadius }
         // A modal: fades in, closes at once.
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: editor.app.fadeMs || 0; easing.type: Easing.OutQuad } }
@@ -369,6 +376,7 @@ Item {
     RangeDialog {
         id: chooser
         objectName: "rangeChooser"
+        onOutside: editor.cancel()
         property int focusedRow: 0
         function focusRow(index) {
             const rows = editor.source ? componentChoices : sourceChoices
@@ -556,6 +564,7 @@ Item {
     RangeDialog {
         id: merge
         objectName: "rangeNoteMerge"
+        onOutside: editor.mergeBack()
         // Combine is focused at once, while the modal is still fading in: enter
         // combines, esc steps back to moving the range, ← → move between buttons.
         onVisibleChanged: if (visible) { mergeCombine.forceActiveFocus() }
@@ -604,12 +613,16 @@ Item {
             }
             FineRule { Layout.fillWidth: true }
             HintRow {
+                id: mergeKeys
                 objectName: "rangeMergeKeys"
                 Layout.fillWidth: true
                 theme: editor.desktop
                 pixelSize: 11 * editor.uiScale
+                // enter presses the focused button: its label follows ← →.
+                readonly property var focused: mergeBackButton.activeFocus ? mergeBackButton : mergeCancel.activeFocus ? mergeCancel : mergeCombine
                 parts: [[["Left", "Right"], "choose"], [["J", "K"], "scroll"],
-                    ["Return", "combine", function() { editor.commit(true) }, !editor.bible.busy && !!editor.pending],
+                    ["Return", mergeKeys.focused === mergeBackButton ? "step back" : mergeKeys.focused === mergeCancel ? "cancel" : "combine",
+                        function() { mergeKeys.focused.clicked() }, !!editor.pending && (mergeKeys.focused !== mergeCombine || !editor.bible.busy)],
                     ["Escape", "back", function() { editor.mergeBack() }]]
             }
         }
