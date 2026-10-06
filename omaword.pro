@@ -11,8 +11,8 @@ SOURCES += src/soundeffects.cpp
 HEADERS += src/soundeffects.h
 SOURCES += src/blockdocument.cpp
 HEADERS += src/blockdocument.h
-SOURCES += src/scripturesearch.cpp src/searchdocument.cpp src/keyhold.cpp
-HEADERS += src/scripturesearch.h src/searchdocument.h src/keyhold.h
+SOURCES += src/scripturesearch.cpp src/searchdocument.cpp src/keyhold.cpp src/exitsnapshot.cpp
+HEADERS += src/scripturesearch.h src/searchdocument.h src/keyhold.h src/exitsnapshot.h
 
 brand_desktop.input = $$PWD/assets/launcher.desktop.in
 brand_desktop.output = $$OUT_PWD/$${BRAND_ID}.desktop

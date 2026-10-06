@@ -353,6 +353,7 @@ Item {
         opacity: 0.65
     }
     component RangeDialog: Popup {
+        id: rangeDialog
         parent: Overlay.overlay
         width: Math.min(600 * editor.textScale, editor.app.width - 32)
         height: Math.min(contentItem.implicitHeight + 2 * padding, editor.app.height - 32)
@@ -367,10 +368,13 @@ Item {
         property bool closingByCode: false
         signal outside()
         function dismiss() { closingByCode = true; close(); closingByCode = false }
-        onAboutToHide: if (!closingByCode) Qt.callLater(outside)
+        onAboutToHide: {
+            if (editor.app.modalExitRelease) editor.app.modalExitRelease(rangeDialog)
+            if (!closingByCode) Qt.callLater(outside)
+        }
         background: Rectangle { color: editor.desktop.background; border.color: editor.desktop.border; radius: editor.desktop.cornerRadius }
-        // A modal: fades in, closes at once.
-        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: editor.app.fadeMs || 0; easing.type: Easing.OutQuad } }
+        // A modal: opens and closes at once; the app's modal ghost plays the exit.
+        enter: null
         exit: null
     }
     RangeDialog {

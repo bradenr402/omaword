@@ -1390,9 +1390,10 @@ Item {
             surface.pressInside = false
             if (outside && surface.opened && panel.confirmation && !panel.app.contextMenuOpen) panel.handleEscape()
         })
-        // A modal: fades in, closes at once.
-        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: panel.app.fadeMs || 0; easing.type: Easing.OutQuad } }
+        // A modal: opens and closes at once; the app's modal ghost plays the exit.
+        enter: null
         exit: null
+        onAboutToHide: if (panel.app.modalExitRelease) panel.app.modalExitRelease(surface)
         onClosed: {
             panel.confirmation = null
             panel.editingScope = null

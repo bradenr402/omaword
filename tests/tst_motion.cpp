@@ -419,37 +419,55 @@ private slots:
         if (mode == "verse") QVERIFY(!item("copyFlash6")->isVisible());
     }
     void popupsFocusImmediatelyAndReopen() {
-        // Palette: input focus at once, while still fading in.
+        auto ghost = [&](const char *name) { return object(name); };
+        // Palette: open at once (no entrance fade), input focused.
         key(Qt::Key_K, Qt::ControlModifier);
         auto palette = object("passagePalette");
         QVERIFY(palette->property("visible").toBool());
         QVERIFY(item("referenceInput")->hasActiveFocus());
-        QVERIFY(palette->property("opacity").toDouble() < 1.0);
+        QCOMPARE(palette->property("opacity").toDouble(), 1.0);
         type("John 1:3"); QCOMPARE(object("referenceInput")->property("text").toString(), QString("John 1:3"));
-        QTRY_COMPARE(palette->property("opacity").toDouble(), 1.0);
-        // Closing is immediate: no exit fade and no ghost; keys go back at once.
+        QTest::qWait(60);
+        // Closing: the palette is gone at once (not open, keys back); its ghost
+        // fades and shrinks toward the centre without taking input.
+        const auto paletteRect = item("referenceInput")->window() ? QRectF(palette->property("x").toDouble(), palette->property("y").toDouble(),
+            palette->property("width").toDouble(), palette->property("height").toDouble()) : QRectF();
         key(Qt::Key_Escape);
-        QVERIFY(!palette->property("visible").toBool());
-        QVERIFY(!object("paletteGhost")); QVERIFY(!object("paletteScrimGhost"));
+        QVERIFY(!palette->property("visible").toBool()); QVERIFY(!prop("modalOpen").toBool()); QVERIFY(!prop("dialogOpen").toBool());
+        QVERIFY(ghost("modalGhost")->property("running").toBool());
+        const auto exit = value(ghost("modalGhost")->property("lastExit")).toMap();
+        QVERIFY(qAbs(exit["width"].toDouble() - paletteRect.width()) <= 1 && qAbs(exit["height"].toDouble() - paletteRect.height()) <= 1);
+        QVERIFY(qAbs(exit["originX"].toDouble() - (exit["x"].toDouble() + exit["width"].toDouble() / 2)) <= 1);
         const auto before = bible->cursorVerse(); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), before + 1);
-        // Reopen at once: it fades in again, in every palette mode.
+        if (const auto directory = qEnvironmentVariable("OMAWORD_SHOTS"); !directory.isEmpty()) {
+            QTest::qWait(30); QVERIFY(window->grabWindow().save(directory + "/palette-exit-ghost.png"));
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(!ghost("modalGhost")->property("running").toBool(), 1000);
+        // Reopen mid-exit: instantly, in every palette mode.
         for (auto mode : {Qt::Key_K, Qt::Key_Slash}) {
             key(mode, Qt::ControlModifier);
             QVERIFY(palette->property("visible").toBool()); QVERIFY(item("referenceInput")->hasActiveFocus());
-            QVERIFY(palette->property("opacity").toDouble() < 1.0);
+            QCOMPARE(palette->property("opacity").toDouble(), 1.0);
+            QTest::qWait(40);
             key(Qt::Key_Escape); QVERIFY(!palette->property("visible").toBool());
+            QVERIFY(ghost("modalGhost")->property("running").toBool());
         }
-        // Other modals: Help, Reading settings, Versions fade in and close at once.
+        key(Qt::Key_K, Qt::ControlModifier); QVERIFY(palette->property("visible").toBool());
+        QVERIFY(item("referenceInput")->hasActiveFocus()); QVERIFY(prop("modalOpen").toBool());
+        key(Qt::Key_Escape); QVERIFY(!palette->property("visible").toBool());
+        // Other modals: Help, Reading settings, Versions, About open at once and close at once.
         for (auto command : {"help", "settings", "switchVersion", "about"}) {
             QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QString(command))));
             const auto name = QString(command) == "help" ? "helpDialog" : QString(command) == "settings" ? "settingsDialog"
                 : QString(command) == "about" ? "aboutDialog" : "versionDialog";
             auto dialog = object(name); QVERIFY2(dialog, name);
             QVERIFY2(dialog->property("visible").toBool(), name);
-            QVERIFY2(dialog->property("opacity").toDouble() < 1.0, name);
-            QTRY_VERIFY(dialog->property("opened").toBool());
             QCOMPARE(dialog->property("opacity").toDouble(), 1.0);
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QTest::qWait(40);
             key(Qt::Key_Escape); QVERIFY2(!dialog->property("visible").toBool(), name);
+            QVERIFY2(ghost("modalGhost")->property("running").toBool(), name);
+            QVERIFY(!prop("modalOpen").toBool());
             call("readerFocus");
         }
         QTRY_VERIFY_WITH_TIMEOUT(!ghost("modalGhost")->property("running").toBool(), 1000);
@@ -526,14 +544,23 @@ private slots:
         key(Qt::Key_Escape); QVERIFY(!prop("findPromptOpen").toBool());
         QVERIFY(item("chapterFind")->isVisible()); QVERIFY(!item("chapterFind")->isEnabled());
         QTRY_VERIFY(!item("chapterFind")->isVisible());
-        // Context menu: no motion at all, in or out, and no ghost.
+        // Context menu: opens at once; closes at once, its ghost shrinking
+        // toward the anchor point it opened at.
         call("openPassageMenuAtCursor");
         QVERIFY(menu()->property("visible").toBool());
         QCOMPARE(menu()->property("opacity").toDouble(), 1.0);
         QVERIFY(menu()->property("opened").toBool());
         QTRY_VERIFY(item("contextMenuContent")->hasActiveFocus());
+        QTest::qWait(40);
+        const auto anchor = menu()->property("origin").toPointF();
         key(Qt::Key_Escape); QVERIFY(!menu()->property("visible").toBool());
-        QVERIFY(!object("contextMenuGhost"));
+        QVERIFY(object("menuGhost")->property("running").toBool());
+        {
+            const auto exit = value(object("menuGhost")->property("lastExit")).toMap();
+            QVERIFY(qAbs(exit["originX"].toDouble() - qBound(exit["x"].toDouble(), anchor.x(), exit["x"].toDouble() + exit["width"].toDouble())) <= 1);
+            QVERIFY(qAbs(exit["originY"].toDouble() - qBound(exit["y"].toDouble(), anchor.y(), exit["y"].toDouble() + exit["height"].toDouble())) <= 1);
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(!object("menuGhost")->property("running").toBool(), 1000);
         // Toasts fade in and out.
         QVERIFY(QMetaObject::invokeMethod(window, "notify", Q_ARG(QVariant, QString("Hello")), Q_ARG(QVariant, true)));
         auto toast = item("toastFrame");
@@ -544,6 +571,65 @@ private slots:
         QVERIFY(toast->isVisible()); QVERIFY(!toast->property("shown").toBool());
         QTRY_VERIFY(toast->opacity() < 1.0);
         QTRY_VERIFY(!toast->isVisible());
+    }
+    // A right click elsewhere while a menu is open: the new menu appears at
+    // once, as the old one's ghost starts leaving from where it was opened.
+    void menuSwitchesWithoutAGap_data() { layouts(); }
+    void menuSwitchesWithoutAGap() {
+        QFETCH(QString, mode);
+        setLayout(mode); navigate("John 1:3");
+        QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, versePoint(3)); QCoreApplication::processEvents();
+        QVERIFY(menu()->property("visible").toBool()); QCOMPARE(menu()->property("opacity").toDouble(), 1.0);
+        const auto firstOrigin = menu()->property("origin").toPointF();
+        const double firstX = menu()->property("x").toDouble(), firstY = menu()->property("y").toDouble();
+        QTest::qWait(60);
+        // Mouse: right press on another verse (outside the open menu), one event.
+        const QRectF open(firstX, firstY, menu()->property("width").toDouble(), menu()->property("height").toDouble());
+        int other = 6;
+        while (other < 30 && open.contains(versePoint(other))) ++other;
+        QVERIFY(!open.contains(versePoint(other)));
+        QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, versePoint(other)); QCoreApplication::processEvents();
+        QVERIFY(menu()->property("visible").toBool()); QCOMPARE(menu()->property("opacity").toDouble(), 1.0);
+        QCOMPARE(bible->selectionReference(), QString("John 1:%1").arg(other));
+        auto ghost = object("menuGhost"); QVERIFY(ghost->property("running").toBool());
+        const auto exit = value(ghost->property("lastExit")).toMap();
+        QVERIFY(qAbs(exit["x"].toDouble() - firstX) <= 1 && qAbs(exit["y"].toDouble() - firstY) <= 1);
+        QVERIFY(qAbs(exit["originX"].toDouble() - firstOrigin.x()) <= 1 && qAbs(exit["originY"].toDouble() - firstOrigin.y()) <= 1);
+        QVERIFY(menu()->property("y").toDouble() != firstY || menu()->property("x").toDouble() != firstX);
+        // Visual check: OMAWORD_SHOTS saves the switch mid-exit.
+        if (const auto directory = qEnvironmentVariable("OMAWORD_SHOTS"); !directory.isEmpty() && mode == "verse") {
+            QTest::qWait(30); QVERIFY(window->grabWindow().save(directory + "/menu-switch-ghost.png"));
+        }
+        // The ghost sits under the new menu and never takes input.
+        QVERIFY(ghost->property("z").toDouble() < menu()->property("z").toDouble());
+        QVERIFY(!qobject_cast<QQuickItem *>(ghost)->isEnabled());
+        QTRY_VERIFY_WITH_TIMEOUT(!ghost->property("running").toBool(), 1000);
+        // Keyboard: the menu key on an open menu closes it; it reopens at once.
+        key(Qt::Key_Escape); QVERIFY(!menu()->property("visible").toBool());
+        key(Qt::Key_Menu); QVERIFY(menu()->property("visible").toBool());
+        key(Qt::Key_Escape); QVERIFY(!menu()->property("visible").toBool());
+        key(Qt::Key_Menu); QVERIFY(menu()->property("visible").toBool()); QVERIFY(ghost->property("running").toBool());
+        key(Qt::Key_Escape);
+    }
+    // Hover colors change at once (never animated), with animations on.
+    void hoverColorsAreInstant() {
+        QVERIFY(!sounds->reduceMotion());
+        auto button = item("searchControl");
+        auto background = button->property("background").value<QQuickItem *>();
+        QCOMPARE(background->property("color").value<QColor>().alpha(), 0);
+        QTest::mouseMove(window, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QCoreApplication::processEvents();
+        QVERIFY(background->property("color").value<QColor>().alpha() > 0);
+        QTest::mouseMove(window, QPoint(window->width() / 2, 200)); QCoreApplication::processEvents();
+        QCOMPARE(background->property("color").value<QColor>().alpha(), 0);
+        call("openPassageMenuAtCursor"); QVERIFY(menu()->property("visible").toBool());
+        QTest::qWait(30);
+        auto row = item("contextMenuItem:bookmark");
+        QTest::mouseMove(window, row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+        QCoreApplication::processEvents();
+        auto highlight = item("contextMenuHighlight" + QString::number(menu()->property("currentIndex").toInt()));
+        QVERIFY(highlight->isVisible()); QCOMPARE(highlight->opacity(), 1.0);
+        key(Qt::Key_Escape);
     }
     void reduceMotionCommand() {
         QCOMPARE(commandTitle("animations"), QString("Disable animations"));
@@ -577,7 +663,12 @@ private slots:
         call("readerFocus"); QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QString("help"))));
         QTRY_VERIFY(object("helpDialog")->property("opened").toBool());
         QCOMPARE(object("helpDialog")->property("opacity").toDouble(), 1.0);
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("helpDialog")->property("visible").toBool()); call("readerFocus");
+        key(Qt::Key_Escape); QVERIFY(!object("helpDialog")->property("visible").toBool());
+        QVERIFY(!object("modalGhost")->property("running").toBool()); call("readerFocus");
+        // Menus: no ghost either.
+        call("openPassageMenuAtCursor"); QVERIFY(menu()->property("visible").toBool());
+        key(Qt::Key_Escape); QVERIFY(!menu()->property("visible").toBool());
+        QVERIFY(!object("menuGhost")->property("running").toBool()); call("readerFocus");
         QVERIFY(QMetaObject::invokeMethod(window, "notify", Q_ARG(QVariant, QString("Hello")), Q_ARG(QVariant, true)));
         QCoreApplication::processEvents(); QTest::qWait(20);
         QCOMPARE(item("toastFrame")->opacity(), 1.0);

@@ -868,6 +868,7 @@ ApplicationWindow {
         }
         verseTagMenu.annotationKind = kind
         verseTagMenu.entries = ranges
+        verseTagMenu.origin = Qt.point(sceneX, sceneY)
         verseTagMenu.popup(sceneX, sceneY)
     }
     function openRangeEntries(sceneX, sceneY) {
@@ -1665,7 +1666,29 @@ ApplicationWindow {
         objectName: "contextMenu"
         theme: desktop
         onRejected: sounds.play("error")
+        onAboutToHide: menuGhost.release(contextMenu, contextMenu.origin)
     }
+    // Exit motion (interfaces.dev: exits subtler than entrances, from their
+    // trigger; frequent popups open instantly). Menus and modals open at once
+    // and close at once; a ghost of what closed fades and shrinks slightly
+    // toward its trigger (a menu's pointer or anchor point) or centre (a
+    // modal), never taking input. Disable animations: no ghost.
+    ExitGhost {
+        id: menuGhost
+        objectName: "menuGhost"
+        duration: app.reduceMotion ? 0 : 110
+        endScale: 0.95
+    }
+    ExitGhost {
+        id: modalGhost
+        objectName: "modalGhost"
+        duration: app.reduceMotion ? 0 : 120
+        endScale: 0.97
+        dimmed: true
+        dimColor: app.tint(desktop.background, 0.72)
+        suppressDim: app.dialogOpen
+    }
+    function modalExitRelease(popup) { modalGhost.release(popup, null) }
     // The mouse's back and forward buttons, anywhere in the window: a menu
     // closes; the palette steps back toward its book list; an open side panel
     // closes; the reader travels its jumps like [ and ].
@@ -1754,6 +1777,11 @@ ApplicationWindow {
         id: verseTagMenu
         objectName: "verseTagMenu"
         property var entries: []
+        // Opens at once; its exit is menuGhost's, toward where it opened.
+        property point origin: Qt.point(0, 0)
+        enter: null
+        exit: null
+        onAboutToHide: menuGhost.release(verseTagMenu, verseTagMenu.origin)
         property string annotationKind: "tag"
         modal: true
         focus: true
@@ -4750,6 +4778,7 @@ ApplicationWindow {
                 verseTagMenu.annotationKind = kind
                 verseTagMenu.entries = choices
                 const p = mapToItem(app.contentItem, width, headingHeight)
+                verseTagMenu.origin = mapToItem(null, width, headingHeight)
                 verseTagMenu.popup(p.x, p.y)
             }
         }
@@ -4837,6 +4866,7 @@ ApplicationWindow {
         font.letterSpacing: 1.5
     }
     component ModalCard: Dialog {
+        id: modalCard
         modal: true
         anchors.centerIn: parent
         padding: 24
@@ -4848,11 +4878,14 @@ ApplicationWindow {
             border.color: desktop.border
         }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.72) }
-        // Every modal fades in and closes at once: no exit motion.
-        enter: Transition {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: app.fadeMs; easing.type: Easing.OutQuad }
-        }
+        // Every modal opens at once and closes at once (it stops counting as
+        // open, and focus returns, immediately); modalGhost plays its exit.
+        enter: null
         exit: null
+        Connections {
+            target: modalCard
+            function onAboutToHide() { app.modalExitRelease(modalCard) }
+        }
     }
 
     ColumnLayout {

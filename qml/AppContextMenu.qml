@@ -45,10 +45,13 @@ Popup {
         close()
         return button !== Qt.RightButton
     }
-    // No motion, ever: the menu appears and disappears at once, so actions and
-    // focus restoration never wait on animation.
+    // The menu appears at once and closes at once, so actions and focus
+    // restoration never wait on animation; its exit motion is a ghost (the
+    // owner's ExitGhost) shrinking toward `origin`, the pointer or anchor
+    // point it opened at.
     enter: null
     exit: null
+    property point origin: Qt.point(0, 0)
     width: rowWidth + leftPadding + rightPadding
     readonly property real rowWidth: {
         let widest = 180 * uiScale
@@ -68,6 +71,7 @@ Popup {
     function show(kind, items, sceneX, sceneY) {
         target = kind
         entries = items
+        origin = Qt.point(sceneX, sceneY)
         restoreFocusItem = (menu.parent as Item)?.Window.activeFocusItem ?? null
         pendingRun = null
         currentIndex = -1
