@@ -638,10 +638,10 @@ ApplicationWindow {
     // layout, text, selection, copy output, or hit-testing. Reduce motion (shared
     // app-wide on `sounds`) collapses every duration to an instant change.
     readonly property bool reduceMotion: sounds.reduceMotion
-    readonly property int fadeMs: reduceMotion ? 0 : 140
-    // Side panels: enter 180 ms over the full slide; exit 120 ms over a short one.
-    readonly property int panelEnterMs: reduceMotion ? 0 : 180
-    readonly property int panelExitMs: reduceMotion ? 0 : 120
+    readonly property int fadeMs: reduceMotion ? 0 : 100
+    // Side panels: enter 125 ms over the full slide; exit 85 ms over a short one.
+    readonly property int panelEnterMs: reduceMotion ? 0 : 125
+    readonly property int panelExitMs: reduceMotion ? 0 : 85
     readonly property real panelExitPosition: reduceMotion ? 0 : 0.85
     readonly property real focusDimOpacity: 0.32
     // Focus mode keeps the selection, else the cursor verse, at full strength.
@@ -689,15 +689,20 @@ ApplicationWindow {
         if (scope && scope.book === bible.book && scope.chapter === bible.chapter && (scope.endBook || scope.book) === bible.book
                 && (scope.endChapter || scope.chapter) === bible.chapter) flashVerses(scope.start, scope.end)
     }
+    // Jump pulse and copy flash: a quick rise, a longer settle.
+    readonly property int pulseInMs: 125
+    readonly property int pulseOutMs: 295
+    readonly property int flashInMs: 65
+    readonly property int flashOutMs: 180
     SequentialAnimation {
         id: pulseAnimation
-        NumberAnimation { target: app; property: "pulseLevel"; from: 0; to: 1; duration: 180; easing.type: Easing.OutQuad }
-        NumberAnimation { target: app; property: "pulseLevel"; to: 0; duration: 420; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: app; property: "pulseLevel"; from: 0; to: 1; duration: app.pulseInMs; easing.type: Easing.OutQuad }
+        NumberAnimation { target: app; property: "pulseLevel"; to: 0; duration: app.pulseOutMs; easing.type: Easing.InOutQuad }
     }
     SequentialAnimation {
         id: flashAnimation
-        NumberAnimation { target: app; property: "flashLevel"; from: 0; to: 1; duration: 90; easing.type: Easing.OutQuad }
-        NumberAnimation { target: app; property: "flashLevel"; to: 0; duration: 260; easing.type: Easing.InQuad }
+        NumberAnimation { target: app; property: "flashLevel"; from: 0; to: 1; duration: app.flashInMs; easing.type: Easing.OutQuad }
+        NumberAnimation { target: app; property: "flashLevel"; to: 0; duration: app.flashOutMs; easing.type: Easing.InQuad }
     }
     FontMetrics { id: readerMetrics; font.family: desktop.fontFamily; font.pixelSize: app.readerSize * app.readerScale }
     // Highlights: a highlighter pen in the theme's yellow (Omarchy color3,
@@ -1677,13 +1682,13 @@ ApplicationWindow {
     ExitGhost {
         id: menuGhost
         objectName: "menuGhost"
-        duration: app.reduceMotion ? 0 : 110
+        duration: app.reduceMotion ? 0 : 75
         endScale: 0.95
     }
     ExitGhost {
         id: modalGhost
         objectName: "modalGhost"
-        duration: app.reduceMotion ? 0 : 120
+        duration: app.reduceMotion ? 0 : 85
         endScale: 0.97
         dimmed: true
         dimColor: app.tint(desktop.background, 0.72)
@@ -2234,7 +2239,7 @@ ApplicationWindow {
     }
     // Toggling margin notes slides the reader to make or return room, and fades
     // the notes in/out; resizes, chapter changes, and Disable animations jump.
-    readonly property int marginSlideMs: reduceMotion ? 0 : 140
+    readonly property int marginSlideMs: reduceMotion ? 0 : 100
     property real marginSlideOffset: 0
     NumberAnimation { id: marginSlide; objectName: "marginSlide"; target: app; property: "marginSlideOffset"; to: 0; duration: app.marginSlideMs; easing.type: Easing.OutCubic }
     NumberAnimation { id: marginFade; target: marginLayer; property: "opacity"; duration: app.marginSlideMs; easing.type: Easing.OutCubic
@@ -3126,9 +3131,9 @@ ApplicationWindow {
             bible.readingPosition = travel > 0 ? Math.max(0, Math.min(1, readerTargetY() / travel)) : 0
         }
     }
-    // Programmatic scrolls to a verse slide (ease-out, ~110 ms) and retarget
+    // Programmatic scrolls to a verse slide (ease-out, ~75 ms) and retarget
     // mid-flight, so held keys never lag; instant with animations disabled.
-    readonly property int slideMs: reduceMotion ? 0 : 110
+    readonly property int slideMs: reduceMotion ? 0 : 75
     NumberAnimation { id: readerSlide; objectName: "readerSlide"; target: reading; property: "contentY"; duration: app.slideMs; easing.type: Easing.OutCubic }
     function clampReaderY(y) { return Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), y)) }
     function readerTargetY() { return readerSlide.running ? readerSlide.to : reading.contentY }
@@ -4419,8 +4424,8 @@ ApplicationWindow {
                 color: desktop.muted
                 radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
                 opacity: bar.hovered || bar.pressed ? 0.8 : linger.running ? 0.5 : 0.2
-                Behavior on width { NumberAnimation { duration: 120 } }
-                Behavior on opacity { NumberAnimation { duration: 200 } }
+                Behavior on width { NumberAnimation { duration: app.reduceMotion ? 0 : 85 } }
+                Behavior on opacity { NumberAnimation { duration: app.reduceMotion ? 0 : 140 } }
             }
         }
         background: Item {}
@@ -6538,7 +6543,7 @@ ApplicationWindow {
     ChapterFind {
         id: chapterFind
         objectName: "chapterFind"
-        fadeDuration: app.reduceMotion ? 0 : 120
+        fadeDuration: app.reduceMotion ? 0 : 85
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
         anchors.margins: 16 * app.controlScale
         theme: desktop

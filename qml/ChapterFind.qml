@@ -20,7 +20,7 @@ Rectangle {
     // Right click (or the menu key) in the field: the app's text menu.
     signal textMenu(Item field, point position)
     // Fade only: closed prompts take no input while fading out.
-    property int fadeDuration: 120
+    property int fadeDuration: 85
     visible: opacity > 0
     enabled: opened
     opacity: opened ? 1 : 0

@@ -341,8 +341,8 @@ Item {
                 color: editor.desktop.muted
                 radius: Math.min(editor.desktop.cornerRadius, width / 2, height / 2)
                 opacity: bar.hovered || bar.pressed ? 0.8 : linger.running ? 0.5 : 0.2
-                Behavior on width { NumberAnimation { duration: editor.app && editor.app.reduceMotion ? 0 : 120 } }
-                Behavior on opacity { NumberAnimation { duration: editor.app && editor.app.reduceMotion ? 0 : 200 } }
+                Behavior on width { NumberAnimation { duration: editor.app && editor.app.reduceMotion ? 0 : 85 } }
+                Behavior on opacity { NumberAnimation { duration: editor.app && editor.app.reduceMotion ? 0 : 140 } }
             }
         }
         background: Item {}

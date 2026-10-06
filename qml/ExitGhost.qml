@@ -18,7 +18,7 @@ import OmaWord.Reader 1.0
 // is a scene point (null = the popup's centre).
 Item {
     id: ghost
-    property int duration: 120
+    property int duration: 85
     property real endScale: 0.96
     // A modal's dim layer fades out with it, unless another modal dims the
     // window already (suppressDim).

@@ -276,7 +276,7 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   - Focus-mode dimming: follows the cursor instantly; only entering/leaving fades.
   - Jump pulse and copy flash rects. Reduce motion disables pulses/flashes/fades.
   - Programmatic scrolls to a verse (`scrollToVerse`, `zz`/`zt`/`zb`, search,
-    jumps) slide via one `readerSlide` animation (110 ms, ease-out) that
+    jumps) slide via one `readerSlide` animation (75 ms, ease-out) that
     retargets from the current position; `readerTargetY()` is the logical
     position (saved positions use it). User drags stop it. Focus mode keeps the
     cursor verse 40% down. Instant when animations are disabled.
@@ -284,12 +284,12 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
     trigger; frequent popups open instantly): menus and modals (palette,
     dialogs, tag picker, range dialogs) open and close at once, so a closed
     one stops counting as open, focus returns, and it (or another) reopens
-    immediately; `ExitGhost` (`menuGhost`, 110 ms toward the pointer or anchor
-    point; `modalGhost`, 120 ms toward the centre, with its dim) plays the
+    immediately; `ExitGhost` (`menuGhost`, 75 ms toward the pointer or anchor
+    point; `modalGhost`, 85 ms toward the centre, with its dim) plays the
     exit. A right click while a menu is open shows the new menu as the old
     one's ghost leaves. Side panels enter with the full slide and a fade
-    (180 ms, ease-out) and exit with a short slide (to position 0.85) and a
-    quicker fade (120 ms, ease-in). Hover colors never animate. Disable
+    (125 ms, ease-out) and exit with a short slide (to position 0.85) and a
+    quicker fade (85 ms, ease-in). Hover colors never animate. Disable
     animations: no ghosts, instant panels.
 - Footnote markers reuse decoration cells at each note's plain-text offset
   (word joiner + transparent image): `BlockDocument` inserts them in
@@ -345,7 +345,7 @@ and the seven-entry `resources/catalog.json`. `branding.env` feeds generated hea
   `{`/`}` step headings from the same verse (History jumps), `{` ending at the
   chapter top (`Margins.headingStep`'s `top`), even without headings. Toggling notes (`applyMarginNotes`, driven
   by `bible.marginNotesChanged`) fades them in while the column slides left,
-  or fades them out before it slides back (`marginSlideOffset`, 140 ms
+  or fades them out before it slides back (`marginSlideOffset`, 100 ms
   ease-out); resizes and chapter changes jump, as does Disable animations.
 - Desktop corners come from async `hyprctl` polling; failure resets to 0.
   Highlight segments stay square.

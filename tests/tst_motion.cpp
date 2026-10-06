@@ -562,7 +562,8 @@ private slots:
             QVERIFY(qAbs(exit["originY"].toDouble() - qBound(exit["y"].toDouble(), anchor.y(), exit["y"].toDouble() + exit["height"].toDouble())) <= 1);
         }
         QTRY_VERIFY_WITH_TIMEOUT(!object("menuGhost")->property("running").toBool(), 1000);
-        // Toasts fade in and out.
+        // Toasts fade in and out (from no earlier toast).
+        QVERIFY(QMetaObject::invokeMethod(object("toastTimer"), "stop")); QTRY_COMPARE(item("toastFrame")->opacity(), 0.0);
         QVERIFY(QMetaObject::invokeMethod(window, "notify", Q_ARG(QVariant, QString("Hello")), Q_ARG(QVariant, true)));
         auto toast = item("toastFrame");
         QVERIFY(toast->isVisible()); QVERIFY(toast->opacity() < 1.0);
@@ -635,6 +636,22 @@ private slots:
         auto highlight = item("contextMenuHighlight" + QString::number(menu()->property("currentIndex").toInt()));
         QVERIFY(highlight->isVisible()); QCOMPARE(highlight->opacity(), 1.0);
         key(Qt::Key_Escape);
+    }
+    // Motion is snappy (about 30% under the original timings) and exits stay
+    // subtler and faster than entrances.
+    void durationsAreSnappy() {
+        QVERIFY(!prop("reduceMotion").toBool());
+        QCOMPARE(prop("panelEnterMs").toInt(), 125); QCOMPARE(prop("panelExitMs").toInt(), 85);
+        QCOMPARE(prop("fadeMs").toInt(), 100); QCOMPARE(prop("slideMs").toInt(), 75); QCOMPARE(prop("marginSlideMs").toInt(), 100);
+        QCOMPARE(object("menuGhost")->property("duration").toInt(), 75); QCOMPARE(object("modalGhost")->property("duration").toInt(), 85);
+        QCOMPARE(item("chapterFind")->property("fadeDuration").toInt(), 85);
+        QVERIFY(prop("panelExitMs").toInt() < prop("panelEnterMs").toInt());
+        QVERIFY(object("menuGhost")->property("duration").toInt() < prop("panelEnterMs").toInt());
+        QVERIFY(object("modalGhost")->property("duration").toInt() < prop("panelEnterMs").toInt());
+        // Jump pulse (was 180 + 420 ms) and copy flash (was 90 + 260 ms).
+        QCOMPARE(prop("pulseInMs").toInt() + prop("pulseOutMs").toInt(), 420);
+        QCOMPARE(prop("flashInMs").toInt() + prop("flashOutMs").toInt(), 245);
+        QVERIFY(prop("pulseInMs").toInt() < prop("pulseOutMs").toInt() && prop("flashInMs").toInt() < prop("flashOutMs").toInt());
     }
     void reduceMotionCommand() {
         QCOMPARE(commandTitle("animations"), QString("Disable animations"));

@@ -6134,7 +6134,7 @@ private slots:
         QVERIFY(!sounds->reduceMotion());
         reference("John 3:1");
         auto slide = object("readerSlide"); QVERIFY(slide);
-        QCOMPARE(window->property("slideMs").toInt(),110);
+        QCOMPARE(window->property("slideMs").toInt(),75);
         auto reading = item("reading");
         const double start = reading->property("contentY").toDouble();
         callJs("scrollToVerse",{30,true});
