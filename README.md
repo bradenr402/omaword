@@ -128,6 +128,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl s`: Note changed in another window: save my draft (in a note)
 - `ctrl shift S`: Note changed in another window: use the saved text (in a note)
 - `ctrl ↓`: From a note to its Linked from list (esc returns)
+- `esc`: From a note back to reading: Notes stays open and follows the selection (esc again closes it)
 
 ### Copy
 
@@ -246,7 +247,7 @@ These also work, but stay out of the in-app list:
 - History keeps the passages you stayed on for a few seconds, shared by every window. The passage palette lists the latest five above the books, then **All History**; `ctrl h` opens it directly: newest first under Today, Yesterday, and Earlier, typing narrows it, `delete` removes a passage and `shift delete` clears it. It never goes into backups, and Commands can clear or disable it.
 
 ### Studying
-- Highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. Highlights are paint: `x` paints the selected verses, joining any highlight they overlap or touch, and on verses already all highlighted it erases them, keeping the rest. Bookmarks are a tag, **Bookmarked**: bookmarks made in earlier versions carry it, and `t` adds it like any tag. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from).
+- Highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. Highlights are paint: `x` paints the selected verses, joining any highlight they overlap or touch, and on verses already all highlighted it erases them, keeping the rest. Bookmarks are a tag, **Bookmarked**: bookmarks made in earlier versions carry it, and `t` adds it like any tag. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from). Notes (`w`) sits beside the text where the window is wide enough, the text making room for it, and over the text's right edge in narrower windows; either way the text stays in view and clickable. `esc` in a note saves it and hands the keyboard back to the text, where `j` and `k` move on and Notes follows the selection; `esc` again closes it, as does its `×`.
 - `u` or `ctrl z` undoes this window's last change to marks, notes, or tags, deletions included, so deleting asks nothing first; `ctrl shift Z` or `ctrl r` redoes. It works from the side panels and while selecting characters, and the passage menu, row menus, and Commands name the step ("Undo highlight on John 3:16"). A passage changed since in another window is left as it is, and a toast says so.
 - In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
 - Quote part of a passage: `v` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.

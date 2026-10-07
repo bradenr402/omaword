@@ -453,7 +453,8 @@ private slots:
             QCOMPARE(settledY(), y);
             QCOMPARE(bible->tagScope(), scope); QCOMPARE(bible->readingMode(), QString("verse"));
             key(Qt::Key_Escape);
-            if (context == "palette") key(Qt::Key_Escape);
+            // The palette's first esc clears its query; Notes' hands the keyboard to the reader.
+            if (context == "palette" || context == "notes") key(Qt::Key_Escape);
             if (context == "notes") QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
             else if (context == "palette") QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
             else if (context == "find") QTRY_VERIFY(!prop("findPromptOpen").toBool());
@@ -635,7 +636,10 @@ private slots:
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); type("nw/s");
         QCOMPARE(object("noteEditor")->property("text").toString(), QString("nw/s"));
         QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!object("passagePalette")->property("visible").toBool());
+        // Back in the reader, esc closes Notes before it clears the search.
+        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        QVERIFY(!prop("acceptedSearchQuery").toString().isEmpty());
         key(Qt::Key_W); QTRY_VERIFY(object("notesDrawer")->property("visible").toBool());
     }
     void chapterFindWithoutForwardMatch_data() {

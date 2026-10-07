@@ -523,8 +523,10 @@ private slots:
         QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(prop("notesOpen").toBool());
         QVERIFY(item("noteEditor")->hasActiveFocus());
         QTRY_VERIFY(object("notesDrawer")->property("opened").toBool());
-        // Side panels animate out as well as in.
-        key(Qt::Key_Escape); QVERIFY(object("notesDrawer")->property("visible").toBool());
+        // esc in the editor only hands the keyboard back; the reader's esc
+        // closes Notes. Side panels animate out as well as in.
+        key(Qt::Key_Escape); QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("notesOpen").toBool());
+        key(Qt::Key_Escape); QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(!prop("notesOpen").toBool());
         QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier);
         QVERIFY(object("deskDrawer")->property("visible").toBool()); QVERIFY(!object("deskDrawer")->property("opened").toBool());

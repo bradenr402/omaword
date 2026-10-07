@@ -397,10 +397,27 @@ files.
   they act over it. Dispatch from Keybindings or Commands never closes panels. Catalog shortcuts
   recheck `shortcutEnabled` on activation (a popup's focus change can leave the
   binding stale).
-- Notes in Write mode keeps the keyboard in the editor (`notesWriting` /
-  `keepNoteEditorFocus`): clicks on the panel's chrome and closing menus or
-  dialogs hand it back. `tab` types a tab (accepts a `[[` suggestion instead),
-  `ctrl ↓` moves to Linked from, `esc` returns.
+- Notes (`notesDrawer`) is a non-modal drawer that never dims: it docks
+  beside the text where the window holds the comfortable column and the
+  reader's widest insets beside it (`notesDocked`; the window's content and
+  the footer give up `notesDock`, animated with the drawer), and is a sheet
+  over the reader's right side when narrower. The keyboard belongs either
+  to it or to the reader (`marginKeys`): focus entering Notes sets it, and
+  only the reader taking the keyboard (`readerFocus`, a text drag) clears
+  it, so menus, dialogs, and Qt's own hand-back as a popup closes leave it
+  as it was and `restorePanelFocus` returns the keyboard where it came from.
+  The drawer's `focus` follows it, so Qt hands the keyboard back to Notes
+  only when Notes had it. The reader's keys work whenever the keyboard is
+  outside Notes (`readerBase`), and selection changes resync the note
+  (`syncNote`). `w` opens Notes on the
+  editor, or moves the keyboard there; `esc` in Notes saves and returns to
+  the reader (`leaveNotes`); the reader's `esc` closes Notes after its own
+  transient layers (Aa, the selection bar, search, text selection, a count)
+  and before touching the selection.
+- Notes in Write mode keeps the keyboard in the editor while it is in Notes
+  (`notesWriting` / `keepNoteEditorFocus`): clicks on the panel's chrome and
+  closing menus or dialogs hand it back. `tab` types a tab (accepts a `[[`
+  suggestion instead), `ctrl ↓` moves to Linked from, `esc` returns.
 
 ### LTR forcing
 - All Scripture layouts are LTR even when a paragraph begins in Hebrew:
@@ -530,7 +547,8 @@ files.
   is StyledText with exact `passageLinks`. While margin notes show
   (`inlineNoteMarks` false), the reader drops its inline note marks: Verse
   hides note rails, Paragraph/Block rebuild without note cells (`build(...,
-  noteMarks)`: one reflow per toggle rather than blank cells in the text). The Notes drawer is a popup, so it
+  noteMarks)`: one reflow per toggle rather than blank cells in the text). Docked
+  Notes narrows the reader, so the margins lay out beside it; as a sheet it
   covers them. The outline's current section is the cursor's when it is on
   screen, else the one at a reading line ¼ down (the chapter title above the
   headings is current before the first one, and jumps to the chapter top);

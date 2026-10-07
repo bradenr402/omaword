@@ -1015,12 +1015,19 @@ private slots:
         click(note, QPointF(note->width() - 4, 4));
         QTRY_VERIFY(object("notesDrawer")->property("opened").toBool());
         QCOMPARE(bible->selectionReference(), QString("John 3:16"));
-        // The drawer simply covers the margin notes: they stay laid out.
+        // Docked, Notes narrows the reader: the margin notes lay out beside it.
         auto drawer = object("notesDrawer");
+        QVERIFY(window->property("notesDocked").toBool());
+        QTRY_COMPARE(window->property("notesDock").toDouble(), drawer->property("width").toDouble());
+        settle();
+        QTRY_VERIFY(notesShown());
+        note = item("marginNote:John 3:16"); QTRY_VERIFY(note && note->isVisible());
         const QRectF noteRect(note->mapToScene(QPointF(0, 0)), QSizeF(note->width(), note->height()));
-        QVERIFY(drawer->property("x").toDouble() < noteRect.right());
-        QVERIFY(note->isVisible());
+        QVERIFY(noteRect.right() <= drawer->property("x").toDouble());
         QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!drawer->property("visible").toBool());
+        QTRY_COMPARE(window->property("notesDock").toDouble(), 0.0);
+        settle();
+        text = item("marginNoteText:John 3:16"); QTRY_VERIFY(text && text->isVisible());
         // The exact passage link is clickable: a History jump.
         QPointF link(-1, -1);
         for (int y = 2; y < text->height() && link.x() < 0; y += 3)

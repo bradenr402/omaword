@@ -195,6 +195,12 @@ class A11yUiTest : public QObject
         return false;
     }
     bool readerFocused() const { return window->activeFocusItem() == item("readerSurface"); }
+    // esc in Notes hands the keyboard back to the reader, Notes still open;
+    // esc there closes it.
+    void escapeNotes() {
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused()); QVERIFY(shown("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+    }
     bool opened(const QString &name) const { auto o = object(name); return o && o->property("opened").toBool(); }
     bool shown(const QString &name) const { auto o = object(name); return o && o->property("visible").toBool(); }
     QObject *menu() const { return object("contextMenu"); }
@@ -641,7 +647,7 @@ private slots:
         QTRY_VERIFY(travel("notePreviewScroll") > 100);
         key(Qt::Key_End); QTRY_VERIFY(qAbs(contentY("notePreviewScroll") - travel("notePreviewScroll")) < 1);
         key(Qt::Key_K); QTRY_VERIFY(contentY("notePreviewScroll") < travel("notePreviewScroll"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        escapeNotes();
     }
     void outlineScrollsByKey() {
         // The chapter outline: reached by tab; j scrolls it instead of moving the reader.
@@ -712,7 +718,17 @@ private slots:
         check("savedDrawer", [&] { run("annotations"); });
         check("deskDrawer", [&] { run("desk"); });
         check("relatedDrawer", [&] { run("related"); });
-        check("notesDrawer", [&] { run("notes"); });
+        // Notes sits beside the text, never over it: a click on the text
+        // reaches the reader (the verse clicked is selected, the keyboard
+        // comes back) and Notes stays open, following the selection.
+        run("notes"); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        clickAt(outsidePoint("notesDrawer"));
+        QTRY_VERIFY(readerFocused()); QVERIFY(opened("notesDrawer"));
+        QVERIFY(bible->selectedStart() != 3); QCOMPARE(prop("loadedNoteReference").toString(), bible->selectionReference());
+        // esc puts the mouse's selection bar away first, then closes Notes.
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("selectionBarShown").toBool()); QVERIFY(opened("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        bible->selectVerses(3, 3); call("readerFocus");
         // The picker nearly fills the window: give it room above to click outside.
         window->resize(1200, 1100); QTRY_COMPARE(window->height(), 1100); call("setReaderY", 0);
         check("tagsSurface", [&] { run("tags"); });
@@ -833,7 +849,7 @@ private slots:
         QCOMPARE(menuIds().mid(menuIds().size() - 3), (QStringList{"|", "openNote", "openTags"}));
         menuKeyTo("openNote"); QTRY_VERIFY(opened("notesDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 3:5"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        escapeNotes();
         // Mouse: right-click, Open tags, then pick the wider range in the
         // chooser: its tags open in place.
         clickAt(versePoint(5), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
@@ -1552,6 +1568,11 @@ private slots:
         clickHint("notesHintsPart:preview"); QTRY_VERIFY(prop("notePreview").toBool());
         clickHint("notesHintsPart:write"); QTRY_VERIFY(!prop("notePreview").toBool());
         QVERIFY(toolTipOf(item("previewButton"))->property("text").toString().contains("alt v"));
+        // Mouse: esc's part hands the keyboard back to the reader, Notes still
+        // open; the panel's Close closes it.
+        clickHint("notesHintsPart:back to reading"); QTRY_VERIFY(readerFocused()); QVERIFY(opened("notesDrawer"));
+        QVERIFY(toolTipOf(item("notesClose"))->property("text").toString().contains("esc"));
+        click(item("notesClose")); QTRY_VERIFY(!shown("notesDrawer")); QVERIFY(readerFocused());
         QDesktopServices::unsetUrlHandler("https");
     }
     void addVersionGuideKeys() {
@@ -1719,7 +1740,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
         const bool numbers = bible->showVerseNumbers();
         key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), !numbers); QVERIFY(opened("notesDrawer"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        escapeNotes();
         // Mouse: a click outside an open panel only closes it (the footer button underneath does not act).
         call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
         click("searchControl"); QTRY_VERIFY(!shown("deskDrawer")); QVERIFY(!shown("passagePalette"));
@@ -1793,10 +1814,10 @@ private slots:
             QTest::mouseDClick(window, Qt::LeftButton, {}, number);
             QTRY_VERIFY2(opened("notesDrawer"), qPrintable(mode)); QCOMPARE(bible->cursorVerse(), 17);
             QVERIFY(prop("freeSelectedText").toString().isEmpty());
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+            escapeNotes();
             // Keyboard: w writes a note; v and iw select a word.
             call("readerFocus"); key(Qt::Key_W); QTRY_VERIFY(opened("notesDrawer"));
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+            escapeNotes();
         }
     }
     void seeAlsoTagsByMouseAndKey() {
@@ -1844,7 +1865,7 @@ private slots:
         QCOMPARE(menuIds(), QStringList({"open", "|", "moveHere", "remove", "|", "copy", "copyPlain", "|", "desk"}));
         QCOMPARE(value(menu()->property("layout")).toList().at(3).toMap()["text"].toString(), QString("Delete note"));
         chooseMenu("open"); QTRY_VERIFY(opened("notesDrawer")); QCOMPARE(bible->selectionReference(), QString("John 3:16"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        escapeNotes();
         // Keyboard: the same menu by keys copies the passage.
         click(note, Qt::RightButton); QGuiApplication::clipboard()->clear(); menuKeyTo("copy");
         QTRY_VERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("—John 3:16")));

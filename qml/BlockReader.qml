@@ -433,7 +433,7 @@ Item {
                 // qmllint disable missing-property
                 if (!root.dragging && Math.hypot(root.pointer.x - root.origin.x, root.pointer.y - root.origin.y) < Qt.styleHints.startDragDistance) return
                 // qmllint enable missing-property
-                if (!root.dragging) { root.controller.clearTextSelection(); body.forceActiveFocus(); root.dragging = true; autoscroll.start() }
+                if (!root.dragging) { root.controller.clearTextSelection(); root.controller.textDragFocus(body); root.dragging = true; autoscroll.start() }
                 root.updateDrag()
             }
             onReleased: function(mouse) {

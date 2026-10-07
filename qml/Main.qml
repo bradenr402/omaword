@@ -215,17 +215,27 @@ ApplicationWindow {
     // since Qt's multi-key sequences stay in a partial-match state that
     // swallows unrelated keys (digits, Ctrl+K) across focus changes.
     property bool zPending: false
-    onActiveFocusItemChanged: clearCount()
-    // Notes in Write mode: the editor keeps the keyboard. A press anywhere on
-    // the panel's chrome (its buttons, labels, background; notesPanel's
-    // passive PointHandler) hands it straight back, as do closing menus and
-    // dialogs (restorePanelFocus, the menu's own restore) and Write. Only
-    // Linked from (ctrl ↓) takes it, until esc.
+    onActiveFocusItemChanged: {
+        clearCount()
+        if (activeFocusItem && focusWithin(notesDrawer.contentItem.parent)) marginKeys = true
+    }
+    // Notes sits beside the text: the keyboard belongs either to it
+    // (marginKeys) or to the reader. Focus entering Notes gives it to Notes;
+    // only the reader taking it (readerFocus, a text drag) gives it back.
+    // Menus, dialogs, and pickers, and Qt's own hand-back as a popup closes,
+    // leave it as it was, so restorePanelFocus returns the keyboard to where
+    // it came from.
+    property bool marginKeys: false
+    // Notes in Write mode: while the keyboard is in Notes, the editor keeps
+    // it. A press anywhere on the panel's chrome (its buttons, labels,
+    // background; notesPanel's passive PointHandler) hands it straight back,
+    // as do closing menus and dialogs (restorePanelFocus, the menu's own
+    // restore) and Write. Only Linked from (ctrl ↓) takes it, until esc.
     readonly property bool notesWriting: notesOpen && notesDrawer.shown && hasSelection && !notePreview && !dialogOpen && !modalOpen
     onNotesWritingChanged: if (notesWriting) noteRefocusTimer.restart()
     Timer { id: noteRefocusTimer; interval: 0; onTriggered: app.keepNoteEditorFocus() }
     function keepNoteEditorFocus() {
-        if (!notesWriting || bible.busy || noteEditor.activeFocus || linkedList.activeFocus) return
+        if (!notesWriting || !marginKeys || bible.busy || noteEditor.activeFocus || linkedList.activeFocus) return
         const item = activeFocusItem
         const chrome = !item || item === notesDrawer.contentItem.parent || focusWithin(notesDrawer.contentItem)
         if (chrome && noteEditor.enabled) noteEditor.forceActiveFocus()
@@ -512,7 +522,6 @@ ApplicationWindow {
     readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || tagsUi.visibleModal
     // Everything modal except the side panels (Annotations, Desk, Study).
     readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
-    readonly property bool notesClosableFromReader: notesOpen && bible.ready && !bible.busy && !modalOpen && !findPromptOpen && !textInputActive()
     // One side panel at a time. Its opening key does nothing while it is open;
     // another panel's key switches to that panel.
     readonly property string sidePanel: notesOpen ? "notes" : savedDrawer.shown ? "annotations"
@@ -539,12 +548,21 @@ ApplicationWindow {
         return true
     }
     // The chapter outline, reached by tab, keeps its scroll keys.
-    readonly property bool readerBase: bible.ready && !bible.busy && !modalOpen && !notesOpen && !findPromptOpen && !textInputActive()
+    readonly property bool readerBase: bible.ready && !bible.busy && !modalOpen && !(notesOpen && marginKeys) && !findPromptOpen && !textInputActive()
         && !(chapterOutline && chapterOutline.activeFocus)
     // Character selection takes the reader's keys itself (charKey).
     readonly property bool readerKeys: readerBase && !charMode
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
+    // Notes docks beside the text where the window keeps a comfortable column
+    // (and the reader's widest side insets) beside it: the reader and footer
+    // make room (notesDock follows it in and out). Narrower, it is a sheet
+    // over the reader's right side. Neither dims or blocks the text.
+    readonly property bool notesDocked: width >= readerMeasure + verseGutter + 9 + 2 * 48 + notesWidth
+    property real notesDock: notesDocked && notesOpen ? notesWidth : 0
+    Behavior on notesDock { NumberAnimation { duration: app.panelEnterMs; easing.type: Easing.OutCubic } }
+    // The window's width beside docked Notes: the footer's.
+    readonly property real stageWidth: width - notesDock
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
     readonly property real observedLineHeight: bible.lineHeight
     // Passage text in panels follows the reader's line height proportionally:
@@ -838,7 +856,7 @@ ApplicationWindow {
         if (!draggingText) {
             clearTextSelection()
             draggingText = true
-            if (!gutterDrag) (verseRepeater.itemAt(dragAnchorRow) as VerseItem).body.forceActiveFocus()
+            if (!gutterDrag) textDragFocus((verseRepeater.itemAt(dragAnchorRow) as VerseItem).body)
         }
         applyTextDrag()
     }
@@ -2261,7 +2279,9 @@ ApplicationWindow {
         noteConflict = false
         flushNote()
     }
-    function readerFocus() { readerSurface.forceActiveFocus() }
+    function readerFocus() { readerSurface.forceActiveFocus(); marginKeys = false }
+    // A text drag puts the keyboard on the verse text it selects: the reader's.
+    function textDragFocus(body) { body.forceActiveFocus(); marginKeys = false }
     // The next (or previous) item on the tab chain from `item`, or the error.
     function focusNext(item, forward) {
         const next = item.nextItemInFocusChain(forward)
@@ -2294,7 +2314,7 @@ ApplicationWindow {
             if (deskDrawer.shown) { if (!app.focusWithin(deskDrawer.contentItem)) deskDrawer.focusContent(); return }
             if (tagsUi.relatedShown) { if (!tagsUi.focusInBody()) tagsUi.focusResults(); return }
             if (app.modalOpen || bible.busy) return
-            if (notesDrawer.shown) {
+            if (notesDrawer.shown && app.marginKeys) {
                 if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
                 else if (app.hasSelection) notePreviewText.forceActiveFocus()
                 else notesPanel.forceActiveFocus()
@@ -3033,6 +3053,13 @@ ApplicationWindow {
         if (!flushNote()) return false
         dismissNotesDrawer()
         editingPanelClosed()
+        return true
+    }
+    // esc in Notes: the draft saves and the keyboard returns to the reader.
+    // Notes stays open and follows the selection; esc there closes it.
+    function leaveNotes() {
+        if (!flushNote()) return false
+        readerFocus()
         return true
     }
     function toggleNotes() {
@@ -3903,6 +3930,7 @@ ApplicationWindow {
         { id: "noteKeepDraft", group: "Annotate", title: "Note changed in another window: save my draft (in a note)", sequences: ["Ctrl+S"], scope: "noteEditor" },
         { id: "noteUseSaved", group: "Annotate", title: "Note changed in another window: use the saved text (in a note)", sequences: ["Ctrl+Shift+S"], scope: "noteEditor" },
         { id: "noteLinkedFrom", group: "Annotate", title: "From a note to its Linked from list (esc returns)", sequences: ["Ctrl+Down"], scope: "noteEditor" },
+        { id: "noteLeave", group: "Annotate", title: "From a note back to reading: Notes stays open and follows the selection (esc again closes it)", sequences: ["Escape"], scope: "noteEditor", explanation: true },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
@@ -5281,6 +5309,7 @@ ApplicationWindow {
 
     ColumnLayout {
         anchors.fill: parent
+        anchors.rightMargin: app.notesDock
         spacing: 0
         // Character selection (v): the mode, its keys, and what is selected.
         Rectangle {
@@ -6215,12 +6244,13 @@ ApplicationWindow {
         width: app.notesWidth
         height: app.height
         edge: Qt.RightEdge
-        // Qt blocks window shortcuts behind any visible modal popup, including
-        // one in its exit transition; a closing drawer stops being modal so the
-        // reader's keys (Escape, t, …) work immediately.
-        modal: !closing
-        dim: true
-        focus: true
+        // Beside the text, never over it: the reader stays clickable, and its
+        // keys work whenever the keyboard is outside Notes (marginKeys).
+        modal: false
+        dim: false
+        // Qt hands the keyboard back to a popup that wants focus as another
+        // closes: Notes wants it only while it has it.
+        focus: app.marginKeys
         interactive: false
         padding: 0
         // Auto-close cannot veto a failed save. All dismissals use closeNotes().
@@ -6245,29 +6275,26 @@ ApplicationWindow {
         // Its note's saves since opening are one undo step; the next session starts another.
         onAboutToHide: { closing = true; bible.closeUndoGroup(); app.restorePanelFocus() }
         // Keyboard focus is available as soon as the drawer starts fading in.
+        // Opened only to show a note (focusEditor false), it leaves the
+        // keyboard where it is.
         function focusContent() {
-            if (app.modalOpen) return
-            if (focusEditor && app.hasSelection) app.focusNoteEnd()
-            else if (app.hasSelection && app.notePreview) notePreviewText.forceActiveFocus()
+            if (app.modalOpen || !focusEditor) return
+            if (app.hasSelection) app.focusNoteEnd()
             else notesPanel.forceActiveFocus()
         }
         onVisibleChanged: if (visible && !closing) focusContent()
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
-        Overlay.modal: Rectangle {
-            color: app.tint(desktop.background, 0.65)
-        }
-        Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
-        onClosed: { closing = false; position = 0; app.editingPanelClosed(); app.restorePanelFocus() }
+        onClosed: { closing = false; position = 0; app.marginKeys = false; app.editingPanelClosed(); app.restorePanelFocus() }
         contentItem: Rectangle {
                 id: notesPanel
                 objectName: "notesPanel"
                 color: desktop.background
                 radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                Keys.onEscapePressed: function(event) { app.closeNotes(); event.accepted = true }
-                // A press on the panel's chrome returns the keyboard to the editor (Write mode).
+                Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
+                // A press on the panel's chrome brings the keyboard to the editor (Write mode).
                 PointHandler {
                     objectName: "notesChromePress"
-                    onActiveChanged: if (!active && app.notesWriting) noteRefocusTimer.restart()
+                    onActiveChanged: if (!active && app.notesWriting) { app.marginKeys = true; noteRefocusTimer.restart() }
                 }
                 Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
                 OverlayScrollView {
@@ -6293,6 +6320,15 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         SectionLabel { text: "PASSAGE NOTES"; Layout.fillWidth: true }
+                        // Clicks outside reach the text, so Notes closes here by mouse.
+                        QuietButton {
+                            objectName: "notesClose"
+                            text: "×"; compact: true
+                            keys: KeyNotation.format("Escape")
+                            tip: "Close Notes · " + keys + ", or " + keys + " " + keys + " from the note"
+                            Accessible.name: "Close Notes"
+                            onClicked: app.closeNotes()
+                        }
                     }
                     Label {
                         text: app.hasSelection ? bible.selectionReference : "A thought worth keeping"
@@ -6435,7 +6471,7 @@ ApplicationWindow {
                                 // Specific key handlers run before onPressed.
                                 Keys.onEscapePressed: function(event) {
                                     if (app.linkSuggesting) app.dismissLinkSuggestions()
-                                    else app.closeNotes()
+                                    else app.leaveNotes()
                                     event.accepted = true
                                 }
                                 Accessible.name: "Markdown note for " + bible.selectionReference
@@ -6497,12 +6533,14 @@ ApplicationWindow {
                         theme: desktop
                         parts: app.linkSuggesting ? [[["Up", "Down"], "choose"], ["Return", "insert", function() { app.acceptLinkSuggestion() }, app.linkSuggestions.length > 0],
                                 ["Escape", "dismiss", app.dismissLinkSuggestions]]
-                            : notePreviewText.activeFocus ? [[["J", "K"], "scroll"], [app.actionKeys("notePreview")[0], "write", app.toggleNotePreview]]
+                            : notePreviewText.activeFocus ? [[["J", "K"], "scroll"], [app.actionKeys("notePreview")[0], "write", app.toggleNotePreview],
+                                ["Escape", "back to reading", app.leaveNotes]]
                             : app.noteConflict ? [[app.actionKeys("noteKeepDraft")[0], "save my draft", app.keepNoteDraft, app.canKeepDraft],
                                 [app.actionKeys("noteUseSaved")[0], "use saved text", app.useSavedNote]]
                             : [app.noteLinkAtCursor || app.noteUrlAtCursor.length ? ["Alt+Return", "open link", app.openNoteLinkAtCursor] : null,
                                 [app.actionKeys("notePreview")[0], "preview", app.toggleNotePreview],
-                                app.linkedFrom.length ? [app.actionKeys("noteLinkedFrom")[0], "linked from", app.focusLinkedFrom] : null]
+                                app.linkedFrom.length ? [app.actionKeys("noteLinkedFrom")[0], "linked from", app.focusLinkedFrom] : null,
+                                ["Escape", "back to reading", app.leaveNotes]]
                         pixelSize: 11 * app.scale
                         Layout.fillWidth: true
                     }
@@ -6631,21 +6669,6 @@ ApplicationWindow {
         }
     }
 
-    MouseArea {
-        objectName: "notesOutside"
-        parent: Overlay.overlay
-        // Cover only the dimmed outside region. Drawer consumes its own outside
-        // events before the dimmer, so guard dismissal here without auto-close.
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: app.width - notesDrawer.width * notesDrawer.position
-        z: notesDrawer.z + 0.1
-        visible: app.notesOpen && !app.modalOpen
-        acceptedButtons: Qt.AllButtons
-        onPressed: app.closeNotes()
-        onWheel: function(wheel) { wheel.accepted = true }
-    }
     // Outside an open side panel, a press only closes the panel: it never
     // reaches the reader or footer beneath (a Drawer alone lets it through).
     // Hidden while a dialog, picker, or menu sits above the panel.
@@ -6728,7 +6751,7 @@ ApplicationWindow {
     readonly property real footerRightFull: footerRightCount * footerButton
     readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
         + (bible.ready ? versionControl.implicitWidth : 0)
-    readonly property real footerAvailable: width - 2 * footerMargin
+    readonly property real footerAvailable: stageWidth - 2 * footerMargin
     readonly property bool footerStacked: footerCenterFull + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap > footerAvailable
     // With the right group stacked, the center keeps clear of the wider corner.
     readonly property real footerSideReserve: Math.max(footerLeftFull, footerRightCount ? footerButton : 0) + footerGroupGap
@@ -6763,6 +6786,7 @@ ApplicationWindow {
         objectName: "footerZone"
         anchors.left: parent.left
         anchors.right: parent.right
+        anchors.rightMargin: app.notesDock
         anchors.bottom: parent.bottom
         height: app.footerHeight + 2 * app.footerMargin
         visible: bible.ready && bible.focusMode && !app.findPromptOpen
@@ -6838,8 +6862,8 @@ ApplicationWindow {
         objectName: "locationControls"
         anchors.bottom: parent.bottom
         anchors.bottomMargin: app.footerMargin
-        x: app.width / 2 - width / 2
-        readonly property real availableWidth: Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
+        x: app.stageWidth / 2 - width / 2
+        readonly property real availableWidth: Math.max(0, app.stageWidth - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
         readonly property real fixedWidth: searchControl.width + (ribbonControl.visible ? ribbonControl.width : 0)
             + (versionControl.visible ? versionControl.width : 0)
         width: Math.min(fixedWidth + passageControl.implicitWidth, availableWidth)
@@ -6891,6 +6915,7 @@ ApplicationWindow {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: app.footerMargin
+        anchors.rightMargin: app.footerMargin + app.notesDock
         spacing: 0
         // One row, or a column bottom-aligned in the corner when cramped.
         columns: app.footerStacked ? 1 : 5
@@ -7082,6 +7107,7 @@ ApplicationWindow {
         fadeDuration: app.reduceMotion ? 0 : 85
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
         anchors.margins: 16 * app.controlScale
+        anchors.rightMargin: 16 * app.controlScale + app.notesDock
         theme: desktop
         uiScale: app.scale
         matchIndex: app.searchMatchIndex
@@ -7109,7 +7135,7 @@ ApplicationWindow {
         id: searchMatchCount
         objectName: "searchMatchCount"
         anchors.right: parent.right; anchors.bottom: parent.bottom
-        anchors.rightMargin: 20 * app.controlScale + app.footerRightInset
+        anchors.rightMargin: 20 * app.controlScale + app.footerRightInset + app.notesDock
         // Above the footer row, which focus mode keeps (quiet, revealed on hover).
         anchors.bottomMargin: app.footerMargin + app.footerHeight + 6 * app.controlScale
         visible: !app.findPromptOpen && app.acceptedSearchQuery.length > 0
@@ -9182,9 +9208,10 @@ ApplicationWindow {
     Rectangle {
         parent: Overlay.overlay
         anchors.horizontalCenter: parent.horizontalCenter
+        anchors.horizontalCenterOffset: -app.notesDock / 2
         anchors.bottom: parent.bottom
         anchors.bottomMargin: bible.focusMode ? 68 : Math.max(68, app.footerMargin + app.footerHeight + 12 * app.controlScale)
-        width: Math.min(toast.implicitWidth + 36, app.width - 2 * Math.max(24, app.footerRightInset))
+        width: Math.min(toast.implicitWidth + 36, app.stageWidth - 2 * Math.max(24, app.footerRightInset))
         height: toast.implicitHeight + 24
         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
         color: desktop.surface
@@ -9255,6 +9282,8 @@ ApplicationWindow {
             app.draggingText = false
             app.dragAnchorRow = -1
         }
+        // Open Notes follows the selection, however it moves.
+        function onSelectionChanged() { if (app.notesOpen && !noteEditor.activeFocus) Qt.callLater(app.syncNote) }
         function onNavigationChanged() {
             app.selectionBarWanted = false
             app.clearTextSelection()
@@ -9335,22 +9364,21 @@ ApplicationWindow {
     }
     Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
     Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
-    // Escape closes the Notes drawer while focus sits outside the editor (the
-    // editor and preview close it themselves). Application context reaches past
-    // the drawer's popup focus scope, so only the active window may enable it.
-    Shortcut {
-        objectName: "closeNotesShortcut"
-        context: Qt.ApplicationShortcut
-        sequence: "Escape"
-        enabled: app.active && app.notesClosableFromReader
-        onActivated: if (app.closeNotes()) app.readerFocus()
-    }
     Shortcut {
         sequence: "Escape"
         enabled: app.readerKeys
         onActivated: {
             if (textPopover.visible) { textPopover.close(); return }
             if (app.selectionBarShown) { app.selectionBarWanted = false; return }
+            if (app.notesOpen) {
+                // Open Notes closes before the reading state it follows (search,
+                // selection) changes; a text selection or a count goes first.
+                // (The editor's esc only brought the keyboard here.)
+                if (app.freeSelectedText.length) { app.clearTextSelection(); app.readerFocus() }
+                else if (app.verseCount.length) app.clearCount()
+                else if (app.closeNotes()) app.readerFocus()
+                return
+            }
             if (app.acceptedSearchQuery.length) { app.clearSearch(); app.readerFocus(); return }
             if (app.freeSelectedText.length) { app.clearTextSelection(); app.readerFocus(); return }
             if (app.verseCount.length) { app.clearCount(); return }

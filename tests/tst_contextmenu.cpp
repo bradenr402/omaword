@@ -442,7 +442,7 @@ private slots:
         rightClick(versePoint(7)); QTRY_VERIFY(menuOpen());
         clickEntry("note");
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
         call("readerFocus");
         rightClick(versePoint(7)); QTRY_VERIFY(menuOpen());
         clickEntry("chapterFind");
@@ -485,7 +485,7 @@ private slots:
         QTRY_COMPARE(bible->selectionReference(), reference);
         // Open goes to the note, ready to write.
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
         QTRY_VERIFY(item(name) && item(name)->isVisible());
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         // With the marker's own range selected there is nowhere to move it.
