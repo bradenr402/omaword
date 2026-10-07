@@ -175,8 +175,15 @@ class HistoryUiTest : public QObject
         }
         return out;
     }
-    bool historyOpen() const { return object("historyDrawer")->property("opened").toBool(); }
-    void openHistory() { key(Qt::Key_H, Qt::ShiftModifier); QTRY_VERIFY(historyOpen()); QTRY_VERIFY(item("historyList")->hasActiveFocus()); }
+    // History lives in the passage palette (ctrl h).
+    bool historyOpen() const { return object("passagePalette")->property("opened").toBool() && prop("paletteHistory").toBool(); }
+    void openHistory() { key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen()); QTRY_VERIFY(item("referenceInput")->hasActiveFocus()); }
+    int paletteRow() const { return object("paletteResults")->property("currentIndex").toInt(); }
+    QString rowHint(int row) const { return paletteRowsConst().value(row).toMap()["hint"].toString(); }
+    QVariantList paletteRowsConst() const {
+        QVariant entries; QMetaObject::invokeMethod(window, "paletteEntries", Q_RETURN_ARG(QVariant, entries));
+        return value(entries).toList();
+    }
     QStringList historyRefs() const {
         QStringList out; for (const auto &row : bible->history()) out << row.toMap()["reference"].toString(); return out;
     }
@@ -314,7 +321,7 @@ private slots:
         QVERIFY(bible->setHistoryEnabled(false)); window->setProperty("historyDwellMs", 200);
         jumpTo("John 1:50"); QTest::qWait(500); QVERIFY(bible->history().isEmpty());
     }
-    void panelGroupsRowsAndListKeys() {
+    void paletteHistoryGroupsRowsAndKeys() {
         record("John 1:3"); record("John 2:4-6"); record("John 1:9"); QVERIFY(bible->navigate("John 2")); QVERIFY(bible->recordHistory());
         navigate("John 1:1");
         // Rows: John 2 (today), John 1:9 (yesterday), John 2:4–6 and John 1:3 (earlier).
@@ -322,62 +329,70 @@ private slots:
         setVisited(2, QDateTime::currentDateTime().addDays(-5)); setVisited(3, QDateTime::currentDateTime().addDays(-6));
         QVERIFY(bible->recordQuery("refresh"));
         openHistory();
-        QVERIFY(item("historyControl")->property("selected").toBool());
-        QCOMPARE(object("historyTitle")->property("text").toString(), QString("History"));
-        QCOMPARE(object("historyCount")->property("text").toString(), QString("4 passages"));
-        QCOMPARE(object("historyHeader0")->property("text").toString(), QString("John 2 · ") + bible->versionAbbreviation());
-        QVERIFY(item("historyGroup0")->isVisible()); QCOMPARE(object("historyGroup0")->property("text").toString(), QString("Today"));
-        QCOMPARE(object("historyGroup1")->property("text").toString(), QString("Yesterday")); QVERIFY(item("historyGroup1")->isVisible());
-        QCOMPARE(object("historyGroup2")->property("text").toString(), QString("Earlier")); QVERIFY(item("historyGroup2")->isVisible());
-        QVERIFY(!item("historyGroup3")->isVisible());
-        QVERIFY(!object("historyTime0")->property("text").toString().isEmpty());
-        QVERIFY(object("historyExcerpt2")->property("text").toString().contains("Common original fixture 2:4"));
-        QVERIFY(object("historyHints")->property("text").toString().contains("shift&nbsp;delete"));
-        QCOMPARE(object("historyList")->property("currentIndex").toInt(), 0);
-        key(Qt::Key_J); key(Qt::Key_Down); QCOMPARE(object("historyList")->property("currentIndex").toInt(), 2);
-        key(Qt::Key_K); QCOMPARE(object("historyList")->property("currentIndex").toInt(), 1);
-        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
-        QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("John 1:9"));
-        key(Qt::Key_Y, Qt::ShiftModifier); QTRY_VERIFY(!QGuiApplication::clipboard()->text().contains("John 1:9"));
-        QVERIFY(QGuiApplication::clipboard()->text().contains("Common original fixture 1:9"));
-        key(Qt::Key_D); QCOMPARE(bible->desk().size(), 1); QCOMPARE(bible->desk().first().toMap()["reference"].toString(), QString("John 1:9"));
-        key(Qt::Key_D); QVERIFY(bible->desk().isEmpty());
-        // A chapter row adds the whole chapter.
-        key(Qt::Key_K); key(Qt::Key_D); QCOMPARE(bible->desk().first().toMap()["reference"].toString(), QString("John 2:1–65"));
-        key(Qt::Key_J); key(Qt::Key_Delete); QCOMPARE(historyRefs(), QStringList({"John 2", "John 2:4–6", "John 1:3"}));
-        QCOMPARE(object("historyList")->property("currentIndex").toInt(), 1);
-        key(Qt::Key_Backspace); QCOMPARE(historyRefs(), QStringList({"John 2", "John 1:3"}));
+        QVERIFY(object("paletteBack")->property("visible").toBool());
+        auto titles = [this] { QStringList out; for (const auto &r : paletteRows()) out << r.toMap()["title"].toString(); return out; };
+        QCOMPARE(titles(), QStringList({"John 2", "John 1:9", "John 2:4–6", "John 1:3"}));
+        // Each day heads its first row; rows show when, and in which version.
+        QTRY_VERIFY(item("paletteGroup0") && item("paletteGroup0")->isVisible());
+        QCOMPARE(object("paletteGroup0")->property("text").toString(), QString("Today"));
+        QCOMPARE(object("paletteGroup1")->property("text").toString(), QString("Yesterday")); QVERIFY(item("paletteGroup1")->isVisible());
+        QCOMPARE(object("paletteGroup2")->property("text").toString(), QString("Earlier")); QVERIFY(item("paletteGroup2")->isVisible());
+        QVERIFY(!item("paletteGroup3")->isVisible());
+        QVERIFY(rowHint(0).endsWith(" · " + bible->versionAbbreviation()));
+        QVERIFY(rowHint(2).contains(QDateTime::currentDateTime().addDays(-5).toString("MMM d")));
+        QVERIFY(object("paletteHints")->property("text").toString().contains("shift&nbsp;delete"));
+        QCOMPARE(paletteRow(), 0);
+        key(Qt::Key_Down); key(Qt::Key_Down); QCOMPARE(paletteRow(), 2);
+        key(Qt::Key_Up); QCOMPARE(paletteRow(), 1);
+        // Typing narrows History; backspace back to all of it.
+        type("2:4"); QCOMPARE(titles(), QStringList({"John 2:4–6"}));
+        key(Qt::Key_Backspace); key(Qt::Key_Backspace); key(Qt::Key_Backspace); QCOMPARE(titles().size(), 4);
+        key(Qt::Key_Down); QCOMPARE(paletteRow(), 1);
+        // Delete removes the chosen passage; the row below moves up.
+        key(Qt::Key_Delete); QCOMPARE(historyRefs(), QStringList({"John 2", "John 2:4–6", "John 1:3"}));
+        QTRY_COMPARE(paletteRow(), 1);
         // Context menu: Open, Copy | Add to Desk | Remove from History.
-        QVERIFY(QMetaObject::invokeMethod(window, "openHistoryMenu", Q_ARG(QVariant, 1), Q_ARG(QVariant, 200), Q_ARG(QVariant, 200)));
+        QVERIFY(QMetaObject::invokeMethod(window, "openSearchMenu", Q_ARG(QVariant, 1), Q_ARG(QVariant, 200), Q_ARG(QVariant, 200)));
         QTRY_VERIFY(object("contextMenu")->property("visible").toBool());
-        QCOMPARE(object("contextMenu")->property("target").toString(), QString("history"));
         for (auto name : {"contextMenuItem:open", "contextMenuItem:copy", "contextMenuItem:desk", "contextMenuItem:remove"}) QVERIFY2(object(name), name);
-        QVERIFY(QMetaObject::invokeMethod(object("contextMenu"), "triggerId", Q_ARG(QVariant, QString("remove"))));
-        QTRY_COMPARE(historyRefs(), QStringList({"John 2"}));
+        QVERIFY(QMetaObject::invokeMethod(object("contextMenu"), "triggerId", Q_ARG(QVariant, QString("desk"))));
+        QTRY_COMPARE(bible->desk().size(), 1); QCOMPARE(bible->desk().first().toMap()["reference"].toString(), QString("John 2:4–6"));
         QTRY_VERIFY(!object("contextMenu")->property("visible").toBool());
-        QTRY_VERIFY(item("historyList")->hasActiveFocus());
-        record("John 1:3"); QTRY_COMPARE(object("historyList")->property("count").toInt(), 2);
-        QVERIFY(bible->navigate("John 1:1"));
-        // Enter opens and closes the panel; the current stack position is marked.
-        key(Qt::Key_K);
-        key(Qt::Key_Return);
-        QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window, "openSearchMenu", Q_ARG(QVariant, 1), Q_ARG(QVariant, 200), Q_ARG(QVariant, 200)));
+        QTRY_VERIFY(object("contextMenu")->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(object("contextMenu"), "triggerId", Q_ARG(QVariant, QString("remove"))));
+        QTRY_COMPARE(historyRefs(), QStringList({"John 2", "John 1:3"}));
+        QTRY_VERIFY(!object("contextMenu")->property("visible").toBool());
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        // Copying a chapter row copies the whole chapter.
+        QGuiApplication::clipboard()->clear();
+        QVERIFY(QMetaObject::invokeMethod(window, "copyHistoryItem", Q_ARG(QVariant, bible->history().first().toMap()["id"].toInt()), Q_ARG(QVariant, false)));
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("John 2"));
+        // Enter opens a row as a jump, and the palette closes.
+        record("John 1:5"); QVERIFY(bible->navigate("John 1:1"));
+        QTRY_COMPARE(titles().size(), 3);
+        key(Qt::Key_Down); key(Qt::Key_Down); key(Qt::Key_Return);
+        QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         QCOMPARE(here(), QString("John 1:3")); QCOMPARE(stack().last(), QString("1:3:engnet"));
+        // The jump stack's current position is marked "here".
         openHistory();
-        QTRY_VERIFY(item("historyCurrent0")->isVisible()); QVERIFY(!item("historyCurrent1")->isVisible());
-        // shift delete asks first; esc keeps History.
+        QTRY_VERIFY(rowHint(2).endsWith(" · here")); QVERIFY(!rowHint(0).endsWith(" · here"));
+        // shift delete asks first; esc keeps History and the palette.
         key(Qt::Key_Delete, Qt::ShiftModifier); QTRY_VERIFY(object("clearHistoryConfirmation")->property("opened").toBool());
-        QVERIFY(object("clearHistoryExplanation")->property("text").toString().contains("2 passages"));
+        QVERIFY(object("clearHistoryExplanation")->property("text").toString().contains("3 passages"));
         key(Qt::Key_Escape); QTRY_VERIFY(!object("clearHistoryConfirmation")->property("visible").toBool());
-        QCOMPARE(bible->history().size(), 2); QVERIFY(historyOpen());
-        QTRY_VERIFY(item("historyList")->hasActiveFocus());
-        key(Qt::Key_Backspace, Qt::ShiftModifier); QTRY_VERIFY(object("clearHistoryConfirmation")->property("opened").toBool());
+        QCOMPARE(bible->history().size(), 3); QVERIFY(historyOpen());
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        key(Qt::Key_Delete, Qt::ShiftModifier); QTRY_VERIFY(object("clearHistoryConfirmation")->property("opened").toBool());
         key(Qt::Key_Right); key(Qt::Key_Return);
         QTRY_VERIFY(bible->history().isEmpty()); QVERIFY(bible->recentQueries().isEmpty());
         QVERIFY(toast().contains("Cleared History"));
-        QTRY_VERIFY(item("historyEmpty")->isVisible());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        QTRY_COMPARE(paletteRows().size(), 0);
+        // Backspace returns to the books.
+        key(Qt::Key_Backspace); QTRY_VERIFY(!prop("paletteHistory").toBool());
+        QCOMPARE(paletteRows().first().toMap()["title"].toString(), bible->books().first().toMap()["name"].toString());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
     }
     // Text size scales every UI text proportionally (the reader by size alone),
     // and both size and line height keys work from panels, modals, and inputs.
@@ -396,10 +411,10 @@ private slots:
         QVERIFY(qAbs(object("deskText0")->property("lineHeight").toDouble() - 1.6 / 1.5 * 1.25) < 1e-6);
         QVERIFY(object("deskDrawer")->property("opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        openHistory();
+        call("readerFocus"); openHistory();
         key(Qt::Key_Minus, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.5);
-        QVERIFY(qAbs(object("historyExcerpt0")->property("lineHeight").toDouble() - 1.25) < 1e-6);
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        QVERIFY(historyOpen());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         // In the palette's text field: the field keeps its text.
         call("readerFocus"); key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus()); type("jo");
@@ -503,9 +518,11 @@ private slots:
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool()); QTRY_VERIFY(item("deskList")->hasActiveFocus());
         expectMotions(object("deskList"), "desk");
         key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        // History.
-        call("readerFocus"); openHistory(); expectMotions(object("historyList"), "history");
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        // History, in the palette: ↓ moves, end and home reach the ends.
+        call("readerFocus"); openHistory();
+        key(Qt::Key_Down); key(Qt::Key_End); QCOMPARE(paletteRow(), 23);
+        key(Qt::Key_Home); QCOMPARE(paletteRow(), 0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         // Annotations (Bookmarks), then not while typing in its search field.
         call("readerFocus"); key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
@@ -532,33 +549,32 @@ private slots:
         // The reader keeps its own meanings once the panels are closed.
         call("readerFocus"); navigate("John 1:20"); key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(bible->cursorVerse(), 25);
     }
-    void panelSwitchingWithOtherPanels() {
+    void historyKeyLeavesPanels() {
         record("John 1:3"); navigate("John 1:1");
+        // ctrl h from a side panel closes it and opens History in the palette.
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
-        key(Qt::Key_H, Qt::ShiftModifier);
+        key(Qt::Key_H, Qt::ControlModifier);
         QTRY_VERIFY(historyOpen()); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        QTRY_VERIFY(item("historyList")->hasActiveFocus());
-        key(Qt::Key_J); key(Qt::Key_H, Qt::ShiftModifier); QTest::qWait(100); QVERIFY(historyOpen()); // Same key: nothing.
-        key(Qt::Key_A, Qt::ShiftModifier);
-        QTRY_VERIFY(object("savedDrawer")->property("opened").toBool()); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
-        key(Qt::Key_H, Qt::ShiftModifier); QTRY_VERIFY(historyOpen()); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
-        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("sidePanel").toString() == "related");
-        QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
-        key(Qt::Key_H, Qt::ShiftModifier); QTRY_VERIFY(historyOpen());
-        key(Qt::Key_W); QTRY_VERIFY(prop("notesOpen").toBool()); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
-        // One esc closes the History panel.
-        call("readerFocus"); openHistory(); key(Qt::Key_Escape); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        // From the palette's other modes too; ctrl k returns to the books.
+        key(Qt::Key_K, Qt::ControlModifier); QVERIFY(!prop("paletteHistory").toBool());
+        key(Qt::Key_H, Qt::ControlModifier); QVERIFY(historyOpen());
+        key(Qt::Key_Slash, Qt::ControlModifier); QVERIFY(prop("paletteTextMode").toBool());
+        key(Qt::Key_H, Qt::ControlModifier); QVERIFY(historyOpen()); QVERIFY(!prop("paletteTextMode").toBool());
+        // space resumes it.
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        key(Qt::Key_Space); QTRY_VERIFY(historyOpen());
+        // One esc closes it.
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        // From the Notes editor, ctrl h closes Notes (saving the note) first.
+        key(Qt::Key_W); QTRY_VERIFY(prop("notesOpen").toBool()); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen()); QTRY_VERIFY(!prop("notesOpen").toBool());
+        key(Qt::Key_Escape);
     }
-    void footerButtonCommandsAndDisabledToast() {
-        window->resize(1200, 820); QTest::qWait(100);
-        auto x = [this](const char *name) { return item(name)->mapToScene(QPointF()).x(); };
-        QVERIFY(item("historyControl")->isVisible());
-        QVERIFY(x("relatedControl") < x("historyControl")); QVERIFY(x("historyControl") < x("deskControl"));
-        QVERIFY(item("historyControl")->property("tip").toString().contains("shift H"));
-        QMetaObject::invokeMethod(item("historyControl"), "clicked"); QTRY_VERIFY(historyOpen());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+    void commandsAndDisabledHistory() {
+        // History has no panel or footer button: it is in the palette.
+        QVERIFY(!object("historyControl")); QVERIFY(!object("historyDrawer"));
+        QCOMPARE(window->property("footerRightCount").toInt(), 3);
         QCOMPARE(commandTitle("history"), QString("History"));
         QCOMPARE(commandTitle("clear history"), QString("Clear History"));
         QCOMPARE(commandTitle("able history"), QString("Disable History"));
@@ -570,26 +586,15 @@ private slots:
         run("toggleHistory");
         QVERIFY(!bible->historyEnabled()); QVERIFY(bible->history().isEmpty());
         QCOMPARE(commandTitle("able history"), QString("Enable History"));
-        QTRY_VERIFY(!item("historyControl")->isVisible());
-        QCOMPARE(window->property("footerRightCount").toInt(), 3);
-        key(Qt::Key_H, Qt::ShiftModifier); QTest::qWait(100);
-        QVERIFY(!object("historyDrawer")->property("visible").toBool());
+        key(Qt::Key_H, Qt::ControlModifier); QTest::qWait(100);
+        QVERIFY(!object("passagePalette")->property("visible").toBool());
         QCOMPARE(toast(), QString("History is disabled · enable it in Commands"));
-        // The … menu drops History while disabled.
+        // The … menu never lists History.
         QVariant entries; QMetaObject::invokeMethod(window, "footerPanelEntries", Q_RETURN_ARG(QVariant, entries));
         QStringList ids; for (const auto &e : value(entries).toList()) ids << e.toMap()["id"].toString();
         QCOMPARE(ids, QStringList({"annotations", "notes", "related", "desk"}));
         run("toggleHistory"); QVERIFY(bible->historyEnabled());
-        QTRY_VERIFY(item("historyControl")->isVisible());
-        QMetaObject::invokeMethod(window, "footerPanelEntries", Q_RETURN_ARG(QVariant, entries));
-        ids.clear(); for (const auto &e : value(entries).toList()) ids << e.toMap()["id"].toString();
-        QCOMPARE(ids, QStringList({"annotations", "notes", "related", "history", "desk"}));
-        // Collapsed footer: History joins the … menu.
-        window->setMinimumWidth(320); window->resize(360, 640); QVERIFY(desktop->setProperty("textScale", 1.5));
-        QTRY_VERIFY(item("footerMore")->isVisible()); QVERIFY(!item("historyControl")->isVisible());
-        QMetaObject::invokeMethod(item("footerMore"), "clicked"); QTRY_VERIFY(object("contextMenu")->property("visible").toBool());
-        QVERIFY(QMetaObject::invokeMethod(object("contextMenu"), "triggerId", Q_ARG(QVariant, QString("history"))));
-        QTRY_VERIFY(historyOpen());
+        key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen());
         key(Qt::Key_Escape);
     }
     void paletteRecentPassagesAndQueries() {
@@ -600,7 +605,11 @@ private slots:
         QStringList recents; for (const auto &r : rows) if (r.toMap().contains("recent")) recents << r.toMap()["title"].toString();
         // Max 5, never the current passage.
         QCOMPARE(recents, QStringList({"John 1:30", "John 2:11", "John 2:9", "John 2:7", "John 2:4"}));
-        for (int i = 0; i < rows.size(); ++i) QCOMPARE(rows[i].toMap()["lastRecent"].toBool(), i == 4);
+        // Then all of History, a step away; the rule follows that row.
+        QVERIFY(rows[5].toMap()["allHistory"].toBool());
+        QCOMPARE(rows[5].toMap()["title"].toString(), QString("All History"));
+        QCOMPARE(rows[5].toMap()["hint"].toString(), QString("8 passages"));
+        for (int i = 0; i < rows.size(); ++i) QCOMPARE(rows[i].toMap()["lastRecent"].toBool(), i == 5);
         QCOMPARE(rows.first().toMap()["title"].toString(), QString("John 1:30"));
         // One thin rule (the border color) under the recent group, before the books.
         QTRY_VERIFY(item("paletteRecentRule"));
@@ -614,9 +623,17 @@ private slots:
         QCOMPARE(rules.first()->property("color").value<QColor>(), desktop->property("border").value<QColor>());
         auto list = item("paletteResults");
         const double ruleY = rules.first()->mapToItem(list, QPointF()).y();
-        QCOMPARE(rules.first()->parentItem()->property("index").toInt(), 4);
+        QCOMPARE(rules.first()->parentItem()->property("index").toInt(), 5);
         QVERIFY(ruleY >= rules.first()->parentItem()->mapToItem(list, QPointF()).y() + rules.first()->parentItem()->height());
-        QCOMPARE(rows[5].toMap()["title"].toString(), QString("John"));
+        QCOMPARE(rows[6].toMap()["title"].toString(), QString("John"));
+        // All History opens the palette's History; backspace returns, that row chosen.
+        for (int i = 0; i < 5; ++i) key(Qt::Key_Down);
+        QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 5);
+        key(Qt::Key_Return); QTRY_VERIFY(historyOpen()); QCOMPARE(paletteRows().size(), 8);
+        key(Qt::Key_Backspace); QTRY_VERIFY(!prop("paletteHistory").toBool());
+        QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 5);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
         QVERIFY(rows.first().toMap()["hint"].toString().startsWith("Recent"));
         type("jo"); QVERIFY(paletteRows().first().toMap()["title"].toString() == "John");
         key(Qt::Key_Backspace); key(Qt::Key_Backspace);
@@ -664,12 +681,13 @@ private slots:
         QCOMPARE(bible->history().first().toMap()["reference"].toString(), QString("John 1:44"));
         QCOMPARE(stack().size(), 3);
         QCOMPARE(value(other->property("jumpStack")).toList().size(), 2);
-        // Clearing in one window empties the other's panel.
+        // Clearing in one window empties the other's History.
         QVERIFY(peer.clearHistory()); QVERIFY(bible->history().isEmpty());
-        openHistory(); QTRY_VERIFY(item("historyEmpty")->isVisible()); key(Qt::Key_Escape);
-        // Disabling elsewhere hides this window's button.
-        QVERIFY(peer.setHistoryEnabled(false)); QTRY_VERIFY(!item("historyControl")->isVisible());
+        openHistory(); QTRY_COMPARE(paletteRows().size(), 0);
+        // Disabling elsewhere closes this window's History, back to the books.
+        QVERIFY(peer.setHistoryEnabled(false)); QTRY_VERIFY(!prop("paletteHistory").toBool());
         QVERIFY(!bible->historyEnabled());
+        key(Qt::Key_Escape);
     }
 };
 

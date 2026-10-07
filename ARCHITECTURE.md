@@ -32,7 +32,7 @@ files.
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (`lastSound`/`playCount` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds) |
 | `qml/Main.qml` | Reader, palettes, Notes, Annotations (one list for all four tabs; Tags rows grouped under tag headings), Desk, settings, catalog, About |
 | `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Annotations and Study drawers, which stay open) and the Study drawer (tabs Cross-references / Footnotes / Tags; the Tags tab keeps the internal id `related`, as do `relatedDrawer` and the `related` action). Study → Tags roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
-| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Annotations and Study: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk and History: their count) |
+| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Annotations and Study: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk: its count) |
 | `qml/RangeEditor.qml` | Annotation range editing session |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
@@ -130,6 +130,10 @@ files.
   and chapter steps do not. A location enters the shared `history` list only
   after the window stays on that chapter for `historyDwellMs` (5 s). Disabling
   History clears both tables and stops recording; it is excluded from backups.
+  It has no panel: the passage palette shows up to five recent rows and an
+  "All History" row above the books, and `paletteHistory` (ctrl h, or that
+  row) lists every row grouped by local day, filtered by the typed query, with
+  `delete` / `shift delete` to remove one or clear all (the latter confirms).
 - Removal keeps annotations/tags/Desk by default (hidden until reimport);
   `removeVersion(id, true)` drops them. Global tag definitions always survive.
 - Backups: JSON `format: "omaword-backup"`, version **5** (3 = annotations,
@@ -261,7 +265,7 @@ files.
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout (`readingMode`, still the id) draws `paintLayoutGlyph`, the
   footer layout button's icons.
-- With a drawer side panel open (Annotations, Desk, History, Study), the keys
+- With a drawer side panel open (Annotations, Desk, Study), the keys
   of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
   keyboard to the reader, close the panel, then act (`runKey`) — so the
   drawer's exit cannot hand focus back over what opened. Notes is not modal:

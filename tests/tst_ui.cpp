@@ -4175,11 +4175,11 @@ private slots:
                 owners.insert(key,id);
             }
         }
-        for (const auto &removed : {"S","Ctrl+P","Ctrl+M","Ctrl+H","Ctrl+A","Shift+R","Shift+X","Ctrl+Shift+N",
+        for (const auto &removed : {"S","Ctrl+P","Ctrl+M","Shift+H","Ctrl+A","Shift+R","Shift+X","Ctrl+Shift+N",
                                     "R","P","B","Ctrl+[","Ctrl+]","Ctrl+\\"})
             QVERIFY2(!owners.contains("app:" + QKeySequence(QString(removed)).toString()),removed);
-        // [ ] - and shift H moved from chapters/headings to History.
-        for (const auto &[sequence,id] : QList<QPair<QString,QString>>{{"[","historyBack"},{"]","historyForward"},{"-","historySwap"},{"Shift+H","history"}})
+        // [ ] - travel the jumps; ctrl h opens History in the palette.
+        for (const auto &[sequence,id] : QList<QPair<QString,QString>>{{"[","historyBack"},{"]","historyForward"},{"-","historySwap"},{"Ctrl+H","history"}})
             QCOMPARE(owners.value("app:" + QKeySequence(sequence).toString()),id);
     }
     void aliasesWorkButStayHidden() {
@@ -4469,10 +4469,11 @@ private slots:
     void footerOrderAndResponsiveLayout() {
         reference("1 Thessalonians 5:16-18");
         const QStringList names = {"focusControl","modeControl","helpControl","searchControl","passageControl","versionControl",
-            "layoutControl","savedControl","relatedControl","historyControl","deskControl","footerMore"};
+            "layoutControl","savedControl","relatedControl","deskControl","footerMore"};
         window->setMinimumWidth(320);
         struct Case { int width; int height; double scale; bool stacked; bool layout; bool collapsed; };
-        const QList<Case> cases = {{1120,820,1,false,true,false},{900,820,1.5,true,true,false},{700,820,1,true,true,false},
+        // Three right buttons (Annotations, Study, Desk): 700 px at 1× fits one row.
+        const QList<Case> cases = {{1120,820,1,false,true,false},{900,820,1.5,true,true,false},{700,820,1,false,true,false},
             {700,820,1.5,true,true,false},{640,820,1.5,true,false,false},{560,820,1.5,true,false,true},{560,820,2.4,true,false,true},
             {420,640,1,true,false,true},{360,640,1.5,true,false,true}};
         for (const auto &entry : cases) {
@@ -4488,7 +4489,7 @@ private slots:
             QCOMPARE(item("savedControl")->isVisible(),!entry.collapsed);
             // The footer itself is always one row tall; only the right group stacks.
             QCOMPARE(window->property("footerHeight").toDouble(),window->property("footerButton").toDouble());
-            const QStringList right = {"savedControl","relatedControl","historyControl","deskControl","footerMore"};
+            const QStringList right = {"savedControl","relatedControl","deskControl","footerMore"};
             QList<QPair<QString,QRectF>> rects;
             for (const auto &name : names) {
                 auto button = item(qPrintable(name));
@@ -4518,7 +4519,7 @@ private slots:
             const auto h = [this](const char *name) { return item(name)->height(); };
             QVERIFY(!item("notesControl"));
             // Buttons within a group sit edge to edge.
-            const QList<const char *> order = {"savedControl","relatedControl","historyControl","deskControl"};
+            const QList<const char *> order = {"savedControl","relatedControl","deskControl"};
             if (!entry.collapsed && !entry.stacked) {
                 for (int i = 1; i < order.size(); ++i) QCOMPARE(x(order[i]),x(order[i - 1]) + w(order[i - 1]));
             } else if (!entry.collapsed) {

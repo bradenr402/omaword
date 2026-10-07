@@ -510,12 +510,13 @@ private slots:
         QTRY_VERIFY(!QGuiApplication::clipboard()->text().isEmpty());
         QVERIFY(!QGuiApplication::clipboard()->text().contains("John 3:5"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
-        // History (keyboard): the menu key opens the row menu with Remove after a divider.
-        QVERIFY(bible->recordHistory()); run("history"); QTRY_VERIFY(opened("historyDrawer"));
+        // History, in the palette (keyboard): the menu key opens the row menu
+        // with Remove after a divider.
+        QVERIFY(bible->recordHistory()); run("history"); QTRY_VERIFY(opened("passagePalette")); QVERIFY(prop("paletteHistory").toBool());
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), (shared + QStringList{"|", "remove"}));
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("historyDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         // Annotations rows: the shared four, then Edit range and Delete.
         bible->selectVerses(3, 3); QVERIFY(bible->toggleBookmark());
         run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
@@ -706,7 +707,6 @@ private slots:
         check("aboutDialog", [&] { run("about"); });
         check("savedDrawer", [&] { run("annotations"); });
         check("deskDrawer", [&] { run("desk"); });
-        check("historyDrawer", [&] { run("history"); });
         check("relatedDrawer", [&] { run("related"); });
         check("notesDrawer", [&] { run("notes"); });
         // The picker nearly fills the window: give it room above to click outside.
@@ -1753,7 +1753,7 @@ private slots:
     void globalKeysLeaveSidePanels() {
         QVERIFY(bible->addToDesk()); bible->selectVerses(3, 3); QVERIFY(bible->toggleBookmark());
         struct Panel { Qt::Key key; const char *drawer; };
-        const QList<Panel> panels = {{Qt::Key_D, "deskDrawer"}, {Qt::Key_A, "savedDrawer"}, {Qt::Key_H, "historyDrawer"}, {Qt::Key_S, "relatedDrawer"}};
+        const QList<Panel> panels = {{Qt::Key_D, "deskDrawer"}, {Qt::Key_A, "savedDrawer"}, {Qt::Key_S, "relatedDrawer"}};
         for (const auto &panel : panels) {
             auto open = [&] { call("readerFocus"); key(panel.key, Qt::ShiftModifier); QTRY_VERIFY2(opened(panel.drawer), panel.drawer); QTest::qWait(30); };
             // Keyboard: the palette, a dialog, and a reading toggle each close the panel first.

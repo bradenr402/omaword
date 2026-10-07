@@ -141,11 +141,11 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `shift A`: Annotations panel
 - `shift D`: Open Desk
 - `shift S`: Study panel
-- `shift H`: History
 
 ### Palettes and windows
 
 - `ctrl k`: Navigate to a passage
+- `ctrl h`: History
 - `ctrl space`: Open commands
 - `space`: Resume last palette
 - `ctrl r`: Reading settings
@@ -158,6 +158,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl i`: Add version: import a USFM ZIP
 - `backspace`: Back a step in Remove version (Versions)
 - `ctrl shift I`: Re-import the highlighted version (Versions)
+- `delete`: History: remove a passage
+- `shift delete`: History: clear it
 
 ### Reading
 
@@ -204,7 +206,6 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `h` · `←`: Previous tab (Annotations, Study)
 - `l` · `→`: Next tab (Annotations, Study)
 - `shift delete` · `shift backspace`: Clean Desk
-- `shift delete` · `shift backspace`: Clear History
 
 ### Commands only
 
@@ -241,7 +242,7 @@ These also work, but stay out of the in-app list:
 - Search Scripture across the current version, or find in the current chapter (`/`) with a regular expression, Neovim-style smart case: lowercase ignores case, any capital matches it, `\c` / `\C` force either way.
 - Click the chapter title for the book's chapter grid, the current chapter chosen; the `<` `>` buttons at the window's edges step chapters (`h` `l`).
 - `[` and `]` (or the mouse's back and forward buttons) step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.
-- History (`shift H`) lists passages you stayed on for a few seconds, shared by every window. It never goes into backups, and Commands can clear or disable it.
+- History keeps the passages you stayed on for a few seconds, shared by every window. The passage palette lists the latest five above the books, then **All History**; `ctrl h` opens it directly: newest first under Today, Yesterday, and Earlier, typing narrows it, `delete` removes a passage and `shift delete` clears it. It never goes into backups, and Commands can clear or disable it.
 
 ### Studying
 - Bookmark, highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from).
@@ -254,7 +255,7 @@ These also work, but stay out of the in-app list:
 ### Feel
 - Annotations look like pen marks; highlights like a highlighter on paper, in your theme's yellow.
 - Moving to a verse slides briefly, jumps pulse, copies flash, and the text slides aside for margin notes. Menus and dialogs open instantly and fade out toward where they came from; side panels slide in and ease out. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows.
-- The footer holds focus, mode, and help on the left; search, passage, version, and layout in the center; and Annotations, Study, History, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows the right group stacks into a column, then folds into a `…` menu.
+- The footer holds focus, mode, and help on the left; search, passage, version, and layout in the center; and Annotations, Study, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows the right group stacks into a column, then folds into a `…` menu.
 
 ### Keyboard and mouse
 - Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Desk), and `menu` or `shift F10` opens it from the keyboard.
@@ -262,7 +263,7 @@ These also work, but stay out of the in-app list:
 - Clicking outside a panel, dialog, or picker only closes it (in Edit range and confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error. Mouse back closes the top dialog.
 - Text fields use the app's own menu (Cut · Copy · Paste · Select all; in a note also Open link and Preview). Right-clicking selected text keeps it only when the click is on it; the passage menu (`menu`) keeps a `v` selection, and its copy entries copy it.
 - If a note changes in another window while you type, typing is not interrupted: `ctrl s` keeps your draft, `ctrl shift S` takes the saved text.
-- With Annotations, Desk, History, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl r`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. The passage menu offers **Edit range** when the selection is annotated, and tooltips on the outline, margin notes, and verse numbers name their keys.
+- With Annotations, Desk, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl r`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. The passage menu offers **Edit range** when the selection is annotated, and tooltips on the outline, margin notes, and verse numbers name their keys.
 
 ### Your data
 Bible versions, annotations, the Desk, and History stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.

@@ -526,11 +526,11 @@ private slots:
         // Side panels animate out as well as in.
         key(Qt::Key_Escape); QVERIFY(object("notesDrawer")->property("visible").toBool());
         QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
-        call("readerFocus"); key(Qt::Key_H, Qt::ShiftModifier);
-        QVERIFY(object("historyDrawer")->property("visible").toBool()); QVERIFY(!object("historyDrawer")->property("opened").toBool());
-        QTRY_VERIFY(object("historyDrawer")->property("opened").toBool());
-        key(Qt::Key_Escape); QVERIFY(object("historyDrawer")->property("visible").toBool());
-        QTRY_VERIFY(!object("historyDrawer")->property("visible").toBool());
+        call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier);
+        QVERIFY(object("deskDrawer")->property("visible").toBool()); QVERIFY(!object("deskDrawer")->property("opened").toBool());
+        QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
+        key(Qt::Key_Escape); QVERIFY(object("deskDrawer")->property("visible").toBool());
+        QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier);
         QTRY_VERIFY(object("relatedDrawer")->property("visible").toBool());
         QVERIFY(object("relatedDrawer")->property("position").toDouble() < 1.0);
