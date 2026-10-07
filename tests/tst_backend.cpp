@@ -971,6 +971,21 @@ private slots:
         const QString id = bible->createAndAssignTag(bible->tagScope(),"Passing"); QVERIFY(!id.isEmpty());
         QVERIFY(bible->deleteTag(id)); QVERIFY(!bible->canUndo());
     }
+    void nextChapterIsReadAhead() {
+        install(net);
+        QVERIFY(bible->navigate("John 3:16"));
+        const int reads = bible->chapterReads();
+        // While idle, the next chapter is read ahead...
+        QTRY_COMPARE(bible->chapterReads(), reads + 1);
+        // ...so turning to it reads nothing, and reads the one after.
+        bible->nextChapter(); QCOMPARE(bible->passage(), QString("John 4"));
+        QCOMPARE(bible->chapterReads(), reads + 1);
+        QVERIFY(bible->verses().size() > 0); QVERIFY(bible->error().isEmpty());
+        QTRY_COMPARE(bible->chapterReads(), reads + 2);
+        // A version switch never serves another generation's read.
+        install(kjv); QVERIFY(bible->navigate("John 4"));
+        QVERIFY(bible->verses().first().toMap()["text"].toString().contains("JHN 4:1"));
+    }
     void compareVersionsFollowsEachNumbering() {
         install(net); install(kjv);
         // KJV+ has MRK 7:16; NET omits it.

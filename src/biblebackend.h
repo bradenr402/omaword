@@ -339,6 +339,8 @@ public:
     // differs, or it has no such book).
     Q_INVOKABLE QVariantList compareVersions(QVariantMap scope = QVariantMap()) const;
     Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
+    // Chapter reads from the text database (tests: the next one is read ahead).
+    Q_INVOKABLE int chapterReads() const { return m_chapterReads; }
     Q_INVOKABLE void openChapter(int book, int chapter);
     Q_INVOKABLE void previousChapter();
     Q_INVOKABLE void nextChapter();
@@ -447,6 +449,11 @@ private:
     void closeBible();
     bool loadChapter();
     bool readChapter(int book, int chapter, QVariantList *rows);
+    void prefetchNextChapter();
+    QPair<QPair<int,int>, QVariantList> m_prefetched;
+    QString m_prefetchGeneration;
+    QTimer m_prefetchTimer;
+    int m_chapterReads = 0;
     QVariantList collectionRows(const QVector<Annotation> &annotations) const;
     bool protectDestination(const QString &path);
     bool goTo(int book, int chapter, int start, int end);

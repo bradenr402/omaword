@@ -79,8 +79,8 @@ fontconfig state.
 
 - **importer**: USFM parsing, metadata, source order, poetry line levels (schema 5), malformed/unsafe input, staged publication.
 - **catalog**: catalog metadata, streamed atomic downloads, cancel/timeout/retry.
-- **backend**: library, references, annotations, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), comparing versions, backups, migrations, peers, History, the ribbon, file ownership, character-selection motions/objects and the quotation format.
-- **ui**: packaged Main: catalog, layouts (the 66ch column, the type scale, poetry indents), selection/copy, Annotations (immediate delete, undo from the panel), undo keys, toasts and Commands, Visual completion, footer.
+- **backend**: library, references, annotations, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), comparing versions, reading the next chapter ahead, backups, migrations, peers, History, the ribbon, file ownership, character-selection motions/objects and the quotation format.
+- **ui**: packaged Main: catalog, layouts (the 66ch column, the type scale, poetry indents, the next-chapter link, `ctrl` + wheel zoom), selection/copy, Annotations (immediate delete, undo from the panel), undo keys, toasts and Commands, Visual completion, footer.
 - **search**: matching semantics (incl. chapter find's smart-case regular expressions), results in Bible order, the two-version corpus cache, async lifecycle, whitespace-preserving copy.
 - **searchui**: palette and chapter-find keyboard behavior; Bible search results under book headings with counts, `ctrl ↓`/`ctrl ↑` book jumps across pages.
 - **searchrender**: rendered match offsets/geometry across layouts.

@@ -270,6 +270,8 @@ ApplicationWindow {
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
     readonly property int readerSize: bible.fontSize
+    // ctrl + wheel: partial wheel steps (touchpads) add up to whole sizes.
+    property real zoomSteps: 0
     // The page's body text, in pixels: every step of TypeScale.js is relative to it.
     readonly property real readerBodySize: readerSize * readerScale
     property int selectionAnchor: 0
@@ -5435,6 +5437,27 @@ ApplicationWindow {
                     }
                     onContentYChanged: positionSaveTimer.restart()
                     onMovementStarted: readerSlide.stop()
+                    // ctrl + wheel and a pinch change the Text size, as ctrl = and ctrl - do.
+                    WheelHandler {
+                        objectName: "readerZoomWheel"
+                        acceptedModifiers: Qt.ControlModifier
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onWheel: function(event) {
+                            app.zoomSteps += event.angleDelta.y / 120
+                            const steps = app.zoomSteps > 0 ? Math.floor(app.zoomSteps) : Math.ceil(app.zoomSteps)
+                            if (!steps) return
+                            app.zoomSteps -= steps
+                            for (let i = 0; i < Math.abs(steps); ++i) app.runCommand(steps > 0 ? "larger" : "smaller")
+                        }
+                    }
+                    PinchHandler {
+                        objectName: "readerPinch"
+                        target: null
+                        property real startScale: 1
+                        property int startSize: 18
+                        onActiveChanged: if (active) { startScale = activeScale; startSize = app.readerSize }
+                        onActiveScaleChanged: if (active) bible.setFontSize(Math.max(8, Math.min(40, Math.round(startSize * activeScale / startScale))))
+                    }
                     ScrollBar.vertical: OverlayScrollbar {
                         id: readerScrollbar
                         objectName: "readerScrollbar"
@@ -5922,6 +5945,33 @@ ApplicationWindow {
                             width: parent.width
                             wrapMode: Text.Wrap
                             padding: 24
+                        }
+                        // The way on, after the last verse: "John 2 →" (l).
+                        Label {
+                            id: nextChapterLink
+                            objectName: "nextChapterLink"
+                            readonly property var destination: app.chapterNeighbors.next
+                            visible: !!destination && bible.verses.length > 0 && !app.focusLayout
+                            x: app.verseGutter
+                            topPadding: 2 * app.readerLineHeight
+                            text: destination ? destination.title + " →" : ""
+                            textFormat: Text.PlainText
+                            color: nextChapterMouse.containsMouse ? desktop.accent : desktop.muted
+                            font.pixelSize: app.readerBodySize
+                            Accessible.role: Accessible.Link
+                            Accessible.name: destination ? "Next chapter, " + destination.title : ""
+                            Accessible.description: app.keyText("nextChapter")
+                            Accessible.onPressAction: app.runCommand("nextChapter")
+                            MouseArea {
+                                id: nextChapterMouse
+                                objectName: "nextChapterMouse"
+                                anchors.fill: parent
+                                anchors.topMargin: parent.topPadding
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: { app.runCommand("nextChapter"); app.readerFocus() }
+                            }
+                            AppToolTip { theme: desktop; uiScale: app.scale; visible: nextChapterMouse.containsMouse; text: "Next chapter · " + app.keyText("nextChapter") }
                         }
                     }
                     // Range editing: the moving endpoint (updateRangeEndpoint).

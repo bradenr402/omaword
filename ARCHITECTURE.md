@@ -174,6 +174,9 @@ files.
   guard; replace/remove/restore flush affected note drafts, and a failed flush
   vetoes. Note saves compare-and-set against the observed baseline; conflicts
   offer **Save my draft** / **Use saved text**.
+- Reading ahead: after each chapter opens, the next chapter in source order is
+  read on the next idle turn (`prefetchNextChapter`, signals blocked, errors
+  kept back) and kept with its generation; opening it uses that read once.
 - Note drafts save after a 400 ms pause in typing (`noteSaveDelay`, 0 in the
   GUI test harnesses); every `flushNote()` (selection, navigation, panels,
   window close, peer flushes) saves a pending draft first. `setNoteText`

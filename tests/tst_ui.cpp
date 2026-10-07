@@ -1,4 +1,5 @@
 #include "testenvironment.h"
+#include <QWheelEvent>
 #include <QtTest/QTest>
 #include <QApplication>
 #include <QClipboard>
@@ -3228,6 +3229,29 @@ private slots:
         QCOMPARE(bible->cursorVerse(),10);
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),window->property("freeSelectedText").toString());
+    }
+    void nextChapterLinkAndCtrlWheelZoom() {
+        reference("John 3:16");
+        auto link = item("nextChapterLink"); QVERIFY(link);
+        QTRY_VERIFY(link->isVisible());
+        QCOMPARE(link->property("text").toString(),QString::fromUtf8("John 4 →"));
+        // It sits after the last verse.
+        const auto last = item("verseBody" + QString::number(bible->verses().last().toMap()["number"].toInt()).toUtf8());
+        QVERIFY(last); QVERIFY(link->mapToItem(nullptr,QPointF(0,0)).y() > last->mapToItem(nullptr,QPointF(0,0)).y());
+        QVERIFY(QMetaObject::invokeMethod(window,"setReaderY",Q_ARG(QVariant,1e9)));
+        QTRY_VERIFY(link->mapToScene(QPointF(0,0)).y() < window->height());
+        click(item("nextChapterMouse"));
+        QTRY_COMPARE(bible->chapter(),4);
+        // ctrl + wheel changes the Text size, a step per notch.
+        const int size = bible->fontSize();
+        const QPoint at = item("reading")->mapToScene(QPointF(200,200)).toPoint();
+        QWheelEvent up(at,window->mapToGlobal(at),QPoint(),QPoint(0,120),Qt::NoButton,Qt::ControlModifier,Qt::NoScrollPhase,false);
+        QCoreApplication::sendEvent(window,&up);
+        QTRY_COMPARE(bible->fontSize(),size + 1);
+        QWheelEvent down(at,window->mapToGlobal(at),QPoint(),QPoint(0,-240),Qt::NoButton,Qt::ControlModifier,Qt::NoScrollPhase,false);
+        QCoreApplication::sendEvent(window,&down);
+        QTRY_COMPARE(bible->fontSize(),size - 1);
+        key(Qt::Key_0,Qt::ControlModifier); QTRY_COMPARE(bible->fontSize(),18);
     }
     void columnMeasureFollowsTextSize() {
         reference("John 3:16");

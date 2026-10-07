@@ -366,6 +366,9 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         connect(peer, &BibleBackend::sharedCommitted, this, &BibleBackend::refreshShared, Qt::DirectConnection);
     }
     readers.append(this);
+    m_prefetchTimer.setSingleShot(true);
+    m_prefetchTimer.setInterval(0);
+    connect(&m_prefetchTimer, &QTimer::timeout, this, &BibleBackend::prefetchNextChapter);
     // Completion wiring must exist even when startup text or storage is damaged.
     m_progressTimer.setInterval(100);
     connect(&m_progressTimer, &QTimer::timeout, this, [this] {
@@ -2406,6 +2409,12 @@ bool BibleBackend::loadChapter()
 
 bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
 {
+    // The chapter after the last one read is read ahead, while idle.
+    if (m_prefetched.first == qMakePair(book, chapter) && m_prefetchGeneration == m_bible.databaseName()) {
+        *result = m_prefetched.second; m_prefetched = {};
+        return true;
+    }
+    ++m_chapterReads;
     QSqlQuery q(m_bible);
     q.prepare("SELECT number,text,html,heading,poetry FROM verses WHERE book=? AND chapter=? ORDER BY number");
     q.addBindValue(book); q.addBindValue(chapter);
@@ -2493,7 +2502,32 @@ bool BibleBackend::goToSelection(int b, int c, int anchor, int cursor, double po
     updateAnnotations();
     clearError();
     emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
+    m_prefetchTimer.start();
     return true;
+}
+
+void BibleBackend::prefetchNextChapter()
+{
+    if (!m_ready) return;
+    bool current = false;
+    for (const auto &key : m_keys) {
+        if (key.book == m_book && key.chapter == m_chapter) current = true;
+        else if (current) {
+            const auto next = qMakePair(key.book, key.chapter);
+            if (m_prefetched.first == next && m_prefetchGeneration == m_bible.databaseName()) return;
+            QVariantList rows;
+            bool read;
+            {
+                // A read ahead never reports: a failure surfaces when the chapter opens.
+                const QSignalBlocker quiet(this);
+                const QString error = m_error;
+                read = readChapter(key.book,key.chapter,&rows);
+                m_error = error;
+            }
+            if (read) { m_prefetched = {next, rows}; m_prefetchGeneration = m_bible.databaseName(); }
+            return;
+        }
+    }
 }
 
 bool BibleBackend::navigate(QString input)
