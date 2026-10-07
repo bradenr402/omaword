@@ -938,7 +938,7 @@ private slots:
         type("3"); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette", "visible").toBool());
         QCOMPARE(bible->book(),43); QCOMPARE(bible->chapter(),3);
-        QCOMPARE(bible->selectedStart(),0);
+        QCOMPARE(bible->selectionReference(),QString("John 3:1")); // On its first verse.
     }
     void invalidReferenceKeepsPassage() {
         reference("John 3:16");
@@ -1023,7 +1023,7 @@ private slots:
         key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("John"); key(Qt::Key_Return); type("4"); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
-        QCOMPARE(bible->passage(),QString("John 4")); QCOMPARE(bible->selectedStart(),0);
+        QCOMPARE(bible->selectionReference(),QString("John 4:1"));
         QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
         key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("John"); key(Qt::Key_Return);
