@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm --needed base-devel git qt6-base qt6-declarative \
-            qt6-multimedia libarchive fontconfig ttf-dejavu python
+            libpipewire libarchive fontconfig ttf-dejavu python
       - uses: actions/checkout@v4
       - name: README shortcuts are current
         run: bin/shortcuts --check

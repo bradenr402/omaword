@@ -5,12 +5,11 @@
 #include <QHash>
 #include <QObject>
 #include <QString>
+#include <memory>
 
-class QAudioSink;
-class QBuffer;
-
-// Short, quiet UI cues synthesized in memory. One instance is shared by every
-// window of the process; failures (no device, disabled env) stay silent.
+// Short, quiet UI cues synthesized in memory and played through PipeWire. One
+// instance is shared by every window of the process; failures (no PipeWire,
+// disabled env) stay silent and are retried later.
 class SoundEffects : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged)
@@ -37,7 +36,11 @@ public:
     bool silenced() const { return m_silenced; }
     static QStringList names();
     static constexpr int cooldownMs = 50;
-    // The 16-bit mono 44.1 kHz PCM a cue plays; for tests and offline inspection.
+    // error and boundary sound once per burst (a held key), not per repeat.
+    static constexpr int burstCooldownMs = 500;
+    static int cooldownFor(const QString &name);
+    // The 16-bit mono 44.1 kHz PCM a cue plays (before the output volume);
+    // for tests and offline inspection.
     static QByteArray render(const QString &name);
 
     QString lastSound() const { return m_lastSound; }
@@ -50,19 +53,23 @@ signals:
     void enabledChanged();
     void reduceMotionChanged();
     void played();
+    // The first cue this user ever heard (persisted): say how to turn them off.
+    void introduced();
 
 private:
+    struct Output;
+    static constexpr int retryMs = 5000;
     bool ensureOutput();
     QString m_settingsPath;
     bool m_enabled = true;
     bool m_reduceMotion = false;
     bool m_silenced = false;
     bool m_audioOutput = true;
-    bool m_outputFailed = false;
+    bool m_introduced = false;
     QString m_lastSound;
     int m_playCount = 0;
     QHash<QString, QByteArray> m_tones;
     QHash<QString, QElapsedTimer> m_lastPlayed;
-    QAudioSink *m_sink = nullptr;
-    QBuffer *m_buffer = nullptr;
+    std::unique_ptr<Output> m_output;
+    QElapsedTimer m_outputAttempt;
 };

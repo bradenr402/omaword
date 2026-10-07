@@ -11,7 +11,7 @@ A minimal, keyboard-first Bible reader built with Qt Quick and C++ that follows 
 OmaWord is built for [Omarchy](https://omarchy.org) and assumes its Hyprland session, theme files, and fonts. Other desktops are not supported.
 
 ```sh
-sudo pacman -S --needed base-devel qt6-declarative qt6-multimedia libarchive
+sudo pacman -S --needed base-devel qt6-declarative libarchive libpipewire
 git clone https://github.com/bradenr402/omaword.git
 cd omaword
 bin/build
@@ -274,8 +274,8 @@ Versions installed before footnotes were supported show **Re-import** in Version
 
 - Omarchy (Hyprland on Arch Linux)
 - `base-devel` (C++17 compiler, `make`, `pkg-config`) and `qmake6`, provided by `qt6-base`
-- Qt 6: `qt6-base`, `qt6-declarative`, `qt6-multimedia` (sound effects), and `qt6-wayland`
-- `libarchive` and `fontconfig`
+- Qt 6: `qt6-base`, `qt6-declarative`, and `qt6-wayland`
+- `libarchive`, `fontconfig`, and `libpipewire` (sound effects)
 
 Omarchy already provides most of these; the install command above adds the rest.
 

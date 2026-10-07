@@ -416,7 +416,7 @@ ApplicationWindow {
         if (target !== clamped) {
             notify(direction > 0 ? "No matches after cursor" : "No matches before cursor", true)
             sounds.play("boundary")
-        } else sounds.play("tick")
+        }
         readerFocus()
         pulseDestination()
     }
@@ -448,7 +448,6 @@ ApplicationWindow {
         if (!bible.ready) return
         const current = paletteTextMode ? 1 : referenceInput.text.trim().startsWith(">") ? 2 : 0
         const next = (current + direction + 3) % 3
-        sounds.play("tick")
         if (next === 1) openTextSearch()
         else openPalette(next === 2)
     }
@@ -2615,6 +2614,16 @@ ApplicationWindow {
     }
     property bool toastInFocus: false
     function notify(message, inFocus) { toastInFocus = !!inFocus; toast.text = message; toastTimer.restart() }
+    // The first sound effect anyone hears says how to turn them off, after the
+    // message of the action that made it (most notify just before they play).
+    Connections {
+        target: sounds
+        function onIntroduced() {
+            if (!app.active) return
+            const introduction = "Sound effects · " + app.keyText("soundEffects") + " turns them off"
+            app.notify(toastTimer.running && toast.text.length ? toast.text + "\n" + introduction : introduction, true)
+        }
+    }
     // Footnote markers (all layouts) open Study → Footnotes at that note,
     // selecting its verse first (Study is a passage panel).
     function openFootnote(verse, seq) {
@@ -2903,7 +2912,6 @@ ApplicationWindow {
     // A different mode's key switches the open palette; its own key does nothing.
     function showPaletteMode(mode) {
         if (passagePalette.visible && paletteMode() === mode) return
-        sounds.play("tick")
         if (mode === "search") openTextSearch()
         else openPalette(mode === "commands")
     }

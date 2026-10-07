@@ -61,6 +61,35 @@ private slots:
         QVERIFY(sounds.play("chime"));
         QTest::qWait(SoundEffects::cooldownMs + 20);
         QVERIFY(sounds.play("tick"));
+        // error and boundary sound once per burst of a held key, not per repeat.
+        QCOMPARE(SoundEffects::cooldownFor("error"), SoundEffects::burstCooldownMs);
+        QCOMPARE(SoundEffects::cooldownFor("boundary"), SoundEffects::burstCooldownMs);
+        QCOMPARE(SoundEffects::cooldownFor("chime"), SoundEffects::cooldownMs);
+        QVERIFY(sounds.play("error"));
+        QTest::qWait(SoundEffects::cooldownMs + 20);
+        QVERIFY(!sounds.play("error")); QVERIFY(!sounds.play("boundary"));
+        QTest::qWait(SoundEffects::burstCooldownMs);
+        QVERIFY(sounds.play("error")); QVERIFY(sounds.play("boundary"));
+    }
+    void firstCueIntroducesSoundsOnce() {
+        {
+            SoundEffects sounds(nullptr, path(), false);
+            QSignalSpy introduced(&sounds, &SoundEffects::introduced);
+            QVERIFY(sounds.play("chime")); QVERIFY(sounds.play("remove"));
+            QCOMPARE(introduced.count(), 1);
+        }
+        // Remembered: later sessions never introduce them again.
+        SoundEffects later(nullptr, path(), false);
+        QSignalSpy again(&later, &SoundEffects::introduced);
+        QVERIFY(later.play("chime"));
+        QCOMPARE(again.count(), 0);
+        // Silenced or disabled cues are not heard, so they introduce nothing.
+        QFile::remove(path());
+        qputenv("OMAWORD_SOUND", "0");
+        SoundEffects silenced(nullptr, path(), false);
+        QSignalSpy unheard(&silenced, &SoundEffects::introduced);
+        QVERIFY(!silenced.play("chime"));
+        QCOMPARE(unheard.count(), 0);
     }
     void testHook() {
         SoundEffects sounds(nullptr, path(), false);
@@ -87,6 +116,8 @@ private slots:
             double peak = 0;
             for (double v : x) peak = qMax(peak, std::abs(v));
             QVERIFY2(peak < 0.99 && peak > 0.02, qPrintable(name));
+            // No cue is louder than the others' loudest: the error buzz included.
+            QVERIFY2(peak < 0.13, qPrintable(name));
         }
         QVERIFY(SoundEffects::render("nonexistent").isEmpty());
     }

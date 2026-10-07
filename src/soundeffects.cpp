@@ -1,18 +1,22 @@
 #include "soundeffects.h"
 
-#include <QAudioFormat>
-#include <QAudioSink>
-#include <QBuffer>
 #include <QGuiApplication>
-#include <QMediaDevices>
 #include <QSettings>
 #include <QtMath>
+#include <atomic>
+#include <cerrno>
+#include <cstring>
 #include <memory>
+#include <pipewire/pipewire.h>
+#include <spa/param/audio/raw-utils.h>
 
 namespace {
 constexpr int sampleRate = 44100;
+// The level QAudioSink played the cues at, applied to the samples instead.
+constexpr double outputVolume = 0.6;
 const char *settingsKey = "sound/effectsEnabled";
 const char *motionKey = "motion/reduced";
+const char *introducedKey = "sound/introduced";
 
 struct Note { double startHz, endHz, ms, gain; };
 
@@ -43,8 +47,18 @@ QHash<QString, QByteArray> baseTones()
     tones.insert(QStringLiteral("boundary"), synthesize({{420, 380, 60, 0.12}}));
     tones.insert(QStringLiteral("chime"), synthesize({{880, 880, 70, 0.09}, {1320, 1320, 110, 0.08}}));
     tones.insert(QStringLiteral("remove"), synthesize({{740, 520, 110, 0.10}}));
-    tones.insert(QStringLiteral("error"), synthesize({{170, 110, 90, 0.20}}));
+    // As loud as the others: a key that cannot act is not an alarm.
+    tones.insert(QStringLiteral("error"), synthesize({{170, 110, 90, 0.10}}));
     return tones;
+}
+
+QByteArray scaled(const QByteArray &pcm, double volume)
+{
+    QByteArray out(pcm.size(), Qt::Uninitialized);
+    const auto *in = reinterpret_cast<const qint16 *>(pcm.constData());
+    auto *samples = reinterpret_cast<qint16 *>(out.data());
+    for (qsizetype i = 0; i < pcm.size() / qsizetype(sizeof(qint16)); ++i) samples[i] = qint16(in[i] * volume);
+    return out;
 }
 
 QSettings *openSettings(const QString &path)
@@ -52,6 +66,135 @@ QSettings *openSettings(const QString &path)
     return path.isEmpty() ? new QSettings : new QSettings(path, QSettings::IniFormat);
 }
 }
+
+// One cue at a time, each on its own PipeWire stream: a new stream goes to the
+// output that is the default right now (WirePlumber routes it), and once a cue
+// has drained its stream goes inactive, so an idle app is never woken.
+struct SoundEffects::Output {
+    pw_thread_loop *loop = nullptr;
+    pw_context *context = nullptr;
+    pw_core *core = nullptr;
+    spa_hook coreListener{};
+    pw_stream *stream = nullptr;
+    spa_hook streamListener{};
+    // Read by the loop thread while a stream plays; replaced under its lock.
+    QByteArray pcm;
+    qsizetype offset = 0;
+    bool draining = false;
+    // Set from the loop thread when the PipeWire daemon goes away.
+    std::atomic<bool> failed{false};
+
+    static void coreError(void *data, uint32_t id, int, int result, const char *)
+    {
+        if (id == PW_ID_CORE && result == -EPIPE) static_cast<Output *>(data)->failed = true;
+    }
+    static void process(void *data)
+    {
+        auto *self = static_cast<Output *>(data);
+        if (self->draining) return;
+        pw_buffer *buffer = pw_stream_dequeue_buffer(self->stream);
+        if (!buffer) return;
+        spa_data &target = buffer->buffer->datas[0];
+        qsizetype bytes = 0;
+        if (target.data) {
+            constexpr uint32_t stride = sizeof(qint16);
+            uint32_t frames = target.maxsize / stride;
+            if (buffer->requested) frames = qMin<uint32_t>(frames, uint32_t(buffer->requested));
+            bytes = qMin<qsizetype>(self->pcm.size() - self->offset, qsizetype(frames) * stride);
+            std::memcpy(target.data, self->pcm.constData() + self->offset, size_t(bytes));
+            self->offset += bytes;
+            target.chunk->offset = 0;
+            target.chunk->stride = stride;
+            target.chunk->size = uint32_t(bytes);
+        }
+        pw_stream_queue_buffer(self->stream, buffer);
+        if (self->offset >= self->pcm.size()) {
+            self->draining = true;
+            pw_stream_flush(self->stream, true);
+        }
+    }
+    static void drained(void *data)
+    {
+        auto *self = static_cast<Output *>(data);
+        pw_stream_set_active(self->stream, false);
+    }
+
+    bool open()
+    {
+        pw_init(nullptr, nullptr);
+        loop = pw_thread_loop_new("omaword-sound", nullptr);
+        if (!loop) return false;
+        context = pw_context_new(pw_thread_loop_get_loop(loop), nullptr, 0);
+        if (!context || pw_thread_loop_start(loop) != 0) return false;
+        pw_thread_loop_lock(loop);
+        core = pw_context_connect(context, nullptr, 0);
+        if (core) {
+            static const pw_core_events events = [] {
+                pw_core_events e{};
+                e.version = PW_VERSION_CORE_EVENTS;
+                e.error = coreError;
+                return e;
+            }();
+            pw_core_add_listener(core, &coreListener, &events, this);
+        }
+        pw_thread_loop_unlock(loop);
+        return core;
+    }
+    bool play(const QByteArray &cue)
+    {
+        static const pw_stream_events events = [] {
+            pw_stream_events e{};
+            e.version = PW_VERSION_STREAM_EVENTS;
+            e.process = process;
+            e.drained = drained;
+            return e;
+        }();
+        pw_thread_loop_lock(loop);
+        // A new cue replaces any cue still sounding.
+        if (stream) pw_stream_destroy(stream);
+        pcm = cue; offset = 0; draining = false;
+        stream = pw_stream_new(core, "OmaWord sound effect", pw_properties_new(
+            PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback", PW_KEY_MEDIA_ROLE, "Notification", nullptr));
+        int result = -ENOMEM;
+        if (stream) {
+            spa_zero(streamListener);
+            pw_stream_add_listener(stream, &streamListener, &events, this);
+            uint8_t space[256];
+            spa_pod_builder builder;
+            spa_pod_builder_init(&builder, space, sizeof space);
+            spa_audio_info_raw info{};
+            info.format = SPA_AUDIO_FORMAT_S16;
+            info.rate = sampleRate;
+            info.channels = 1;
+            info.position[0] = SPA_AUDIO_CHANNEL_MONO;
+            const spa_pod *params[] = {spa_format_audio_raw_build(&builder, SPA_PARAM_EnumFormat, &info)};
+            result = pw_stream_connect(stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
+                pw_stream_flags(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS), params, 1);
+        }
+        pw_thread_loop_unlock(loop);
+        return result == 0;
+    }
+    void stop()
+    {
+        pw_thread_loop_lock(loop);
+        if (stream) pw_stream_destroy(stream);
+        stream = nullptr;
+        pw_thread_loop_unlock(loop);
+    }
+    ~Output()
+    {
+        if (loop) {
+            pw_thread_loop_lock(loop);
+            if (stream) pw_stream_destroy(stream);
+            if (core) pw_core_disconnect(core);
+            pw_thread_loop_unlock(loop);
+            pw_thread_loop_stop(loop);
+        }
+        if (context) pw_context_destroy(context);
+        if (loop) pw_thread_loop_destroy(loop);
+        pw_deinit();
+    }
+};
 
 SoundEffects::SoundEffects(QObject *parent, const QString &settingsPath, bool audioOutput)
     : QObject(parent), m_settingsPath(settingsPath), m_audioOutput(audioOutput)
@@ -63,13 +206,12 @@ SoundEffects::SoundEffects(QObject *parent, const QString &settingsPath, bool au
     std::unique_ptr<QSettings> settings(openSettings(m_settingsPath));
     m_enabled = settings->value(settingsKey, true).toBool();
     m_reduceMotion = settings->value(motionKey, false).toBool();
-    m_tones = baseTones();
+    m_introduced = settings->value(introducedKey, false).toBool();
+    const auto tones = baseTones();
+    for (auto it = tones.cbegin(); it != tones.cend(); ++it) m_tones.insert(it.key(), scaled(it.value(), outputVolume));
 }
 
-SoundEffects::~SoundEffects()
-{
-    if (m_sink) m_sink->stop();
-}
+SoundEffects::~SoundEffects() = default;
 
 QByteArray SoundEffects::render(const QString &name)
 {
@@ -82,6 +224,11 @@ QStringList SoundEffects::names()
             QStringLiteral("error")};
 }
 
+int SoundEffects::cooldownFor(const QString &name)
+{
+    return name == QStringLiteral("error") || name == QStringLiteral("boundary") ? burstCooldownMs : cooldownMs;
+}
+
 void SoundEffects::setEnabled(bool enabled)
 {
     if (m_enabled == enabled) return;
@@ -89,7 +236,7 @@ void SoundEffects::setEnabled(bool enabled)
     std::unique_ptr<QSettings> settings(openSettings(m_settingsPath));
     settings->setValue(settingsKey, enabled);
     settings->sync();
-    if (!enabled && m_sink) m_sink->stop();
+    if (!enabled && m_output) m_output->stop();
     emit enabledChanged();
 }
 
@@ -105,17 +252,15 @@ void SoundEffects::setReduceMotion(bool reduce)
 
 bool SoundEffects::ensureOutput()
 {
-    if (m_sink) return true;
-    if (m_outputFailed || !m_audioOutput) return false;
-    const auto device = QMediaDevices::defaultAudioOutput();
-    QAudioFormat format;
-    format.setSampleRate(sampleRate);
-    format.setChannelCount(1);
-    format.setSampleFormat(QAudioFormat::Int16);
-    if (device.isNull() || !device.isFormatSupported(format)) { m_outputFailed = true; return false; }
-    m_sink = new QAudioSink(device, format, this);
-    m_sink->setVolume(0.6);
-    m_buffer = new QBuffer(this);
+    if (!m_audioOutput) return false;
+    if (m_output && !m_output->failed) return true;
+    // PipeWire missing or restarted: try again later, never give up for the session.
+    if (m_outputAttempt.isValid() && m_outputAttempt.elapsed() < retryMs) return false;
+    m_output.reset();
+    m_outputAttempt.start();
+    auto output = std::make_unique<Output>();
+    if (!output->open()) return false;
+    m_output = std::move(output);
     return true;
 }
 
@@ -128,15 +273,15 @@ bool SoundEffects::play(const QString &name)
     emit played();
     if (m_silenced) return false;
     QElapsedTimer &last = m_lastPlayed[name];
-    if (last.isValid() && last.elapsed() < cooldownMs) return false;
+    if (last.isValid() && last.elapsed() < cooldownFor(name)) return false;
     last.start();
-    if (!ensureOutput()) return true;
-    // A new cue replaces any cue still sounding; QAudioSink pulls asynchronously.
-    m_sink->stop();
-    m_buffer->close();
-    m_buffer->setData(*tone);
-    m_buffer->open(QIODevice::ReadOnly);
-    m_sink->start(m_buffer);
-    if (m_sink->error() != QAudio::NoError) { m_sink->stop(); m_outputFailed = true; delete m_sink; m_sink = nullptr; }
+    if (!m_introduced) {
+        m_introduced = true;
+        std::unique_ptr<QSettings> settings(openSettings(m_settingsPath));
+        settings->setValue(introducedKey, true);
+        settings->sync();
+        emit introduced();
+    }
+    if (ensureOutput() && !m_output->play(*tone)) m_output->failed = true;
     return true;
 }

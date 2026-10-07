@@ -2,7 +2,7 @@
 # for the app and every test suite.
 QT += core gui widgets qml quick quickcontrols2 sql concurrent dbus network multimedia
 CONFIG += c++17 link_pkgconfig staticlib
-PKGCONFIG += libarchive fontconfig
+PKGCONFIG += libarchive fontconfig libpipewire-0.3
 include(../branding.pri)
 TEMPLATE = lib
 TARGET = omawordcore

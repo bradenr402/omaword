@@ -3,8 +3,8 @@
 Durable, non-obvious knowledge for developers. Code wins over this file; the
 tests (see [tests/README.md](tests/README.md)) pin the contracts below.
 
-Stack: C++17, Qt 6 Quick/QML (SQL, Concurrent, DBus, Network, Multimedia),
-libarchive for ZIPs, qmake. `omaword.pro` builds two static libraries, linked by
+Stack: C++17, Qt 6 Quick/QML (SQL, Concurrent, DBus, Network), libarchive for
+ZIPs, libpipewire for sound, qmake. `omaword.pro` builds two static libraries, linked by
 the app (`app/app.pro`) and every test suite alike: `src/src.pro` (the C++
 core: everything but `main.cpp` and the QML types) and `qml/qml.pro`
 (`resources.qrc` with its QML and JavaScript compiled ahead of time by
@@ -130,6 +130,13 @@ files.
   definitions are never renamed/deleted. Preferences and text are excluded.
 - Markdown export: `omaword-notes.md`, includes tag-only ranges, escapes tag names.
 - Sound/reduce-motion settings live in a separate `QSettings` file, global to all windows.
+- Sound: each cue plays on its own PipeWire stream (`SoundEffects::Output`, a
+  `pw_thread_loop`), so it reaches whatever output is the default at that
+  moment; a drained stream goes inactive, so an idle app is never woken. A
+  missing or restarted PipeWire is retried after 5 s, never given up. `error`
+  and `boundary` sound once per 500 ms burst (a held key), other cues per
+  50 ms. The first cue ever heard (`sound/introduced`) shows how to turn them
+  off. Offscreen sessions and `OMAWORD_SOUND=0` never open PipeWire.
 - Peer sync: readers in one process share committed annotations, tags, Desk, History,
   prefs, and library; each keeps its own version, passage, selection, scroll.
   Commits publish to peers without navigating them. Imports use a shared busy
