@@ -661,11 +661,26 @@ private slots:
         // r without a ribbon says how to place one.
         key(Qt::Key_R); QCOMPARE(toast(), QString("No ribbon yet · shift R places it"));
         QVERIFY(!item("ribbonTab")->isVisible()); QVERIFY(!item("ribbonControl")->isVisible());
-        // shift R places it at the selection; the tab hangs over this chapter.
+        // shift R places it at the selection; the tab drops in over this chapter.
         navigate("John 1:5"); key(Qt::Key_R, Qt::ShiftModifier);
         QCOMPARE(toast(), QString("Ribbon placed at John 1:5"));
         QCOMPARE(bible->ribbon()["reference"].toString(), QString("John 1:5"));
         QTRY_VERIFY(item("ribbonTab")->isVisible());
+        QVERIFY(object("ribbonDrop")->property("running").toBool());
+        QTRY_VERIFY(!object("ribbonDrop")->property("running").toBool());
+        QCOMPARE(item("ribbonTab")->property("drop").toDouble(), 0.0);
+        // Moving it within the chapter lifts it out and drops it again.
+        bible->selectVerses(6, 6); key(Qt::Key_R, Qt::ShiftModifier);
+        QCOMPARE(bible->ribbon()["reference"].toString(), QString("John 1:6"));
+        QTRY_VERIFY(item("ribbonTab")->property("drop").toDouble() < -10);
+        QTRY_VERIFY(!object("ribbonDrop")->property("running").toBool());
+        QCOMPARE(item("ribbonTab")->property("drop").toDouble(), 0.0);
+        // Without animations it is simply there.
+        sounds->setReduceMotion(true);
+        bible->selectVerses(5, 5); key(Qt::Key_R, Qt::ShiftModifier);
+        QVERIFY(!object("ribbonDrop")->property("running").toBool());
+        QCOMPARE(item("ribbonTab")->property("drop").toDouble(), 0.0);
+        sounds->setReduceMotion(false);
         QCOMPARE(item("ribbonTab")->property("fill").value<QColor>(), desktop->property("accent").value<QColor>());
         QVERIFY(!item("ribbonControl")->isVisible());
         // Away from it: no tab, "↩ John 1" in the footer, Continue first in the palette.

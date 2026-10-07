@@ -4341,9 +4341,21 @@ ApplicationWindow {
         if (rangeEditing) return
         savePosition()
         const moved = !!bible.ribbon.versionId
+        const shown = ribbonHere
         if (!bible.placeRibbon()) { sounds.play("error"); return }
         notify("Ribbon " + (moved ? "moved to " : "placed at ") + bible.ribbon.reference, true)
         sounds.play("chime")
+        ribbonDrop.stop()
+        if (reduceMotion) { ribbonTab.drop = 0; return }
+        // Shown already, it lifts out first; otherwise it drops in from above.
+        ribbonLift.duration = shown ? 90 : 0
+        ribbonDrop.start()
+    }
+    SequentialAnimation {
+        id: ribbonDrop
+        objectName: "ribbonDrop"
+        NumberAnimation { id: ribbonLift; target: ribbonTab; property: "drop"; to: -ribbonTab.height - 2; easing.type: Easing.InQuad }
+        NumberAnimation { target: ribbonTab; property: "drop"; to: 0; duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
     }
     function openRibbon() {
         if (rangeEditing || !flushNote()) return false
@@ -5581,7 +5593,10 @@ ApplicationWindow {
                         width: 12 * app.readerScale
                         height: 34 * app.readerScale
                         x: readerColumn.x + readerColumn.width + 8 * app.readerScale
-                        y: reading.contentY
+                        // Placing it (shift R) lifts it out of the top and drops it
+                        // back in with a little settle (ribbonDrop).
+                        property real drop: 0
+                        y: reading.contentY + drop
                         readonly property color fill: desktop.accent
                         onFillChanged: requestPaint()
                         onWidthChanged: requestPaint()
