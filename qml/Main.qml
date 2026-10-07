@@ -937,7 +937,7 @@ ApplicationWindow {
             ["W", "note", function() { app.selectionBarRun("notes", true) }, ready],
             ["T", "tag", function() { app.selectionBarRun("tags", true) }, ready],
             ["Y", "copy", function() { app.selectionBarRun("copyText") }, ready],
-            [[], "⋯", app.selectionBarMore, ready, "More: Desk, Compare versions, Copy plain text, Study"]]
+            [[], "⋯", app.selectionBarMore, ready, "More: Desk, Compare versions, Copy plain text, See also"]]
     }
     function selectionBarMore() {
         const more = selectionBarHints.partItems()[4]
@@ -949,7 +949,7 @@ ApplicationWindow {
                 enabled: actionAvailable("compare"), run: function() { app.selectionBarRun("compare", true) } },
             { id: "copyPlain", text: "Copy plain text", shortcut: menuKey("copyPlain"),
                 enabled: actionAvailable("copyPlain"), run: function() { app.selectionBarRun("copyPlain") } },
-            { id: "related", text: "Study", shortcut: menuKey("related"),
+            { id: "related", text: "See also", shortcut: menuKey("related"),
                 enabled: actionAvailable("related"), run: function() { app.selectionBarRun("related", true) } }
         ], p.x, p.y)
     }
@@ -1420,7 +1420,7 @@ ApplicationWindow {
             menuDivider,
             menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "toggleDesk"),
             menuDivider,
-            menuAction("related", "Study", "related"),
+            menuAction("related", "See also", "related"),
             menuAction("chapterFind", "Find in chapter", "chapterFind")
         ]).concat(openRangeEntries(sceneX, sceneY))
             .concat(bible.focusMode ? [menuDivider, menuAction("leaveFocus", "Leave focus mode", "focus")] : [])
@@ -2660,14 +2660,12 @@ ApplicationWindow {
             app.notify(toastTimer.running && toast.text.length ? toast.text + "\n" + introduction : introduction, true)
         }
     }
-    // Footnote markers (all layouts) open Study → Footnotes at that note,
-    // selecting its verse first (Study is a passage panel).
-    function openFootnote(verse, seq) {
+    // See also for one verse (a footnote's, from Peek), selecting it first.
+    function seeAlsoForVerse(verse) {
         if (!bible.ready || bible.busy || modalOpen) return
         if (bible.selectedStart !== verse || bible.selectedEnd !== verse || bible.crossChapterSelection) selectVerse(verse, false)
         if (bible.cursorVerse !== verse) return
-        if (sidePanel === "related") { tagsUi.setStudyTab("footnotes", { verse: verse, seq: seq }); return }
-        if (leaveSidePanel("related")) tagsUi.openStudy("footnotes", { verse: verse, seq: seq })
+        if (sidePanel === "related" || leaveSidePanel("related")) tagsUi.openRelated()
     }
     // Peek (PeekCard): a footnote read where it is (a marker's click, or i on
     // the cursor verse); ↑ ↓ step through the chapter's notes in the card.
@@ -2696,7 +2694,7 @@ ApplicationWindow {
     }
     function peekParts() {
         const ready = peekCard.opened && !!peekNote && !bible.busy
-        return [["Return", "Study", app.studyFromPeek, ready], ["Y", "copy", app.copyPeek, ready],
+        return [["Return", "see also", app.seeAlsoFromPeek, ready], ["Y", "copy", app.copyPeek, ready],
             bible.footnotes.length > 1 ? [["Up", "Down"], "notes"] : null, ["Escape", "close", function() { peekCard.close() }]]
     }
     function stepPeek(delta) {
@@ -2704,11 +2702,11 @@ ApplicationWindow {
         if (next < 0 || next >= bible.footnotes.length) { sounds.play("boundary"); return }
         showPeekNote(next)
     }
-    function studyFromPeek() {
+    function seeAlsoFromPeek() {
         const note = peekNote
         if (!note) return
         peekCard.close()
-        openFootnote(note.verse, note.seq)
+        seeAlsoForVerse(note.verse)
     }
     function copyPeek() {
         const note = peekNote
@@ -2719,7 +2717,7 @@ ApplicationWindow {
     function peekKey(event) {
         if ((event.modifiers & ~Qt.KeypadModifier) & ~Qt.ShiftModifier) return
         const plain = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
-        if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) studyFromPeek()
+        if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) seeAlsoFromPeek()
         else if (event.key === Qt.Key_Y) copyPeek()
         else if (plain && (event.key === Qt.Key_Down || event.key === Qt.Key_J)) stepPeek(1)
         else if (plain && (event.key === Qt.Key_Up || event.key === Qt.Key_K)) stepPeek(-1)
@@ -2731,7 +2729,7 @@ ApplicationWindow {
     // drawn cell: a larger, invisible target that never moves the text.
     readonly property real markerHitMargin: 5 * readerScale
     // Footnote markers stay out of the tab order; their tooltips name the key.
-    readonly property string footnoteHint: "Click or " + keyText("peek") + ": peek · " + KeyNotation.format("Shift+S") + " → Footnotes"
+    readonly property string footnoteHint: "Click or " + keyText("peek") + ": peek"
     function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
     // Verse rows reserve footnote cells like BlockDocument: a word joiner and a
     // transparent image at each note's plain-text offset. Paint-only markers
@@ -3911,8 +3909,8 @@ ApplicationWindow {
         { id: "clickMenu", group: "Copy", title: "Open context menu", sequences: ["RightClick"], explanation: true },
         { id: "annotations", group: "Panels", title: "Marks panel", sequences: ["Shift+M"], command: true },
         { id: "desk", group: "Panels", title: "Open Desk", sequences: ["Shift+D"], command: true },
-        // The Study panel (Cross-references, Footnotes, Tags); id kept for compatibility.
-        { id: "related", group: "Panels", title: "Study panel", sequences: ["Shift+S"], command: true },
+        // The See also panel (once Study); id kept for compatibility.
+        { id: "related", group: "Panels", title: "See also panel", sequences: ["Shift+S"], command: true },
         // A popover (PeekCard), read in place; its own keys step and act.
         { id: "peek", group: "Panels", title: "Peek at the verse's footnotes", sequences: ["I"], command: true },
         { id: "books", group: "Palettes and windows", title: "Navigate to a passage", sequences: ["Ctrl+K"], scope: "palette", command: true },
@@ -3967,16 +3965,9 @@ ApplicationWindow {
         { id: "listCopyPlain", group: "Lists", title: "Copy item as plain text", sequences: ["Shift+Y"], scope: "list", explanation: true },
         { id: "listDesk", group: "Lists", title: "Add item to Desk, or remove it", sequences: ["D"], scope: "list", explanation: true },
         { id: "listRemove", group: "Lists", title: "Remove item", sequences: ["Delete", "Backspace"], scope: "list", explanation: true },
-        { id: "listTag", group: "Lists", title: "Edit the item's tags (Marks and Study Tags)", sequences: ["T"], scope: "list", explanation: true },
+        { id: "listTag", group: "Lists", title: "Edit the item's tags (Marks, See also)", sequences: ["T"], scope: "list", explanation: true },
         { id: "listNote", group: "Lists", title: "Write the item's note in place (Marks)", sequences: ["W"], scope: "list", explanation: true },
-        { id: "studyChips", group: "Lists", title: "Between Study Tags results and tag chips", sequences: ["Tab", "Shift+Tab"], scope: "list", explanation: true },
-        { id: "studyChipToggle", group: "Lists", title: "Turn a Study tag chip on or off", sequences: ["Space"], scope: "list", explanation: true },
-        { id: "studyChipSolo", group: "Lists", title: "Show only this tag (a Study tag chip), or all tags again", sequences: ["Shift+Space"], scope: "list", explanation: true },
-        { id: "studyChipsAll", group: "Lists", title: "Show all tags (Study tag chips)", sequences: ["0"], scope: "list", explanation: true },
-        { id: "studyAllVersions", group: "Lists", title: "Study Tags in all installed versions, or this one", sequences: ["A"], scope: "list", explanation: true },
-        { id: "listSearch", group: "Lists", title: "Filter the list, #name for a tag (Marks with more than 10 items, Study's Tags)", sequences: ["/"], scope: "list", explanation: true },
-        { id: "listPreviousTab", group: "Lists", title: "Previous tab (Study)", sequences: ["H", "Left"], scope: "list", explanation: true },
-        { id: "listNextTab", group: "Lists", title: "Next tab (Study)", sequences: ["L", "Right"], scope: "list", explanation: true },
+        { id: "listSearch", group: "Lists", title: "Filter the list, #name for a tag (Marks with more than 10 items, See also)", sequences: ["/"], scope: "list", explanation: true },
         // Desk-only: bound by deskDrawer, never globally.
         { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+Del", "Shift+Backspace"], scope: "desk", command: true },
         // Bound by the History panel; the command itself is Commands-only.
@@ -4188,7 +4179,7 @@ ApplicationWindow {
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
-        if (action.scope === "list") return "List panels · Marks, Desk, History, Study"
+        if (action.scope === "list") return "List panels · Marks, Desk, History, See also"
         if (action.scope === "history") return "History in the palette only"
         if (action.scope === "search") return "Bible search results (" + keyText("bibleSearch") + ")"
         if (action.scope === "versions") return "Versions dialog"
@@ -5839,7 +5830,7 @@ ApplicationWindow {
                                         width: app.footnoteCellWidth
                                         height: cell.height
                                         z: 3
-                                        // Out of the tab order: shift S opens Study → Footnotes.
+                                        // Out of the tab order: i peeks at the cursor verse's notes.
                                         activeFocusOnTab: false
                                         Text {
                                             anchors.horizontalCenter: parent.horizontalCenter
@@ -6759,7 +6750,7 @@ ApplicationWindow {
             footerShowsText ? null : { id: "text", text: "Text and layout (Aa)", enabled: ready, run: function() { app.toggleTextPopover() } },
             { id: "annotations", text: "Marks", shortcut: menuKey("annotations"), enabled: ready, run: function() { app.runCommand("annotations") } },
             { id: "notes", text: "Notes", shortcut: menuKey("notes"), enabled: ready, run: function() { app.toggleNotes() } },
-            { id: "related", text: "Study", shortcut: menuKey("related"), enabled: ready && hasSelection, run: function() { app.runCommand("related") } },
+            { id: "related", text: "See also", shortcut: menuKey("related"), enabled: ready && hasSelection, run: function() { app.runCommand("related") } },
             { id: "desk", text: "Desk", shortcut: menuKey("desk"), enabled: ready, run: function() { app.runCommand("desk") } }
         ].filter(function(entry) { return !!entry })
     }
@@ -6917,7 +6908,7 @@ ApplicationWindow {
             glyph: "study"
             visible: floatingActions.expanded
             available: bible.ready && !bible.busy && !app.modalOpen
-            label: "Study"
+            label: "See also"
             keys: app.keyText("related")
             onClicked: app.runCommand("related")
         }
@@ -8680,7 +8671,7 @@ ApplicationWindow {
                 text: "Version details & permissions ↗"; visible: !!entry; compact: true
                 onClicked: desktop.openExternal(entry.detailsUrl)
             }
-            Label { objectName: "aboutCrossReferences"; text: "Cross-references beyond a version's own: OpenBible.info (openbible.info/labs/cross-references), licensed CC BY. Community-ranked; they follow the version's own in Study."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
+            Label { objectName: "aboutCrossReferences"; text: "Cross-references beyond a version's own: OpenBible.info (openbible.info/labs/cross-references), licensed CC BY. Community-ranked; they follow the version's own in See also."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
             Label { text: desktop.appName + " " + desktop.version + " · Application code licensed under MIT\nNo account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
             QuietButton { text: "Open local data folder ↗"; compact: true; onClicked: desktop.openExternal("file://" + bible.dataDirectory()) }
         }

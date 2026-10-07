@@ -115,7 +115,8 @@ class TagsUiTest : public QObject
         bible->openChapter(43, 3); bible->selectVerses(first, last);
         return bible->tagScope();
     }
-    QVariantList rows() const { return prop("results").toList(); }
+    // See also's rows (every section).
+    QVariantList rows() const { return prop("studyRows").toList(); }
     QStringList ids(const QVariantList &tags) const {
         QStringList result;
         for (const auto &tag : tags) result << tag.toMap().value("id").toString();
@@ -373,7 +374,7 @@ ApplicationWindow {
         QVERIFY(prop("scopePinned").toBool());
         QVERIFY(item("tag:" + a)->property("chosen").toBool());
         QVERIFY(!item("tag:" + b)->property("chosen").toBool());
-        QVERIFY(!item("tagResults")->isVisible());
+        QVERIFY(!item("studyList")->isVisible());
         click("tag:" + a); click("tag:" + b);
         QCOMPARE(ids(bible->tagsForScope(first)), QStringList{b});
         QVERIFY(rows().isEmpty());
@@ -443,27 +444,33 @@ ApplicationWindow {
         QTRY_VERIFY(!prop("visibleModal").toBool());
     }
 private:
+    // See also's tagged-alike rows.
     QStringList refs() const {
         QStringList result;
-        for (const auto &row : prop("visibleResults").toList()) result << row.toMap().value("reference").toString();
+        for (const auto &row : rows()) if (row.toMap().value("section") == "tags") result << row.toMap().value("reference").toString();
         return result;
     }
-    QStringList chipIds() const {
+    QStringList rootIds() const {
         QStringList result;
-        for (const auto &chip : prop("rootChips").toList()) result << chip.toMap().value("id").toString();
+        for (const auto &tag : prop("rootTags").toList()) result << tag.toMap().value("id").toString();
         return result;
     }
-    void openTagsTab() {
+    void openSeeAlso() {
         QVERIFY(invoke("openRelated").toBool());
         QTRY_VERIFY(panel->findChild<QObject *>("relatedDrawer")->property("opened").toBool());
-        QVERIFY(QMetaObject::invokeMethod(panel, "setStudyTab", Q_ARG(QVariant, QString("related")), Q_ARG(QVariant, QVariant())));
-        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        QTRY_VERIFY(item("studyList")->hasActiveFocus());
+    }
+    // Keeps only the rows the filter's words match (as typing them in it does).
+    void filter(const QString &words) {
+        panel->setProperty("studyQuery", words);
+        panel->setProperty("studySearchOpen", !words.isEmpty());
+        QCoreApplication::processEvents();
     }
 private slots:
-    // Study → Tags: the passage's tags as chips (exact first, then overlapping),
-    // other passages ranked by shared tags, chips toggle/solo/restore, a for
-    // every installed version, never the passage itself or its overlaps.
-    void studyTagsChipsRankingAndVersions() {
+    // See also → Tagged alike: the passage's tags (exact first, then
+    // overlapping), other passages ranked by shared tags in every version,
+    // never the passage itself or its overlaps; a heading's tag filters.
+    void seeAlsoTaggedAlikeRankingAndVersions() {
         const auto source = scope(2, 3);
         const auto a = bible->createAndAssignTag(source, "Alpha");
         const auto overlap = scope(3, 4);
@@ -473,122 +480,97 @@ private slots:
         const auto betaOnly = scope(11, 11); QVERIFY(bible->setTag(betaOnly, b, true));
         install(kjv); const auto remote = scope(2, 3); QVERIFY(bible->setTag(remote, b, true));
         QVERIFY(bible->openTaggedPassage(source));
-        openTagsTab();
+        openSeeAlso();
         auto drawer = panel->findChild<QObject *>("relatedDrawer");
         // Header: title and the reader's passage.
-        QCOMPARE(item("studyTitle")->property("text").toString(), QString("Study"));
+        QCOMPARE(item("studyTitle")->property("text").toString(), QString("See also"));
         QCOMPARE(item("studyPassage")->property("text").toString(), source["reference"].toString() + " · NET");
         QCOMPARE(prop("relatedSource").toMap(), source);
-        QCOMPARE(chipIds(), (QStringList{a, b}));
-        QVERIFY(!prop("rootChips").toList()[0].toMap()["overlap"].toBool());
-        QVERIFY(prop("rootChips").toList()[1].toMap()["overlap"].toBool());
-        // Ranked by shared count, then canonical order; never the source or its overlap.
-        QCOMPARE(refs(), (QStringList{both["reference"].toString(), alphaOnly["reference"].toString(), betaOnly["reference"].toString()}));
-        QCOMPARE(item("studyTagCount")->property("text").toString(), QString("3 passages"));
-        QCOMPARE(item("studyChipCount:" + a)->property("text").toString(), QString("2"));
-        QCOMPARE(item("studyChipCount:" + b)->property("text").toString(), QString("2"));
-        // The body sits inside the drawer's padding.
-        const auto bounds = item("studyBody")->mapRectToScene(item("studyBody")->boundingRect());
-        QCOMPARE(bounds.right(), window->width() - 24);
-        QCOMPARE(bounds.top(), 24);
-        // k from the first row climbs to the chips; space toggles, shift space solos.
-        key(Qt::Key_K); QTRY_VERIFY(item("studyChip:" + a)->hasActiveFocus());
-        key(Qt::Key_Space);
-        QCOMPARE(prop("onIds").toList(), QVariantList{b});
-        QCOMPARE(refs(), (QStringList{both["reference"].toString(), betaOnly["reference"].toString()}));
-        key(Qt::Key_Space); QCOMPARE(prop("onIds").toList().size(), 2);
-        QTest::keyClick(window, Qt::Key_Space, Qt::ShiftModifier);
-        QCOMPARE(prop("onIds").toList(), QVariantList{a});
-        // Ranking counts only chips that are on: a tie, so canonical order.
-        QCOMPARE(refs(), (QStringList{alphaOnly["reference"].toString(), both["reference"].toString()}));
-        QTest::keyClick(window, Qt::Key_Space, Qt::ShiftModifier); // Soloing again restores all.
-        QCOMPARE(prop("onIds").toList().size(), 2);
-        key(Qt::Key_L); QVERIFY(item("studyChip:" + b)->hasActiveFocus());
-        QCOMPARE(prop("studyTab").toString(), QString("related"));
-        key(Qt::Key_Space); key(Qt::Key_H); key(Qt::Key_Space);
-        QVERIFY(prop("onIds").toList().isEmpty());
-        QCOMPARE(item("studyTagsEmpty")->property("text").toString(), QString("Turn on a tag to see passages."));
-        key(Qt::Key_0); QCOMPARE(prop("onIds").toList().size(), 2); // 0 turns every chip back on.
-        // Shift click solos too.
-        const auto chip = item("studyChip:" + b);
-        QTest::mouseClick(window, Qt::LeftButton, Qt::ShiftModifier, chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
-        QTRY_COMPARE(prop("onIds").toList(), QVariantList{b});
-        key(Qt::Key_0); QCOMPARE(prop("onIds").toList().size(), 2);
-        key(Qt::Key_J); QVERIFY(item("tagResults")->hasActiveFocus());
-        // a: every installed version, shown in the count line and on other-version rows.
-        key(Qt::Key_A); QVERIFY(prop("allVersions").toBool());
-        QCOMPARE(refs().size(), 4);
-        QVERIFY(item("studyTagCount")->property("text").toString().endsWith(" · all versions"));
+        QCOMPARE(rootIds(), (QStringList{a, b}));
+        // Ranked by shared count first; never the source or its overlap; every version.
+        const auto tagged = refs();
+        QCOMPARE(tagged.size(), 4);
+        QCOMPARE(tagged.first(), both["reference"].toString());
+        for (const auto &scope : {alphaOnly, betaOnly, remote}) QVERIFY(tagged.contains(scope["reference"].toString()));
+        // A row from another version says which.
         QString remoteAbbreviation;
         for (const auto &version : bible->versions())
             if (version.toMap()["id"] == remote["versionId"]) remoteAbbreviation = version.toMap()["abbreviation"].toString();
         QVERIFY(!remoteAbbreviation.isEmpty());
-        bool remoteRow = false;
-        for (int i = 0; i < 4; ++i) {
-            QTRY_VERIFY(item("tagResultReference:" + QString::number(i)));
-            const auto text = item("tagResultReference:" + QString::number(i))->property("text").toString();
-            if (text == remote["reference"].toString() + " · " + remoteAbbreviation) remoteRow = true;
-            else QVERIFY2(!text.contains(" · "), qPrintable(text)); // Rows in the reading version stay plain.
-        }
-        QVERIFY(remoteRow);
-        key(Qt::Key_A); QVERIFY(!prop("allVersions").toBool()); QCOMPARE(refs().size(), 3);
-        // Enter opens the row; Study stays, and keeps its root while it has focus.
+        int remoteRow = -1;
+        for (int i = 0; i < rows().size(); ++i) if (rows()[i].toMap()["versionId"] == remote["versionId"]) remoteRow = i;
+        QVERIFY(remoteRow >= 0);
+        QTRY_VERIFY(item("studyRowTitle:" + QString::number(remoteRow)));
+        QCOMPARE(item("studyRowTitle:" + QString::number(remoteRow))->property("text").toString(), remote["reference"].toString() + " · from " + remoteAbbreviation);
+        // The body sits inside the drawer's padding.
+        const auto bounds = item("studyBody")->mapRectToScene(item("studyBody")->boundingRect());
+        QCOMPARE(bounds.right(), window->width() - 24);
+        QCOMPARE(bounds.top(), 24);
+        // The heading's tags: one clicked keeps only its passages.
+        QTRY_VERIFY(item("studySectionTag:Alpha") && item("studySectionTag:Beta"));
+        click("studySectionTag:Alpha");
+        QTRY_COMPARE(refs(), (QStringList{both["reference"].toString(), alphaOnly["reference"].toString()}));
+        QCOMPARE(prop("studyQuery").toString(), QString("#Alpha"));
+        filter("");
+        QCOMPARE(refs().size(), 4);
+        // Enter opens the row; See also stays, and keeps its root while it has focus.
+        QVERIFY(QMetaObject::invokeMethod(item("studyList"), "forceActiveFocus"));
+        int bothRow = -1;
+        for (int i = 0; i < rows().size(); ++i) if (rows()[i].toMap()["reference"] == both["reference"] && rows()[i].toMap()["section"] == "tags") bothRow = i;
+        item("studyList")->setProperty("currentIndex", bothRow);
         key(Qt::Key_Return);
         QCOMPARE(bible->tagScope(), both);
         QVERIFY(drawer->property("opened").toBool());
         invoke("followSelection");
         QCOMPARE(prop("relatedSource").toMap(), source);
         QCOMPARE(item("studyPassage")->property("text").toString(), both["reference"].toString() + " · NET"); // The header is live.
-        // Reopened, Study follows the reader again.
+        // Reopened, See also follows the reader again.
         invoke("closeForFocusMode"); QTRY_VERIFY(!drawer->property("visible").toBool());
-        openTagsTab();
+        openSeeAlso();
         QCOMPARE(prop("relatedSource").toMap(), both);
-        QCOMPARE(chipIds(), (QStringList{a, b}));
+        QCOMPARE(rootIds(), (QStringList{a, b}));
         QVERIFY(!refs().contains(both["reference"].toString()));
         invoke("closeForFocusMode"); QTRY_VERIFY(!drawer->property("visible").toBool());
-        // Reopening roots at the reader's passage with every chip on.
         QVERIFY(bible->openTaggedPassage(alphaOnly));
-        openTagsTab();
+        openSeeAlso();
         QCOMPARE(prop("relatedSource").toMap(), alphaOnly);
-        QCOMPARE(chipIds(), QStringList{a});
-        QVERIFY(!prop("allVersions").toBool());
+        QCOMPARE(rootIds(), QStringList{a});
     }
-    void studyTagsSearchMenuTagKeyAndEmptyStates() {
+    void seeAlsoFilterMenuTagKeyAndEmptyStates() {
         const auto source = scope(2, 3);
         const auto a = bible->createAndAssignTag(source, "Alpha");
         const auto b = bible->createTag("Beta grace");
         const auto first = scope(8, 9); QVERIFY(bible->setTag(first, a, true)); QVERIFY(bible->setTag(first, b, true));
         const auto second = scope(11, 11); QVERIFY(bible->setTag(second, a, true));
         QVERIFY(bible->openTaggedPassage(source));
-        openTagsTab();
+        openSeeAlso();
         QCOMPARE(refs().size(), 2);
-        // / shows the field in place of the count line; tag names match.
+        // / shows the filter; tag names match.
         QVERIFY(!item("studySearch")->isVisible());
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
-        QVERIFY(!item("studyTagCount")->isVisible());
         for (const char c : QByteArray("grace")) QTest::keyClick(window, c);
         QTRY_COMPARE(refs(), QStringList{first["reference"].toString()});
-        // enter keeps the query and returns to the results.
-        key(Qt::Key_Return); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
-        QVERIFY(!item("studySearch")->isVisible());
-        QCOMPARE(item("studyTagCount")->property("text").toString(), QString::fromUtf8("1 of 2 passages · “grace”"));
+        // enter keeps the filter (still shown) and returns to the list.
+        key(Qt::Key_Return); QTRY_VERIFY(item("studyList")->hasActiveFocus());
+        QVERIFY(item("studySearch")->isVisible());
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
         for (const char c : QByteArray("zz")) QTest::keyClick(window, c);
-        QTRY_VERIFY(refs().isEmpty());
-        QCOMPARE(item("studyTagsEmpty")->property("text").toString(), QString::fromUtf8("No passages match “gracezz”."));
-        key(Qt::Key_Down); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
-        // esc closes, as in Annotations; reopening clears the query.
+        QTRY_VERIFY(rows().isEmpty());
+        QCOMPARE(item("studyEmpty")->property("text").toString(), QString::fromUtf8("Nothing matches “gracezz”."));
+        key(Qt::Key_Down); QTRY_VERIFY(item("studyList")->hasActiveFocus());
+        // esc closes, as in Marks; reopening clears the filter.
         key(Qt::Key_Escape); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
-        openTagsTab(); QCOMPARE(prop("studyQuery").toString(), QString());
+        openSeeAlso(); QCOMPARE(prop("studyQuery").toString(), QString());
         QCOMPARE(refs().size(), 2);
-        // The shared row menu (Open, Copy, Copy plain text, Desk), then Edit tags…, Move here. No delete.
+        // A tagged passage's row menu: the shared row menu, then Edit tags…, Move here. No delete.
+        filter("#alpha"); item("studyList")->setProperty("currentIndex", 0);
         key(Qt::Key_Menu);
         QCOMPARE(root->property("menuKind").toString(), QString("study"));
         QCOMPARE(variant(root->property("menuEntries")).toStringList(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "moveHere"}));
         key(Qt::Key_Delete); QCOMPARE(bible->tagsForScope(first).size(), 2);
         // y copies.
         key(Qt::Key_Y); QCOMPARE(variant(root->property("copied")).toMap()["start"], first["start"]);
-        // t opens the picker on the row's range; Study stays open beneath it.
+        // t opens the picker on the row's range; See also stays open beneath it.
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), first);
         QVERIFY(panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
@@ -596,51 +578,35 @@ private slots:
         QVERIFY(panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
         invoke("closeForFocusMode");
         QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
-        // Tags, but no other passages: the versions hint once another version is installed.
+        // Tags, but no other passages: no tagged-alike rows.
         const auto lonely = scope(6, 6); bible->createAndAssignTag(lonely, "Lonely");
-        openTagsTab();
-        QCOMPARE(item("studyTagsEmpty")->property("text").toString(), QString("No other passages are tagged Lonely."));
-        QVERIFY(!item("studyTagsVersionsHint"));
+        openSeeAlso();
+        QVERIFY(refs().isEmpty());
         invoke("closeForFocusMode"); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
-        install(kjv); QVERIFY(bible->openTaggedPassage(lonely));
-        openTagsTab();
-        // The empty state no longer repeats the footer's a hint (it wrapped down the centre).
-        QVERIFY(!item("studyTagsVersionsHint"));
-        QVERIFY(item("studyTagsEmpty")->isVisible());
-        QVERIFY(item("studyHints")->property("text").toString().contains("all&nbsp;versions"));
-        // Keyboard and mouse still reach other versions through the footer hint.
-        key(Qt::Key_A); QTRY_VERIFY(panel->property("allVersions").toBool());
-        key(Qt::Key_A); QTRY_VERIFY(!panel->property("allVersions").toBool());
-        QTRY_VERIFY(item("studyHintsPart:all versions") && item("studyHintsPart:all versions")->property("clickable").toBool());
-        QTest::qWait(50); click("studyHintsPart:all versions"); QTRY_VERIFY(panel->property("allVersions").toBool());
-        key(Qt::Key_A); QTRY_VERIFY(!panel->property("allVersions").toBool());
-        invoke("closeForFocusMode"); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
-        // No tags: the passage, and t (or the button) adds some.
+        // With no row to tag, t tags the passage itself.
         const auto bare = scope(12, 12);
-        openTagsTab();
-        QCOMPARE(item("studyTagsEmpty")->property("text").toString(), QString("No tags on ") + bare["reference"].toString() + ".");
-        QVERIFY(item("studyAddTags")->isVisible());
-        QVERIFY(!item("studyChips")->isVisible());
+        openSeeAlso(); filter("no such words");
+        QTRY_VERIFY(rows().isEmpty());
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), bare);
         key(Qt::Key_Escape); QTRY_VERIFY(!panel->findChild<QObject *>("tagsSurface")->property("visible").toBool());
         invoke("closeForFocusMode");
     }
-    // A tag chip clicked elsewhere opens Study → Tags with that chip soloed.
-    void relatedForTagSolosChip() {
+    // A tag clicked elsewhere opens See also filtered to that tag's passages.
+    void relatedForTagFilters() {
         const auto source = scope(2, 3);
         const auto a = bible->createAndAssignTag(source, "Alpha");
         const auto b = bible->createAndAssignTag(source, "Beta");
         const auto target = scope(8, 9); QVERIFY(bible->setTag(target, b, true));
         bible->openChapter(43, 4); bible->selectVerses(1, 1); // The supplied source wins.
         QVariant opened;
-        QVERIFY(QMetaObject::invokeMethod(panel, "openRelatedForTag", Q_RETURN_ARG(QVariant, opened), Q_ARG(QVariant, b), Q_ARG(QVariant, source)));
+        QVERIFY(QMetaObject::invokeMethod(panel, "openRelatedForTag", Q_RETURN_ARG(QVariant, opened), Q_ARG(QVariant, QString("Beta")), Q_ARG(QVariant, source)));
         QVERIFY(variant(opened).toBool());
         QTRY_VERIFY(panel->findChild<QObject *>("relatedDrawer")->property("opened").toBool());
-        QCOMPARE(prop("studyTab").toString(), QString("related"));
         QCOMPARE(prop("relatedSource").toMap(), source);
-        QCOMPARE(prop("onIds").toList(), QVariantList{b});
+        QCOMPARE(prop("studyQuery").toString(), QString("#Beta"));
         QCOMPARE(refs(), QStringList{target["reference"].toString()});
+        QCOMPARE(rows().size(), 1); // The filter keeps only tagged passages.
         Q_UNUSED(a)
     }
     // The shared header follows the reader: the selection, else its chapter.
@@ -648,11 +614,8 @@ private slots:
         scope(2, 3);
         QVERIFY(invoke("openRelated").toBool());
         QTRY_VERIFY(panel->findChild<QObject *>("relatedDrawer")->property("opened").toBool());
-        for (const QString tab : {"crossrefs", "footnotes", "related"}) {
-            QVERIFY(QMetaObject::invokeMethod(panel, "setStudyTab", Q_ARG(QVariant, tab), Q_ARG(QVariant, QVariant())));
-            QVERIFY(item("studyPassage")->isVisible());
-            QCOMPARE(item("studyPassage")->property("text").toString(), QString::fromUtf8("John 3:2–3 · NET"));
-        }
+        QVERIFY(item("studyPassage")->isVisible());
+        QCOMPARE(item("studyPassage")->property("text").toString(), QString::fromUtf8("John 3:2–3 · NET"));
         bible->selectVerses(7, 7);
         QCOMPARE(item("studyPassage")->property("text").toString(), QString("John 3:7 · NET"));
         bible->clearSelection();
@@ -968,8 +931,8 @@ private slots:
         QVERIFY(item("savedVersionJohn 3:5")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
     }
-    // Study in the app: Cross-references first, then the remembered tab.
-    void mainStudyDefaultAndRememberedTab() {
+    // See also in the app: on the reader's passage, one list, no tabs.
+    void mainSeeAlsoOnThePassage() {
         const auto cleanupQml = qScopeGuard([this] { unloadMain(); });
         QVERIFY(loadMain());
         QTRY_VERIFY(!root->property("restoringPosition").toBool());
@@ -977,15 +940,10 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(root.get(), "runCommand", Q_ARG(QVariant, QString("related"))));
         auto drawer = root->findChild<QObject *>("relatedDrawer");
         QTRY_VERIFY(drawer->property("opened").toBool());
-        QCOMPARE(prop("studyTab").toString(), QString("crossrefs"));
         QCOMPARE(item("studyPassage")->property("text").toString(), QString("John 3:2 · NET"));
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_H); QCOMPARE(prop("studyTab").toString(), QString("related"));
-        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!drawer->property("visible").toBool());
-        QVERIFY(QMetaObject::invokeMethod(root.get(), "runCommand", Q_ARG(QVariant, QString("related"))));
-        QTRY_VERIFY(drawer->property("opened").toBool());
-        QCOMPARE(prop("studyTab").toString(), QString("related"));
+        QVERIFY(!item("studyTabs"));
+        key(Qt::Key_H); QVERIFY(item("studyList")->hasActiveFocus()); QVERIFY(drawer->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!drawer->property("visible").toBool());
     }
 };

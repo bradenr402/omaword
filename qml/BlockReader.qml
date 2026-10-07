@@ -527,7 +527,7 @@ Item {
             z: 2
             visible: !root.backend.focusMode
             // Out of the tab order, as in the Verse layout: the passage menu
-            // (menu key) opens the cursor's ranges; shift S opens Study → Footnotes.
+            // (menu key) opens the cursor's ranges; i peeks at the cursor verse's notes.
             activeFocusOnTab: false
             Keys.onPressed: function(event) {
                 if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Return || event.key === Qt.Key_Space)) {

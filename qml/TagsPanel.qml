@@ -7,7 +7,7 @@ import "KeyNotation.js" as KeyNotation
 import "RowMenu.js" as RowMenu
 
 // Two surfaces share the tag state: the modal tag picker (with Manage tags)
-// and the Study drawer (Cross-references · Footnotes · Tags). The picker may
+// and the See also drawer (cross references, parallels, tagged alike). The picker may
 // open over the Study and Annotations drawers; they stay open beneath it.
 Item {
     id: panel
@@ -32,224 +32,109 @@ Item {
     // selection, or its chapter when nothing is selected — never blank.
     readonly property string passageSubtitle: (bible.selectedStart > 0 && bible.selectionReference
         ? bible.selectionReference : bible.passage) + (bible.versionAbbreviation ? " · " + bible.versionAbbreviation : "")
-    // Study panel (the Related drawer, now tabbed): the passage's cross
-    // references, the current chapter's footnotes, and other passages sharing
-    // its tags (internal id "related", shown as "Tags"). ←/→ (h/l) switch
-    // tabs; every tab shares the list keys and motions. Opens on
-    // Cross-references, then remembers the last tab for this window.
-    readonly property var studyTabs: ["crossrefs", "footnotes", "related"]
-    readonly property var studyTitles: ["Cross-references", "Footnotes", "Tags"]
-    property string studyTab: "crossrefs"
+    // See also (the Study drawer; internal id "related"): one list, in
+    // sections, of what goes with the reader's passage: the version's own
+    // cross references, its parallel passages, OpenBible.info's community
+    // cross references, and the passages tagged alike, in every version.
+    // The filter (/) narrows every section, and #name keeps a tag's passages.
     property var crossRows: []
-    // The version's own cross references come first; OpenBible.info's follow,
-    // each row labeled with its source.
-    function crossCount() {
-        const community = crossRows.filter(function(row) { return row.openBible }).length
-        const own = crossRows.length - community
-        const plural = function(n) { return n === 1 ? " cross reference" : " cross references" }
-        if (!community) return own + plural(own) + " in " + bible.versionAbbreviation
-        if (!own) return community + plural(community) + " from OpenBible.info"
-        return own + plural(own) + " in " + bible.versionAbbreviation + " · " + community + " from OpenBible.info"
-    }
-    readonly property var footnoteRows: Array.from(bible.footnotes || [])
-    readonly property var studyRows: studyTab === "crossrefs" ? crossRows : studyTab === "footnotes" ? footnoteRows : []
-    readonly property bool studyListTab: relatedDrawer.visible && studyTab !== "related"
-    readonly property bool tagsTab: relatedDrawer.visible && studyTab === "related"
-    function setStudyTab(tab, note) {
-        if (studyTabs.indexOf(tab) < 0) return
-        studyTab = tab
-        refreshStudy()
-        studyList.currentIndex = studyRows.length ? 0 : -1
-        if (tab === "footnotes") {
-            // Start at the requested note, else the cursor verse's first note.
-            const verse = note ? note.verse : bible.cursorVerse
-            const index = footnoteRows.findIndex(function(row) {
-                return row.verse === verse && (!note || !note.seq || row.seq === note.seq)
+    property var tagRows: []
+    // The passage's tags: its exact range's, then those of ranges over it.
+    property var rootTags: []
+    property string studyQuery: ""
+    property bool studySearchOpen: false
+    readonly property var studyRows: seeAlsoRows()
+    function seeAlsoRows() {
+        const own = [], parallel = [], openBible = []
+        crossRows.forEach(function(row) { (row.source === "parallel" ? parallel : row.openBible ? openBible : own).push(row) })
+        const rows = []
+        for (const section of [["own", own], ["parallel", parallel], ["openBible", openBible], ["tags", tagRows]]) {
+            const matching = section[1].filter(function(row) { return panel.rowMatches(row) })
+            matching.forEach(function(row, index) {
+                rows.push(Object.assign({}, row, { section: section[0], firstOfSection: index === 0, sectionCount: matching.length }))
             })
-            if (index >= 0) studyList.currentIndex = index
         }
-        if (studyList.currentIndex >= 0) studyList.positionViewAtIndex(studyList.currentIndex, ListView.Contain)
-        Qt.callLater(function() { if (panel.relatedShown) panel.focusResults() })
+        return rows
     }
-    function stepStudyTab(delta) {
-        const index = studyTabs.indexOf(studyTab)
-        setStudyTab(studyTabs[(index + delta + studyTabs.length) % studyTabs.length])
+    function sectionTitle(section) {
+        return section === "own" ? "Cross-references in " + bible.versionAbbreviation
+            : section === "parallel" ? "Parallel passages" : section === "openBible" ? "OpenBible.info" : "Tagged alike"
+    }
+    // Every word must match: #gr a tag starting "gr", others the reference,
+    // version, tags, or verse text, ignoring case.
+    function rowMatches(row) {
+        const words = studyQuery.trim().toLowerCase().split(/\s+/).filter(function(word) { return word.length > 0 })
+        const tags = Array.from(row.tags || []).map(function(tag) { return tag.name.toLowerCase() })
+        const text = [row.reference, row.versionAbbreviation || "", tags.join("\n"), row.excerpt || ""].join("\n").toLowerCase()
+        return words.every(function(word) {
+            if (word.length > 1 && word[0] === "#") return tags.some(function(name) { return name.startsWith(word.slice(1)) })
+            return text.indexOf(word) >= 0
+        })
+    }
+    function resetRootTags() {
+        const tags = []
+        if (installed(relatedSource)) {
+            Array.from(bible.tagsForScope(relatedSource, false)).forEach(function(tag) { tags.push({ id: tag.id, name: tag.name }) })
+            Array.from(bible.tagsForScope(relatedSource, true)).forEach(function(range) {
+                if (sameRange(range, relatedSource)) return
+                Array.from(range.tags).forEach(function(tag) {
+                    if (!tags.some(function(other) { return other.id === tag.id })) tags.push({ id: tag.id, name: tag.name })
+                })
+            })
+        }
+        rootTags = tags
     }
     function refreshStudy() {
-        crossRows = studyTab === "crossrefs" && installed(relatedSource) ? Array.from(bible.crossReferences(relatedSource)) : []
+        const ready = installed(relatedSource)
+        crossRows = ready ? Array.from(bible.crossReferences(relatedSource)) : []
+        // The passages sharing any of its tags, in every version, most shared first.
+        const ids = rootTags.map(function(tag) { return tag.id })
+        tagRows = ready && ids.length ? Array.from(bible.relatedPassages(relatedSource, ids, false, true)) : []
+        if (studyList.currentIndex >= studyList.count) studyList.currentIndex = studyList.count - 1
+        if (studyList.currentIndex < 0 && studyList.count) studyList.currentIndex = 0
     }
-    function footnoteScope(note) {
-        if (!note) return null
-        return { versionId: bible.versionId, reference: bible.passage + ":" + note.verse, book: bible.book, chapter: bible.chapter,
-            start: note.verse, endBook: bible.book, endChapter: bible.chapter, end: note.verse }
+    // A tag clicked (a section heading's, or one elsewhere): only its passages.
+    function filterTag(name) {
+        studyQuery = "#" + String(name).split(/\s+/)[0]
+        studySearchOpen = true
+        studyList.currentIndex = studyList.count ? 0 : -1
+        focusResults()
     }
-    function studyScope(row) { return studyTab === "footnotes" ? footnoteScope(row) : row || null }
-    function rejected() { if (typeof app.rejected === "function") app.rejected() }
+    function rejected(reason) { if (typeof app.rejected === "function") app.rejected(reason) }
     function openStudyRow(index) {
         const row = studyRows[index]
         if (!row) { rejected(); return }
         studyList.currentIndex = index
-        openTagged(studyScope(row))
+        openTagged(row)
     }
-
-    // ── Study → Tags: "Where else have I tagged what this passage is about?"
-    // Chips are the root's tags: exact-range tags, then tags on overlapping
-    // ranges. Results are the other passages sharing any chip that is on,
-    // ranked by shared count, then canonical order (the backend's order).
-    property var rootChips: []
-    property var chipOff: []
-    property bool allVersions: false
-    property var allResults: []
-    property var results: []
-    property bool chipsExpanded: false
-    property int chipLimit: 1000
-    property int chipIndex: 0
-    property string studyQuery: ""
-    property bool studySearchOpen: false
-    readonly property var onIds: rootChips.filter(function(chip) { return panel.chipOff.indexOf(chip.id) < 0 })
-        .map(function(chip) { return chip.id })
-    readonly property bool otherVersions: Array.from(bible.versions).length > 1
-    readonly property var visibleResults: results.filter(function(entry) { return panel.resultMatches(entry) })
-    readonly property int hiddenChips: chipsExpanded ? 0 : Math.max(0, rootChips.length - chipLimit)
-    function chipCount(id) {
-        return allResults.filter(function(entry) {
-            return Array.from(entry.tags || []).some(function(tag) { return tag.id === id })
-        }).length
+    // t: the current row's tags, else (an empty list) the passage's own.
+    function tagCurrentRow() {
+        const scope = studyRows[studyList.currentIndex] || relatedSource
+        if (!installed(scope) || bible.busy) { rejected(); return }
+        app.openPassageTags(snapshot(scope))
     }
-    function resultMatches(entry) {
-        const query = studyQuery.trim().toLowerCase()
-        return !query.length || [entry.reference, tagNames(entry.tags), entry.excerpt || ""].join("\n").toLowerCase().indexOf(query) >= 0
-    }
-    function resetChips() {
-        let chips = []
-        if (installed(relatedSource)) {
-            Array.from(bible.tagsForScope(relatedSource, false)).forEach(function(tag) {
-                chips.push({ id: tag.id, name: tag.name, overlap: false, reference: "" })
-            })
-            Array.from(bible.tagsForScope(relatedSource, true)).forEach(function(range) {
-                if (sameRange(range, relatedSource)) return
-                Array.from(range.tags).forEach(function(tag) {
-                    if (!chips.some(function(chip) { return chip.id === tag.id }))
-                        chips.push({ id: tag.id, name: tag.name, overlap: true, reference: range.reference })
-                })
-            })
-        }
-        const ids = chips.map(function(chip) { return chip.id })
-        chipOff = chipOff.filter(function(id) { return ids.indexOf(id) >= 0 })
-        rootChips = chips
-        chipLimit = 1000
-        chipIndex = Math.min(chipIndex, Math.max(0, chips.length - 1))
-    }
-    function refreshTagResults() {
-        const ids = rootChips.map(function(chip) { return chip.id })
-        allResults = installed(relatedSource) && ids.length ? Array.from(bible.relatedPassages(relatedSource, ids, false, allVersions)) : []
-        results = installed(relatedSource) && onIds.length ? Array.from(bible.relatedPassages(relatedSource, onIds, false, allVersions)) : []
-        if (resultList.currentIndex >= resultList.count) resultList.currentIndex = resultList.count - 1
-        if (resultList.currentIndex < 0 && resultList.count) resultList.currentIndex = 0
-    }
-    function setChipOff(ids) {
-        chipOff = ids
-        refreshTagResults()
-        resultList.currentIndex = resultList.count ? 0 : -1
-    }
-    function toggleChip(id) {
-        const off = chipOff.slice()
-        const index = off.indexOf(id)
-        if (index < 0) off.push(id); else off.splice(index, 1)
-        setChipOff(off)
-    }
-    // Solo: only this chip on; soloing it again turns every chip back on.
-    function soloChip(id) {
-        if (onIds.length === 1 && onIds[0] === id) setChipOff([])
-        else setChipOff(rootChips.map(function(chip) { return chip.id }).filter(function(other) { return other !== id }))
-    }
-    function restoreChips() { setChipOff([]) }
-    // A chip's right-click menu, and the passage count's (Study → Tags).
-    function chipMenu(chip, sceneX, sceneY) {
-        const only = onIds.length === 1 && onIds[0] === chip.id
-        app.showContextMenu("studyChip", [
-            { id: "soloChip", text: "Show only this tag", shortcut: KeyNotation.format("Shift+Space"), enabled: !only,
-                run: function() { panel.soloChip(chip.id) } },
-            { id: "allChips", text: "Show all tags", shortcut: KeyNotation.format("0"), enabled: chipOff.length > 0,
-                run: function() { panel.restoreChips() } },
-            { separator: true },
-            { id: "editTags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: !bible.busy && installed(relatedSource),
-                run: function() { panel.app.openPassageTags(panel.snapshot(panel.relatedSource)) } }
-        ], sceneX, sceneY)
-    }
-    function countMenu(sceneX, sceneY) {
-        app.showContextMenu("studyCount", [
-            { id: "allVersions", text: allVersions ? "This version only" : "All versions", shortcut: KeyNotation.format("A"), enabled: otherVersions,
-                run: function() { panel.toggleAllVersions() } },
-            { id: "searchPassages", text: "Search passages…", shortcut: KeyNotation.format("/"), enabled: tagsTab,
-                run: function() { panel.showStudySearch() } }
-        ], sceneX, sceneY)
-    }
-    function toggleAllVersions() {
-        allVersions = !allVersions
-        refreshTagResults()
-    }
-    readonly property bool chipFocused: !!app.activeFocusItem && app.activeFocusItem.studyChip === true
-    function chipItems() {
-        const items = []
-        for (let i = 0; i < chipRepeater.count; ++i) {
-            const cell = chipRepeater.itemAt(i)
-            // The cell's only Button is its chip.
-            if (cell && cell.visible) items.push(cell.children[cell.children.length - 1])
-        }
-        if (moreChips.visible) items.push(moreChips)
-        return items
-    }
-    function focusChips() {
-        const items = chipItems()
-        if (!items.length) return false
-        items[Math.max(0, Math.min(items.length - 1, chipIndex))].forceActiveFocus()
-        return true
-    }
-    function moveChip(delta) {
-        const items = chipItems()
-        if (!items.length) return
-        const current = items.indexOf(app.activeFocusItem)
-        chipIndex = Math.max(0, Math.min(items.length - 1, (current < 0 ? chipIndex : current) + delta))
-        items[chipIndex].forceActiveFocus()
-    }
-    function showStudySearch() {
-        if (!tagsTab) return
-        studySearchOpen = true
-        Qt.callLater(function() { studySearch.forceActiveFocus() })
-    }
-    function leaveStudySearch() {
-        studySearchOpen = false
-        focusResults()
-    }
-    function tagCurrentResult() {
-        if (resultList.activeFocus || !chipFocused) {
-            const entry = visibleResults[resultList.currentIndex]
-            if (entry) { app.openPassageTags(panel.snapshot(entry)); return }
-        }
-        // From a chip (or with no chips): the Study passage's own tags.
-        if ((chipFocused || !rootChips.length) && installed(relatedSource)) { app.openPassageTags(panel.snapshot(relatedSource)); return }
-        app.rejected()
-    }
-    function openResultMenu(index, sceneX, sceneY) {
-        const entry = visibleResults[index]
-        if (!entry || typeof app.showContextMenu !== "function") return
-        resultList.currentIndex = index
-        resultList.forceActiveFocus()
-        const ready = !bible.busy
-        app.showContextMenu("study", RowMenu.entries(app, { busy: bible.busy, scope: entry, open: function() { panel.openTagged(entry) },
-            extras: [{ id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { panel.app.openPassageTags(panel.snapshot(entry)) } },
-                panel.app.moveHereEntry([entry], sceneX, sceneY)] }),
-            sceneX, sceneY)
-    }
-    // Cross-references and Footnotes rows: the shared row menu on the row's passage.
+    // The shared row menu on a row's passage, with Edit tags (and Move here
+    // for a tagged passage).
     function openStudyMenu(index, sceneX, sceneY) {
         const row = studyRows[index]
         if (!row || typeof app.showContextMenu !== "function") return
         studyList.currentIndex = index
         studyList.forceActiveFocus()
-        app.showContextMenu("study", RowMenu.entries(app, { busy: bible.busy, scope: studyScope(row),
-            openText: studyTab === "footnotes" ? "Go to verse" : "Open", open: function() { panel.openStudyRow(index) } }), sceneX, sceneY)
+        const ready = !bible.busy
+        const extras = [{ id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { panel.app.openPassageTags(panel.snapshot(row)) } }]
+        if (row.section === "tags") extras.push(panel.app.moveHereEntry([row], sceneX, sceneY))
+        app.showContextMenu("study", RowMenu.entries(app, { busy: bible.busy, scope: row, open: function() { panel.openStudyRow(index) }, extras: extras }),
+            sceneX, sceneY)
+    }
+    function showStudySearch() {
+        if (!relatedShown) return
+        studySearchOpen = true
+        Qt.callLater(function() { studySearch.forceActiveFocus() })
+    }
+    // Leaving the filter keeps it while it has words.
+    function leaveStudySearch() {
+        studySearchOpen = studyQuery.length > 0
+        focusResults()
     }
 
     // ── Picker
@@ -335,18 +220,11 @@ Item {
         manage()
         return true
     }
-    function openRelated() { return openStudy("", null) }
-    // Opens Study on a tab ("" keeps the last one), optionally at a footnote {verse, seq}.
-    function openStudy(tab, note) {
-        if (!showRelated(bible.tagScope())) return false
-        setStudyTab(tab || studyTab, note)
-        return true
-    }
-    // Study → Tags with one chip soloed (a tag chip clicked elsewhere).
-    function openRelatedForTag(id, source) {
+    function openRelated() { return showRelated(bible.tagScope()) }
+    // See also filtered to one tag's passages (a tag clicked elsewhere).
+    function openRelatedForTag(name, source) {
         if (!showRelated(source || bible.tagScope())) return false
-        if (id && rootChips.some(function(chip) { return chip.id === id })) soloChip(id)
-        setStudyTab("related")
+        if (name) filterTag(name)
         return true
     }
     function showRelated(source) {
@@ -361,22 +239,16 @@ Item {
         Qt.callLater(function() { panel.focusResults() })
         return true
     }
-    // (Re)roots Study on a passage: every chip on, this version, no search.
+    // (Re)roots See also on a passage, without a filter.
     function rootAt(captured) {
         relatedSource = captured
         message = ""
-        allVersions = false
-        chipOff = []
-        chipIndex = 0
-        chipsExpanded = false
-        chipLimit = 1000
         studyQuery = ""
         studySearchOpen = false
         allTags = Array.from(bible.tags)
-        resetChips()
-        refreshTagResults()
+        resetRootTags()
         refreshStudy()
-        resultList.currentIndex = resultList.count ? 0 : -1
+        studyList.currentIndex = studyList.count ? 0 : -1
     }
     // Study follows the reader's passage, but not while the panel itself has
     // the keyboard: opening a row from inside keeps the list where it was.
@@ -436,8 +308,7 @@ Item {
             return !panel.sameRange(range, panel.editingScope)
         }) : []
         if (relatedDrawer.visible) {
-            resetChips()
-            refreshTagResults()
+            resetRootTags()
             refreshStudy()
         }
     }
@@ -579,27 +450,14 @@ Item {
         search.forceActiveFocus()
     }
     // Clickable hint rows (HintRow): each part runs what its key would.
-    function currentChip() {
-        const chip = chipItems()[chipIndex]
-        return chip && chip.modelData ? chip.modelData : null
-    }
     function studyHintParts() {
-        const tabs = [["Left", "Right"], "tabs"]
         const escape = function() { panel.handleStudyEscape() }
-        if (!tagsTab) return [tabs, ["Return", studyTab === "footnotes" ? "go to verse" : "open", function() { panel.openStudyRow(studyList.currentIndex) }, listKeys],
+        if (studySearch.activeFocus) return [[["Return", "Down"], "passages", function() { panel.leaveStudySearch() }], ["Escape", "leave filter", function() { panel.leaveStudySearch() }]]
+        return [["Return", "open", function() { panel.openStudyRow(studyList.currentIndex) }, listKeys],
+            ["T", "tag", function() { panel.tagCurrentRow() }, relatedMoveKeys && !bible.busy],
             ["Y", "copy", function() { panel.app.copyScope(panel.listScope()) }, listKeys],
-            ["D", "Desk", function() { panel.app.toggleScopeDesk(panel.listScope()) }, listKeys], ["Escape", "close", escape]]
-        if (studySearch.activeFocus) return [[["Return", "Down"], "passages", function() { panel.leaveStudySearch() }], ["Escape", "leave search", function() { panel.leaveStudySearch() }]]
-        const tag = ["T", "add tags", function() { panel.tagCurrentResult() }, relatedMoveKeys && !bible.busy]
-        if (!rootChips.length) return [tabs, tag, ["Escape", "close", escape]]
-        const chip = currentChip()
-        if (chipFocused) return [[["Left", "Right"], "chips"], ["Space", "toggle", function() { panel.toggleChip(chip.id) }, !!chip],
-            ["Shift+Space", "show only this tag", function() { panel.soloChip(chip.id) }, !!chip], ["0", "show all tags", function() { panel.restoreChips() }],
-            ["T", "tag passage", tag[2], tag[3] && installed(relatedSource)],
-            ["Down", "passages"], ["Escape", "close", escape]]
-        return [tabs, ["Return", "open", function() { panel.openTagged(panel.visibleResults[resultList.currentIndex]) }, listKeys], ["T", "tag", tag[2], tag[3]],
-            otherVersions ? ["A", allVersions ? "this version" : "all versions", function() { panel.toggleAllVersions() }, relatedMoveKeys] : null,
-            ["/", "search", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", "close", escape]]
+            ["D", "Desk", function() { panel.app.toggleScopeDesk(panel.listScope()) }, listKeys],
+            ["/", "filter", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", "close", escape]]
     }
     // The picker's enter: create or toggle from the search field, toggle in the list.
     function pickerEnter() {
@@ -631,32 +489,17 @@ Item {
         return [["Space", "toggle", function() { panel.pickerEnter() }, inList && scopeValid && !bible.busy],
             ["Return", "toggle / create", function() { panel.pickerEnter() }, enter && scopeValid && !bible.busy], pageKey, escape]
     }
-    // Study keys: off while typing, behind the picker or a menu, and while closing.
+    // See also keys: off while typing, behind the picker or a menu, and while closing.
     readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.contextMenuOpen
         && !textInputActive()
     readonly property bool relatedKeys: relatedMoveKeys
-    readonly property bool listKeys: !bible.busy && relatedKeys && !chipFocused
-        && (studyListTab ? studyList.currentIndex >= 0 : resultList.currentIndex >= 0 && resultList.count > 0)
-    function listScope() {
-        return studyListTab ? studyScope(studyRows[studyList.currentIndex]) : visibleResults[resultList.currentIndex] || null
-    }
-    function moveRelated(delta) {
-        if (studyListTab) { moveStudy(delta); return }
-        // Up from the first result climbs into the chips.
-        if (delta < 0 && (resultList.currentIndex <= 0 || !resultList.count) && focusChips()) return
-        moveResult(delta)
-    }
+    readonly property bool listKeys: !bible.busy && relatedKeys && studyList.currentIndex >= 0 && studyList.count > 0
+    function listScope() { return studyRows[studyList.currentIndex] || null }
     function moveStudy(delta) {
         if (!studyList.count) return
         studyList.currentIndex = Math.max(0, Math.min(studyList.count - 1, studyList.currentIndex + delta))
         studyList.positionViewAtIndex(studyList.currentIndex, ListView.Contain)
         studyList.forceActiveFocus()
-    }
-    function moveResult(delta) {
-        if (!resultList.count) { resultList.forceActiveFocus(); return }
-        resultList.currentIndex = Math.max(0, Math.min(resultList.count - 1, resultList.currentIndex + delta))
-        resultList.positionViewAtIndex(resultList.currentIndex, ListView.Contain)
-        resultList.forceActiveFocus()
     }
     function focusIn(container) {
         for (let item = app.activeFocusItem; item; item = item.parent) if (item === container) return true
@@ -665,13 +508,8 @@ Item {
     function focusInBody() { return focusIn(body) || focusIn(studyBody) }
     function focusInStudy() { return focusIn(studyBody) }
     function focusResults() {
-        if (studyListTab) {
-            if (studyList.count && studyList.currentIndex < 0) studyList.currentIndex = 0
-            studyList.forceActiveFocus()
-            return
-        }
-        if (resultList.count && resultList.currentIndex < 0) resultList.currentIndex = 0
-        resultList.forceActiveFocus()
+        if (studyList.count && studyList.currentIndex < 0) studyList.currentIndex = 0
+        studyList.forceActiveFocus()
     }
     function focusSearch() { showStudySearch() }
     // One esc closes the picker (a pending confirmation first).
@@ -686,9 +524,8 @@ Item {
         if (tagList.count) { tagList.currentIndex = Math.max(0, at); tagList.forceActiveFocus() }
         else search.forceActiveFocus()
     }
-    // Study: esc in the search field leaves it, keeping the query; otherwise
-    // esc closes the panel, as in Annotations (reopening roots Study afresh,
-    // clearing the query).
+    // See also: esc in the filter leaves it, keeping the words; otherwise esc
+    // closes the panel, as in Marks (reopening roots it afresh, unfiltered).
     function handleStudyEscape() {
         if (studySearch.activeFocus) leaveStudySearch()
         else relatedDrawer.close()
@@ -697,11 +534,7 @@ Item {
         target: panel.bible
         function onTagsChanged() { if (panel.contentVisible) panel.refresh() }
         function onVersionsChanged() { if (panel.contentVisible) panel.refresh() }
-        function onVersionChanged() { if (panel.relatedShown) panel.refreshTagResults() }
-        function onVersesChanged() {
-            // Footnotes follow the chapter; keep the current row in range.
-            if (panel.studyTab === "footnotes" && studyList.currentIndex >= studyList.count) studyList.currentIndex = studyList.count - 1
-        }
+        function onVersionChanged() { if (panel.relatedShown) panel.refreshStudy() }
     }
 
     component TagText: Text {
@@ -746,90 +579,6 @@ Item {
         Keys.onEnterPressed: { keyActivated = true; clicked(); keyActivated = false }
         // Focus shows the tip only when the keyboard put it there (a click does not).
         AppToolTip { theme: panel.desktop; uiScale: panel.uiScale; text: control.hint; visible: text.length > 0 && (control.hovered || (control.activeFocus && control.focusReason !== Qt.MouseFocusReason)) }
-    }
-    // Study's tag chips: "name N" (N muted: other passages with the tag). On
-    // chips keep a light accent tint; off chips are a bare outline, muted.
-    component StudyChip: Button {
-        id: chip
-        required property var modelData
-        required property int index
-        readonly property bool studyChip: true
-        readonly property bool on: panel.onIds.indexOf(modelData.id) >= 0
-        objectName: "studyChip:" + modelData.id
-        focusPolicy: Qt.StrongFocus
-        hoverEnabled: true
-        font.family: panel.desktop.fontFamily
-        font.pixelSize: 12 * panel.studyScale
-        padding: 7 * panel.studyScale
-        topPadding: 4 * panel.studyScale
-        bottomPadding: 4 * panel.studyScale
-        implicitHeight: 28 * panel.studyScale
-        contentItem: Row {
-            spacing: 5 * panel.studyScale
-            Text {
-                text: chip.modelData.name
-                textFormat: Text.PlainText
-                font: chip.font
-                color: chip.on ? panel.desktop.foreground : panel.desktop.muted
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.min(implicitWidth, studyBody.width * 0.6)
-                elide: Text.ElideRight
-            }
-            Text {
-                objectName: "studyChipCount:" + chip.modelData.id
-                text: String(panel.chipCount(chip.modelData.id))
-                font: chip.font
-                color: panel.desktop.muted
-                anchors.verticalCenter: parent.verticalCenter
-            }
-        }
-        background: Rectangle {
-            color: chipMouse.pressed ? panel.desktop.surface
-                : chip.on ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, (chip.hovered || chipMouse.containsMouse) ? 0.14 : 0.08)
-                : (chip.hovered || chipMouse.containsMouse) ? panel.desktop.surface : "transparent"
-            border.width: 1
-            border.color: chip.activeFocus ? panel.desktop.accent : (chip.hovered || chipMouse.containsMouse) ? panel.desktop.muted : panel.desktop.border
-            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
-        }
-        onActiveFocusChanged: if (activeFocus) panel.chipIndex = Math.max(0, panel.chipItems().indexOf(chip))
-        // Click toggles; shift click solos the chip (again: every chip back on);
-        // right click: Show only this tag / Show all tags / Edit tags.
-        MouseArea {
-            id: chipMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
-            // A click leaves the keyboard on the results (or where it was), not on the chip.
-            onClicked: function(mouse) {
-                if (chip.activeFocus) panel.focusResults()
-                if (mouse.button === Qt.RightButton) {
-                    const p = mapToItem(null, mouse.x, mouse.y)
-                    panel.chipMenu(chip.modelData, p.x, p.y)
-                } else if (mouse.modifiers & Qt.ShiftModifier) panel.soloChip(chip.modelData.id)
-                else panel.toggleChip(chip.modelData.id)
-            }
-        }
-        Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                event.accepted = true
-                if (event.isAutoRepeat) return
-                if (event.modifiers & Qt.ShiftModifier) panel.soloChip(modelData.id)
-                else panel.toggleChip(modelData.id)
-            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                event.accepted = true
-                panel.focusResults()
-            }
-        }
-        Keys.onReleased: function(event) { if (event.key === Qt.Key_Space) event.accepted = true }
-        Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
-        AppToolTip {
-            theme: panel.desktop; uiScale: panel.uiScale
-            text: (chip.modelData.overlap ? "On " + chip.modelData.reference + " (overlapping range)\n" : "")
-                + "Click: turn on/off · " + KeyNotation.format("Shift+Click") + ": show only this tag"
-            visible: chipMouse.containsMouse || (chip.activeFocus && chip.focusReason !== Qt.MouseFocusReason)
-        }
-        Accessible.name: modelData.name + (on ? "" : ", off")
     }
     component TagInput: TextField {
         id: input
@@ -933,49 +682,27 @@ Item {
             objectName: "studyBody"
             spacing: 8 * panel.studyScale
             Keys.onEscapePressed: panel.handleStudyEscape()
-            // Tabs: ←/→ (h/l), except while a chip has the keyboard: there they move between chips.
-            Shortcut { objectName: "studyTabPrevious"; sequences: ["H", "Left"]; enabled: panel.relatedMoveKeys && !panel.chipFocused; onActivated: panel.stepStudyTab(-1) }
-            Shortcut { objectName: "studyTabNext"; sequences: ["L", "Right"]; enabled: panel.relatedMoveKeys && !panel.chipFocused; onActivated: panel.stepStudyTab(1) }
-            Shortcut { sequences: ["H", "Left"]; enabled: panel.relatedMoveKeys && panel.chipFocused; onActivated: panel.moveChip(-1) }
-            Shortcut { sequences: ["L", "Right"]; enabled: panel.relatedMoveKeys && panel.chipFocused; onActivated: panel.moveChip(1) }
-            Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedMoveKeys; onActivated: { if (panel.chipFocused) panel.focusResults(); else panel.moveRelated(1) } }
-            Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedMoveKeys && !panel.chipFocused; onActivated: panel.moveRelated(-1) }
+            Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveStudy(1) }
+            Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveStudy(-1) }
             // Shared list keys on the current row.
             Shortcut { sequence: "Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope()) }
             Shortcut { sequence: "Shift+Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope(), true) }
             Shortcut { sequence: "D"; enabled: panel.listKeys; onActivated: panel.app.toggleScopeDesk(panel.listScope()) }
-            // Tags tab: t tags the row (or, with no tags yet, the passage), a
-            // toggles all installed versions, 0 turns every chip back on.
-            Shortcut { objectName: "studyTagKey"; sequence: "T"; enabled: panel.relatedMoveKeys && panel.tagsTab && !panel.bible.busy; onActivated: panel.tagCurrentResult() }
-            Shortcut { objectName: "studyAllVersionsKey"; sequence: "A"; enabled: panel.relatedMoveKeys && panel.tagsTab; onActivated: panel.toggleAllVersions() }
-            Shortcut { objectName: "studyChipsAllKey"; sequence: "0"; enabled: panel.relatedMoveKeys && panel.tagsTab && (panel.chipFocused || resultList.activeFocus); onActivated: panel.restoreChips() }
-            Shortcut { sequence: "/"; enabled: panel.relatedMoveKeys && panel.tagsTab; onActivated: panel.showStudySearch() }
+            // t tags the row (or, with none, the passage); / filters.
+            Shortcut { objectName: "studyTagKey"; sequence: "T"; enabled: panel.relatedMoveKeys && !panel.bible.busy; onActivated: panel.tagCurrentRow() }
+            Shortcut { sequence: "/"; enabled: panel.relatedMoveKeys; onActivated: panel.showStudySearch() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
-                enabled: panel.relatedMoveKeys && panel.tagsTab && !panel.chipFocused && resultList.currentItem !== null
-                onActivated: {
-                    const point = resultList.currentItem.mapToItem(null, 24 * panel.uiScale, Math.min(resultList.currentItem.height, 28 * panel.uiScale))
-                    panel.openResultMenu(resultList.currentIndex, point.x, point.y)
-                }
-            }
-            Shortcut {
-                sequences: ["Menu", "Shift+F10"]
-                enabled: panel.relatedMoveKeys && panel.studyListTab && studyList.currentItem !== null
+                enabled: panel.relatedMoveKeys && studyList.currentItem !== null
                 onActivated: {
                     const point = studyList.currentItem.mapToItem(null, 24 * panel.uiScale, Math.min(studyList.currentItem.height, 28 * panel.uiScale))
                     panel.openStudyMenu(studyList.currentIndex, point.x, point.y)
                 }
             }
-            // g, shift G, ctrl d/u, ctrl f/b, pgdn/pgup on the current tab's list.
-            ListMotionKeys {
-                objectName: "relatedMotionKeys"
-                active: panel.relatedMoveKeys && panel.tagsTab && !panel.chipFocused
-                count: resultList.count
-                onMove: function(delta) { if (resultList.currentIndex < 0) resultList.currentIndex = 0; panel.moveResult(delta) }
-            }
+            // g, shift G, ctrl d/u, ctrl f/b, pgdn/pgup.
             ListMotionKeys {
                 objectName: "studyMotionKeys"
-                active: panel.relatedMoveKeys && panel.studyListTab
+                active: panel.relatedMoveKeys
                 count: studyList.count
                 onMove: function(delta) { if (studyList.currentIndex < 0) studyList.currentIndex = 0; panel.moveStudy(delta) }
             }
@@ -983,385 +710,166 @@ Item {
                 objectName: "studyHeader"
                 Layout.fillWidth: true
                 theme: panel.desktop
-                title: "Study"
+                title: "See also"
                 subtitle: panel.passageSubtitle
                 uiScale: panel.studyScale
                 titleName: "studyTitle"
                 subtitleName: "studyPassage"
             }
-            PanelTabs {
-                id: studyTabRow
-                objectName: "studyTabs"
-                Layout.fillWidth: true
-                labels: panel.studyTitles
-                theme: panel.desktop
-                uiScale: panel.studyScale
-                namePrefix: "studyTab"
-                // ←/→ (h/l) drive the tabs; clicks still switch.
-                focusable: false
-                currentIndex: panel.studyTabs.indexOf(panel.studyTab)
-                onActivated: index => panel.setStudyTab(panel.studyTabs[index])
-            }
-            FineRule { objectName: "studyTabsRule" }
+            FineRule { objectName: "studyHeaderRule" }
             TagText {
                 Layout.fillWidth: true
-                visible: panel.studyTab !== "footnotes" && !panel.installed(panel.relatedSource)
+                visible: !panel.installed(panel.relatedSource)
                 objectName: "studyScopePrompt"
                 text: "This source version is no longer installed. Choose a current passage to continue."
                 color: panel.desktop.muted
-            }
-            // Tags tab: this passage's tags as chips.
-            Flow {
-                id: chipFlow
-                objectName: "studyChips"
-                Layout.fillWidth: true
-                Layout.topMargin: 4 * panel.studyScale
-                visible: panel.tagsTab && panel.rootChips.length > 0
-                spacing: 6 * panel.studyScale
-                // At most two lines: chips that would wrap further fold into "+N".
-                onWidthChanged: panel.chipLimit = 1000
-                onPositioningComplete: {
-                    if (panel.chipsExpanded || panel.chipLimit <= 1) return
-                    const chipHeight = 28 * panel.studyScale
-                    let bottom = 0
-                    for (let i = 0; i < children.length; ++i) {
-                        const child = children[i]
-                        if (child.visible && child.width > 0) bottom = Math.max(bottom, child.y + child.height)
-                    }
-                    if (bottom > 2 * chipHeight + spacing + 1)
-                        panel.chipLimit = Math.min(panel.chipLimit, panel.rootChips.length) - 1
-                }
-                Repeater {
-                    id: chipRepeater
-                    model: panel.rootChips
-                    // Exact-range tags first; a muted · leads the overlapping ones.
-                    delegate: Row {
-                        id: chipCell
-                        required property var modelData
-                        required property int index
-                        readonly property bool leading: modelData.overlap && index > 0 && !panel.rootChips[index - 1].overlap
-                        visible: panel.chipsExpanded || index < panel.chipLimit
-                        spacing: chipFlow.spacing
-                        Text {
-                            objectName: "studyChipSeparator"
-                            visible: chipCell.leading
-                            height: cellChip.height
-                            verticalAlignment: Text.AlignVCenter
-                            text: "·"
-                            color: panel.desktop.muted
-                            font.family: panel.desktop.fontFamily
-                            font.pixelSize: 14 * panel.studyScale
-                        }
-                        StudyChip { id: cellChip; modelData: chipCell.modelData; index: chipCell.index }
-                    }
-                }
-                Button {
-                    id: moreChips
-                    objectName: "studyChipsMore"
-                    readonly property bool studyChip: true
-                    visible: panel.hiddenChips > 0
-                    focusPolicy: Qt.StrongFocus
-                    hoverEnabled: true
-                    implicitHeight: 28 * panel.studyScale
-                    padding: 7 * panel.studyScale
-                    topPadding: 4 * panel.studyScale
-                    bottomPadding: 4 * panel.studyScale
-                    font.family: panel.desktop.fontFamily
-                    font.pixelSize: 12 * panel.studyScale
-                    text: "+" + panel.hiddenChips
-                    contentItem: Text { text: moreChips.text; font: moreChips.font; color: panel.desktop.muted; verticalAlignment: Text.AlignVCenter }
-                    background: Rectangle {
-                        color: moreChips.hovered || moreChips.down ? panel.desktop.surface : "transparent"
-                        border.width: 1
-                        border.color: moreChips.activeFocus ? panel.desktop.accent : panel.desktop.border
-                        radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
-                    }
-                    onClicked: { panel.chipsExpanded = true; Qt.callLater(panel.focusChips) }
-                    Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
-                    Keys.onPressed: function(event) {
-                        if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) { event.accepted = true; panel.focusResults() }
-                        else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; moreChips.clicked() }
-                    }
-                    Accessible.name: panel.hiddenChips + " more tags"
-                    HoverHandler { cursorShape: Qt.PointingHandCursor }
-                    AppToolTip {
-                        theme: panel.desktop; uiScale: panel.uiScale
-                        text: "Show " + panel.hiddenChips + " more " + (panel.hiddenChips === 1 ? "tag" : "tags")
-                        visible: moreChips.hovered || (moreChips.activeFocus && moreChips.focusReason !== Qt.MouseFocusReason)
-                    }
-                }
-            }
-            TagText {
-                objectName: "studyTagCount"
-                // Clickable: opens the passage search; right click for its menu.
-                // Over the text only (not the rest of the row).
-                MouseArea {
-                    id: studyCountMouse
-                    objectName: "studyTagCountMouse"
-                    width: Math.min(parent.width, parent.contentWidth)
-                    height: parent.height
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onClicked: function(mouse) {
-                        if (mouse.button === Qt.RightButton) {
-                            const p = mapToItem(null, mouse.x, mouse.y)
-                            panel.countMenu(p.x, p.y)
-                        } else panel.showStudySearch()
-                    }
-                }
-                AppToolTip {
-                    theme: panel.desktop; uiScale: panel.uiScale
-                    text: "Search these passages · " + KeyNotation.format("/") + "\n" + KeyNotation.format("RightClick") + ": all versions, search"
-                    visible: studyCountMouse.containsMouse
-                }
-                Layout.fillWidth: true
-                visible: panel.tagsTab && !panel.studySearchOpen && panel.onIds.length > 0 && panel.results.length > 0
-                font.pixelSize: 12 * panel.studyScale
-                // Hover reads as a link.
-                color: studyCountMouse.containsMouse ? panel.desktop.foreground : panel.desktop.muted
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                text: {
-                    const total = panel.results.length
-                    const noun = total === 1 ? " passage" : " passages"
-                    const query = panel.studyQuery.trim()
-                    return (query.length ? panel.visibleResults.length + " of " + total + noun + " · “" + query + "”" : total + noun)
-                        + (panel.allVersions ? " · all versions" : "")
-                }
             }
             TagInput {
                 id: studySearch
                 objectName: "studySearch"
                 Layout.fillWidth: true
-                visible: panel.tagsTab && panel.studySearchOpen
+                visible: panel.studySearchOpen
                 font.pixelSize: 13 * panel.studyScale
                 padding: 8 * panel.studyScale
-                placeholderText: "Search passages…"
+                placeholderText: "Filter… #name for a tag"
                 text: panel.studyQuery
-                onTextEdited: { panel.studyQuery = text; resultList.currentIndex = resultList.count ? 0 : -1 }
+                onTextEdited: { panel.studyQuery = text; studyList.currentIndex = studyList.count ? 0 : -1 }
                 onAccepted: panel.leaveStudySearch()
                 Keys.onDownPressed: panel.leaveStudySearch()
                 Keys.onEscapePressed: panel.leaveStudySearch()
                 onActiveFocusChanged: if (!activeFocus && !panel.studyQuery.length) panel.studySearchOpen = false
-                Accessible.name: "Search passages"
-            }
-            ListView {
-                id: resultList
-                objectName: "tagResults"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                visible: panel.tagsTab
-                clip: true
-                spacing: 4 * panel.studyScale
-                model: panel.visibleResults
-                currentIndex: count ? 0 : -1
-                activeFocusOnTab: true
-                keyNavigationEnabled: false
-                Keys.onReturnPressed: { if (currentIndex >= 0) panel.openTagged(panel.visibleResults[currentIndex]); else panel.rejected() }
-                Keys.onEnterPressed: { if (currentIndex >= 0) panel.openTagged(panel.visibleResults[currentIndex]); else panel.rejected() }
-                Keys.onTabPressed: function(event) { event.accepted = panel.focusChips() }
-                Keys.onBacktabPressed: function(event) { event.accepted = panel.focusChips() }
-                ScrollBar.vertical: TagScrollbar { objectName: "tagResultsScrollbar" }
-                delegate: ItemDelegate {
-                    id: resultDelegate
-                    required property var modelData
-                    required property int index
-                    readonly property bool current: resultList.currentIndex === index && !panel.chipFocused
-                    readonly property bool otherVersion: modelData.versionId !== (panel.relatedSource ? panel.relatedSource.versionId : "")
-                    objectName: "tagResult:" + index
-                    width: resultList.width - Math.max(12 * panel.studyScale, panel.gutter(resultList))
-                    focusPolicy: Qt.NoFocus
-                    hoverEnabled: true
-                    padding: 10 * panel.studyScale
-                    onClicked: { resultList.currentIndex = index; resultList.forceActiveFocus(); panel.openTagged(modelData) }
-                    TapHandler {
-                        acceptedButtons: Qt.RightButton
-                        onTapped: function(eventPoint) { panel.openResultMenu(resultDelegate.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
-                    }
-                    contentItem: Column {
-                        spacing: 3 * panel.studyScale
-                        Text {
-                            objectName: "tagResultReference:" + resultDelegate.index
-                            width: parent.width
-                            text: resultDelegate.modelData.reference + (panel.allVersions && resultDelegate.otherVersion ? " · " + resultDelegate.modelData.versionAbbreviation : "")
-                            textFormat: Text.PlainText
-                            color: panel.desktop.foreground
-                            font.family: panel.desktop.fontFamily
-                            font.pixelSize: 14 * panel.studyScale
-                            elide: Text.ElideRight
-                        }
-                        // The row's tags: shared ones in the accent, the rest muted. Inert.
-                        Text {
-                            objectName: "tagResultTags:" + resultDelegate.index
-                            width: parent.width
-                            textFormat: Text.StyledText
-                            text: Array.from(resultDelegate.modelData.tags || []).map(function(tag) {
-                                return '<font color="' + (panel.onIds.indexOf(tag.id) >= 0 ? panel.desktop.accent : panel.desktop.muted) + '">'
-                                    + KeyNotation.escapeHtml(tag.name) + "</font>"
-                            }).join('<font color="' + panel.desktop.muted + '"> · </font>')
-                            font.family: panel.desktop.fontFamily
-                            font.pixelSize: 12 * panel.studyScale
-                            wrapMode: Text.Wrap
-                        }
-                        Text {
-                            width: parent.width
-                            visible: text.length > 0
-                            text: resultDelegate.modelData.excerpt || ""
-                            textFormat: Text.PlainText
-                            color: panel.desktop.muted
-                            font.family: panel.desktop.fontFamily
-                            font.pixelSize: 13 * panel.studyScale
-                            lineHeight: 1.2
-                            wrapMode: Text.Wrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                        }
-                    }
-                    background: Rectangle {
-                        color: resultDelegate.current ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
-                            : resultDelegate.hovered ? panel.desktop.surface : "transparent"
-                        border.width: 0
-                        radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
-                    }
-                }
-                ColumnLayout {
-                    objectName: "studyTagsEmptyState"
-                    anchors.centerIn: parent
-                    width: parent.width - 24 * panel.studyScale
-                    visible: resultList.count === 0 && panel.installed(panel.relatedSource)
-                    spacing: 10 * panel.studyScale
-                    TagText {
-                        objectName: "studyTagsEmpty"
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignHCenter
-                        font.pixelSize: 13 * panel.studyScale
-                        color: panel.desktop.muted
-                        text: !panel.relatedSource ? ""
-                            : !panel.rootChips.length ? "No tags on " + panel.relatedSource.reference + "."
-                            : !panel.onIds.length ? "Turn on a tag to see passages."
-                            : panel.results.length ? "No passages match “" + panel.studyQuery.trim() + "”."
-                            : "No other passages are tagged " + panel.rootChips.filter(function(chip) { return panel.onIds.indexOf(chip.id) >= 0 })
-                                .map(function(chip) { return chip.name }).join(", ") + "."
-                    }
-                    Button {
-                        id: addTags
-                        objectName: "studyAddTags"
-                        Layout.alignment: Qt.AlignHCenter
-                        visible: !panel.rootChips.length
-                        hoverEnabled: true
-                        focusPolicy: Qt.StrongFocus
-                        implicitHeight: 32 * panel.studyScale
-                        padding: 10 * panel.studyScale
-                        font.family: panel.desktop.fontFamily
-                        font.pixelSize: 13 * panel.studyScale
-                        text: "Add tags…"
-                        contentItem: Text {
-                            textFormat: Text.StyledText
-                            text: KeyNotation.escapeHtml(addTags.text) + "&nbsp;&nbsp;" + '<font color="' + panel.desktop.muted + '">'
-                                + KeyNotation.escapeHtml(KeyNotation.format("T")) + "</font>"
-                            font: addTags.font
-                            color: panel.desktop.foreground
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        background: Rectangle {
-                            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
-                            color: addTags.down ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.16)
-                                : addTags.hovered ? panel.desktop.surface : "transparent"
-                            border.width: addTags.activeFocus ? 1 : 0
-                            border.color: panel.desktop.accent
-                        }
-                        onClicked: panel.app.openPassageTags(panel.snapshot(panel.relatedSource))
-                        Keys.onReturnPressed: clicked()
-                        Keys.onShortcutOverride: function(event) { if ((event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier && [Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter].includes(event.key)) event.accepted = true }
-                        Keys.onEnterPressed: clicked()
-                    }
-                }
-            }
-            TagText {
-                objectName: "studyCount"
-                visible: panel.studyListTab
-                Layout.fillWidth: true
-                font.pixelSize: 12 * panel.studyScale
-                text: panel.studyTab === "crossrefs" ? panel.crossCount()
-                    : (panel.footnoteRows.length + (panel.footnoteRows.length === 1 ? " footnote" : " footnotes") + " in " + panel.bible.passage + " · " + panel.bible.versionAbbreviation)
-                color: panel.desktop.muted
+                Accessible.name: "Filter passages"
             }
             ListView {
                 id: studyList
                 objectName: "studyList"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                visible: panel.studyListTab
                 clip: true
-                spacing: 8 * panel.uiScale
+                spacing: 4 * panel.studyScale
                 model: panel.studyRows
                 currentIndex: count ? 0 : -1
                 activeFocusOnTab: true
-                keyNavigationEnabled: true
+                keyNavigationEnabled: false
                 Keys.onReturnPressed: panel.openStudyRow(currentIndex)
                 Keys.onEnterPressed: panel.openStudyRow(currentIndex)
                 ScrollBar.vertical: TagScrollbar { objectName: "studyScrollbar" }
-                delegate: TagButton {
-                    id: studyDelegate
+                // Each section's heading sits above its first row, in the row's
+                // block: j/k and the motions never stop on it.
+                delegate: Column {
+                    id: studyBlock
                     required property var modelData
                     required property int index
-                    readonly property bool footnote: panel.studyTab === "footnotes"
-                    // The cursor verse's footnotes stay marked while the list moves.
-                    readonly property bool atCursor: footnote && modelData.verse === panel.bible.cursorVerse
-                    objectName: "studyRow:" + index
-                    // The list holds the keyboard (j k, enter); rows never take it.
-                    focusPolicy: Qt.NoFocus
-                    // Clear of the scrollbar while it shows.
-                    width: studyList.width - (studyList.ScrollBar.vertical.visible ? studyList.ScrollBar.vertical.width : 0)
-                    chosen: studyList.activeFocus && studyList.currentIndex === index
-                    onClicked: panel.openStudyRow(index)
-                    TapHandler {
-                        acceptedButtons: Qt.RightButton
-                        onTapped: function(eventPoint) { panel.openStudyMenu(studyDelegate.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
-                    }
-                    background: Rectangle {
-                        color: studyDelegate.chosen ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
-                            : studyDelegate.atCursor ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.06)
-                            : studyDelegate.hovered ? panel.desktop.surface : "transparent"
-                        border.width: studyDelegate.atCursor ? 1 : 0
-                        border.color: Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.4)
-                        radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
-                    }
-                    contentItem: Column {
-                        spacing: 4 * panel.uiScale
-                        TagText {
-                            objectName: "studyRowTitle:" + studyDelegate.index
-                            width: parent.width
-                            text: studyDelegate.footnote
-                                ? panel.bible.passage + ":" + studyDelegate.modelData.verse + " · " + (studyDelegate.modelData.caller && studyDelegate.modelData.caller !== "+" && studyDelegate.modelData.caller !== "-" ? studyDelegate.modelData.caller : "note")
-                                : (studyDelegate.modelData.reference || "") + (studyDelegate.modelData.openBible ? " · OpenBible.info" : "")
-                            color: studyDelegate.atCursor ? panel.desktop.accent : panel.desktop.foreground
+                    readonly property bool otherVersion: modelData.versionId !== (panel.relatedSource ? panel.relatedSource.versionId : "")
+                    width: studyList.width - panel.gutter(studyList)
+                    Flow {
+                        objectName: "studySection:" + studyBlock.modelData.section
+                        visible: !!studyBlock.modelData.firstOfSection
+                        width: parent.width
+                        spacing: 6 * panel.studyScale
+                        topPadding: studyBlock.index ? 12 * panel.studyScale : 0
+                        bottomPadding: 4 * panel.studyScale
+                        leftPadding: 10 * panel.studyScale
+                        Text {
+                            objectName: "studySectionTitle:" + studyBlock.modelData.section
+                            text: panel.sectionTitle(studyBlock.modelData.section)
+                            textFormat: Text.PlainText
+                            color: panel.desktop.muted
+                            font.family: panel.desktop.fontFamily
+                            font.pixelSize: 12 * panel.studyScale
+                            font.weight: Font.Medium
                         }
-                        TagText {
-                            width: parent.width
-                            text: (studyDelegate.footnote ? studyDelegate.modelData.text : studyDelegate.modelData.excerpt) || ""
-                            lineHeight: panel.bible.lineHeight > 0 ? panel.bible.lineHeight / 1.5 * 1.25 : 1.25
-                            maximumLineCount: studyDelegate.footnote ? 8 : 3
-                            elide: Text.ElideRight
-                            color: studyDelegate.footnote ? panel.desktop.foreground : panel.desktop.muted
+                        // The passage's tags: click one to keep only its passages.
+                        Repeater {
+                            model: studyBlock.modelData.section === "tags" ? panel.rootTags : []
+                            delegate: Text {
+                                required property var modelData
+                                objectName: "studySectionTag:" + modelData.name
+                                text: "#" + modelData.name
+                                textFormat: Text.PlainText
+                                color: tagMouse.containsMouse ? panel.desktop.foreground : panel.desktop.accent
+                                font.family: panel.desktop.fontFamily
+                                font.pixelSize: 12 * panel.studyScale
+                                MouseArea {
+                                    id: tagMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: panel.filterTag(parent.modelData.name)
+                                }
+                                AppToolTip { theme: panel.desktop; uiScale: panel.uiScale; text: "Only the passages tagged " + parent.modelData.name; visible: tagMouse.containsMouse }
+                            }
+                        }
+                        Text {
+                            text: "· " + studyBlock.modelData.sectionCount
+                            color: panel.desktop.muted
+                            font.family: panel.desktop.fontFamily
+                            font.pixelSize: 12 * panel.studyScale
+                        }
+                    }
+                    TagButton {
+                        id: studyDelegate
+                        objectName: "studyRow:" + studyBlock.index
+                        // The list holds the keyboard (j k, enter); rows never take it.
+                        focusPolicy: Qt.NoFocus
+                        width: parent.width
+                        chosen: studyList.activeFocus && studyList.currentIndex === studyBlock.index
+                        onClicked: panel.openStudyRow(studyBlock.index)
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: function(eventPoint) { panel.openStudyMenu(studyBlock.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                        }
+                        background: Rectangle {
+                            color: studyDelegate.chosen ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
+                                : studyDelegate.hovered ? panel.desktop.surface : "transparent"
+                            border.width: 0
+                            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
+                        }
+                        contentItem: Column {
+                            spacing: 4 * panel.uiScale
+                            TagText {
+                                objectName: "studyRowTitle:" + studyBlock.index
+                                width: parent.width
+                                text: (studyBlock.modelData.reference || "") + (studyBlock.otherVersion ? " · from " + studyBlock.modelData.versionAbbreviation : "")
+                            }
+                            // A tagged passage's tags: the ones it shares in the accent.
+                            Text {
+                                objectName: "studyRowTags:" + studyBlock.index
+                                width: parent.width
+                                visible: Array.from(studyBlock.modelData.tags || []).length > 0
+                                textFormat: Text.StyledText
+                                text: Array.from(studyBlock.modelData.tags || []).map(function(tag) {
+                                    const shared = panel.rootTags.some(function(own) { return own.id === tag.id })
+                                    return '<font color="' + (shared ? panel.desktop.accent : panel.desktop.muted) + '">#' + KeyNotation.escapeHtml(tag.name) + "</font>"
+                                }).join("&nbsp; ")
+                                font.family: panel.desktop.fontFamily
+                                font.pixelSize: 12 * panel.studyScale
+                                wrapMode: Text.Wrap
+                            }
+                            TagText {
+                                width: parent.width
+                                text: studyBlock.modelData.excerpt || ""
+                                visible: text.length > 0
+                                lineHeight: panel.bible.lineHeight > 0 ? panel.bible.lineHeight / 1.5 * 1.25 : 1.25
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                                color: panel.desktop.muted
+                            }
                         }
                     }
                 }
                 TagText {
                     objectName: "studyEmpty"
                     anchors.centerIn: parent
-                    width: parent.width
+                    width: parent.width - 24 * panel.studyScale
                     horizontalAlignment: Text.AlignHCenter
-                    visible: studyList.count === 0
-                    text: panel.studyTab === "footnotes"
-                        ? (panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? "Re-import this version (Versions) to read its footnotes." : "No footnotes in this chapter.")
-                        : !panel.relatedSource || !panel.relatedSource.start ? "Select a verse to see its cross references."
-                        : panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? "Re-import this version (Versions) to read its own cross-references."
-                        : !panel.bible.hasCrossReferences ? "No cross-references for this passage; " + panel.bible.versionAbbreviation + " has none of its own."
-                        : "No cross-references for this passage in " + panel.bible.versionAbbreviation + "."
+                    visible: studyList.count === 0 && panel.installed(panel.relatedSource)
                     color: panel.desktop.muted
+                    text: !panel.relatedSource || !panel.relatedSource.start ? "Select a verse to see what goes with it."
+                        : panel.studyQuery.trim().length && panel.crossRows.length + panel.tagRows.length ? "Nothing matches “" + panel.studyQuery.trim() + "”."
+                        : "Nothing goes with " + panel.relatedSource.reference + " yet."
+                            + (panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? " Re-import " + panel.bible.versionAbbreviation + " (Versions) to read its own cross-references." : "")
+                            + (panel.rootTags.length ? "" : " Tag it (" + KeyNotation.format("T") + ") to gather the passages you tag alike.")
                 }
             }
             TagText { objectName: "studyMessage"; Layout.fillWidth: true; visible: text.length > 0; text: panel.relatedShown ? panel.message : "" }

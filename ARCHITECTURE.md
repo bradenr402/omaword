@@ -31,13 +31,13 @@ files.
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (`lastSound`/`playCount` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds) |
 | `qml/Main.qml` | Reader, palettes, Notes, Marks (`savedDrawer`: every version's marks from `marks()`, one row per exact range, filtered, notes written in place), Desk, settings, catalog, About |
-| `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Marks and Study drawers, which stay open) and the Study drawer (tabs Cross-references / Footnotes / Tags; the Tags tab keeps the internal id `related`, as do `relatedDrawer` and the `related` action). Study → Tags roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
-| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Marks and Study: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk: its count) |
+| `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Marks and See also drawers, which stay open) and the See also drawer (`relatedDrawer`, the `related` action: one list, in sections, from `crossReferences` and `relatedPassages` in every version, filtered by words or `#tag`). See also roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
+| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Marks and See also: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk: its count) |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
 | `qml/ExitGhost.qml` | Exit motion for popups that close at once (menus, modals): a frozen `ShaderEffectSource` picture that fades and shrinks toward the trigger, never taking input |
 | `qml/AppContextMenu.qml`, `qml/AppToolTip.qml`, `qml/RowMenu.js` | Shared context menu (scrolls when taller than the window; also replaces Qt's text-field menu via `ContextMenu.menu: null` → `openTextMenu`) and themed tooltip; `RowMenu.entries` builds every list row's menu (Open · Copy · Copy plain text · Desk, then the row's extras) |
-| `qml/PanelTabs.qml` | Shared tab row (Study, palette Passage/Search/Command): sizing, selected accent tint, focus outline |
+| `qml/PanelTabs.qml` | Shared tab row (palette Passage/Search/Command): sizing, selected accent tint, focus outline |
 | `qml/ChapterFind.qml`, `qml/SearchHighlights.qml` | `/` chapter find; match overlay painting |
 | Passage palette (`Main.qml`) | One input over a list (`paletteResults`: books, candidates, recents, commands, search results) or, while a book is chosen, a five-column chapter grid (`paletteChapters`); `paletteList` is whichever shows, so keys, snapshots, and resume treat them alike |
 | `qml/HintRow.qml` | Every panel/modal key hint row: parts `[keys, label, run, enabled]`; parts with `run` are clickable while enabled (hover tint, pointing hand), navigation parts never; `text` keeps the plain styled markup |
@@ -112,7 +112,7 @@ files.
   votes ≤ 0 dropped, columnar + delta/varint, `qCompress`ed: ≈ 0.9 MB for
   341k rows) into `resources/crossrefs.bin`, embedded in the core library
   (`src/core.qrc`) and decoded once per process. `hasCrossReferences` (the
-  source has `\x` notes) words Study's empty state.
+  source has `\x` notes) words See also's empty state.
 
 - Seven catalog entries (`engnet`, `eng-kjv2006`, `eng-kjv` = **KJV+**, `engojb`,
   `engylt`, `eng-asv`, `engbsb`) from `https://ebible.org/Scriptures/<id>_usfm.zip`.
@@ -299,7 +299,7 @@ files.
   it does not take go to the owner (`keyPressed`). Footnotes use it: a
   marker's click or `i` on the cursor verse shows the note, `↑`/`↓` step
   through the chapter's notes (`bible.footnotes`) without moving the reader,
-  `y` copies, `enter` opens Study → Footnotes there.
+  `y` copies, `enter` opens See also on the note's verse.
 
 ### Selection bar
 - A verse selection made with the mouse (`mouseSelected`, from Verse rows and
@@ -309,7 +309,7 @@ files.
   it flips below at the top and is placed again after relayouts. Any catalog
   key (`runKey`), `esc`, a new chapter, or losing the reader's keys hides it;
   its own parts and its ⋯ menu keep it up, except those that open a panel or
-  dialog (note, tag, Compare, Study).
+  dialog (note, tag, Compare, See also).
 
 ### Compare
 - `compareVersions(scope)` reads the scope's endpoints in every installed
@@ -390,7 +390,7 @@ files.
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw
   `paintLayoutGlyph`'s icons.
-- With a drawer side panel open (Marks, Desk, Study), the keys
+- With a drawer side panel open (Marks, Desk, See also), the keys
   of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
   keyboard to the reader, close the panel, then act (`runKey`) — so the
   drawer's exit cannot hand focus back over what opened. Notes is not modal:
@@ -469,7 +469,7 @@ files.
   Paragraph/Block; Verse rows insert `<img src="qrc:/resources/cell.png">` in
   the row HTML and overlay marks at `positionToRectangle`. `SourcePositionMap`
   skips U+FFFC/U+2060 in rendered text, so search offsets survive; copy strips
-  the cells. Clicking one selects the verse and opens Study → Footnotes there.
+  the cells. Clicking one peeks at its note (Peek).
 - Words of Jesus: `<span class="wj">` gets an inline color (desktop `color1`,
   i.e. Omarchy `color1`/`red`, else accent) only while the setting is on;
   layout is unchanged.

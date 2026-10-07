@@ -1589,10 +1589,10 @@ private slots:
         }
         // Use executable panel rows for the dispatch check; their order/height
         // can change independently of the full-catalog geometry checks above.
-        bible->selectVerses(1,1); // Study needs a selection to be executable.
-        // "study panel", not "panel": the Write/Preview row "(Notes panel)"
+        bible->selectVerses(1,1); // See also needs a selection to be executable.
+        // "see also panel", not "panel": the Write/Preview row "(Notes panel)"
         // is unavailable without an open note.
-        type("study panel");
+        type("see also panel");
         key(Qt::Key_Home); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
         key(Qt::Key_PageDown);
         QVERIFY(current()->property("available").toBool());
@@ -1711,7 +1711,7 @@ private slots:
             QVERIFY(QMetaObject::invokeMethod(object("tagsUi"),"toggleTag",Q_ARG(QVariant,tag)));
             QVERIFY(bible->tagsForScope(john).isEmpty());
             QCOMPARE(bible->tagsForScope(genesis).size(),1);
-            QVERIFY(!item("tagResults")->isVisible());
+            QVERIFY(!item("studyList")->isVisible());
             key(Qt::Key_Escape);
             QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
             QCOMPARE(bible->tagScope(),john);
@@ -4253,21 +4253,19 @@ private slots:
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Love").isEmpty());
         reference("John 3:16");
         key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
-        key(Qt::Key_H); QTRY_COMPARE(prop("tagsUi","studyTab").toString(),QString("related"));
-        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        QTRY_VERIFY(item("studyList")->hasActiveFocus());
         QVERIFY(!item("studySearch")->isVisible());
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
-        QVERIFY(!item("studyTagCount")->isVisible()); // The field replaces the count line.
         type("zq"); QCOMPARE(prop("studySearch","text").toString(),QString("zq"));
-        // esc in the field leaves it and keeps the query, shown in the count line.
+        // esc in the field leaves it and keeps the filter, still shown.
         key(Qt::Key_Escape);
         QTRY_VERIFY(!item("studySearch")->hasActiveFocus());
-        QVERIFY(item("tagResults")->hasActiveFocus());
+        QVERIFY(item("studyList")->hasActiveFocus());
         QVERIFY(prop("relatedDrawer","visible").toBool());
         QCOMPARE(prop("tagsUi","studyQuery").toString(),QString("zq"));
-        QTRY_VERIFY(item("studyTagCount")->isVisible());
-        QCOMPARE(prop("studyTagCount","text").toString(),QString::fromUtf8("0 of 1 passage · “zq”"));
-        // The next esc closes, as in Annotations.
+        QVERIFY(item("studySearch")->isVisible());
+        QCOMPARE(prop("studyEmpty","text").toString(),QString::fromUtf8("Nothing matches “zq”."));
+        // The next esc closes, as in Marks.
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
     }
@@ -4381,23 +4379,26 @@ private slots:
         reference("John 3:16");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Sent").isEmpty());
         key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
-        key(Qt::Key_H); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
-        QTRY_COMPARE(prop("tagResults","count").toInt(),1);
+        QTRY_VERIFY(item("studyList")->hasActiveFocus());
+        // The tagged-alike passage follows the cross references.
+        QVariantList rows;
+        QTRY_VERIFY((rows = prop("tagsUi","studyRows").value<QJSValue>().toVariant().toList(), !rows.isEmpty()));
+        QCOMPARE(rows.last().toMap().value("reference").toString(),QString("John 3:17"));
+        QCOMPARE(rows.last().toMap().value("section").toString(),QString("tags"));
+        key(Qt::Key_G,Qt::ShiftModifier); QCOMPARE(prop("studyList","currentIndex").toInt(),rows.size() - 1);
         QApplication::clipboard()->clear();
         key(Qt::Key_Y); QTRY_VERIFY(QApplication::clipboard()->text().contains("John 3:17"));
         key(Qt::Key_Y,Qt::ShiftModifier);
         QTRY_VERIFY(!QApplication::clipboard()->text().contains("John 3:17"));
         key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),1);
         QCOMPARE(bible->desk().first().toMap().value("reference").toString(),QString("John 3:17"));
-        key(Qt::Key_J); QCOMPARE(prop("tagResults","currentIndex").toInt(),0);
-        // k from the first row climbs into the chips; j comes back.
-        key(Qt::Key_K); QVERIFY(!item("tagResults")->hasActiveFocus());
-        key(Qt::Key_J); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        key(Qt::Key_J); QCOMPARE(prop("studyList","currentIndex").toInt(),rows.size() - 1);
+        QVERIFY(item("studyList")->hasActiveFocus());
         QCOMPARE(bible->selectionReference(),QString("John 3:16"));
-        // Study never removes tags: delete is inert on its results.
+        // See also never removes tags: delete is inert on its rows.
         key(Qt::Key_Delete); QTest::qWait(50);
         QCOMPARE(bible->tagsForScope(other).size(),1);
-        QCOMPARE(prop("tagResults","count").toInt(),1);
+        QCOMPARE(prop("studyList","count").toInt(),rows.size());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
     }
     void annotationsSearchVisibilityAndEscapes() {
@@ -4506,7 +4507,7 @@ private slots:
             "savedControl","relatedControl","deskControl","footerMore"};
         window->setMinimumWidth(320);
         struct Case { int width; int height; double scale; bool stacked; bool collapsed; };
-        // Four left buttons (focus, Aa, mode, help) and three right (Annotations, Study, Desk).
+        // Four left buttons (focus, Aa, mode, help) and three right (Marks, See also, Desk).
         const QList<Case> cases = {{1120,820,1,false,false},{900,820,1.5,true,false},{700,820,1,false,false},
             {700,820,1.5,true,false},{640,820,1.5,true,false},{560,820,1.5,true,true},{560,820,2.4,true,true},
             {420,640,1,true,true},{360,640,1.5,true,true}};
@@ -5472,7 +5473,7 @@ private slots:
         QVERIFY(!prop("tagsSurface","visible").toBool());
         QVERIFY(!prop("tagsUi","visibleModal").toBool());
         QVERIFY(!prop("tagsUi","scopePinned").toBool());
-        for (const auto name : {"tagResults", "tagSearch", "createPassageTag"})
+        for (const auto name : {"studyList", "tagSearch", "createPassageTag"})
             QVERIFY(!item(name)->isVisible());
         key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
@@ -5499,7 +5500,7 @@ private slots:
         const auto helpBounds = item("helpControl")->mapRectToScene(item("helpControl")->boundingRect());
         if (item("helpControl")->isVisible()) QCOMPARE(helpBounds.left(),modeBounds.right());
         else QVERIFY(!window->property("footerShowsHelp").toBool());
-        // Right group order: Annotations, Study, Desk (no Notes); a column when cramped.
+        // Right group order: Marks, See also, Desk (no Notes); a column when cramped.
         const auto scene = [this](const char *name) { return item(name)->mapRectToScene(item(name)->boundingRect()); };
         if (window->property("footerStacked").toBool()) {
             QVERIFY(relatedBounds.bottom() < modeBounds.bottom());
@@ -5511,21 +5512,20 @@ private slots:
             QCOMPARE(scene("savedControl").right(),relatedBounds.left());
             QVERIFY(relatedBounds.right() <= scene("deskControl").left());
         }
-        // Study draws its own book-and-magnifier glyph, not the tag; Annotations wears the note.
+        // See also draws its own book-and-magnifier glyph, not the tag; Marks wears the note.
         QCOMPARE(related->property("glyph").toString(),QString("study"));
         QVERIFY(!item("relatedControlGlyph")->isVisible());
         QCOMPARE(prop("savedControlGlyph","kind").toString(),QString("note"));
         QVERIFY(item("savedControlGlyph")->isVisible());
         click(related); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
         QVERIFY(!prop("savedDrawer","visible").toBool());
-        key(Qt::Key_H); QTRY_COMPARE(prop("tagsUi","studyTab").toString(),QString("related"));
         const auto inner = item("studyBody")->mapRectToScene(item("studyBody")->boundingRect());
         const qreal padding = 24 * 1.8;
         QVERIFY(qAbs(inner.left() - (window->width() - prop("relatedDrawer","width").toReal() + padding)) < 0.1);
         QVERIFY(qAbs(inner.right() - (window->width() - padding)) < 0.1);
         QVERIFY(qAbs(inner.top() - padding) < 0.1);
         QVERIFY(qAbs(inner.bottom() - (window->height() - padding)) < 0.1);
-        for (const auto name : {"studyHeader", "studyTabs", "studyChips", "tagResults", "studyHints"}) {
+        for (const auto name : {"studyHeader", "studyHeaderRule", "studyList", "studyHints"}) {
             auto button = item(name); QVERIFY2(button && button->isVisible(),name);
             const auto bounds = button->mapRectToScene(button->boundingRect());
             QVERIFY2(inner.adjusted(-1,-1,1,1).contains(bounds),qPrintable(QString("%1: %2,%3 %4x%5 in %6,%7 %8x%9").arg(name).arg(bounds.x()).arg(bounds.y())

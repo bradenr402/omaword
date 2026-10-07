@@ -490,9 +490,11 @@ private slots:
         key(Qt::Key_Right); QVERIFY(item("cleanDeskConfirm")->hasActiveFocus());
         clickHint("cleanDeskHintsPart:select"); QTRY_VERIFY(bible->desk().isEmpty());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
-        // Study and the tag picker.
+        // See also and the tag picker.
         run("related"); QTRY_VERIFY(opened("relatedDrawer"));
-        QVERIFY(!item("studyHintsPart:tabs")->property("clickable").toBool());
+        QTRY_VERIFY(item("studyHintsPart:filter")); QVERIFY(item("studyHintsPart:filter")->property("clickable").toBool());
+        clickHint("studyHintsPart:filter"); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
         clickHint("studyHintsPart:close"); QTRY_VERIFY(!shown("relatedDrawer"));
         run("tags"); QTRY_VERIFY(opened("tagsSurface")); type("Grace");
         clickHint("tagsHintsPart:toggle / create"); QTRY_COMPARE(bible->tags().size(), 1);
@@ -523,21 +525,14 @@ private slots:
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), (shared + QStringList{"|", "note", "tags", "moveHere", "delete", "undo"}));
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
-        // Study Cross-references: mouse and keyboard.
+        // See also rows: mouse and keyboard (Edit tags follows the shared four).
         navigate("John 1:1"); run("related"); QTRY_VERIFY(opened("relatedDrawer"));
         QTRY_VERIFY(item("studyRow:0") && item("studyRow:0")->isVisible());
         click(item("studyRow:0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), shared);
+        QCOMPARE(menuIds(), (shared + QStringList{"|", "tags"}));
         QGuiApplication::clipboard()->clear(); chooseMenu("copy");
         QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("Genesis 1:1"));
-        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool()); QCOMPARE(menuIds(), shared);
-        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
-        // Footnotes rows too.
-        key(Qt::Key_L); QTRY_COMPARE(object("tagsUi")->property("studyTab").toString(), QString("footnotes"));
-        navigate("John 3:3"); run("related"); QTRY_VERIFY(opened("relatedDrawer"));
-        QTRY_VERIFY(item("studyRow:0") && item("studyRow:0")->isVisible());
-        click(item("studyRow:0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), shared);
+        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool()); QCOMPARE(menuIds(), (shared + QStringList{"|", "tags"}));
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
     }
     void paletteRecentsAndLinkedNotesHaveRowMenus() {
@@ -1605,7 +1600,7 @@ private slots:
             auto marker = visualPrefix(window->contentItem(), mode == "verse" ? "verseFootnoteMark:3." : "blockInlineMarker:footnote:");
             QVERIFY2(marker, qPrintable(mode)); QVERIFY(!marker->activeFocusOnTab());
             auto tip = toolTipOf(marker); QVERIFY(tip);
-            QVERIFY2(tip->property("text").toString().contains(QStringLiteral("shift S → Footnotes")), qPrintable(tip->property("text").toString()));
+            QVERIFY2(tip->property("text").toString().endsWith(QStringLiteral("Click or i: peek")), qPrintable(tip->property("text").toString()));
             // Mouse: hovering shows it.
             QTest::mouseMove(window, center(marker)); QTRY_VERIFY(tip->property("visible").toBool());
             QTest::mouseMove(window, QPoint(5, window->height() / 2));
@@ -1804,44 +1799,38 @@ private slots:
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         }
     }
-    void studyTagChipsAndCountByMouseAndKey() {
+    void seeAlsoTagsByMouseAndKey() {
         bible->selectVerses(7, 7); const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
         bible->selectVerses(9, 9); const QString beta = bible->createAndAssignTag(bible->tagScope(), "Beta");
         bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true)); QVERIFY(bible->setTag(bible->tagScope(), beta, true));
         navigate("John 3:3");
         auto tags = object("tagsUi");
-        QVERIFY(QMetaObject::invokeMethod(tags, "openStudy", Q_ARG(QVariant, "related"), Q_ARG(QVariant, QVariant())));
-        QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyChip:" + alpha));
-        auto chip = item("studyChip:" + alpha);
-        // Every chip's tooltip explains the clicks.
-        auto tip = toolTipOf(chip); QVERIFY(tip);
-        QVERIFY(tip->property("text").toString().contains("shift click: show only this tag"));
-        QTest::mouseMove(window, center(chip) + QPoint(1, 1)); QTest::mouseMove(window, center(chip)); QTRY_VERIFY(tip->property("visible").toBool());
-        // Mouse: the chip's menu shows only this tag, then all tags again.
-        click(chip, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), QStringList({"soloChip", "allChips", "|", "editTags"}));
-        QVERIFY(!menuEnabled("allChips"));
-        chooseMenu("soloChip"); QCOMPARE(value(tags->property("onIds")).toStringList(), QStringList{alpha});
-        click(chip, Qt::RightButton); chooseMenu("allChips"); QCOMPARE(value(tags->property("onIds")).toStringList().size(), 2);
-        // Keyboard: the chip hints use the same words.
-        chip->forceActiveFocus();
-        QTRY_VERIFY(object("studyHints")->property("plainText").toString().contains("shift space show only this tag"));
-        QVERIFY(object("studyHints")->property("plainText").toString().contains("0 show all tags"));
-        key(Qt::Key_Space, Qt::ShiftModifier); QCOMPARE(value(tags->property("onIds")).toStringList(), QStringList{alpha});
-        key(Qt::Key_0); QCOMPARE(value(tags->property("onIds")).toStringList().size(), 2);
-        // The count line opens the passage search; its menu offers All versions and Search.
-        auto count = item("studyTagCount"); QVERIFY(count && count->isVisible());
-        QCOMPARE(item("studyTagCountMouse")->cursor().shape(), Qt::PointingHandCursor);
-        click(item("studyTagCountMouse")); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!item("studySearch")->isVisible());
-        QTRY_VERIFY(item("studyTagCount")->isVisible());
-        click(item("studyTagCountMouse"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), QStringList({"allVersions", "searchPassages"}));
-        QVERIFY(!menuEnabled("allVersions")); // one version installed
-        chooseMenu("searchPassages"); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
-        key(Qt::Key_Escape);
-        // Edit tags from the chip menu opens the tag picker for the passage.
-        click(item("studyChip:" + alpha), Qt::RightButton); chooseMenu("editTags"); QTRY_VERIFY(opened("tagsSurface"));
+        run("related"); QTRY_VERIFY(opened("relatedDrawer"));
+        // Mouse: the heading's tags are links (a hand, a tooltip); one keeps only its passages.
+        QTRY_VERIFY(item("studySectionTag:Alpha") && item("studySectionTag:Alpha")->isVisible());
+        auto link = item("studySectionTag:Alpha");
+        QCOMPARE(mouseAreaOf(link)->cursor().shape(), Qt::PointingHandCursor);
+        auto tip = toolTipOf(link); QVERIFY(tip);
+        QTest::mouseMove(window, center(link) + QPoint(1, 1)); QTest::mouseMove(window, center(link)); QTRY_VERIFY(tip->property("visible").toBool());
+        QCOMPARE(tip->property("text").toString(), QString("Only the passages tagged Alpha"));
+        click(link); QTRY_COMPARE(tags->property("studyQuery").toString(), QString("#Alpha"));
+        QTRY_COMPARE(item("studyList")->property("count").toInt(), 1);
+        QVERIFY(item("studyList")->hasActiveFocus());
+        // Keyboard: / edits the filter; the hints name the keys.
+        QVERIFY(object("studyHints")->property("plainText").toString().contains("/ filter"));
+        key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
+        key(Qt::Key_A, Qt::ControlModifier); type("#beta"); QTRY_COMPARE(item("studyList")->property("count").toInt(), 1);
+        QVERIFY(object("studyHints")->property("plainText").toString().contains("esc leave filter"));
+        key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
+        // t on a row opens the tag picker for its passage.
+        QVERIFY(object("studyHints")->property("plainText").toString().contains("t tag"));
+        key(Qt::Key_T); QTRY_VERIFY(opened("tagsSurface"));
+        QCOMPARE(value(tags->property("editingScope")).toMap()["start"].toInt(), 9);
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
+        // A tagged passage's row menu: Edit tags and Move here too.
+        click(item("studyRow:0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(menuIds(), QStringList({"open", "copy", "copyPlain", "desk", "|", "tags", "moveHere"}));
+        chooseMenu("tags"); QTRY_VERIFY(opened("tagsSurface"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
     }
     void marginNotesTakeTheMarkerMenu() {
@@ -1977,19 +1966,18 @@ private slots:
         QTest::qWait(50); click(item("setupImport")); QTRY_VERIFY(opened("importGuide"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
     }
-    void studyTagsEscapeClosesLikeAnnotations() {
+    void seeAlsoEscapeClosesLikeMarks() {
         bible->selectVerses(7, 7); const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
         bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true));
         navigate("John 3:3");
         auto tags = object("tagsUi");
         auto openTags = [&] {
-            QVERIFY(QMetaObject::invokeMethod(tags, "openStudy", Q_ARG(QVariant, "related"), Q_ARG(QVariant, QVariant())));
-            QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+            run("related"); QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyList")->hasActiveFocus());
         };
         openTags();
-        // Keyboard: / searches; esc leaves the field keeping the query; the next esc closes.
+        // Keyboard: / filters; esc leaves the field keeping the filter; the next esc closes.
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus()); type("zz");
-        key(Qt::Key_Escape); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
         QCOMPARE(tags->property("studyQuery").toString(), QString("zz"));
         QVERIFY(object("studyHints")->property("plainText").toString().contains("esc close"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer")); QTRY_VERIFY(readerFocused());
@@ -2017,13 +2005,12 @@ private slots:
     }
     void helpTitlesSayWhereKeysWork() {
         // Keyboard: search Keybindings for the clarified rows.
-        run("help"); QTRY_VERIFY(opened("helpDialog")); type("tab");
-        QTRY_VERIFY(item("keybindingPrevious tab (Study)"));
-        QTRY_VERIFY(item("keybindingNext tab (Study)"));
+        run("help"); QTRY_VERIFY(opened("helpDialog")); type("tags");
+        QTRY_VERIFY(item("keybindingEdit the item's tags (Marks, See also)"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
         run("help"); QTRY_VERIFY(opened("helpDialog")); type("filter the list");
         QQuickItem *row = nullptr;
-        QTRY_VERIFY((row = item("keybindingFilter the list, #name for a tag (Marks with more than 10 items, Study's Tags)")) != nullptr);
+        QTRY_VERIFY((row = item("keybindingFilter the list, #name for a tag (Marks with more than 10 items, See also)")) != nullptr);
         // Mouse: hovering the row names its scope.
         QTest::qWait(50); QTest::mouseMove(window, center(row)); QTRY_VERIFY(toolTipOf(row)->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
@@ -2072,9 +2059,9 @@ private slots:
         QCOMPARE(mouseAreaOf(row)->cursor().shape(), Qt::PointingHandCursor);
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
         const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
-        QVERIFY(QMetaObject::invokeMethod(object("tagsUi"), "openStudy", Q_ARG(QVariant, "related"), Q_ARG(QVariant, QVariant())));
-        QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyChip:" + alpha));
-        QCOMPARE(mouseAreaOf(item("studyChip:" + alpha))->cursor().shape(), Qt::PointingHandCursor);
+        bible->selectVerses(9, 9); QVERIFY(bible->setTag(bible->tagScope(), alpha, true)); bible->selectVerses(3, 3);
+        run("related"); QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studySectionTag:Alpha"));
+        QCOMPARE(mouseAreaOf(item("studySectionTag:Alpha"))->cursor().shape(), Qt::PointingHandCursor);
         QVERIFY(QMetaObject::invokeMethod(object("relatedDrawer"), "close")); QTRY_VERIFY(!shown("relatedDrawer"));
         // [[ suggestions: hovering one chooses it (tint); a click inserts it.
         navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
@@ -2450,35 +2437,28 @@ private slots:
         key(Qt::Key_Return); QTRY_COMPARE(bible->cursorVerse(), 20);
         item("chapterOutline")->forceActiveFocus(); QTest::keyClick(window, '{'); QTRY_VERIFY(bible->cursorVerse() < 20);
     }
-    void reauditStudyChipsRowsAndTooltips() {
+    void reauditSeeAlsoRowsAndTooltips() {
         bible->selectVerses(7, 7); const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
-        bible->selectVerses(9, 9); const QString beta = bible->createAndAssignTag(bible->tagScope(), "Beta");
-        bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true)); QVERIFY(bible->setTag(bible->tagScope(), beta, true));
+        bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true));
         navigate("John 3:3");
         auto tags = object("tagsUi");
-        QVERIFY(QMetaObject::invokeMethod(tags, "openStudy", Q_ARG(QVariant, "related"), Q_ARG(QVariant, QVariant())));
-        QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyChip:" + alpha));
-        auto chip = item("studyChip:" + alpha); auto tip = toolTipOf(chip);
-        QVERIFY(tip->property("text").toString().contains("Click: turn on/off"));
-        // Mouse: a click toggles without taking the keyboard; leaving hides the tooltip.
-        const int on = value(tags->property("onIds")).toStringList().size();
-        QTest::mouseMove(window, center(chip) + QPoint(1, 1)); QTest::mouseMove(window, center(chip)); QTRY_VERIFY(tip->property("visible").toBool());
-        click(chip); QTRY_COMPARE(value(tags->property("onIds")).toStringList().size(), on - 1);
-        QVERIFY(!chip->hasActiveFocus());
-        click(chip); QTRY_COMPARE(value(tags->property("onIds")).toStringList().size(), on);
+        run("related"); QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studySectionTag:Alpha"));
+        // Mouse: leaving a heading's tag hides its tooltip.
+        auto link = item("studySectionTag:Alpha"); auto tip = toolTipOf(link);
+        QTest::mouseMove(window, center(link) + QPoint(1, 1)); QTest::mouseMove(window, center(link)); QTRY_VERIFY(tip->property("visible").toBool());
         QTest::mouseMove(window, QPoint(10, window->height() / 2)); QTRY_VERIFY(!tip->property("visible").toBool());
-        // Keyboard: focus by key shows it; t opens the tag picker for the Study passage.
-        chip->forceActiveFocus(Qt::TabFocusReason); QTRY_VERIFY(tip->property("visible").toBool());
-        QVERIFY(object("studyHints")->property("plainText").toString().contains("t tag passage"));
+        // Keyboard: with no row (a filter matching nothing), t opens the tag picker for the passage.
+        key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus()); type("nothing here");
+        key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus()); QCOMPARE(item("studyList")->property("count").toInt(), 0);
         key(Qt::Key_T); QTRY_VERIFY(opened("tagsSurface"));
         QCOMPARE(value(tags->property("editingScope")).toMap()["start"].toInt(), 3);
         // Tag rows never take tab.
         auto tagRow = item("tag:" + alpha); QVERIFY(tagRow); QCOMPARE(tagRow->property("focusPolicy").toInt(), int(Qt::NoFocus));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
-        // Study's Cross-references rows never take tab either; home and end move the list.
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+        // See also's rows never take tab either; home and end move the list.
         navigate("John 1:1");
-        QVERIFY(QMetaObject::invokeMethod(tags, "openStudy", Q_ARG(QVariant, "crossrefs"), Q_ARG(QVariant, QVariant())));
-        QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyRow:0"));
+        run("related"); QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyRow:0"));
         QCOMPARE(item("studyRow:0")->property("focusPolicy").toInt(), int(Qt::NoFocus));
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
         key(Qt::Key_End); QCOMPARE(item("studyList")->property("currentIndex").toInt(), item("studyList")->property("count").toInt() - 1);
