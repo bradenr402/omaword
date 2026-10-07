@@ -4079,11 +4079,13 @@ private slots:
                 owners.insert(key,id);
             }
         }
-        for (const auto &removed : {"S","Ctrl+P","Ctrl+M","Shift+H","Ctrl+A","Shift+R","Shift+X","Ctrl+Shift+N",
-                                    "R","P","B","Ctrl+[","Ctrl+]","Ctrl+\\"})
+        for (const auto &removed : {"S","Ctrl+P","Ctrl+M","Shift+H","Ctrl+A","Shift+X","Ctrl+Shift+N",
+                                    "P","B","Ctrl+[","Ctrl+]","Ctrl+\\"})
             QVERIFY2(!owners.contains("app:" + QKeySequence(QString(removed)).toString()),removed);
-        // [ ] - travel the jumps; ctrl h opens History in the palette.
-        for (const auto &[sequence,id] : QList<QPair<QString,QString>>{{"[","historyBack"},{"]","historyForward"},{"-","historySwap"},{"Ctrl+H","history"}})
+        // [ ] - travel the jumps; ctrl h opens History in the palette; r and
+        // shift R are the ribbon's; u and ctrl r undo and redo.
+        for (const auto &[sequence,id] : QList<QPair<QString,QString>>{{"[","historyBack"},{"]","historyForward"},{"-","historySwap"},{"Ctrl+H","history"},
+                {"R","ribbon"},{"Shift+R","placeRibbon"},{"U","undo"},{"Ctrl+R","redo"}})
             QCOMPARE(owners.value("app:" + QKeySequence(sequence).toString()),id);
     }
     void aliasesWorkButStayHidden() {
