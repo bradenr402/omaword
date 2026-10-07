@@ -21,6 +21,7 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <limits>
+#include <sys/stat.h>
 #include <unistd.h>
 
 class BackendTest : public QObject
@@ -1034,6 +1035,42 @@ private slots:
         }
         QSqlDatabase::removeDatabase("corruption");
         QString error; QVERIFY(!UsfmImporter::validateDatabase(path,&error)); QVERIFY(!error.isEmpty());
+    }
+    void unchangedGenerationsOpenWithoutRevalidation() {
+        install(net);
+        const QString path = installedPath();
+        const QString record = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/validated-bibles.json";
+        auto identity = [](const QString &file) {
+            struct stat info;
+            if (::stat(QFile::encodeName(file).constData(),&info) != 0) return QString();
+            return QStringLiteral("%1 %2 %3 %4.%5 %6.%7").arg(info.st_dev).arg(info.st_ino).arg(info.st_size)
+                .arg(info.st_mtim.tv_sec).arg(info.st_mtim.tv_nsec).arg(info.st_ctim.tv_sec).arg(info.st_ctim.tv_nsec);
+        };
+        auto recorded = [&] {
+            QFile file(record);
+            return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+        };
+        auto setRecorded = [&](const QJsonObject &object) {
+            QSaveFile file(record);
+            return file.open(QIODevice::WriteOnly) && file.write(QJsonDocument(object).toJson()) > 0 && file.commit();
+        };
+        // The import's open validated the generation and recorded its file identity.
+        QCOMPARE(recorded().value(path).toString(),identity(path));
+        bible.reset();
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","edited"); db.setDatabaseName(path); QVERIFY(db.open());
+            QSqlQuery q(db); QVERIFY(q.exec("UPDATE verses SET text=text||' changed' WHERE book=1 AND chapter=1 AND number=1"));
+        }
+        QSqlDatabase::removeDatabase("edited");
+        // An edit in place changes the identity: the next open validates again and refuses it.
+        QVERIFY(recorded().value(path).toString() != identity(path));
+        bible = std::make_unique<BibleBackend>();
+        QVERIFY(!bible->ready()); QVERIFY2(bible->error().contains("digest"),qPrintable(bible->error()));
+        // An identity matching the record is trusted as already validated.
+        bible.reset();
+        auto object = recorded(); object.insert(path,identity(path)); QVERIFY(setRecorded(object));
+        bible = std::make_unique<BibleBackend>();
+        QVERIFY2(bible->ready() && bible->error().isEmpty(),qPrintable(bible->error()));
     }
     void textSchemaFootnotesAndReimportFlag() {
         const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));

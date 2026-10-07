@@ -129,6 +129,39 @@ bool bibleIdentity(const QString &path, const QString &id)
     QSqlDatabase::removeDatabase(name);
     return matches;
 }
+// Generations are immutable files, so one full validation (quick_check and the
+// content digest: most of a launch) per file is enough. It repeats only when
+// the file's identity changes; any in-place write advances its ctime, which
+// user tools cannot set back.
+QString fileIdentity(const QString &path)
+{
+    struct stat info;
+    if (::stat(QFile::encodeName(path).constData(),&info) != 0) return {};
+    return QStringLiteral("%1 %2 %3 %4.%5 %6.%7").arg(info.st_dev).arg(info.st_ino).arg(info.st_size)
+        .arg(info.st_mtim.tv_sec).arg(info.st_mtim.tv_nsec).arg(info.st_ctim.tv_sec).arg(info.st_ctim.tv_nsec);
+}
+bool validateGeneration(const QString &path, QString *error)
+{
+    // A cache: losing it, or failing to write it, only costs a validation.
+    const QString record = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/validated-bibles.json";
+    const QString identity = fileIdentity(path);
+    QFile file(record);
+    QJsonObject validated;
+    if (file.open(QIODevice::ReadOnly) && file.size() < 65536) validated = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    if (!identity.isEmpty() && validated.value(path).toString() == identity) return true;
+    if (!UsfmImporter::validateDatabase(path,error)) return false;
+    if (identity.isEmpty() || fileIdentity(path) != identity) return true;
+    for (const QString &known : validated.keys()) if (!QFileInfo::exists(known)) validated.remove(known);
+    validated.insert(path,identity);
+    QDir().mkpath(QFileInfo(record).absolutePath());
+    QSaveFile output(record);
+    if (output.open(QIODevice::WriteOnly)) {
+        output.write(QJsonDocument(validated).toJson(QJsonDocument::Compact));
+        output.commit();
+    }
+    return true;
+}
 
 const QStringList scopeFields{"book","chapter","start","endBook","endChapter","end"};
 QString normalizedTag(QString name)
@@ -1811,7 +1844,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         } else if (candidate.lastError().isValid() || !removedId.isEmpty()) return setError("Cannot find the Bible removal target.");
     }
     QString validationError;
-    if (!id.isEmpty() && !UsfmImporter::validateDatabase(path,&validationError)) return setError(validationError);
+    if (!id.isEmpty() && !validateGeneration(path,&validationError)) return setError(validationError);
     const auto oldAnchor = endpoint(m_anchor), oldCursor = endpoint(m_cursor);
     // Stage using the ordinary SQL/reference readers with signals blocked. Keep
     // the old read-only connection open until commit; rollback restores every

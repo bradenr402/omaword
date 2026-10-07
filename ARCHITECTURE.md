@@ -55,6 +55,11 @@ files.
   registry pointer to a fresh immutable `bible-<UUID>.sqlite` generation. A crash
   leaves only an unreferenced file. Replacement refreshes affected readers before
   old-file cleanup; ownership checks reject symlinks/hardlinks/foreign targets.
+- Opening a generation validates it fully (`quick_check`, counts, both digests)
+  once per file identity: `validated-bibles.json` in the cache directory records
+  device, inode, size, mtime, and ctime after a pass, and a matching file opens
+  without revalidation. Any write in place advances the ctime, so an edited file
+  is validated again; a lost or unwritable record only costs a validation.
 - Text DB schema is **4** (independent of personal schema): `metadata` (incl.
   digests), `books(...,ordinal)`, `book_aliases`, `source_chapters`,
   `source_keys(book,chapter,number,retained)`, `verses(...,html,heading,poetry,paragraphStart)`,
