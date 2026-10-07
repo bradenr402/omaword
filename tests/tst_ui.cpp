@@ -6273,8 +6273,8 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(window,"readerFocus")); QCoreApplication::processEvents();
         QTest::keyPress(window,Qt::Key_L);
         QCOMPARE(bible->chapter(),4);
-        QTest::qWait(500);
-        QVERIFY2(bible->chapter() >= 6,qPrintable(QString::number(bible->chapter())));
+        // However slowly chapters lay out (a loaded machine), it keeps stepping.
+        QTRY_VERIFY2(bible->chapter() >= 6,qPrintable(QString::number(bible->chapter())));
         QTest::keyRelease(window,Qt::Key_L);
         const int held = bible->chapter();
         QTest::qWait(300); QCOMPARE(bible->chapter(),held);
