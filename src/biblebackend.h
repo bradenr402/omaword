@@ -60,7 +60,7 @@ class BibleBackend : public QObject
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
     Q_PROPERTY(bool hasParagraphs READ hasParagraphs NOTIFY versionChanged)
     // Text DB schema of the active version (4 = notes and words of Jesus kept,
-    // 5 = poetry line levels).
+    // 5 = poetry line levels, 6 = parallel passage lines).
     Q_PROPERTY(int textSchema READ textSchema NOTIFY versionChanged)
     Q_PROPERTY(bool hasWordsOfJesus READ hasWordsOfJesus NOTIFY versionChanged)
     Q_PROPERTY(bool hasCrossReferences READ hasCrossReferences NOTIFY versionChanged)
@@ -189,7 +189,11 @@ public:
     QString readingMode() const { return m_readingMode; }
     int fontSize() const { return m_fontSize; }
     bool hasParagraphs() const { return m_hasParagraphs; }
-    static constexpr int CurrentTextSchema = 5;
+    static constexpr int CurrentTextSchema = 6;
+    // Below this the text lacks what every version shows (footnotes, poetry
+    // indents), so Versions offers a re-import; schema 6 adds only parallel
+    // passages, which few sources have (the catalog says which).
+    static constexpr int ReimportTextSchema = 5;
     int textSchema() const { return m_textSchema; }
     bool hasWordsOfJesus() const { return m_hasWordsOfJesus; }
     bool hasCrossReferences() const { return m_hasCrossReferences; }
@@ -341,10 +345,12 @@ public:
     Q_INVOKABLE QVariantList linkedNotes() const;
     // Cross references for a scope in the active version (empty: the current
     // selection; none without a verse): the source's own \x targets (schema 4)
-    // in source order, then bundled OpenBible.info ones by votes (KJV verse
-    // numbers), each range once, targets absent from this version and the
-    // passage itself hidden.
-    // Rows: canonical scope fields + reference, excerpt, openBible, votes.
+    // in source order, then its parallel passages (schema 6: the \r lines of
+    // the section the passage is in), then bundled OpenBible.info ones by
+    // votes (KJV verse numbers), each range once, targets absent from this
+    // version and the passage itself hidden.
+    // Rows: canonical scope fields + reference, excerpt, source ("own",
+    // "parallel", "openBible"), openBible, votes.
     Q_INVOKABLE QVariantList crossReferences(QVariantMap scope = QVariantMap()) const;
     // Every installed version's text for a scope's endpoints (empty: the
     // selection), in library order: {versionId, abbreviation, name, active,

@@ -146,11 +146,11 @@ class BackendTest : public QObject
     static QMap<QString,QByteArray> studyEntries() {
         return {{"01-GENstudy.usfm", "\\id GEN Study Test Bible\n\\c 1\n\\p\n\\v 1 In the beginning.\\f + \\fr 1:1 \\ft First note\\f*\\x - \\xo 1:1 \\xt Jn 1:1-3; John 1:1-3\\x*\n"
                     "\\v 2 Formless.\\x - \\xo 1:2 \\xt Jn 1:3; Mt 1:2-3, 1; Zz 9:9\\x*\n\\v 3 Light.\\f b \\ft Second note\\f*\n\\c 2\n\\p\n\\v 1 Finished.\n"},
-                {"02-MATstudy.usfm", "\\id MAT Study Test Bible\n\\c 1\n\\p\n\\v 1 Book.\n\\v 2 Abraham.\n\\v 3 Judah.\n"},
+                {"02-MATstudy.usfm", "\\id MAT Study Test Bible\n\\c 1\n\\s1 The record\n\\r (Jn 1:1–3; Luke 3:23; Gen 1:2)\n\\p\n\\v 1 Book.\n\\v 2 Abraham.\n\\v 3 Judah.\n"},
                 {"03-JHNstudy.usfm", "\\id JHN Study Test Bible\n\\c 1\n\\p\n\\v 1 Word.\n\\v 2 Same.\n\\v 3 Made.\n"
                     "\\c 3\n\\p\n\\v 16 For God so loved. He said, \\wj Truly I say\\wj* again.\n"}};
     }
-    // Rewrites a current generation as the schema 3 (or 4) layout older builds wrote.
+    // Rewrites a current generation as the schema 3 (4, or 5) layout older builds wrote.
     static bool downgradeToSchema3(const QString &path, int schema = 3) {
         const QString name = QUuid::createUuid().toString();
         bool ok = false;
@@ -158,7 +158,8 @@ class BackendTest : public QObject
             auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
             if (db.open()) {
                 QSqlQuery q(db);
-                ok = q.exec("DROP TABLE indents") && q.exec(QString("UPDATE metadata SET value='%1' WHERE key='schema'").arg(schema));
+                ok = q.exec("DROP TABLE parallels") && q.exec(QString("UPDATE metadata SET value='%1' WHERE key='schema'").arg(schema));
+                if (schema < 5) ok = ok && q.exec("DROP TABLE indents");
                 if (schema == 3) ok = ok && q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
                     && q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')")
                     && q.exec("UPDATE verses SET html=replace(replace(html,'<span class=\"wj\">',''),'</span>','')");
@@ -170,8 +171,9 @@ class BackendTest : public QObject
                          QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
                          QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
                          QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")};
-                if (schema == 4) queries << "SELECT book,chapter,verse,seq,kind,caller,offset,text,targets FROM notes ORDER BY book,chapter,verse,seq"
+                if (schema >= 4) queries << "SELECT book,chapter,verse,seq,kind,caller,offset,text,targets FROM notes ORDER BY book,chapter,verse,seq"
                                          << "SELECT book,chapter,verse,start,end FROM words_of_jesus ORDER BY book,chapter,verse,start";
+                if (schema == 5) queries << "SELECT book,chapter,verse,levels FROM indents ORDER BY book,chapter,verse";
                 for (const QString &sql : queries) {
                     field(sql.toUtf8()); ok = ok && q.exec(sql);
                     while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
@@ -1437,9 +1439,20 @@ private slots:
     void textSchemaFootnotesAndReimportFlag() {
         const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
         install(path);
-        QCOMPARE(bible->versionId(), QString("study")); QCOMPARE(bible->textSchema(), 5); QVERIFY(bible->hasWordsOfJesus());
+        QCOMPARE(bible->versionId(), QString("study")); QCOMPARE(bible->textSchema(), 6); QVERIFY(bible->hasWordsOfJesus());
         QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
-        QCOMPARE(versionRow(bible.get(),"study")["textSchema"].toInt(), 5);
+        QCOMPARE(versionRow(bible.get(),"study")["textSchema"].toInt(), 6);
+        {
+            // A schema 5 generation (before parallel passages) reads as before; it is
+            // not flagged, as few sources have parallel passages (the catalog says which).
+            const QString file = installedPath();
+            bible.reset(); QVERIFY(downgradeToSchema3(file, 5)); bible = std::make_unique<BibleBackend>();
+            QVERIFY2(bible->ready(), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 5);
+            QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
+            QVERIFY(bible->navigate("Matthew 1:2")); QVERIFY(bible->crossReferences().isEmpty());
+            bible->importUsfm(QUrl::fromLocalFile(path), "study");
+            QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QCOMPARE(bible->textSchema(), 6);
+        }
         {
             // A schema 4 generation (before poetry levels) keeps its notes and is flagged.
             const QString file = installedPath();
@@ -1448,7 +1461,7 @@ private slots:
             QVERIFY(bible->hasWordsOfJesus()); QVERIFY(versionRow(bible.get(),"study")["needsReimport"].toBool());
             QVERIFY(bible->navigate("Genesis 1")); QCOMPARE(bible->footnotes().size(), 2);
             bible->importUsfm(QUrl::fromLocalFile(path), "study");
-            QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QCOMPARE(bible->textSchema(), 5);
+            QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QCOMPARE(bible->textSchema(), 6);
         }
         QVERIFY(bible->navigate("Genesis 1"));
         const auto notes = bible->footnotes();
@@ -1477,10 +1490,39 @@ private slots:
         // Re-import through the ordinary install/replace flow keeps annotations.
         bible->importUsfm(QUrl::fromLocalFile(path), "study");
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 5); QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
+        QCOMPARE(bible->textSchema(), 6); QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
         QVERIFY(installedPath() != file); QVERIFY(!QFile::exists(file));
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16,16);
         QCOMPARE(bible->noteText(), QString("Kept across re-import"));
+    }
+    void parallelPassagesFollowTheirSection() {
+        const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
+        install(path);
+        const auto parallels = [&](const QString &reference) {
+            QStringList out;
+            if (!bible->navigate(reference)) return QStringList{"cannot open " + reference};
+            QStringList order{"own","parallel","openBible"};
+            int stage = 0;
+            for (const auto &value : bible->crossReferences()) {
+                const auto row = value.toMap();
+                const int at = order.indexOf(row["source"].toString());
+                if (at < stage) return QStringList{"out of order"};
+                stage = at;
+                if (at == 1) out << row["reference"].toString();
+                if (row["openBible"].toBool() != (at == 2)) return QStringList{"openBible mismatch"};
+            }
+            return out;
+        };
+        // The section's parallel passages, from anywhere in it; Luke is not in
+        // this version, so it is hidden.
+        const QStringList section{QString::fromUtf8("John 1:1–3"),"Genesis 1:2"};
+        QCOMPARE(parallels("Matthew 1:1"),section);
+        QCOMPARE(parallels("Matthew 1:3"),section);
+        QCOMPARE(parallels("Matthew 1:2-3"),section);
+        // A section never reaches into the next book, and a passage among the
+        // parallels is not its own.
+        QCOMPARE(parallels("John 1:2"),QStringList());
+        QCOMPARE(parallels("Genesis 1:2"),QStringList());
     }
     void crossReferencesComeFromTheSourceThenOpenBible() {
         const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));

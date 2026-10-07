@@ -60,7 +60,7 @@ files.
   device, inode, size, mtime, and ctime after a pass, and a matching file opens
   without revalidation. Any write in place advances the ctime, so an edited file
   is validated again; a lost or unwritable record only costs a validation.
-- Text DB schema is **5** (independent of personal schema): `metadata` (incl.
+- Text DB schema is **6** (independent of personal schema): `metadata` (incl.
   digests), `books(...,ordinal)`, `book_aliases`, `source_chapters`,
   `source_keys(book,chapter,number,retained)`, `verses(...,html,heading,poetry,paragraphStart)`,
   `notes(book,chapter,verse,seq,kind,caller,offset,text,targets)` (`\f`/`\fe`/`\x`
@@ -68,9 +68,13 @@ files.
   `words_of_jesus(book,chapter,verse,start,end)`; `\wj` also renders as
   `<span class="wj">` in `html`; and `indents(book,chapter,verse,levels)`, one
   digit per line of the verse's text (`0` prose, `1`–`4` for `\q1`–`\q4`/`\qm#`,
-  other `\q*` at 1), for verses with a poetry line. Schema 3 and 4 files still
-  validate (own digests) and open without notes (3) or with every poetry line
-  at level 1 (4); Versions flags them (`needsReimport`) for Re-import.
+  other `\q*` at 1), for verses with a poetry line; and
+  `parallels(book,chapter,verse,seq,text)`, the `\r` lines under a heading,
+  on the verse that opens its section. Schema 3–5 files still validate (own
+  digests) and open without notes (3), with every poetry line at level 1 (4),
+  or without parallel passages (5). Below schema 5 Versions flags them
+  (`needsReimport`, `ReimportTextSchema`) for Re-import; a schema 5 version
+  is offered one only when the catalog lists `parallels` among its features.
 - Identity: source ID from numbered internal filename suffixes, cross-checked
   with `copr.htm`; else `usfm-<first 32 hex of SHA-256(title)>`. Outer ZIP name
   never matters.
@@ -97,9 +101,13 @@ files.
   selection's verses (≤ 50) in source order (verse, note, list order; parsed
   with book/chapter carry-over), then appends OpenBible's targets for the same
   verses by votes (ties in canonical order), each exact range once (the
-  source's wins); absent targets and the passage itself are hidden. Rows carry
-  `openBible` and `votes`. OpenBible numbers verses as the KJV does; other
-  versifications are looked up by the same numbers. `bin/crossrefs` converts
+  source's wins); absent targets and the passage itself are hidden. Between
+  them come the source's parallel passages (schema 6): the `\r` lines of the
+  section the passage starts in (back to its heading, within its book) and of
+  any section starting inside it, parsed like `\xt` lists. Rows carry
+  `source` (`own`, `parallel`, `openBible`), `openBible`, and `votes`.
+  OpenBible numbers verses as the KJV does; other versifications are looked up
+  by the same numbers. `bin/crossrefs` converts
   its `cross_references.txt` at development time (OSIS → USFM codes → book IDs,
   votes ≤ 0 dropped, columnar + delta/varint, `qCompress`ed: ≈ 0.9 MB for
   341k rows) into `resources/crossrefs.bin`, embedded in the core library

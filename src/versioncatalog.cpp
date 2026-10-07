@@ -65,7 +65,7 @@ void VersionCatalog::loadEntries()
         const QJsonObject object = value.toObject();
         valid = valid && object.value(QStringLiteral("size")).isDouble() && object.value(QStringLiteral("size")).toDouble() > 0
             && object.value(QStringLiteral("features")).isArray();
-        static const QSet<QString> features = {"footnotes", "headings", "wordsOfJesus", "apocrypha"};
+        static const QSet<QString> features = {"footnotes", "headings", "wordsOfJesus", "apocrypha", "parallels"};
         for (const auto &feature : object.value(QStringLiteral("features")).toArray())
             valid = valid && features.contains(feature.toString());
         seen.insert(id);

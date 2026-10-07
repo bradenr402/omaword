@@ -29,7 +29,7 @@ makepkg -si
 
 ## Bible versions
 
-Choose **Add version** to install NET, KJV, KJV with Apocrypha, OJB, YLT, ASV, or BSB directly from eBible.org. Each version's card says what it is, its year, download size, and license, and what it carries (footnotes, section headings, words of Jesus, the Apocrypha); the download's progress shows in its card. You can also import a local USFM ZIP.
+Choose **Add version** to install NET, KJV, KJV with Apocrypha, OJB, YLT, ASV, or BSB directly from eBible.org. Each version's card says what it is, its year, download size, and license, and what it carries (footnotes, section headings, parallel passages, words of Jesus, the Apocrypha); the download's progress shows in its card. You can also import a local USFM ZIP.
 
 Internet is needed only to download a version. Once installed, reading and annotations work offline, and the original ZIP is no longer needed. Bible text has its own copyright and attribution, shown in About & Attribution.
 
@@ -280,7 +280,7 @@ These also work, but stay out of the in-app list:
 ### Your data
 Bible versions, marks, the Desk, History, and the ribbon stay on this device, in `~/.local/share/omaword/`. Commands back up your marks in every installed version (with the Desk), restore them, and export them as Markdown; backups from earlier versions of OmaWord still restore. Reader windows have independent passages and share one library.
 
-Versions installed before footnotes or poetry indents were supported show **Re-import** in Versions (`ctrl shift I` on the highlighted row) and Reading settings; it replaces the text and keeps your annotations.
+Versions installed before footnotes or poetry indents were supported (or, for a source that lists them, parallel passages) show **Re-import** in Versions (`ctrl shift I` on the highlighted row) and Reading settings; it replaces the text and keeps your annotations.
 
 ## Requirements
 

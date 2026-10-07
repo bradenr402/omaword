@@ -2162,9 +2162,22 @@ ApplicationWindow {
     // "2.9 MB"; the bytes are a catalog snapshot, so approximate.
     function downloadSize(bytes) { return "≈" + (bytes / 1000000).toFixed(1) + " MB" }
     // What re-importing a version of an older text schema adds.
-    function reimportGains(schema) { return schema < 4 ? "footnotes, cross references, words of Jesus, and poetry indents" : "poetry indents" }
+    // A version's text predates what it would show now: footnotes and poetry
+    // indents (every version), or the parallel passages its source has (the
+    // catalog says which, schema 6).
+    function hasParallels(version) {
+        const details = catalogEntry(version.id)
+        return !!details && Array.from(details.features).indexOf("parallels") >= 0
+    }
+    function wantsReimport(version) { return !!version && (version.needsReimport || (version.textSchema > 0 && version.textSchema < 6 && hasParallels(version))) }
+    function reimportGains(version) {
+        const gains = version.textSchema < 4 ? ["footnotes", "cross references", "words of Jesus", "poetry indents"]
+            : version.textSchema < 5 ? ["poetry indents"] : []
+        if (version.textSchema < 6 && hasParallels(version)) gains.push("parallel passages")
+        return gains.length > 1 ? gains.slice(0, -1).join(", ") + " and " + gains[gains.length - 1] : gains.join("")
+    }
     function featureName(feature) {
-        return ({ footnotes: "Footnotes", headings: "Section headings", wordsOfJesus: "Words of Jesus", apocrypha: "Apocrypha" })[feature] || feature
+        return ({ footnotes: "Footnotes", headings: "Section headings", wordsOfJesus: "Words of Jesus", apocrypha: "Apocrypha", parallels: "Parallel passages" })[feature] || feature
     }
     function rejected(reason) {
         if (reason) notify(reason, true)
@@ -3678,7 +3691,7 @@ ApplicationWindow {
         contextMenu.show("version", [
             { id: "switch", text: entry.active ? "Current version" : "Switch to " + (entry.abbreviation || entry.name), shortcut: KeyNotation.format("Return"),
                 enabled: ready && !entry.active, run: function() { app.switchVersion(entry.id) } },
-            entry.needsReimport ? { id: "reimport", text: "Re-import", shortcut: menuKey("reimportVersion"), enabled: ready && !catalog.busy,
+            wantsReimport(entry) ? { id: "reimport", text: "Re-import", shortcut: menuKey("reimportVersion"), enabled: ready && !catalog.busy,
                 run: function() { app.reimportVersion(entry) } } : null,
             { id: "details", text: "Details & Attribution", enabled: !!details,
                 run: function() { catalogDetails.entry = details; catalogDetails.open() } },
@@ -3705,7 +3718,7 @@ ApplicationWindow {
     // The highlighted Versions row, when its text predates the current schema.
     function reimportableVersion() {
         const entry = versionResults.model[versionResults.currentIndex]
-        return !versionDialog.removing && versionDialog.step === 0 && entry && entry.needsReimport ? entry : null
+        return !versionDialog.removing && versionDialog.step === 0 && wantsReimport(entry) ? entry : null
     }
     function versionKey(event) {
         if (event.key === Qt.Key_I && event.modifiers === (Qt.ControlModifier | Qt.ShiftModifier)) {
@@ -7269,13 +7282,13 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Label {
                                 text: versionEntry.modelData.hint || ((versionEntry.modelData.active ? "Current version" : "Installed locally")
-                                    + (versionEntry.modelData.needsReimport ? " · older text format: re-import for " + app.reimportGains(versionEntry.modelData.textSchema) : ""))
+                                    + (app.wantsReimport(versionEntry.modelData) ? " · older text format: re-import for " + app.reimportGains(versionEntry.modelData) : ""))
                                 color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
                                 Layout.fillWidth: true; wrapMode: Text.Wrap
                             }
                             QuietButton {
                                 objectName: "versionReimport:" + (versionEntry.modelData.id || "")
-                                visible: !versionDialog.removing && versionDialog.step === 0 && !!versionEntry.modelData.needsReimport
+                                visible: !versionDialog.removing && versionDialog.step === 0 && app.wantsReimport(versionEntry.modelData)
                                 text: "Re-import"
                                 compact: true
                                 font.pixelSize: 12 * versionDialog.uiScale
@@ -8508,13 +8521,13 @@ ApplicationWindow {
                 Layout.fillWidth: true
             }
             Repeater {
-                model: Array.from(bible.versions).filter(function(version) { return version.needsReimport })
+                model: Array.from(bible.versions).filter(function(version) { return app.wantsReimport(version) })
                 delegate: RowLayout {
                     id: reimportRow
                     required property var modelData
                     Layout.fillWidth: true
                     Label {
-                        text: reimportRow.modelData.abbreviation + " uses an older text format: re-import for " + app.reimportGains(reimportRow.modelData.textSchema) + "."
+                        text: reimportRow.modelData.abbreviation + " uses an older text format: re-import for " + app.reimportGains(reimportRow.modelData) + "."
                         color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     QuietButton {

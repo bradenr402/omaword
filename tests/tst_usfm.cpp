@@ -224,7 +224,7 @@ private slots:
         const auto result = UsfmImporter::importFile(path, target); QVERIFY2(result.ok, qPrintable(result.error));
         QString error; QVERIFY2(UsfmImporter::validateDatabase(target, &error), qPrintable(error));
         Database db(target);
-        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("5"));
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("6"));
         const QString text = db.scalar("SELECT text FROM verses WHERE number=1").toString();
         QCOMPARE(text, QString("He said, Follow me. Then went."));
         // Heading note anchors at the start of the following verse.
@@ -249,7 +249,7 @@ private slots:
         const auto result = UsfmImporter::importFile(path, target); QVERIFY2(result.ok, qPrintable(result.error));
         QString error; QVERIFY2(UsfmImporter::validateDatabase(target, &error), qPrintable(error));
         Database db(target);
-        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("5"));
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("6"));
         QCOMPARE(db.scalar("SELECT levels FROM indents WHERE verse=1").toString(), QString("12"));
         QCOMPARE(db.scalar("SELECT levels FROM indents WHERE verse=2").toString(), QString("1"));
         QCOMPARE(db.scalar("SELECT levels FROM indents WHERE verse=3").toString(), QString("02"));
@@ -257,6 +257,27 @@ private slots:
         QCOMPARE(db.scalar("SELECT levels FROM indents WHERE verse=5").toString(), QString("31"));
         // A level per line, in the digest: tampering is caught.
         { QSqlQuery q(db.db); QVERIFY(q.exec("UPDATE indents SET levels='1' WHERE verse=1")); }
+        QVERIFY(!UsfmImporter::validateDatabase(target, &error));
+    }
+    void parallelPassageLines() {
+        const QString path = root.filePath("parallels.zip"), target = root.filePath("parallels.sqlite");
+        // \r under a heading belongs to the verse that opens the section; a
+        // second \r line keeps its order; a \r before the chapter is ignored.
+        QVERIFY(zip(path, fixture("\\r (Ignored 1:1)\n\\c 1\n\\s1 Section\n\\r (Mark 1:1–8; \\it Luke\\it* 3:1)\n\\r (John 1:19)\n\\p\n"
+            "\\v 1 First.\n\\v 2 Second.\n\\s1 Next\n\\r (Acts 1:1)\n\\p\n\\v 3 Third.\n")));
+        const auto result = UsfmImporter::importFile(path, target); QVERIFY2(result.ok, qPrintable(result.error));
+        QString error; QVERIFY2(UsfmImporter::validateDatabase(target, &error), qPrintable(error));
+        Database db(target);
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("6"));
+        QCOMPARE(db.scalar("SELECT group_concat(text,'|') FROM (SELECT text FROM parallels WHERE verse=1 ORDER BY seq)").toString(),
+                 QString::fromUtf8("(Mark 1:1–8; Luke 3:1)|(John 1:19)"));
+        QCOMPARE(db.scalar("SELECT text FROM parallels WHERE verse=3").toString(), QString("(Acts 1:1)"));
+        QCOMPARE(db.scalar("SELECT count(*) FROM parallels").toInt(), 3);
+        // The lines are not verse text, and the heading keeps its own.
+        QCOMPARE(db.scalar("SELECT text FROM verses WHERE number=1").toString(), QString("First."));
+        QCOMPARE(db.scalar("SELECT heading FROM verses WHERE number=3").toString(), QString("Next"));
+        // In the digest: tampering is caught.
+        { QSqlQuery q(db.db); QVERIFY(q.exec("UPDATE parallels SET text='(Acts 2:1)' WHERE verse=3")); }
         QVERIFY(!UsfmImporter::validateDatabase(target, &error));
     }
     void schema3StillValid() {
@@ -418,7 +439,7 @@ private slots:
             QVERIFY(!db.scalar("SELECT text FROM verses WHERE book=2 AND chapter=20 AND number=13").toString().contains("14"));
         }
         // Schema 4: notes and words of Jesus survive with valid anchors.
-        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("5"));
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("6"));
         const int footnotes = db.scalar("SELECT count(*) FROM notes WHERE kind IN ('f','fe')").toInt();
         const int xrefs = db.scalar("SELECT count(*) FROM notes WHERE kind='x'").toInt();
         const int jesus = db.scalar("SELECT count(*) FROM words_of_jesus").toInt();

@@ -286,7 +286,7 @@ private slots:
         catalog->finish(QUrl::fromLocalFile(source));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 5);
+        QCOMPARE(bible->textSchema(), 6);
         QTRY_COMPARE(object("toast")->property("text").toString(), "Reimported " + bible->versionAbbreviation());
         for (const auto &row : bible->versions()) QVERIFY(!row.toMap()["needsReimport"].toBool());
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
@@ -351,7 +351,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 5); QVERIFY(bible->hasWordsOfJesus());
+        QCOMPARE(bible->textSchema(), 6); QVERIFY(bible->hasWordsOfJesus());
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
     }
 private:

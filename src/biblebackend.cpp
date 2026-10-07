@@ -1960,7 +1960,7 @@ bool BibleBackend::readVersions(QVariantList *result)
         const auto info = textInfo(q.value(0).toString(), m_directory + '/' + q.value(4).toString());
         rows.append(QVariantMap{{"id",q.value(0)},{"abbreviation",q.value(1)},
             {"name",q.value(2)},{"active",q.value(3).toBool()},{"textSchema",info.first},
-            {"needsReimport",info.first > 0 && info.first < CurrentTextSchema},{"wordsOfJesus",info.second}});
+            {"needsReimport",info.first > 0 && info.first < ReimportTextSchema},{"wordsOfJesus",info.second}});
     }
     if (q.lastError().isValid()) return setError("Cannot read installed versions: " + q.lastError().text());
     *result = rows; return true;
@@ -4442,9 +4442,11 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
     const int last = absoluteVerse(scope.value("endBook").toInt(),scope.value("endChapter").toInt(),scope.value("end").toInt());
     if (!first || last < first) return {};
     // The source's own \x targets first, in source order (verse, note, list
-    // order); exact duplicates keep their first position. Then OpenBible.info's
-    // community cross references by votes, minus any the source already gave.
-    struct Entry { int first = 0, last = 0, votes = 0; bool openBible = false; };
+    // order); exact duplicates keep their first position. Then its parallel
+    // passages, then OpenBible.info's community cross references by votes,
+    // minus any already given.
+    enum Source { Own, Parallel, OpenBible };
+    struct Entry { int first = 0, last = 0, votes = 0; Source source = Own; };
     QVector<Entry> entries;
     QSet<QPair<int, int>> seen;
     if (m_textSchema >= 4) {
@@ -4460,6 +4462,38 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
                     const int a = range.first, z = range.second;
                     if (!a || z < a || (a >= first && z <= last) || seen.contains(range)) continue;
                     seen.insert(range); entries.append({a,z});
+                }
+            }
+        }
+    }
+    // Parallel passages (schema 6): the \r lines under the heading of the
+    // section the passage starts in, and of any section starting inside it.
+    if (m_textSchema >= 6) {
+        QSqlQuery heading(m_bible), lines(m_bible);
+        heading.prepare("SELECT heading<>'' FROM verses WHERE book=? AND chapter=? AND number=?");
+        lines.prepare("SELECT text FROM parallels WHERE book=? AND chapter=? AND verse=? ORDER BY seq");
+        const auto opens = [&](int index) {
+            const auto verse = endpoint(index);
+            heading.bindValue(0,verse.book); heading.bindValue(1,verse.chapter); heading.bindValue(2,verse.verse);
+            return heading.exec() && heading.next() && heading.value(0).toBool();
+        };
+        QVector<int> sections;
+        // Back to the start of the section, within the passage's book.
+        for (int index = first; index >= 1 && index > first - 400 && endpoint(index).book == endpoint(first).book; --index)
+            if (opens(index)) { sections.append(index); break; }
+        for (int index = first + 1; index <= last && index < first + 50; ++index)
+            if (opens(index)) sections.append(index);
+        for (int index : std::as_const(sections)) {
+            const auto verse = endpoint(index);
+            lines.bindValue(0,verse.book); lines.bindValue(1,verse.chapter); lines.bindValue(2,verse.verse);
+            if (!lines.exec()) continue;
+            while (lines.next()) {
+                // "(Mark 1:1–8; Luke 3:1–18)": the same lists as \xt targets.
+                const QString text = lines.value(0).toString().remove('(').remove(')');
+                for (const auto &range : sourceTargets(text,verse.book,verse.chapter)) {
+                    const int a = range.first, z = range.second;
+                    if (!a || z < a || (a >= first && z <= last) || seen.contains(range)) continue;
+                    seen.insert(range); entries.append({a,z,0,Parallel});
                 }
             }
         }
@@ -4481,7 +4515,7 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
         }
     }
     QVector<Entry> openBible;
-    for (auto it = community.cbegin(); it != community.cend(); ++it) openBible.append({it.key().first,it.key().second,it.value(),true});
+    for (auto it = community.cbegin(); it != community.cend(); ++it) openBible.append({it.key().first,it.key().second,it.value(),OpenBible});
     std::stable_sort(openBible.begin(),openBible.end(),[](const Entry &a, const Entry &b) { return a.votes > b.votes; });
     entries += openBible;
     QSqlQuery text(m_bible);
@@ -4499,7 +4533,8 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
         rows.append(QVariantMap{{"versionId",m_versionId},{"versionAbbreviation",m_abbreviation},
             {"reference",rangeReference(entry.first,entry.last)},{"book",a.book},{"chapter",a.chapter},{"start",a.verse},
             {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse},{"excerpt",excerpt},
-            {"openBible",entry.openBible},{"votes",entry.votes}});
+            {"openBible",entry.source == OpenBible},{"source",entry.source == Own ? "own" : entry.source == Parallel ? "parallel" : "openBible"},
+            {"votes",entry.votes}});
     }
     return rows;
 }

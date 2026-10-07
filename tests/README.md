@@ -76,9 +76,9 @@ fontconfig state.
 
 ## Suites
 
-- **importer**: USFM parsing, metadata, source order, poetry line levels (schema 5), malformed/unsafe input, staged publication.
+- **importer**: USFM parsing, metadata, source order, poetry line levels (schema 5), parallel passage lines (schema 6), malformed/unsafe input, staged publication.
 - **catalog**: catalog metadata, streamed atomic downloads, cancel/timeout/retry.
-- **backend**: library, references, annotations (highlights paint, join, and erase), Marks across versions and notes written in place, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), comparing versions, reading the next chapter ahead, backups, migrations (schema 9: bookmarks become the Bookmarked tag, times), peers, History, the ribbon, file ownership, character-selection motions/objects and the quotation format.
+- **backend**: library, references, annotations (highlights paint, join, and erase), Marks across versions and notes written in place, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), comparing versions, cross references and parallel passages, reading the next chapter ahead, backups, migrations (schema 9: bookmarks become the Bookmarked tag, times), peers, History, the ribbon, file ownership, character-selection motions/objects and the quotation format.
 - **ui**: packaged Main: catalog, layouts (the 66ch column, the type scale, poetry indents, the next-chapter link, `ctrl` + wheel zoom), the Aa popover, footer folding, selection/copy, Marks (one row per passage, `#tag` filter, notes written in place with conflicts kept, immediate delete, undo from the panel), undo keys, toasts and Commands, Visual completion, footer.
 - **search**: matching semantics (incl. chapter find's smart-case regular expressions), results in Bible order, the two-version corpus cache, async lifecycle, whitespace-preserving copy.
 - **searchui**: palette and chapter-find keyboard behavior; Bible search results under book headings with counts, `ctrl ↓`/`ctrl ↑` book jumps across pages.
