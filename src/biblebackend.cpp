@@ -1367,7 +1367,6 @@ void BibleBackend::reloadHistory()
                 QString reference = chapterOnly
                     ? QString("%1 %2").arg(book <= BibleBooks::canon().size() ? QString::fromUtf8(BibleBooks::canon()[book - 1].name) : QString::number(book)).arg(chapter)
                     : canonicalReference(row);
-                QString excerpt;
                 bool available = false;
                 if (abbreviations.contains(id)) {
                     auto &bible = bibles[id];
@@ -1375,32 +1374,24 @@ void BibleBackend::reloadHistory()
                     if (bible->db.isOpen()) {
                         if (chapterOnly) {
                             QSqlQuery v(bible->db);
-                            v.prepare("SELECT b.name,substr(v.text,1,512) FROM verses v JOIN books b ON b.id=v.book "
-                                      "WHERE v.book=? AND v.chapter=? ORDER BY v.number LIMIT 2");
+                            v.prepare("SELECT b.name,MIN(v.number),MAX(v.number) FROM verses v JOIN books b ON b.id=v.book "
+                                      "WHERE v.book=? AND v.chapter=?");
                             v.addBindValue(book); v.addBindValue(chapter);
-                            if (v.exec()) while (v.next()) {
-                                if (!available) reference = QString("%1 %2").arg(v.value(0).toString()).arg(chapter);
+                            if (v.exec() && v.next() && !v.isNull(1)) {
                                 available = true;
-                                if (!excerpt.isEmpty()) excerpt += ' ';
-                                excerpt += v.value(1).toString().simplified();
-                            }
-                            v.prepare("SELECT MIN(number),MAX(number) FROM verses WHERE book=? AND chapter=?");
-                            v.addBindValue(book); v.addBindValue(chapter);
-                            if (available && v.exec() && v.next()) {
-                                row["firstVerse"] = v.value(0).toInt(); row["lastVerse"] = v.value(1).toInt();
+                                reference = QString("%1 %2").arg(v.value(0).toString()).arg(chapter);
+                                row["firstVerse"] = v.value(1).toInt(); row["lastVerse"] = v.value(2).toInt();
                             }
                         } else {
                             QVariantMap canonical;
                             if (bible->scope(row,&canonical)) {
                                 available = true;
                                 reference = canonical.value("reference").toString();
-                                excerpt = bible->excerpt(canonical);
                             }
                         }
                     }
                 }
-                if (excerpt.size() > 160) excerpt = excerpt.left(159).trimmed() + QChar(0x2026);
-                row["reference"] = reference; row["excerpt"] = excerpt; row["available"] = available;
+                row["reference"] = reference; row["available"] = available;
                 rows.append(row);
             }
         }

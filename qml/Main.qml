@@ -8163,7 +8163,7 @@ ApplicationWindow {
                             visible: text.length > 0
                             textFormat: Text.PlainText
                             horizontalAlignment: Text.AlignLeft
-                            // Matches History excerpts: muted, the same size and line height.
+                            // Muted, at the panels' passage size and line height.
                             color: desktop.muted
                             font.pixelSize: 13 * app.scale
                             lineHeight: app.panelLineHeight

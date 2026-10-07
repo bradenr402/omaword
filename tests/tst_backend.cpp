@@ -762,9 +762,10 @@ private slots:
         QCOMPARE(refs(),QStringList({"John 3:16–17","John 3","Genesis 1:2"}));
         auto top = bible->history().first().toMap();
         QCOMPARE(top["versionAbbreviation"].toString(),bible->versionAbbreviation()); QVERIFY(top["available"].toBool());
-        QVERIFY(!top["excerpt"].toString().isEmpty()); QVERIFY(top["excerpt"].toString().size() <= 160);
         QVERIFY(QDateTime::fromString(top["visitedAt"].toString(),Qt::ISODateWithMs).isValid());
-        QVERIFY(!bible->history()[1].toMap()["excerpt"].toString().isEmpty());
+        // A chapter row knows its verses (to copy or add the whole chapter).
+        const auto chapterRow = bible->history()[1].toMap();
+        QVERIFY(chapterRow["available"].toBool()); QCOMPARE(chapterRow["firstVerse"].toInt(),1); QVERIFY(chapterRow["lastVerse"].toInt() > 1);
         // A repeat visit moves to the top without duplicating, refreshing the position.
         auto genesis = bible->history().last().toMap(); QCOMPARE(genesis["position"].toDouble(),0.25);
         genesis["position"] = 0.5; QVERIFY(bible->recordHistory(genesis));

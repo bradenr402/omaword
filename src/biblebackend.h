@@ -253,7 +253,7 @@ public:
     // Recording an existing location moves it to the top (refreshing position
     // and visitedAt); the list keeps the newest HistoryLimit entries. Rows:
     // {id,versionId,versionAbbreviation,reference,book,chapter,start,endBook,
-    // endChapter,end,position,visitedAt,excerpt,available}; available chapter rows
+    // endChapter,end,position,visitedAt,available}; available chapter rows
     // also carry firstVerse/lastVerse so the whole chapter can be copied or added. Recent Bible search
     // queries (newest first, at most RecentQueryLimit) live beside the list and
     // are cleared with it. While disabled (a shared preference) nothing is
