@@ -75,15 +75,16 @@ Desktop::Desktop(QObject *parent, const QString &hyprctlCommand) : QObject(paren
     // event socket; the rounding is asked again only then.
     connect(&m_events, &QLocalSocket::readyRead, this, &Desktop::readEvents);
     // animations:enabled comes over Hyprland's request socket: the reply is
-    // the whole stream, so it is read when the compositor closes it.
-    connect(&m_request, &QLocalSocket::connected, this, [this] { m_request.write("j/getoption animations:enabled"); });
+    // the whole stream, so it is read when the compositor closes it. Hyprland
+    // 0.56 reports it as "bool"; older releases as "int".
     connect(&m_request, &QLocalSocket::readyRead, this, [this] {
         m_requestBuffer += m_request.read(8193 - m_requestBuffer.size());
         if (m_requestBuffer.size() > 8192) m_request.abort();
     });
     connect(&m_request, &QLocalSocket::disconnected, this, [this] {
-        const auto value = QJsonDocument::fromJson(m_requestBuffer).object().value(QStringLiteral("int"));
-        const bool enabled = !value.isDouble() || value.toDouble() != 0;
+        const auto reply = QJsonDocument::fromJson(m_requestBuffer).object();
+        const auto value = reply.contains(QStringLiteral("bool")) ? reply.value(QStringLiteral("bool")) : reply.value(QStringLiteral("int"));
+        const bool enabled = !(value.isBool() || value.isDouble()) || value.toVariant().toBool();
         if (enabled != m_animations) { m_animations = enabled; emit this->changed(); }
     });
     const QString instance = qEnvironmentVariable("HYPRLAND_INSTANCE_SIGNATURE");
@@ -105,6 +106,13 @@ void Desktop::refreshAnimations() {
     if (instance.isEmpty() || runtime.isEmpty() || m_request.state() != QLocalSocket::UnconnectedState) return;
     m_requestBuffer.clear();
     m_request.connectToServer(runtime + QStringLiteral("/hypr/") + instance + QStringLiteral("/.socket.sock"));
+    // Hyprland reads the request on its main thread as soon as a client
+    // connects: send it now, in this call. Left for the event loop, it would
+    // stall the compositor until a startup that waits on the compositor (the
+    // window's creation) times Hyprland's read out, seconds later.
+    if (!m_request.waitForConnected(100)) { m_request.abort(); return; }
+    m_request.write("j/getoption animations:enabled");
+    m_request.flush();
 }
 
 double Desktop::contrast(const QColor &a, const QColor &b) {

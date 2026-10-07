@@ -501,7 +501,12 @@ files.
   text uses `selection` (else the accent mixed into the background).
 - Motion: `desktop.animations` is Hyprland's `animations:enabled`, asked over
   its request socket (`.socket.sock`, `j/getoption animations:enabled`) at
-  startup and on each config reload; true outside Hyprland or on a bad reply.
+  startup and on each config reload; true outside Hyprland or on a bad reply
+  (0.56 answers `bool`, older releases `int`). Hyprland reads a request on its
+  main thread as soon as a client connects, so the query is written and
+  flushed in the same call that connects: left for the event loop, it stalled
+  the compositor, and the window's creation with it, for Hyprland's 5 s read
+  timeout.
   The app animates only while that and its own Animations setting are on.
 - Accessibility: buttons name their action (`label`) and describe their keys
   (`keys`), and key hints name their label with the keys as the description;

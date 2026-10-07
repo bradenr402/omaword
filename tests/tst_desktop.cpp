@@ -305,29 +305,44 @@ private slots:
         QLocalServer requestServer, eventServer;
         QVERIFY2(requestServer.listen(requests), qPrintable(requestServer.errorString()));
         QVERIFY2(eventServer.listen(events), qPrintable(eventServer.errorString()));
-        QByteArray reply = "{\"option\":\"animations:enabled\",\"int\":0,\"set\":true}";
+        // Hyprland 0.56 answers with "bool".
+        QByteArray reply = "{\"option\": \"animations:enabled\", \"bool\": false, \"set\": true }";
         QStringList asked;
+        auto answer = [&](QLocalSocket *client) {
+            asked << QString::fromUtf8(client->readAll());
+            client->write(reply); client->flush(); client->disconnectFromServer();
+        };
+        std::unique_ptr<Desktop> desktop = std::make_unique<Desktop>(nullptr, command());
+        // The request is sent within the constructor, before this process
+        // returns to its event loop: Hyprland reads it on its main thread and
+        // must never wait for us (it would stall the compositor and our window).
+        QVERIFY(requestServer.waitForNewConnection(1000));
+        auto *first = requestServer.nextPendingConnection();
+        QVERIFY(first->bytesAvailable() || first->waitForReadyRead(1000));
+        answer(first);
         connect(&requestServer, &QLocalServer::newConnection, this, [&] {
             auto *client = requestServer.nextPendingConnection();
-            connect(client, &QLocalSocket::readyRead, client, [&, client] {
-                asked << QString::fromUtf8(client->readAll());
-                client->write(reply); client->flush(); client->disconnectFromServer();
-            });
+            if (client->bytesAvailable()) answer(client);
+            else connect(client, &QLocalSocket::readyRead, client, [&, client] { answer(client); });
         });
-        Desktop desktop(nullptr, command());
-        QTRY_VERIFY(!desktop.animations());
+        Desktop &desktopRef = *desktop;
+        QTRY_VERIFY(!desktopRef.animations());
         QCOMPARE(asked, QStringList{"j/getoption animations:enabled"});
         QTRY_VERIFY(eventServer.hasPendingConnections());
         std::unique_ptr<QLocalSocket> hyprland(eventServer.nextPendingConnection());
+        // Older releases answer with "int".
         reply = "{\"int\":1}";
         hyprland->write("configreloaded>>\n"); QVERIFY(hyprland->waitForBytesWritten());
-        QTRY_VERIFY(desktop.animations());
+        QTRY_VERIFY(desktopRef.animations());
         QCOMPARE(asked.size(), 2);
+        reply = "{\"int\":0}";
+        hyprland->write("configreloaded>>\n"); QVERIFY(hyprland->waitForBytesWritten());
+        QTRY_VERIFY(!desktopRef.animations());
         // A malformed reply means enabled, as outside Hyprland.
         reply = "{\"int\":0";
         hyprland->write("configreloaded>>\n"); QVERIFY(hyprland->waitForBytesWritten());
-        QTRY_COMPARE(asked.size(), 3); QTest::qWait(100);
-        QVERIFY(desktop.animations());
+        QTRY_COMPARE(asked.size(), 4);
+        QTRY_VERIFY(desktopRef.animations());
     }
     void configReloadEventsRequery() {
         // Hyprland's event socket: only config reloads ask for the rounding
