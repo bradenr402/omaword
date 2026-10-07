@@ -512,8 +512,10 @@ files.
   `Overlay.onPressed` with a passive `PointHandler` marking presses inside.
 - Margins (off by default; hidden in focus mode): one
   `Margins.space()` split. Margin notes win: they may shift the reader column
-  left (only in chapters that have notes) and sit right after their connector;
-  the outline takes what is left and never moves the column. `updateMargins()`
+  left and sit right after their connector; while they are on, their room is
+  kept in every chapter, notes or not, and the scrollbar's width is reserved
+  whether it shows or not, so the column keeps its place between chapters.
+  The outline takes what is left and never moves the column. `updateMargins()`
   measures verse spans (Verse rows or `BlockReader.verseRangeRects`, re-run on
   `layoutRefreshed`/size changes) into `verseExtents`, then `Margins.place()`
   lays notes out in content coordinates: aligned to the passage top, pushed

@@ -2390,11 +2390,14 @@ ApplicationWindow {
         else if (at < books.length - 1) { const after = Array.from(books[at + 1].chapterNumbers || []); if (after.length) next = entry(books[at + 1], after[0]) }
         return { previous: previous, next: next }
     }
+    // While margin notes are on, their room is kept in every chapter, notes
+    // or not, and the scrollbar's width is reserved whether it shows or not:
+    // the column stays put from chapter to chapter.
     readonly property var marginSpace: marginsLeaving && leavingSpace ? leavingSpace : Margins.space({
         width: reading.width, columnX: readerNaturalX, columnWidth: readerColumnWidth,
         minLeft: readerSideInset, leftInset: Math.max(24 * readerScale, chapterNavReserve),
-        rightInset: Math.max(28 * readerScale, footerRightInset, chapterNavReserve + chapterNavScrollbar),
-        wantNotes: marginNoteEntries.length > 0, connectorWidth: 3 * readerScale + 2 * marginBraceWidth + 34 * readerScale,
+        rightInset: Math.max(28 * readerScale, footerRightInset, chapterNavReserve + readerScrollbar.width),
+        wantNotes: marginsAllowed && marginNotesOn, connectorWidth: 3 * readerScale + 2 * marginBraceWidth + 34 * readerScale,
         notesMin: 170 * readerScale, notesPreferred: 250 * readerScale, notesMax: 330 * readerScale,
         wantOutline: outlineHeadings.length > 0, outlineGap: 12 * readerScale,
         outlineMin: 120 * readerScale, outlineMax: 220 * readerScale
@@ -2516,7 +2519,7 @@ ApplicationWindow {
         return item ? { number: number, top: item.y + item.textOffset, bottom: item.y + item.textOffset + item.textHeight } : null
     }
     // Margins measure only while one is shown; `{`/`}` measure on demand.
-    readonly property bool marginsMeasured: marginSpace.notes.visible || marginSpace.outline.visible
+    readonly property bool marginsMeasured: (marginSpace.notes.visible && marginNoteEntries.length > 0) || marginSpace.outline.visible
     onMarginsMeasuredChanged: scheduleMargins()
     function updateMargins() {
         if (!bible.ready || !marginsMeasured) {

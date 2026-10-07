@@ -915,9 +915,22 @@ private slots:
         QTRY_VERIFY(!outlineShown());
         auto note = item("marginNote:John 3:16"); QTRY_VERIFY(note && note->isVisible());
         QVERIFY(note->x() + note->width() <= 1200);
-        // No notes in this chapter: no shift, outline back.
-        navigate("John 2:1"); QTRY_COMPARE(columnX(), natural);
-        navigate("John 3:1"); QTRY_VERIFY(outlineShown() == false);
+        const double shifted = columnX();
+        // No notes in this chapter: the room stays, so the column does not move.
+        navigate("John 2:1"); QTRY_VERIFY(prop("marginNoteEntries").toList().isEmpty());
+        settle(); QCOMPARE(columnX(), shifted); QVERIFY(notesShown()); QVERIFY(!outlineShown());
+        QVERIFY(prop("marginLayout").toList().isEmpty());
+        navigate("John 3:1"); QCOMPARE(columnX(), shifted); QTRY_VERIFY(outlineShown() == false);
+        // The scrollbar's width is kept too: a chapter that fits without
+        // scrolling keeps the place (wide enough that the room sets the shift).
+        resize(1400, 900);
+        const double scrolling = columnX();
+        QVERIFY(item("readerScrollbar")->isVisible()); QVERIFY(space()["shift"].toDouble() > 0);
+        QVERIFY(scrolling > window->property("readerSideInset").toDouble());
+        window->resize(1400, 20000); QTRY_COMPARE(window->height(), 20000); settle();
+        QTRY_VERIFY(!item("readerScrollbar")->isVisible());
+        QCOMPARE(columnX(), scrolling);
+        resize(1200, 900);
         // Too narrow even after shifting: hidden, no shift.
         resize(900, 900); QTRY_VERIFY(!notesShown());
         QCOMPARE(columnX(), window->property("readerNaturalX").toDouble());
