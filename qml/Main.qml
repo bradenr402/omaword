@@ -196,11 +196,10 @@ ApplicationWindow {
             openedTagActionScope = null
         tagsUi.open(scope || bible.tagScope())
     }
-    function openTagsBrowser(manage) {
+    function openManageTags() {
         if (bible.busy || !flushNote()) return
         clearCount()
-        if (manage) tagsUi.openManage()
-        else { collectionTab = 2; savedDrawer.open() }
+        tagsUi.openManage()
     }
     readonly property alias tagsUi: tagsUi
     readonly property var tagBackend: bible
@@ -240,7 +239,6 @@ ApplicationWindow {
     readonly property real readerBodySize: readerSize * readerScale
     property int selectionAnchor: 0
     property bool movingSelection: false
-    property int collectionTab: 0
     property int paletteBook: 0
     property string paletteBookName: ""
     // The palette's History: every passage kept in History, newest first
@@ -1688,17 +1686,15 @@ ApplicationWindow {
         collectionList.currentIndex = row
         collectionList.forceActiveFocus()
         const ready = !bible.busy
-        const moveHere = moveHereEntry([entry])
-        const extras = (collectionTab === 2 ? [
+        const extras = [
+            { id: "note", text: entry.note.length ? "Edit note" : "Write note", shortcut: KeyNotation.format("W"), enabled: ready, run: function() { app.editMarkNote(entry) } },
             { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { app.openPassageTags(tagsUi.snapshot(entry)) } },
-            moveHere,
-            { id: "removeTag", text: "Remove " + entry.group, shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeSavedTag(entry, row) } }
-        ] : [moveHere,
+            moveHereEntry([entry]),
             { id: "delete", text: "Delete", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() {
                 collectionList.currentIndex = row
                 collectionList.forceActiveFocus()
                 app.deleteSaved()
-            } }]).concat(undoMenuEntries())
+            } }].concat(undoMenuEntries())
         contextMenu.show("annotation", RowMenu.entries(app, { busy: bible.busy, scope: entry,
             open: function() { app.openSaved(entry) }, extras: extras }), sceneX, sceneY)
     }
@@ -2232,6 +2228,7 @@ ApplicationWindow {
     }
     function flushNote() {
         noteSaveTimer.stop()
+        if (!flushMarkNote()) return false
         if (syncingNote) return true
         syncNote()
         if (noteConflict) return false
@@ -3445,37 +3442,21 @@ ApplicationWindow {
         positionJumpToSelection = !!jumpToSelection
         positionTimer.restart()
     }
-    function collectionForTab() {
-        if (collectionTab === 2) return taggedRows()
-        return Array.from(bible.collection).filter(function(entry) {
-            return (collectionTab === 0 && entry.highlight) || (collectionTab === 1 && entry.note.length > 0)
-        })
+    // Marks: every mark (highlight, note, tags) on an exact range, in every
+    // version, one row each in passage order (bible.marks()). Read when the
+    // panel opens and again after changes, but never while a row's note is
+    // being written in place: rebuilding the rows would drop the editor.
+    property var marksRows: []
+    function refreshMarks() {
+        if (markEditKey.length) return
+        // The current mark stays current; when it went, the row that took its place.
+        const current = collectionList.model[collectionList.currentIndex]
+        const key = current ? rangeKey(current) : "", index = collectionList.currentIndex
+        marksRows = Array.from(bible.marks())
+        const kept = key.length ? collectionList.model.findIndex(function(entry) { return app.rangeKey(entry) === key }) : -1
+        collectionList.currentIndex = kept >= 0 ? kept : collectionList.count ? Math.max(0, Math.min(index, collectionList.count - 1)) : -1
     }
-    // Annotations → Tags: every tagged passage in this version, grouped by tag
-    // (tag name order), each group in canonical order. A passage with several
-    // tags appears once per tag.
-    property var savedTagExcerpts: ({})
     function rangeKey(scope) { return [scope.versionId, scope.book, scope.chapter, scope.start, scope.endBook, scope.endChapter, scope.end].join(":") }
-    function refreshTagExcerpts() {
-        const ids = Array.from(bible.tags).map(function(tag) { return tag.id })
-        const excerpts = {}
-        if (ids.length && bible.versionId) Array.from(bible.taggedPassages(ids, false, bible.versionId)).forEach(function(row) {
-            excerpts[app.rangeKey(row)] = row.excerpt || ""
-        })
-        savedTagExcerpts = excerpts
-    }
-    function taggedRows() {
-        const ranges = Array.from(bible.collection).filter(function(entry) { return entry.tags && entry.tags.length > 0 })
-        const rows = []
-        Array.from(bible.tags).forEach(function(tag) {
-            ranges.forEach(function(range) {
-                if (!Array.from(range.tags).some(function(other) { return other.id === tag.id })) return
-                rows.push(Object.assign({}, range, { group: tag.name, groupId: tag.id,
-                    excerpt: app.savedTagExcerpts[app.rangeKey(range)] || "" }))
-            })
-        })
-        return rows
-    }
     // The reader's range ("here" rows): the selection, else nothing.
     function verseKey(book, chapter, verse) { return (book * 1000 + chapter) * 1000 + verse }
     function savedHere(entry) {
@@ -3486,46 +3467,56 @@ ApplicationWindow {
             && verseKey(scope.book, scope.chapter, scope.start) <= verseKey(entry.endBook, entry.endChapter, entry.end)
     }
     readonly property var savedHereKey: [bible.versionId, bible.selectionReference, bible.selectedStart, bible.selectedEnd, bible.passage]
-    // Opening the Tags tab starts at the first row here, else the first row.
+    // Opening Marks starts at the first row here, else the first row.
     function initialSavedRow() {
-        if (collectionTab !== 2) return collectionList.count ? 0 : -1
         const rows = collectionList.model || []
         const here = rows.findIndex(function(entry) { return app.savedHere(entry) })
         return here >= 0 ? here : rows.length ? 0 : -1
     }
-    // Annotations search: reference, note, and tag names, case-insensitive.
+    // The filter: every word must match. "#gr" matches a row with a tag
+    // starting "gr"; other words match the reference, version, note, tags,
+    // or verse text, ignoring case.
     property string savedQuery: ""
     // Typing replaces the field's text binding, so clear both.
     function clearSavedQuery() { savedQuery = ""; savedSearch.text = "" }
     function savedMatches(entry, query) {
-        if (!query.length) return true
-        // Tags: a match on the tag's name keeps its whole group.
-        const fields = collectionTab === 2 ? [entry.reference, entry.note || "", entry.group, entry.excerpt || ""]
-            : [entry.reference, entry.note || "", tagsPlainText(entry.tags), entry.excerpt || ""]
-        return fields.join("\n").toLowerCase().indexOf(query.toLowerCase()) >= 0
-    }
-    function filteredCollection() {
-        const query = savedQuery.trim()
-        const rows = collectionForTab().filter(function(entry) { return app.savedMatches(entry, query) })
-        if (collectionTab !== 2) return rows
-        // Section headings: "name · count" over the rows shown.
-        const counts = {}
-        rows.forEach(function(row) { counts[row.groupId] = (counts[row.groupId] || 0) + 1 })
-        return rows.map(function(row, index) {
-            return Object.assign(row, { groupCount: counts[row.groupId], firstOfGroup: index === 0 || rows[index - 1].groupId !== row.groupId })
+        const text = [entry.reference, entry.versionAbbreviation || "", entry.note || "", tagsPlainText(entry.tags), entry.excerpt || ""]
+            .join("\n").toLowerCase()
+        const tags = Array.from(entry.tags || []).map(function(tag) { return tag.name.toLowerCase() })
+        return query.toLowerCase().split(/\s+/).filter(function(word) { return word.length > 0 }).every(function(word) {
+            if (word.length > 1 && word[0] === "#") return tags.some(function(name) { return name.startsWith(word.slice(1)) })
+            return text.indexOf(word) >= 0
         })
     }
-    // The search field appears once a tab holds more than ten items, and stays
+    function filteredMarks() {
+        const query = savedQuery.trim()
+        return marksRows.filter(function(entry) { return app.savedMatches(entry, query) })
+    }
+    // A row's tag, clicked: show only that tag's marks.
+    function filterMarksByTag(name) {
+        savedQuery = "#" + name.replace(/\s+/g, " ").split(" ")[0]
+        savedSearch.text = savedQuery
+        collectionList.currentIndex = collectionList.count ? 0 : -1
+        focusSavedList()
+    }
+    // The filter field appears once Marks holds more than ten rows, and stays
     // while it has a query.
-    readonly property int savedTabTotal: collectionForTab().length
-    readonly property bool savedSearchVisible: savedTabTotal > 10 || savedQuery.length > 0
+    readonly property bool savedSearchVisible: marksRows.length > 10 || savedQuery.length > 0
     function focusSavedSearch() { if (savedSearchVisible) savedSearch.forceActiveFocus() }
     function focusSavedList() {
         moveSaved(0)
     }
     function escapeSaved() {
-        if (savedSearch.activeFocus) focusSavedList()
+        if (markEditKey.length) finishMarkNote(true)
+        else if (savedSearch.activeFocus) focusSavedList()
         else savedDrawer.close()
+    }
+    // Closing Marks finishes a note written in place; a draft that cannot be
+    // saved keeps Marks open with it.
+    function dismissMarks() {
+        if (markEditKey.length && !finishMarkNote(false)) return false
+        savedDrawer.close()
+        return true
     }
     function moveSaved(delta) {
         if (collectionList.count > 0) {
@@ -3535,14 +3526,6 @@ ApplicationWindow {
         if (collectionList.currentItem) collectionList.currentItem.focus = false
         collectionList.forceActiveFocus()
     }
-    function filterSaved(delta) {
-        const tab = (collectionTab + delta + 3) % 3
-        clearSavedQuery()
-        collectionTab = tab
-        if (tab === 2) refreshTagExcerpts()
-        collectionList.currentIndex = initialSavedRow()
-        moveSaved(0)
-    }
     function openSaved(entry) {
         if (!entry) { sounds.play("error"); return }
         if (!flushNote()) return
@@ -3551,42 +3534,95 @@ ApplicationWindow {
         endJump(from)
         syncNote()
         savedDrawer.close()
-        if (entry.note.length > 0 && collectionTab !== 2) openNotes(false)
+        if (entry.note.length > 0) openNotes(false)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
-    // delete / backspace: the row's range goes at once (on the Tags tab, only
-    // that tag); u undoes it.
+    // delete / backspace: the row's mark goes at once (highlight, note, and
+    // tags); u undoes it.
     function deleteSaved() {
-        let row = collectionList.currentIndex
-        let focused = activeFocusItem
-        while (focused && focused !== collectionList) {
-            let delegate = focused as SavedEntry
-            if (delegate) { row = delegate.index; break }
-            focused = focused.parent
-        }
-        let entry = focused instanceof SavedEntry ? (focused as SavedEntry).modelData : collectionList.model[row]
+        const row = collectionList.currentIndex
+        const entry = focusedSavedEntry()
         if (!entry || bible.busy) return
-        if (collectionTab === 2) { removeSavedTag(entry, row); return }
         if (!deleteScope(entry, false)) return
         collectionList.currentIndex = Math.min(row, collectionList.count - 1)
         deleteFocusTimer.restart()
     }
-    function removeSavedTag(entry, row) {
-        if (!entry || !entry.groupId || bible.busy) return
-        const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
-            book: entry.book, chapter: entry.chapter, start: entry.start,
-            endBook: entry.endBook, endChapter: entry.endChapter, end: entry.end })
-        if (!flushNote() || bible.busy) return
-        if (!bible.setTag(scope, entry.groupId, false)) return
-        notify(entry.group + " removed from " + (scope.reference || "passage"), true)
-        sounds.play("remove")
-        Qt.callLater(function() { collectionList.currentIndex = Math.min(row, collectionList.count - 1) })
-        deleteFocusTimer.restart()
+    // Writing a row's note in place (w): the row opens an editor that saves
+    // as you type (like Notes), compared with the text it started from so a
+    // change from another window is never overwritten; esc closes it.
+    // The draft lives here, not in the row: a row scrolled out of view goes.
+    property string markEditKey: ""
+    property var markEditScope: null
+    property string markEditText: ""
+    property string markEditBaseline: ""
+    property bool markEditConflict: false
+    Timer { id: markSaveTimer; interval: Math.max(1, app.noteSaveDelay); onTriggered: app.flushMarkNote() }
+    function editMarkNote(entry) {
+        if (!entry || bible.busy) { rejected(); return }
+        if (markEditKey === rangeKey(entry)) { focusMarkEditor(); return }
+        if (!flushNote()) return
+        markEditScope = tagsUi.snapshot(entry)
+        markEditText = markEditBaseline = entry.note || ""
+        markEditConflict = false
+        markEditKey = rangeKey(entry)
+        Qt.callLater(focusMarkEditor)
+    }
+    function markEditor() {
+        const rows = collectionList.contentItem.children
+        for (let i = 0; i < rows.length; ++i) if (rows[i].editing) return rows[i].editor
+        return null
+    }
+    function focusMarkEditor() {
+        const editor = markEditor()
+        if (!editor) return
+        editor.forceActiveFocus()
+        editor.cursorPosition = editor.length
+    }
+    // Saves a pending in-place draft; false keeps it (and whatever asked to
+    // move on) where it is.
+    function flushMarkNote() {
+        markSaveTimer.stop()
+        if (!markEditKey.length || markEditConflict) return !markEditConflict
+        if (markEditText === markEditBaseline) return true
+        const text = markEditText
+        if (!bible.setScopeNote(markEditScope, text, markEditBaseline)) {
+            if (bible.error.indexOf("another window") >= 0) { markEditConflict = true; bible.clearError() }
+            return false
+        }
+        markEditBaseline = text
+        return true
+    }
+    function finishMarkNote(refocus) {
+        if (!flushMarkNote()) { rejected("Not saved · " + KeyNotation.format("Ctrl+S") + " keeps your draft, " + KeyNotation.format("Ctrl+Shift+S") + " the saved text"); return false }
+        const key = markEditKey
+        markEditKey = ""
+        markEditScope = null
+        bible.closeUndoGroup()
+        refreshMarks()
+        if (refocus) {
+            const row = collectionList.model.findIndex(function(entry) { return app.rangeKey(entry) === key })
+            if (row >= 0) collectionList.currentIndex = row
+            focusSavedList()
+        }
+        return true
+    }
+    function keepMarkDraft() {
+        if (!markEditConflict) { rejected(); return }
+        markEditBaseline = bible.savedNote(markEditScope)
+        markEditConflict = false
+        flushMarkNote()
+    }
+    function useSavedMarkNote() {
+        if (!markEditConflict) { rejected(); return }
+        markEditText = markEditBaseline = bible.savedNote(markEditScope)
+        const editor = markEditor()
+        if (editor) editor.text = markEditText
+        markEditConflict = false
     }
     function savedScopeExists(scope) {
-        return !!scope && !!scope.versionId && scope.versionId === bible.versionId
-            && Array.from(bible.collection).some(function(entry) {
+        return !!scope && !!scope.versionId
+            && (scope.versionId === bible.versionId ? Array.from(bible.collection) : marksRows).some(function(entry) {
                 return ["versionId", "book", "chapter", "start", "endBook", "endChapter", "end"].every(function(key) {
                     return entry[key] === scope[key]
                 })
@@ -3860,7 +3896,7 @@ ApplicationWindow {
         { id: "copyTextPlain", group: "Copy", title: "Copy selected text as plain text (else the passage)", sequences: ["Ctrl+Shift+C"] },
         { id: "contextMenu", group: "Copy", title: "Open context menu", sequences: ["Menu", "Shift+F10"] },
         { id: "clickMenu", group: "Copy", title: "Open context menu", sequences: ["RightClick"], explanation: true },
-        { id: "annotations", group: "Panels", title: "Annotations panel", sequences: ["Shift+A"], command: true },
+        { id: "annotations", group: "Panels", title: "Marks panel", sequences: ["Shift+M"], command: true },
         { id: "desk", group: "Panels", title: "Open Desk", sequences: ["Shift+D"], command: true },
         // The Study panel (Cross-references, Footnotes, Tags); id kept for compatibility.
         { id: "related", group: "Panels", title: "Study panel", sequences: ["Shift+S"], command: true },
@@ -3918,15 +3954,16 @@ ApplicationWindow {
         { id: "listCopyPlain", group: "Lists", title: "Copy item as plain text", sequences: ["Shift+Y"], scope: "list", explanation: true },
         { id: "listDesk", group: "Lists", title: "Add item to Desk, or remove it", sequences: ["D"], scope: "list", explanation: true },
         { id: "listRemove", group: "Lists", title: "Remove item", sequences: ["Delete", "Backspace"], scope: "list", explanation: true },
-        { id: "listTag", group: "Lists", title: "Edit the item's tags (Annotations and Study Tags)", sequences: ["T"], scope: "list", explanation: true },
+        { id: "listTag", group: "Lists", title: "Edit the item's tags (Marks and Study Tags)", sequences: ["T"], scope: "list", explanation: true },
+        { id: "listNote", group: "Lists", title: "Write the item's note in place (Marks)", sequences: ["W"], scope: "list", explanation: true },
         { id: "studyChips", group: "Lists", title: "Between Study Tags results and tag chips", sequences: ["Tab", "Shift+Tab"], scope: "list", explanation: true },
         { id: "studyChipToggle", group: "Lists", title: "Turn a Study tag chip on or off", sequences: ["Space"], scope: "list", explanation: true },
         { id: "studyChipSolo", group: "Lists", title: "Show only this tag (a Study tag chip), or all tags again", sequences: ["Shift+Space"], scope: "list", explanation: true },
         { id: "studyChipsAll", group: "Lists", title: "Show all tags (Study tag chips)", sequences: ["0"], scope: "list", explanation: true },
         { id: "studyAllVersions", group: "Lists", title: "Study Tags in all installed versions, or this one", sequences: ["A"], scope: "list", explanation: true },
-        { id: "listSearch", group: "Lists", title: "Search the list (Annotations tabs with more than 10 items, Study's Tags)", sequences: ["/"], scope: "list", explanation: true },
-        { id: "listPreviousTab", group: "Lists", title: "Previous tab (Annotations, Study)", sequences: ["H", "Left"], scope: "list", explanation: true },
-        { id: "listNextTab", group: "Lists", title: "Next tab (Annotations, Study)", sequences: ["L", "Right"], scope: "list", explanation: true },
+        { id: "listSearch", group: "Lists", title: "Filter the list, #name for a tag (Marks with more than 10 items, Study's Tags)", sequences: ["/"], scope: "list", explanation: true },
+        { id: "listPreviousTab", group: "Lists", title: "Previous tab (Study)", sequences: ["H", "Left"], scope: "list", explanation: true },
+        { id: "listNextTab", group: "Lists", title: "Next tab (Study)", sequences: ["L", "Right"], scope: "list", explanation: true },
         // Desk-only: bound by deskDrawer, never globally.
         { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+Del", "Shift+Backspace"], scope: "desk", command: true },
         // Bound by the History panel; the command itself is Commands-only.
@@ -4022,18 +4059,18 @@ ApplicationWindow {
         return [[["Up", "Down"], "choose"], versionSearch.activeFocus ? null : [["Home", "End"], "jump"], select, versionDialog.step > 0 ? back : null, ["Escape", "cancel", function() { versionDialog.close() }]]
     }
     function savedHintParts() {
+        if (markEditKey.length) return markEditConflict
+            ? [[actionKeys("noteKeepDraft")[0], "save my draft", app.keepMarkDraft], [actionKeys("noteUseSaved")[0], "use saved text", app.useSavedMarkNote]]
+            : [["Escape", "done", function() { app.finishMarkNote(true) }]]
         const entry = focusedSavedEntry()
         const ready = !!entry && !bible.busy
-        const search = savedSearchVisible ? ["/", "search", app.focusSavedSearch] : null
-        const close = ["Escape", "close", app.escapeSaved]
-        const open = ["Return", "open", function() { app.openSaved(app.focusedSavedEntry()) }, ready]
-        const copy = ["Y", "copy", function() { app.copyScope(app.focusedSavedEntry()) }, !!entry && !bible.busy]
-        const desk = ["D", "Desk", function() { app.toggleScopeDesk(app.focusedSavedEntry()) }, ready]
-        if (collectionTab === 2) return [[["Left", "Right"], "tabs"], open,
+        const search = savedSearchVisible ? ["/", "filter", app.focusSavedSearch] : null
+        return [["Return", "open", function() { app.openSaved(app.focusedSavedEntry()) }, ready],
+            ["W", "note", function() { app.editMarkNote(app.focusedSavedEntry()) }, ready],
             ["T", "tags", function() { app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry())) }, ready],
-            ["Delete", "remove tag", app.deleteSaved, ready], copy, desk,
-            [actionKeys("manageTags")[0], "manage", function() { tagsUi.openManage() }, !bible.busy], search, close]
-        return [[["Left", "Right"], "tabs"], open, copy, desk, ["Delete", "delete", app.deleteSaved, ready], search, close]
+            ["Y", "copy", function() { app.copyScope(app.focusedSavedEntry()) }, ready],
+            ["D", "Desk", function() { app.toggleScopeDesk(app.focusedSavedEntry()) }, ready],
+            ["Delete", "delete", app.deleteSaved, ready], search, ["Escape", "close", app.escapeSaved]]
     }
     function deskHintParts() {
         const entry = deskList.model[deskList.currentIndex]
@@ -4095,12 +4132,14 @@ ApplicationWindow {
         // Typing owns every key, Ctrl and Alt included (ctrl v pastes); only the
         // palette's own mode keys still switch modes from its input.
         if (textInputActive() && !(action.scope === "palette" && passagePalette.visible)) return false
+        // In Marks, w writes the current row's note in place (Marks binds it).
+        if (sidePanel === "annotations" && action.id === "notes") return false
         if (sidePanel.length && panelActions.includes(action.id)) return panelSwitchKeys
         if (sidePanel.length && panelLeavingActions.includes(action.id)) return panelSwitchKeys
         // Undo works where changes are made: the reader and its side panels.
         if (sidePanel.length && undoActions.includes(action.id)) return panelSwitchKeys
-        // ctrl t opens Manage tags over a side panel (Annotations → Tags binds it itself).
-        if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && !(sidePanel === "annotations" && collectionTab === 2)
+        // ctrl t opens Manage tags over a side panel (Marks binds it itself).
+        if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && sidePanel !== "annotations"
         if (settingsDialog.opened && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         // visible, not opened: the palette accepts keys during its fade-in.
@@ -4136,7 +4175,7 @@ ApplicationWindow {
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
-        if (action.scope === "list") return "List panels · Annotations, Desk, History, Study"
+        if (action.scope === "list") return "List panels · Marks, Desk, History, Study"
         if (action.scope === "history") return "History in the palette only"
         if (action.scope === "search") return "Bible search results (" + keyText("bibleSearch") + ")"
         if (action.scope === "versions") return "Versions dialog"
@@ -4548,9 +4587,7 @@ ApplicationWindow {
         case "settings": settingsDialog.open(); break
         case "annotations":
             if (!leaveSidePanel("annotations")) break
-            bible.refreshCollection()
-            if (collectionTab === 2) openTagsBrowser()
-            else savedDrawer.open()
+            savedDrawer.open()
             break
         case "notes": if (sidePanel === "notes" || leaveSidePanel("notes")) openNotes(true); break
         case "desk": if (leaveSidePanel("desk")) openDesk(); break
@@ -4560,7 +4597,7 @@ ApplicationWindow {
         case "undo": undoChange(true); break
         case "redo": undoChange(false); break
         case "tags": openPassageTags(); break
-        case "manageTags": if (tagsUi.pickerVisible) tagsUi.togglePage(); else openTagsBrowser(true); break
+        case "manageTags": if (tagsUi.pickerVisible) tagsUi.togglePage(); else openManageTags(); break
         case "related":
             // Study needs a passage; after opening a chapter nothing is selected yet,
             // so study the first verse, as entering Visual mode does.
@@ -6621,7 +6658,7 @@ ApplicationWindow {
         onPressed: outside.dismiss()
         onWheel: function(wheel) { wheel.accepted = true }
     }
-    DrawerOutside { objectName: "savedOutside"; drawer: savedDrawer; shown: savedDrawer.shown; onDismiss: savedDrawer.close() }
+    DrawerOutside { objectName: "savedOutside"; drawer: savedDrawer; shown: savedDrawer.shown; onDismiss: app.dismissMarks() }
     DrawerOutside { objectName: "deskOutside"; drawer: deskDrawer; shown: deskDrawer.shown && !cleanDeskConfirmation.visible; onDismiss: deskDrawer.close() }
     DrawerOutside { objectName: "studyOutside"; drawer: tagsUi.studyDrawer; shown: tagsUi.relatedShown && !tagsUi.pickerVisible; onDismiss: tagsUi.close() }
 
@@ -6707,7 +6744,7 @@ ApplicationWindow {
         const ready = bible.ready && !bible.busy
         return [
             footerShowsText ? null : { id: "text", text: "Text and layout (Aa)", enabled: ready, run: function() { app.toggleTextPopover() } },
-            { id: "annotations", text: "Annotations", shortcut: menuKey("annotations"), enabled: ready, run: function() { app.runCommand("annotations") } },
+            { id: "annotations", text: "Marks", shortcut: menuKey("annotations"), enabled: ready, run: function() { app.runCommand("annotations") } },
             { id: "notes", text: "Notes", shortcut: menuKey("notes"), enabled: ready, run: function() { app.toggleNotes() } },
             { id: "related", text: "Study", shortcut: menuKey("related"), enabled: ready && hasSelection, run: function() { app.runCommand("related") } },
             { id: "desk", text: "Desk", shortcut: menuKey("desk"), enabled: ready, run: function() { app.runCommand("desk") } }
@@ -6857,7 +6894,7 @@ ApplicationWindow {
             visible: floatingActions.expanded
             glyph: "saved"
             selected: savedDrawer.visible
-            label: "Annotations"
+            label: "Marks"
             keys: app.keyText("annotations")
             available: bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("annotations")
@@ -7717,8 +7754,9 @@ ApplicationWindow {
         bottomPadding: padding
         leftPadding: padding
         rightPadding: padding
-        // Esc is handled below: it first leaves the search field.
-        closePolicy: closing || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnPressOutside
+        // Esc is handled below: it first leaves the search field. Outside
+        // presses close it through dismissMarks (a note written in place saves first).
+        closePolicy: closing || tagsUi.visibleModal || app.markEditKey.length ? Popup.NoAutoClose : Popup.CloseOnPressOutside
         readonly property bool tabKeys: shown && !contextMenu.visible && !tagsUi.visibleModal && !app.textInputActive()
         readonly property bool collectionKeys: tabKeys
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
@@ -7742,17 +7780,23 @@ ApplicationWindow {
         // belongs to the reader (or range editor) immediately.
         // A fresh open (not one interrupting the exit animation) starts without a query.
         onAboutToShow: { const reopening = visible; if (!closing) app.clearSavedQuery(); closing = false; if (reopening) focusContent() }
-        onAboutToHide: { closing = true; app.restorePanelFocus() }
+        onAboutToHide: { closing = true; if (app.markEditKey.length) app.finishMarkNote(false); app.restorePanelFocus() }
         function focusContent() { app.focusSavedList() }
         onVisibleChanged: if (visible && !closing) {
-            if (app.collectionTab === 2) { app.refreshTagExcerpts(); collectionList.currentIndex = app.initialSavedRow() }
+            app.refreshMarks()
+            collectionList.currentIndex = app.initialSavedRow()
             focusContent()
         }
         onClosed: { closing = false; position = 0; app.restorePanelFocus() }
+        // Changes anywhere (this window, another, any version) reread the marks once.
         Connections {
             target: bible
-            enabled: savedDrawer.visible && app.collectionTab === 2
-            function onTagsChanged() { app.refreshTagExcerpts() }
+            enabled: savedDrawer.visible
+            function onMarksChanged() { Qt.callLater(app.refreshMarks) }
+            function onCollectionChanged() { Qt.callLater(app.refreshMarks) }
+            function onTagsChanged() { Qt.callLater(app.refreshMarks) }
+            function onVersionsChanged() { Qt.callLater(app.refreshMarks) }
+            function onVersionChanged() { Qt.callLater(app.refreshMarks) }
         }
         contentItem: ColumnLayout {
             objectName: "savedContent"
@@ -7765,8 +7809,6 @@ ApplicationWindow {
             Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(-1) }
             ListMotionKeys { objectName: "savedMotionKeys"; active: savedDrawer.collectionKeys; count: collectionList.count; onMove: function(delta) { app.moveSaved(delta) } }
-            Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(-1) }
-            Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(1) }
             // enter opens the current row from anywhere in the drawer (a focused button takes its own enter).
             Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
             Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.deleteSaved() }
@@ -7774,14 +7816,18 @@ ApplicationWindow {
             Shortcut { sequence: "Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry()) }
             Shortcut { sequence: "Shift+Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry(), true) }
             Shortcut { sequence: "D"; enabled: savedDrawer.collectionKeys; onActivated: app.toggleScopeDesk(app.focusedSavedEntry()) }
-            // Tags: t edits the row's tags over the drawer; ctrl t manages tags.
+            // In place: w writes the row's note in the row; t edits its tags over the drawer; ctrl t manages tags.
+            Shortcut { objectName: "savedNoteKey"; sequence: "W"; enabled: savedDrawer.collectionKeys && !bible.busy && !!app.focusedSavedEntry(); onActivated: app.editMarkNote(app.focusedSavedEntry()) }
             Shortcut {
                 objectName: "savedTagKey"
                 sequence: "T"
-                enabled: savedDrawer.collectionKeys && app.collectionTab === 2 && !bible.busy && !!app.focusedSavedEntry()
+                enabled: savedDrawer.collectionKeys && !bible.busy && !!app.focusedSavedEntry()
                 onActivated: app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry()))
             }
-            Shortcut { sequences: app.actionKeys("manageTags"); enabled: savedDrawer.collectionKeys && app.collectionTab === 2 && !bible.busy; onActivated: tagsUi.openManage() }
+            Shortcut { sequences: app.actionKeys("manageTags"); enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: tagsUi.openManage() }
+            // A note changed in another window while written here: keep the draft or take the saved text.
+            Shortcut { sequences: app.actionKeys("noteKeepDraft"); enabled: savedDrawer.shown && app.markEditConflict; onActivated: app.keepMarkDraft() }
+            Shortcut { sequences: app.actionKeys("noteUseSaved"); enabled: savedDrawer.shown && app.markEditConflict; onActivated: app.useSavedMarkNote() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
                 enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0
@@ -7792,23 +7838,12 @@ ApplicationWindow {
                 objectName: "savedHeader"
                 Layout.fillWidth: true
                 theme: desktop
-                title: "Annotations"
+                title: "Marks"
                 subtitle: tagsUi.passageSubtitle
                 uiScale: app.scale
                 titleScale: app.controlScale
                 titleName: "savedTitle"
                 subtitleName: "savedPassage"
-            }
-            PanelTabs {
-                id: savedTabs
-                objectName: "savedTabs"
-                Layout.fillWidth: true
-                labels: ["Highlights", "Notes", "Tags"]
-                theme: desktop
-                uiScale: app.controlScale
-                namePrefix: "savedTab"
-                currentIndex: app.collectionTab
-                onActivated: index => app.filterSaved(index - app.collectionTab)
             }
             FineRule { Layout.fillWidth: true }
             TextField {
@@ -7821,7 +7856,7 @@ ApplicationWindow {
                 implicitHeight: 36 * app.controlScale
                 font.pixelSize: 14 * app.controlScale
                 color: desktop.foreground
-                placeholderText: "Search " + ["highlights", "notes", "tagged passages"][app.collectionTab] + "…"
+                placeholderText: "Filter marks… #name for a tag"
                 placeholderTextColor: desktop.muted
                 selectByMouse: true
                 leftPadding: 10 * app.controlScale; rightPadding: 10 * app.controlScale
@@ -7829,14 +7864,14 @@ ApplicationWindow {
                 onTextEdited: {
                     app.savedQuery = text
                     collectionList.currentIndex = collectionList.count ? 0 : -1
-                    // Clearing a short tab's query hides the field: keep the keyboard in the list.
+                    // Clearing a short list's query hides the field: keep the keyboard in the list.
                     if (!app.savedSearchVisible) Qt.callLater(app.focusSavedList)
                 }
                 background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: savedSearch.activeFocus ? desktop.accent : desktop.border }
                 Keys.onDownPressed: app.focusSavedList()
                 Keys.onReturnPressed: app.focusSavedList()
                 Keys.onEnterPressed: app.focusSavedList()
-                Accessible.name: "Search annotations"
+                Accessible.name: "Filter marks"
             }
             ListView {
                 id: collectionList
@@ -7845,75 +7880,44 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 clip: true
                 spacing: 6 * app.scale
-                model: app.filteredCollection()
+                model: app.filteredMarks()
                 onModelChanged: currentIndex = count > 0 ? Math.max(0, Math.min(currentIndex, count - 1)) : -1
                 ScrollBar.vertical: OverlayScrollbar { id: savedScrollbar; objectName: "savedScrollbar" }
-                // Tags rows sit under "name · count" headings; headings are part
-                // of the row's block, so j/k and the motions never stop on them.
-                delegate: Column {
+                // The row sits in a plain item: the list's current item takes the
+                // list's focus, and rows themselves never do (like Desk and History).
+                delegate: Item {
                     id: savedBlock
                     required property var modelData
                     required property int index
+                    readonly property bool editing: savedEntry.editing
+                    readonly property var editor: savedEntry.editor
                     width: collectionList.width - app.scrollGutter(collectionList)
-                    Label {
-                        objectName: "savedTagGroup:" + (savedBlock.modelData.group || "")
-                        visible: app.collectionTab === 2 && !!savedBlock.modelData.firstOfGroup
-                        width: parent.width
-                        text: (savedBlock.modelData.group || "") + " · " + (savedBlock.modelData.groupCount || 0)
-                        textFormat: Text.PlainText
-                        color: desktop.muted
-                        font.pixelSize: 12 * app.scale; font.weight: Font.Medium
-                        elide: Text.ElideRight
-                        leftPadding: 12 * app.scale
-                        topPadding: savedBlock.index ? 10 * app.scale : 0
-                        bottomPadding: 4 * app.scale
-                    }
-                SavedEntry {
-                    id: savedEntry
-                    modelData: savedBlock.modelData
-                    index: savedBlock.index
-                    objectName: app.collectionTab === 2 ? "savedTagEntry:" + modelData.group + ":" + modelData.reference : "savedEntry" + modelData.reference
-                    // Like Desk and History rows: the list keeps the keyboard (tab
-                    // never stops on a row); the current row is the list's.
-                    focusPolicy: Qt.NoFocus
-                    width: collectionList.width - app.scrollGutter(collectionList)
-                    padding: 12 * app.scale
-                    height: savedContent.implicitHeight + topPadding + bottomPadding
-                    clip: true
-                    highlighted: collectionList.currentIndex === savedBlock.index
-                    onClicked: { collectionList.currentIndex = savedBlock.index; app.openSaved(modelData) }
-                    TapHandler {
-                        acceptedButtons: Qt.RightButton
-                        onTapped: function(eventPoint) { app.openSavedMenu(savedEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
-                    }
-                    // Each tab shows only its own annotation kind: Highlights the
-                    // highlight mark, Notes the note.
-                    readonly property bool showHighlight: app.collectionTab === 0 && !!modelData.highlight
-                    readonly property bool showNote: app.collectionTab === 1 && modelData.note.length > 0
-                    readonly property bool showTag: app.collectionTab === 2
-                    // Tags: the reader's range (equal or overlapping) is "here".
-                    readonly property bool here: { app.savedHereKey; return showTag && app.savedHere(modelData) }
-                    // Other tags on the range; omitted when the group's tag is its only one.
-                    readonly property string otherTags: showTag && Array.from(modelData.tags || []).length > 1 ? app.tagsPlainText(modelData.tags).replace(/, /g, " · ") : ""
-                    contentItem: RowLayout {
-                        id: savedContent
-                        objectName: "savedEntryContent" + savedEntry.modelData.reference
-                        spacing: 12 * app.scale
-                        ColumnLayout {
-                            Layout.alignment: Qt.AlignTop
-                            spacing: 7 * app.scale
-                            visible: savedEntry.showNote || savedEntry.showTag
-                            NoteGlyph { objectName: "savedNote" + savedEntry.modelData.reference; visible: savedEntry.showNote; Layout.alignment: Qt.AlignHCenter }
-                            AnnotationGlyph {
-                                objectName: "savedTag" + savedEntry.modelData.reference
-                                visible: savedEntry.showTag
-                                kind: "tag"; ink: desktop.accent
-                                implicitWidth: 14 * app.scale; implicitHeight: 16 * app.scale
-                                Layout.alignment: Qt.AlignHCenter
-                            }
+                    height: savedEntry.height
+                    SavedEntry {
+                        id: savedEntry
+                        modelData: savedBlock.modelData
+                        index: savedBlock.index
+                        objectName: "savedEntry" + (modelData.active ? "" : modelData.versionAbbreviation + ":") + modelData.reference
+                        // Like Desk and History rows: the list keeps the keyboard (tab
+                        // never stops on a row); the current row is the list's.
+                        focusPolicy: Qt.NoFocus
+                        width: collectionList.width - app.scrollGutter(collectionList)
+                        padding: 12 * app.scale
+                        height: savedContent.implicitHeight + topPadding + bottomPadding
+                        clip: true
+                        highlighted: collectionList.currentIndex === index
+                        onClicked: { collectionList.currentIndex = index; app.openSaved(modelData) }
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: function(eventPoint) { app.openSavedMenu(savedEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
                         }
-                        ColumnLayout {
-                            Layout.fillWidth: true
+                        readonly property bool editing: app.markEditKey.length > 0 && app.markEditKey === app.rangeKey(modelData)
+                        property alias editor: markEditor
+                        // The reader's range (equal or overlapping) is "here".
+                        readonly property bool here: { app.savedHereKey; return app.savedHere(modelData) }
+                        contentItem: ColumnLayout {
+                            id: savedContent
+                            objectName: "savedEntryContent" + savedEntry.modelData.reference
                             spacing: 7 * app.scale
                             RowLayout {
                                 Layout.fillWidth: true
@@ -7924,12 +7928,12 @@ ApplicationWindow {
                                     text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground
                                     font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap
                                     FontMetrics { id: savedReferenceMetrics; font: savedReference.font }
-                                    // Highlights tab: the reader's highlighter stroke (same ink and seed) under the reference.
+                                    // A highlighted mark: the reader's highlighter stroke (same ink and seed) under the reference.
                                     Canvas {
                                         id: savedHighlight
                                         objectName: "savedHighlight" + savedEntry.modelData.reference
                                         z: -1
-                                        visible: savedEntry.showHighlight
+                                        visible: !!savedEntry.modelData.highlight
                                         x: -4 * app.scale
                                         width: Math.min(savedReference.width, savedReference.contentWidth) + 8 * app.scale
                                         height: savedReference.height
@@ -7953,6 +7957,16 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+                                // Marks kept in another version say which.
+                                Label {
+                                    objectName: "savedVersion" + savedEntry.modelData.reference
+                                    visible: !savedEntry.modelData.active
+                                    text: "from " + savedEntry.modelData.versionAbbreviation
+                                    textFormat: Text.PlainText
+                                    color: desktop.muted
+                                    font.pixelSize: 11 * app.scale
+                                    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                }
                                 Label {
                                     objectName: "savedHere" + savedEntry.modelData.reference
                                     visible: savedEntry.here
@@ -7962,29 +7976,84 @@ ApplicationWindow {
                                     Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                                 }
                             }
-                            Label { objectName: "savedTagLine" + savedEntry.modelData.reference; text: savedEntry.otherTags; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; elide: Text.ElideRight; Layout.fillWidth: true }
-                            Label { objectName: "savedExcerpt" + savedEntry.modelData.reference; text: savedEntry.showTag ? app.leftToRightText(savedEntry.modelData.excerpt || "") : ""; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 13 * app.scale; maximumLineCount: 1; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                            Label { objectName: "savedNoteText" + savedEntry.modelData.reference; text: savedEntry.showNote ? savedEntry.modelData.note.replace(/\s+/g, " ") : ""; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            // Tags: click one to show only its marks.
+                            Flow {
+                                objectName: "savedTags" + savedEntry.modelData.reference
+                                Layout.fillWidth: true
+                                visible: Array.from(savedEntry.modelData.tags || []).length > 0
+                                spacing: 8 * app.scale
+                                Repeater {
+                                    model: Array.from(savedEntry.modelData.tags || [])
+                                    delegate: Label {
+                                        required property var modelData
+                                        objectName: "savedTag:" + modelData.name
+                                        text: "#" + modelData.name
+                                        textFormat: Text.PlainText
+                                        color: desktop.accent
+                                        font.pixelSize: 12 * app.scale
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: app.filterMarksByTag(parent.modelData.name)
+                                        }
+                                    }
+                                }
+                            }
+                            Label { objectName: "savedNoteText" + savedEntry.modelData.reference; text: savedEntry.editing ? "" : savedEntry.modelData.note.replace(/\s+/g, " "); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            Label { objectName: "savedExcerpt" + savedEntry.modelData.reference; text: savedEntry.editing || savedEntry.modelData.note.length ? "" : app.leftToRightText(savedEntry.modelData.excerpt || ""); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 13 * app.scale; maximumLineCount: 1; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            // The note, written in place (w); saves as you type, esc is done.
+                            TextArea {
+                                id: markEditor
+                                objectName: savedEntry.editing ? "markEditor" : ""
+                                visible: savedEntry.editing
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: visible ? Math.max(96 * app.scale, contentHeight + topPadding + bottomPadding) : 0
+                                wrapMode: TextEdit.Wrap
+                                textFormat: TextEdit.PlainText
+                                font.pixelSize: 14 * app.scale
+                                color: desktop.foreground
+                                placeholderText: "Write a note…"
+                                placeholderTextColor: desktop.muted
+                                selectByMouse: true
+                                ContextMenu.menu: null
+                                ContextMenu.onRequested: function(position) { app.openTextMenu(markEditor, position) }
+                                onVisibleChanged: if (visible) text = app.markEditText
+                                onTextChanged: if (savedEntry.editing && text !== app.markEditText) {
+                                    app.markEditText = text
+                                    if (app.noteSaveDelay > 0) markSaveTimer.restart(); else app.flushMarkNote()
+                                }
+                                background: Rectangle {
+                                    radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                                    color: desktop.surface
+                                    border.color: app.markEditConflict ? desktop.error : markEditor.activeFocus ? desktop.accent : desktop.border
+                                }
+                                Accessible.name: "Note on " + savedEntry.modelData.reference
+                            }
+                            Label {
+                                objectName: savedEntry.editing ? "markEditConflict" : ""
+                                visible: savedEntry.editing && app.markEditConflict
+                                text: "This note changed in another window. " + KeyNotation.format("Ctrl+S") + " saves your draft over it, " + KeyNotation.format("Ctrl+Shift+S") + " takes the saved text."
+                                color: desktop.error
+                                font.pixelSize: 12 * app.scale
+                                wrapMode: Text.Wrap
+                                Layout.fillWidth: true
+                            }
+                        }
+                        background: Rectangle {
+                            color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"
+                            radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                            // The current row is shown by its tinted fill alone, never an accent border.
+                            border.width: 0
                         }
                     }
-                    background: Rectangle {
-                        color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"
-                        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                        // The current row is shown by its tinted fill alone, never an accent border.
-                        border.width: 0
-                    }
-                }
                 }
                 Label {
                     objectName: "savedEmpty"
                     anchors.centerIn: parent
                     width: parent.width - 24
-                    text: app.collectionTab === 2
-                        ? (app.savedQuery.trim().length && app.collectionForTab().length ? "No matching tagged passages."
-                            : Array.from(bible.tags).some(function(tag) { return tag.count > 0 }) ? "No tagged passages in " + bible.versionAbbreviation + ". Tags in other versions stay with them."
-                            : "No tagged passages yet. Press " + app.keyText("tags") + " on a passage to tag it.")
-                        : app.savedQuery.trim().length && app.collectionForTab().length ? "No matching annotations."
-                        : ["No highlights yet.", "No notes yet."][app.collectionTab] || ""
+                    text: app.marksRows.length ? "No matching marks."
+                        : "No marks yet. Highlight with " + app.keyText("highlight") + ", write a note with " + app.keyText("notes")
+                            + ", or tag with " + app.keyText("tags") + "."
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     color: desktop.muted
@@ -7993,7 +8062,7 @@ ApplicationWindow {
                     visible: collectionList.count === 0
                 }
             }
-            // Each tab's keys, above the footer (dropped when the drawer is too short for its list).
+            // Marks' keys, above the footer (dropped when the drawer is too short for its list).
             HintRow {
                 objectName: "savedHints"
                 visible: savedDrawer.height >= 420 * app.scale
@@ -8005,9 +8074,9 @@ ApplicationWindow {
             FineRule { Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: { savedDrawer.close(); app.runCommand("export") } }
+                QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("export") }
                 Item { Layout.fillWidth: true }
-                QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: { savedDrawer.close(); app.runCommand("backup") } }
+                QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("backup") }
             }
         }
     }
@@ -8784,7 +8853,7 @@ ApplicationWindow {
                     Label {
                         objectName: "importReplacement"
                         visible: bible.ready
-                        text: "Importing the same edition replaces its Bible data and preserves your notes, highlights, tags, and settings. Adding another supported version keeps the installed editions. Annotations belong to their own version."
+                        text: "Importing the same edition replaces its Bible data and preserves your notes, highlights, tags, and settings. Adding another supported version keeps the installed editions. Marks belong to their own version."
                         color: desktop.accent; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     Label { objectName: "importDataPath"; text: bible.dataDirectory(); textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }

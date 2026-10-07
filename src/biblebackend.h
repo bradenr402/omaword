@@ -151,6 +151,22 @@ public:
     Q_INVOKABLE bool changeAnnotationRange(QVariantMap sourceSnapshot, QVariantMap destination,
                                           QVariantMap components, bool combineNotes = false,
                                           QString destinationToken = QString());
+    // Marks: every exact range with a highlight, a note, or tags, in every
+    // installed version, one row each: canonical scope fields + reference,
+    // versionAbbreviation, active (the reading version), highlight, note,
+    // tags [{id,name}] in name order, created/updated (the annotation's;
+    // empty when unknown or tags only), and excerpt (bounded verse text).
+    // Ordered by passage (the reading version's book order, then chapter and
+    // verse), the reading version first among equal ranges. Read on demand;
+    // marksChanged says when to read again.
+    Q_INVOKABLE QVariantList marks() const;
+    // The saved note on an exact range of any installed version ("" when none).
+    Q_INVOKABLE QString savedNote(QVariantMap scope) const;
+    // Saves text as an exact range's note in any installed version, only while
+    // its saved note still equals expected (else the "changed in another
+    // window" error). A range left with nothing goes. Successive saves on one
+    // range are one undo step until closeUndoGroup(), as with setNoteText.
+    Q_INVOKABLE bool setScopeNote(QVariantMap scope, QString text, QString expected);
     // Local reading-only restoration in the active version; never flushes peer drafts.
     // An unselected chapter uses {versionId,book,chapter,start:0,end:0}.
     Q_INVOKABLE bool restoreSelection(QVariantMap scope, bool reversed = false, double position = -1);
@@ -407,6 +423,8 @@ signals:
     void historyChanged();
     void undoChanged();
     void ribbonChanged();
+    // Annotations or tags changed in some version (any window): marks() is stale.
+    void marksChanged();
     void sharedCommitted(QString versionId, bool library, bool preferences);
 
 private:
@@ -432,7 +450,8 @@ private:
                        bool peerReload = false, const QVariantMap &targetScope = {});
     void refreshShared(const QString &versionId, bool library, bool preferences);
     bool flushDrafts();
-    void publishAnnotations();
+    // versionId: the version whose annotations changed (empty: the reading one).
+    void publishAnnotations(const QString &versionId = QString());
     bool sharedMutationBusy() const;
     void notifyBusy();
     std::function<bool()> m_flush;

@@ -30,14 +30,14 @@ files.
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC |
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (`lastSound`/`playCount` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds) |
-| `qml/Main.qml` | Reader, palettes, Notes, Annotations (one list for all four tabs; Tags rows grouped under tag headings), Desk, settings, catalog, About |
-| `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Annotations and Study drawers, which stay open) and the Study drawer (tabs Cross-references / Footnotes / Tags; the Tags tab keeps the internal id `related`, as do `relatedDrawer` and the `related` action). Study → Tags roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
-| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Annotations and Study: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk: its count) |
+| `qml/Main.qml` | Reader, palettes, Notes, Marks (`savedDrawer`: every version's marks from `marks()`, one row per exact range, filtered, notes written in place), Desk, settings, catalog, About |
+| `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Marks and Study drawers, which stay open) and the Study drawer (tabs Cross-references / Footnotes / Tags; the Tags tab keeps the internal id `related`, as do `relatedDrawer` and the `related` action). Study → Tags roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
+| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Marks and Study: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk: its count) |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
 | `qml/ExitGhost.qml` | Exit motion for popups that close at once (menus, modals): a frozen `ShaderEffectSource` picture that fades and shrinks toward the trigger, never taking input |
 | `qml/AppContextMenu.qml`, `qml/AppToolTip.qml`, `qml/RowMenu.js` | Shared context menu (scrolls when taller than the window; also replaces Qt's text-field menu via `ContextMenu.menu: null` → `openTextMenu`) and themed tooltip; `RowMenu.entries` builds every list row's menu (Open · Copy · Copy plain text · Desk, then the row's extras) |
-| `qml/PanelTabs.qml` | Shared tab row (Annotations, Study, palette Passage/Search/Command): sizing, selected accent tint, focus outline |
+| `qml/PanelTabs.qml` | Shared tab row (Study, palette Passage/Search/Command): sizing, selected accent tint, focus outline |
 | `qml/ChapterFind.qml`, `qml/SearchHighlights.qml` | `/` chapter find; match overlay painting |
 | Passage palette (`Main.qml`) | One input over a list (`paletteResults`: books, candidates, recents, commands, search results) or, while a book is chosen, a five-column chapter grid (`paletteChapters`); `paletteList` is whichever shows, so keys, snapshots, and resume treat them alike |
 | `qml/HintRow.qml` | Every panel/modal key hint row: parts `[keys, label, run, enabled]`; parts with `run` are clickable while enabled (hover tint, pointing hand), navigation parts never; `text` keeps the plain styled markup |
@@ -215,7 +215,7 @@ files.
 
 ### Move here (`changeAnnotationRange`)
 - A mark's note and tags move from their exact range to the verses selected
-  now, in the same active version (`moveMark`: marker menus, Annotations and
+  now, in the same active version (`moveMark`: marker menus, Marks and
   Study rows). Overlapping ranges stay; highlights are paint and never move.
 - Collisions: tags dedupe; a different note already there comes first, the
   moved one after a blank line (`needsNoteMerge` with the previewed
@@ -241,14 +241,30 @@ files.
   the same ID), reads back, commits, and publishes to every window. A step in
   another version applies there without switching; a removed version's steps
   are dropped.
-- Successive `setNoteText` saves on one range extend one step (`group`) until
-  `closeUndoGroup()` (the Notes drawer closing), an undo or redo, or any other
-  step; a session that returns to its starting text leaves no step. A new step
+- Successive `setNoteText`/`setScopeNote` saves on one range extend one step
+  (`group`) until `closeUndoGroup()` (the Notes drawer or the in-place editor
+  closing), an undo or redo, or any other step, and only while nothing else
+  changed the range in between; a session that returns to its starting text
+  leaves no step. A new step
   clears redo. Labels read after "Undo"/"Redo" ("highlight on John 3:16").
 - QML: `u`/`ctrl z` and `ctrl shift Z`/`ctrl r` in the reader, side panels,
-  and character selection (`charKey`); the passage and Annotations row menus
+  and character selection (`charKey`); the passage and Marks row menus
   and Commands name the step; failures toast instead of the error banner.
-  Deleting from Annotations or a marker menu has no confirmation.
+  Deleting from Marks or a marker menu has no confirmation.
+
+### Marks (`marks`, `setScopeNote`)
+- `marks()` reads every installed version's marks on demand: one row per exact
+  range with its highlight, note, tags, times, and opening verse, ordered by
+  the reading version's book order (other versions' marks sort among its
+  own). `marksChanged` (any window, any version) and the reader's own change
+  signals reread it, once per turn, while Marks is open.
+- A row's note is written in the row (`markEditKey`): the draft lives in the
+  window (`markEditText`), saves after `noteSaveDelay` with `setScopeNote`
+  against the text it started from, and `flushNote()` saves it first, so
+  navigation, panels, and window close wait for it. A change from another
+  window keeps the draft (`ctrl s` saves it over, `ctrl shift S` takes the
+  saved text), and Marks stays open until it is resolved. The rows are not
+  reread while the editor is open, which would recreate it.
 
 ### Peek
 - `PeekCard` is a popover for what the text points to, read in place: a
@@ -349,7 +365,7 @@ files.
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw
   `paintLayoutGlyph`'s icons.
-- With a drawer side panel open (Annotations, Desk, Study), the keys
+- With a drawer side panel open (Marks, Desk, Study), the keys
   of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
   keyboard to the reader, close the panel, then act (`runKey`) — so the
   drawer's exit cannot hand focus back over what opened. Notes is not modal:
@@ -403,8 +419,8 @@ files.
     little below the baseline (`HandDrawn.highlightBand`, from the reader
     font's metrics; text sits at the top of its line box) — a feathered pass,
     a chisel-tipped core that tapers at its ends, and a shorter second pass
-    darker where they overlap; seeded per range and line. No accent bar. The
-    Highlights tab draws the same stroke under each row's reference.
+    darker where they overlap; seeded per range and line. No accent bar. A
+    highlighted row in Marks draws the same stroke under its reference.
   - Focus-mode dimming: follows the cursor instantly; only entering/leaving fades.
   - Jump pulse and copy flash rects. Reduce motion disables pulses/flashes/fades.
   - Programmatic scrolls to a verse (`scrollToVerse`, `zz`/`zt`/`zb`, search,

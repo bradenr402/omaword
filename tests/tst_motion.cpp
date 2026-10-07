@@ -509,7 +509,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!desk->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         // Annotations drawer: immediate list focus.
-        key(Qt::Key_A, Qt::ShiftModifier);
+        key(Qt::Key_M, Qt::ShiftModifier);
         QVERIFY(object("savedDrawer")->property("visible").toBool());
         QVERIFY(item("collectionList")->hasActiveFocus());
         QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());

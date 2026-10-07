@@ -882,17 +882,15 @@ private:
         const auto list = item("collectionList");
         return variant(list->property("model")).toList().value(index).toMap();
     }
-    void openAnnotationsTags() {
-        root->setProperty("collectionTab", 2);
+    void openMarks() {
         QVERIFY(QMetaObject::invokeMethod(root.get(), "runCommand", Q_ARG(QVariant, QString("annotations"))));
         QTRY_VERIFY(root->findChild<QObject *>("savedDrawer")->property("opened").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
     }
 private slots:
-    // Annotations → Tags: every tagged passage in this version grouped by tag
-    // (name order, then canonical order), headings that j/k skip, a "here"
-    // marker and starting row, and keys that act on the row's own tag.
-    void annotationsTagsGroupsKeysAndRemoval() {
+    // Marks: one row per tagged passage with all its tags, a "here" marker and
+    // starting row, #tag filtering by a row's tag, and keys that act on the row.
+    void marksTagsFilterKeysAndDeletion() {
         const auto cleanupQml = qScopeGuard([this] { unloadMain(); });
         QVERIFY(loadMain());
         QTRY_VERIFY(!root->property("restoringPosition").toBool());
@@ -902,40 +900,35 @@ private slots:
         const auto here = scope(8, 8);
         QVERIFY(bible->setTag(here, alpha, true)); QVERIFY(bible->setTag(here, beta, true));
         bible->selectVerses(8, 8);
-        openAnnotationsTags();
+        openMarks();
         // Header: the reader's passage under the title.
         QCOMPARE(item("savedPassage")->property("text").toString(), QString("John 3:8 · NET"));
         const auto list = item("collectionList");
-        QTRY_COMPARE(list->property("count").toInt(), 4);
+        QTRY_COMPARE(list->property("count").toInt(), 3);
         QStringList order;
-        for (int i = 0; i < 4; ++i) order << savedRow(i)["group"].toString() + " " + savedRow(i)["reference"].toString();
-        QCOMPARE(order, (QStringList{QString::fromUtf8("Alpha John 3:1–3"), "Alpha John 3:8", "Beta John 3:5", "Beta John 3:8"}));
-        QVERIFY(item("savedTagGroup:Alpha")->isVisible());
-        QCOMPARE(item("savedTagGroup:Alpha")->property("text").toString(), QString("Alpha · 2"));
-        QCOMPARE(item("savedTagGroup:Beta")->property("text").toString(), QString("Beta · 2"));
-        // Starts on the first row here; the marker shows only on rows overlapping the reader.
-        QCOMPARE(list->property("currentIndex").toInt(), 1);
+        for (int i = 0; i < 3; ++i) order << savedRow(i)["reference"].toString() + " " + ids(savedRow(i)["tags"].toList()).join(",");
+        QCOMPARE(order, (QStringList{QString::fromUtf8("John 3:1–3 ") + alpha, "John 3:5 " + beta, "John 3:8 " + alpha + "," + beta}));
+        // Starts on the row here; the marker shows only on rows overlapping the reader.
+        QCOMPARE(list->property("currentIndex").toInt(), 2);
         QVERIFY(item("savedHereJohn 3:8")->isVisible());
         QVERIFY(!item(QString::fromUtf8("savedHereJohn 3:1–3"))->isVisible());
-        // The tag line lists the range's tags, omitted when it is just the group's tag.
-        QCOMPARE(item("savedTagLineJohn 3:8")->property("text").toString(), QString("Alpha · Beta"));
-        QVERIFY(!item("savedTagLineJohn 3:5")->isVisible());
-        QVERIFY(item("savedTagJohn 3:5")->isVisible());
-        QVERIFY(!item("savedNoteJohn 3:5")->isVisible());
-        // j/k step rows, never headings.
-        key(Qt::Key_J); QCOMPARE(list->property("currentIndex").toInt(), 2);
-        key(Qt::Key_K); key(Qt::Key_K); QCOMPARE(list->property("currentIndex").toInt(), 0);
-        key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(list->property("currentIndex").toInt(), 3);
-        // Hints: this tab's keys.
+        // A row without a note shows the verse instead.
+        QVERIFY(item("savedTagsJohn 3:8")->isVisible());
+        QVERIFY(item("savedExcerptJohn 3:5")->isVisible());
+        QVERIFY(!item("savedNoteTextJohn 3:5")->isVisible());
+        key(Qt::Key_K); QCOMPARE(list->property("currentIndex").toInt(), 1);
+        key(Qt::Key_K); QCOMPARE(list->property("currentIndex").toInt(), 0);
+        key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(list->property("currentIndex").toInt(), 2);
+        // Hints: the row's keys.
         const QString hints = item("savedHints")->property("text").toString();
-        QVERIFY(hints.contains("remove&nbsp;tag")); QVERIFY(hints.contains("manage"));
+        QVERIFY(hints.contains("note")); QVERIFY(hints.contains("tags")); QVERIFY(hints.contains("delete"));
         // The context menu.
         key(Qt::Key_Menu);
         QTRY_VERIFY(root->findChild<QObject *>("contextMenu")->property("visible").toBool());
         QStringList menuIds;
         for (const auto &entry : variant(root->findChild<QObject *>("contextMenu")->property("layout")).toList())
             menuIds << (entry.toMap().value("separator").toBool() ? QString("|") : entry.toMap().value("id").toString());
-        QCOMPARE(menuIds, (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "moveHere", "removeTag", "undo"}));
+        QCOMPARE(menuIds, (QStringList{"open", "copy", "copyPlain", "desk", "|", "note", "tags", "moveHere", "delete", "undo"}));
         key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("contextMenu")->property("visible").toBool());
         // t: the picker on the row's range, over the drawer, which stays.
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
@@ -944,34 +937,35 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("visibleModal").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         QVERIFY(root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
-        // delete removes only this row's tag, at once; u puts it back, ctrl r removes it again.
-        QCOMPARE(list->property("currentIndex").toInt(), 3);
+        // delete removes the row's whole mark, at once; u puts it back, ctrl r removes it again.
+        QCOMPARE(list->property("currentIndex").toInt(), 2);
         key(Qt::Key_Delete);
-        QTRY_COMPARE(ids(bible->tagsForScope(here)), QStringList{alpha});
-        QCOMPARE(root->findChild<QObject *>("toast")->property("text").toString(), QString("Beta removed from John 3:8"));
+        QTRY_VERIFY(bible->tagsForScope(here).isEmpty());
+        QCOMPARE(root->findChild<QObject *>("toast")->property("text").toString(), QString("John 3:8 deleted"));
         QCOMPARE(ids(bible->tagsForScope(scope(5, 5))), QStringList{beta});
-        QTRY_COMPARE(list->property("count").toInt(), 3);
+        QTRY_COMPARE(list->property("count").toInt(), 2);
         key(Qt::Key_U); QTRY_COMPARE(bible->tagsForScope(here).size(), 2);
-        QTRY_COMPARE(list->property("count").toInt(), 4);
-        key(Qt::Key_R, Qt::ControlModifier); QTRY_COMPARE(ids(bible->tagsForScope(here)), QStringList{alpha});
         QTRY_COMPARE(list->property("count").toInt(), 3);
+        key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(bible->tagsForScope(here).isEmpty());
+        QTRY_COMPARE(list->property("count").toInt(), 2);
+        // Mouse: a row's tag shows only its marks.
+        click("savedTag:Beta");
+        QTRY_COMPARE(list->property("count").toInt(), 1);
+        QCOMPARE(root->property("savedQuery").toString(), QString("#Beta"));
         bible->openChapter(43, 3); bible->selectVerses(8, 8);
-        // Every Annotations tab has a hint row and the passage header.
-        for (int tab = 0; tab < 3; ++tab) {
-            QVERIFY(QMetaObject::invokeMethod(root.get(), "filterSaved", Q_ARG(QVariant, tab - root->property("collectionTab").toInt())));
-            QVERIFY(item("savedHints")->isVisible());
-            QVERIFY(item("savedHints")->property("text").toString().contains(tab == 2 ? "remove&nbsp;tag" : "delete"));
-            QCOMPARE(item("savedPassage")->property("text").toString(), QString("John 3:8 · NET"));
-        }
+        QCOMPARE(item("savedPassage")->property("text").toString(), QString("John 3:8 · NET"));
         bible->clearSelection();
         QCOMPARE(item("savedPassage")->property("text").toString(), QString("John 3 · NET"));
         key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
-        // Tags only in another version: said plainly.
+        // Reading another version: its marks are labelled with theirs.
+        const QString net = bible->versionAbbreviation();
         install(kjv);
-        openAnnotationsTags();
-        QCOMPARE(item("collectionList")->property("count").toInt(), 0);
-        QCOMPARE(item("savedEmpty")->property("text").toString(),
-            "No tagged passages in " + bible->versionAbbreviation() + ". Tags in other versions stay with them.");
+        openMarks();
+        QTRY_COMPARE(item("collectionList")->property("count").toInt(), 2);
+        QCOMPARE(savedRow(0)["versionAbbreviation"].toString(), net);
+        QVERIFY(!savedRow(0)["active"].toBool());
+        QCOMPARE(item("savedVersionJohn 3:5")->property("text").toString(), "from " + net);
+        QVERIFY(item("savedVersionJohn 3:5")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
     }
     // Study in the app: Cross-references first, then the remembered tab.

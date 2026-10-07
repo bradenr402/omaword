@@ -525,8 +525,9 @@ private slots:
         key(Qt::Key_Down); key(Qt::Key_End); QCOMPARE(paletteRow(), 23);
         key(Qt::Key_Home); QCOMPARE(paletteRow(), 0);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
-        // Annotations (Highlights), then not while typing in its search field.
-        call("readerFocus"); key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        // Marks (25: each highlighted and tagged passage once, and a tagged one),
+        // then not while typing in its filter field.
+        call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         auto saved = object("collectionList"); expectMotions(saved, "annotations");
         key(Qt::Key_G); key(Qt::Key_Slash); QTRY_VERIFY(item("savedSearch")->hasActiveFocus());
@@ -534,10 +535,7 @@ private slots:
         QCOMPARE(object("savedSearch")->property("text").toString().toLower(), QString("g")); // Typed, not a motion.
         QVERIFY(item("savedSearch")->hasActiveFocus());
         object("savedSearch")->setProperty("text", QString()); key(Qt::Key_Escape); QTRY_VERIFY(!item("savedSearch")->hasActiveFocus());
-        // Annotations · Tags tab: the same list and motions (25 tagged ranges).
-        key(Qt::Key_H); QTRY_COMPARE(prop("collectionTab").toInt(), 2);
         QTRY_COMPARE(saved->property("count").toInt(), 25);
-        expectMotions(saved, "annotations tags");
         key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
         // Study → Tags: the results.
         call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
@@ -613,14 +611,13 @@ private slots:
         QCOMPARE(rows[5].toMap()["hint"].toString(), QString("8 passages"));
         for (int i = 0; i < rows.size(); ++i) QCOMPARE(rows[i].toMap()["lastRecent"].toBool(), i == 5);
         QCOMPARE(rows.first().toMap()["title"].toString(), QString("John 1:30"));
-        // One thin rule (the border color) under the recent group, before the books.
-        QTRY_VERIFY(item("paletteRecentRule"));
+        // One thin rule (the border color) under the recent group, before the
+        // books, once the list holds the rows after it.
         QList<QQuickItem *> rules; std::function<void(QQuickItem *)> walk = [&](QQuickItem *node) {
             if (node->objectName() == "paletteRecentRule" && node->isVisible()) rules << node;
             for (auto child : node->childItems()) walk(child);
         };
-        walk(item("paletteResults"));
-        QCOMPARE(rules.size(), 1);
+        QTRY_VERIFY((rules.clear(), walk(item("paletteResults")), rules.size() == 1));
         QCOMPARE(rules.first()->height(), 1.0);
         QCOMPARE(rules.first()->property("color").value<QColor>(), desktop->property("border").value<QColor>());
         auto list = item("paletteResults");

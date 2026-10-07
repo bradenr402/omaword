@@ -600,12 +600,12 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         // Annotations panel row.
         navigate("John 1:2"); key(Qt::Key_X);
-        key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         const auto saved = "savedEntry" + bible->collection().first().toMap().value("reference").toString();
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("annotation"));
-        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "moveHere", "delete", "undo"}));
+        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "note", "tags", "moveHere", "delete", "undo"}));
         QCOMPARE(entry("undo").value("text").toString(), QString("Undo highlight on John 1:2"));
         clickEntry("desk");
         QVERIFY2(bible->desk().size() == 1, qPrintable(object("toast")->property("text").toString() + " / " + bible->error() + " / " + QString::number(menu()->property("x").toDouble()) + "," + QString::number(menu()->property("y").toDouble())));

@@ -517,11 +517,11 @@ private slots:
         QCOMPARE(menuIds(), (shared + QStringList{"|", "remove"}));
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
-        // Annotations rows: the shared four, then Move here, Delete, and the undo it offers.
+        // Marks rows: the shared four, then Write note, Edit tags, Move here, Delete, and the undo it offers.
         bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
         run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), (shared + QStringList{"|", "moveHere", "delete", "undo"}));
+        QCOMPARE(menuIds(), (shared + QStringList{"|", "note", "tags", "moveHere", "delete", "undo"}));
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         // Study Cross-references: mouse and keyboard.
         navigate("John 1:1"); run("related"); QTRY_VERIFY(opened("relatedDrawer"));
@@ -1076,8 +1076,7 @@ private slots:
                 }
             }
             setMode("verse");
-            run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
-            window->setProperty("collectionTab", 0); QTRY_COMPARE(prop("collectionTab").toInt(), 0); QTest::qWait(200);
+            run("annotations"); QTRY_VERIFY(opened("savedDrawer")); QTest::qWait(200);
             shot("highlight-" + theme.first + "-panel");
             if (!qEnvironmentVariableIsSet("OMAWORD_HIGHLIGHT_BEFORE")) {
                 auto mark = item("savedHighlightJohn 3:16"); QVERIFY(mark && mark->isVisible());
@@ -1691,7 +1690,7 @@ private slots:
     void globalKeysLeaveSidePanels() {
         QVERIFY(bible->addToDesk()); bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
         struct Panel { Qt::Key key; const char *drawer; };
-        const QList<Panel> panels = {{Qt::Key_D, "deskDrawer"}, {Qt::Key_A, "savedDrawer"}, {Qt::Key_S, "relatedDrawer"}};
+        const QList<Panel> panels = {{Qt::Key_D, "deskDrawer"}, {Qt::Key_M, "savedDrawer"}, {Qt::Key_S, "relatedDrawer"}};
         for (const auto &panel : panels) {
             auto open = [&] { call("readerFocus"); key(panel.key, Qt::ShiftModifier); QTRY_VERIFY2(opened(panel.drawer), panel.drawer); QTest::qWait(30); };
             // Keyboard: the palette, a dialog, and a reading toggle each close the panel first.
@@ -1896,14 +1895,13 @@ private slots:
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer"));
         check("deskList", "deskEntry0", "deskScrollbar"); shot("scrollbar-desk");
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
-        window->setProperty("collectionTab", 1);
-        key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer"));
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer"));
         check("collectionList", "savedEntryJohn 3:1", "savedScrollbar");
-        // Tags: the "here" label stays clear of the scrollbar.
-        call("filterSaved", 1); QTRY_VERIFY(item("savedHereJohn 3:3"));
+        // The "here" label stays clear of the scrollbar.
+        QTRY_VERIFY(item("savedHereJohn 3:3"));
         auto here = item("savedHereJohn 3:3");
         QTRY_VERIFY(here->mapToItem(item("collectionList"), QPointF(here->width(), 0)).x() <= item("collectionList")->width() - item("savedScrollbar")->width() + 0.5);
-        shot("scrollbar-annotations-tags");
+        shot("scrollbar-marks");
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         // Mouse: wheel scrolling still works and the rows keep their width.
         call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer"));
@@ -2020,12 +2018,12 @@ private slots:
     void helpTitlesSayWhereKeysWork() {
         // Keyboard: search Keybindings for the clarified rows.
         run("help"); QTRY_VERIFY(opened("helpDialog")); type("tab");
-        QTRY_VERIFY(item("keybindingPrevious tab (Annotations, Study)"));
-        QTRY_VERIFY(item("keybindingNext tab (Annotations, Study)"));
+        QTRY_VERIFY(item("keybindingPrevious tab (Study)"));
+        QTRY_VERIFY(item("keybindingNext tab (Study)"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
-        run("help"); QTRY_VERIFY(opened("helpDialog")); type("search the list");
+        run("help"); QTRY_VERIFY(opened("helpDialog")); type("filter the list");
         QQuickItem *row = nullptr;
-        QTRY_VERIFY((row = item("keybindingSearch the list (Annotations tabs with more than 10 items, Study's Tags)")) != nullptr);
+        QTRY_VERIFY((row = item("keybindingFilter the list, #name for a tag (Marks with more than 10 items, Study's Tags)")) != nullptr);
         // Mouse: hovering the row names its scope.
         QTest::qWait(50); QTest::mouseMove(window, center(row)); QTRY_VERIFY(toolTipOf(row)->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
@@ -2707,7 +2705,7 @@ private slots:
         // Footer buttons: the accessible name says what it does, the
         // description its keys; the tooltip shows both.
         for (const auto &[name, label, action] : QList<std::tuple<QString, QString, QString>>{
-                {"searchControl", "Search Bible", "ctrl /"}, {"savedControl", "Annotations", "shift A"},
+                {"searchControl", "Search Bible", "ctrl /"}, {"savedControl", "Marks", "shift M"},
                 {"deskControl", "Desk", "shift D"}, {"helpControl", "Keybindings", "?"}}) {
             auto button = item(name); QVERIFY(button);
             QCOMPARE(button->property("label").toString(), label);

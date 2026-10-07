@@ -139,7 +139,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 ### Panels
 
-- `shift A`: Annotations panel
+- `shift M`: Marks panel
 - `shift D`: Open Desk
 - `shift S`: Study panel
 - `i`: Peek at the verse's footnotes
@@ -199,15 +199,16 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `shift Y`: Copy item as plain text
 - `d`: Add item to Desk, or remove it
 - `delete` · `backspace`: Remove item
-- `t`: Edit the item's tags (Annotations and Study Tags)
+- `t`: Edit the item's tags (Marks and Study Tags)
+- `w`: Write the item's note in place (Marks)
 - `tab` · `shift tab`: Between Study Tags results and tag chips
 - `space`: Turn a Study tag chip on or off
 - `shift space`: Show only this tag (a Study tag chip), or all tags again
 - `0`: Show all tags (Study tag chips)
 - `a`: Study Tags in all installed versions, or this one
-- `/`: Search the list (Annotations tabs with more than 10 items, Study's Tags)
-- `h` · `←`: Previous tab (Annotations, Study)
-- `l` · `→`: Next tab (Annotations, Study)
+- `/`: Filter the list, #name for a tag (Marks with more than 10 items, Study's Tags)
+- `h` · `←`: Previous tab (Study)
+- `l` · `→`: Next tab (Study)
 - `shift delete` · `shift backspace`: Clean Desk
 
 ### Commands only
@@ -259,13 +260,13 @@ These also work, but stay out of the in-app list:
 - The Study panel (`shift S`) follows the passage you are reading: its **Cross-references** (the version's own first, then OpenBible.info's community-ranked ones, each labeled), the chapter's **Footnotes**, and **Tags** — other passages you tagged the same way, ranked by shared tags. The passage's tags sit above the list as chips: `space` turns one off, `shift space` shows only it, `0` turns them all back on, and `a` includes every installed version. Footnotes also appear as small marks in the text: click one (or press `i` on its verse) to peek at it in place, where `↑` `↓` step through the chapter's notes, `y` copies one, and `enter` opens it in Study.
 - Compare a passage across your versions (two or more): `c` (or Versions, `ctrl v`, with verses selected) shows each version's text for the selection, "Not in this version" where its numbering differs; `y` copies the highlighted version's quotation (`shift Y` plain text) and `enter` switches to it at the same passage.
 - The Desk (`d`, `shift D`) collects passages for side-by-side study across windows and versions.
-- Annotations → Tags lists every tagged passage in this version, grouped by tag, and marks the ones `here` at your reading position; `t` edits a row's tags and `delete` removes just that tag. **Manage tags** (`ctrl t`) renames, deletes, or merges them; names are shared across versions, assignments belong to one version.
+- **Marks** (`shift M`) lists everything you have marked, one row per passage: its highlight, tags, and note (or the verse, where there is no note), in Bible order, starting at the passage you are reading (`here`). Marks kept in another version say "from KJV". Edit a row where it is: `w` writes its note right in the row (`esc` is done), `t` edits its tags, `delete` removes the mark (`u` undoes). Past ten marks a filter appears (`/`): words match the reference, note, and verse, and `#grace` keeps a tag's marks; clicking a row's tag does the same. **Manage tags** (`ctrl t`) renames, deletes, or merges tags; names are shared across versions, assignments belong to one version.
 
 ### Feel
-- Annotations look like pen marks; highlights like a highlighter on paper, in your theme's yellow.
+- Notes and tags look like pen marks; highlights like a highlighter on paper, in your theme's yellow.
 - Moving to a verse slides briefly, jumps pulse, copies flash, and the text slides aside for margin notes. Menus and dialogs open instantly and fade out toward where they came from; side panels slide in and ease out. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows, and nothing moves while Hyprland's own animations are off.
 - Colors come from your Omarchy theme: secondary text uses the theme's quietest text color that still reads (4.5:1 contrast), errors its red, and selected text its selection color. Screen readers hear each button's action, with its keys as the description.
-- The footer holds focus, Aa, mode, and help on the left; search, passage, the way back to the ribbon (where there is room), and version in the center; and Annotations, Study, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows focus and help give way first, then the right group stacks into a column and folds into a `…` menu, Aa with it when even that is not enough.
+- The footer holds focus, Aa, mode, and help on the left; search, passage, the way back to the ribbon (where there is room), and version in the center; and Marks, Study, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows focus and help give way first, then the right group stacks into a column and folds into a `…` menu, Aa with it when even that is not enough.
 
 ### Keyboard and mouse
 - Selecting verses with the mouse brings up a small bar above them: **x highlight · w note · t tag · y copy** and `⋯` for Desk, Compare versions, plain text, and Study. Any key or `esc` puts it away.
@@ -274,7 +275,7 @@ These also work, but stay out of the in-app list:
 - Clicking outside a panel, dialog, or picker only closes it (in confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error and say why ("Select a verse first"). Mouse back closes the top dialog.
 - Text fields use the app's own menu (Cut · Copy · Paste · Select all; in a note also Open link and Preview). Right-clicking selected text keeps it only when the click is on it; the passage menu (`menu`) keeps a `v` selection, and its copy entries copy it.
 - If a note changes in another window while you type, typing is not interrupted: `ctrl s` keeps your draft, `ctrl shift S` takes the saved text.
-- With Annotations, Desk, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl ,`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. Mark menus offer **Move here**: select the verses a note or tag belongs on, then move it there from its marker or its Annotations row (`u` undoes). Tooltips on the outline, margin notes, and verse numbers name their keys.
+- With Marks, Desk, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl ,`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. Mark menus offer **Move here**: select the verses a note or tag belongs on, then move it there from its marker or its row in Marks (`u` undoes). Tooltips on the outline, margin notes, and verse numbers name their keys.
 
 ### Your data
 Bible versions, annotations, the Desk, History, and the ribbon stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.

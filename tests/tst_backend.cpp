@@ -1011,6 +1011,64 @@ private slots:
         // Steps live in memory only.
         bible.reset(); bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->canUndo());
     }
+    void marksAcrossVersionsAndScopeNotes() {
+        install(net); BibleBackend peer; QSignalSpy peerMarks(&peer,&BibleBackend::marksChanged);
+        QVERIFY(bible->navigate("John 3:16-17")); bible->setNoteText("Net note"); QVERIFY(bible->toggleHighlight());
+        QVERIFY(bible->navigate("John 3:3")); const auto tagged = bible->tagScope();
+        QVERIFY(!bible->createAndAssignTag(tagged,"Born").isEmpty()); QVERIFY(!bible->createAndAssignTag(tagged,"Again").isEmpty());
+        QVERIFY(bible->navigate("Genesis 1:1")); bible->setNoteText("In the beginning");
+        install(kjv); QVERIFY(bible->navigate("John 3:16")); const auto kjvScope = bible->tagScope();
+        bible->setNoteText("Kjv note");
+        // One row per exact range, every version, in passage order; the
+        // reading version (KJV) first among equal places.
+        auto marks = bible->marks();
+        QStringList seen;
+        for (const auto &value : marks) {
+            const auto mark = value.toMap();
+            seen << mark["versionAbbreviation"].toString() + " " + mark["reference"].toString();
+        }
+        QCOMPARE(seen.size(),4);
+        QCOMPARE(seen[0].section(' ',1),QString("Genesis 1:1"));
+        QCOMPARE(seen[1].section(' ',1),QString("John 3:3"));
+        QVERIFY(seen[2].endsWith(QString("John 3:16"))); QVERIFY(seen[3].endsWith(QString::fromUtf8("John 3:16–17")));
+        auto net316 = marks[3].toMap();
+        QVERIFY(!net316["active"].toBool()); QCOMPARE(net316["versionId"].toString(),QString("engnet"));
+        QVERIFY(net316["highlight"].toBool()); QCOMPARE(net316["note"].toString(),QString("Net note"));
+        QVERIFY(QDateTime::fromString(net316["created"].toString(),Qt::ISODateWithMs).isValid());
+        QVERIFY(!net316["excerpt"].toString().isEmpty());
+        QVERIFY(marks[2].toMap()["active"].toBool());
+        const auto born = marks[1].toMap();
+        QCOMPARE(born["tags"].toList().size(),2);
+        QCOMPARE(born["tags"].toList().first().toMap()["name"].toString(),QString("Again")); // Name order.
+        QVERIFY(born["note"].toString().isEmpty()); QVERIFY(born["created"].toString().isEmpty());
+        // Notes in place, in another version than the reading one.
+        QCOMPARE(bible->savedNote(net316),QString("Net note"));
+        peerMarks.clear();
+        QVERIFY2(bible->setScopeNote(net316,"Net note, longer","Net note"),qPrintable(bible->error()));
+        QCOMPARE(bible->savedNote(net316),QString("Net note, longer"));
+        QCOMPARE(bible->versionId(),QString("eng-kjv")); QCOMPARE(bible->noteText(),QString("Kjv note"));
+        QVERIFY(peerMarks.count() > 0);
+        // Saves continue one undo step; a stale baseline is refused, unchanged.
+        QVERIFY(bible->setScopeNote(net316,"Net note, longer still","Net note, longer"));
+        QVERIFY(!bible->setScopeNote(net316,"Lost","Net note"));
+        QVERIFY(bible->error().contains("another window")); bible->clearError();
+        QCOMPARE(bible->savedNote(net316),QString("Net note, longer still"));
+        QCOMPARE(bible->undoLabel(),QString::fromUtf8("note on John 3:16–17"));
+        bible->closeUndoGroup();
+        QVERIFY(bible->undo()); QCOMPARE(bible->savedNote(net316),QString("Net note"));
+        // A tags-only range gets a note; emptied again, only its tags stay.
+        QVERIFY(bible->setScopeNote(born,"Born again",""));
+        QCOMPARE(bible->savedNote(born),QString("Born again"));
+        QVERIFY(bible->setScopeNote(born,"","Born again"));
+        QVERIFY(bible->savedNote(born).isEmpty()); QCOMPARE(bible->tagsForScope(born).size(),2);
+        // The reading version's own note updates the selection's note too.
+        QVERIFY(bible->setScopeNote(kjvScope,"Kjv note, edited","Kjv note"));
+        QCOMPARE(bible->noteText(),QString("Kjv note, edited"));
+        // Removed versions' marks are hidden; invalid scopes are refused.
+        QVERIFY(bible->removeVersion("engnet",false));
+        QCOMPARE(bible->marks().size(),1);
+        auto bad = kjvScope; bad["end"] = 99; QVERIFY(!bible->setScopeNote(bad,"x",""));
+    }
     void undoAcrossWindowsAndVersions() {
         install(net); BibleBackend peer;
         QVERIFY(bible->navigate("John 3:16")); QVERIFY(peer.navigate("John 3:16"));
