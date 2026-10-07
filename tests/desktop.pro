@@ -1,4 +1,4 @@
-QT += core gui qml quick quickcontrols2 dbus testlib
+QT += core gui qml quick quickcontrols2 dbus network testlib
 CONFIG += c++17 testcase link_pkgconfig
 TEMPLATE = app
 include(../branding.pri)

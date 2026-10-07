@@ -22,14 +22,24 @@
 Desktop::Desktop(QObject *parent, const QString &hyprctlCommand) : QObject(parent) {
     const QString state = qEnvironmentVariable("XDG_STATE_HOME", QDir::homePath() + QStringLiteral("/.local/state"));
     m_themePath = state + QStringLiteral("/omarchy/current/theme/colors.toml");
-    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, &Desktop::refresh);
-    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, &Desktop::refresh);
+    m_fontConfigPath = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/fontconfig");
+    // Events, not polling. omarchy-theme-set replaces the theme directory
+    // (rm -rf, then mv), which ends any watch inside it: the watch on its parent
+    // sees the swap, and each refresh re-arms the rest. omarchy-font-set
+    // rewrites fontconfig/fonts.conf. A burst of events makes one refresh.
+    m_themeDelay.setSingleShot(true);
+    m_themeDelay.setInterval(50);
+    connect(&m_themeDelay, &QTimer::timeout, this, &Desktop::refresh);
+    m_fontDelay.setSingleShot(true);
+    m_fontDelay.setInterval(50);
+    connect(&m_fontDelay, &QTimer::timeout, this, [this] { FcInitReinitialize(); refresh(); });
+    auto changed = [this](const QString &path) {
+        (path.startsWith(m_fontConfigPath) || path == QFileInfo(m_fontConfigPath).absolutePath() ? m_fontDelay : m_themeDelay).start();
+    };
+    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, changed);
+    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, changed);
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, &Desktop::refresh);
-    // Polling also catches replaced theme symlinks and fontconfig edits without
-    // requiring modifications to the user's Omarchy hooks.
-    connect(&m_poll, &QTimer::timeout, this, &Desktop::refresh);
-    m_poll.start(2000);
-    // Query the compositor's effective value, independently of theme polling.
+    // Query the compositor's effective value, independently of theme changes.
     m_roundingProcess.setProgram(hyprctlCommand);
     m_roundingProcess.setArguments({QStringLiteral("getoption"), QStringLiteral("decoration:rounding"), QStringLiteral("-j")});
     m_roundingProcess.setStandardInputFile(QProcess::nullDevice());
@@ -56,9 +66,17 @@ Desktop::Desktop(QObject *parent, const QString &hyprctlCommand) : QObject(paren
                 radius = number;
         }
         setCornerRadius(radius);
+        // A request while this query ran (a reload, a timeout's late reap)
+        // asks once more, now: without polling, nothing else would.
+        if (m_roundingPending) QTimer::singleShot(0, this, &Desktop::refreshCornerRadius);
     });
-    connect(&m_roundingPoll, &QTimer::timeout, this, &Desktop::refreshCornerRadius);
-    m_roundingPoll.start(5000);
+    // Hyprland announces every config reload (a theme switch reloads it) on its
+    // event socket; the rounding is asked again only then.
+    connect(&m_events, &QLocalSocket::readyRead, this, &Desktop::readEvents);
+    const QString instance = qEnvironmentVariable("HYPRLAND_INSTANCE_SIGNATURE");
+    const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    if (!instance.isEmpty() && !runtime.isEmpty())
+        m_events.connectToServer(runtime + QStringLiteral("/hypr/") + instance + QStringLiteral("/.socket2.sock"), QIODevice::ReadOnly);
     QDBusConnection::sessionBus().connect(QString(), QStringLiteral("/org/freedesktop/portal/desktop"),
         QStringLiteral("org.freedesktop.portal.Settings"), QStringLiteral("SettingChanged"),
         this, SLOT(settingChanged(QString,QString,QDBusVariant)));
@@ -82,7 +100,8 @@ void Desktop::refreshCornerRadius() {
         failRoundingQuery();
         return;
     }
-    if (m_roundingProcess.state() != QProcess::NotRunning) return;
+    if (m_roundingProcess.state() != QProcess::NotRunning) { m_roundingPending = true; return; }
+    m_roundingPending = false;
     m_roundingOutput.clear();
     m_roundingFailed = false;
     m_roundingTimeout.start();
@@ -111,6 +130,30 @@ void Desktop::setCornerRadius(qreal radius) {
     emit changed();
 }
 
+void Desktop::readEvents() {
+    m_eventBuffer += m_events.readAll();
+    bool reloaded = false;
+    for (qsizetype end; (end = m_eventBuffer.indexOf('\n')) >= 0; m_eventBuffer.remove(0, end + 1))
+        reloaded |= m_eventBuffer.startsWith("configreloaded>>");
+    // Events are short lines; a runaway one is dropped rather than buffered.
+    if (m_eventBuffer.size() > 65536) m_eventBuffer.clear();
+    if (reloaded) refreshCornerRadius();
+}
+
+void Desktop::watch() {
+    const QString theme = QFileInfo(m_themePath).absolutePath();
+    const QString current = QFileInfo(theme).absolutePath();
+    QStringList paths{current, theme, m_themePath};
+    // fonts.conf and its directory; until that exists, the config home it
+    // will appear in.
+    if (QFileInfo::exists(m_fontConfigPath)) paths << m_fontConfigPath << m_fontConfigPath + QStringLiteral("/fonts.conf");
+    else paths << QFileInfo(m_fontConfigPath).absolutePath();
+    for (const QString &path : paths) {
+        if (!QFileInfo::exists(path) || m_watcher.files().contains(path) || m_watcher.directories().contains(path)) continue;
+        m_watcher.addPath(path);
+    }
+}
+
 void Desktop::refresh() {
     const auto palette = QGuiApplication::palette();
     QColor background = palette.color(QPalette::Window);
@@ -122,7 +165,14 @@ void Desktop::refresh() {
     QColor color1, color3;
     bool dark = background.lightnessF() < 0.5;
     QFile theme(m_themePath);
-    if (theme.open(QIODevice::ReadOnly) && theme.size() < 65536) {
+    const bool readable = theme.open(QIODevice::ReadOnly) && theme.size() < 65536;
+    if (!readable && m_themeLoaded) {
+        // Mid-swap: Omarchy has removed the old theme directory and is about
+        // to move the new one in. Keep the last theme rather than flash Qt's.
+        background = m_background; foreground = m_foreground; surface = m_surface; accent = m_accent;
+        muted = m_muted; border = m_border; color1 = m_color1; color3 = m_color3; dark = m_dark;
+    } else if (readable) {
+        m_themeLoaded = true;
         const QString contents = QString::fromUtf8(theme.readAll());
         QMap<QString, QColor> colors;
         const QRegularExpression expression(QStringLiteral("^\\s*([a-z_0-9]+)\\s*=\\s*[\"'](#[0-9a-fA-F]{6})[\"']"), QRegularExpression::MultilineOption);
@@ -146,7 +196,6 @@ void Desktop::refresh() {
             background.blueF() * .78 + foreground.blueF() * .22);
     }
     QString family = QStringLiteral("monospace");
-    FcInitBringUptoDate();
     FcPattern *pattern = FcNameParse(reinterpret_cast<const FcChar8 *>("monospace"));
     if (pattern) {
         FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
@@ -161,9 +210,7 @@ void Desktop::refresh() {
     }
     if (!color1.isValid()) color1 = accent;
     if (!color3.isValid()) color3 = accent;
-    const QString directory = QFileInfo(m_themePath).absolutePath();
-    if (QFile::exists(m_themePath) && !m_watcher.files().contains(m_themePath)) m_watcher.addPath(m_themePath);
-    if (QDir(directory).exists() && !m_watcher.directories().contains(directory)) m_watcher.addPath(directory);
+    watch();
     if (background == m_background && foreground == m_foreground && surface == m_surface &&
         accent == m_accent && muted == m_muted && border == m_border && color1 == m_color1 && color3 == m_color3 && family == m_fontFamily && dark == m_dark) return;
     m_background = background; m_foreground = foreground; m_surface = surface;

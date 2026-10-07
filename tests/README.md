@@ -72,7 +72,8 @@ Suites generate small, original USFM text in temporary application-data
 directories (sparse chapters, omitted verses, noncanonical source order such as
 ESG/GEN/TOB, cross-book ranges). No whole Bible or network download is needed:
 catalog tests use fake replies and a local HTTP server, and desktop tests inject
-a fake `hyprctl` and temporary theme state.
+a fake `hyprctl`, a fake Hyprland event socket, and temporary theme and
+fontconfig state.
 
 ## Suites
 
@@ -95,7 +96,7 @@ a fake `hyprctl` and temporary theme state.
 - **ranges**: atomic range moves, collisions, stale tokens, rollback.
 - **rangesui**: range editor UI, entry points, cancellation/restore, note confirmation, status bar layout, moving-endpoint marker.
 - **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, annotation tints.
-- **desktop**: async compositor rounding and themed tooltips.
+- **desktop**: async compositor rounding (re-asked on Hyprland config reloads, never polled), Omarchy theme swaps and font changes followed by events, themed tooltips.
 - **sound**: sound effects and settings.
 - **windows**: multiple readers, shared commits, draft conflicts, closing.
 - **instance**: single-instance lock, handoff, IPC bounds, stale recovery.

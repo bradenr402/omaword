@@ -386,7 +386,17 @@ files.
   place beside waiting margins, would cover it (`marginCover`). Resizes,
   chapter changes, range editing, and Disable animations end margin motion at
   once (`settleMargins`).
-- Desktop corners come from async `hyprctl` polling; failure resets to 0.
+- `Desktop` follows events, never a timer. The theme: `omarchy-theme-set`
+  replaces `~/.local/state/omarchy/current/theme` (`rm -rf`, then `mv`), so
+  the watcher also watches `current/` and re-arms the theme directory and
+  `colors.toml` after every refresh; while `colors.toml` is missing mid-swap
+  the last theme stays. Fonts: a change to `fontconfig/fonts.conf` (what
+  `omarchy-font-set` writes) reinitializes fontconfig and re-resolves
+  `monospace`. Bursts of events make one refresh (50 ms).
+- Desktop corners come from an async `hyprctl getoption decoration:rounding`
+  at startup and after each `configreloaded>>` on Hyprland's event socket
+  (`$XDG_RUNTIME_DIR/hypr/<instance>/.socket2.sock`); requests during a query
+  make one more query after it. Failure resets to 0.
   Highlight segments stay square.
 
 ## Verification

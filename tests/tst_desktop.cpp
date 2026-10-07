@@ -5,8 +5,12 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QFont>
+#include <QFontDatabase>
 #include <QGuiApplication>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQmlProperty>
@@ -14,9 +18,11 @@
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <memory>
 #include <cstdio>
+#include <fontconfig/fontconfig.h>
 
 // The test executable doubles as hyprctl: no compositor or shell required.
 static int fakeHyprctl(QCoreApplication &app) {
@@ -56,16 +62,34 @@ class DesktopTest : public QObject {
     void query(Desktop &desktop) {
         QVERIFY(QMetaObject::invokeMethod(&desktop, "refreshCornerRadius", Qt::DirectConnection));
     }
+    // The family fontconfig picks for a family name.
+    static QString resolveFamily(const QString &family) {
+        QString result;
+        FcPattern *pattern = FcNameParse(reinterpret_cast<const FcChar8 *>(family.toUtf8().constData()));
+        if (!pattern) return result;
+        FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
+        FcDefaultSubstitute(pattern);
+        FcResult outcome;
+        FcPattern *match = FcFontMatch(nullptr, pattern, &outcome);
+        FcChar8 *name = nullptr;
+        if (match && FcPatternGetString(match, FC_FAMILY, 0, &name) == FcResultMatch)
+            result = QString::fromUtf8(reinterpret_cast<const char *>(name));
+        if (match) FcPatternDestroy(match);
+        FcPatternDestroy(pattern);
+        return result;
+    }
 
 private slots:
     void initTestCase() {
         QVERIFY(m_dir.isValid());
-        for (const auto &name : {"HYPRLAND_INSTANCE_SIGNATURE", "XDG_STATE_HOME",
+        for (const auto &name : {"HYPRLAND_INSTANCE_SIGNATURE", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
                                 "DESKTOP_TEST_LOG", "DESKTOP_TEST_RESPONSE",
                                 "DESKTOP_TEST_DELAY", "DESKTOP_TEST_EXIT"})
             m_environment.insert(name, qgetenv(name));
         QVERIFY(QFile::link(QCoreApplication::applicationFilePath(), command()));
         qputenv("XDG_STATE_HOME", m_dir.path().toUtf8());
+        // A short runtime path: Unix socket paths are limited to 107 bytes.
+        qputenv("XDG_RUNTIME_DIR", m_dir.path().toUtf8());
         qputenv("DESKTOP_TEST_LOG", m_dir.filePath("queries").toUtf8());
         qputenv("DESKTOP_TEST_RESPONSE", m_dir.filePath("response").toUtf8());
     }
@@ -192,12 +216,14 @@ private slots:
         QVERIFY(elapsed.elapsed() >= 800);
         QVERIFY(elapsed.elapsed() < 2000);
         QVERIFY(ticks >= 10);
-        QCOMPARE(queries(), 2);
-        QTest::qWait(100);
+        // The requests made during the slow query start no process of their
+        // own; together they ask once more after it, so the latest value
+        // arrives without any polling.
         qputenv("DESKTOP_TEST_DELAY", "0");
         response("{\"int\":7}");
         query(desktop);
         QTRY_COMPARE(desktop.cornerRadius(), 7.0);
+        QVERIFY(queries() <= 4);
     }
 
     void missingEnvironment() {
@@ -232,17 +258,91 @@ private slots:
         QTRY_COMPARE(desktop.cornerRadius(), 0.0);
     }
 
-    void separateFiveSecondPolling() {
+    void configReloadEventsRequery() {
+        // Hyprland's event socket: only config reloads ask for the rounding
+        // again, never a timer or any other event.
+        const QString events = m_dir.filePath("hypr/desktop-test/.socket2.sock");
+        QVERIFY(QDir().mkpath(QFileInfo(events).absolutePath()));
+        QLocalServer server;
+        QVERIFY2(server.listen(events), qPrintable(server.errorString()));
         Desktop desktop(nullptr, command());
+        QTRY_VERIFY(server.hasPendingConnections());
+        std::unique_ptr<QLocalSocket> hyprland(server.nextPendingConnection());
         QTRY_COMPARE(desktop.cornerRadius(), 11.0);
+        QCOMPARE(queries(), 1);
         response("{\"int\":23}");
         for (int i = 0; i < 3; ++i)
             QVERIFY(QMetaObject::invokeMethod(&desktop, "refresh", Qt::DirectConnection));
-        QTest::qWait(2500); // Includes a normal theme poll.
+        hyprland->write("activewindow>>kitty,shell\nworkspace>>2\nconfigreloaded");
+        QVERIFY(hyprland->waitForBytesWritten());
+        QTest::qWait(300);
         QCOMPARE(queries(), 1);
         QCOMPARE(desktop.cornerRadius(), 11.0);
-        QTRY_COMPARE_WITH_TIMEOUT(desktop.cornerRadius(), 23.0, 3500);
+        // A line split across reads still counts once it ends.
+        hyprland->write(">>\n");
+        QVERIFY(hyprland->waitForBytesWritten());
+        QTRY_COMPARE(desktop.cornerRadius(), 23.0);
         QCOMPARE(queries(), 2);
+        QTest::qWait(300);
+        QCOMPARE(queries(), 2);
+    }
+
+    void themeSwapsFollowWithoutPolling() {
+        // omarchy-theme-set stages next-theme, removes theme, and moves
+        // next-theme in; the old theme stays until the new one arrives.
+        const QString current = m_dir.filePath("omarchy/current");
+        QVERIFY(QDir(current + "/theme").removeRecursively());
+        QVERIFY(QDir().mkpath(current + "/theme"));
+        auto write = [](const QString &path, const QByteArray &accent) {
+            QFile file(path);
+            return file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                && file.write("background = \"#000000\"\nforeground = \"#ffffff\"\naccent = \"" + accent + "\"\n") > 0;
+        };
+        QVERIFY(write(current + "/theme/colors.toml", "#112233"));
+        Desktop desktop(nullptr, command());
+        const auto accent = [&] { return desktop.property("accent").value<QColor>(); };
+        QCOMPARE(accent(), QColor("#112233"));
+        QVERIFY(QDir().mkpath(current + "/next-theme"));
+        QVERIFY(write(current + "/next-theme/colors.toml", "#445566"));
+        QVERIFY(QDir(current + "/theme").removeRecursively());
+        QTest::qWait(300);
+        QCOMPARE(accent(), QColor("#112233"));
+        QCOMPARE(desktop.property("background").value<QColor>(), QColor("#000000"));
+        QVERIFY(QDir(current).rename("next-theme", "theme"));
+        QTRY_COMPARE(accent(), QColor("#445566"));
+        // The new theme's file is watched in turn.
+        QVERIFY(write(current + "/theme/colors.toml", "#778899"));
+        QTRY_COMPARE(accent(), QColor("#778899"));
+        QVERIFY(QDir(current + "/theme").removeRecursively());
+    }
+
+    void fontConfigChangesFollow() {
+        // omarchy-font-set rewrites fontconfig/fonts.conf to put the chosen
+        // family first for monospace; the app follows at once.
+        QStringList families;
+        for (const QString &family : QFontDatabase::families()) {
+            if (resolveFamily(family) == family && !families.contains(family)) families << family;
+            if (families.size() == 2) break;
+        }
+        if (families.size() < 2) QSKIP("Two installed font families are needed.");
+        const QString directory = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/fontconfig";
+        QVERIFY(QDir().mkpath(directory));
+        auto choose = [&](const QString &family) {
+            QFile file(directory + "/fonts.conf");
+            return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(
+                "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n"
+                "  <match target=\"pattern\">\n    <test name=\"family\" qual=\"any\"><string>monospace</string></test>\n"
+                "    <edit name=\"family\" mode=\"prepend_first\" binding=\"strong\"><string>" + family.toHtmlEscaped().toUtf8()
+                + "</string></edit>\n  </match>\n</fontconfig>\n") > 0;
+        };
+        QVERIFY(choose(families[0]));
+        FcInitReinitialize();
+        Desktop desktop(nullptr, command());
+        QCOMPARE(desktop.property("fontFamily").toString(), families[0]);
+        QVERIFY(choose(families[1]));
+        QTRY_COMPARE(desktop.property("fontFamily").toString(), families[1]);
+        QVERIFY(QFile::remove(directory + "/fonts.conf"));
+        FcInitReinitialize();
     }
 
     void toolTipThemeAndWrapping() {

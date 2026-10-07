@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QColor>
 #include <QFileSystemWatcher>
+#include <QLocalSocket>
 #include <QTimer>
 #include <QUrl>
 #include <QDBusVariant>
@@ -43,20 +44,26 @@ private slots:
     void refreshCornerRadius();
     void settingChanged(const QString &space, const QString &key, const QDBusVariant &value);
 private:
+    void watch();
+    void readEvents();
     void requestScale();
     void setScale(const QVariant &value);
     void setCornerRadius(qreal radius);
     void readRoundingOutput();
     void failRoundingQuery();
     QColor m_background, m_foreground, m_surface, m_muted, m_accent, m_border, m_color1, m_color3;
-    QString m_fontFamily, m_themePath;
+    QString m_fontFamily, m_themePath, m_fontConfigPath;
     double m_textScale = 1.0;
     qreal m_cornerRadius = 0;
     bool m_dark = true;
+    bool m_themeLoaded = false;
     QFileSystemWatcher m_watcher;
-    QTimer m_poll;
-    QTimer m_roundingPoll, m_roundingTimeout;
+    QTimer m_themeDelay, m_fontDelay;
+    QLocalSocket m_events;
+    QByteArray m_eventBuffer;
+    QTimer m_roundingTimeout;
     QProcess m_roundingProcess;
     QByteArray m_roundingOutput;
     bool m_roundingFailed = false;
+    bool m_roundingPending = false;
 };
