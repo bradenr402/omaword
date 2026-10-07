@@ -7,4 +7,4 @@ include(../branding.pri)
 TARGET = tst_tags
 include(../src/core.pri)
 SOURCES += tst_tags.cpp
-HEADERS += testenvironment.h
+HEADERS += testenvironment.h legacybackup.h

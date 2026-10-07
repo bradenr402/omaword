@@ -90,7 +90,7 @@ fontconfig state.
 - **historyui**: jump stack (`[` `]` `-`), dwell recording, History in the palette (recents, All History, `ctrl h`, day groups, filter, remove and clear keys, row menu), the ribbon (`shift R`, `r`, tab, footer, Continue row, another version), two windows.
 - **motion**: focus dimming, jump pulses, copy flashes, held-key repeat, instant menus/modals with exit ghosts, side-panel enter/exit, hover colors, reduce motion.
 - **contextmenu**: shared context menu items, keyboard navigation, actions, the mouse selection bar in every layout.
-- **tags**: tag identity, exact/overlap queries, persistence, backup (older backups' bookmarks restore as the Bookmarked tag), rollback.
+- **tags**: tag identity, exact/overlap queries, persistence, backups (every version in format 6; format 3–5 backups and their bookmarks, restored as the Bookmarked tag), Markdown export of every version, rollback.
 - **tagsui**: picker, Marks rows and `#tag` filtering, Related, management, Main integration.
 - **ranges**: atomic range moves, collisions, stale tokens, rollback, undoing a move.
 - **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, annotation tints.

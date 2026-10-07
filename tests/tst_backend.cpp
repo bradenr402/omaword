@@ -1,6 +1,7 @@
 #include "testenvironment.h"
 #include <QtTest/QTest>
 #include "biblebackend.h"
+#include "legacybackup.h"
 #include "biblebooks.h"
 #include "textselection.h"
 #include <QClipboard>
@@ -894,7 +895,7 @@ private slots:
         auto withoutStamp = [](const QByteArray &bytes) { auto o = QJsonDocument::fromJson(bytes).object(); o.remove("created"); return o; };
         QVERIFY(!a.isEmpty()); QCOMPARE(withoutStamp(b),withoutStamp(a)); // Only the export time differs.
         const auto root = QJsonDocument::fromJson(b).object();
-        QCOMPARE(root["version"].toInt(),5); QVERIFY(!root.contains("history")); QVERIFY(!b.contains("light"));
+        QCOMPARE(root["version"].toInt(),6); QVERIFY(!root.contains("history")); QVERIFY(!b.contains("light"));
         // Restoring a backup leaves History alone.
         QVERIFY2(bible->importBackup(after),qPrintable(bible->error())); QCOMPARE(bible->history().size(),1);
         QCOMPARE(bible->recentQueries(),QStringList({"light"}));
@@ -1202,7 +1203,8 @@ private slots:
         const auto backup = QUrl::fromLocalFile(session->filePath("desk.json")); QVERIFY(bible->exportBackup(backup));
         QFile file(backup.toLocalFile()); QVERIFY(file.open(QIODevice::ReadOnly));
         const auto root = QJsonDocument::fromJson(file.readAll()).object(); file.close();
-        QCOMPARE(root["version"].toInt(),5); QCOMPARE(root["desk"].toArray().size(),2);
+        QCOMPARE(root["version"].toInt(),6); QCOMPARE(root["desk"].toArray().size(),2);
+        QCOMPARE(root["desk"].toArray().first().toObject()["versionId"].toString(),QString("engnet"));
         QVERIFY(bible->cleanDesk()); QVERIFY(bible->navigate("MAT 1:1")); QVERIFY(bible->addToDesk());
         BibleBackend peer;
         QVERIFY2(bible->importBackup(backup),qPrintable(bible->error()));
@@ -1210,15 +1212,26 @@ private slots:
         QStringList refs; for (const auto &row : bible->desk()) refs << row.toMap()["reference"].toString();
         QCOMPARE(refs,QStringList({"Genesis 1:2","John 3:16"})); // Version-scoped replacement.
         QCOMPARE(bible->desk().first().toMap()["created"],saved.first().toMap()["created"]);
+        // The Desk keeps its order across versions; versions not in a backup keep theirs.
+        install(kjv); QVERIFY(bible->navigate("John 3:17")); QVERIFY(bible->addToDesk());
+        QVERIFY(bible->switchVersion("engnet")); QVERIFY(bible->navigate("John 3:18")); QVERIFY(bible->addToDesk());
+        QVERIFY(bible->exportBackup(backup)); QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto both = QJsonDocument::fromJson(file.readAll()).object(); file.close();
+        QStringList order; for (const auto &item : both["desk"].toArray()) order << item.toObject()["versionId"].toString();
+        QCOMPARE(order,QStringList({"engnet","engnet","eng-kjv","engnet"}));
+        QVERIFY(bible->cleanDesk()); QVERIFY2(bible->importBackup(backup),qPrintable(bible->error()));
+        refs.clear(); for (const auto &row : bible->desk()) refs << row.toMap()["versionAbbreviation"].toString() + " " + row.toMap()["reference"].toString();
+        QCOMPARE(refs.size(),4); QVERIFY(refs[2].endsWith("John 3:17")); QVERIFY(refs[3].endsWith("John 3:18"));
         // Older formats restore without touching the Desk.
-        auto legacy = root; legacy["version"] = 4; legacy.remove("desk");
+        auto legacy = legacyBackup(root,"engnet"); legacy["version"] = 4; legacy.remove("desk");
         const auto old = QUrl::fromLocalFile(session->filePath("desk-v4.json"));
         QVERIFY(write(old.toLocalFile(),QJsonDocument(legacy).toJson()));
         QVERIFY(bible->cleanDesk()); QVERIFY2(bible->importBackup(old),qPrintable(bible->error())); QVERIFY(bible->desk().isEmpty());
-        for (const QString kind : {"duplicate","invalid","missing-created"}) {
+        for (const QString kind : {"duplicate","invalid","missing-created","other-version"}) {
             auto broken = root; auto items = broken["desk"].toArray(); auto a = items.first().toObject();
             if (kind == "invalid") a["start"] = 999;
             if (kind == "missing-created") a.remove("created");
+            if (kind == "other-version") a["versionId"] = "eng-kjv"; // Installed, but not in this backup.
             items[0] = a; if (kind == "duplicate") items.append(a); broken["desk"] = items;
             const auto path = QUrl::fromLocalFile(session->filePath("broken-desk.json"));
             QVERIFY(write(path.toLocalFile(),QJsonDocument(broken).toJson()));
@@ -1231,16 +1244,25 @@ private slots:
         QFile source(backup.toLocalFile()); QVERIFY(source.open(QIODevice::ReadOnly));
         const auto document = QJsonDocument::fromJson(source.readAll());
         const auto original = bible->collection();
-        for (const QString kind : {"signature","version","fractional","unknown-key","out-of-range","omitted","duplicate","reading"}) {
-            auto root = document.object(); auto rows = root["annotations"].toArray(); auto a = rows.first().toObject();
+        QCOMPARE(document.object().value("version").toInt(),6);
+        // Every check, in this format and in the format earlier versions wrote.
+        for (const bool legacy : {false,true})
+        for (const QString kind : {"signature","version","fractional","unknown-key","out-of-range","omitted","duplicate","reading","time"}) {
+            if (legacy && kind == "time") continue;
+            auto root = legacy ? legacyBackup(document.object(),"engnet") : document.object();
+            auto entry = legacy ? root : root["versions"].toArray().first().toObject();
+            auto rows = entry["annotations"].toArray(); auto a = rows.first().toObject();
             if (kind == "signature") root["format"] = "unknown-backup";
-            if (kind == "version") root["version"] = 2;
+            if (kind == "version") root["version"] = legacy ? 2 : 7;
             if (kind == "fractional") a["start"] = 16.5;
             if (kind == "unknown-key") a["unexpected"] = true;
             if (kind == "out-of-range") a["chapter"] = 1000;
             if (kind == "omitted") { a["book"] = 41; a["chapter"] = 7; a["start"] = 16; }
-            if (kind == "reading") { auto r = root["reading"].toObject(); r["position"] = 2; root["reading"] = r; }
-            rows[0] = a; if (kind == "duplicate") rows.append(a); root["annotations"] = rows;
+            if (kind == "reading") { auto r = entry["reading"].toObject(); r["position"] = 2; entry["reading"] = r; }
+            if (kind == "time") a["created"] = "yesterday";
+            rows[0] = a; if (kind == "duplicate") rows.append(a); entry["annotations"] = rows;
+            if (legacy) { entry["format"] = root["format"]; entry["version"] = root["version"]; root = entry; }
+            else { auto versions = root["versions"].toArray(); versions[0] = entry; root["versions"] = versions; }
             const auto invalid = QUrl::fromLocalFile(session->filePath("invalid.json"));
             QVERIFY(write(invalid.toLocalFile(),QJsonDocument(root).toJson()));
             QVERIFY2(!bible->importBackup(invalid),qPrintable(kind)); QCOMPARE(bible->collection(),original); QCOMPARE(bible->readingPosition(),0.73);

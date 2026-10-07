@@ -215,9 +215,9 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 - Add version
 - Remove version
-- Export notes as Markdown
-- Save annotation backup
-- Restore annotation backup
+- Export your marks as Markdown
+- Back up your marks
+- Restore a backup of your marks
 - Clear History
 - Disable / Enable History
 - About & Attribution
@@ -278,7 +278,7 @@ These also work, but stay out of the in-app list:
 - With Marks, Desk, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl ,`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. Mark menus offer **Move here**: select the verses a note or tag belongs on, then move it there from its marker or its row in Marks (`u` undoes). Tooltips on the outline, margin notes, and verse numbers name their keys.
 
 ### Your data
-Bible versions, annotations, the Desk, History, and the ribbon stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.
+Bible versions, marks, the Desk, History, and the ribbon stay on this device, in `~/.local/share/omaword/`. Commands back up your marks in every installed version (with the Desk), restore them, and export them as Markdown; backups from earlier versions of OmaWord still restore. Reader windows have independent passages and share one library.
 
 Versions installed before footnotes or poetry indents were supported show **Re-import** in Versions (`ctrl shift I` on the highlighted row) and Reading settings; it replaces the text and keeps your annotations.
 

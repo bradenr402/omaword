@@ -167,14 +167,25 @@ files.
   "Continue · …" first among the palette's recents.
 - Removal keeps annotations/tags/Desk by default (hidden until reimport);
   `removeVersion(id, true)` drops them. Global tag definitions always survive.
-- Backups: JSON `format: "omaword-backup"`, version **5** (3 = annotations,
-  4 = + tags, 5 = + Desk). Exports write `bookmark: false` (bookmarks travel as
-  the Bookmarked tag); restoring a `bookmark: true` row assigns that tag, and a
-  format 3 restore replaces only that tag's assignments in the version. Scoped to the active source; restore requires matching
-  `versionId`/edition, exact keys, endpoint validation, 32 MiB bound. Tag names
-  reuse existing global identities; colliding IDs are remapped; existing global
-  definitions are never renamed/deleted. Preferences and text are excluded.
-- Markdown export: `omaword-notes.md`, includes tag-only ranges, escapes tag names.
+- Backups: JSON `format: "omaword-backup"`, version **6**: `tags` (the
+  definitions in use), `versions` (each installed version: `versionId`,
+  `edition`, `annotations` with highlight, note, and times, `tagAssignments`
+  with times, and its `reading` place when it has one), and `desk` (the Desk
+  in its order, each item with its `versionId`). Restoring checks every key
+  and range against each version's own text (`TagBible`) before writing, and
+  refuses a backup holding a version that is not installed; it then replaces,
+  for each version in the backup, its marks, Desk items, and reading place in
+  one transaction, leaving other versions alone. Every range is checked again
+  on export, so a backup always restores. Formats 3–5 (one version: 3 =
+  annotations, 4 = + tags, 5 = + Desk) still restore, into the version being
+  read, which must match their `versionId`/edition; their `bookmark: true`
+  rows assign the Bookmarked tag, and a format 3 restore replaces only that
+  tag's assignments. 32 MiB bound. Tag names reuse existing global
+  identities; colliding IDs are remapped; existing global definitions are
+  never renamed/deleted. Preferences, History, the ribbon, and text are excluded.
+- Markdown export: `omaword-notes.md`, every installed version's marks (from
+  `marks()`) under a `## Name (ABBR)` heading, tag-only ranges included, tag
+  names escaped.
 - Sound/reduce-motion settings live in a separate `QSettings` file, global to all windows.
 - Sound: each cue plays on its own PipeWire stream (`SoundEffects::Output`, a
   `pw_thread_loop`), so it reaches whatever output is the default at that

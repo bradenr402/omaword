@@ -3035,7 +3035,7 @@ ApplicationWindow {
         if (bible.importBackup(restoreConfirmation.backupFile)) {
             syncNote()
             restoreConfirmation.close()
-            notify("Restored " + bible.versionAbbreviation + " annotation backup", true)
+            notify("Backup restored", true)
         }
     }
     function copyPassage(plainText) {
@@ -3971,9 +3971,9 @@ ApplicationWindow {
         { id: "historyClearKeys", group: "Palettes and windows", title: "History: clear it", sequences: ["Shift+Del"], scope: "history", explanation: true },
         { id: "import", group: "Commands only", title: "Add version", scope: "global", command: true },
         { id: "removeVersion", group: "Commands only", title: "Remove version", scope: "global", command: true },
-        { id: "export", group: "Commands only", title: "Export notes as Markdown", command: true },
-        { id: "backup", group: "Commands only", title: "Save annotation backup", command: true },
-        { id: "restore", group: "Commands only", title: "Restore annotation backup", command: true },
+        { id: "export", group: "Commands only", title: "Export your marks as Markdown", command: true },
+        { id: "backup", group: "Commands only", title: "Back up your marks", command: true },
+        { id: "restore", group: "Commands only", title: "Restore a backup of your marks", command: true },
         { id: "clearHistory", group: "Commands only", title: "Clear History", command: true },
         { id: "toggleHistory", group: "Commands only", title: "Disable / Enable History", command: true },
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
@@ -8939,8 +8939,8 @@ ApplicationWindow {
     FolderDialog {
         id: exportDialog
         objectName: "exportDialog"
-        title: "Export " + bible.versionAbbreviation + " notes only — choose a folder"
-        onAccepted: { if (!app.flushNote()) return; if (bible.exportNotes(selectedFolder)) app.notify("Exported " + bible.versionAbbreviation + " notes as Markdown", true) }
+        title: "Export your marks as Markdown — choose a folder"
+        onAccepted: { if (!app.flushNote()) return; if (bible.exportNotes(selectedFolder)) app.notify("Exported your marks as Markdown", true) }
         onVisibleChanged: { if (!visible) app.restorePanelFocus() }
     }
     ModalCard {
@@ -8971,7 +8971,7 @@ ApplicationWindow {
                 app.scrollKey(backupScopeScroll.contentItem as Flickable, event)
             }
             Label {
-                text: "Save " + bible.versionAbbreviation + " annotation backup"
+                text: "Back up your marks"
                 color: desktop.foreground; font.pixelSize: 22 * app.scale
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
@@ -8985,9 +8985,9 @@ ApplicationWindow {
                 Label {
                     objectName: "backupScopeExplanation"
                     width: backupScopeScroll.availableWidth
-                    text: "This backup includes only " + bible.edition + " (" + bible.versionAbbreviation + ") highlights, notes, tags, and reading location.\n\n"
-                        + "Other editions are excluded. Switch to each edition to back it up separately. To back up retained annotations from a removed edition, reimport that edition first.\n\n"
-                        + "Bible text, source USFM files, and global preferences are not included."
+                    text: "This backup holds the highlights, notes, and tags of every installed version, with the Desk and each version's reading place.\n\n"
+                        + "Marks kept for a removed version are not included: reimport it first.\n\n"
+                        + "Bible text, source USFM files, History, the ribbon, and preferences are not included."
                     textFormat: Text.PlainText; color: desktop.foreground
                     font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap
                 }
@@ -9024,17 +9024,17 @@ ApplicationWindow {
     FileDialog {
         id: backupDialog
         objectName: "backupDialog"
-        title: "Save " + bible.versionAbbreviation + " annotation backup — active edition only"
+        title: "Back up your marks"
         fileMode: FileDialog.SaveFile
         defaultSuffix: "json"
         nameFilters: ["JSON backup (*.json)"]
-        onAccepted: { if (!app.flushNote()) return; if (bible.exportBackup(selectedFile)) app.notify("Saved " + bible.versionAbbreviation + " annotation backup", true) }
+        onAccepted: { if (!app.flushNote()) return; if (bible.exportBackup(selectedFile)) app.notify("Backup saved", true) }
         onVisibleChanged: { if (!visible) app.restorePanelFocus() }
     }
     FileDialog {
         id: restoreDialog
         objectName: "restoreDialog"
-        title: "Restore " + bible.versionAbbreviation + " annotation backup"
+        title: "Restore a backup of your marks"
         fileMode: FileDialog.OpenFile
         nameFilters: ["JSON backup (*.json)"]
         onAccepted: app.requestRestore(selectedFile)
@@ -9079,7 +9079,7 @@ ApplicationWindow {
             }
             Label {
                 objectName: "restoreScopeExplanation"
-                text: "This replaces only the active edition's highlights, notes, tags, and reading location: " + bible.edition + " (" + bible.versionAbbreviation + "). The backup must match this edition. Other editions and global preferences are untouched. Your imported Bible stays in place."
+                text: "This replaces the highlights, notes, tags, Desk passages, and reading place of each version in the backup; other versions are untouched. A backup from an earlier " + desktop.appName + " holds one version, and restores into it while you read it (" + bible.versionAbbreviation + " now). Your Bible text and preferences stay as they are."
                 color: desktop.foreground
                 font.pixelSize: 14 * app.scale
                 Layout.fillWidth: true

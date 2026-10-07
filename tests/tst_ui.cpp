@@ -5065,7 +5065,7 @@ private slots:
     void backupScopeAndExport() {
         QFETCH(double,scale);
         reference("John 3:16");
-        bible->setNoteText("Only the active edition");
+        bible->setNoteText("Every installed version");
         const auto scope = bible->tagScope();
         const auto tag = bible->createAndAssignTag(scope,"Backup <tag> 🌿");
         QVERIFY(!tag.isEmpty());
@@ -5074,7 +5074,7 @@ private slots:
         const auto openScope = [this] {
             key(Qt::Key_Space,Qt::ControlModifier);
             QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
-            type("save annotation backup"); key(Qt::Key_Return);
+            type("back up your marks"); key(Qt::Key_Return);
             QTRY_VERIFY(prop("backupScope","opened").toBool());
             QTRY_VERIFY(item("backupChoose")->hasActiveFocus());
         };
@@ -5082,11 +5082,9 @@ private slots:
         QVERIFY(window->property("modalOpen").toBool());
         QVERIFY(!prop("backupDialog","visible").toBool());
         const auto explanation = prop("backupScopeExplanation","text").toString();
-        QVERIFY(explanation.contains(bible->edition()));
-        QVERIFY(explanation.contains("(NET)"));
-        QVERIFY(explanation.contains("reading location"));
-        QVERIFY(explanation.contains("Other editions are excluded"));
-        QVERIFY(explanation.contains("reimport that edition first"));
+        QVERIFY(explanation.contains("every installed version"));
+        QVERIFY(explanation.contains("reading place"));
+        QVERIFY(explanation.contains("reimport it first"));
         QTest::qWait(100);
         for (const auto name : {"backupScopeScroll","backupCancel","backupChoose"}) {
             const auto target = item(name);
@@ -5107,8 +5105,7 @@ private slots:
         QTRY_VERIFY(prop("backupDialog","visible").toBool());
         QVERIFY(!prop("backupScope","visible").toBool()); QVERIFY(!overlapped);
         disconnect(observe);
-        QVERIFY(prop("backupDialog","title").toString().contains("NET"));
-        QVERIFY(prop("backupDialog","title").toString().contains("active edition only"));
+        QCOMPARE(prop("backupDialog","title").toString(),QString("Back up your marks"));
         // Cancel the platform picker, then exercise its acceptance callback directly.
         QVERIFY(QMetaObject::invokeMethod(object("backupDialog"),"reject"));
         QTRY_VERIFY(!prop("backupDialog","visible").toBool());
@@ -5118,24 +5115,26 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(object("backupDialog"),"accepted"));
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
         const auto backup = QJsonDocument::fromJson(file.readAll()).object();
-        // Version 5 (Desk step) adds the global Desk list; empty here.
-        QCOMPARE(backup.value("version").toInt(),5);
+        // Format 6: every installed version; the Desk, empty here.
+        QCOMPARE(backup.value("version").toInt(),6);
         QVERIFY(backup.value("desk").isArray());
         QCOMPARE(backup.value("desk").toArray().size(),0);
-        QCOMPARE(backup.value("versionId").toString(),QString("engnet"));
+        const auto versions = backup.value("versions").toArray();
+        QCOMPARE(versions.size(),1);
+        QCOMPARE(versions.first().toObject().value("versionId").toString(),QString("engnet"));
         const auto tags = backup.value("tags").toArray();
         QCOMPARE(tags.size(),1);
         QCOMPARE(tags.first().toObject().value("id").toString(),tag);
         QCOMPARE(tags.first().toObject().value("name").toString(),QString("Backup <tag> 🌿"));
-        const auto assignments = backup.value("tagAssignments").toArray();
+        const auto assignments = versions.first().toObject().value("tagAssignments").toArray();
         QCOMPARE(assignments.size(),1);
         const auto assignment = assignments.first().toObject();
         QCOMPARE(assignment.value("tagId").toString(),tag);
         for (const auto field : {"book","chapter","start","endBook","endChapter","end"})
             QCOMPARE(assignment.value(field).toInt(),scope.value(field).toInt());
-        QCOMPARE(prop("toast","text").toString(),QString("Saved NET annotation backup"));
-        QVERIFY(prop("exportDialog","title").toString().contains("NET notes only"));
-        QVERIFY(prop("restoreDialog","title").toString().contains("NET"));
+        QCOMPARE(prop("toast","text").toString(),QString("Backup saved"));
+        QVERIFY(prop("exportDialog","title").toString().contains("Markdown"));
+        QCOMPARE(prop("restoreDialog","title").toString(),QString("Restore a backup of your marks"));
         QCOMPARE(bible->collection(),collection);
     }
     void importGuideAndPicker_data() {
@@ -6052,9 +6051,9 @@ private slots:
         QTRY_VERIFY(item("restoreCancel")->hasActiveFocus());
         QCOMPARE(prop("restoreBackupPath","text").toString(),backup.toString());
         const auto scope = prop("restoreScopeExplanation","text").toString();
-        QVERIFY(scope.contains(bible->edition()));
-        QVERIFY(scope.contains("(NET)"));
-        QVERIFY(scope.contains("Other editions and global preferences are untouched"));
+        QVERIFY(scope.contains("each version in the backup"));
+        QVERIFY(scope.contains("other versions are untouched"));
+        QVERIFY(scope.contains("(NET now)"));
         QVERIFY(window->property("modalOpen").toBool());
         key(Qt::Key_N); key(Qt::Key_W); key(Qt::Key_H); key(Qt::Key_J);
         key(Qt::Key_Right,Qt::AltModifier);
@@ -6081,7 +6080,7 @@ private slots:
         QCOMPARE(bible->noteText(),QString("Original backup note n j k h m"));
         QVERIFY(bible->selectionHighlighted());
         QCOMPARE(saved(16).value("note").toString(),bible->noteText());
-        QCOMPARE(prop("toast","text").toString(),QString("Restored NET annotation backup"));
+        QCOMPARE(prop("toast","text").toString(),QString("Backup restored"));
     }
     void narrowLayoutAndSystemScale() {
         reference("John 3:16");

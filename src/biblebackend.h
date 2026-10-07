@@ -12,6 +12,8 @@
 #include <functional>
 #include <optional>
 
+class QJsonObject;
+
 class BibleBackend : public QObject
 {
     Q_OBJECT
@@ -438,6 +440,11 @@ private:
     };
     bool initializeStore();
     bool migrateBookmarks();
+    // Backup format 6: every installed version's marks, Desk, and reading place.
+    bool restoreEveryVersion(const QJsonObject &root);
+    // A backup's tag definitions by name: existing global identities are
+    // reused (never renamed or deleted); ids maps each backup id to the store's.
+    bool restoreTagDefinitions(const QMap<QString,QString> &definitions, QMap<QString,QString> *ids);
     bool loadPreferences();
     bool savePreference(const QString &key, const QVariant &value);
     QString copyRange(int first, int last, const QString &reference, bool plainText);

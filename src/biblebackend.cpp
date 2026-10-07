@@ -263,6 +263,12 @@ struct TagBible {
         q.addBindValue(scope.value("book")); q.addBindValue(scope.value("chapter")); q.addBindValue(scope.value("start"));
         return q.exec() && q.next() ? q.value(0).toString().simplified() : QString();
     }
+    bool chapter(int book, int number) const {
+        QSqlQuery q(db);
+        q.prepare("SELECT 1 FROM verses WHERE book=? AND chapter=? LIMIT 1");
+        q.addBindValue(book); q.addBindValue(number);
+        return q.exec() && q.next();
+    }
     QString excerpt(const QVariantMap &scope) const {
         QSqlQuery q(db);
         q.prepare("SELECT substr(v.text,1,512) FROM verses v JOIN books b ON b.id=v.book "
@@ -340,6 +346,34 @@ bool rangesOverlap(const QVariantMap &a, const QVariantMap &b)
         && b.value("_order").toLongLong() <= a.value("_endOrder").toLongLong();
 }
 QVariantMap publicRange(QVariantMap map) { map.remove("_order"); map.remove("_endOrder"); return map; }
+// A backup's tag definitions: unique ids and names.
+bool backupTagDefinitions(const QJsonValue &value, QMap<QString,QString> *definitions)
+{
+    if (!value.isArray() || value.toArray().size() > 100000) return false;
+    QSet<QString> names;
+    for (const auto &entry : value.toArray()) {
+        const auto object = entry.toObject();
+        const QString id = object.value("id").toString(), name = normalizedTag(object.value("name").toString());
+        if (!entry.isObject() || !exactKeys(object,{"id","name"}) || !object.value("id").isString()
+            || id.isEmpty() || id.size() > 4096 || !safeString(id) || !object.value("name").isString() || name.isEmpty()
+            || definitions->contains(id) || names.contains(tagKey(name))) return false;
+        (*definitions)[id] = name; names.insert(tagKey(name));
+    }
+    return true;
+}
+// A time in a backup: empty (unknown) or ISO 8601.
+bool backupTime(const QJsonValue &value)
+{
+    if (!value.isString()) return false;
+    const QString text = value.toString();
+    return text.isEmpty() || (text.size() <= 64 && QDateTime::fromString(text,Qt::ISODateWithMs).isValid());
+}
+QJsonObject scopeJson(const QSqlQuery &q, int first = 0)
+{
+    QJsonObject object;
+    for (int i = 0; i < scopeFields.size(); ++i) object[scopeFields[i]] = q.value(first + i).toInt();
+    return object;
+}
 QString markdownText(const QString &text)
 {
     QString out;
@@ -3708,18 +3742,25 @@ bool BibleBackend::exportNotes(QUrl directory)
     if (path.isEmpty()) return false;
     if (!QFileInfo(path).isDir()) return setError("Choose an existing directory for the Markdown export.");
     if (!protectDestination(QDir(path).filePath("omaword-notes.md"))) return false;
-    QVector<Annotation> rows;
-    if (!loadAnnotations(&rows)) return false;
+    const auto rows = marks();
     // The export filename remains stable for existing scripts and consumers.
-    QString markdown = "# " + Brand::name() + " notes\n\nEdition: " + edition() + " (" + versionId() + ")\n\n";
-    for (const auto &value : collectionRows(rows)) {
-        const auto a = value.toMap();
-        markdown += "## " + markdownText(a.value("reference").toString()) + "\n\n";
-        if (a.value("highlight").toBool()) markdown += "*Highlight*\n\n";
-        QStringList names;
-        for (const auto &tag : a.value("tags").toList()) names << markdownText(tag.toMap().value("name").toString());
-        if (!names.isEmpty()) markdown += "Tags: " + names.join(" · ") + "\n\n";
-        if (!a.value("note").toString().isEmpty()) markdown += a.value("note").toString() + "\n\n";
+    // One section per installed version with marks, in the library's order.
+    QString markdown = "# " + Brand::name() + " notes\n\n";
+    for (const auto &value : std::as_const(m_versions)) {
+        const auto version = value.toMap();
+        QString section;
+        for (const auto &row : rows) {
+            const auto a = row.toMap();
+            if (a.value("versionId") != version.value("id")) continue;
+            section += "### " + markdownText(a.value("reference").toString()) + "\n\n";
+            if (a.value("highlight").toBool()) section += "*Highlight*\n\n";
+            QStringList names;
+            for (const auto &tag : a.value("tags").toList()) names << markdownText(tag.toMap().value("name").toString());
+            if (!names.isEmpty()) section += "Tags: " + names.join(" · ") + "\n\n";
+            if (!a.value("note").toString().isEmpty()) section += a.value("note").toString() + "\n\n";
+        }
+        if (!section.isEmpty())
+            markdown += "## " + markdownText(version.value("name").toString()) + " (" + markdownText(version.value("abbreviation").toString()) + ")\n\n" + section;
     }
     QString error;
     if (!writeAtomic(QDir(path).filePath("omaword-notes.md"),markdown.toUtf8(),&error))
@@ -3777,63 +3818,310 @@ bool BibleBackend::exportBackup(QUrl file)
     if (!m_store.isOpen()) return setError("Your notes database is unavailable.");
     const QString path = localPath(file);
     if (path.isEmpty() || !protectDestination(path)) return false;
+    // Format 6: every installed version (marks kept for a removed one wait
+    // for its reimport), read in one transaction.
     if (!m_store.transaction()) return setError("Cannot read a consistent backup: " + m_store.lastError().text());
-    QVector<Annotation> rows;
-    if (!loadAnnotations(&rows)) { m_store.rollback(); return false; }
+    const auto rollback = qScopeGuard([this] { m_store.rollback(); });
     QSqlQuery q(m_store);
-    q.prepare("SELECT book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter FROM reading WHERE id=1 AND version_id=?");
-    q.addBindValue(m_versionId);
-    if (!q.exec() || !q.next()) {
-        m_store.rollback(); return setError("Cannot read your reading position for backup.");
+    if (!q.exec("SELECT version_id,name,abbreviation FROM installed ORDER BY version_id")) return setError("Cannot read installed versions: " + q.lastError().text());
+    QVector<QStringList> installed;
+    while (q.next()) installed.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString()});
+    if (q.lastError().isValid()) return setError("Cannot read installed versions: " + q.lastError().text());
+    QJsonArray versions, desk;
+    for (const auto &version : std::as_const(installed)) {
+        const QString &id = version[0];
+        TagBible bible(installedPath(id),id);
+        if (!bible.db.isOpen()) return setError("Cannot read " + version[2] + " to back it up.");
+        // A backup must restore: every range is checked against its text.
+        const auto valid = [&](const QJsonObject &object) {
+            QVariantMap scope = object.toVariantMap(), canonical;
+            scope["versionId"] = id;
+            return bible.scope(scope,&canonical);
+        };
+        const auto broken = [&] { return setError("Cannot back up " + version[2] + ": a mark's verses are missing from its text."); };
+        QJsonArray annotations, assignments;
+        q.prepare("SELECT book,chapter,start,endBook,endChapter,end,highlight,note,created,updated FROM annotations WHERE version_id=? ORDER BY book,chapter,start,endBook,endChapter,end");
+        q.addBindValue(id);
+        if (!q.exec()) return setError("Cannot read backup annotations: " + q.lastError().text());
+        while (q.next()) {
+            auto object = scopeJson(q);
+            if (!valid(object)) return broken();
+            object["highlight"] = q.value(6).toBool(); object["note"] = q.value(7).toString();
+            object["created"] = q.value(8).toString(); object["updated"] = q.value(9).toString();
+            annotations.append(object);
+        }
+        if (q.lastError().isValid()) return setError("Cannot read complete backup annotations.");
+        q.prepare("SELECT book,chapter,start,endBook,endChapter,end,tag_id,created FROM tag_assignments WHERE version_id=? ORDER BY book,chapter,start,endBook,endChapter,end,tag_id");
+        q.addBindValue(id);
+        if (!q.exec()) return setError("Cannot read backup tag assignments: " + q.lastError().text());
+        while (q.next()) {
+            auto object = scopeJson(q);
+            if (!valid(object)) return broken();
+            object["tagId"] = q.value(6).toString(); object["created"] = q.value(7).toString();
+            assignments.append(object);
+        }
+        if (q.lastError().isValid()) return setError("Cannot read complete backup tag assignments.");
+        QJsonObject entry{{"versionId",id},{"edition",version[1]},{"annotations",annotations},{"tagAssignments",assignments}};
+        q.prepare("SELECT book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter FROM reading WHERE id=1 AND version_id=?");
+        q.addBindValue(id);
+        if (!q.exec()) return setError("Cannot read your reading position for backup: " + q.lastError().text());
+        if (q.next()) entry["reading"] = QJsonObject{{"book",q.value(0).toInt()},{"chapter",q.value(1).toInt()},
+            {"start",q.value(2).toInt()},{"end",q.value(3).toInt()},{"position",q.value(4).toDouble()},
+            {"anchorBook",q.value(5).toInt()},{"anchorChapter",q.value(6).toInt()},
+            {"cursorBook",q.value(7).toInt()},{"cursorChapter",q.value(8).toInt()}};
+        q.finish();
+        versions.append(entry);
     }
-    const QJsonObject reading{{"book",q.value(0).toInt()},{"chapter",q.value(1).toInt()},
-        {"start",q.value(2).toInt()},{"end",q.value(3).toInt()},{"position",q.value(4).toDouble()},
-        {"anchorBook",q.value(5).toInt()},{"anchorChapter",q.value(6).toInt()},
-        {"cursorBook",q.value(7).toInt()},{"cursorChapter",q.value(8).toInt()}};
-    q.finish();
-    QJsonArray tagDefinitions, assignments;
-    q.prepare("SELECT DISTINCT t.id,t.name FROM tags t JOIN tag_assignments a ON a.tag_id=t.id WHERE a.version_id=? ORDER BY t.id");
-    q.addBindValue(m_versionId);
-    if (!q.exec()) { m_store.rollback(); return setError("Cannot read backup tags: " + q.lastError().text()); }
-    while (q.next()) tagDefinitions.append(QJsonObject{{"id",q.value(0).toString()},{"name",q.value(1).toString()}});
-    if (q.lastError().isValid()) { m_store.rollback(); return setError("Cannot read complete backup tags."); }
-    q.prepare("SELECT book,chapter,start,endBook,endChapter,end,tag_id FROM tag_assignments WHERE version_id=? ORDER BY book,chapter,start,endBook,endChapter,end,tag_id");
-    q.addBindValue(m_versionId);
-    if (!q.exec()) { m_store.rollback(); return setError("Cannot read backup tag assignments: " + q.lastError().text()); }
+    // The Desk in its own order, its installed versions' passages only.
+    q.prepare("SELECT d.book,d.chapter,d.start,d.endBook,d.endChapter,d.end,d.version_id,d.created FROM desk d "
+              "JOIN installed i ON i.version_id=d.version_id ORDER BY d.position");
+    if (!q.exec()) return setError("Cannot read backup Desk: " + q.lastError().text());
     while (q.next()) {
-        QJsonObject assignment;
-        for (int i = 0; i < scopeFields.size(); ++i) assignment[scopeFields[i]] = q.value(i).toInt();
-        assignment["tagId"] = q.value(6).toString(); assignments.append(assignment);
+        auto item = scopeJson(q);
+        item["versionId"] = q.value(6).toString(); item["created"] = q.value(7).toString();
+        desk.append(item);
     }
-    if (q.lastError().isValid()) { m_store.rollback(); return setError("Cannot read complete backup tag assignments."); }
-    QJsonArray desk;
-    q.prepare("SELECT book,chapter,start,endBook,endChapter,end,created FROM desk WHERE version_id=? ORDER BY position");
-    q.addBindValue(m_versionId);
-    if (!q.exec()) { m_store.rollback(); return setError("Cannot read backup Desk: " + q.lastError().text()); }
-    while (q.next()) {
-        QJsonObject item;
-        for (int i = 0; i < scopeFields.size(); ++i) item[scopeFields[i]] = q.value(i).toInt();
-        item["created"] = q.value(6).toString(); desk.append(item);
-    }
-    if (q.lastError().isValid()) { m_store.rollback(); return setError("Cannot read the complete backup Desk."); }
+    if (q.lastError().isValid()) return setError("Cannot read the complete backup Desk.");
+    QJsonArray tags;
+    if (!q.exec("SELECT DISTINCT t.id,t.name FROM tags t JOIN tag_assignments a ON a.tag_id=t.id "
+                "JOIN installed i ON i.version_id=a.version_id ORDER BY t.id")) return setError("Cannot read backup tags: " + q.lastError().text());
+    while (q.next()) tags.append(QJsonObject{{"id",q.value(0).toString()},{"name",q.value(1).toString()}});
+    if (q.lastError().isValid()) return setError("Cannot read complete backup tags.");
     q.finish();
-    if (!m_store.commit()) { m_store.rollback(); return setError("Cannot finish reading the backup: " + m_store.lastError().text()); }
-    QJsonArray annotations;
-    for (const auto &a : rows) {
-        const auto start = endpoint(a.start), end = endpoint(a.end);
-        annotations.append(QJsonObject{{"book",start.book},{"chapter",start.chapter},
-            {"start",start.verse},{"end",end.verse},{"endBook",end.book},{"endChapter",end.chapter},
-            {"bookmark",false},{"highlight",a.highlight},{"note",a.note}});
-    }
-    // Bookmarks travel as the Bookmarked tag; format 5 readers still expect the field.
-    const QJsonObject root{{"format","omaword-backup"},{"version",5},{"edition",edition()},{"versionId",versionId()},
-        {"created",timestamp()}, {"reading",reading},{"annotations",annotations},
-        {"tags",tagDefinitions},{"tagAssignments",assignments},{"desk",desk}};
+    const QJsonObject root{{"format","omaword-backup"},{"version",6},{"created",timestamp()},
+        {"tags",tags},{"versions",versions},{"desk",desk}};
     const QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (bytes.size() > MaximumBackupSize) return setError("This backup exceeds the supported 32 MiB size. Export Markdown notes instead.");
     QString error;
     if (!writeAtomic(path,bytes,&error)) return setError("Cannot export backup: " + error);
     clearError(); setStatus("Backup exported to " + path); return true;
+}
+
+bool BibleBackend::restoreTagDefinitions(const QMap<QString,QString> &definitions, QMap<QString,QString> *ids)
+{
+    // Names define global identity. Never rename or delete a global definition
+    // to accommodate an old backup ID: other editions may still use it.
+    QSqlQuery q(m_store);
+    for (auto it = definitions.cbegin(); it != definitions.cend(); ++it) {
+        q.prepare("SELECT id FROM tags WHERE id=? OR name_key=?"); q.addBindValue(it.key()); q.addBindValue(tagKey(it.value()));
+        if (!q.exec()) return setError("Cannot inspect restored tag identity: " + q.lastError().text());
+        const bool existing = q.next(); q.finish();
+        QString id;
+        if (existing) id = ensureTag(it.value());
+        else {
+            id = it.key();
+            q.prepare("INSERT INTO tags(id,name,name_key) VALUES(?,?,?)");
+            q.addBindValue(id); q.addBindValue(it.value()); q.addBindValue(tagKey(it.value()));
+            if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot restore tag definition: " + q.lastError().text());
+            q.prepare("SELECT name,name_key FROM tags WHERE id=?"); q.addBindValue(id);
+            if (!q.exec() || !q.next() || q.value(0).toString() != it.value() || q.value(1).toString() != tagKey(it.value()))
+                return setError("Cannot verify restored tag definition.");
+            q.finish();
+        }
+        if (id.isEmpty()) return false;
+        (*ids)[it.key()] = id;
+    }
+    return true;
+}
+
+bool BibleBackend::restoreEveryVersion(const QJsonObject &root)
+{
+    const QString invalid = "Unsupported or invalid " + Brand::name() + " backup format.";
+    if (!exactKeys(root,{"format","version","created","tags","versions","desk"})
+        || !root.value("versions").isArray() || !root.value("desk").isArray() || root.value("versions").toArray().size() > 1000)
+        return setError(invalid);
+    QMap<QString,QString> definitions;
+    if (!backupTagDefinitions(root.value("tags"),&definitions)) return setError("The backup contains invalid or duplicate tag definitions.");
+    struct Reading { int book = 0, chapter = 0, anchorBook = 0, anchorChapter = 0, cursorBook = 0, cursorChapter = 0, start = 0, end = 0; double position = 0; };
+    struct Version { QString id; QVariantList annotations, assignments; std::optional<Reading> reading; QSet<QString> marks; };
+    QVector<Version> versions;
+    QSet<QString> used;
+    int rows = 0;
+    for (const auto &value : root.value("versions").toArray()) {
+        const auto object = value.toObject();
+        if (!value.isObject() || !exactKeys(object,object.contains("reading")
+                ? QStringList{"versionId","edition","annotations","tagAssignments","reading"} : QStringList{"versionId","edition","annotations","tagAssignments"})
+            || !object.value("versionId").isString() || !object.value("edition").isString()
+            || !object.value("annotations").isArray() || !object.value("tagAssignments").isArray())
+            return setError(invalid);
+        Version version;
+        version.id = object.value("versionId").toString();
+        if (version.id.isEmpty() || version.id.size() > 128 || !safeString(version.id)
+            || std::any_of(versions.cbegin(),versions.cend(),[&](const Version &other) { return other.id == version.id; }))
+            return setError("The backup contains an invalid or repeated version.");
+        // Restoring checks every range against the version's own text.
+        if (installedPath(version.id).isEmpty())
+            return setError("This backup holds marks in " + object.value("edition").toString() + " (" + version.id
+                            + "), which is not installed. Install it, then restore again.");
+        TagBible bible(installedPath(version.id),version.id);
+        const auto canonical = [&](const QJsonObject &entry, const QStringList &keys, QVariantMap *scope) {
+            QVariantMap input = entry.toVariantMap();
+            input["versionId"] = version.id;
+            return exactKeys(entry,scopeFields + keys) && bible.scope(input,scope);
+        };
+        rows += object.value("annotations").toArray().size() + object.value("tagAssignments").toArray().size();
+        if (rows > 200000) return setError("The backup has too many marks.");
+        QSet<QString> ranges;
+        for (const auto &entry : object.value("annotations").toArray()) {
+            const auto annotation = entry.toObject();
+            QVariantMap scope;
+            if (!entry.isObject() || !canonical(annotation,{"highlight","note","created","updated"},&scope)
+                || !annotation.value("highlight").isBool() || !annotation.value("note").isString()
+                || !backupTime(annotation.value("created")) || !backupTime(annotation.value("updated")))
+                return setError("The backup contains an invalid annotation reference or field type.");
+            const QString note = annotation.value("note").toString();
+            if (note.size() > MaximumNoteSize || !safeString(note) || (!annotation.value("highlight").toBool() && note.isEmpty()))
+                return setError("The backup contains an empty, oversized, or invalid annotation.");
+            if (ranges.contains(rangeKey(scope))) return setError("The backup contains duplicate annotation ranges.");
+            ranges.insert(rangeKey(scope)); version.marks.insert(rangeKey(scope));
+            scope["highlight"] = annotation.value("highlight").toBool(); scope["note"] = note;
+            scope["created"] = annotation.value("created").toString(); scope["updated"] = annotation.value("updated").toString();
+            version.annotations.append(scope);
+        }
+        QSet<QString> assignments;
+        for (const auto &entry : object.value("tagAssignments").toArray()) {
+            const auto assignment = entry.toObject();
+            QVariantMap scope;
+            const QString tag = assignment.value("tagId").toString();
+            if (!entry.isObject() || !canonical(assignment,{"tagId","created"},&scope) || !definitions.contains(tag)
+                || !backupTime(assignment.value("created")))
+                return setError("The backup contains an invalid tag assignment.");
+            if (assignments.contains(rangeKey(scope) + ':' + tag)) return setError("The backup contains duplicate tag assignments.");
+            assignments.insert(rangeKey(scope) + ':' + tag); used.insert(tag); version.marks.insert(rangeKey(scope));
+            scope["tagId"] = tag; scope["created"] = assignment.value("created").toString();
+            version.assignments.append(scope);
+        }
+        if (object.contains("reading")) {
+            const auto reading = object.value("reading").toObject();
+            Reading place;
+            const auto number = [&](const char *key, int low, int high) { return integer(reading.value(key),low,high) ? reading.value(key).toInt() : -1; };
+            place.book = number("book",1,80); place.chapter = number("chapter",1,999);
+            place.start = number("start",0,999); place.end = number("end",0,999);
+            place.anchorBook = number("anchorBook",0,80); place.anchorChapter = number("anchorChapter",0,999);
+            place.cursorBook = number("cursorBook",0,80); place.cursorChapter = number("cursorChapter",0,999);
+            place.position = reading.value("position").toDouble(-1);
+            const auto verse = [&](int book, int chapter, int number) {
+                QVariantMap scope{{"versionId",version.id},{"book",book},{"chapter",chapter},{"start",number},
+                                  {"endBook",book},{"endChapter",chapter},{"end",number}}, out;
+                return bible.scope(scope,&out);
+            };
+            const bool none = place.start == 0 && place.end == 0;
+            if (!exactKeys(reading,{"book","chapter","start","end","position","anchorBook","anchorChapter","cursorBook","cursorChapter"})
+                || std::min({place.book,place.chapter,place.start,place.end,place.anchorBook,place.anchorChapter,place.cursorBook,place.cursorChapter}) < 0
+                || !reading.value("position").isDouble() || !std::isfinite(place.position) || place.position < 0 || place.position > 1
+                || !bible.chapter(place.book,place.chapter)
+                || (!none && (!verse(place.anchorBook,place.anchorChapter,place.start) || !verse(place.cursorBook,place.cursorChapter,place.end)
+                              || place.cursorBook != place.book || place.cursorChapter != place.chapter)))
+                return setError("The backup has an invalid reading location.");
+            version.reading = place;
+        }
+        versions.append(version);
+    }
+    if (used.size() != definitions.size()) return setError("The backup contains unused tag definitions.");
+    QVariantList deskItems;
+    QSet<QString> deskKeys;
+    for (const auto &value : root.value("desk").toArray()) {
+        const auto object = value.toObject();
+        auto keys = scopeFields; keys << "versionId" << "created";
+        const QString id = object.value("versionId").toString();
+        QVariantMap scope = object.toVariantMap(), canonical;
+        scope.remove("created");
+        if (!value.isObject() || !exactKeys(object,keys) || !object.value("versionId").isString()
+            || !std::any_of(versions.cbegin(),versions.cend(),[&](const Version &version) { return version.id == id; })
+            || !backupTime(object.value("created")) || object.value("created").toString().isEmpty() || !validateScope(scope,&canonical))
+            return setError("The backup contains an invalid Desk item.");
+        if (deskKeys.contains(rangeKey(canonical))) return setError("The backup contains duplicate Desk items.");
+        deskKeys.insert(rangeKey(canonical));
+        canonical["created"] = object.value("created").toString(); deskItems.append(canonical);
+    }
+    // Restore is replacement for each version in the backup, not a merge;
+    // validation precedes all writes, which commit together or not at all.
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_mutating = false; });
+    if (!flushDrafts()) return false;
+    for (const auto &version : std::as_const(versions))
+        if (installedPath(version.id).isEmpty()) return setError("A version changed before restore. Open the backup again.");
+    if (!m_store.transaction()) return setError("Cannot start backup restore: " + m_store.lastError().text());
+    const auto rollback = qScopeGuard([this] { m_store.rollback(); });
+    QSqlQuery q(m_store);
+    for (const auto &version : std::as_const(versions)) {
+        for (const QString table : {"annotations","tag_assignments","desk"}) {
+            q.prepare("DELETE FROM " + table + " WHERE version_id=?"); q.addBindValue(version.id);
+            if (!q.exec()) return setError("Cannot replace backup marks: " + q.lastError().text());
+        }
+    }
+    QMap<QString,QString> ids;
+    if (!restoreTagDefinitions(definitions,&ids)) return false;
+    QVariantList chapterRows;
+    int restored = 0;
+    for (const auto &version : std::as_const(versions)) {
+        for (const auto &value : version.annotations) {
+            const auto row = value.toMap();
+            q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,highlight,note,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+            bindScope(q,row);
+            for (const auto &key : {"highlight","note","created","updated"}) q.addBindValue(row.value(key));
+            if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot restore annotations: " + q.lastError().text());
+        }
+        for (const auto &value : version.assignments) {
+            const auto row = value.toMap();
+            if (!writeTagAssignment(row,ids.value(row.value("tagId").toString()),true,row.value("created").toString())) return false;
+        }
+        for (const auto &table : {QString("annotations"),QString("tag_assignments")}) {
+            q.prepare("SELECT COUNT(*) FROM " + table + " WHERE version_id=?"); q.addBindValue(version.id);
+            const int expected = table == "annotations" ? version.annotations.size() : version.assignments.size();
+            if (!q.exec() || !q.next() || q.value(0).toInt() != expected) return setError("Cannot verify restored marks.");
+            q.finish();
+        }
+        restored += version.marks.size();
+        if (!version.reading) continue;
+        const auto &place = *version.reading;
+        if (version.id == m_versionId) {
+            // The reading version opens there, read before anything commits.
+            const int anchor = place.start ? absoluteVerse(place.anchorBook,place.anchorChapter,place.start) : 0;
+            const int cursor = place.end ? absoluteVerse(place.cursorBook,place.cursorChapter,place.end) : 0;
+            if (!readChapter(place.book,place.chapter,&chapterRows) || !persistState(place.book,place.chapter,anchor,cursor,place.position)) return false;
+            continue;
+        }
+        q.prepare("INSERT INTO reading(id,book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter,version_id) VALUES(1,?,?,?,?,?,?,?,?,?,?) "
+                  "ON CONFLICT(version_id) DO UPDATE SET book=excluded.book,chapter=excluded.chapter,start=excluded.start,end=excluded.end,position=excluded.position,"
+                  "anchorBook=excluded.anchorBook,anchorChapter=excluded.anchorChapter,cursorBook=excluded.cursorBook,cursorChapter=excluded.cursorChapter");
+        for (const QVariant &field : QVariantList{place.book,place.chapter,place.start,place.end,place.position,
+                                                  place.anchorBook,place.anchorChapter,place.cursorBook,place.cursorChapter,version.id})
+            q.addBindValue(field);
+        if (!q.exec()) return setError("Cannot restore a reading location: " + q.lastError().text());
+    }
+    for (const auto &value : std::as_const(deskItems)) {
+        const auto item = value.toMap();
+        q.prepare("INSERT INTO desk(position,version_id,book,chapter,start,endBook,endChapter,end,created) "
+                  "VALUES((SELECT COALESCE(MAX(position),0)+1 FROM desk),?,?,?,?,?,?,?,?)");
+        bindScope(q,item); q.addBindValue(item.value("created"));
+        if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot restore Desk item: " + q.lastError().text());
+    }
+    QVector<Annotation> savedRows;
+    if (!loadAnnotations(&savedRows)) return false;
+    const QVariantList savedCollection = collectionRows(savedRows);
+    if (!m_store.commit()) return setError("Cannot commit backup restore: " + m_store.lastError().text());
+    const auto active = std::find_if(versions.cbegin(),versions.cend(),[this](const Version &version) { return version.id == m_versionId; });
+    if (active != versions.cend() && active->reading) {
+        const auto &place = *active->reading;
+        m_book = place.book; m_chapter = place.chapter; m_position = place.position;
+        m_anchor = place.start ? absoluteVerse(place.anchorBook,place.anchorChapter,place.start) : 0;
+        m_cursor = place.end ? absoluteVerse(place.cursorBook,place.cursorChapter,place.end) : 0;
+        intersectSelection();
+        m_verses = chapterRows;
+    }
+    m_annotations = savedRows; m_collection = savedCollection;
+    for (const auto &version : std::as_const(versions)) emit sharedCommitted(version.id,false,false);
+    publishTags(); publishDesk();
+    updateAnnotations(); emit collectionChanged(); emit marksChanged();
+    if (active != versions.cend() && active->reading) {
+        emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
+    }
+    // A restore replaced what undo steps would write back.
+    clearUndo();
+    clearError();
+    setStatus(QString("Restored %1 marks in %2 versions from backup.").arg(restored).arg(versions.size()));
+    return true;
 }
 
 bool BibleBackend::importBackup(QUrl file)
@@ -3853,6 +4141,12 @@ bool BibleBackend::importBackup(QUrl file)
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) return setError("Invalid backup JSON: " + parseError.errorString());
     if (!uniqueJsonKeys(bytes)) return setError("The backup contains duplicate JSON fields.");
     const auto root = document.object();
+    if (root.value("format") == "omaword-backup" && integer(root.value("version"),6,6)) {
+        if (!root.value("created").isString() || !QDateTime::fromString(root.value("created").toString(),Qt::ISODateWithMs).isValid())
+            return setError("Unsupported or invalid " + Brand::name() + " backup format.");
+        return restoreEveryVersion(root);
+    }
+    // Formats 3–5 hold the version that was being read; they restore into it.
     QStringList rootKeys{"format","version","edition","created","reading","annotations","versionId"};
     // Format 3: annotations only. 4: + scoped tags. 5: + scoped Desk items.
     const bool withTags = root.value("version").toInt() >= 4, withDesk = root.value("version").toInt() == 5;
@@ -3917,18 +4211,10 @@ bool BibleBackend::importBackup(QUrl file)
     QMap<QString,QString> definitions;
     QVariantList assignments;
     if (withTags) {
-        if (!root.value("tags").isArray() || !root.value("tagAssignments").isArray()
-            || root.value("tags").toArray().size() > 100000 || root.value("tagAssignments").toArray().size() > 100000)
+        if (!root.value("tagAssignments").isArray() || root.value("tagAssignments").toArray().size() > 100000)
             return setError("The backup contains invalid or excessive tags.");
-        QSet<QString> names, used, assignmentKeys;
-        for (const auto &value : root.value("tags").toArray()) {
-            const auto object = value.toObject();
-            const QString id = object.value("id").toString(), name = normalizedTag(object.value("name").toString());
-            if (!value.isObject() || !exactKeys(object,{"id","name"}) || !object.value("id").isString()
-                || id.isEmpty() || id.size() > 4096 || !safeString(id) || !object.value("name").isString() || name.isEmpty()
-                || definitions.contains(id) || names.contains(tagKey(name))) return setError("The backup contains invalid or duplicate tag definitions.");
-            definitions[id] = name; names.insert(tagKey(name));
-        }
+        if (!backupTagDefinitions(root.value("tags"),&definitions)) return setError("The backup contains invalid or duplicate tag definitions.");
+        QSet<QString> used, assignmentKeys;
         for (const auto &value : root.value("tagAssignments").toArray()) {
             const auto object = value.toObject();
             const QString id = object.value("tagId").toString();
@@ -3978,28 +4264,8 @@ bool BibleBackend::importBackup(QUrl file)
         q.prepare("SELECT COUNT(*) FROM tag_assignments WHERE version_id=?"); q.addBindValue(restoreVersion);
         if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify backup tag replacement.");
         q.finish();
-        // Names define global identity. Never rename or delete a global definition
-        // to accommodate an old backup ID: other editions may still use it.
         QMap<QString,QString> ids;
-        for (auto it = definitions.cbegin(); it != definitions.cend(); ++it) {
-            q.prepare("SELECT id FROM tags WHERE id=? OR name_key=?"); q.addBindValue(it.key()); q.addBindValue(tagKey(it.value()));
-            if (!q.exec()) return setError("Cannot inspect restored tag identity: " + q.lastError().text());
-            const bool existing = q.next(); q.finish();
-            QString id;
-            if (existing) id = ensureTag(it.value());
-            else {
-                id = it.key();
-                q.prepare("INSERT INTO tags(id,name,name_key) VALUES(?,?,?)");
-                q.addBindValue(id); q.addBindValue(it.value()); q.addBindValue(tagKey(it.value()));
-                if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot restore tag definition: " + q.lastError().text());
-                q.prepare("SELECT name,name_key FROM tags WHERE id=?"); q.addBindValue(id);
-                if (!q.exec() || !q.next() || q.value(0).toString() != it.value() || q.value(1).toString() != tagKey(it.value()))
-                    return setError("Cannot verify restored tag definition.");
-                q.finish();
-            }
-            if (id.isEmpty()) return false;
-            ids[it.key()] = id;
-        }
+        if (!restoreTagDefinitions(definitions,&ids)) return false;
         for (const auto &value : assignments) {
             const auto scope = value.toMap();
             if (!writeTagAssignment(scope,ids.value(scope.value("tagId").toString()),true)) return false;

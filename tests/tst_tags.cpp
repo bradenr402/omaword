@@ -1,6 +1,8 @@
 #include "testenvironment.h"
 #include <QtTest/QTest>
 #include "biblebackend.h"
+#include "legacybackup.h"
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -62,6 +64,11 @@ class TagsTest : public QObject
     static QJsonObject json(const QString &path) {
         QFile f(path); if (!f.open(QIODevice::ReadOnly)) return {};
         return QJsonDocument::fromJson(f.readAll()).object();
+    }
+    // A format 6 backup's entry for one version.
+    static QJsonObject versionIn(const QJsonObject &root, const QString &id) {
+        for (const auto &value : root.value("versions").toArray()) if (value.toObject().value("versionId").toString() == id) return value.toObject();
+        return {};
     }
     int count(const QString &id) const {
         for (const auto &v : bible->tags()) if (v.toMap().value("id").toString() == id) return v.toMap().value("count").toInt();
@@ -197,9 +204,16 @@ private slots:
         bible->setNoteText("Saved note"); QVERIFY(bible->toggleHighlight());
         const QString unused = bible->createTag("Unused"); QVERIFY(!unused.isEmpty());
         const auto backup = QUrl::fromLocalFile(session->filePath("backup.json")); QVERIFY(bible->exportBackup(backup));
-        auto root = json(backup.toLocalFile()); QCOMPARE(root.value("version").toInt(),5);
-        QCOMPARE(root.value("tags").toArray().size(),1); QCOMPARE(root.value("tagAssignments").toArray().size(),1);
-        auto legacy = root; legacy["version"] = 3; legacy.remove("tags"); legacy.remove("tagAssignments"); legacy.remove("desk");
+        auto root = json(backup.toLocalFile()); QCOMPARE(root.value("version").toInt(),6);
+        QCOMPARE(root.value("tags").toArray().size(),1); QCOMPARE(root.value("versions").toArray().size(),1);
+        const auto netEntry = versionIn(root,"engnet");
+        QCOMPARE(netEntry.value("tagAssignments").toArray().size(),1); QCOMPARE(netEntry.value("annotations").toArray().size(),1);
+        // Marks keep their times.
+        const auto saved = netEntry.value("annotations").toArray().first().toObject();
+        QVERIFY(saved.value("highlight").toBool()); QCOMPARE(saved.value("note").toString(),QString("Saved note"));
+        QVERIFY(QDateTime::fromString(saved.value("created").toString(),Qt::ISODateWithMs).isValid());
+        QVERIFY(QDateTime::fromString(netEntry.value("tagAssignments").toArray().first().toObject().value("created").toString(),Qt::ISODateWithMs).isValid());
+        auto legacy = legacyBackup(root,"engnet"); legacy["version"] = 3; legacy.remove("tags"); legacy.remove("tagAssignments"); legacy.remove("desk");
         const auto old = QUrl::fromLocalFile(session->filePath("legacy.json")); QVERIFY(write(old.toLocalFile(),QJsonDocument(legacy).toJson()));
         install(kjv); QVERIFY(bible->navigate("TOB 1:3")); const auto other = bible->tagScope();
         QVERIFY(bible->setTag(other,id,true)); QVERIFY(bible->renameTag(id,"Renamed elsewhere"));
@@ -207,18 +221,35 @@ private slots:
         const QString extra = bible->createAndAssignTag(scope,"Extra"); QVERIFY(!extra.isEmpty());
         BibleBackend peer;
         QVERIFY(bible->importBackup(old)); QCOMPARE(bible->tagsForScope(scope).size(),2); QCOMPARE(bible->noteText(),QString("Saved note"));
+        // A backup replaces the marks of the versions it holds, and only theirs.
         QVERIFY2(bible->importBackup(backup),qPrintable(bible->error())); QCOMPARE(bible->tagsForScope(scope).size(),1);
         const auto restored = bible->tagsForScope(scope).first().toMap(); QCOMPARE(restored.value("name").toString(),QString("[Hope] <&> | *"));
         QVERIFY(restored.value("id").toString() != id);
         QCOMPARE(bible->tagsForScope(other).first().toMap().value("name").toString(),QString("Renamed elsewhere"));
         QCOMPARE(count(extra),0); QCOMPARE(count(unused),0); QCOMPARE(peer.selectionTags(),bible->selectionTags());
+        // Markdown: every version's marks, under its name.
         QVERIFY(bible->exportNotes(QUrl::fromLocalFile(session->path())));
-        QFile md(session->filePath("omaword-notes.md")); QVERIFY(md.open(QIODevice::ReadOnly)); const auto text = md.readAll();
+        QFile md(session->filePath("omaword-notes.md")); QVERIFY(md.open(QIODevice::ReadOnly)); const auto text = QString::fromUtf8(md.readAll());
         QVERIFY(text.contains("Tags: \\[Hope\\] &lt;&amp;&gt; \\| \\*"));
         QVERIFY(text.contains("Saved note"));
-        auto invalid = root; auto assignments = invalid.value("tagAssignments").toArray(); assignments.append(assignments.first()); invalid["tagAssignments"] = assignments;
+        QCOMPARE(text.count("\n## "),2);
+        QVERIFY(text.contains(QString::fromUtf8("(NET)\n\n### Genesis 1:1–2\n\n*Highlight*")));
+        QVERIFY(text.contains("### Tobit 1:3\n\nTags: Renamed elsewhere"));
+        // Every installed version goes into a backup.
+        QVERIFY(bible->exportBackup(backup)); root = json(backup.toLocalFile());
+        QCOMPARE(root.value("versions").toArray().size(),2);
+        QCOMPARE(versionIn(root,"eng-kjv").value("tagAssignments").toArray().size(),1);
+        auto invalid = root; auto versions = invalid.value("versions").toArray(); auto entry = versions.first().toObject();
+        auto assignments = entry.value("tagAssignments").toArray(); assignments.append(assignments.first()); entry["tagAssignments"] = assignments;
+        versions[0] = entry; invalid["versions"] = versions;
         const auto bad = QUrl::fromLocalFile(session->filePath("bad.json")); QVERIFY(write(bad.toLocalFile(),QJsonDocument(invalid).toJson()));
         const auto collection = bible->collection(); QVERIFY(!bible->importBackup(bad)); QCOMPARE(bible->collection(),collection);
+        // A version the backup holds must be installed to restore it.
+        auto missing = root; versions = missing.value("versions").toArray(); entry = versions.first().toObject();
+        entry["versionId"] = "not-installed"; versions[0] = entry; missing["versions"] = versions;
+        QVERIFY(write(bad.toLocalFile(),QJsonDocument(missing).toJson()));
+        QVERIFY(!bible->importBackup(bad)); QVERIFY2(bible->error().contains("not installed"),qPrintable(bible->error()));
+        QCOMPARE(bible->collection(),collection);
         QVERIFY(!bible->exportBackup(QUrl::fromLocalFile(bible->dataDirectory()+"/personal.sqlite")));
     }
     void legacyBookmarksRestoreAsTheBookmarkedTag() {
@@ -227,7 +258,7 @@ private slots:
         QVERIFY(bible->navigate("GEN 1:3")); const auto bare = bible->tagScope();
         QVERIFY(bible->navigate("GEN 2:1")); const auto elsewhere = bible->tagScope();
         const auto backup = QUrl::fromLocalFile(session->filePath("backup.json")); QVERIFY(bible->exportBackup(backup));
-        auto root = json(backup.toLocalFile());
+        auto root = legacyBackup(json(backup.toLocalFile()),"engnet");
         // Older versions kept bookmarks as a flag: one on the noted range, one alone.
         auto annotations = root.value("annotations").toArray();
         auto withNote = annotations.first().toObject(); QCOMPARE(withNote.value("bookmark").toBool(),false);
@@ -256,8 +287,8 @@ private slots:
         QVERIFY(bookmarked(noted)); QVERIFY(bookmarked(bare)); QVERIFY(!bookmarked(elsewhere));
         QCOMPARE(bible->tagsForScope(elsewhere).size(),1);
         // Backups now carry them as the tag.
-        QVERIFY(bible->exportBackup(backup)); const auto again = json(backup.toLocalFile());
-        for (const auto &value : again.value("annotations").toArray()) QVERIFY(!value.toObject().value("bookmark").toBool());
+        QVERIFY(bible->exportBackup(backup)); const auto again = versionIn(json(backup.toLocalFile()),"engnet");
+        for (const auto &value : again.value("annotations").toArray()) QVERIFY(!value.toObject().contains("bookmark"));
         QCOMPARE(again.value("tagAssignments").toArray().size(),3);
     }
     void rollbackAndPublication() {
@@ -313,6 +344,8 @@ private slots:
         install(net); QVERIFY(bible->navigate("TOB 2:4")); bible->moveSelection(1,true);
         const auto source = bible->tagScope(); const auto id = bible->createAndAssignTag(source,"Frozen"); QVERIFY(!id.isEmpty());
         const auto backup = QUrl::fromLocalFile(session->filePath("capture.json")); QVERIFY(bible->exportBackup(backup));
+        const auto legacy = QUrl::fromLocalFile(session->filePath("capture-v5.json"));
+        QVERIFY(write(legacy.toLocalFile(),QJsonDocument(legacyBackup(json(backup.toLocalFile()),"engnet")).toJson()));
         install(kjv); QVERIFY(bible->navigate("GEN 2:2")); const auto original = bible->tagScope();
         QSqlQuery q(store());
         QVERIFY(q.exec("CREATE TRIGGER reject_library BEFORE UPDATE ON library BEGIN SELECT RAISE(ABORT,'open failure'); END"));
@@ -321,7 +354,8 @@ private slots:
         QVERIFY(q.exec("DROP TRIGGER reject_library"));
         QVERIFY(bible->openTaggedPassage(source)); QCOMPARE(bible->tagScope(),source);
         bible->setFlushCallback([&] { return bible->switchVersion("eng-kjv"); });
-        QVERIFY(!bible->importBackup(backup)); QVERIFY(bible->error().contains("version changed"));
+        // An older backup restores into the version it holds, which must still be the one read.
+        QVERIFY(!bible->importBackup(legacy)); QVERIFY(bible->error().contains("version changed"));
         QCOMPARE(count(id),1); QVERIFY(bible->tagsForScope(original).isEmpty());
         bible->setFlushCallback({});
         // A clean restore retains portable IDs when there is no global collision.
@@ -414,7 +448,7 @@ private slots:
         QCOMPARE(peer.tagScope(),peerScope); QCOMPARE(peer.collection(),collection);
         QCOMPARE(committed.count(),0); QCOMPARE(changed.count(),0); QCOMPARE(navigation.count(),0);
         const auto backup = QUrl::fromLocalFile(session->filePath("after-rejected-import.json"));
-        QVERIFY(bible->exportBackup(backup)); QCOMPARE(json(backup.toLocalFile()).value("tagAssignments").toArray().size(),1);
+        QVERIFY(bible->exportBackup(backup)); QCOMPARE(versionIn(json(backup.toLocalFile()),"engnet").value("tagAssignments").toArray().size(),1);
         QVERIFY(bible->setTag(scope,tag,false)); QCOMPARE(count(tag),0);
         QVERIFY2(bible->importBackup(backup),qPrintable(bible->error())); QCOMPARE(count(tag),1); QCOMPARE(bible->collection(),collection);
         // Compatible reimport is still permitted and preserves the same scope.
