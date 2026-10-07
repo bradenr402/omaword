@@ -9,6 +9,7 @@ import "HandDrawn.js" as HandDrawn
 import "KeyNotation.js" as KeyNotation
 import "Margins.js" as Margins
 import "RowMenu.js" as RowMenu
+import "TypeScale.js" as TypeScale
 // qmllint disable import
 import OmaWord.Reader 1.0
 // qmllint enable import
@@ -269,6 +270,8 @@ ApplicationWindow {
     property bool restoringPosition: true
     property bool positionJumpToSelection: false
     readonly property int readerSize: bible.fontSize
+    // The page's body text, in pixels: every step of TypeScale.js is relative to it.
+    readonly property real readerBodySize: readerSize * readerScale
     property int selectionAnchor: 0
     property bool movingSelection: false
     property int collectionTab: 0
@@ -2151,6 +2154,8 @@ ApplicationWindow {
     // why when there is a reason a reader can act on.
     // "2.9 MB"; the bytes are a catalog snapshot, so approximate.
     function downloadSize(bytes) { return "≈" + (bytes / 1000000).toFixed(1) + " MB" }
+    // What re-importing a version of an older text schema adds.
+    function reimportGains(schema) { return schema < 4 ? "footnotes, cross references, words of Jesus, and poetry indents" : "poetry indents" }
     function featureName(feature) {
         return ({ footnotes: "Footnotes", headings: "Section headings", wordsOfJesus: "Words of Jesus", apocrypha: "Apocrypha" })[feature] || feature
     }
@@ -2289,7 +2294,13 @@ ApplicationWindow {
     // (marginsLeaving), as the column glides to its centred place.
     readonly property real readerSideInset: reading.width < 700 ? 24 : 48
     readonly property real readerRightInset: Math.max(readerSideInset, footerRightInset)
-    readonly property real readerColumnWidth: Math.min(760 * readerScale, reading.width - readerSideInset - readerRightInset)
+    // A comfortable measure: 66 zeros of the reader's text (CSS 66ch), so the
+    // column follows the Text size; plus the verse-number gutter.
+    readonly property real readerMeasure: {
+        readerMetrics.font // A function call alone would not follow the font.
+        return Math.round(TypeScale.measure * readerMetrics.advanceWidth("0"))
+    }
+    readonly property real readerColumnWidth: Math.min(readerMeasure + verseGutter + 9, reading.width - readerSideInset - readerRightInset)
     readonly property real readerNaturalX: Math.min((reading.width - readerColumnWidth) / 2, reading.width - readerRightInset - readerColumnWidth)
     property bool marginsLeaving: false
     // The split the leaving margins keep (focus mode's layout has no
@@ -2371,7 +2382,7 @@ ApplicationWindow {
     // While margin notes show for this chapter, the reader drops its inline
     // note marks (Verse rails, Paragraph/Block brackets); other kinds stay.
     readonly property bool inlineNoteMarks: !marginSpace.notes.visible
-    readonly property real marginNotePixelSize: Math.round(readerSize * readerScale * 0.8)
+    readonly property real marginNotePixelSize: TypeScale.size(readerBodySize, TypeScale.note)
     readonly property real marginNoteLineHeight: Math.round(marginNotePixelSize * 1.45)
     // Content-space verse spans {number, top, bottom} (reader column coordinates)
     // and the placed notes, refreshed after layout changes.
@@ -5471,8 +5482,8 @@ ApplicationWindow {
                             text: bible.passage
                             // Hover: the accent, as a link (a click opens the chapter list).
                             color: chapterTitleMouse.containsMouse ? desktop.accent : desktop.foreground
-                            // Scales with the Text size, in proportion to the verse text.
-                            font.pixelSize: 34 * app.readerScale * app.fontScale
+                            // A step of the reader's type scale.
+                            font.pixelSize: TypeScale.size(app.readerBodySize, TypeScale.title)
                             font.weight: Font.Medium
                             font.letterSpacing: -0.9 * app.fontScale
                             leftPadding: app.verseGutter
@@ -5533,28 +5544,20 @@ ApplicationWindow {
                                     // visibility. First import creates rows inside a hidden
                                     // reader; Label height/implicitHeight/padding feedback
                                     // otherwise re-enters when that ancestor becomes visible.
-                                    height: hasHeading ? headingText.implicitHeight + 36 * app.readerScale : 0
+                                    height: hasHeading ? headingText.implicitHeight + headingText.y + TypeScale.size(app.readerBodySize, TypeScale.headingBelow) : 0
                                     visible: hasHeading
-                                    Text {
-                                        objectName: "headingPrefix" + verseRow.modelData.number
-                                        x: -26 * app.readerScale
-                                        y: headingText.y
-                                        text: "#"
-                                        font: headingText.font
-                                        color: app.tint(desktop.accent, 0.6)
-                                    }
                                     Text {
                                         id: headingText
                                         objectName: "headingText" + verseRow.modelData.number
                                         width: parent.width
-                                        y: 22 * app.readerScale
+                                        y: TypeScale.size(app.readerBodySize, TypeScale.headingAbove)
                                         // An LRM keeps a Hebrew-first heading ("א Aleph")
                                         // in an LTR paragraph; display only.
                                         text: app.leftToRightText(verseRow.modelData.heading)
                                         horizontalAlignment: Text.AlignLeft
                                         textFormat: Text.PlainText
                                         font.family: desktop.fontFamily
-                                        font.pixelSize: 15 * app.readerScale
+                                        font.pixelSize: TypeScale.size(app.readerBodySize, TypeScale.heading)
                                         font.weight: Font.DemiBold
                                         wrapMode: Text.Wrap
                                         color: desktop.foreground
@@ -5708,7 +5711,7 @@ ApplicationWindow {
                                         fontSizeMode: Text.HorizontalFit
                                         minimumPixelSize: 1
                                         text: verseRow.modelData.number
-                                        font.pixelSize: 10 * app.readerScale
+                                        font.pixelSize: TypeScale.size(app.readerBodySize, TypeScale.number)
                                         font.weight: verseRow.selected ? Font.Bold : Font.Normal
                                         color: verseRow.selected ? desktop.accent : desktop.muted
                                         FontMetrics { id: numberMetrics; font: numberLabel.font }
@@ -5762,7 +5765,7 @@ ApplicationWindow {
                                             text: app.footnoteMark(footnoteMarker.modelData.caller)
                                             color: desktop.accent
                                             font.family: desktop.fontFamily
-                                            font.pixelSize: Math.max(6, app.readerSize * app.readerScale * 0.55)
+                                            font.pixelSize: Math.max(6, TypeScale.size(app.readerBodySize, TypeScale.mark))
                                             textFormat: Text.PlainText
                                         }
                                         MouseArea {
@@ -5795,6 +5798,8 @@ ApplicationWindow {
                                     width: verseBody.width; height: verseBody.height
                                     body: verseBody
                                     sourceText: verseRow.modelData.text
+                                    lineIndents: verseRow.modelData.indents || []
+                                    indentUnit: app.readerBodySize * TypeScale.poetryIndent
                                     theme: desktop
                                     segments: app.searchSegments.filter(function(segment) { return segment.verse === verseRow.modelData.number })
                                 }
@@ -5802,7 +5807,7 @@ ApplicationWindow {
                                     id: verseBody
                                     property SearchHighlights searchOverlay: verseSearch
                                     objectName: "verseBody" + verseRow.modelData.number
-                                    x: verseRow.gutter + (verseRow.modelData.poetry ? 13 : 0)
+                                    x: verseRow.gutter
                                     y: verseHeading.height
                                     width: parent.width - x - 9
                                     height: contentHeight
@@ -7052,7 +7057,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Label {
                                 text: versionEntry.modelData.hint || ((versionEntry.modelData.active ? "Current version" : "Installed locally")
-                                    + (versionEntry.modelData.needsReimport ? " · older text format: re-import for footnotes, cross references, and words of Jesus" : ""))
+                                    + (versionEntry.modelData.needsReimport ? " · older text format: re-import for " + app.reimportGains(versionEntry.modelData.textSchema) : ""))
                                 color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
                                 Layout.fillWidth: true; wrapMode: Text.Wrap
                             }
@@ -8268,7 +8273,7 @@ ApplicationWindow {
                     required property var modelData
                     Layout.fillWidth: true
                     Label {
-                        text: reimportRow.modelData.abbreviation + " uses an older text format (no footnotes, cross references, or words of Jesus)."
+                        text: reimportRow.modelData.abbreviation + " uses an older text format: re-import for " + app.reimportGains(reimportRow.modelData.textSchema) + "."
                         color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     QuietButton {

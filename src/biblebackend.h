@@ -57,7 +57,8 @@ class BibleBackend : public QObject
     Q_PROPERTY(QString readingMode READ readingMode WRITE setReadingMode NOTIFY preferencesChanged)
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
     Q_PROPERTY(bool hasParagraphs READ hasParagraphs NOTIFY versionChanged)
-    // Text DB schema of the active version (4 = notes and words of Jesus kept).
+    // Text DB schema of the active version (4 = notes and words of Jesus kept,
+    // 5 = poetry line levels).
     Q_PROPERTY(int textSchema READ textSchema NOTIFY versionChanged)
     Q_PROPERTY(bool hasWordsOfJesus READ hasWordsOfJesus NOTIFY versionChanged)
     Q_PROPERTY(bool hasCrossReferences READ hasCrossReferences NOTIFY versionChanged)
@@ -174,7 +175,7 @@ public:
     QString readingMode() const { return m_readingMode; }
     int fontSize() const { return m_fontSize; }
     bool hasParagraphs() const { return m_hasParagraphs; }
-    static constexpr int CurrentTextSchema = 4;
+    static constexpr int CurrentTextSchema = 5;
     int textSchema() const { return m_textSchema; }
     bool hasWordsOfJesus() const { return m_hasWordsOfJesus; }
     bool hasCrossReferences() const { return m_hasCrossReferences; }

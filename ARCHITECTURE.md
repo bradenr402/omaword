@@ -61,14 +61,17 @@ files.
   device, inode, size, mtime, and ctime after a pass, and a matching file opens
   without revalidation. Any write in place advances the ctime, so an edited file
   is validated again; a lost or unwritable record only costs a validation.
-- Text DB schema is **4** (independent of personal schema): `metadata` (incl.
+- Text DB schema is **5** (independent of personal schema): `metadata` (incl.
   digests), `books(...,ordinal)`, `book_aliases`, `source_chapters`,
   `source_keys(book,chapter,number,retained)`, `verses(...,html,heading,poetry,paragraphStart)`,
   `notes(book,chapter,verse,seq,kind,caller,offset,text,targets)` (`\f`/`\fe`/`\x`
-  as plain text; `offset` is UTF-16 into the verse's plain text; `targets` = `\xt`)
-  and `words_of_jesus(book,chapter,verse,start,end)`; `\wj` also renders as
-  `<span class="wj">` in `html`. Schema 3 files still validate (own digest) and
-  open without notes; Versions flags them (`needsReimport`) for Re-import.
+  as plain text; `offset` is UTF-16 into the verse's plain text; `targets` = `\xt`),
+  `words_of_jesus(book,chapter,verse,start,end)`; `\wj` also renders as
+  `<span class="wj">` in `html`; and `indents(book,chapter,verse,levels)`, one
+  digit per line of the verse's text (`0` prose, `1`–`4` for `\q1`–`\q4`/`\qm#`,
+  other `\q*` at 1), for verses with a poetry line. Schema 3 and 4 files still
+  validate (own digests) and open without notes (3) or with every poetry line
+  at level 1 (4); Versions flags them (`needsReimport`) for Re-import.
 - Identity: source ID from numbered internal filename suffixes, cross-checked
   with `copr.htm`; else `usfm-<first 32 hex of SHA-256(title)>`. Outer ZIP name
   never matters.
@@ -328,6 +331,18 @@ files.
 
 ## Reader rendering
 
+- The page: one type scale (`qml/TypeScale.js`) in steps of the body text
+  (Text size × system scale) sets the title, headings (body size, semi-bold, no
+  marker), verse numbers, margin notes, footnote marks, heading spacing, and
+  the poetry indent, in every layout. The column's measure is 66 zeros of the
+  reader font (CSS `66ch`, `readerMeasure`) plus the verse-number gutter, so it
+  follows the Text size, narrowed only by the window.
+- Poetry: Paragraph and Verse layouts set each line of a poetry verse as its
+  own block (U+2028 becomes a block break, one position either way, so offsets,
+  copy, and search maps are unchanged), `level × unit` in from the left with
+  wrapped lines one unit further (`SearchGeometry::poetryFormat`; BlockDocument
+  at build, `SearchDocument::indentLines` for Verse rows). Block layout stays
+  dense, with line breaks only.
 - Verse layout: one row per verse; annotation rails packed by
   `packAnnotationLanes` into nearest free gutter lanes by source-row ordinal
   (not verse labels), tie priority bookmark/tag/note, lane kept for an interval's life.

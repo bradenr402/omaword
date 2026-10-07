@@ -78,7 +78,8 @@ void BlockDocument::filterClipboard(QClipboard::Mode mode)
 
 void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses,
                           bool numbers, bool headings, double lineHeight, const QString &mode,
-                          bool annotationsVisible, double decorationSize, bool noteMarks)
+                          bool annotationsVisible, double decorationSize, bool noteMarks,
+                          const QVariantMap &spacing)
 {
     if (!target || !target->textDocument()) return;
     QScopedValueRollback<bool> building(m_building, true);
@@ -111,6 +112,9 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     m_document->addResource(QTextDocument::ImageResource, cellUrl, cell);
     const QFontMetricsF bodyMetrics(m_document->defaultFont());
     const double em = decorationSize > 0 ? decorationSize : bodyMetrics.height();
+    // Paragraph layout sets poetry lines as indented blocks; Block stays dense.
+    const bool poetry = mode == QStringLiteral("paragraph");
+    const double indentUnit = poetry ? spacing.value("poetryIndent").toDouble() : 0;
     QTextCursor cursor(m_document);
     // One edit: the document (and the TextEdit showing it) lays out once,
     // not after every insertion.
@@ -151,22 +155,29 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     for (int verseIndex = 0; verseIndex < verses.size(); ++verseIndex) {
         const auto &value = verses[verseIndex];
         const auto verse = value.toMap();
+        const auto levels = verse.value("indents").toList();
+        const bool indented = poetry && std::any_of(levels.cbegin(), levels.cend(), [](const QVariant &level) { return level.toInt() > 0; });
+        int line = 0;
+        const auto lineFormat = [&](int index) {
+            return indented ? SearchGeometry::poetryFormat(paragraph, levels.value(qMin(index, int(levels.size()) - 1)).toInt(), indentUnit)
+                            : paragraph;
+        };
         const QString heading = verse.value("heading").toString();
         if (headings && !heading.isEmpty()) {
             if (cursor.position()) cursor.insertBlock(paragraph, normal);
             QTextBlockFormat section = paragraph;
-            section.setTopMargin(18);
-            section.setBottomMargin(12);
+            section.setTopMargin(spacing.value("headingAbove", 18).toDouble());
+            section.setBottomMargin(spacing.value("headingBelow", 12).toDouble());
             cursor.setBlockFormat(section);
             QTextCharFormat title;
             title.setFontWeight(QFont::DemiBold);
             cursor.insertText(heading, title);
-            cursor.insertBlock(paragraph, normal);
+            cursor.insertBlock(lineFormat(0), normal);
         } else if (cursor.position()) {
             if (mode == QStringLiteral("paragraph") && verse.value("paragraphStart").toBool())
-                cursor.insertBlock(paragraph, normal);
+                cursor.insertBlock(lineFormat(0), normal);
             else cursor.insertText(" ", separator);
-        }
+        } else cursor.setBlockFormat(lineFormat(0));
         const int start = cursor.position();
         if (numbers) {
             QTextCharFormat number;
@@ -239,11 +250,22 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         else source.setHtml(html); // Already sanitized by the USFM importer.
         // Flatten source paragraph wrappers, preserving internal poetry breaks
         // and inline formats. Source verse-boundary paragraphs are handled above.
+        // A line break inside a poetry verse starts the next line's block
+        // (one position, like the separator it replaces).
+        const auto lineBreak = [&](const QTextCharFormat &format) {
+            if (indented) cursor.insertBlock(lineFormat(++line), format);
+            else cursor.insertText(QString(QChar::LineSeparator), format);
+        };
         for (auto block = source.begin(); block.isValid(); block = block.next()) {
-            if (block != source.begin()) cursor.insertText(QString(QChar::LineSeparator), normal);
+            if (block != source.begin()) lineBreak(normal);
             for (auto it = block.begin(); !it.atEnd(); ++it) {
                 const auto fragment = it.fragment();
-                if (fragment.isValid()) cursor.insertText(fragment.text(), fragment.charFormat());
+                if (!fragment.isValid()) continue;
+                const auto parts = fragment.text().split(QChar::LineSeparator);
+                for (int i = 0; i < parts.size(); ++i) {
+                    if (i) lineBreak(fragment.charFormat());
+                    if (!parts[i].isEmpty()) cursor.insertText(parts[i], fragment.charFormat());
+                }
             }
         }
         int textEnd = cursor.position();

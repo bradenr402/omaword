@@ -1319,6 +1319,9 @@ private slots:
                 // The wrapped line ends on its last ink; the next word is on the next line.
                 const QPoint end = cursorPoint(); keys("w"); QVERIFY(cursorPoint().y() > end.y()); keys("ge");
                 QCOMPARE(cursorPoint(), end);
+                // Where that line ends depends on the column: start again at 16.
+                key(Qt::Key_Escape); QTRY_VERIFY(!prop("charMode").toBool());
+                key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool()); QVERIFY(charAt(charCursor(), 16, 0));
             }
             // h and l cross the verse break; ) and ( step sentences.
             keys(")"); QVERIFY(charAt(charCursor(), 17, 0));

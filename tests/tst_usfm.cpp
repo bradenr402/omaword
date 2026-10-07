@@ -224,7 +224,7 @@ private slots:
         const auto result = UsfmImporter::importFile(path, target); QVERIFY2(result.ok, qPrintable(result.error));
         QString error; QVERIFY2(UsfmImporter::validateDatabase(target, &error), qPrintable(error));
         Database db(target);
-        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("4"));
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("5"));
         const QString text = db.scalar("SELECT text FROM verses WHERE number=1").toString();
         QCOMPARE(text, QString("He said, Follow me. Then went."));
         // Heading note anchors at the start of the following verse.
@@ -240,6 +240,23 @@ private slots:
         QCOMPARE(db.scalar("SELECT count(*) FROM words_of_jesus WHERE verse=2").toInt(), 0);
         // Tampering with the new tables is caught by the schema 4 digest.
         { QSqlQuery q(db.db); QVERIFY(q.exec("UPDATE notes SET text='Altered' WHERE verse=2")); }
+        QVERIFY(!UsfmImporter::validateDatabase(target, &error));
+    }
+    void poetryLineLevels() {
+        const QString path = root.filePath("poetry.zip"), target = root.filePath("poetry.sqlite");
+        QVERIFY(zip(path, fixture("\\c 1\n\\q1\n\\v 1 First line\n\\q2 second line\n\\q1\n\\v 2 Third\n"
+            "\\m\n\\v 3 Prose \\q2 then poetry.\n\\p\n\\v 4 All prose.\n\\q3\n\\v 5 Deep \\qm1 back out.\n")));
+        const auto result = UsfmImporter::importFile(path, target); QVERIFY2(result.ok, qPrintable(result.error));
+        QString error; QVERIFY2(UsfmImporter::validateDatabase(target, &error), qPrintable(error));
+        Database db(target);
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("5"));
+        QCOMPARE(db.scalar("SELECT levels FROM indents WHERE verse=1").toString(), QString("12"));
+        QCOMPARE(db.scalar("SELECT levels FROM indents WHERE verse=2").toString(), QString("1"));
+        QCOMPARE(db.scalar("SELECT levels FROM indents WHERE verse=3").toString(), QString("02"));
+        QCOMPARE(db.scalar("SELECT count(*) FROM indents WHERE verse=4").toInt(), 0);
+        QCOMPARE(db.scalar("SELECT levels FROM indents WHERE verse=5").toString(), QString("31"));
+        // A level per line, in the digest: tampering is caught.
+        { QSqlQuery q(db.db); QVERIFY(q.exec("UPDATE indents SET levels='1' WHERE verse=1")); }
         QVERIFY(!UsfmImporter::validateDatabase(target, &error));
     }
     void schema3StillValid() {
@@ -401,7 +418,7 @@ private slots:
             QVERIFY(!db.scalar("SELECT text FROM verses WHERE book=2 AND chapter=20 AND number=13").toString().contains("14"));
         }
         // Schema 4: notes and words of Jesus survive with valid anchors.
-        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("4"));
+        QCOMPARE(db.scalar("SELECT value FROM metadata WHERE key='schema'").toString(), QString("5"));
         const int footnotes = db.scalar("SELECT count(*) FROM notes WHERE kind IN ('f','fe')").toInt();
         const int xrefs = db.scalar("SELECT count(*) FROM notes WHERE kind='x'").toInt();
         const int jesus = db.scalar("SELECT count(*) FROM words_of_jesus").toInt();

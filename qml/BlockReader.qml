@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import "HandDrawn.js" as HandDrawn
 import "KeyNotation.js" as KeyNotation
+import "TypeScale.js" as TypeScale
 // Registered by blockdocument.cpp at application startup, without a QML plugin.
 // qmllint disable import
 import OmaWord.Reader 1.0
@@ -82,7 +83,7 @@ Item {
     }
     // Note text is not layout: a typed note repaints the marks, never rebuilds.
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
-        return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart,
+        return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart, indents: v.indents,
             bookmarkRanges: v.bookmarkRanges, tagRanges: v.tagRanges, footnotes: v.footnotes,
             noteRanges: Array.from(v.noteRanges || []).map(function(r) { return [r.reference, r.continuesBefore, r.continuesAfter] }) }
     })) + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + focusLayout + noteMarks + controller.readerSize + root.readerScale + controller.scale
@@ -97,8 +98,10 @@ Item {
         // controller reselects it from source positions after the build.
         if (controller.relayoutTextSelection) controller.relayoutTextSelection(); else controller.clearTextSelection()
         cancelDrag()
+        const em = controller.readerSize * root.readerScale
         document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode,
-                       !focusLayout, controller.readerSize * root.readerScale, noteMarks)
+                       !focusLayout, em, noteMarks, { headingAbove: TypeScale.size(em, TypeScale.headingAbove),
+                           headingBelow: TypeScale.size(em, TypeScale.headingBelow), poetryIndent: em * TypeScale.poetryIndent })
         layoutDirty = true
         geometryTimer.restart()
     }
@@ -592,7 +595,7 @@ Item {
                 text: root.footnoteMark(inlineMarker.modelData.caller)
                 color: root.theme.accent
                 font.family: root.theme.fontFamily
-                font.pixelSize: Math.max(6, root.controller.readerSize * root.readerScale * 0.55)
+                font.pixelSize: Math.max(6, TypeScale.size(root.controller.readerSize * root.readerScale, TypeScale.mark))
                 textFormat: Text.PlainText
             }
             AnnotationGlyph {

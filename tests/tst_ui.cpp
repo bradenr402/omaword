@@ -2527,8 +2527,36 @@ private slots:
         QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() == bible->verses().size());
         QTRY_VERIFY(item("blockBody")->height() > 0);
         QVERIFY(!item("verseBody1"));
+        // Paragraph layout sets each poetry line as its own block, indented for
+        // its level with a hanging indent; the positions stay the source's.
+        const int built = object("blockReader")->property("rebuildCount").toInt();
+        bible->setReadingMode("paragraph");
+        QTRY_VERIFY(object("blockReader")->property("rebuildCount").toInt() > built);
         auto doc = blockTextDocument();
         QVERIFY(doc);
+        {
+            const auto first = doc->findBlock(blockOffset(2)), second = first.next();
+            const double unit = 18 * window->property("readerScale").toDouble() * 1.25;
+            QCOMPARE(first.blockFormat().leftMargin(),2 * unit); QCOMPARE(first.blockFormat().textIndent(),-unit);
+            QVERIFY(second.text().startsWith(QString::fromUtf8("A second line")));
+            QCOMPARE(second.blockFormat().leftMargin(),2 * unit);
+            QCOMPARE(doc->findBlock(blockOffset(3)).blockFormat().leftMargin(),0.0);
+            QVERIFY(!doc->toRawText().contains(QChar::LineSeparator));
+        }
+        bible->setReadingMode("verse");
+        QTRY_VERIFY(item("verseBody2"));
+        {
+            auto verse = item("verseBody2")->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+            QTRY_COMPARE(verse->blockCount(),2);
+            const double unit = 18 * window->property("readerScale").toDouble() * 1.25;
+            QCOMPARE(verse->firstBlock().blockFormat().leftMargin(),2 * unit);
+            QCOMPARE(verse->lastBlock().blockFormat().textIndent(),-unit);
+            QCOMPARE(item("verseBody2")->x(),item("verseBody1")->x());
+        }
+        bible->setReadingMode("block");
+        QTRY_VERIFY(object("blockReader") && blockMapping() && blockMapping()->spans().size() == bible->verses().size());
+        QTRY_VERIFY(blockTextDocument() && blockTextDocument()->toRawText().contains(QChar::LineSeparator));
+        doc = blockTextDocument();
         // Verse 2 begins on verse 1's last visual line, rather than a new row.
         QCOMPARE(blockRect(blockOffset(1)).y(),blockRect(blockOffset(2)).y());
         QVERIFY(blockRect(blockOffset(2)).x() > blockRect(blockOffset(1)).x());
@@ -3201,6 +3229,22 @@ private slots:
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),window->property("freeSelectedText").toString());
     }
+    void columnMeasureFollowsTextSize() {
+        reference("John 3:16");
+        // 66 zeros of the reader's text (CSS 66ch), whatever the Text size.
+        auto measure = [&] {
+            const auto font = item("verseBody16")->property("font").value<QFont>();
+            return qRound(66 * QFontMetricsF(font).horizontalAdvance("0"));
+        };
+        QTRY_VERIFY(qAbs(window->property("readerMeasure").toInt() - measure()) <= 1);
+        QCOMPARE(item("verseBody16")->width(),window->property("readerMeasure").toDouble());
+        const int before = window->property("readerMeasure").toInt();
+        key(Qt::Key_Equal,Qt::ControlModifier); key(Qt::Key_Equal,Qt::ControlModifier);
+        QTRY_VERIFY(window->property("readerMeasure").toInt() > before);
+        QTRY_VERIFY(qAbs(window->property("readerMeasure").toInt() - measure()) <= 1);
+        QTRY_COMPARE(item("verseBody16")->width(),window->property("readerMeasure").toDouble());
+        key(Qt::Key_0,Qt::ControlModifier); QTRY_COMPARE(window->property("readerMeasure").toInt(),before);
+    }
     void runtimeReadingPreferences() {
         installDragFixture();
         bible->toggleBookmark(); bible->setNoteText("Marker");
@@ -3209,8 +3253,9 @@ private slots:
         const auto height = item("verseBody2")->height();
         const auto heading = item("verseHeading1")->height();
         QVERIFY(heading > 0);
-        QVERIFY(item("headingPrefix1")->isVisible());
-        QCOMPARE(prop("headingPrefix1","text").toString(),QString("#"));
+        // Headings are a step of the type scale: the body size, semi-bold, no "#".
+        QVERIFY(!item("headingPrefix1"));
+        QCOMPARE(item("headingText1")->property("font").value<QFont>().pixelSize(),item("verseBody1")->property("font").value<QFont>().pixelSize());
         QCOMPARE(prop("chapterTitle","leftPadding").toDouble(),x);
         bible->setShowVerseNumbers(false);
         QVERIFY(!item("verseNumberLabel1")->isVisible());
@@ -3218,7 +3263,6 @@ private slots:
         QVERIFY(item("bookmarkMarker1")->isVisible());
         bible->setShowHeadings(false);
         QTRY_COMPARE(item("verseHeading1")->height(),0.0);
-        QVERIFY(!item("headingPrefix1")->isVisible());
         bible->setLineHeight(2.5);
         QTRY_VERIFY(item("verseBody2")->height() > height * 1.4);
         bible->setShowHeadings(true);

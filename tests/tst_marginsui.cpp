@@ -246,7 +246,9 @@ class MarginsUiTest : public QObject
                 const auto place = value(child->property("place")).toMap();
                 const int first = value(child->property("modelData")).toMap()["first"].toInt();
                 if (!f.shownNotes++) f.noteX = child->mapToItem(reading, QPointF(0, 0)).x();
-                if (auto connector = visual(child, "marginConnector:" + value(child->property("modelData")).toMap()["reference"].toString()))
+                // A connector the gliding column covers entirely paints nothing.
+                if (auto connector = visual(child, "marginConnector:" + value(child->property("modelData")).toMap()["reference"].toString());
+                        connector && connector->parentItem()->width() > 0.5)
                     f.connectorGap = std::min(f.connectorGap, connector->parentItem()->mapToItem(reading, QPointF(0, 0)).x()
                         - (f.columnX + item("readerColumn")->width() - 9));
                 if (place["naturalLines"].toInt() != child->property("naturalLines").toInt()) f.stale = std::max(f.stale, 999.0);

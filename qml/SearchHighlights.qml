@@ -13,6 +13,12 @@ Item {
     property real markScale: theme && theme.textScale > 0 ? theme.textScale : 1
     property bool outlined: false
     onOutlinedChanged: refresh()
+    // Poetry: each source line's level and the indent per level, in pixels
+    // (SearchDocument.indentLines); empty for prose and search results.
+    property var lineIndents: []
+    property real indentUnit: 0
+    onLineIndentsChanged: leftToRight()
+    onIndentUnitChanged: leftToRight()
     property bool destroying: false
 
     function refresh() { if (!destroying) geometryTimer.restart() }
@@ -48,7 +54,11 @@ Item {
         return document.sourceAt(position, forward)
     }
     // Scripture paragraphs are always LTR, even when they open with Hebrew.
-    function leftToRight() { if (!destroying && body) document.leftToRight(body.textDocument) }
+    function leftToRight() {
+        if (destroying || !body) return
+        document.leftToRight(body.textDocument)
+        document.indentLines(body.textDocument, lineIndents, indentUnit)
+    }
     onBodyChanged: { leftToRight(); refresh() }
     onSourceTextChanged: refresh()
     onSegmentsChanged: refresh()

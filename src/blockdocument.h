@@ -19,11 +19,13 @@ public:
     // reflow happens once per toggle and no blank cells remain in the text.
     explicit BlockDocument(QObject *parent = nullptr);
     QVariantList spans() const { return m_spans; }
+    // spacing (pixels, from the reader's type scale): headingAbove,
+    // headingBelow, and poetryIndent (Paragraph layout's poetry lines).
     Q_INVOKABLE void build(QQuickTextDocument *target, const QVariantList &verses,
                           bool numbers, bool headings, double lineHeight,
                           const QString &mode = QStringLiteral("block"),
                           bool annotationsVisible = false, double decorationSize = 0,
-                          bool noteMarks = true);
+                          bool noteMarks = true, const QVariantMap &spacing = {});
     // Plain clipboard text for actual TextEdit selection offsets (either order).
     // start/end include decorations; textStart/textEnd delimit original verse text.
     Q_INVOKABLE QString selectionText(int start, int end) const;

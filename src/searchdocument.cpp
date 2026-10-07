@@ -160,6 +160,31 @@ void SearchDocument::leftToRight(QQuickTextDocument *target) const
     if (target) SearchGeometry::forceLeftToRight(target->textDocument());
 }
 
+QTextBlockFormat SearchGeometry::poetryFormat(QTextBlockFormat format, int level, qreal unit)
+{
+    format.setLeftMargin(level > 0 ? (level + 1) * unit : 0);
+    format.setTextIndent(level > 0 ? -unit : 0);
+    return format;
+}
+
+void SearchGeometry::indentLines(QTextDocument *document, const QVariantList &levels, qreal unit)
+{
+    if (!document || !std::any_of(levels.cbegin(), levels.cend(), [](const QVariant &level) { return level.toInt() > 0; })) return;
+    for (QTextCursor found(document); !(found = document->find(QString(QChar::LineSeparator), found)).isNull();)
+        found.insertBlock();
+    int line = 0;
+    for (auto block = document->begin(); block.isValid(); block = block.next(), ++line) {
+        const int level = levels.value(qMin(line, int(levels.size()) - 1)).toInt();
+        const auto format = poetryFormat(block.blockFormat(), level, unit);
+        if (format != block.blockFormat()) QTextCursor(block).setBlockFormat(format);
+    }
+}
+
+void SearchDocument::indentLines(QQuickTextDocument *target, const QVariantList &levels, qreal unit) const
+{
+    if (target) SearchGeometry::indentLines(target->textDocument(), levels, unit);
+}
+
 void SearchDocument::attach(QQuickTextDocument *target, const QString &sourceText)
 {
     auto document = target ? target->textDocument() : nullptr;

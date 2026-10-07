@@ -238,6 +238,7 @@ These also work, but stay out of the in-app list:
 
 ### Reading
 - Paragraph, Verse, and Block layouts (`alt l`, or Reading settings → Layout), with optional verse numbers and headings.
+- A comfortable page: the column is about 66 characters wide and grows with the Text size; the title, headings, verse numbers, and notes are steps of one type scale; poetry lines are indented by level (`\q1`, `\q2`, …) with hanging wrapped lines in the Paragraph and Verse layouts.
 - Focus mode (`f`) dims everything but the current verse and keeps it 40% down the window, like a typewriter. The footer then shows only the focus button; rest the pointer on it (or tab to it) to reveal the rest in place.
 - **Highlight words of Jesus** (`alt j`) colors them with your theme's palette, where the version marks them (KJV).
 - Wide windows add margins: a sticky **Chapter outline** of the chapter and its section headings on the left (`alt o`; `{` / `}` jump between headings, `{` ending at the top of the chapter), and **Margin notes** on the right (`alt w`), each joined to its passage by hand-drawn braces and an arrow. Margin notes take priority and may move the text left; both are off by default.
@@ -275,7 +276,7 @@ These also work, but stay out of the in-app list:
 ### Your data
 Bible versions, annotations, the Desk, History, and the ribbon stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.
 
-Versions installed before footnotes were supported show **Re-import** in Versions (`ctrl shift I` on the highlighted row) and Reading settings; it replaces the text and keeps your annotations.
+Versions installed before footnotes or poetry indents were supported show **Re-import** in Versions (`ctrl shift I` on the highlighted row) and Reading settings; it replaces the text and keeps your annotations.
 
 ## Requirements
 

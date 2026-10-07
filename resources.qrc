@@ -13,6 +13,7 @@
     <file>qml/ListMotionKeys.qml</file>
     <file>qml/HandDrawn.js</file>
     <file>qml/Margins.js</file>
+    <file>qml/TypeScale.js</file>
     <file>qml/ChapterOutline.qml</file>
     <file>qml/PanelTabs.qml</file>
     <file>qml/PanelHeader.qml</file>

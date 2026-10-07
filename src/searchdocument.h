@@ -4,6 +4,7 @@
 #include <QPointer>
 #include <QQuickTextDocument>
 #include <QRectF>
+#include <QTextBlockFormat>
 #include <QVariantList>
 
 // Source offsets are UTF-16, before HTML serialization. Whitespace runs may
@@ -31,6 +32,13 @@ QRectF firstRect(const QVariantList &rectangles);
 // letter (Psalm 119's acrostic) must not switch its base direction; RTL runs
 // still render in place. Display-only: no characters are inserted.
 void forceLeftToRight(QTextDocument *document);
+// Poetry: a line of level n starts n units in from the left, and its wrapped
+// lines one unit further (a hanging indent). Level 0 is prose.
+QTextBlockFormat poetryFormat(QTextBlockFormat format, int level, qreal unit);
+// One block per source line (U+2028 becomes a block break: positions are
+// unchanged), each indented for its level; levels past the list repeat the
+// last. No-op without a poetry level.
+void indentLines(QTextDocument *document, const QVariantList &levels, qreal unit);
 }
 
 class SearchDocument : public QObject
@@ -48,6 +56,7 @@ public:
     Q_INVOKABLE QVariantList documentRange(int start, int length) const;
     Q_INVOKABLE int sourceAt(int position, bool forward) const;
     Q_INVOKABLE void leftToRight(QQuickTextDocument *target) const;
+    Q_INVOKABLE void indentLines(QQuickTextDocument *target, const QVariantList &levels, qreal unit) const;
 signals:
     void geometryChanged();
 private:

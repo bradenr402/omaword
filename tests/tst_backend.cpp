@@ -139,26 +139,29 @@ class BackendTest : public QObject
                 {"03-JHNstudy.usfm", "\\id JHN Study Test Bible\n\\c 1\n\\p\n\\v 1 Word.\n\\v 2 Same.\n\\v 3 Made.\n"
                     "\\c 3\n\\p\n\\v 16 For God so loved. He said, \\wj Truly I say\\wj* again.\n"}};
     }
-    // Rewrites a schema 4 generation as the schema 3 layout older builds wrote.
-    static bool downgradeToSchema3(const QString &path) {
+    // Rewrites a current generation as the schema 3 (or 4) layout older builds wrote.
+    static bool downgradeToSchema3(const QString &path, int schema = 3) {
         const QString name = QUuid::createUuid().toString();
         bool ok = false;
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
             if (db.open()) {
                 QSqlQuery q(db);
-                ok = q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
+                ok = q.exec("DROP TABLE indents") && q.exec(QString("UPDATE metadata SET value='%1' WHERE key='schema'").arg(schema));
+                if (schema == 3) ok = ok && q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
                     && q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')")
-                    && q.exec("UPDATE metadata SET value='3' WHERE key='schema'")
                     && q.exec("UPDATE verses SET html=replace(replace(html,'<span class=\"wj\">',''),'</span>','')");
                 QCryptographicHash hash(QCryptographicHash::Sha256);
                 auto field = [&](const QByteArray &v) { hash.addData(QByteArray::number(v.size())); hash.addData(":"); hash.addData(v); };
-                for (const QString &sql : {QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
+                QStringList queries{QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
                          QString("SELECT id,code,name,abbreviation,ordinal FROM books ORDER BY ordinal"),
                          QString("SELECT book,chapter FROM source_chapters ORDER BY book,chapter"),
                          QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
                          QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
-                         QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")}) {
+                         QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")};
+                if (schema == 4) queries << "SELECT book,chapter,verse,seq,kind,caller,offset,text,targets FROM notes ORDER BY book,chapter,verse,seq"
+                                         << "SELECT book,chapter,verse,start,end FROM words_of_jesus ORDER BY book,chapter,verse,start";
+                for (const QString &sql : queries) {
                     field(sql.toUtf8()); ok = ok && q.exec(sql);
                     while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
                 }
@@ -584,6 +587,10 @@ private slots:
         QVERIFY(rows[2].toMap()["paragraphStart"].toBool());
         QVERIFY(rows[3].toMap()["poetry"].toBool());
         QVERIFY(rows[4].toMap()["poetry"].toBool());
+        // Each line's poetry level (schema 5); prose lines are 0.
+        QCOMPARE(rows[3].toMap()["indents"].toList(),QVariantList({1,2}));
+        QCOMPARE(rows[4].toMap()["indents"].toList(),QVariantList({2}));
+        QCOMPARE(rows[5].toMap()["indents"].toList(),QVariantList({0}));
         QVERIFY(!rows[4].toMap()["paragraphStart"].toBool());
         QCOMPARE(bible->copyVerse(4,true),text[3]);
         const QString expected = text[0]+' '+text[1]+"\n\n"+text[2]+"\n\n"+text[3]+'\n'+text[4]+"\n\n"+text[5];
@@ -1212,9 +1219,19 @@ private slots:
     void textSchemaFootnotesAndReimportFlag() {
         const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
         install(path);
-        QCOMPARE(bible->versionId(), QString("study")); QCOMPARE(bible->textSchema(), 4); QVERIFY(bible->hasWordsOfJesus());
+        QCOMPARE(bible->versionId(), QString("study")); QCOMPARE(bible->textSchema(), 5); QVERIFY(bible->hasWordsOfJesus());
         QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
-        QCOMPARE(versionRow(bible.get(),"study")["textSchema"].toInt(), 4);
+        QCOMPARE(versionRow(bible.get(),"study")["textSchema"].toInt(), 5);
+        {
+            // A schema 4 generation (before poetry levels) keeps its notes and is flagged.
+            const QString file = installedPath();
+            bible.reset(); QVERIFY(downgradeToSchema3(file, 4)); bible = std::make_unique<BibleBackend>();
+            QVERIFY2(bible->ready(), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 4);
+            QVERIFY(bible->hasWordsOfJesus()); QVERIFY(versionRow(bible.get(),"study")["needsReimport"].toBool());
+            QVERIFY(bible->navigate("Genesis 1")); QCOMPARE(bible->footnotes().size(), 2);
+            bible->importUsfm(QUrl::fromLocalFile(path), "study");
+            QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QCOMPARE(bible->textSchema(), 5);
+        }
         QVERIFY(bible->navigate("Genesis 1"));
         const auto notes = bible->footnotes();
         QCOMPARE(notes.size(), 2);
@@ -1242,7 +1259,7 @@ private slots:
         // Re-import through the ordinary install/replace flow keeps annotations.
         bible->importUsfm(QUrl::fromLocalFile(path), "study");
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 4); QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
+        QCOMPARE(bible->textSchema(), 5); QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
         QVERIFY(installedPath() != file); QVERIFY(!QFile::exists(file));
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16,16);
         QCOMPARE(bible->noteText(), QString("Kept across re-import"));

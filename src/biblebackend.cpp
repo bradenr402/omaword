@@ -2415,6 +2415,26 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
             row = map;
         }
     }
+    // Each text line's poetry level (0 prose); before schema 5 every line of
+    // a poetry verse is at the first level.
+    QHash<int, QString> levels;
+    if (m_textSchema >= 5) {
+        QSqlQuery extra(m_bible);
+        extra.prepare("SELECT verse,levels FROM indents WHERE book=? AND chapter=?");
+        extra.addBindValue(book); extra.addBindValue(chapter);
+        if (!extra.exec()) return setError("Cannot load chapter poetry: " + extra.lastError().text());
+        while (extra.next()) levels.insert(extra.value(0).toInt(), extra.value(1).toString());
+    }
+    for (auto &row : rows) {
+        auto map = row.toMap();
+        const int lines = map.value("text").toString().count('\n') + 1;
+        const QString saved = levels.value(map.value("number").toInt());
+        QVariantList indents;
+        for (int i = 0; i < lines; ++i)
+            indents.append(m_textSchema >= 5 ? (i < saved.size() ? saved[i].digitValue() : 0) : int(map.value("poetry").toBool()));
+        map["indents"] = indents;
+        row = map;
+    }
     QVector<int> expected;
     for (const auto &key : m_keys) if (key.book == book && key.chapter == chapter) expected.append(key.verse);
     if (q.lastError().isValid() || rows.isEmpty() || rows.size() != expected.size())
