@@ -504,23 +504,30 @@ private slots:
         const auto name = markerName("note", 2, reference);
         QTRY_VERIFY(item(name) && item(name)->isVisible());
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
-        QCOMPARE(entry("remove").value("text").toString(), QString("Delete note…"));
+        QCOMPARE(entry("remove").value("text").toString(), QString("Delete note"));
+        // At once, with no confirmation: the note only.
         clickEntry("remove");
-        const auto confirm = object("deleteConfirmation");
-        QTRY_VERIFY(confirm->property("opened").toBool());
-        QCOMPARE(object("deleteTitle")->property("text").toString(), QString("Delete note?"));
-        QVERIFY(object("deleteExplanation")->property("text").toString().contains("deletes the note"));
-        QTRY_VERIFY(item("deleteConfirm"));
-        QTest::mouseClick(window, Qt::LeftButton, {}, item("deleteConfirm")->mapToScene(QPointF(4, 4)).toPoint());
-        QTRY_VERIFY(!confirm->property("visible").toBool());
+        QTRY_VERIFY(bible->collection().first().toMap().value("note").toString().isEmpty());
         QCOMPARE(bible->collection().size(), 1);
         const auto row = bible->collection().first().toMap();
         QCOMPARE(row.value("reference").toString(), reference);
         QVERIFY(row.value("bookmark").toBool()); QVERIFY(row.value("highlight").toBool());
-        QVERIFY(row.value("note").toString().isEmpty());
         QCOMPARE(bible->tagsForScope(scope).size(), 1);
         QTRY_VERIFY(!item(name) || !item(name)->isVisible());
-        QVERIFY(object("toast")->property("text").toString().contains("note deleted"));
+        QCOMPARE(object("toast")->property("text").toString(), reference + " note deleted");
+        // The passage menu names the undo and undoes it.
+        rightClick(versePoint(1)); QTRY_VERIFY(menuOpen());
+        QCOMPARE(entry("undo").value("text").toString(), "Undo note deletion on " + reference);
+        QCOMPARE(entry("undo").value("shortcut").toString(), QString("u"));
+        QVERIFY(!ids().contains("redo"));
+        clickEntry("undo");
+        QTRY_COMPARE(bible->collection().first().toMap().value("note").toString(), QString("A long note worth confirming"));
+        QTRY_VERIFY(item(name) && item(name)->isVisible());
+        QCOMPARE(object("toast")->property("text").toString(), "Note deletion on " + reference + " undone");
+        rightClick(versePoint(1)); QTRY_VERIFY(menuOpen());
+        QCOMPARE(entry("redo").value("text").toString(), "Redo note deletion on " + reference);
+        QCOMPARE(entry("redo").value("shortcut").toString(), QString("ctrl shift Z"));
+        escape();
     }
     void deskAnnotationAndSearchMenus() {
         navigate("John 1:1"); key(Qt::Key_D); QCOMPARE(bible->desk().size(), 1);
@@ -544,14 +551,15 @@ private slots:
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("annotation"));
-        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "editRange", "delete"}));
+        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "editRange", "delete", "undo"}));
+        QCOMPARE(entry("undo").value("text").toString(), QString("Undo bookmark on John 1:2"));
         clickEntry("desk");
         QVERIFY2(bible->desk().size() == 1, qPrintable(object("toast")->property("text").toString() + " / " + bible->error() + " / " + QString::number(menu()->property("x").toDouble()) + "," + QString::number(menu()->property("y").toDouble())));
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
         clickEntry("delete");
-        QTRY_VERIFY(object("deleteConfirmation")->property("opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("deleteConfirmation")->property("visible").toBool());
-        QCOMPARE(bible->collection().size(), 1);
+        QTRY_VERIFY(bible->collection().isEmpty());
+        key(Qt::Key_U); QTRY_COMPARE(bible->collection().size(), 1);
+        QTRY_VERIFY(item(saved) && item(saved)->isVisible());
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
         clickEntry("editRange");
         QTRY_VERIFY(prop("rangeEditing").toBool());

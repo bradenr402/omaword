@@ -544,7 +544,7 @@ ApplicationWindow {
     readonly property bool contextMenuOpen: contextMenu.visible
     readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || tagsUi.visibleModal
     // Everything modal except the side panels (Annotations, Desk, Study).
-    readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || deleteConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool notesClosableFromReader: notesOpen && bible.ready && !bible.busy && !modalOpen && !findPromptOpen && !textInputActive()
     // One side panel at a time. Its opening key does nothing while it is open;
     // another panel's key switches to that panel.
@@ -1335,6 +1335,12 @@ ApplicationWindow {
         }
         if (mods & Qt.ControlModifier) {
             if (event.key === Qt.Key_C && !(mods & Qt.AltModifier)) { copyCharSelection(!!(mods & Qt.ShiftModifier)); return true }
+            // ctrl z undoes, ctrl shift Z and ctrl r redo, as in the reader.
+            const shifted = !!(mods & Qt.ShiftModifier)
+            const undoKey = event.key === Qt.Key_Z && !shifted
+            if (!(mods & Qt.AltModifier) && (undoKey || (event.key === Qt.Key_Z && shifted) || (event.key === Qt.Key_R && !shifted))) {
+                clearCount(); charPending = ""; runCommand(undoKey ? "undo" : "redo"); return true
+            }
             clearCount(); rejected(charKeyReason); return true
         }
         if (mods & Qt.AltModifier) { clearCount(); rejected(charKeyReason); return true }
@@ -1370,6 +1376,7 @@ ApplicationWindow {
         case "o": charSwap(); break
         case "y": copyCharSelection(false); break
         case "Y": copyCharSelection(true); break
+        case "u": clearCount(); runCommand("undo"); break
         // v (its own key) leaves; shift V switches to verse (Visual) selection.
         case "v": endCharMode(); readerFocus(); break
         case "V": endCharMode(); setVisualMode(true); readerFocus(); break
@@ -1393,14 +1400,20 @@ ApplicationWindow {
             menuAction("bookmark", bible.selectionBookmarked ? "Remove bookmark" : "Bookmark", "bookmark"),
             menuAction("highlight", bible.selectionHighlighted ? "Remove highlight" : "Highlight", "highlight"),
             menuAction("note", bible.noteText.length ? "Edit note" : "Write note", "notes"),
-            menuAction("tags", "Tags…", "tags"),
+            menuAction("tags", "Tags…", "tags")
+        ].concat(undoMenuEntries()).concat([
             menuDivider,
             menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "toggleDesk"),
             menuDivider,
             menuAction("related", "Study", "related"),
             menuAction("chapterFind", "Find in chapter", "chapterFind")
-        ].concat(openRangeEntries(sceneX, sceneY))
+        ]).concat(openRangeEntries(sceneX, sceneY))
             .concat(bible.focusMode ? [menuDivider, menuAction("leaveFocus", "Leave focus mode", "focus")] : [])
+    }
+    // Undo and Redo, named, while there is something to undo or redo.
+    function undoMenuEntries() {
+        return (bible.canUndo ? [menuAction("undo", "Undo " + bible.undoLabel, "undo")] : [])
+            .concat(bible.canRedo ? [menuAction("redo", "Redo " + bible.redoLabel, "redo")] : [])
     }
     // While an annotation range is being moved, the menu offers the session's
     // own actions (the same keys as the status bar), then the copies.
@@ -1581,24 +1594,26 @@ ApplicationWindow {
             if (bible.selectionBookmarked) markPassage(false)
         } else if (kind === "tag") {
             const tags = Array.from(bible.tagsForScope(scope))
-            let removed = tags.length > 0
-            for (const tag of tags) removed = bible.setTag(scope, tag.id, false) && removed
-            if (removed) { notify((scope.reference || "Passage") + " tags removed", true); sounds.play("remove") }
-            else sounds.play("error")
-        } else requestDeleteScope(scope, true)
+            if (tags.length && bible.setTags(scope, tags.map(function(tag) { return tag.id }), false)) {
+                notify((scope.reference || "Passage") + " tags removed", true); sounds.play("remove")
+            } else sounds.play("error")
+        } else deleteScope(scope, true)
     }
     // noteOnly deletes just the note on this exact range (marker menu);
-    // otherwise every mark, the note, and tags go (Annotations panel).
-    function requestDeleteScope(entry, noteOnly) {
-        if (rangeEditing || bible.busy || !entry || !flushNote()) return
+    // otherwise every mark, the note, and tags go. Either is one undo step.
+    function deleteScope(entry, noteOnly) {
+        if (rangeEditing || bible.busy || !entry) return false
+        // Freeze identity before flushing drafts can publish a replacement model.
         const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
             book: entry.book, chapter: entry.chapter, start: entry.start,
             endBook: entry.endBook, endChapter: entry.endChapter, end: entry.end })
-        if (!savedScopeExists(scope)) { sounds.play("error"); return }
-        deleteConfirmation.scope = scope
-        deleteConfirmation.row = -1
-        deleteConfirmation.noteOnly = noteOnly === true
-        deleteConfirmation.open()
+        if (!flushNote() || bible.busy) return false
+        if (!savedScopeExists(scope)) { sounds.play("error"); return false }
+        if (!(noteOnly ? bible.deleteNoteScope(scope) : bible.deleteAnnotationScope(scope))) return false
+        syncNote()
+        notify((scope.reference || "Passage") + (noteOnly ? " note deleted" : " deleted"), true)
+        sounds.play("remove")
+        return true
     }
     // Bookmark, note, and tag markers in every layout. One choice targets
     // that range; several overlapping ranges keep Open's chooser and Edit range.
@@ -1629,13 +1644,13 @@ ApplicationWindow {
         // (Verse layout passes its edit scope as a list: one range is that range.)
         if (Array.isArray(editScope) && editScope.length === 1) editScope = editScope[0]
         const edited = editScope || (several ? choices : choices[0])
-        const removeText = kind === "bookmark" ? "Remove bookmark" : kind === "tag" ? "Remove tags" : "Delete note…"
+        const removeText = kind === "bookmark" ? "Remove bookmark" : kind === "tag" ? "Remove tags" : "Delete note"
         contextMenu.show("marker", [
             { id: "open", text: "Open", enabled: ready, run: openMarker },
             menuDivider,
             { id: "editRange", text: "Edit range", shortcut: editKeyEdits(edited) ? menuKey("editRange") : "", enabled: ready && !!edited,
                 run: function() { app.openRangeEditor(edited, kind) } },
-            { id: "remove", text: removeText + (several && !removeText.endsWith("…") ? which : ""), enabled: ready && choices.length > 0,
+            { id: "remove", text: removeText + which, enabled: ready && choices.length > 0,
                 run: function() { app.onMarkerScope(choices, function(scope) { app.removeMarkerAnnotation(scope, kind) }, sceneX, sceneY) } },
             menuDivider,
             { id: "copy", text: "Copy passage" + which, enabled: !bible.busy && choices.length > 0,
@@ -1667,16 +1682,16 @@ ApplicationWindow {
         const ready = !rangeEditing && !bible.busy
         const kind = ["bookmark", "highlight", "note", "tag"][collectionTab]
         const editRange = { id: "editRange", text: "Edit range", shortcut: menuKey("editRange"), enabled: ready, run: function() { app.openRangeEditor(entry, kind) } }
-        const extras = collectionTab === 3 ? [
+        const extras = (collectionTab === 3 ? [
             { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { app.openPassageTags(tagsUi.snapshot(entry)) } },
             editRange,
-            { id: "removeTag", text: "Remove " + entry.group + "…", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.requestRemoveTag(entry, row) } }
+            { id: "removeTag", text: "Remove " + entry.group, shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeSavedTag(entry, row) } }
         ] : [editRange,
-            { id: "delete", text: "Delete…", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() {
+            { id: "delete", text: "Delete", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() {
                 collectionList.currentIndex = row
                 collectionList.forceActiveFocus()
-                app.requestDeleteSaved()
-            } }]
+                app.deleteSaved()
+            } }]).concat(undoMenuEntries())
         contextMenu.show("annotation", RowMenu.entries(app, { busy: bible.busy, scope: entry,
             open: function() { app.openSaved(entry) }, extras: extras }), sceneX, sceneY)
     }
@@ -1726,7 +1741,6 @@ ApplicationWindow {
             if (forward) { rejected(); return }
             if (errorDialog.visible) errorDialog.close()
             else if (catalogDetails.visible) catalogDetails.close()
-            else if (deleteConfirmation.visible) deleteConfirmation.close()
             else if (cleanDeskConfirmation.visible) cleanDeskConfirmation.close()
             else if (clearHistoryConfirmation.visible) clearHistoryConfirmation.close()
             else if (restoreConfirmation.visible) restoreConfirmation.close()
@@ -2155,6 +2169,8 @@ ApplicationWindow {
         if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen)
             return "Open a note first · " + keyText("notes")
         if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
+        if (action.id === "undo" && !bible.canUndo) return "Nothing to undo"
+        if (action.id === "redo" && !bible.canRedo) return "Nothing to redo"
         if (!bible.ready) return "Add a Bible version first"
         return ""
     }
@@ -3010,6 +3026,20 @@ ApplicationWindow {
             sounds.play(added ? "chime" : "remove")
         } else sounds.play("error")
     }
+    // This window's last change to marks, notes, or tags, wherever it is; the
+    // toast names it ("Highlight on John 3:16 undone"). A change made since in
+    // another window stops it, with a toast saying so.
+    function undoChange(undo) {
+        const label = undo ? bible.undoLabel : bible.redoLabel
+        if (!(undo ? bible.undo() : bible.redo())) {
+            notify(bible.error.replace(/\.$/, ""), true)
+            bible.clearError()
+            return
+        }
+        syncNote()
+        notify(label.charAt(0).toUpperCase() + label.slice(1) + (undo ? " undone" : " redone"), true)
+        sounds.play("tick")
+    }
     // Desk: one global study list shared by every window and version.
     property int deskSelectedId: -1
     property int deskRow: 0
@@ -3490,7 +3520,9 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
-    function requestDeleteSaved() {
+    // delete / backspace: the row's range goes at once (on the Tags tab, only
+    // that tag); u undoes it.
+    function deleteSaved() {
         if (rangeEditing) return
         let row = collectionList.currentIndex
         let focused = activeFocusItem
@@ -3501,28 +3533,22 @@ ApplicationWindow {
         }
         let entry = focused instanceof SavedEntry ? (focused as SavedEntry).modelData : collectionList.model[row]
         if (!entry || bible.busy) return
-        // Tags: removes only this row's tag from its range.
-        if (collectionTab === 3) { requestRemoveTag(entry, row); return }
-        // Freeze identity before flushing drafts can publish a replacement model.
-        const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
-            book: entry.book, chapter: entry.chapter, start: entry.start,
-            endBook: entry.endBook, endChapter: entry.endChapter, end: entry.end })
-        if (!flushNote() || bible.busy || !savedScopeExists(scope)) return
-        deleteConfirmation.scope = scope
-        deleteConfirmation.row = row
-        deleteConfirmation.open()
+        if (collectionTab === 3) { removeSavedTag(entry, row); return }
+        if (!deleteScope(entry, false)) return
+        collectionList.currentIndex = Math.min(row, collectionList.count - 1)
+        deleteFocusTimer.restart()
     }
-    function requestRemoveTag(entry, row) {
+    function removeSavedTag(entry, row) {
         if (rangeEditing || !entry || !entry.groupId || bible.busy) return
         const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
             book: entry.book, chapter: entry.chapter, start: entry.start,
             endBook: entry.endBook, endChapter: entry.endChapter, end: entry.end })
         if (!flushNote() || bible.busy) return
-        deleteConfirmation.tag = { id: entry.groupId, name: entry.group }
-        deleteConfirmation.scope = scope
-        deleteConfirmation.row = row
-        if (!deleteScopeValid()) { deleteConfirmation.tag = null; deleteConfirmation.scope = null; return }
-        deleteConfirmation.open()
+        if (!bible.setTag(scope, entry.groupId, false)) return
+        notify(entry.group + " removed from " + (scope.reference || "passage"), true)
+        sounds.play("remove")
+        Qt.callLater(function() { collectionList.currentIndex = Math.min(row, collectionList.count - 1) })
+        deleteFocusTimer.restart()
     }
     function savedScopeExists(scope) {
         return !!scope && !!scope.versionId && scope.versionId === bible.versionId
@@ -3531,49 +3557,6 @@ ApplicationWindow {
                     return entry[key] === scope[key]
                 })
             })
-    }
-    function deleteScopeValid() {
-        const tag = deleteConfirmation.tag
-        if (tag) return savedScopeExists(deleteConfirmation.scope)
-            && Array.from(bible.tagsForScope(deleteConfirmation.scope, false)).some(function(other) { return other.id === tag.id })
-        return savedScopeExists(deleteConfirmation.scope)
-    }
-    function invalidateDeleteSaved() {
-        deleteConfirmation.scope = null
-        deleteConfirmation.row = -1
-        deleteConfirmation.close()
-    }
-    function confirmDeleteSaved() {
-        if (rangeEditing) return
-        if (!deleteConfirmation.opened || !deleteScopeValid()) { invalidateDeleteSaved(); return }
-        const scope = deleteConfirmation.scope
-        const row = deleteConfirmation.row
-        if (!flushNote() || bible.busy) return
-        if (!deleteScopeValid() || deleteConfirmation.scope !== scope) {
-            invalidateDeleteSaved()
-            return
-        }
-        if (deleteConfirmation.tag) {
-            const tag = deleteConfirmation.tag
-            if (!bible.setTag(scope, tag.id, false)) { sounds.play("error"); return }
-            notify(tag.name + " removed from " + (scope.reference || "passage"), true)
-            sounds.play("remove")
-            deleteConfirmation.close()
-            Qt.callLater(function() { collectionList.currentIndex = Math.min(row, collectionList.count - 1) })
-            return
-        }
-        if (deleteConfirmation.noteOnly) {
-            if (!bible.deleteNoteScope(scope)) { sounds.play("error"); return }
-            syncNote()
-            notify((scope.reference || "Passage") + " note deleted", true)
-            sounds.play("remove")
-            deleteConfirmation.close()
-            return
-        }
-        if (!bible.deleteAnnotationScope(scope)) return
-        syncNote()
-        collectionList.currentIndex = Math.min(row, collectionList.count - 1)
-        deleteConfirmation.close()
     }
     function openBookmark(scope) {
         if (rangeEditing) return
@@ -3803,6 +3786,9 @@ ApplicationWindow {
         { id: "notes", group: "Annotate", title: "Write a note", sequences: ["W"], scope: "notes", command: true },
         { id: "tags", group: "Annotate", title: "Tag passage", sequences: ["T"], command: true },
         { id: "toggleDesk", group: "Annotate", title: "Add to Desk", sequences: ["D"], command: true },
+        // This window's own changes to marks, notes, and tags (bible.undo()).
+        { id: "undo", group: "Annotate", title: "Undo a mark, note, or tag change", sequences: ["U", "Ctrl+Z"], command: true },
+        { id: "redo", group: "Annotate", title: "Redo the change undone", sequences: ["Ctrl+Shift+Z", "Ctrl+R"], command: true },
         { id: "editRange", group: "Annotate", title: "Edit the selection's annotation range", sequences: ["Shift+E"], command: true },
         { id: "rangeChooseAnother", group: "Annotate", title: "Edit range: choose another overlapping range", sequences: ["Backspace"], scope: "rangeEditor", explanation: true },
         { id: "rangeMergeBack", group: "Annotate", title: "Edit range: back from Combine notes to moving the range", sequences: ["Escape"], scope: "rangeEditor", explanation: true },
@@ -3997,9 +3983,9 @@ ApplicationWindow {
         const range = ["Shift+E", "range", app.editSavedRange, ready]
         if (collectionTab === 3) return [[["Left", "Right"], "tabs"], open,
             ["T", "tags", function() { app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry())) }, ready],
-            ["Delete", "remove tag", app.requestDeleteSaved, ready], copy, desk, range,
+            ["Delete", "remove tag", app.deleteSaved, ready], copy, desk, range,
             [actionKeys("manageTags")[0], "manage", function() { tagsUi.openManage() }, !bible.busy && !rangeEditing], search, close]
-        return [[["Left", "Right"], "tabs"], open, copy, desk, range, ["Delete", "delete", app.requestDeleteSaved, ready], search, close]
+        return [[["Left", "Right"], "tabs"], open, copy, desk, range, ["Delete", "delete", app.deleteSaved, ready], search, close]
     }
     function deskHintParts() {
         const entry = deskList.model[deskList.currentIndex]
@@ -4029,6 +4015,8 @@ ApplicationWindow {
         if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
         if (action.id === "reduceMotion") return sounds.reduceMotion ? "Enable animations" : "Disable animations"
         if (action.id === "toggleHistory") return bible.historyEnabled ? "Disable History" : "Enable History"
+        if (action.id === "undo" && bible.canUndo) return "Undo " + bible.undoLabel
+        if (action.id === "redo" && bible.canRedo) return "Redo " + bible.redoLabel
         return action.title
     }
     function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
@@ -4059,9 +4047,11 @@ ApplicationWindow {
         if (textInputActive() && !(action.scope === "palette" && passagePalette.visible)) return false
         if (sidePanel.length && panelActions.includes(action.id)) return panelSwitchKeys
         if (sidePanel.length && panelLeavingActions.includes(action.id)) return panelSwitchKeys
+        // Undo works where changes are made: the reader and its side panels.
+        if (sidePanel.length && undoActions.includes(action.id)) return panelSwitchKeys
         // ctrl t opens Manage tags over a side panel (Annotations → Tags binds it itself).
         if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && !(sidePanel === "annotations" && collectionTab === 3)
-        if (settingsDialog.opened && !deleteConfirmation.visible && !errorDialog.visible
+        if (settingsDialog.opened && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         // visible, not opened: the palette accepts keys during its fade-in.
         if (action.scope === "palette") return !modalOpen || passagePalette.visible
@@ -4070,6 +4060,7 @@ ApplicationWindow {
         return readerKeys
     }
     readonly property var textSizeActions: ["larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"]
+    readonly property var undoActions: ["undo", "redo"]
     // Launchers that work while typing a note: the palettes and dialogs on Ctrl
     // or F-keys (help's ? types; its F1 alias launches). Ctrl v stays paste, so
     // Switch version is not here; ctrl n and the Alt toggles stay the editor's.
@@ -4082,6 +4073,8 @@ ApplicationWindow {
         if (action.id === "copyText" || action.id === "copyTextPlain") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
+        if (action.id === "undo") return bible.canUndo
+        if (action.id === "redo") return bible.canRedo
         // Notes editor keys, run from Keybindings: they act in an open Notes panel.
         if (["noteLinkSuggest", "openNoteLink", "notePreview"].includes(action.id)) return notesOpen && hasSelection
         if (action.id === "noteKeepDraft") return notesOpen && canKeepDraft
@@ -4108,6 +4101,7 @@ ApplicationWindow {
         if (action.scope === "importGuide") return "Add version guide"
         if (action.scope === "rangeEditor") return "Range editing (" + keyText("editRange") + ")"
         if (action.scope === "tags") return "Tag picker · Manage tags (" + keyText("manageTags") + ")"
+        if (undoActions.includes(action.id)) return "Reader and side panels · also selecting characters, not while typing"
         return "Reader · outside text editing and dialogs"
     }
     function filteredKeybindings() {
@@ -4469,6 +4463,8 @@ ApplicationWindow {
         case "cleanDesk": requestCleanDesk(); break
         case "bookmark": markPassage(false); break
         case "highlight": markPassage(true); break
+        case "undo": undoChange(true); break
+        case "redo": undoChange(false); break
         case "tags": openPassageTags(); break
         case "manageTags": if (tagsUi.pickerVisible) tagsUi.togglePage(); else openTagsBrowser(true); break
         case "related":
@@ -6098,7 +6094,8 @@ ApplicationWindow {
         // While closing, a drawer must not keep its Escape grab: the next Escape
         // belongs to the reader (or range editor) immediately.
         onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
-        onAboutToHide: { closing = true; app.restorePanelFocus() }
+        // Its note's saves since opening are one undo step; the next session starts another.
+        onAboutToHide: { closing = true; bible.closeUndoGroup(); app.restorePanelFocus() }
         // Keyboard focus is available as soon as the drawer starts fading in.
         function focusContent() {
             if (app.modalOpen) return
@@ -7440,8 +7437,8 @@ ApplicationWindow {
         leftPadding: padding
         rightPadding: padding
         // Esc is handled below: it first leaves the search field.
-        closePolicy: closing || deleteConfirmation.visible || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnPressOutside
-        readonly property bool tabKeys: shown && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
+        closePolicy: closing || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnPressOutside
+        readonly property bool tabKeys: shown && !contextMenu.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
         readonly property bool collectionKeys: tabKeys
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
@@ -7480,7 +7477,7 @@ ApplicationWindow {
             objectName: "savedContent"
             Shortcut {
                 sequence: "Escape"
-                enabled: savedDrawer.shown && !contextMenu.visible && !deleteConfirmation.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal
+                enabled: savedDrawer.shown && !contextMenu.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal
                 onActivated: app.escapeSaved()
             }
             Shortcut { sequence: "/"; enabled: savedDrawer.tabKeys && app.savedSearchVisible; onActivated: app.focusSavedSearch() }
@@ -7492,7 +7489,7 @@ ApplicationWindow {
             Shortcut { sequence: "Shift+E"; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.editSavedRange() }
             // enter opens the current row from anywhere in the drawer (a focused button takes its own enter).
             Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
-            Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.requestDeleteSaved() }
+            Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.deleteSaved() }
             // Shared list keys: y quotation, shift Y plain text, d Desk.
             Shortcut { sequence: "Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry()) }
             Shortcut { sequence: "Shift+Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry(), true) }
@@ -7990,65 +7987,6 @@ ApplicationWindow {
                 objectName: "clearHistoryHints"
                 theme: desktop
                 parts: app.confirmationHintParts(clearHistoryCancel, clearHistoryConfirm, clearHistoryConfirmation)
-                pixelSize: 11 * app.scale
-                Layout.fillWidth: true
-            }
-        }
-    }
-
-    ModalCard {
-        id: deleteConfirmation
-        objectName: "deleteConfirmation"
-        property var scope: null
-        // Annotations → Tags: {id, name} of the one tag to remove.
-        property var tag: null
-        readonly property string reference: scope ? scope.reference : ""
-        readonly property string versionId: scope ? scope.versionId : ""
-        property int row: -1
-        property bool noteOnly: false
-        // Outside clicks cancel, like esc; they never reach what is underneath.
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        // Focus at once, while the modal is still fading in.
-        onVisibleChanged: if (visible) { deleteCancel.forceActiveFocus() }
-        Shortcut {
-            sequences: ["Left", "Up", "Right", "Down"]
-            enabled: deleteConfirmation.opened && !errorDialog.visible
-            onActivated: {
-                if (deleteCancel.activeFocus) deleteConfirm.forceActiveFocus()
-                else deleteCancel.forceActiveFocus()
-            }
-        }
-        onClosed: {
-            scope = null
-            tag = null
-            row = -1
-            noteOnly = false
-            deleteFocusTimer.restart()
-        }
-        contentItem: ColumnLayout {
-            spacing: 18 * app.scale
-            Label {
-                objectName: "deleteTitle"
-                text: deleteConfirmation.tag ? "Remove " + deleteConfirmation.tag.name + " from " + deleteConfirmation.reference + "?"
-                    : deleteConfirmation.noteOnly ? "Delete note?" : "Delete annotations?"
-                textFormat: Text.PlainText
-                color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
-            }
-            Label { objectName: "deleteReference"; visible: !deleteConfirmation.tag; text: deleteConfirmation.reference; textFormat: Text.PlainText; color: desktop.accent; font.pixelSize: 16 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { objectName: "deleteExplanation"; text: deleteConfirmation.tag ? "Only this tag is removed from this exact range. Its other tags, marks, and note stay."
-                : deleteConfirmation.noteOnly ? "This deletes the note for this exact reference. Bookmarks, highlights, and tags stay."
-                : "This deletes all marks (bookmark and highlight), the note, and tags for this exact reference."; color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            RowLayout {
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                QuietButton { id: deleteCancel; objectName: "deleteCancel"; text: "Cancel"; onClicked: deleteConfirmation.close() }
-                QuietButton { id: deleteConfirm; objectName: "deleteConfirm"; text: deleteConfirmation.tag ? "Remove" : "Delete"; emphasized: true; onClicked: app.confirmDeleteSaved() }
-            }
-            HintRow {
-                objectName: "deleteHints"
-                theme: desktop
-                parts: app.confirmationHintParts(deleteCancel, deleteConfirm, deleteConfirmation)
                 pixelSize: 11 * app.scale
                 Layout.fillWidth: true
             }
@@ -8916,7 +8854,6 @@ ApplicationWindow {
         id: deleteFocusTimer
         interval: 0
         onTriggered: {
-            if (deleteConfirmation.visible) return
             if (savedDrawer.shown) app.moveSaved(0)
             else app.restorePanelFocus()
         }
@@ -8941,13 +8878,9 @@ ApplicationWindow {
     Connections {
         target: bible
         function onVersionChanged() {
-            app.invalidateDeleteSaved()
             if (app.paletteTextMode) app.scheduleBibleSearch()
         }
         function onSearchChanged() { Qt.callLater(app.restoreSearchPalette) }
-        function onCollectionChanged() {
-            if (deleteConfirmation.visible && !app.deleteScopeValid()) app.invalidateDeleteSaved()
-        }
         function onErrorChanged() {
             if (bible.error.length) sounds.play("error")
             Qt.callLater(app.showFocusedError)
@@ -8961,7 +8894,9 @@ ApplicationWindow {
             }
         }
         function onVersesChanged() {
-            app.clearTextSelection()
+            // New marks (an undo while selecting characters) keep a character
+            // selection; another chapter ends it (onNavigationChanged).
+            app.relayoutTextSelection()
             app.draggingText = false
             app.dragAnchorRow = -1
         }

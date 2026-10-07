@@ -517,11 +517,11 @@ private slots:
         QCOMPARE(menuIds(), (shared + QStringList{"|", "remove"}));
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
-        // Annotations rows: the shared four, then Edit range and Delete.
+        // Annotations rows: the shared four, then Edit range, Delete, and the undo it offers.
         bible->selectVerses(3, 3); QVERIFY(bible->toggleBookmark());
         run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), (shared + QStringList{"|", "editRange", "delete"}));
+        QCOMPARE(menuIds(), (shared + QStringList{"|", "editRange", "delete", "undo"}));
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         // Study Cross-references: mouse and keyboard.
         navigate("John 1:1"); run("related"); QTRY_VERIFY(opened("relatedDrawer"));

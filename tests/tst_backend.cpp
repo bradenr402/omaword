@@ -831,6 +831,80 @@ private slots:
         for (const auto &v : bible->collection()) QVERIFY(v.toMap()["reference"] != single["reference"]);
         QCOMPARE(bible->collection().size(),1);
     }
+    void undoRedoAnnotationChanges() {
+        install(net); BibleBackend peer;
+        QVERIFY(!bible->canUndo()); QVERIFY(!bible->canRedo());
+        QVERIFY(!bible->undo()); QVERIFY(!bible->error().isEmpty()); bible->clearError();
+        QSignalSpy changed(bible.get(),&BibleBackend::undoChanged);
+        // Toggling a flag can split rows: undo puts back the exact rows.
+        QVERIFY(bible->navigate("John 3:16-18")); QVERIFY(bible->toggleHighlight());
+        QCOMPARE(bible->undoLabel(),QString("highlight on John 3:16–18")); QVERIFY(changed.count() > 0);
+        bible->selectVerses(17,17); QVERIFY(bible->toggleHighlight());
+        QCOMPARE(bible->undoLabel(),QString("highlight removal on John 3:17")); QCOMPARE(bible->collection().size(),2);
+        QVERIFY2(bible->undo(),qPrintable(bible->error()));
+        QCOMPARE(bible->collection().size(),1); QVERIFY(bible->selectionHighlighted());
+        QCOMPARE(peer.collection(),bible->collection()); QVERIFY(!peer.canUndo()); // Per window.
+        QCOMPARE(bible->redoLabel(),QString("highlight removal on John 3:17"));
+        QVERIFY(bible->undo()); QVERIFY(bible->collection().isEmpty()); QVERIFY(!bible->canUndo());
+        QVERIFY(bible->redo()); QVERIFY(bible->redo()); QCOMPARE(bible->collection().size(),2); QVERIFY(!bible->canRedo());
+        // A note's saves are one step until its group closes.
+        bible->selectVerses(16,16); const auto scope = bible->tagScope();
+        bible->setNoteText("F"); bible->setNoteText("Fi"); bible->setNoteText("First");
+        QCOMPARE(bible->undoLabel(),QString("note on John 3:16"));
+        bible->closeUndoGroup(); bible->setNoteText("First, then more");
+        QVERIFY(bible->undo()); QCOMPARE(bible->noteText(),QString("First"));
+        QVERIFY(bible->undo()); QVERIFY(bible->noteText().isEmpty()); QVERIFY(bible->selectionHighlighted());
+        QCOMPARE(bible->undoLabel(),QString("highlight removal on John 3:17")); QVERIFY(bible->canRedo());
+        // Typing back to the saved text leaves no step, but any change clears redo.
+        bible->setNoteText("Gone"); bible->setNoteText("");
+        QCOMPARE(bible->undoLabel(),QString("highlight removal on John 3:17")); QVERIFY(!bible->canRedo());
+        QVERIFY(bible->toggleBookmark()); QCOMPARE(bible->undoLabel(),QString("bookmark on John 3:16"));
+        // A tag the step created goes with its undo, and comes back (same ID) with redo.
+        const QString grace = bible->createAndAssignTag(scope,"Grace"); QVERIFY(!grace.isEmpty());
+        QCOMPARE(bible->undoLabel(),QString("tag Grace on John 3:16"));
+        QVERIFY(bible->undo()); QVERIFY(bible->tagsForScope(scope).isEmpty()); QVERIFY(bible->tags().isEmpty());
+        QVERIFY(bible->redo()); QCOMPARE(bible->tagsForScope(scope).value(0).toMap()["id"].toString(),grace);
+        const QString hope = bible->createAndAssignTag(scope,"Hope"); QVERIFY(!hope.isEmpty());
+        QVERIFY(bible->setTags(scope,{grace,hope},false)); QVERIFY(bible->tagsForScope(scope).isEmpty());
+        QCOMPARE(bible->undoLabel(),QString("removal of 2 tags from John 3:16"));
+        QVERIFY(bible->undo()); QCOMPARE(bible->tagsForScope(scope).size(),2);
+        QVERIFY(bible->setTag(scope,hope,false)); QCOMPARE(bible->undoLabel(),QString("removal of Hope from John 3:16"));
+        QVERIFY(bible->undo());
+        // Deleting restores marks, note and tags exactly, here and in the peer.
+        bible->setNoteText("Kept"); const auto saved = bible->annotationSnapshot(scope);
+        QVERIFY(bible->deleteAnnotationScope(scope)); QCOMPARE(bible->undoLabel(),QString("deletion of John 3:16"));
+        QVERIFY(!bible->annotationSnapshot(scope).value("ok").toBool());
+        QVERIFY(bible->undo()); QCOMPARE(bible->annotationSnapshot(scope),saved);
+        QCOMPARE(bible->noteText(),QString("Kept")); QCOMPARE(peer.collection(),bible->collection());
+        QVERIFY(bible->deleteNoteScope(scope)); QCOMPARE(bible->undoLabel(),QString("note deletion on John 3:16"));
+        QVERIFY(bible->undo()); QCOMPARE(bible->annotationSnapshot(scope),saved);
+        // Steps live in memory only.
+        bible.reset(); bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->canUndo());
+    }
+    void undoAcrossWindowsAndVersions() {
+        install(net); BibleBackend peer;
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(peer.navigate("John 3:16"));
+        QVERIFY(bible->toggleHighlight()); QVERIFY(bible->navigate("John 3:17")); QVERIFY(bible->toggleHighlight());
+        // The peer changes 3:17: that step is dropped, the one before still applies.
+        QVERIFY(peer.navigate("John 3:17")); QVERIFY(peer.toggleBookmark());
+        QVERIFY(!bible->undo()); QVERIFY2(bible->error().contains("another window"),qPrintable(bible->error()));
+        QVERIFY(bible->selectionHighlighted()); QCOMPARE(bible->undoLabel(),QString("highlight on John 3:16"));
+        QVERIFY(bible->undo()); QVERIFY(!bible->canUndo());
+        QVERIFY(peer.navigate("John 3:16")); QVERIFY(!peer.selectionHighlighted());
+        QVERIFY(peer.undo()); QVERIFY(peer.navigate("John 3:17")); QVERIFY(!peer.selectionBookmarked());
+        // Another version's step applies there, without switching to it.
+        install(kjv); QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->toggleBookmark());
+        QVERIFY(bible->switchVersion("engnet")); QVERIFY(bible->undo()); QCOMPARE(bible->versionId(),QString("engnet"));
+        QVERIFY(bible->switchVersion("eng-kjv")); QVERIFY(bible->navigate("John 3:16")); QVERIFY(!bible->selectionBookmarked());
+        QVERIFY(bible->redo()); QVERIFY(bible->selectionBookmarked());
+        // Removing a version drops its steps.
+        QVERIFY(bible->removeVersion("eng-kjv",true)); QVERIFY(bible->canUndo());
+        QVERIFY(!bible->undo()); QVERIFY(!bible->canUndo()); QVERIFY(!bible->canRedo());
+        // Deleting a tag (Manage tags) clears this window's steps.
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->toggleBookmark());
+        const QString id = bible->createAndAssignTag(bible->tagScope(),"Passing"); QVERIFY(!id.isEmpty());
+        QVERIFY(bible->deleteTag(id)); QVERIFY(!bible->canUndo());
+    }
     void deskCrossVersionPeersAndRemoval() {
         install(net); BibleBackend peer; QVERIFY(peer.desk().isEmpty());
         QSignalSpy peerChanged(&peer,&BibleBackend::deskChanged);

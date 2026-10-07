@@ -79,8 +79,8 @@ fontconfig state.
 
 - **importer**: USFM parsing, metadata, source order, malformed/unsafe input, staged publication.
 - **catalog**: catalog metadata, streamed atomic downloads, cancel/timeout/retry.
-- **backend**: library, references, annotations, backups, migrations, peers, History, file ownership, character-selection motions/objects and the quotation format.
-- **ui**: packaged Main: catalog, layouts, selection/copy, Annotations, Visual completion, footer.
+- **backend**: library, references, annotations, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), backups, migrations, peers, History, file ownership, character-selection motions/objects and the quotation format.
+- **ui**: packaged Main: catalog, layouts, selection/copy, Annotations (immediate delete, undo from the panel), undo keys, toasts and Commands, Visual completion, footer.
 - **search**: matching semantics (incl. chapter find's smart-case regular expressions), results in Bible order, the two-version corpus cache, async lifecycle, whitespace-preserving copy.
 - **searchui**: palette and chapter-find keyboard behavior; Bible search results under book headings with counts, `ctrl ↓`/`ctrl ↑` book jumps across pages.
 - **searchrender**: rendered match offsets/geometry across layouts.
@@ -93,7 +93,7 @@ fontconfig state.
 - **contextmenu**: shared context menu items, keyboard navigation, actions.
 - **tags**: tag identity, exact/overlap queries, persistence, backup, rollback.
 - **tagsui**: picker, Annotations summary, Related, management, Main integration.
-- **ranges**: atomic range moves, collisions, stale tokens, rollback.
+- **ranges**: atomic range moves, collisions, stale tokens, rollback, undoing a move.
 - **rangesui**: range editor UI, entry points, cancellation/restore, note confirmation, status bar layout, moving-endpoint marker.
 - **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, annotation tints.
 - **desktop**: async compositor rounding (re-asked on Hyprland config reloads, never polled), Omarchy theme swaps and font changes followed by events, themed tooltips.

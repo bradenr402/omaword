@@ -203,6 +203,30 @@ files.
   switch); failed restore keeps the session for Esc retry; window close vetoed.
   Source removal ends the session automatically.
 
+### Undo (`BibleBackend::undo`/`redo`)
+- Per window and in memory only (`UndoLimit` 100 steps). Recorded: flag
+  toggles, note saves, tag assignment (`setTags`, `createAndAssignTag`),
+  `deleteAnnotationScope`, `deleteNoteScope`, `changeAnnotationRange`. Not
+  recorded: tag rename/delete/merge, backups, version removal, Desk, History;
+  deleting or merging a tag and restoring a backup clear this window's steps.
+- A step stores, for every exact range it touched, the whole saved state
+  before and after (annotation row or none, plus sorted tag IDs), and the tags
+  it created. Undo runs in one transaction: every range must still read
+  "after" (redo: "before") and every tag to write must exist, else the step is
+  dropped with "That changed in another window" and nothing is written. It then
+  writes "before", removes created tags left unused (redo recreates them with
+  the same ID), reads back, commits, and publishes to every window. A step in
+  another version applies there without switching; a removed version's steps
+  are dropped.
+- Successive `setNoteText` saves on one range extend one step (`group`) until
+  `closeUndoGroup()` (the Notes drawer closing), an undo or redo, or any other
+  step; a session that returns to its starting text leaves no step. A new step
+  clears redo. Labels read after "Undo"/"Redo" ("highlight on John 3:16").
+- QML: `u`/`ctrl z` and `ctrl shift Z`/`ctrl r` in the reader, side panels,
+  and character selection (`charKey`); the passage and Annotations row menus
+  and Commands name the step; failures toast instead of the error banner.
+  Deleting from Annotations or a marker menu has no confirmation.
+
 ### Search
 - Active version only; per-window state. Case-insensitive, whitespace-collapsed,
   partial words; punctuation and accents significant. Headings, numbers, notes,

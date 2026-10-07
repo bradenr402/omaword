@@ -113,6 +113,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `w`: Write a note
 - `t`: Tag passage
 - `d`: Add to Desk
+- `u` · `ctrl z`: Undo a mark, note, or tag change
+- `ctrl shift Z` · `ctrl r`: Redo the change undone
 - `shift E`: Edit the selection's annotation range
 - `backspace`: Edit range: choose another overlapping range
 - `esc`: Edit range: back from Combine notes to moving the range
@@ -247,6 +249,7 @@ These also work, but stay out of the in-app list:
 
 ### Studying
 - Bookmark, highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from).
+- `u` or `ctrl z` undoes this window's last change to marks, notes, or tags, deletions included, so deleting asks nothing first; `ctrl shift Z` or `ctrl r` redoes. It works from the side panels and while selecting characters, and the passage menu, row menus, and Commands name the step ("Undo highlight on John 3:16"). A passage changed since in another window is left as it is, and a toast says so.
 - In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
 - Quote part of a passage: `v` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.
 - The Study panel (`shift S`) follows the passage you are reading: its **Cross-references** (the version's own first, then OpenBible.info's community-ranked ones, each labeled), the chapter's **Footnotes**, and **Tags** — other passages you tagged the same way, ranked by shared tags. The passage's tags sit above the list as chips: `space` turns one off, `shift space` shows only it, `0` turns them all back on, and `a` includes every installed version. Footnotes also appear as small marks in the text.

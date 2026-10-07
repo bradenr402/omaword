@@ -719,6 +719,8 @@ bool BibleBackend::changeAnnotationRange(QVariantMap snapshot, QVariantMap desti
     }
     if (components.value("note").toBool()) { source["note"] = QString(""); target["note"] = preview.value("combinedNote"); }
     const auto sourceScope = source.value("scope").toMap(), targetScope = target.value("scope").toMap();
+    UndoStep step("range move to " + targetScope.value("reference").toString(),m_versionId,{sourceScope,targetScope});
+    if (!captureStates(&step,false)) return false;
     // Only the two exact annotation rows are touched. Other overlapping marks
     // retain their independent coverage, notes and assignments.
     if (components.value("bookmark").toBool() || components.value("highlight").toBool() || components.value("note").toBool()) {
@@ -757,8 +759,9 @@ bool BibleBackend::changeAnnotationRange(QVariantMap snapshot, QVariantMap desti
         for (const auto &key : {"bookmark","highlight","note","tags"})
             if (actual.value(key) != state.value(key)) return setError("Cannot verify moved annotation components.");
     }
+    if (!captureStates(&step,true)) return false;
     if (!m_store.commit()) return setError("Cannot commit range change: " + m_store.lastError().text());
-    clearError(); publishTags();
+    clearError(); publishTags(); recordUndo(step);
     return true;
 }
 
@@ -889,6 +892,13 @@ QString BibleBackend::ensureTag(const QString &input)
     return id;
 }
 
+QString BibleBackend::tagName(const QString &id) const
+{
+    QSqlQuery q(m_store);
+    q.prepare("SELECT name FROM tags WHERE id=?"); q.addBindValue(id);
+    return q.exec() && q.next() ? q.value(0).toString() : QString();
+}
+
 bool BibleBackend::writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned)
 {
     QSqlQuery q(m_store);
@@ -931,15 +941,27 @@ QString BibleBackend::createTag(QString name)
     return !id.isEmpty() && commitTagMutation() ? id : QString();
 }
 
-bool BibleBackend::setTag(QVariantMap scope, QString id, bool assigned)
+bool BibleBackend::setTag(QVariantMap scope, QString id, bool assigned) { return setTags(scope,{id},assigned); }
+
+bool BibleBackend::setTags(QVariantMap scope, QVariantList ids, bool assigned)
 {
     if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    if (ids.isEmpty()) return setError("Choose a tag first.");
     m_mutating = true;
     const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
     if (!m_store.transaction()) return setError(m_store.lastError().text());
     QVariantMap canonical;
     if (!validateScope(scope,&canonical)) return setError("That Bible version or passage is no longer available.");
-    return writeTagAssignment(canonical,id,assigned) && commitTagMutation();
+    UndoStep step({},canonical.value("versionId").toString(),{publicRange(canonical)});
+    if (!captureStates(&step,false)) return false;
+    for (const auto &id : ids) if (!writeTagAssignment(canonical,id.toString(),assigned)) return false;
+    if (!captureStates(&step,true)) return false;
+    const QString name = ids.size() == 1 ? tagName(ids.first().toString()) : QString("%1 tags").arg(ids.size());
+    const QString reference = canonical.value("reference").toString();
+    step.label = assigned ? "tag " + name + " on " + reference : "removal of " + name + " from " + reference;
+    if (!commitTagMutation()) return false;
+    recordUndo(step);
+    return true;
 }
 
 QString BibleBackend::createAndAssignTag(QVariantMap scope, QString name)
@@ -950,8 +972,21 @@ QString BibleBackend::createAndAssignTag(QVariantMap scope, QString name)
     if (!m_store.transaction()) { setError(m_store.lastError().text()); return {}; }
     QVariantMap canonical;
     if (!validateScope(scope,&canonical)) { setError("That Bible version or passage is no longer available."); return {}; }
+    UndoStep step({},canonical.value("versionId").toString(),{publicRange(canonical)});
+    if (!captureStates(&step,false)) return {};
+    // A tag this creates goes again when its step is undone (if unused).
+    QSqlQuery q(m_store);
+    q.prepare("SELECT 1 FROM tags WHERE name_key=?"); q.addBindValue(tagKey(normalizedTag(name)));
+    if (!q.exec()) { setError("Cannot read tags: " + q.lastError().text()); return {}; }
+    const bool existed = q.next();
+    q.finish();
     const QString id = ensureTag(name);
-    return !id.isEmpty() && writeTagAssignment(canonical,id,true) && commitTagMutation() ? id : QString();
+    if (id.isEmpty() || !writeTagAssignment(canonical,id,true) || !captureStates(&step,true)) return {};
+    if (!existed) step.createdTags.append({id,tagName(id)});
+    step.label = "tag " + tagName(id) + " on " + canonical.value("reference").toString();
+    if (!commitTagMutation()) return {};
+    recordUndo(step);
+    return id;
 }
 
 bool BibleBackend::renameTag(QString id, QString input)
@@ -987,7 +1022,10 @@ bool BibleBackend::deleteTag(QString id)
     q.addBindValue(id); q.addBindValue(id);
     if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify tag deletion.");
     q.finish();
-    return commitTagMutation();
+    if (!commitTagMutation()) return false;
+    // Undo steps could no longer restore its assignments.
+    clearUndo();
+    return true;
 }
 
 bool BibleBackend::mergeTags(QString source, QString target)
@@ -1016,7 +1054,9 @@ bool BibleBackend::mergeTags(QString source, QString target)
         if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify tag merge.");
         q.finish();
     }
-    return commitTagMutation();
+    if (!commitTagMutation()) return false;
+    clearUndo();
+    return true;
 }
 
 QVariantList BibleBackend::taggedPassages(QVariantList tagIds, bool matchAll, QString version)
@@ -2902,6 +2942,7 @@ bool BibleBackend::toggleFlag(bool highlight)
     if (!m_store.transaction()) return setError("Cannot start annotation save: " + m_store.lastError().text());
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) { m_store.rollback(); return false; }
+    const auto before = rows;
     const bool covered = flagCovered(rows,highlight);
     const int start = std::min(m_anchor,m_cursor), end = std::max(m_anchor,m_cursor);
     if (covered) {
@@ -2915,15 +2956,34 @@ bool BibleBackend::toggleFlag(bool highlight)
         }
         rows += pieces;
     } else rows.append({start,end,!highlight,highlight,{}});
-    return commitAnnotations(rows);
+    const QString kind = highlight ? "highlight" : "bookmark";
+    return commitAnnotations(rows,before,kind + (covered ? " removal on " : " on ") + rangeReference(start,end));
 }
-bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows)
+bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows, const QVector<Annotation> &before, const QString &label)
 {
     QVector<Annotation> saved;
     if (!saveAnnotations(rows) || !loadAnnotations(&saved)) { m_store.rollback(); return false; }
+    // The undo step holds every exact range whose row changed; their tags
+    // are untouched, so both states read them now.
+    UndoStep step(label,m_versionId,{});
+    QMap<QPair<int,int>,QPair<const Annotation *,const Annotation *>> changes;
+    for (const auto &a : before) changes[{a.start,a.end}].first = &a;
+    for (const auto &a : saved) changes[{a.start,a.end}].second = &a;
+    for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
+        const auto *was = it->first, *now = it->second;
+        if (was && now && was->bookmark == now->bookmark && was->highlight == now->highlight && was->note == now->note) continue;
+        const auto scope = annotationScope(it.key().first,it.key().second);
+        ScopeState after;
+        if (!readScopeState(scope,&after)) { m_store.rollback(); return false; }
+        auto prior = after;
+        prior.annotated = was != nullptr; prior.bookmark = was && was->bookmark; prior.highlight = was && was->highlight;
+        prior.note = was ? was->note : QString();
+        step.scopes << scope; step.before << prior; step.after << after;
+    }
     const auto collection = collectionRows(saved);
     if (!m_store.commit()) { m_store.rollback(); return setError("Cannot commit annotations: " + m_store.lastError().text()); }
     m_annotations = saved; m_collection = collection;
+    recordUndo(step);
     publishAnnotations();
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
 }
@@ -2961,6 +3021,9 @@ void BibleBackend::setNoteText(QString text)
         return;
     }
     // savedNote == m_note != text: a missing row means a new, nonempty note.
+    const auto scope = annotationScope(start,end);
+    UndoStep step("note on " + rangeReference(start,end),m_versionId,{scope},"note:" + rangeKey(scope));
+    if (!captureStates(&step,false)) { m_store.rollback(); return; }
     const bool removed = exists && !flagged && text.isEmpty();
     if (removed) { q.prepare("DELETE FROM annotations" + where); bindRange(); }
     else if (exists) { q.prepare("UPDATE annotations SET note=?" + where); q.addBindValue(text); bindRange(); }
@@ -2978,10 +3041,11 @@ void BibleBackend::setNoteText(QString text)
     }
     q.finish();
     QVector<Annotation> saved;
-    if (!loadAnnotations(&saved)) { m_store.rollback(); return; }
+    if (!captureStates(&step,true) || !loadAnnotations(&saved)) { m_store.rollback(); return; }
     const auto collection = collectionRows(saved);
     if (!m_store.commit()) { m_store.rollback(); setError("Cannot commit annotations: " + m_store.lastError().text()); return; }
     m_annotations = saved; m_collection = collection;
+    recordUndo(step);
     publishAnnotations();
     clearError(); emit collectionChanged(); updateAnnotations();
 }
@@ -3008,6 +3072,8 @@ bool BibleBackend::deleteAnnotationScope(QVariantMap scope)
     if (!m_store.transaction()) return setError("Cannot start annotation deletion: " + m_store.lastError().text());
     QVariantMap canonical;
     if (!validateScope(scope,&canonical)) return setError("That Bible version or passage is no longer available.");
+    UndoStep step("deletion of " + canonical.value("reference").toString(),canonical.value("versionId").toString(),{publicRange(canonical)});
+    if (!captureStates(&step,false)) return false;
     QSqlQuery q(m_store);
     qint64 deleted = 0;
     for (const auto &table : {QString("annotations"),QString("tag_assignments")}) {
@@ -3020,9 +3086,10 @@ bool BibleBackend::deleteAnnotationScope(QVariantMap scope)
     }
     if (!deleted) return setError("No saved annotation exists for that exact range.");
     QVector<Annotation> saved;
-    if (!loadAnnotations(&saved)) return false;
+    if (!captureStates(&step,true) || !loadAnnotations(&saved)) return false;
     if (!m_store.commit()) return setError("Cannot commit annotation deletion: " + m_store.lastError().text());
     m_annotations = saved; m_collection = collectionRows(saved);
+    recordUndo(step);
     emit sharedCommitted(canonical.value("versionId").toString(),false,false);
     publishTags();
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
@@ -3036,6 +3103,8 @@ bool BibleBackend::deleteNoteScope(QVariantMap scope)
     if (!m_store.transaction()) return setError("Cannot start note deletion: " + m_store.lastError().text());
     QVariantMap canonical;
     if (!validateScope(scope,&canonical)) return setError("That Bible version or passage is no longer available.");
+    UndoStep step("note deletion on " + canonical.value("reference").toString(),canonical.value("versionId").toString(),{publicRange(canonical)});
+    if (!captureStates(&step,false)) return false;
     QSqlQuery q(m_store);
     // Same semantics as saving an empty note: a row with nothing else goes.
     q.prepare("DELETE FROM annotations WHERE " + scopeWhere + " AND NOT bookmark AND NOT highlight AND note<>''"); bindScope(q,canonical);
@@ -3049,10 +3118,140 @@ bool BibleBackend::deleteNoteScope(QVariantMap scope)
     if (!q.exec() || !q.next() || q.value(0).toLongLong()) return setError("Cannot verify note deletion.");
     q.finish();
     QVector<Annotation> saved;
-    if (!loadAnnotations(&saved)) return false;
+    if (!captureStates(&step,true) || !loadAnnotations(&saved)) return false;
     if (!m_store.commit()) return setError("Cannot commit note deletion: " + m_store.lastError().text());
     m_annotations = saved; m_collection = collectionRows(saved);
+    recordUndo(step);
     emit sharedCommitted(canonical.value("versionId").toString(),false,false);
+    clearError(); emit collectionChanged(); updateAnnotations(); return true;
+}
+
+QVariantMap BibleBackend::annotationScope(int start, int end) const
+{
+    const auto a = endpoint(start), z = endpoint(end);
+    return {{"versionId",m_versionId},{"book",a.book},{"chapter",a.chapter},{"start",a.verse},
+            {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse}};
+}
+
+bool BibleBackend::readScopeState(const QVariantMap &scope, ScopeState *state)
+{
+    *state = {};
+    QSqlQuery q(m_store);
+    q.prepare("SELECT bookmark,highlight,note FROM annotations WHERE " + scopeWhere); bindScope(q,scope);
+    if (!q.exec()) return setError("Cannot read annotations: " + q.lastError().text());
+    if (q.next()) {
+        state->annotated = true;
+        state->bookmark = q.value(0).toBool(); state->highlight = q.value(1).toBool(); state->note = q.value(2).toString();
+    }
+    q.prepare("SELECT tag_id FROM tag_assignments WHERE " + scopeWhere + " ORDER BY tag_id"); bindScope(q,scope);
+    if (!q.exec()) return setError("Cannot read tags: " + q.lastError().text());
+    while (q.next()) state->tags << q.value(0).toString();
+    if (q.lastError().isValid()) return setError("Cannot read tags: " + q.lastError().text());
+    return true;
+}
+
+bool BibleBackend::writeScopeState(const QVariantMap &scope, const ScopeState &state)
+{
+    QSqlQuery q(m_store);
+    for (const auto &table : {QString("annotations"),QString("tag_assignments")}) {
+        q.prepare("DELETE FROM " + table + " WHERE " + scopeWhere); bindScope(q,scope);
+        if (!q.exec()) return setError("Cannot restore annotations: " + q.lastError().text());
+    }
+    if (state.annotated) {
+        q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,bookmark,highlight,note) VALUES(?,?,?,?,?,?,?,?,?,?)");
+        bindScope(q,scope); q.addBindValue(state.bookmark); q.addBindValue(state.highlight);
+        q.addBindValue(state.note.isNull() ? QString("") : state.note);
+        if (!q.exec()) return setError("Cannot restore annotations: " + q.lastError().text());
+    }
+    for (const auto &id : state.tags) if (!writeTagAssignment(scope,id,true)) return false;
+    ScopeState written;
+    if (!readScopeState(scope,&written)) return false;
+    if (written != state) return setError("Cannot verify the restored annotations.");
+    return true;
+}
+
+bool BibleBackend::captureStates(UndoStep *step, bool after)
+{
+    auto &states = after ? step->after : step->before;
+    states.clear();
+    for (const auto &scope : std::as_const(step->scopes)) {
+        ScopeState state;
+        if (!readScopeState(scope,&state)) return false;
+        states << state;
+    }
+    return true;
+}
+
+void BibleBackend::recordUndo(UndoStep step)
+{
+    // A note session's later saves extend its step, keeping the first "before".
+    if (!step.group.isEmpty() && step.group == m_undoGroup && !m_undo.isEmpty() && m_undo.last().group == step.group)
+        step.before = m_undo.takeLast().before;
+    m_undoGroup = step.group;
+    if (step.before != step.after) {
+        m_redo.clear();
+        m_undo << step;
+        if (m_undo.size() > UndoLimit) m_undo.removeFirst();
+    }
+    emit undoChanged();
+}
+
+void BibleBackend::clearUndo()
+{
+    m_undo.clear(); m_redo.clear(); m_undoGroup.clear();
+    emit undoChanged();
+}
+
+bool BibleBackend::applyUndo(bool undo)
+{
+    auto &from = undo ? m_undo : m_redo;
+    if (from.isEmpty()) return setError(undo ? "Nothing to undo." : "Nothing to redo.");
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    m_undoGroup.clear();
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError("Cannot start " + QString(undo ? "undo: " : "redo: ") + m_store.lastError().text());
+    const auto step = from.last();
+    // A step that no longer applies goes, so the next key reaches the one before it.
+    const auto drop = [&](const QString &error) { from.removeLast(); emit undoChanged(); return setError(error); };
+    const QString changed = QString("That changed in another window, so it was not ") + (undo ? "undone." : "redone.");
+    if (installedPath(step.versionId).isEmpty()) {
+        // Every step in a removed version goes at once.
+        const auto removed = [&](const UndoStep &other) { return other.versionId == step.versionId; };
+        m_undo.removeIf(removed); m_redo.removeIf(removed);
+        emit undoChanged();
+        return setError("That Bible version is no longer installed.");
+    }
+    QSqlQuery q(m_store);
+    // Redo brings back a tag the step created; undo removed it while unused.
+    if (!undo) for (const auto &tag : step.createdTags) {
+        q.prepare("INSERT INTO tags(id,name,name_key) VALUES(?,?,?) ON CONFLICT(id) DO NOTHING");
+        q.addBindValue(tag.first); q.addBindValue(tag.second); q.addBindValue(tagKey(tag.second));
+        if (!q.exec()) return drop(changed);
+    }
+    const auto &expected = undo ? step.after : step.before, &target = undo ? step.before : step.after;
+    for (int i = 0; i < step.scopes.size(); ++i) {
+        ScopeState current;
+        if (!readScopeState(step.scopes[i],&current)) return false;
+        const auto &tags = target[i].tags;
+        if (current != expected[i] || std::any_of(tags.cbegin(),tags.cend(),[this](const QString &id) { return tagName(id).isEmpty(); }))
+            return drop(changed);
+    }
+    for (int i = 0; i < step.scopes.size(); ++i) if (!writeScopeState(step.scopes[i],target[i])) return false;
+    if (undo) for (const auto &tag : step.createdTags) {
+        q.prepare("DELETE FROM tags WHERE id=? AND NOT EXISTS(SELECT 1 FROM tag_assignments WHERE tag_id=?)");
+        q.addBindValue(tag.first); q.addBindValue(tag.first);
+        if (!q.exec()) return setError("Cannot remove the tag: " + q.lastError().text());
+    }
+    QVector<Annotation> saved;
+    if (!loadAnnotations(&saved)) return false;
+    if (!m_store.commit()) return setError("Cannot commit " + QString(undo ? "undo: " : "redo: ") + m_store.lastError().text());
+    from.removeLast();
+    (undo ? m_redo : m_undo) << step;
+    emit undoChanged();
+    m_annotations = saved; m_collection = collectionRows(saved);
+    emit sharedCommitted(step.versionId,false,false);
+    publishTags();
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
 }
 
@@ -3535,6 +3734,8 @@ bool BibleBackend::importBackup(QUrl file)
     if (withDesk) publishDesk();
     updateAnnotations(); emit collectionChanged();
     emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
+    // A restore replaced what undo steps would write back.
+    clearUndo();
     clearError(); setStatus(QString("Restored %1 annotations from backup.").arg(rows.size())); return true;
 }
 

@@ -1079,8 +1079,9 @@ private slots:
                 }
                 if (dismissal == 4) { key(Qt::Key_F1); QVERIFY(!prop("helpDialog","visible").toBool()); }
                 if (dismissal == 5) {
-                    QVERIFY(QMetaObject::invokeMethod(window,"requestDeleteSaved"));
-                    QVERIFY(!prop("deleteConfirmation","visible").toBool());
+                    const auto collection = bible->collection();
+                    QVERIFY(QMetaObject::invokeMethod(window,"deleteSaved"));
+                    QCOMPARE(bible->collection(),collection);
                 }
                 if (dismissal == 6) {
                     QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"import")));
@@ -1582,7 +1583,7 @@ private slots:
         QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
         key(Qt::Key_Return); QTRY_VERIFY(bible->chapterOutline());
     }
-    void savedDeleteConfirmationAndIcons() {
+    void savedDeleteUndoAndIcons() {
         reference("John 3:16-18");
         bible->setNoteText("An overlapping range survives exact deletion");
         reference("John 3:16"); bible->toggleBookmark(); bible->toggleHighlight();
@@ -1616,41 +1617,30 @@ private slots:
         item("collectionList")->forceActiveFocus(); QTest::qWait(50);
         const auto before = bible->collection();
         const auto selection = bible->selectionReference();
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        QTRY_VERIFY(item("deleteCancel")->hasActiveFocus());
-        QCOMPARE(prop("deleteReference","text").toString(),QString("John 3:16"));
-        key(Qt::Key_J); key(Qt::Key_L); key(Qt::Key_Delete);
-        QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
-        for (auto arrow : {Qt::Key_Left,Qt::Key_Up,Qt::Key_Right,Qt::Key_Down}) {
-            key(arrow); QTRY_VERIFY(item("deleteConfirm")->hasActiveFocus());
-            QCOMPARE(bible->collection(),before);
-            QVERIFY(prop("deleteConfirmation","opened").toBool());
-            key(arrow); QTRY_VERIFY(item("deleteCancel")->hasActiveFocus());
-            QCOMPARE(bible->collection(),before);
-        }
-        key(Qt::Key_Return); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QCOMPARE(bible->collection(),before);
-        key(Qt::Key_Backspace); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QVERIFY(prop("savedDrawer","opened").toBool());
-        QCOMPARE(bible->collection(),before);
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        key(Qt::Key_Tab); QTRY_VERIFY(item("deleteConfirm")->hasActiveFocus());
-        key(Qt::Key_Up); QTRY_VERIFY(item("deleteCancel")->hasActiveFocus());
-        key(Qt::Key_Down); QTRY_VERIFY(item("deleteConfirm")->hasActiveFocus());
-        key(Qt::Key_Return); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QCOMPARE(bible->collection().size(),1);
+        // Delete acts at once, on the exact range only; the toast says what went.
+        key(Qt::Key_Delete); QTRY_COMPARE(bible->collection().size(),1);
+        QCOMPARE(prop("toast","text").toString(),QString("John 3:16 deleted"));
         QCOMPARE(bible->selectionReference(),selection);
         QCOMPARE(bible->noteText(),QString());
         QCOMPARE(prop("noteEditor","text").toString(),QString());
         QCOMPARE(prop("collectionList","currentIndex").toInt(),-1);
         QVERIFY(bible->collection().first().toMap().value("note").toString().contains("overlapping"));
+        // u in the panel brings it all back; ctrl shift Z deletes it again, ctrl z restores.
+        key(Qt::Key_U); QTRY_COMPARE(bible->collection(),before);
+        QCOMPARE(prop("toast","text").toString(),QString("Deletion of John 3:16 undone"));
+        QCOMPARE(bible->noteText(),QString("Delete this exact note"));
+        QCOMPARE(prop("noteEditor","text").toString(),QString("Delete this exact note"));
+        QVERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_Z,Qt::ControlModifier | Qt::ShiftModifier); QTRY_COMPARE(bible->collection().size(),1);
+        QCOMPARE(prop("toast","text").toString(),QString("Deletion of John 3:16 redone"));
+        key(Qt::Key_Z,Qt::ControlModifier); QTRY_COMPARE(bible->collection(),before);
+        key(Qt::Key_J); QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
+        key(Qt::Key_Backspace); QTRY_COMPARE(bible->collection().size(),1);
         click(item("savedTab2"));
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        click(item("deleteConfirm")); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        key(Qt::Key_Delete); QTRY_COMPARE(prop("collectionList","count").toInt(),0);
         QCOMPARE(prop("collectionList","currentIndex").toInt(),-1);
-        QCOMPARE(prop("collectionList","count").toInt(),0);
-        key(Qt::Key_Delete); QVERIFY(!prop("deleteConfirmation","visible").toBool());
+        QVERIFY(bible->collection().isEmpty());
+        key(Qt::Key_Delete); QVERIFY(bible->collection().isEmpty());
     }
     void savedCollidingBookNames_data() {
         QTest::addColumn<bool>("tagsOnly");
@@ -1718,104 +1708,17 @@ private slots:
         key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
         object("collectionList")->setProperty("currentIndex",0);
         item("collectionList")->forceActiveFocus();
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        QCOMPARE(prop("deleteReference","text"),genesis.value("reference"));
-        const auto value = prop("deleteConfirmation","scope");
-        const auto captured = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
-        QCOMPARE(captured,genesis);
-        // A new model/list selection cannot retarget the already-open confirmation.
-        object("collectionList")->setProperty("currentIndex",1);
-        bible->refreshCollection();
-        click(item("deleteConfirm")); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QCOMPARE(bible->collection(),QVariantList{johnEntry});
+        // Delete takes the row's exact range, never its namesake in another book.
+        key(Qt::Key_Delete); QTRY_COMPARE(bible->collection(),QVariantList{johnEntry});
         QVERIFY(bible->tagsForScope(genesis).isEmpty());
         QCOMPARE(bible->tagsForScope(john).size(),1);
         QCOMPARE(bible->book(),1);
         QVERIFY(bible->noteText().isEmpty());
-        // Disappearance of GEN invalidates its pending confirmation even though
-        // JHN still supplies an identical display reference in the collection.
-        QVERIFY(bible->setTag(genesis,tag,true));
-        QVERIFY(bible->openTaggedPassage(genesis));
-        QVERIFY(bible->toggleBookmark());
-        object("collectionList")->setProperty("currentIndex",0);
-        item("collectionList")->forceActiveFocus();
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        BibleBackend peer;
-        QVERIFY(peer.deleteAnnotationScope(genesis));
-        QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved"));
-        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QVERIFY(prop("deleteConfirmation","versionId").toString().isEmpty());
-        QCOMPARE(bible->collection(),QVariantList{johnEntry});
-    }
-    void pendingDeleteVersionScope_data() {
-        QTest::addColumn<bool>("peerRemoval");
-        QTest::newRow("active-switch") << false;
-        QTest::newRow("peer-removal") << true;
-    }
-    void pendingDeleteVersionScope() {
-        QFETCH(bool,peerRemoval);
-        // A synthetic second edition keeps this UI scope regression independent
-        // of optional downloaded USFM and WindowManager's separate test target.
-        const QString name = "bible-11111111-2222-3333-4444-555555555555.sqlite";
-        const QString path = bible->dataDirectory() + '/' + name;
-        const auto source = session->filePath("second_usfm.zip");
-        QVERIFY(writeSyntheticUsfm(source,"eng-kjv2006"));
-        const auto imported = UsfmImporter::importFile(source,path);
-        QVERIFY2(imported.ok,qPrintable(imported.error));
-        {
-            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-delete-library");
-            db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
-            QVERIFY(db.open()); QSqlQuery q(db);
-            q.prepare("INSERT INTO installed(version_id,path,abbreviation,name,copyright) VALUES('eng-kjv2006',?,'KJV',?,'')");
-            q.addBindValue(name); q.addBindValue(imported.edition.name); QVERIFY(q.exec());
-        }
-        QSqlDatabase::removeDatabase("ui-delete-library");
-        BibleBackend peer;
-        QVERIFY2(peer.switchVersion("eng-kjv2006"),qPrintable(peer.error()));
-        QVERIFY(peer.navigate("John 3:16"));
-        peer.setNoteText("Keep KJV note"); peer.toggleBookmark(); peer.toggleHighlight();
-        const auto kjv = peer.collection();
-        reference("John 3:16");
-        bible->setNoteText("NET deletion target"); bible->toggleBookmark();
-        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        QCOMPARE(prop("deleteConfirmation","versionId").toString(),QString("engnet"));
-        QCOMPARE(prop("deleteConfirmation","reference").toString(),QString("John 3:16"));
-        QSignalSpy commits(bible.get(),&BibleBackend::sharedCommitted);
-        if (peerRemoval) QVERIFY2(peer.removeVersion("engnet",false),qPrintable(peer.error()));
-        else QVERIFY2(bible->switchVersion("eng-kjv2006"),qPrintable(bible->error()));
-        QCOMPARE(bible->versionId(),QString("eng-kjv2006"));
-        commits.clear(); // Switching publishes library metadata; confirmation must not publish anything.
-        QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved")); // Even during close animation.
-        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QVERIFY(prop("deleteConfirmation","versionId").toString().isEmpty());
-        QVERIFY(prop("deleteConfirmation","reference").toString().isEmpty());
-        QCOMPARE(commits.count(),0);
-        QCOMPARE(bible->collection(),kjv); QCOMPARE(peer.collection(),kjv);
-        QCOMPARE(bible->noteText(),QString("Keep KJV note"));
-        if (!peerRemoval) {
-            QVERIFY(bible->switchVersion("engnet"));
-            QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved"));
-            QCOMPARE(bible->noteText(),QString("NET deletion target"));
-        }
-    }
-    void pendingDeleteMissingCapture() {
-        reference("John 3:16"); bible->setNoteText("Original target");
-        window->setProperty("collectionTab",2);
-        key(Qt::Key_A,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        BibleBackend peer;
-        QVERIFY(peer.navigate("John 3:16"));
-        QVERIFY(peer.deleteAnnotation("John 3:16"));
-        peer.setNoteText("A newly created note at the same reference");
-        const auto annotations = peer.collection();
-        QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved"));
-        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QCOMPARE(bible->collection(),annotations);
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QVERIFY(QMetaObject::invokeMethod(window,"confirmDeleteSaved"));
-        QCOMPARE(bible->collection(),annotations);
+        // Undo restores that same range.
+        key(Qt::Key_U); QTRY_COMPARE(bible->collection().size(),2);
+        QCOMPARE(bible->collection()[0].toMap().value("book").toInt(),1);
+        QCOMPARE(bible->tagsForScope(genesis).size(),1); QCOMPARE(bible->tagsForScope(john).size(),1);
+        QCOMPARE(bible->noteText(),QString("GEN note"));
     }
     void savedDeleteFailureAndIndexClamping() {
         for (int verse = 1; verse <= 3; ++verse) {
@@ -1834,19 +1737,17 @@ private slots:
             QVERIFY(db.open());
             QSqlQuery query(db);
             QVERIFY(query.exec("CREATE TRIGGER reject_delete BEFORE DELETE ON annotations BEGIN SELECT RAISE(FAIL,'test delete failure'); END"));
-            key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-            click(item("deleteConfirm"));
-            QVERIFY(prop("deleteConfirmation","opened").toBool());
-            QVERIFY(!bible->error().isEmpty());
+            key(Qt::Key_Delete);
+            QTRY_VERIFY(!bible->error().isEmpty());
             QCOMPARE(bible->collection(),before);
             QCOMPARE(prop("collectionList","currentIndex").toInt(),2);
             QCOMPARE(bible->noteText(),QString("Note 3"));
+            QCOMPARE(bible->undoLabel(),QString("note on John 3:3")); // A failed delete is no step.
             QVERIFY(query.exec("DROP TRIGGER reject_delete"));
-            click(item("deleteConfirm"));
-            QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+            key(Qt::Key_Delete);
         }
         QSqlDatabase::removeDatabase("ui-delete-failure");
-        QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
+        QTRY_COMPARE(prop("collectionList","currentIndex").toInt(),1);
         QCOMPARE(bible->collection().size(),2);
         QCOMPARE(bible->noteText(),QString());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
@@ -4350,14 +4251,48 @@ private slots:
         key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),0);
         // x no longer removes; shift delete has no bulk clear here.
         key(Qt::Key_X); key(Qt::Key_Delete,Qt::ShiftModifier); QTest::qWait(60);
-        QCOMPARE(bible->collection().size(),1); QVERIFY(!prop("deleteConfirmation","visible").toBool());
-        key(Qt::Key_Delete); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
         QCOMPARE(bible->collection().size(),1);
+        // Delete and backspace remove at once; u and ctrl z undo, here in the panel.
+        key(Qt::Key_Delete); QTRY_VERIFY(bible->collection().isEmpty());
         QVERIFY(prop("savedDrawer","visible").toBool());
-        key(Qt::Key_Backspace); QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
+        key(Qt::Key_U); QTRY_COMPARE(bible->collection().size(),1);
+        key(Qt::Key_J); key(Qt::Key_Backspace); QTRY_VERIFY(bible->collection().isEmpty());
+        key(Qt::Key_Z,Qt::ControlModifier); QTRY_COMPARE(bible->collection().size(),1);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+    }
+    void undoKeysToastsAndCommands() {
+        reference("John 3:16");
+        QVERIFY(QMetaObject::invokeMethod(window,"readerFocus")); QCoreApplication::processEvents();
+        key(Qt::Key_U); QCOMPARE(prop("toast","text").toString(),QString("Nothing to undo"));
+        key(Qt::Key_X); QTRY_VERIFY(bible->selectionHighlighted());
+        key(Qt::Key_U); QTRY_VERIFY(!bible->selectionHighlighted());
+        QCOMPARE(prop("toast","text").toString(),QString("Highlight on John 3:16 undone"));
+        key(Qt::Key_R,Qt::ControlModifier); QTRY_VERIFY(bible->selectionHighlighted());
+        QCOMPARE(prop("toast","text").toString(),QString("Highlight on John 3:16 redone"));
+        // Commands names the step it would undo.
+        key(Qt::Key_Space,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("undo");
+        QVariant entries;
+        QVERIFY(QMetaObject::invokeMethod(window,"paletteEntries",Q_RETURN_ARG(QVariant,entries)));
+        const auto first = (entries.canConvert<QJSValue>() ? entries.value<QJSValue>().toVariant() : entries).toList().value(0).toMap();
+        QCOMPARE(first.value("title").toString(),QString("Undo highlight on John 3:16"));
+        key(Qt::Key_Return); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QTRY_VERIFY(!bible->selectionHighlighted());
+        // Selecting characters keeps undo's keys.
+        QTRY_VERIFY(window->property("readerKeys").toBool());
+        key(Qt::Key_V); QTRY_VERIFY(window->property("charMode").toBool());
+        const auto selected = window->property("freeSelectedText").toString(); QVERIFY(!selected.isEmpty());
+        key(Qt::Key_Z,Qt::ControlModifier | Qt::ShiftModifier); QTRY_VERIFY(bible->selectionHighlighted());
+        key(Qt::Key_U); QTRY_VERIFY(!bible->selectionHighlighted());
+        QVERIFY(window->property("charMode").toBool());
+        QTRY_COMPARE(window->property("freeSelectedText").toString(),selected);
+        key(Qt::Key_Escape); QTRY_VERIFY(!window->property("charMode").toBool());
+        // A change made since in another window stops it, with a toast, not the banner.
+        key(Qt::Key_M); QTRY_VERIFY(bible->selectionBookmarked());
+        BibleBackend peer; QVERIFY(peer.navigate("John 3:16")); QVERIFY(peer.toggleHighlight());
+        key(Qt::Key_U);
+        QTRY_COMPARE(prop("toast","text").toString(),QString("That changed in another window, so it was not undone"));
+        QVERIFY(bible->selectionBookmarked()); QVERIFY(bible->error().isEmpty());
     }
     void relatedListKeys() {
         reference("John 3:17");
@@ -5721,21 +5656,12 @@ private slots:
         item("collectionList")->forceActiveFocus();
         QVERIFY(prop("savedEntryJohn 3:2","highlighted").toBool());
         key(Qt::Key(deleteKey));
-        QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        QCOMPARE(prop("deleteReference","text").toString(),QString("John 3:2"));
-        QCOMPARE(prop("deleteConfirmation","row").toInt(),1);
-        click(item("deleteConfirm"));
-        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QVERIFY(!saved(1).isEmpty()); QVERIFY(saved(2).isEmpty()); QVERIFY(!saved(3).isEmpty());
+        QTRY_VERIFY(saved(2).isEmpty()); QVERIFY(!saved(1).isEmpty()); QVERIFY(!saved(3).isEmpty());
         QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
-        // With focus back on the list, deletion falls back to its current row.
-        item("collectionList")->forceActiveFocus();
+        // The row that took its place is next.
         key(Qt::Key(deleteKey));
-        QTRY_VERIFY(prop("deleteConfirmation","opened").toBool());
-        QCOMPARE(prop("deleteReference","text").toString(),QString("John 3:3"));
-        key(Qt::Key_Escape);
-        QTRY_VERIFY(!prop("deleteConfirmation","visible").toBool());
-        QVERIFY(!saved(3).isEmpty());
+        QTRY_VERIFY(saved(3).isEmpty()); QVERIFY(!saved(1).isEmpty());
+        QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
     }
     void savedKeyboardIsolationAndToggle() {
         for (int verse = 1; verse <= 12; ++verse) {

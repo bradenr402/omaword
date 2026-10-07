@@ -78,6 +78,10 @@ class BibleBackend : public QObject
     Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
     Q_PROPERTY(QStringList recentQueries READ recentQueries NOTIFY historyChanged)
     Q_PROPERTY(bool historyEnabled READ historyEnabled NOTIFY historyChanged)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
+    Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
+    Q_PROPERTY(QString undoLabel READ undoLabel NOTIFY undoChanged)
+    Q_PROPERTY(QString redoLabel READ redoLabel NOTIFY undoChanged)
 
 public:
     explicit BibleBackend(QObject *parent = nullptr);
@@ -120,6 +124,8 @@ public:
     Q_INVOKABLE QVariantList tagsForScope(QVariantMap scope, bool overlapping = false);
     Q_INVOKABLE QString createTag(QString name);
     Q_INVOKABLE bool setTag(QVariantMap scope, QString tagId, bool assigned);
+    // Several tags on one range in one transaction (one undo step).
+    Q_INVOKABLE bool setTags(QVariantMap scope, QVariantList tagIds, bool assigned);
     Q_INVOKABLE QString createAndAssignTag(QVariantMap scope, QString name);
     Q_INVOKABLE bool renameTag(QString id, QString name);
     Q_INVOKABLE bool deleteTag(QString id);
@@ -266,6 +272,25 @@ public:
     // Switches version when needed, then restores the range and reading position.
     Q_INVOKABLE bool openLocation(QVariantMap location);
 
+    // Undo: this window's own annotation changes (bookmark, highlight, note,
+    // tag assignment, deletion, range move), newest first, in memory only.
+    // Each step keeps the exact saved state of every range it touched, before
+    // and after: undo writes "before" back only while those ranges still read
+    // "after" (redo the reverse), otherwise it fails with a "changed in another
+    // window" error and the stale step is dropped. A new change clears redo.
+    // Successive note saves on one range are one step until closeUndoGroup()
+    // (the editor closing) or any other step. Labels read after "Undo"/"Redo":
+    // "highlight on John 3:16". Tag management, backups, version removal, the
+    // Desk and History are not undoable.
+    static constexpr int UndoLimit = 100;
+    bool canUndo() const { return !m_undo.isEmpty(); }
+    bool canRedo() const { return !m_redo.isEmpty(); }
+    QString undoLabel() const { return m_undo.isEmpty() ? QString() : m_undo.last().label; }
+    QString redoLabel() const { return m_redo.isEmpty() ? QString() : m_redo.last().label; }
+    Q_INVOKABLE bool undo() { return applyUndo(true); }
+    Q_INVOKABLE bool redo() { return applyUndo(false); }
+    Q_INVOKABLE void closeUndoGroup() { m_undoGroup.clear(); }
+
     // expectedId (Re-import) rejects a file of another edition before importing.
     Q_INVOKABLE void importUsfm(QUrl file, QString expectedId = QString());
     Q_INVOKABLE bool switchVersion(QString id);
@@ -362,6 +387,7 @@ signals:
     void deskChanged();
     void currentInDeskChanged();
     void historyChanged();
+    void undoChanged();
     void sharedCommitted(QString versionId, bool library, bool preferences);
 
 private:
@@ -409,7 +435,7 @@ private:
     QVector<QPair<int, int>> sourceTargets(const QString &text, int book, int chapter) const;
     bool chapterBounds(int book, int chapter, int *first, int *last) const;
     void intersectSelection();
-    bool commitAnnotations(const QVector<Annotation> &annotations);
+    bool commitAnnotations(const QVector<Annotation> &annotations, const QVector<Annotation> &before, const QString &label);
     bool flagCovered(const QVector<Annotation> &annotations, bool highlight) const;
     QString rangeReference(int start, int end) const;
     bool validRange(int book, int chapter, int start, int end) const;
@@ -429,8 +455,41 @@ private:
     QVariantList tagRangeRows(const QString &versionId, bool excerpts) const;
     bool writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned);
     QString ensureTag(const QString &name);
+    QString tagName(const QString &id) const;
     bool commitTagMutation();
     void publishTags();
+    // One exact range's saved state: its annotation row (annotated false: no
+    // marks, no note) and its tag ids in SQLite order.
+    struct ScopeState {
+        bool annotated = false, bookmark = false, highlight = false;
+        QString note;
+        QStringList tags;
+        bool operator==(const ScopeState &other) const {
+            return annotated == other.annotated && bookmark == other.bookmark && highlight == other.highlight
+                && note == other.note && tags == other.tags;
+        }
+        bool operator!=(const ScopeState &other) const { return !(*this == other); }
+    };
+    struct UndoStep {
+        UndoStep() = default;
+        UndoStep(QString label, QString versionId, QVector<QVariantMap> scopes, QString group = {})
+            : label(std::move(label)), versionId(std::move(versionId)), group(std::move(group)), scopes(std::move(scopes)) {}
+        QString label, versionId;
+        // An open note session's range: its later saves extend this step.
+        QString group;
+        QVector<QVariantMap> scopes;
+        QVector<ScopeState> before, after;
+        QVector<QPair<QString, QString>> createdTags; // {id, name} the step created
+    };
+    QVector<UndoStep> m_undo, m_redo;
+    QString m_undoGroup;
+    QVariantMap annotationScope(int start, int end) const;
+    bool readScopeState(const QVariantMap &scope, ScopeState *state);
+    bool writeScopeState(const QVariantMap &scope, const ScopeState &state);
+    bool captureStates(UndoStep *step, bool after);
+    void recordUndo(UndoStep step);
+    void clearUndo();
+    bool applyUndo(bool undo);
     void reloadDesk();
     void publishDesk();
     QVariantMap deskItem(int id) const;

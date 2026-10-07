@@ -147,6 +147,12 @@ private slots:
         QVERIFY(peer.noteText().isEmpty()); QVERIFY(peer.selectionTags().isEmpty());
         QCOMPARE(bible->tagScope(),before); QCOMPARE(peer.tagScope(),peerBefore);
         QCOMPARE(bible->readingPosition(),0.42); QCOMPARE(navigation.count(),0); QCOMPARE(peerNavigation.count(),0);
+        // One undo step puts both exact ranges back, in every window; redo moves them again.
+        QCOMPARE(bible->undoLabel(),"range move to " + d.value("reference").toString());
+        QVERIFY2(bible->undo(),qPrintable(bible->error()));
+        QCOMPARE(bible->annotationSnapshot(s),snapshot); QCOMPARE(peer.annotationSnapshot(s),snapshot);
+        QVERIFY(!bible->annotationSnapshot(d).value("ok").toBool());
+        QVERIFY2(bible->redo(),qPrintable(bible->error())); QCOMPARE(bible->annotationSnapshot(d),dest);
         bible.reset(); bible = std::make_unique<BibleBackend>();
         QCOMPARE(bible->annotationSnapshot(d),dest);
     }

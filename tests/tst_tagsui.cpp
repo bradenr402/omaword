@@ -937,7 +937,7 @@ private slots:
         QStringList menuIds;
         for (const auto &entry : variant(root->findChild<QObject *>("contextMenu")->property("layout")).toList())
             menuIds << (entry.toMap().value("separator").toBool() ? QString("|") : entry.toMap().value("id").toString());
-        QCOMPARE(menuIds, (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "editRange", "removeTag"}));
+        QCOMPARE(menuIds, (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "editRange", "removeTag", "undo"}));
         key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("contextMenu")->property("visible").toBool());
         // t: the picker on the row's range, over the drawer, which stays.
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
@@ -946,19 +946,16 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("visibleModal").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         QVERIFY(root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
-        // delete removes only this row's tag, after confirming.
+        // delete removes only this row's tag, at once; u puts it back, ctrl r removes it again.
         QCOMPARE(list->property("currentIndex").toInt(), 3);
         key(Qt::Key_Delete);
-        auto confirmation = root->findChild<QObject *>("deleteConfirmation");
-        QTRY_VERIFY(confirmation->property("opened").toBool());
-        QCOMPARE(item("deleteTitle")->property("text").toString(), QString("Remove Beta from John 3:8?"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!confirmation->property("visible").toBool());
-        QCOMPARE(bible->tagsForScope(here).size(), 2);
-        key(Qt::Key_Delete); QTRY_VERIFY(confirmation->property("opened").toBool());
-        QVERIFY(QMetaObject::invokeMethod(item("deleteConfirm"), "clicked"));
-        QTRY_VERIFY(!confirmation->property("visible").toBool());
-        QCOMPARE(ids(bible->tagsForScope(here)), QStringList{alpha});
+        QTRY_COMPARE(ids(bible->tagsForScope(here)), QStringList{alpha});
+        QCOMPARE(root->findChild<QObject *>("toast")->property("text").toString(), QString("Beta removed from John 3:8"));
         QCOMPARE(ids(bible->tagsForScope(scope(5, 5))), QStringList{beta});
+        QTRY_COMPARE(list->property("count").toInt(), 3);
+        key(Qt::Key_U); QTRY_COMPARE(bible->tagsForScope(here).size(), 2);
+        QTRY_COMPARE(list->property("count").toInt(), 4);
+        key(Qt::Key_R, Qt::ControlModifier); QTRY_COMPARE(ids(bible->tagsForScope(here)), QStringList{alpha});
         QTRY_COMPARE(list->property("count").toInt(), 3);
         bible->openChapter(43, 3); bible->selectVerses(8, 8);
         // Every Annotations tab has a hint row and the passage header.
