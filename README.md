@@ -164,7 +164,6 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `f`: Focus mode
 - `alt n`: Show verse numbers
 - `alt h`: Show headings
-- `alt p`: Verse picker
 - `alt o`: Chapter outline
 - `alt w`: Margin notes
 - `alt j`: Highlight words of Jesus
@@ -238,9 +237,9 @@ These also work, but stay out of the in-app list:
 - Wide windows add margins: a sticky **Chapter outline** of the chapter and its section headings on the left (`alt o`; `{` / `}` jump between headings, `{` ending at the top of the chapter), and **Margin notes** on the right (`alt w`), each joined to its passage by hand-drawn braces and an arrow. Margin notes take priority and may move the text left; both are off by default.
 
 ### Finding passages
-- The passage palette understands compact references like `jn316`, `1co13`, or `rev 3 14-22`, and lists likely matches, best first.
+- The passage palette understands compact references like `jn316`, `1co13`, or `rev 3 14-22`, and lists likely matches, best first. Choosing a book (`enter` or `→`) shows its chapters as a grid of numbers, five to a row: arrows move, typing a number narrows the grid, `3:16` goes to that verse, and `backspace` returns to the books.
 - Search Scripture across the current version, or find in the current chapter (`/`) with a regular expression, Neovim-style smart case: lowercase ignores case, any capital matches it, `\c` / `\C` force either way.
-- Click the chapter title to pick another chapter of the book; the `<` `>` buttons at the window's edges step chapters (`h` `l`).
+- Click the chapter title for the book's chapter grid, the current chapter chosen; the `<` `>` buttons at the window's edges step chapters (`h` `l`).
 - `[` and `]` (or the mouse's back and forward buttons) step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.
 - History (`shift H`) lists passages you stayed on for a few seconds, shared by every window. It never goes into backups, and Commands can clear or disable it.
 

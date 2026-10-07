@@ -2238,16 +2238,15 @@ private slots:
         QTRY_VERIFY(toolTipOf(item("chapterTitle"))->property("visible").toBool());
         click(title); QTRY_VERIFY(opened("passagePalette"));
         QCOMPARE(prop("paletteBook").toInt(), bible->book());
-        QCOMPARE(item("paletteResults")->property("currentIndex").toInt(), 2);
+        QCOMPARE(item("paletteChapters")->property("currentIndex").toInt(), 2);
         shot("chapter-title-palette");
-        // Keyboard: ↑ and enter open the previous chapter; ← goes back to all books.
-        key(Qt::Key_Up); key(Qt::Key_Return);
-        QTRY_VERIFY(!shown("passagePalette") || prop("paletteChapter").toInt() == 2);
-        if (shown("passagePalette")) { key(Qt::Key_Return); QTRY_VERIFY(!shown("passagePalette")); }
+        // Keyboard: ← and enter open the previous chapter; backspace goes back to all books.
+        key(Qt::Key_Left); key(Qt::Key_Return);
+        QTRY_VERIFY(!shown("passagePalette"));
         QCOMPARE(bible->chapter(), 2);
         call("setReaderY", 0); QTRY_VERIFY(center(title).y() > 20 && center(title).y() < window->height() / 2);
         click(item("chapterTitleMouse")); QTRY_VERIFY(opened("passagePalette"));
-        key(Qt::Key_Left); QTRY_COMPARE(prop("paletteBook").toInt(), 0);
+        key(Qt::Key_Backspace); QTRY_COMPARE(prop("paletteBook").toInt(), 0);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
     }
     // The chapter title scales with the Text size, keeping its proportion to the verse text.
@@ -2606,14 +2605,14 @@ private slots:
         QTRY_VERIFY(item("keybindingScrollbar")->isVisible());
         QCOMPARE(current->width(), results->width() - item("keybindingScrollbar")->width());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
-        // The palette's ← back hint shows only where ← goes back; ↑ on Back is an error.
+        // A book's chapter grid names its keys: arrows choose, backspace returns
+        // to the books; with a number typed ← moves the caret. ↑ on Back is an error.
         run("books"); QTRY_VERIFY(opened("passagePalette"));
         type("John"); key(Qt::Key_Right); QTRY_VERIFY(prop("paletteBook").toInt() > 0);
-        QVERIFY(prop("paletteLeftGoesBack").toBool());
-        QVERIFY(object("paletteHints")->property("plainText").toString().contains("← back"));
+        QVERIFY(object("paletteHints")->property("plainText").toString().contains("← → ↑ ↓ choose"));
+        QVERIFY(object("paletteHints")->property("plainText").toString().contains("backspace books"));
         type("3"); window->setProperty("paletteArrowUsed", false);
         QTRY_VERIFY(!prop("paletteLeftGoesBack").toBool());
-        QVERIFY(!object("paletteHints")->property("plainText").toString().contains("← back"));
         key(Qt::Key_Left); QVERIFY(prop("paletteBook").toInt() > 0);
         item("paletteBack")->forceActiveFocus(); key(Qt::Key_Up); QCOMPARE(lastSound(), QString("error"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));

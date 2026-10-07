@@ -644,17 +644,17 @@ private slots:
         const auto book = bible->books().first().toMap();
         const QVariant entry = QVariantMap{{"book",69},{"title",book.value("name")}};
         QVERIFY(QMetaObject::invokeMethod(window,"activatePaletteEntry",Q_ARG(QVariant,entry)));
-        QCOMPARE(prop("paletteResults","count").toInt(),7);
-        key(Qt::Key_Right);
-        QCOMPARE(window->property("paletteChapter").toInt(),10);
-        key(Qt::Key_Left);
-        QCOMPARE(prop("paletteResults","currentIndex").toInt(),0);
-        for (int i = 0; i < 6; ++i) key(Qt::Key_Down);
-        key(Qt::Key_Right);
-        QCOMPARE(window->property("paletteChapter").toInt(),16);
-        key(Qt::Key_Left);
-        QCOMPARE(prop("paletteResults","currentIndex").toInt(),6);
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        // The grid follows the source's chapter numbers: this book starts at 10.
+        QTRY_VERIFY(prop("paletteChapters","visible").toBool()); QVERIFY(!prop("paletteResults","visible").toBool());
+        QCOMPARE(prop("paletteChapters","count").toInt(),7);
+        QTRY_VERIFY(item("paletteChapter16")); QVERIFY(item("paletteChapter10")); QVERIFY(!item("paletteChapter1"));
+        key(Qt::Key_Down); QCOMPARE(prop("paletteChapters","currentIndex").toInt(),5); // A row of five.
+        key(Qt::Key_Right); QCOMPARE(prop("paletteChapters","currentIndex").toInt(),6);
+        key(Qt::Key_Right); QCOMPARE(prop("paletteChapters","currentIndex").toInt(),6); // The last chapter.
+        QCOMPARE(prop("referencePreview","text").toString(),book.value("name").toString() + " 16");
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->book(),69); QCOMPARE(bible->chapter(),16);
         bible->openChapter(69,16);
         QVERIFY(QMetaObject::invokeMethod(window,"chapterStep",Q_ARG(QVariant,1)));
         QCOMPARE(bible->book(),40); QCOMPARE(bible->chapter(),1);
@@ -892,7 +892,6 @@ private slots:
         QCOMPARE(bodyText(1),importedText);
     }
     void referenceAliasesAndBrowsing() {
-        bible->setVersePicker(false); // Explicit legacy chapter-only browsing.
         reference("John3:16");
         QCOMPARE(bible->book(),43); QCOMPARE(bible->chapter(),3); QCOMPARE(bible->selectedStart(),16);
         QVERIFY(prop("reading", "contentY").toDouble() > 0);
@@ -923,8 +922,7 @@ private slots:
         QTRY_VERIFY(!prop("passagePalette", "visible").toBool());
         QVERIFY(bible->error().isEmpty()); QCOMPARE(bible->chapter(),4);
     }
-    void defaultVersePickerAndResume() {
-        QVERIFY(bible->versePicker());
+    void chapterGridAndResume() {
         reference("John 3:16-18");
         bible->setNoteText("Browsing must preserve this range note");
         bible->toggleBookmark();
@@ -935,51 +933,75 @@ private slots:
         QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
         key(Qt::Key_K,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        // A book's chapters are a grid of five columns; there is no verse step.
         type("Matthew"); key(Qt::Key_Right);
-        type("17");
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Browse verses in Matthew 17"));
-        key(Qt::Key_Right);
-        QCOMPARE(window->property("paletteChapter").toInt(),17);
-        QCOMPARE(prop("referenceInput","placeholderText").toString(),QString::fromUtf8("Matthew 17 — verse number"));
-        QCOMPARE(prop("paletteResults","count").toInt(),26);
+        QCOMPARE(window->property("paletteBook").toInt(),40);
+        QTRY_VERIFY(prop("paletteChapters","visible").toBool()); QVERIFY(!prop("paletteResults","visible").toBool());
+        QCOMPARE(prop("paletteChapters","count").toInt(),28);
+        QCOMPARE(prop("referenceInput","placeholderText").toString(),QString::fromUtf8("Matthew — chapter, or chapter:verse"));
+        QCOMPARE(item("paletteChapter2")->y(),item("paletteChapter1")->y());
+        QVERIFY(item("paletteChapter6")->y() > item("paletteChapter5")->y()); // Five to a row.
+        QCOMPARE(item("paletteChapter6")->x(),item("paletteChapter1")->x());
+        // Arrows move through the grid: → one, ↓ a row.
+        key(Qt::Key_Right); key(Qt::Key_Down); key(Qt::Key_Down); key(Qt::Key_Down);
+        QCOMPARE(prop("paletteChapters","currentIndex").toInt(),16);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 17"));
+        // Typing a number narrows the grid to the chapters it starts.
         type("2");
-        QCOMPARE(prop("paletteResults","count").toInt(),8); // 2,20,22..27, never 21.
-        key(Qt::Key_Down); key(Qt::Key_Down);
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 17:22"));
-        const int index = prop("paletteResults","currentIndex").toInt();
-        capture("phase-b-verse-picker");
+        QCOMPARE(prop("paletteChapters","count").toInt(),10); // 2, 20..28.
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 2"));
+        key(Qt::Key_Right); key(Qt::Key_Right);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 21"));
+        const int index = prop("paletteChapters","currentIndex").toInt();
+        capture("chapter-grid");
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space,Qt::ShiftModifier);
         QVERIFY(!prop("passagePalette","visible").toBool());
+        // space resumes the grid where it was.
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
-        QCOMPARE(window->property("paletteChapter").toInt(),17);
-        QCOMPARE(prop("referenceInput","text").toString(),QString("2"));
-        QCOMPARE(prop("paletteResults","currentIndex").toInt(),index);
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 17:22"));
-        key(Qt::Key_Left);
-        QCOMPARE(window->property("paletteChapter").toInt(),0);
         QCOMPARE(window->property("paletteBook").toInt(),40);
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Browse verses in Matthew 17"));
-        key(Qt::Key_Right);
-        key(Qt::Key_Up);
+        QCOMPARE(prop("referenceInput","text").toString(),QString("2"));
+        QCOMPARE(prop("paletteChapters","currentIndex").toInt(),index);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Matthew 21"));
+        // ↑ from the first row reaches Back; ← from the first chapter, and
+        // backspace with nothing typed, return to the books, that book chosen.
+        key(Qt::Key_A,Qt::ControlModifier); key(Qt::Key_Backspace);
+        QCOMPARE(prop("paletteChapters","count").toInt(),28);
+        key(Qt::Key_Down); key(Qt::Key_Up); key(Qt::Key_Up);
         QVERIFY(item("paletteBack")->hasActiveFocus());
-        QCOMPARE(prop("referencePreview","text").toString(),QString("Browse chapters in Matthew"));
-        key(Qt::Key_Return); key(Qt::Key_Left);
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Browse all books"));
+        key(Qt::Key_Down);
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        QCOMPARE(prop("paletteChapters","currentIndex").toInt(),0);
+        key(Qt::Key_Left);
         QCOMPARE(window->property("paletteBook").toInt(),0);
+        QVERIFY(prop("paletteResults","visible").toBool());
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Browse Matthew"));
+        key(Qt::Key_Right); QCOMPARE(window->property("paletteBook").toInt(),40);
+        key(Qt::Key_Backspace); QCOMPARE(window->property("paletteBook").toInt(),0);
         QCOMPARE(navigation.count(),0); QCOMPARE(selection.count(),0);
         QCOMPARE(bible->readingPosition(),position);
         QCOMPARE(bible->collection(),collection);
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
-        type("Matthew"); key(Qt::Key_Return); type("17"); key(Qt::Key_Return);
-        type("21"); key(Qt::Key_Return);
-        QVERIFY(prop("passagePalette","visible").toBool());
-        QCOMPARE(navigation.count(),0);
-        key(Qt::Key_A,Qt::ControlModifier); type("22"); key(Qt::Key_Return);
+        // In a book, chapter:verse goes straight to the verse.
+        key(Qt::Key_A,Qt::ControlModifier); key(Qt::Key_Backspace);
+        type("Matthew"); key(Qt::Key_Return); type("17:22"); key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         QCOMPARE(bible->selectionReference(),QString("Matthew 17:22"));
-        reference("John 4"); QCOMPARE(bible->selectedStart(),0);
+        // A chapter cell opens its chapter, from the keyboard or a click.
+        key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John"); key(Qt::Key_Return); type("4"); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->passage(),QString("John 4")); QCOMPARE(bible->selectedStart(),0);
+        QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
+        key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John"); key(Qt::Key_Return);
+        QTRY_VERIFY(item("paletteChapter3") && item("paletteChapter3")->isVisible());
+        click(item("paletteChapter3"));
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->passage(),QString("John 3"));
         reference("John 3:16-18"); QCOMPARE(bible->selectedEnd(),18);
-        // Explicit entry shortcuts reset mode and all picker context.
+        // Explicit entry shortcuts reset mode and all browsing context.
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("headings"); key(Qt::Key_Escape);
@@ -989,20 +1011,13 @@ private slots:
         key(Qt::Key_K,Qt::ControlModifier);
         QCOMPARE(prop("referenceInput","text").toString(),QString());
         QCOMPARE(window->property("paletteBook").toInt(),0);
-        QCOMPARE(window->property("paletteChapter").toInt(),0);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        // The verse picker setting is gone from Commands.
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
-        type("verse picker"); key(Qt::Key_Return);
-        QTRY_VERIFY(!bible->versePicker());
-        unloadUi(); loadUi();
-        QVERIFY(!bible->versePicker());
-        key(Qt::Key_K,Qt::ControlModifier);
-        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
-        type("John"); key(Qt::Key_Return); type("3"); key(Qt::Key_Right);
-        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
-        QCOMPARE(bible->passage(),QString("John 3")); QCOMPARE(bible->selectedStart(),0);
-        QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
+        type("verse picker");
+        QCOMPARE(prop("paletteResults","count").toInt(),0);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
     }
     void notesOverlayDismissalAndSaveFailure() {
         reference("John 3:16-18");
@@ -1275,9 +1290,8 @@ private slots:
         QTest::qWait(100); // Polish the newly visible settings layout before mouse input.
         QVERIFY(!prop("settingnumbers","checked").toBool());
         QVERIFY(!prop("settingheadings","checked").toBool());
-        QVERIFY(prop("settingversePicker","checked").toBool());
+        QVERIFY(!item("settingversePicker"));
         capture("phase-b-settings");
-        click(item("settingversePicker")); QVERIFY(!bible->versePicker());
         click(item("settingfocus"));
         QVERIFY(prop("settingsDialog","opened").toBool());
         QVERIFY(bible->focusMode());
@@ -1316,7 +1330,7 @@ private slots:
         unloadUi(); loadUi();
         QVERIFY(bible->focusMode()); QVERIFY(!window->property("notesOpen").toBool());
         QVERIFY(!bible->showVerseNumbers()); QVERIFY(!bible->showHeadings());
-        QVERIFY(!bible->versePicker()); QCOMPARE(bible->lineHeight(),1.1);
+        QCOMPARE(bible->lineHeight(),1.1);
         key(Qt::Key_F); QVERIFY(!bible->focusMode());
         key(Qt::Key_N,Qt::AltModifier); key(Qt::Key_H,Qt::AltModifier);
         QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings());
@@ -1326,15 +1340,15 @@ private slots:
         QVERIFY(desktop->setProperty("textScale",1.8));
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
-        type("verse picker");
-        QTRY_VERIFY(item("paletteHintversePicker"));
-        QCOMPARE(prop("paletteHintversePicker","text").toString(),QString("On · alt p"));
+        type("chapter outline");
+        QTRY_VERIFY(item("paletteHintchapterOutline"));
+        QCOMPARE(prop("paletteHintchapterOutline","text").toString(),QString("Off · alt o"));
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
-        QVERIFY(!bible->versePicker());
+        QVERIFY(bible->chapterOutline());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
-        QCOMPARE(prop("referenceInput","text").toString(),QString("> verse picker"));
-        QTRY_COMPARE(prop("paletteHintversePicker","text").toString(),QString("Off · alt p"));
+        QCOMPARE(prop("referenceInput","text").toString(),QString("> chapter outline"));
+        QTRY_COMPARE(prop("paletteHintchapterOutline","text").toString(),QString("On · alt o"));
         key(Qt::Key_A,Qt::ControlModifier); type("> reading settings"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         QVERIFY(prop("settingsDialog","height").toDouble() <= 432);
@@ -1358,8 +1372,8 @@ private slots:
         window->resize(640,480);
         QVERIFY(desktop->setProperty("textScale",scale));
         QVERIFY(!bible->property("blockMode").toBool());
-        key(Qt::Key_P,Qt::AltModifier); QVERIFY(!bible->versePicker());
-        key(Qt::Key_P,Qt::AltModifier); QVERIFY(bible->versePicker());
+        key(Qt::Key_O,Qt::AltModifier); QVERIFY(bible->chapterOutline());
+        key(Qt::Key_O,Qt::AltModifier); QVERIFY(!bible->chapterOutline());
         key(Qt::Key_P,Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_VERIFY(prop("passagePalette","opened").toBool());
         key(Qt::Key_Space,Qt::ControlModifier);
@@ -1367,7 +1381,7 @@ private slots:
         type("reading settings"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         QTest::qWait(100);
-        for (const auto id : {"numbers","headings","versePicker","focus"}) {
+        for (const auto id : {"numbers","headings","chapterOutline","focus"}) {
             const QByteArray name = QByteArray("setting") + id;
             auto control = item(name);
             auto label = item(name + "Label");
@@ -1388,9 +1402,9 @@ private slots:
             QCOMPARE(track->property("radius").toDouble(),qMin(desktop->cornerRadius(),qMin(track->width(),track->height()) / 2));
             QCOMPARE(thumb->property("radius").toDouble(),qMin(desktop->cornerRadius(),qMin(thumb->width(),thumb->height()) / 2));
         }
-        key(Qt::Key_N,Qt::AltModifier); key(Qt::Key_H,Qt::AltModifier); key(Qt::Key_P,Qt::AltModifier); key(Qt::Key_L,Qt::AltModifier);
+        key(Qt::Key_N,Qt::AltModifier); key(Qt::Key_H,Qt::AltModifier); key(Qt::Key_O,Qt::AltModifier); key(Qt::Key_L,Qt::AltModifier);
         QVERIFY(!bible->showVerseNumbers()); QVERIFY(!bible->showHeadings());
-        QVERIFY(!bible->versePicker()); QVERIFY(bible->property("blockMode").toBool());
+        QVERIFY(bible->chapterOutline()); QVERIFY(bible->property("blockMode").toBool());
         key(Qt::Key_Equal,Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(),1.6);
         key(Qt::Key_Minus,Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(),1.5);
         key(Qt::Key_Minus,Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(),1.4);
@@ -1405,7 +1419,7 @@ private slots:
         key(Qt::Key_0,Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(),1.5);
         unloadUi(); loadUi();
         QVERIFY(!bible->showVerseNumbers()); QVERIFY(!bible->showHeadings());
-        QVERIFY(!bible->versePicker()); QVERIFY(bible->property("blockMode").toBool());
+        QVERIFY(bible->chapterOutline()); QVERIFY(bible->property("blockMode").toBool());
     }
     void paletteChevronsAndFreshSnapshots() {
         key(Qt::Key_K,Qt::ControlModifier);
@@ -1416,17 +1430,16 @@ private slots:
         QCOMPARE(prop("paletteSearch","text").toString(),QString("Search"));
         QVERIFY(!prop("paletteSearch","emphasized").toBool());
         type("John"); key(Qt::Key_Return);
-        QTRY_VERIFY(item("paletteChevron0")->isVisible());
-        type("3"); key(Qt::Key_Return);
-        QTRY_VERIFY(item("paletteChevron0"));
-        QVERIFY(!item("paletteChevron0")->isVisible());
-        type("2"); key(Qt::Key_Down);
-        const int row = prop("paletteResults","currentIndex").toInt();
+        QTRY_VERIFY(prop("paletteChapters","visible").toBool());
+        QVERIFY(!prop("paletteResults","visible").toBool());
+        type("2"); key(Qt::Key_Right);
+        const int row = prop("paletteChapters","currentIndex").toInt();
+        QCOMPARE(row,1);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QCOMPARE(prop("referenceInput","text").toString(),QString("2"));
-        QCOMPARE(prop("paletteResults","currentIndex").toInt(),row);
-        QCOMPARE(window->property("paletteChapter").toInt(),3);
+        QCOMPARE(prop("paletteChapters","currentIndex").toInt(),row);
+        QCOMPARE(window->property("paletteBook").toInt(),43);
         key(Qt::Key_Space,Qt::ControlModifier);
         QCOMPARE(prop("referenceInput","text").toString(),QString("> "));
         QTRY_VERIFY(item("paletteChevron0"));
@@ -1441,14 +1454,9 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         key(Qt::Key_Space); QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QCOMPARE(prop("referenceInput","text").toString(),QString("> headings"));
-        bible->setVersePicker(false);
         key(Qt::Key_K,Qt::ControlModifier);
         QCOMPARE(window->property("paletteBook").toInt(),0);
-        QCOMPARE(window->property("paletteChapter").toInt(),0);
         QTRY_VERIFY(item("paletteChevron0")->isVisible());
-        type("John"); key(Qt::Key_Return);
-        QTRY_VERIFY(item("paletteChevron0"));
-        QVERIFY(!item("paletteChevron0")->isVisible());
     }
     void keybindingEdgesAndOverlayScrollbar() {
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
@@ -1567,10 +1575,10 @@ private slots:
         QTRY_VERIFY(!window->property("modalOpen").toBool());
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
-        type("verse picker");
+        type("chapter outline");
         key(Qt::Key_PageDown); key(Qt::Key_PageUp);
         QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
-        key(Qt::Key_Return); QTRY_VERIFY(!bible->versePicker());
+        key(Qt::Key_Return); QTRY_VERIFY(bible->chapterOutline());
     }
     void savedDeleteConfirmationAndIcons() {
         reference("John 3:16-18");
@@ -1878,7 +1886,6 @@ private slots:
         QCOMPARE(bible->passage(),QString("Revelation 4"));
     }
     void rightArrowBrowsingAndEditing() {
-        bible->setVersePicker(false);
         reference("John 3:16");
         key(Qt::Key_K,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
@@ -1924,10 +1931,10 @@ private slots:
         key(Qt::Key_Up);
         QVERIFY(item("paletteBack")->hasActiveFocus());
         QVERIFY(prop("paletteBack","emphasized").toBool());
-        QCOMPARE(prop("paletteResults","currentIndex").toInt(),-1);
+        QCOMPARE(prop("paletteChapters","currentIndex").toInt(),-1);
         key(Qt::Key_Down);
         QVERIFY(item("referenceInput")->hasActiveFocus());
-        QCOMPARE(prop("paletteResults","currentIndex").toInt(),0);
+        QCOMPARE(prop("paletteChapters","currentIndex").toInt(),0);
         key(Qt::Key_Up); key(Qt::Key_Return);
         QCOMPARE(window->property("paletteBook").toInt(),0);
         QVERIFY(item("referenceInput")->hasActiveFocus());
@@ -1942,8 +1949,13 @@ private slots:
         QCOMPARE(prop("referenceInput","cursorPosition").toInt(),0);
         key(Qt::Key_Left);
         QCOMPARE(window->property("paletteBook").toInt(),0);
-        type("John"); key(Qt::Key_Return); type("1"); key(Qt::Key_Down);
-        // Once navigating results, Left backs out even with a query present.
+        type("John"); key(Qt::Key_Return); type("1"); key(Qt::Key_Right);
+        QCOMPARE(prop("paletteChapters","currentIndex").toInt(),1);
+        // Once navigating the grid, ← moves through it even with a query
+        // present, and backs out from its first chapter.
+        key(Qt::Key_Left);
+        QCOMPARE(window->property("paletteBook").toInt(),43);
+        QCOMPARE(prop("paletteChapters","currentIndex").toInt(),0);
         key(Qt::Key_Left);
         QCOMPARE(window->property("paletteBook").toInt(),0);
         type("John"); key(Qt::Key_Return); key(Qt::Key_Up); key(Qt::Key_Left);
@@ -2254,7 +2266,6 @@ private slots:
         QCOMPARE(prop("tagsUi","page").toString(),QString("manage"));
     }
     void palettePreviewMatchesAcceptance() {
-        bible->setVersePicker(false);
         QString psalmName;
         for (const auto &entry : bible->books())
             if (entry.toMap().value("id").toInt() == 19) psalmName = entry.toMap().value("name").toString();
@@ -2279,7 +2290,7 @@ private slots:
         QCOMPARE(window->property("paletteBook").toInt(),19);
         type("1");
         QCOMPARE(prop("referencePreview","text").toString(),psalmName + " 1");
-        key(Qt::Key_Down);
+        key(Qt::Key_Right);
         QCOMPARE(prop("referencePreview","text").toString(),psalmName + " 10");
         QCOMPARE(navigation.count(),0);
         QCOMPARE(bible->selectionReference(),QString("John 3:16"));
@@ -2288,7 +2299,7 @@ private slots:
         QCOMPARE(bible->book(),19); QCOMPARE(bible->chapter(),10);
         key(Qt::Key_K,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
-        type("Psalms"); key(Qt::Key_Return); type("1"); key(Qt::Key_Down);
+        type("Psalms"); key(Qt::Key_Return); type("1"); key(Qt::Key_Right);
         QCOMPARE(prop("referencePreview","text").toString(),psalmName + " 10");
         // Editing resets the list override and restores the typed destination.
         type(":2");
@@ -3698,13 +3709,13 @@ private slots:
             QSqlQuery query(db);
             QVERIFY(query.exec("CREATE TRIGGER reject_preferences BEFORE UPDATE ON preferences BEGIN SELECT RAISE(ABORT,'preference disk failure'); END"));
             const auto toast = prop("toast","text");
-            for (auto toggle : {Qt::Key_N,Qt::Key_H,Qt::Key_P,Qt::Key_L,Qt::Key_F}) {
+            for (auto toggle : {Qt::Key_N,Qt::Key_H,Qt::Key_O,Qt::Key_L,Qt::Key_F}) {
                 key(toggle,toggle == Qt::Key_F ? Qt::NoModifier : Qt::AltModifier);
                 QVERIFY(bible->error().contains("preference disk failure"));
                 QCOMPARE(prop("toast","text"),toast);
                 QVERIFY(!item("toast")->isVisible());
             }
-            QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings()); QVERIFY(bible->versePicker());
+            QVERIFY(bible->showVerseNumbers()); QVERIFY(bible->showHeadings()); QVERIFY(!bible->chapterOutline());
             QVERIFY(!bible->blockMode()); QVERIFY(!bible->focusMode());
             QVERIFY(query.exec("DROP TRIGGER reject_preferences"));
             key(Qt::Key_N,Qt::AltModifier); checkToast("Show verse numbers off");
@@ -4103,7 +4114,7 @@ private slots:
             {"switchVersion","Switch version","ctrl v"},
             {"bibleSearch","Search Bible","ctrl /"}, {"help","Keybindings","?"},
             {"numbers","Show verse numbers","alt n"}, {"headings","Show headings","alt h"},
-            {"versePicker","Verse picker","alt p"}, {"readingMode","Layout","alt l"},
+            {"chapterOutline","Chapter outline","alt o"}, {"readingMode","Layout","alt l"},
             {"soundEffects","Sound effects","alt s"}, {"reduceMotion","Animations","alt m"},
             {"lineMore","Increase line height","ctrl alt ="}, {"lineLess","Decrease line height","ctrl alt -"},
             {"lineReset","Reset line height","ctrl alt 0"}, {"manageTags","Manage tags","ctrl t"},

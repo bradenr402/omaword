@@ -273,8 +273,12 @@ ApplicationWindow {
     property bool movingSelection: false
     property int collectionTab: 0
     property int paletteBook: 0
-    property int paletteChapter: 0
     property string paletteBookName: ""
+    // A book's chapters are a grid of numbers (paletteChapters); everything
+    // else is a list (paletteResults). paletteList is the one showing.
+    readonly property int paletteColumns: 5
+    readonly property bool paletteChapterGrid: !paletteTextMode && paletteBook > 0 && !referenceInput.text.trim().startsWith(">")
+    readonly property Item paletteList: paletteChapterGrid ? paletteChapters : paletteResults
     property bool paletteArrowUsed: false
     property var paletteSnapshot: null
     property bool paletteCleared: false
@@ -506,15 +510,15 @@ ApplicationWindow {
     readonly property var paletteDestination: {
         if (paletteTextMode) return { entry: paletteSearchCurrent || !paletteTextQuery.length ? paletteResults.model[paletteResults.currentIndex] : null, reference: "" }
         let query = referenceInput.text.trim()
-        let entry = paletteResults.model[paletteResults.currentIndex]
+        let entry = paletteList.model[paletteList.currentIndex]
         if (entry && entry.candidate) return { entry: entry, reference: entry.reference }
         if (entry && (paletteArrowUsed || !query || query.startsWith(">")
                 || (paletteBook > 0 && /^\d+$/.test(query))
                 || (paletteBook === 0 && !/\d/.test(query)))) {
             return { entry: entry, reference: entry.chapter ? entry.title : "" }
         }
-        return { entry: null, reference: paletteBook > 0 && /^[\d:\s–-]+$/.test(query)
-            ? paletteBookName + " " + (paletteChapter > 0 && !query.includes(":") ? paletteChapter + ":" : "") + query : query }
+        // A book's grid takes "3:16" for that book's chapter and verse.
+        return { entry: null, reference: paletteBook > 0 && /^[\d:\s–-]+$/.test(query) ? paletteBookName + " " + query : query }
     }
     readonly property var paletteResolution: {
         if (paletteTextMode) return { valid: false, reference: "", error: "" }
@@ -522,8 +526,6 @@ ApplicationWindow {
         let currentBook = bible.book
         let ready = bible.ready
         let destination = paletteDestination
-        if (destination.entry && destination.entry.chapter && !destination.entry.verse && bible.versePicker)
-            return { valid: true, reference: "Browse verses in " + destination.entry.title }
         if (destination.entry && !destination.reference)
             return { valid: true, reference: destination.entry.book ? "Browse " + destination.entry.title : destination.entry.title }
         return bible.resolveReference(destination.reference)
@@ -550,7 +552,7 @@ ApplicationWindow {
     // keys close it first and then act: palettes, dialogs, and reading toggles.
     // With Notes open (outside the editor) they act over it.
     readonly property var panelLeavingActions: ["books", "bibleSearch", "commands", "help", "settings", "switchVersion",
-        "about", "import", "removeVersion", "focus", "numbers", "headings", "versePicker", "wordsOfJesus", "chapterOutline",
+        "about", "import", "removeVersion", "focus", "numbers", "headings", "wordsOfJesus", "chapterOutline",
         "marginNotes", "readingMode", "soundEffects", "reduceMotion"]
     readonly property bool panelSwitchKeys: sidePanel.length > 0 && bible.ready && !bible.busy && !dialogOpen
         && !findPromptOpen && !rangeEditing && !textInputActive()
@@ -1716,7 +1718,7 @@ ApplicationWindow {
     function mouseNavigate(forward) {
         if (contextMenu.visible) { contextMenu.close(); return }
         if (passagePalette.visible) {
-            if (!forward && (paletteBook > 0 || paletteChapter > 0)) backToBooks()
+            if (!forward && paletteBook > 0) backToBooks()
             else rejected()
             return
         }
@@ -2870,11 +2872,10 @@ ApplicationWindow {
             const saved = paletteSnapshot
             paletteBookName = paletteSnapshot.name
             paletteBook = paletteSnapshot.book
-            paletteChapter = paletteSnapshot.chapter
             referenceInput.text = paletteSnapshot.query
             paletteArrowUsed = paletteSnapshot.arrow
-            paletteResults.currentIndex = paletteSnapshot.row
-            paletteResults.positionViewAtIndex(paletteSnapshot.row, ListView.Contain)
+            paletteList.currentIndex = paletteSnapshot.row
+            paletteList.positionViewAtIndex(paletteSnapshot.row, ListView.Contain)
             if (paletteTextMode) {
                 pendingSearchResume = saved
                 Qt.callLater(app.restoreSearchPalette)
@@ -2884,7 +2885,7 @@ ApplicationWindow {
         passagePalette.open()
         referenceInput.forceActiveFocus()
     }
-    // The Passage palette at the reader's book, its chapters listed with the
+    // The Passage palette at the reader's book, its chapter grid with the
     // current one chosen (clicking the chapter title).
     function openChapterList() {
         if (rangeEditing || !bible.ready || bible.busy) { rejected(); return }
@@ -2897,14 +2898,14 @@ ApplicationWindow {
         referenceInput.text = ""
         paletteArrowUsed = true
         const row = Math.max(0, Array.from(book.chapterNumbers).indexOf(bible.chapter))
-        paletteResults.currentIndex = row
-        paletteResults.positionViewAtIndex(row, ListView.Contain)
+        paletteChapters.currentIndex = row
+        paletteChapters.positionViewAtIndex(row, GridView.Contain)
         referenceInput.forceActiveFocus()
     }
     function rememberPalette() {
-        paletteSnapshot = { query: referenceInput.text, book: paletteBook, chapter: paletteChapter,
-            name: paletteBookName, row: paletteResults.currentIndex, arrow: paletteArrowUsed,
-            position: paletteResults.contentY, generation: bible.textGeneration }
+        paletteSnapshot = { query: referenceInput.text, book: paletteBook,
+            name: paletteBookName, row: paletteList.currentIndex, arrow: paletteArrowUsed,
+            position: paletteList.contentY, generation: bible.textGeneration }
     }
     // One esc closes the palette in any mode; space resumes it, query and all.
     function escapePalette() { passagePalette.close() }
@@ -3851,7 +3852,6 @@ ApplicationWindow {
         { id: "focus", group: "Reading", title: "Focus mode", sequences: ["F"], setting: "focusMode", command: true },
         { id: "numbers", group: "Reading", title: "Show verse numbers", sequences: ["Alt+N"], setting: "showVerseNumbers", command: true },
         { id: "headings", group: "Reading", title: "Show headings", sequences: ["Alt+H"], setting: "showHeadings", command: true },
-        { id: "versePicker", group: "Reading", title: "Verse picker", sequences: ["Alt+P"], setting: "versePicker", command: true },
         { id: "chapterOutline", group: "Reading", title: "Chapter outline", sequences: ["Alt+O"], setting: "chapterOutline", command: true },
         // alt w: w writes a note; alt w shows notes in the margin.
         { id: "marginNotes", group: "Reading", title: "Margin notes", sequences: ["Alt+W"], setting: "marginNotes", command: true },
@@ -3960,9 +3960,10 @@ ApplicationWindow {
         && (!referenceInput.activeFocus || (referenceInput.selectedText.length === 0
             && (!referenceInput.text.length || referenceInput.cursorPosition === 0 || paletteArrowUsed)))
     function paletteHintParts() {
-        return [[["Up", "Down"], "choose"], paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
+        return [[paletteChapterGrid ? ["Left", "Right", "Up", "Down"] : ["Up", "Down"], "choose"],
+            paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
             ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
-            paletteLeftGoesBack ? ["Left", "back", app.backToBooks] : null,
+            paletteChapterGrid ? ["Backspace", "books", app.backToBooks] : paletteLeftGoesBack ? ["Left", "back", app.backToBooks] : null,
             // tab / shift tab cycle Passage → Search → Command.
             bible.ready ? ["Tab", "mode", function() { app.cyclePaletteMode(1) }] : null, ["Escape", "close", app.escapePalette]]
     }
@@ -4134,12 +4135,6 @@ ApplicationWindow {
             return actions.filter(function(c) { return c.command && actionTitle(c).toLowerCase().indexOf(query) >= 0 })
                 .map(function(c) { return { title: actionTitle(c), hint: actionHint(c), action: c.id } })
         }
-        if (paletteChapter > 0) {
-            return Array.from(bible.chapterVerses(paletteBook, paletteChapter))
-                .filter(function(v) { return !query || String(v.number).startsWith(query) })
-                .map(function(v) { return { title: paletteBookName + " " + paletteChapter + ":" + v.number,
-                    hint: "Verse " + v.number, book: paletteBook, chapter: paletteChapter, verse: v.number } })
-        }
         if (paletteBook > 0) {
             let book = Array.from(bible.books).find(function(b) { return b.id === paletteBook })
             let result = []
@@ -4207,15 +4202,7 @@ ApplicationWindow {
             }
             passagePalette.pendingAction = entry.action
             passagePalette.close()
-        } else if (entry.verse) jump(entry.title)
-        else if (entry.chapter) {
-            if (!bible.versePicker) { openChapter(entry.book, entry.chapter); return }
-            paletteChapter = entry.chapter
-            referenceInput.text = ""
-            paletteArrowUsed = false
-            paletteResults.currentIndex = 0
-            referenceInput.forceActiveFocus()
-        }
+        } else if (entry.chapter) openChapter(entry.book, entry.chapter)
         else {
             // Changing the book rebuilds the results model; snapshot the entry first.
             let book = entry.book
@@ -4223,7 +4210,9 @@ ApplicationWindow {
             paletteBookName = name
             paletteBook = book
             referenceInput.text = ""
-            paletteResults.currentIndex = 0
+            paletteArrowUsed = false
+            paletteChapters.currentIndex = 0
+            paletteChapters.positionViewAtBeginning()
             referenceInput.forceActiveFocus()
         }
     }
@@ -4234,23 +4223,19 @@ ApplicationWindow {
         else if (paletteResolution.valid) jump(destination.reference)
         else sounds.play("error")
     }
+    // Back from a book's chapters to the books, that book chosen.
     function backToBooks() {
-        if (paletteChapter > 0) {
-            let chapter = paletteChapter
-            paletteChapter = 0
-            referenceInput.text = ""
+        const book = paletteBook
+        resetBooks()
+        const row = Array.from(paletteResults.model).findIndex(function(entry) { return entry.book === book && !entry.chapter && !entry.recent })
+        if (row > 0) {
             paletteArrowUsed = true
-            const row = Array.from(bible.chaptersForBook(paletteBook)).indexOf(chapter)
             paletteResults.currentIndex = row
             paletteResults.positionViewAtIndex(row, ListView.Contain)
-            referenceInput.forceActiveFocus()
-            return
         }
-        resetBooks()
         referenceInput.forceActiveFocus()
     }
     function resetBooks() {
-        paletteChapter = 0
         paletteBook = 0
         paletteBookName = ""
         referenceInput.text = ""
@@ -4275,31 +4260,38 @@ ApplicationWindow {
     // list), then on into the next loaded page; home to the first.
     function paletteListKey(event) {
         if (event.modifiers !== Qt.NoModifier) return false
-        const page = Math.max(1, Math.floor(paletteResults.height / (44 * scale)))
+        const rows = Math.max(1, Math.floor(paletteList.height / (44 * scale)))
+        const page = paletteChapterGrid ? rows * paletteColumns : rows
         if (event.key === Qt.Key_PageDown) movePalette(page)
         else if (event.key === Qt.Key_PageUp) movePalette(-page)
         else if (event.key === Qt.Key_End && paletteArrowUsed) {
-            if (paletteResults.currentIndex >= paletteResults.count - 1) loadMorePalette()
-            else movePalette(paletteResults.count - 1 - paletteResults.currentIndex)
-        } else if (event.key === Qt.Key_Home && paletteArrowUsed) movePalette(-paletteResults.currentIndex)
+            if (paletteList.currentIndex >= paletteList.count - 1) loadMorePalette()
+            else movePalette(paletteList.count - 1 - paletteList.currentIndex)
+        } else if (event.key === Qt.Key_Home && paletteArrowUsed) movePalette(-paletteList.currentIndex)
         else return false
         event.accepted = true
         return true
     }
+    // ↑ ↓ move a row: in the chapter grid, a row of paletteColumns.
+    function paletteRow(direction) { movePalette(direction * (paletteChapterGrid ? paletteColumns : 1)) }
     function movePalette(delta) {
         paletteArrowUsed = true
-        if (delta < 0 && paletteResults.currentIndex <= 0 && paletteBack.visible) {
-            paletteResults.currentIndex = -1
+        const view = paletteList
+        // Above the first row (the grid's first row too) is Back.
+        if (delta < 0 && paletteBack.visible && (view.currentIndex <= 0
+                || (paletteChapterGrid && delta === -paletteColumns && view.currentIndex < paletteColumns))) {
+            view.currentIndex = -1
             paletteBack.forceActiveFocus()
             return
         }
-        if (delta > 0 && paletteResults.currentIndex + delta > paletteResults.count - 1 && paletteMoreResults) {
-            loadMorePalette(paletteResults.currentIndex + delta)
+        if (delta > 0 && view.currentIndex + delta > view.count - 1 && paletteMoreResults) {
+            loadMorePalette(view.currentIndex + delta)
             referenceInput.forceActiveFocus()
             return
         }
-        paletteResults.currentIndex = Math.max(0, Math.min(paletteResults.count - 1, paletteResults.currentIndex + delta))
-        paletteResults.positionViewAtIndex(paletteResults.currentIndex, ListView.Contain)
+        // A grid row past the last stops at the last chapter.
+        view.currentIndex = Math.max(0, Math.min(view.count - 1, view.currentIndex + delta))
+        view.positionViewAtIndex(view.currentIndex, ListView.Contain)
         referenceInput.forceActiveFocus()
     }
     // A catalog key: with a side panel open, palette, dialog, and reading
@@ -4373,7 +4365,6 @@ ApplicationWindow {
         case "resetText": bible.setFontSize(18); break
         case "numbers": bible.setShowVerseNumbers(!bible.showVerseNumbers); break
         case "headings": bible.setShowHeadings(!bible.showHeadings); break
-        case "versePicker": bible.setVersePicker(!bible.versePicker); break
         case "wordsOfJesus":
             // A version without \wj marks: say so; the setting stays as it is.
             if (!bible.hasWordsOfJesus) {
@@ -7067,8 +7058,7 @@ ApplicationWindow {
                     implicitHeight: 38 * app.scale
                     font.pixelSize: 15 * app.scale
                     color: desktop.foreground
-                    placeholderText: app.paletteChapter ? app.paletteBookName + " " + app.paletteChapter + " — verse number"
-                        : app.paletteBook ? app.paletteBookName + " — chapter number" : "John 3:16–18, / text, or > command"
+                    placeholderText: app.paletteBook ? app.paletteBookName + " — chapter, or chapter:verse" : "John 3:16–18, / text, or > command"
                     placeholderTextColor: desktop.muted
                     selectByMouse: true
                     leftPadding: 14
@@ -7076,7 +7066,7 @@ ApplicationWindow {
                     background: Rectangle { color: desktop.surface; radius: Math.min(desktop.cornerRadius, width / 2, height / 2); border.color: referenceInput.activeFocus ? app.tint(desktop.accent, 0.65) : desktop.border }
                     onTextChanged: {
                         app.paletteCleared = false; app.paletteArrowUsed = false
-                        app.scheduleBibleSearch(); paletteResults.currentIndex = 0
+                        app.scheduleBibleSearch(); paletteResults.currentIndex = 0; paletteChapters.currentIndex = 0
                     }
                     Keys.onPressed: function(event) {
                         if (app.paletteListKey(event)) return
@@ -7090,6 +7080,10 @@ ApplicationWindow {
                         } else if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier
                                 && (text === "/ " || text === "> ") && cursorPosition === 2 && !selectedText.length) {
                             text = ""; event.accepted = true
+                        } else if (event.key === Qt.Key_Backspace && event.modifiers === Qt.NoModifier
+                                && !text.length && app.paletteBook > 0) {
+                            // Backspace with nothing typed steps back from a book's chapters.
+                            app.backToBooks(); event.accepted = true
                         }
                     }
                     // Dim only the recognized prefix, retaining native input,
@@ -7129,20 +7123,28 @@ ApplicationWindow {
                         }
                     }
                     onAccepted: app.acceptPalette()
-                    Keys.onDownPressed: app.movePalette(1)
-                    Keys.onUpPressed: app.movePalette(-1)
+                    Keys.onDownPressed: app.paletteRow(1)
+                    Keys.onUpPressed: app.paletteRow(-1)
 
+                    // ← and → move through the chapter grid (← from the first
+                    // chapter back to the books); in the book list → opens a
+                    // book's chapters and ← steps back. A typed query keeps them
+                    // for its caret until the arrows take over.
                     Keys.onLeftPressed: function(event) {
                         event.accepted = !app.paletteTextMode && event.modifiers === Qt.NoModifier && app.paletteBook > 0
                             && selectedText.length === 0 && (!text.length || cursorPosition === 0 || app.paletteArrowUsed)
-                        if (event.accepted) app.backToBooks()
+                        if (!event.accepted) return
+                        if (app.paletteChapterGrid && paletteChapters.currentIndex > 0) app.movePalette(-1)
+                        else app.backToBooks()
                     }
                     Keys.onRightPressed: function(event) {
-                        let entry = paletteResults.model[paletteResults.currentIndex]
+                        let entry = app.paletteList.model[app.paletteList.currentIndex]
                         let browsing = (!text.trim() || /^[1-3]?\s*[A-Za-z ]+$/.test(text.trim()) || (app.paletteBook > 0 && /^\d+$/.test(text.trim())) || text.trim().startsWith(">"))
                             && (app.paletteArrowUsed || (cursorPosition === text.length && selectedText.length === 0))
                         event.accepted = !app.paletteTextMode && event.modifiers === Qt.NoModifier && browsing && !!entry
-                        if (event.accepted) app.activatePaletteEntry(entry)
+                        if (!event.accepted) return
+                        if (app.paletteChapterGrid) app.movePalette(1)
+                        else app.activatePaletteEntry(entry)
                     }
                     Keys.onEscapePressed: app.escapePalette()
                     Accessible.name: "Passage reference, / Bible search, or > command"
@@ -7162,7 +7164,7 @@ ApplicationWindow {
             Label {
                 objectName: "referencePreview"
                 visible: !app.paletteTextMode && !referenceInput.text.trim().startsWith(">") && (referenceInput.text.trim().length > 0 || app.paletteBook > 0)
-                text: paletteBack.activeFocus ? (app.paletteChapter ? "Browse chapters in " + app.paletteBookName : "Browse all books") : app.paletteResolution.valid ? app.paletteResolution.reference : app.paletteResolution.error
+                text: paletteBack.activeFocus ? "Browse all books" : app.paletteResolution.valid ? app.paletteResolution.reference : app.paletteResolution.error
                 color: app.paletteResolution.valid ? desktop.accent : desktop.muted
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -7171,24 +7173,70 @@ ApplicationWindow {
             QuietButton {
                 id: paletteBack
                 objectName: "paletteBack"
-                text: app.paletteChapter ? "← " + app.paletteBookName + " chapters" : "← All books"
+                text: "← All books"
                 compact: true
                 visible: !app.paletteTextMode && app.paletteBook > 0
                 emphasized: activeFocus
                 onClicked: app.backToBooks()
-                Keys.onDownPressed: { paletteResults.currentIndex = -1; app.movePalette(1) }
+                Keys.onDownPressed: { app.paletteList.currentIndex = -1; app.movePalette(1) }
                 // Nothing above Back.
                 Keys.onUpPressed: app.rejected()
             }
-            ListView {
-                id: paletteResults
-                objectName: "paletteResults"
+            // A book's chapters: a grid of numbers, the reader's chapter in the accent.
+            GridView {
+                id: paletteChapters
+                objectName: "paletteChapters"
+                visible: app.paletteChapterGrid
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumHeight: 40
                 Layout.preferredHeight: Math.min(340 * app.scale, app.height * 0.43)
                 clip: true
-                model: app.paletteEntries()
+                model: app.paletteChapterGrid ? app.paletteEntries() : []
+                currentIndex: 0
+                // Always clear of the overlay scrollbar (its width): whether it
+                // shows depends on the rows, which depend on this width.
+                cellWidth: Math.floor((width - 18 * app.scale) / app.paletteColumns)
+                cellHeight: 44 * app.scale
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: OverlayScrollbar { objectName: "paletteChaptersScrollbar" }
+                Keys.onReturnPressed: app.acceptPalette()
+                Keys.onEnterPressed: app.acceptPalette()
+                delegate: ItemDelegate {
+                    id: chapterCell
+                    required property var modelData
+                    required property int index
+                    objectName: "paletteChapter" + modelData.chapter
+                    width: paletteChapters.cellWidth - 3 * app.scale
+                    height: paletteChapters.cellHeight - 3 * app.scale
+                    highlighted: GridView.isCurrentItem
+                    focusPolicy: Qt.NoFocus
+                    readonly property bool here: modelData.book === bible.book && modelData.chapter === bible.chapter
+                    onClicked: app.activatePaletteEntry(modelData)
+                    contentItem: Label {
+                        text: chapterCell.modelData.chapter
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        color: chapterCell.here ? desktop.accent : desktop.foreground
+                        font.pixelSize: 14 * app.scale
+                    }
+                    background: Rectangle {
+                        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                        color: chapterCell.highlighted ? app.tint(desktop.accent, 0.11) : chapterCell.hovered ? desktop.surface : "transparent"
+                    }
+                    Accessible.name: chapterCell.modelData.title
+                }
+            }
+            ListView {
+                id: paletteResults
+                objectName: "paletteResults"
+                visible: !app.paletteChapterGrid
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 40
+                Layout.preferredHeight: Math.min(340 * app.scale, app.height * 0.43)
+                clip: true
+                model: app.paletteChapterGrid ? [] : app.paletteEntries()
                 currentIndex: 0
                 spacing: 3
                 boundsBehavior: Flickable.StopAtBounds
@@ -7223,8 +7271,7 @@ ApplicationWindow {
                             Label {
                                 objectName: "paletteChevron" + paletteEntry.index
                                 text: "›"
-                                visible: !app.paletteTextMode && !!paletteEntry.modelData.book && !paletteEntry.modelData.verse
-                                    && (!paletteEntry.modelData.chapter || bible.versePicker)
+                                visible: !app.paletteTextMode && !!paletteEntry.modelData.book && !paletteEntry.modelData.chapter
                                 color: desktop.muted
                                 Layout.leftMargin: 8
                             }

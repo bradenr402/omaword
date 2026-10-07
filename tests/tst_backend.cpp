@@ -195,12 +195,12 @@ private slots:
         const auto property = bible->metaObject()->property(bible->metaObject()->indexOfProperty("books"));
         QVERIFY(!property.isConstant()); QCOMPARE(property.notifySignal().name(),QByteArray("booksChanged"));
         QSignalSpy changed(bible.get(),&BibleBackend::preferencesChanged);
-        bible->setShowVerseNumbers(false); bible->setShowHeadings(false); bible->setVersePicker(false);
+        bible->setShowVerseNumbers(false); bible->setShowHeadings(false); bible->setChapterOutline(true);
         bible->setFocusMode(true); bible->setReadingMode("block"); bible->setFontSize(23); bible->setLineHeight(2.26);
         QCOMPARE(changed.count(),7); QCOMPARE(bible->lineHeight(),2.3);
         bible->setLineHeight(std::numeric_limits<double>::quiet_NaN()); QCOMPARE(changed.count(),7);
         bible.reset(); bible = std::make_unique<BibleBackend>();
-        QVERIFY(!bible->showVerseNumbers()); QVERIFY(!bible->showHeadings()); QVERIFY(!bible->versePicker());
+        QVERIFY(!bible->showVerseNumbers()); QVERIFY(!bible->showHeadings()); QVERIFY(bible->chapterOutline());
         QVERIFY(bible->focusMode()); QCOMPARE(bible->readingMode(),QString("block"));
         QCOMPARE(bible->fontSize(),23); QCOMPARE(bible->lineHeight(),2.3);
         QSqlQuery q(store());

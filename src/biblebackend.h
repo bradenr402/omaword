@@ -46,7 +46,6 @@ class BibleBackend : public QObject
     Q_PROPERTY(double readingPosition READ readingPosition WRITE setReadingPosition NOTIFY readingPositionChanged)
     Q_PROPERTY(bool showVerseNumbers READ showVerseNumbers WRITE setShowVerseNumbers NOTIFY preferencesChanged)
     Q_PROPERTY(bool showHeadings READ showHeadings WRITE setShowHeadings NOTIFY preferencesChanged)
-    Q_PROPERTY(bool versePicker READ versePicker WRITE setVersePicker NOTIFY preferencesChanged)
     Q_PROPERTY(double lineHeight READ lineHeight WRITE setLineHeight NOTIFY preferencesChanged)
     Q_PROPERTY(bool focusMode READ focusMode WRITE setFocusMode NOTIFY preferencesChanged)
     // Color \wj spans (format only); off by default, a shared preference.
@@ -154,7 +153,6 @@ public:
     void setReadingPosition(double position);
     bool showVerseNumbers() const { return m_showVerseNumbers; }
     bool showHeadings() const { return m_showHeadings; }
-    bool versePicker() const { return m_versePicker; }
     double lineHeight() const { return m_lineHeight; }
     bool focusMode() const { return m_focusMode; }
     bool wordsOfJesus() const { return m_wordsOfJesus; }
@@ -194,7 +192,6 @@ public:
     Q_INVOKABLE QVariantMap findPatternInChapter(QString pattern) const;
     Q_INVOKABLE void setShowVerseNumbers(bool value);
     Q_INVOKABLE void setShowHeadings(bool value);
-    Q_INVOKABLE void setVersePicker(bool value);
     Q_INVOKABLE void setLineHeight(double value);
     Q_INVOKABLE void setFocusMode(bool value);
     Q_INVOKABLE void setWordsOfJesus(bool value);
@@ -460,7 +457,7 @@ private:
     int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0;
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
-    bool m_showVerseNumbers = true, m_showHeadings = true, m_versePicker = true, m_focusMode = false, m_wordsOfJesus = false;
+    bool m_showVerseNumbers = true, m_showHeadings = true, m_focusMode = false, m_wordsOfJesus = false;
     bool m_chapterOutline = false, m_marginNotes = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;

@@ -1525,7 +1525,7 @@ bool BibleBackend::initializeStore()
     };
     // Additive to schema 2: annotation backups intentionally exclude preferences.
     schema << "CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY,value NOT NULL) WITHOUT ROWID"
-           << "INSERT OR IGNORE INTO preferences(key,value) VALUES('showVerseNumbers',1),('showHeadings',1),('versePicker',1),('lineHeight',1.5),('focusMode',0),('blockMode',0),('fontSize',18)"
+           << "INSERT OR IGNORE INTO preferences(key,value) VALUES('showVerseNumbers',1),('showHeadings',1),('lineHeight',1.5),('focusMode',0),('blockMode',0),('fontSize',18)"
            << "INSERT OR IGNORE INTO preferences(key,value) SELECT 'readingMode',CASE WHEN typeof(value) IN ('integer','real') AND value=1 THEN 'block' ELSE 'paragraph' END FROM preferences WHERE key='blockMode'";
     // Schema 3 design: one root transaction owns installation metadata, active ID,
     // version-scoped references/annotations, and global preferences. Removed IDs
@@ -1596,7 +1596,6 @@ bool BibleBackend::loadPreferences()
     };
     m_showVerseNumbers = boolean("showVerseNumbers",true);
     m_showHeadings = boolean("showHeadings",true);
-    m_versePicker = boolean("versePicker",true);
     m_focusMode = boolean("focusMode",false);
     m_wordsOfJesus = boolean("wordsOfJesus",false);
     m_chapterOutline = boolean("chapterOutline",false);
@@ -1640,11 +1639,6 @@ void BibleBackend::setShowHeadings(bool value)
 {
     if (value == m_showHeadings || !savePreference("showHeadings",int(value))) return;
     m_showHeadings = value; emit preferencesChanged();
-}
-void BibleBackend::setVersePicker(bool value)
-{
-    if (value == m_versePicker || !savePreference("versePicker",int(value))) return;
-    m_versePicker = value; emit preferencesChanged();
 }
 void BibleBackend::setFocusMode(bool value)
 {
