@@ -511,7 +511,7 @@ private slots:
         // shift L no longer opens the panel.
         call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTest::qWait(100); QVERIFY(!studyOpen());
     }
-    void footnoteMarkersOpenStudyInEveryLayout() {
+    void footnoteMarkersPeekInEveryLayout() {
         for (const QString mode : {"verse", "paragraph", "block"}) {
             setMode(mode); navigate("John 3:16"); bible->clearSelection();
             QTest::qWait(50);
@@ -550,14 +550,38 @@ private slots:
                 QMetaObject::invokeMethod(body, "getText", Q_RETURN_ARG(QString, plain), Q_ARG(int, 0), Q_ARG(int, body->property("length").toInt()));
                 QVERIFY(plain.remove(QChar(0xfffc)).remove(QChar(0x2060)).contains("For God so loved the world that he gave his Son."));
             }
-            // Clicking a marker selects its verse and opens Study → Footnotes there.
-            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, item(second)->mapToScene(QPointF(item(second)->width() / 2, item(second)->height() / 2)).toPoint());
+            // Clicking a marker peeks at its note, in place, below the mark.
+            const QPointF mark = item(second)->mapToScene(QPointF(item(second)->width() / 2, item(second)->height() / 2));
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, mark.toPoint());
+            auto peek = object("peekCard");
+            QTRY_VERIFY2(peek->property("opened").toBool(), qPrintable(mode));
+            QCOMPARE(object("peekBody")->property("text").toString(), QString("Or only begotten"));
+            QCOMPARE(object("peekTitle")->property("text").toString(), QString("Footnote b · John 3:16 · 3 of 3"));
+            QVERIFY(peek->property("y").toDouble() > mark.y());
+            QCOMPARE(bible->selectedStart(), 0); // A peek moves nothing.
+            QVERIFY(!studyOpen());
+            // ↑ steps to the previous note; y copies it and closes.
+            key(Qt::Key_Up); QCOMPARE(object("peekBody")->property("text").toString(), QString("Greek agapao"));
+            key(Qt::Key_Y); QTRY_VERIFY(!peek->property("visible").toBool());
+            QCOMPARE(QGuiApplication::clipboard()->text(), QString("Greek agapao"));
+            // enter opens Study → Footnotes at that note, its verse selected.
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, mark.toPoint());
+            QTRY_VERIFY(peek->property("opened").toBool());
+            key(Qt::Key_Return);
             QTRY_VERIFY2(studyOpen(), qPrintable(mode));
             QCOMPARE(bible->selectionReference(), QString("John 3:16"));
             QCOMPARE(tab(), QString("footnotes"));
             QCOMPARE(studyIndex(), 2);
             QCOMPARE(rows()[2].toMap()["text"].toString(), QString("Or only begotten"));
             key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+            // i peeks at the cursor verse's first note; without one it says so.
+            call("readerFocus"); key(Qt::Key_I);
+            QTRY_VERIFY(peek->property("opened").toBool());
+            QCOMPARE(object("peekBody")->property("text").toString(), QString("Greek agapao"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!peek->property("visible").toBool());
+            bible->selectVerses(4, 4); call("readerFocus"); key(Qt::Key_I);
+            QVERIFY(!peek->property("visible").toBool());
+            QCOMPARE(object("toast")->property("text").toString(), QString("No footnotes on John 3:4"));
             // Focus mode hides the markers.
             bible->setFocusMode(true);
             QTRY_VERIFY2(!item(first) || !item(first)->isVisible(), qPrintable(mode));

@@ -47,7 +47,7 @@ Item {
         annotationRanges = ranges
     }
     function openAnnotation(entry) {
-        if (entry.kind === "footnote") { controller.openFootnote(entry.verse, entry.seq); return }
+        if (entry.kind === "footnote") { controller.peekFootnote(entry.verse, entry.seq); return }
         if (entry.kind === "bookmark") controller.openBookmark(entry.scope || entry.reference)
         else if (entry.kind === "tag") controller.openPassageTags(entry.scope || entry.reference)
         else {
@@ -523,7 +523,7 @@ Item {
             required property var modelData
             readonly property bool opening: modelData.edge !== "close"
             readonly property bool footnote: modelData.kind === "footnote"
-            readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\n" + (root.controller.footnoteHint || "Click: read it in Study")
+            readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\n" + (root.controller.footnoteHint || "Click: peek")
                 : (modelData.kind === "bookmark" ? "Bookmark" : modelData.kind === "note" ? "Note" : "Tag") + "\n"
                 + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
                 + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
@@ -627,7 +627,10 @@ Item {
                         if (mouse.button === Qt.RightButton) {
                             const p = mapToItem(null, mouse.x, mouse.y)
                             root.controller.openPassageMenu(inlineMarker.modelData.verse, p.x, p.y)
-                        } else root.openAnnotation(inlineMarker.modelData)
+                        } else {
+                            const at = inlineMarker.mapToItem(null, 0, 0)
+                            root.controller.peekFootnote(inlineMarker.modelData.verse, inlineMarker.modelData.seq, at.x, at.y, inlineMarker.height)
+                        }
                     } else if (mouse.button === Qt.RightButton) {
                         const entry = inlineMarker.modelData
                         const point = mapToItem(null, mouse.x, mouse.y)

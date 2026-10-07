@@ -549,7 +549,7 @@ ApplicationWindow {
     readonly property bool contextMenuOpen: contextMenu.visible
     readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || tagsUi.visibleModal
     // Everything modal except the side panels (Annotations, Desk, Study).
-    readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool notesClosableFromReader: notesOpen && bible.ready && !bible.busy && !modalOpen && !findPromptOpen && !textInputActive()
     // One side panel at a time. Its opening key does nothing while it is open;
     // another panel's key switches to that panel.
@@ -1802,6 +1802,7 @@ ApplicationWindow {
         if (dialogOpen) {
             if (forward) { rejected(); return }
             if (errorDialog.visible) errorDialog.close()
+            else if (peekCard.visible) peekCard.close()
             else if (catalogDetails.visible) catalogDetails.close()
             else if (cleanDeskConfirmation.visible) cleanDeskConfirmation.close()
             else if (clearHistoryConfirmation.visible) clearHistoryConfirmation.close()
@@ -1834,6 +1835,16 @@ ApplicationWindow {
         theme: desktop
         onRejected: sounds.play("error")
         onAboutToHide: menuGhost.release(contextMenu, contextMenu.origin)
+    }
+    PeekCard {
+        id: peekCard
+        objectName: "peekCard"
+        theme: desktop
+        uiScale: app.scale
+        parts: app.peekParts()
+        onKeyPressed: function(event) { app.peekKey(event) }
+        onAboutToHide: menuGhost.release(peekCard, peekCard.origin)
+        onClosed: app.restorePanelFocus()
     }
     // Exit motion (interfaces.dev: exits subtler than entrances, from their
     // trigger; frequent popups open instantly). Menus and modals open at once
@@ -2228,12 +2239,13 @@ ApplicationWindow {
         if (!action) return ""
         if (bible.busy) return "Wait for the import to finish"
         if (rangeEditing) return "Finish editing the range first · " + KeyNotation.format("Return") + " saves, " + KeyNotation.format("Escape") + " cancels"
-        if (["bookmark", "highlight", "tags", "toggleDesk", "notes", "editRange", "copy", "copyPlain", "compare"].includes(action.id) && !hasSelection)
+        if (["bookmark", "highlight", "tags", "toggleDesk", "notes", "editRange", "copy", "copyPlain", "compare", "peek"].includes(action.id) && !hasSelection)
             return "Select a verse first"
         if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen)
             return "Open a note first · " + keyText("notes")
         if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
         if (action.id === "compare" && hasSelection && bible.versions.length < 2) return "Add another version to compare"
+        if (action.id === "peek" && hasSelection) return "No footnotes on " + bible.passage + ":" + bible.cursorVerse
         if (action.id === "undo" && !bible.canUndo) return "Nothing to undo"
         if (action.id === "redo" && !bible.canRedo) return "Nothing to redo"
         if (action.id === "ribbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon yet · " + keyText("placeRibbon") + " places it"
@@ -2746,11 +2758,69 @@ ApplicationWindow {
         if (sidePanel === "related") { tagsUi.setStudyTab("footnotes", { verse: verse, seq: seq }); return }
         if (leaveSidePanel("related")) tagsUi.openStudy("footnotes", { verse: verse, seq: seq })
     }
+    // Peek (PeekCard): a footnote read where it is (a marker's click, or i on
+    // the cursor verse); ↑ ↓ step through the chapter's notes in the card.
+    property int peekIndex: -1
+    readonly property var peekNote: peekIndex >= 0 ? bible.footnotes[peekIndex] || null : null
+    function peekFootnote(verse, seq, sceneX, sceneY, lineHeight) {
+        if (!bible.ready || bible.busy || rangeEditing || modalOpen) return
+        const index = Array.from(bible.footnotes).findIndex(function(note) { return note.verse === verse && note.seq === seq })
+        if (index < 0) { rejected(); return }
+        const point = sceneX === undefined ? verseMenuPoint(verse) : Qt.point(sceneX, sceneY)
+        showPeekNote(index)
+        peekCard.show(point.x, point.y, lineHeight || 0)
+    }
+    function peekVerseFootnotes() {
+        const note = Array.from(bible.footnotes).find(function(note) { return note.verse === bible.cursorVerse })
+        if (!note) { rejected(unavailableReason("peek")); return }
+        peekFootnote(note.verse, note.seq)
+    }
+    function showPeekNote(index) {
+        const notes = Array.from(bible.footnotes)
+        peekIndex = index
+        const note = notes[index]
+        peekCard.title = (note.kind === "fe" ? "Endnote " : "Footnote ") + footnoteMark(note.caller) + " · " + bible.passage + ":" + note.verse
+            + (notes.length > 1 ? " · " + (index + 1) + " of " + notes.length : "")
+        peekCard.body = note.text
+    }
+    function peekParts() {
+        const ready = peekCard.opened && !!peekNote && !bible.busy
+        return [["Return", "Study", app.studyFromPeek, ready], ["Y", "copy", app.copyPeek, ready],
+            bible.footnotes.length > 1 ? [["Up", "Down"], "notes"] : null, ["Escape", "close", function() { peekCard.close() }]]
+    }
+    function stepPeek(delta) {
+        const next = peekIndex + delta
+        if (next < 0 || next >= bible.footnotes.length) { sounds.play("boundary"); return }
+        showPeekNote(next)
+    }
+    function studyFromPeek() {
+        const note = peekNote
+        if (!note) return
+        peekCard.close()
+        openFootnote(note.verse, note.seq)
+    }
+    function copyPeek() {
+        const note = peekNote
+        if (!note) return
+        peekCard.close()
+        copyText(note.text, "Footnote " + footnoteMark(note.caller))
+    }
+    function peekKey(event) {
+        if ((event.modifiers & ~Qt.KeypadModifier) & ~Qt.ShiftModifier) return
+        const plain = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
+        if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) studyFromPeek()
+        else if (event.key === Qt.Key_Y) copyPeek()
+        else if (plain && (event.key === Qt.Key_Down || event.key === Qt.Key_J)) stepPeek(1)
+        else if (plain && (event.key === Qt.Key_Up || event.key === Qt.Key_K)) stepPeek(-1)
+        else if (event.key !== Qt.Key_Escape) { rejected("Not a key in the peek · " + KeyNotation.format("Escape") + " closes it") }
+        else return
+        event.accepted = true
+    }
     // Footnote and inline annotation markers take clicks a little beyond their
     // drawn cell: a larger, invisible target that never moves the text.
     readonly property real markerHitMargin: 5 * readerScale
     // Footnote markers stay out of the tab order; their tooltips name the key.
-    readonly property string footnoteHint: "Click: read it in Study · " + KeyNotation.format("Shift+S") + " → Footnotes"
+    readonly property string footnoteHint: "Click or " + keyText("peek") + ": peek · " + KeyNotation.format("Shift+S") + " → Footnotes"
     function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
     // Verse rows reserve footnote cells like BlockDocument: a word joiner and a
     // transparent image at each note's plain-text offset. Paint-only markers
@@ -3929,6 +3999,8 @@ ApplicationWindow {
         { id: "desk", group: "Panels", title: "Open Desk", sequences: ["Shift+D"], command: true },
         // The Study panel (Cross-references, Footnotes, Tags); id kept for compatibility.
         { id: "related", group: "Panels", title: "Study panel", sequences: ["Shift+S"], command: true },
+        // A popover (PeekCard), read in place; its own keys step and act.
+        { id: "peek", group: "Panels", title: "Peek at the verse's footnotes", sequences: ["I"], command: true },
         { id: "books", group: "Palettes and windows", title: "Navigate to a passage", sequences: ["Ctrl+K"], scope: "palette", command: true },
         { id: "history", group: "Palettes and windows", title: "History", sequences: ["Ctrl+H"], scope: "palette", command: true },
         { id: "commands", group: "Palettes and windows", title: "Open commands", sequences: ["Ctrl+Space"], aliases: ["Ctrl+Shift+P"], aliasReason: "the command palette key in VS Code and its kin.", scope: "palette" },
@@ -4194,6 +4266,7 @@ ApplicationWindow {
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
         if (action.id === "compare") return hasSelection && bible.versions.length > 1
+        if (action.id === "peek") return hasSelection && Array.from(bible.footnotes).some(function(note) { return note.verse === bible.cursorVerse })
         if (action.id === "undo") return bible.canUndo
         if (action.id === "redo") return bible.canRedo
         if (action.id === "ribbon") return bible.ready && !!bible.ribbon.versionId
@@ -4661,6 +4734,7 @@ ApplicationWindow {
         case "import": importGuide.open(); break
         case "switchVersion": openVersions(false); break
         case "compare": openCompare(); break
+        case "peek": peekVerseFootnotes(); break
         case "removeVersion": openVersions(true); break
         case "help": helpDialog.open(); break
         case "about": aboutDialog.open(); break
@@ -5956,7 +6030,10 @@ ApplicationWindow {
                                             anchors.bottomMargin: -app.markerHitMargin
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: app.openFootnote(verseRow.modelData.number, footnoteMarker.modelData.seq)
+                                            onClicked: {
+                                                const p = footnoteMarker.mapToItem(null, 0, 0)
+                                                app.peekFootnote(verseRow.modelData.number, footnoteMarker.modelData.seq, p.x, p.y, footnoteMarker.height)
+                                            }
                                         }
                                         Accessible.role: Accessible.Button
                                         Accessible.name: "Footnote: " + footnoteMarker.modelData.text

@@ -1712,11 +1712,11 @@ private slots:
             QVERIFY(marker && hit);
             // Taller than the mark (never wider: the next word keeps its clicks), and the text did not move.
             QCOMPARE(hit->width(), marker->width()); QVERIFY(hit->height() > marker->height() + 6);
-            // Mouse: a click just above the drawn cell still opens the footnote.
+            // Mouse: a click just above the drawn cell still peeks at the footnote.
             const QPointF edge = marker->mapToScene(QPointF(marker->width() / 2, -3));
-            clickAt(edge.toPoint()); QTRY_VERIFY(opened("relatedDrawer"));
-            QCOMPARE(bible->selectionReference(), QString("John 3:3"));
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+            clickAt(edge.toPoint()); QTRY_VERIFY(opened("peekCard"));
+            QVERIFY(object("peekBody")->property("text").toString().contains("from above"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("peekCard"));
         }
         // Inline annotation markers too (flowing layouts).
         bible->selectVerses(5, 6); QVERIFY(bible->toggleBookmark()); navigate("John 3:3");

@@ -243,6 +243,16 @@ files.
   and Commands name the step; failures toast instead of the error banner.
   Deleting from Annotations or a marker menu has no confirmation.
 
+### Peek
+- `PeekCard` is a popover for what the text points to, read in place: a
+  modal popup without dim (an outside click only closes it) that opens at
+  once below its anchor (above when there is no room), keeps the keyboard,
+  and exits through `menuGhost`. Its actions are a buttons-mode HintRow; keys
+  it does not take go to the owner (`keyPressed`). Footnotes use it: a
+  marker's click or `i` on the cursor verse shows the note, `↑`/`↓` step
+  through the chapter's notes (`bible.footnotes`) without moving the reader,
+  `y` copies, `enter` opens Study → Footnotes there.
+
 ### Selection bar
 - A verse selection made with the mouse (`mouseSelected`, from Verse rows and
   BlockReader releases) shows a bar above the selection's first line: a
