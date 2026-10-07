@@ -267,7 +267,7 @@ private slots:
         // The preference persists and Settings lists it with its key.
         key(Qt::Key_J, Qt::AltModifier); QTRY_VERIFY(bible->wordsOfJesus());
         BibleBackend reopened; QVERIFY(reopened.wordsOfJesus());
-        key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
+        key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
         QVERIFY(item("settingwordsOfJesus") && item("settingwordsOfJesus")->isVisible());
         QVERIFY(!item("wordsOfJesusUnmarked")->isVisible());
     }
@@ -305,7 +305,7 @@ private slots:
         bible->setWordsOfJesus(false);
         key(Qt::Key_J, Qt::AltModifier); QVERIFY(!bible->wordsOfJesus());
         bible->setWordsOfJesus(true);
-        key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
+        key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
         auto toggle = item("settingwordsOfJesus"); QVERIFY(toggle && toggle->isVisible());
         QVERIFY(!toggle->isEnabled()); QVERIFY(!toggle->property("checked").toBool());
         // Below Margin notes and directly above the hint.
@@ -326,7 +326,7 @@ private slots:
         QVERIFY(bible->wordsOfJesus()); QVERIFY(!toggle->property("checked").toBool());
     }
     void reimportLocalFilePicker() {
-        key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
+        key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
         auto button = item("settingsReimport:study"); QVERIFY(button); QVERIFY(button->isVisible());
         QVERIFY(item("wordsOfJesusUnmarked")->isVisible());
         QVERIFY(QMetaObject::invokeMethod(button, "clicked"));

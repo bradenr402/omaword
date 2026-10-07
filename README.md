@@ -148,7 +148,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl h`: History
 - `ctrl space`: Open commands
 - `space`: Resume last palette
-- `ctrl r`: Reading settings
+- `ctrl ,`: Reading settings
 - `ctrl v`: Switch version
 - `?`: Keybindings
 - `ctrl n`: New window
@@ -263,7 +263,7 @@ These also work, but stay out of the in-app list:
 - Clicking outside a panel, dialog, or picker only closes it (in Edit range and confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error. Mouse back closes the top dialog.
 - Text fields use the app's own menu (Cut · Copy · Paste · Select all; in a note also Open link and Preview). Right-clicking selected text keeps it only when the click is on it; the passage menu (`menu`) keeps a `v` selection, and its copy entries copy it.
 - If a note changes in another window while you type, typing is not interrupted: `ctrl s` keeps your draft, `ctrl shift S` takes the saved text.
-- With Annotations, Desk, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl r`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. The passage menu offers **Edit range** when the selection is annotated, and tooltips on the outline, margin notes, and verse numbers name their keys.
+- With Annotations, Desk, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl ,`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. The passage menu offers **Edit range** when the selection is annotated, and tooltips on the outline, margin notes, and verse numbers name their keys.
 
 ### Your data
 Bible versions, annotations, the Desk, and History stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.

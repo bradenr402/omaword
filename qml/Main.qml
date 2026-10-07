@@ -3809,7 +3809,7 @@ ApplicationWindow {
         { id: "history", group: "Palettes and windows", title: "History", sequences: ["Ctrl+H"], scope: "palette", command: true },
         { id: "commands", group: "Palettes and windows", title: "Open commands", sequences: ["Ctrl+Space"], aliases: ["Ctrl+Shift+P"], aliasReason: "the command palette key in VS Code and its kin.", scope: "palette" },
         { id: "resume", group: "Palettes and windows", title: "Resume last palette", sequences: ["Space"] },
-        { id: "settings", group: "Palettes and windows", title: "Reading settings", sequences: ["Ctrl+R"], scope: "global", command: true },
+        { id: "settings", group: "Palettes and windows", title: "Reading settings", sequences: ["Ctrl+,"], scope: "global", command: true },
         { id: "switchVersion", group: "Palettes and windows", title: "Switch version", sequences: ["Ctrl+V"], scope: "global", command: true },
         { id: "help", group: "Palettes and windows", title: "Keybindings", sequences: ["?"], aliases: ["F1"], aliasReason: "the help key in most desktop apps.", scope: "global", command: true },
         { id: "newWindow", group: "Palettes and windows", title: "New window", sequences: ["Ctrl+N"], scope: "global", command: true },

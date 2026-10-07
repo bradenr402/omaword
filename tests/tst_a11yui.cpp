@@ -920,7 +920,7 @@ private slots:
         struct Launcher { Qt::Key key; Qt::KeyboardModifiers modifiers; const char *surface; };
         const QList<Launcher> launchers = {
             {Qt::Key_K, Qt::ControlModifier, "passagePalette"}, {Qt::Key_Slash, Qt::ControlModifier, "passagePalette"},
-            {Qt::Key_Space, Qt::ControlModifier, "passagePalette"}, {Qt::Key_R, Qt::ControlModifier, "settingsDialog"},
+            {Qt::Key_Space, Qt::ControlModifier, "passagePalette"}, {Qt::Key_Comma, Qt::ControlModifier, "settingsDialog"},
             {Qt::Key_F1, Qt::NoModifier, "helpDialog"}, {Qt::Key_T, Qt::ControlModifier, "tagsSurface"}};
         int n = 0;
         for (const auto &launcher : launchers) {
@@ -1760,7 +1760,7 @@ private slots:
             open(); key(Qt::Key_K, Qt::ControlModifier);
             QTRY_VERIFY2(opened("passagePalette"), panel.drawer); QTRY_VERIFY(!shown(panel.drawer));
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
-            open(); key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(opened("settingsDialog")); QTRY_VERIFY(!shown(panel.drawer));
+            open(); key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(opened("settingsDialog")); QTRY_VERIFY(!shown(panel.drawer));
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
             open(); const bool numbers = bible->showVerseNumbers();
             key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), !numbers); QTRY_VERIFY(!shown(panel.drawer));

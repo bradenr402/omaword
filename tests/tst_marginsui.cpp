@@ -657,7 +657,7 @@ private slots:
         QVERIFY(item("outlineEntry:16") && item("outlineEntry:31"));
         // The preference persists; Settings and Commands list it.
         { BibleBackend reopened; QVERIFY(reopened.chapterOutline()); }
-        key(Qt::Key_R, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
+        key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
         QVERIFY(item("settingchapterOutline") && item("settingchapterOutline")->isVisible());
         QVERIFY(item("settingmarginNotes") && item("settingmarginNotes")->isVisible());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("settingsDialog")->property("visible").toBool());

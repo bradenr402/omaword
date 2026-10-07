@@ -691,7 +691,7 @@ private slots:
         type("layout");
         QTRY_VERIFY(item("keybindingLayout"));
         key(Qt::Key_Return); QTRY_COMPARE(bible->readingMode(),QString("block"));
-        key(Qt::Key_R,Qt::ControlModifier); QTRY_VERIFY(prop("settingsDialog","opened").toBool());
+        key(Qt::Key_Comma,Qt::ControlModifier); QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         QTest::qWait(100);
         click(item("readingMode:paragraph"));
         QCOMPARE(bible->readingMode(),QString("paragraph"));
@@ -786,7 +786,7 @@ private slots:
         QTRY_VERIFY(!prop("importGuide","visible").toBool());
         QVERIFY(!prop("importDialog","visible").toBool());
         // Reading settings work before any version is installed.
-        key(Qt::Key_R,Qt::ControlModifier);
+        key(Qt::Key_Comma,Qt::ControlModifier);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
         key(Qt::Key_Space,Qt::ControlModifier);
@@ -3550,7 +3550,7 @@ private slots:
                 QCOMPARE(bible->collection(),annotations);
             };
             for (auto code : {Qt::Key_J,Qt::Key_M,Qt::Key_X,Qt::Key_F}) isolatedKey(code);
-            for (auto code : {Qt::Key_K,Qt::Key_Space,Qt::Key_D,Qt::Key_R,Qt::Key_V,Qt::Key_Slash}) isolatedKey(code,Qt::ControlModifier);
+            for (auto code : {Qt::Key_K,Qt::Key_Space,Qt::Key_D,Qt::Key_Comma,Qt::Key_V,Qt::Key_Slash}) isolatedKey(code,Qt::ControlModifier);
             for (auto code : {Qt::Key_N,Qt::Key_L}) isolatedKey(code,Qt::AltModifier);
             isolatedKey(Qt::Key_A,Qt::ShiftModifier);
             QVERIFY(!bible->focusMode());
@@ -3908,20 +3908,20 @@ private slots:
         type("Psalms");
         QCOMPARE(prop("referenceInput","text").toString(),QString("Psalms"));
         // Ctrl and Alt app shortcuts are inactive while typing.
-        key(Qt::Key_R,Qt::ControlModifier);
+        key(Qt::Key_Comma,Qt::ControlModifier);
         QCOMPARE(prop("referenceInput","text").toString(),QString("Psalms"));
         QVERIFY(!prop("settingsDialog","visible").toBool());
         key(Qt::Key_N,Qt::AltModifier); QVERIFY(bible->showVerseNumbers());
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
-        key(Qt::Key_R,Qt::ControlModifier);
+        key(Qt::Key_Comma,Qt::ControlModifier);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
         key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(!item("toast")->isVisible());
         // Plain keys and the reader's Alt toggles type; window launchers
-        // (ctrl r, ctrl space, ctrl k, F1) close Notes first (below).
+        // (ctrl ,, ctrl space, ctrl k, F1) close Notes first (below).
         type("notes s "); key(Qt::Key_Question);
         QVERIFY(prop("noteEditor","text").toString().startsWith("notes s ?"));
         key(Qt::Key_H,Qt::AltModifier);
@@ -3955,14 +3955,14 @@ private slots:
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(!item("toast")->isVisible());
         QCOMPARE(bible->noteText(),QString("notes s ?pasted"));
-        // From the editor, ctrl r saves the draft, closes Notes, and opens Settings.
+        // From the editor, ctrl , saves the draft, closes Notes, and opens Settings.
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_End); type(" more"); key(Qt::Key_R,Qt::ControlModifier);
+        key(Qt::Key_End); type(" more"); key(Qt::Key_Comma,Qt::ControlModifier);
         QTRY_VERIFY(prop("settingsDialog","opened").toBool()); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QCOMPARE(bible->noteText(),QString("notes s ?pasted more"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
-        type("settings"); key(Qt::Key_R,Qt::ControlModifier);
+        type("settings"); key(Qt::Key_Comma,Qt::ControlModifier);
         QCOMPARE(prop("keybindingSearch","text").toString(),QString("settings"));
         QVERIFY(!prop("settingsDialog","visible").toBool());
     }
@@ -4108,7 +4108,7 @@ private slots:
             {"clickMenu","Open context menu","right click"},
             {"middleCopy","Copy passage as quotation","middle click"},
             {"contextMenu","Open context menu","menu · shift F10"},
-            {"settings","Reading settings","ctrl r"},
+            {"settings","Reading settings","ctrl ,"},
             {"commands","Open commands","ctrl space"},
             {"newWindow","New window","ctrl n"},
             {"switchVersion","Switch version","ctrl v"},
