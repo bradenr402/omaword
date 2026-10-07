@@ -212,6 +212,8 @@ ApplicationWindow {
         property color surface: "#222830"
         property color border: "#485563"
         property color muted: "#8a96a3"
+        property color selection: "#30475a"
+        property color error: "#e06c75"
         property real textScale: 1
         property real cornerRadius: 8
         property string fontFamily: "DejaVu Sans"
