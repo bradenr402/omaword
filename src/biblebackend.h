@@ -332,6 +332,12 @@ public:
     // passage itself hidden.
     // Rows: canonical scope fields + reference, excerpt, openBible, votes.
     Q_INVOKABLE QVariantList crossReferences(QVariantMap scope = QVariantMap()) const;
+    // Every installed version's text for a scope's endpoints (empty: the
+    // selection), in library order: {versionId, abbreviation, name, active,
+    // available, reference, text}. text is laid out as copySelection(true);
+    // available is false where a version lacks an endpoint (its numbering
+    // differs, or it has no such book).
+    Q_INVOKABLE QVariantList compareVersions(QVariantMap scope = QVariantMap()) const;
     Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
     Q_INVOKABLE void openChapter(int book, int chapter);
     Q_INVOKABLE void previousChapter();

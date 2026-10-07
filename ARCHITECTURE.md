@@ -240,6 +240,13 @@ files.
   and Commands name the step; failures toast instead of the error banner.
   Deleting from Annotations or a marker menu has no confirmation.
 
+### Compare
+- `compareVersions(scope)` reads the scope's endpoints in every installed
+  generation (`TagBible`, read-only), in library order; a version missing
+  either endpoint is `available: false`. The Versions dialog shows them under
+  each row while a selection exists (`c` opens it on the list); copying a row
+  is `copyScope` with that version's ID, and switching keeps the passage.
+
 ### Search
 - Active version only; per-window state. Case-insensitive, whitespace-collapsed,
   partial words; punctuation and accents significant. Headings, numbers, notes,

@@ -2171,11 +2171,12 @@ ApplicationWindow {
         if (!action) return ""
         if (bible.busy) return "Wait for the import to finish"
         if (rangeEditing) return "Finish editing the range first · " + KeyNotation.format("Return") + " saves, " + KeyNotation.format("Escape") + " cancels"
-        if (["bookmark", "highlight", "tags", "toggleDesk", "notes", "editRange", "copy", "copyPlain"].includes(action.id) && !hasSelection)
+        if (["bookmark", "highlight", "tags", "toggleDesk", "notes", "editRange", "copy", "copyPlain", "compare"].includes(action.id) && !hasSelection)
             return "Select a verse first"
         if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen)
             return "Open a note first · " + keyText("notes")
         if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
+        if (action.id === "compare" && hasSelection && bible.versions.length < 2) return "Add another version to compare"
         if (action.id === "undo" && !bible.canUndo) return "Nothing to undo"
         if (action.id === "redo" && !bible.canRedo) return "Nothing to redo"
         if (action.id === "ribbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon yet · " + keyText("placeRibbon") + " places it"
@@ -3589,7 +3590,9 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
-    function openVersions(removing) {
+    // With a selection, Versions shows its text in each version (Compare,
+    // c, starts on the list rather than the search).
+    function openVersions(removing, compare) {
         if (rangeEditing) return
         if (bible.busy || !flushNote()) return
         clearCount()
@@ -3597,9 +3600,24 @@ ApplicationWindow {
         versionDialog.step = 0
         versionDialog.chosen = null
         versionDialog.removeAnnotations = false
+        const rows = !removing && hasSelection && bible.versions.length > 1 ? Array.from(bible.compareVersions(bible.tagScope())) : []
+        const compared = {}
+        for (const row of rows) compared[row.versionId] = row
+        versionDialog.compared = compared
+        versionDialog.compareReference = rows.length ? bible.selectionReference : ""
         versionSearch.text = ""
         versionResults.currentIndex = 0
         versionDialog.open()
+        if (compare) versionResults.forceActiveFocus()
+    }
+    function copyComparedVersion(plainText) {
+        const entry = versionResults.model[versionResults.currentIndex]
+        const row = entry ? versionDialog.compared[entry.id] : null
+        if (!row || !row.available) { rejected(row ? "Not in " + row.abbreviation : ""); return }
+        const scope = Object.assign({}, bible.tagScope(), { versionId: row.versionId })
+        if (!bible.copyScope(scope, !!plainText).length) { rejected(); return }
+        notify(row.reference + " · " + row.abbreviation + (plainText ? " copied as plain text" : " copied"), true)
+        sounds.play("chime")
     }
     // Versions rows (choosing a version): Switch · Re-import · Details & Attribution · Remove…
     function openVersionMenu(index, sceneX, sceneY) {
@@ -3657,6 +3675,12 @@ ApplicationWindow {
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             event.accepted = true
             if (event.modifiers === Qt.NoModifier) acceptVersion()
+            return
+        }
+        if (event.key === Qt.Key_Y && versionDialog.comparing && !textInputActive()
+                && (event.modifiers === Qt.NoModifier || event.modifiers === Qt.ShiftModifier)) {
+            event.accepted = true
+            copyComparedVersion(event.modifiers === Qt.ShiftModifier)
             return
         }
         // Backspace (never while typing in the search) steps back a page.
@@ -3840,6 +3864,10 @@ ApplicationWindow {
         { id: "resume", group: "Palettes and windows", title: "Resume last palette", sequences: ["Space"] },
         { id: "settings", group: "Palettes and windows", title: "Reading settings", sequences: ["Ctrl+,"], scope: "global", command: true },
         { id: "switchVersion", group: "Palettes and windows", title: "Switch version", sequences: ["Ctrl+V"], scope: "global", command: true },
+        // Versions, opened on the selection's text in each version.
+        { id: "compare", group: "Palettes and windows", title: "Compare the selection across versions", sequences: ["C"], command: true },
+        // Bound by the Versions dialog itself, while it compares.
+        { id: "compareCopy", group: "Palettes and windows", title: "Copy the highlighted version's text (Versions, comparing)", sequences: ["Y", "Shift+Y"], scope: "versions", explanation: true },
         { id: "help", group: "Palettes and windows", title: "Keybindings", sequences: ["?"], aliases: ["F1"], aliasReason: "the help key in most desktop apps.", scope: "global", command: true },
         { id: "newWindow", group: "Palettes and windows", title: "New window", sequences: ["Ctrl+N"], scope: "global", command: true },
         // Bound by the Versions dialog itself.
@@ -3984,7 +4012,9 @@ ApplicationWindow {
         if (versionDialog.step === 2) return [[["Left", "Right"], "choose"], ["Return", "select", app.acceptVersion, ready], back, ["Escape", "cancel", function() { versionDialog.close() }]]
         const select = ["Return", "select", app.acceptVersion, ready && versionResults.currentIndex >= 0 && versionResults.count > 0]
         const reimport = reimportableVersion()
-        if (!versionDialog.removing) return [[["Up", "Down"], "choose"], [actionKeys("addVersion")[0], "add", app.addVersionFromPicker, ready],
+        if (!versionDialog.removing) return [[["Up", "Down"], "choose"],
+            versionDialog.comparing ? ["Y", "copy", function() { app.copyComparedVersion(false) }, ready] : null,
+            [actionKeys("addVersion")[0], "add", app.addVersionFromPicker, ready],
             reimport ? [actionKeys("reimportVersion")[0], "re-import", function() { app.reimportVersion(app.reimportableVersion()) }, ready && !catalog.busy] : null,
             select, ["Escape", "cancel", function() { versionDialog.close() }]]
         return [[["Up", "Down"], "choose"], versionSearch.activeFocus ? null : [["Home", "End"], "jump"], select, versionDialog.step > 0 ? back : null, ["Escape", "cancel", function() { versionDialog.close() }]]
@@ -4092,6 +4122,7 @@ ApplicationWindow {
         if (action.id === "copyText" || action.id === "copyTextPlain") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
+        if (action.id === "compare") return hasSelection && bible.versions.length > 1
         if (action.id === "undo") return bible.canUndo
         if (action.id === "redo") return bible.canRedo
         if (action.id === "ribbon") return bible.ready && !!bible.ribbon.versionId
@@ -4545,6 +4576,7 @@ ApplicationWindow {
         case "restore": restoreDialog.open(); break
         case "import": importGuide.open(); break
         case "switchVersion": openVersions(false); break
+        case "compare": openVersions(false, true); break
         case "removeVersion": openVersions(true); break
         case "help": helpDialog.open(); break
         case "about": aboutDialog.open(); break
@@ -6976,6 +7008,10 @@ ApplicationWindow {
         property bool removing: false
         property int step: 0
         property var chosen: null
+        // The selection's text in each version (versionId → compareVersions row).
+        property var compared: ({})
+        property string compareReference: ""
+        readonly property bool comparing: !removing && step === 0 && compareReference.length > 0
         property bool removeAnnotations: false
         readonly property int deskCount: chosen && removeAnnotations && bible.desk.length >= 0 ? bible.deskCountForVersion(chosen.id) : 0
         property bool addPending: false
@@ -6995,7 +7031,8 @@ ApplicationWindow {
             Keys.onPressed: function(event) { app.versionKey(event) }
             Label {
                 objectName: "versionTitle"
-                text: !versionDialog.removing ? "Versions" : versionDialog.step === 0 ? "Remove version"
+                text: !versionDialog.removing ? (versionDialog.comparing ? "Versions · " + versionDialog.compareReference : "Versions")
+                    : versionDialog.step === 0 ? "Remove version"
                     : versionDialog.step === 1 ? "Remove annotations too?" : "Confirm removal"
                 color: desktop.foreground; font.pixelSize: 22 * versionDialog.uiScale
                 Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -7073,6 +7110,18 @@ ApplicationWindow {
                         Label {
                             text: (versionEntry.modelData.abbreviation ? versionEntry.modelData.abbreviation + " · " : "") + versionEntry.modelData.name
                             color: desktop.foreground; font.pixelSize: 14 * versionDialog.uiScale
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                        }
+                        // Comparing: this version's text for the selection.
+                        Label {
+                            readonly property var compared: versionDialog.comparing ? versionDialog.compared[versionEntry.modelData.id] : null
+                            objectName: "versionText:" + (versionEntry.modelData.id || "")
+                            visible: !!compared
+                            text: !compared ? "" : compared.available ? compared.text : "Not in this version"
+                            textFormat: Text.PlainText
+                            color: compared && compared.available ? desktop.foreground : desktop.muted
+                            font.pixelSize: 13 * versionDialog.uiScale
+                            maximumLineCount: 4; elide: Text.ElideRight
                             Layout.fillWidth: true; wrapMode: Text.Wrap
                         }
                         RowLayout {

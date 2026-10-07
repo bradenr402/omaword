@@ -368,6 +368,38 @@ private:
         QTRY_VERIFY(studyOpen());
     }
 private slots:
+    void compareAcrossVersions() {
+        // A second edition with only John 1:1: John 3:16 is not in it.
+        install(other); QCOMPARE(bible->versions().size(), 2);
+        const QString otherId = bible->versionId(), studyId = bible->versions()[1].toMap()["id"].toString();
+        navigate("John 1:1"); key(Qt::Key_C);
+        QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
+        QCOMPARE(object("versionTitle")->property("text").toString(), QString("Versions · John 1:1"));
+        QTRY_VERIFY(item("versionResults")->hasActiveFocus());
+        QCOMPARE(object("versionText:" + otherId)->property("text").toString(), QString("Another edition."));
+        QVERIFY(object("versionText:" + studyId)->property("text").toString().startsWith("In the beginning was the Word."));
+        // y copies the highlighted version's quotation; shift Y its plain text.
+        QGuiApplication::clipboard()->clear();
+        key(Qt::Key_Down); key(Qt::Key_Y);
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(QString::fromUtf8("“")));
+        QVERIFY(QGuiApplication::clipboard()->text().contains("In the beginning was the Word."));
+        QVERIFY(QGuiApplication::clipboard()->text().endsWith(QString::fromUtf8("—John 1:1")));
+        key(Qt::Key_Y, Qt::ShiftModifier);
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith("In the beginning was the Word."));
+        // enter switches to it at the same passage.
+        key(Qt::Key_Return); QTRY_VERIFY(!object("versionDialog")->property("visible").toBool());
+        QCOMPARE(bible->versionId(), studyId); QCOMPARE(bible->selectionReference(), QString("John 1:1"));
+        // Where a version lacks the passage, it says so; ctrl v compares too.
+        navigate("John 3:16"); key(Qt::Key_V, Qt::ControlModifier);
+        QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
+        QCOMPARE(object("versionText:" + otherId)->property("text").toString(), QString("Not in this version"));
+        QCOMPARE(object("versionText:" + otherId)->property("color").value<QColor>(), desktop->property("muted").value<QColor>());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("versionDialog")->property("visible").toBool());
+        // Without a selection there is nothing to compare: c says why.
+        bible->clearSelection(); call("readerFocus"); key(Qt::Key_C);
+        QVERIFY(!object("versionDialog")->property("visible").toBool());
+        QCOMPARE(object("toast")->property("text").toString(), QString("Select a verse first"));
+    }
     void studyOpensWithoutSelection() {
         // A freshly opened chapter has no selection; Study studies its first verse.
         for (int via = 0; via < 2; ++via) {

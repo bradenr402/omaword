@@ -971,6 +971,26 @@ private slots:
         const QString id = bible->createAndAssignTag(bible->tagScope(),"Passing"); QVERIFY(!id.isEmpty());
         QVERIFY(bible->deleteTag(id)); QVERIFY(!bible->canUndo());
     }
+    void compareVersionsFollowsEachNumbering() {
+        install(net); install(kjv);
+        // KJV+ has MRK 7:16; NET omits it.
+        QVERIFY(bible->navigate("MRK 7:15-16"));
+        auto rows = bible->compareVersions();
+        QCOMPARE(rows.size(), 2);
+        QMap<QString,QVariantMap> by;
+        for (const auto &row : rows) by[row.toMap()["versionId"].toString()] = row.toMap();
+        QVERIFY(by["eng-kjv"]["active"].toBool()); QVERIFY(by["eng-kjv"]["available"].toBool());
+        QCOMPARE(by["eng-kjv"]["text"].toString(), bible->copySelection(true));
+        QCOMPARE(by["eng-kjv"]["reference"].toString(), QString("Mark 7:15–16"));
+        QVERIFY(!by["engnet"]["available"].toBool()); QVERIFY(by["engnet"]["text"].toString().isEmpty());
+        // A shared passage, given as a scope, reads in each version.
+        QVERIFY(bible->navigate("GEN 1:2"));
+        for (const auto &row : bible->compareVersions(bible->tagScope())) {
+            QVERIFY(row.toMap()["available"].toBool());
+            QVERIFY(row.toMap()["text"].toString().contains("GEN 1:2"));
+        }
+        bible->clearSelection(); QVERIFY(bible->compareVersions().isEmpty());
+    }
     void deskCrossVersionPeersAndRemoval() {
         install(net); BibleBackend peer; QVERIFY(peer.desk().isEmpty());
         QSignalSpy peerChanged(&peer,&BibleBackend::deskChanged);

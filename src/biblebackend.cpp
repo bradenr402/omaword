@@ -1285,6 +1285,29 @@ QString BibleBackend::copyScope(QVariantMap scope, bool plainText)
     copyText(text); clearError(); return text;
 }
 
+QVariantList BibleBackend::compareVersions(QVariantMap scope) const
+{
+    if (scope.isEmpty()) scope = tagScope();
+    QVariantList rows;
+    if (scope.isEmpty()) return rows;
+    for (const auto &value : m_versions) {
+        const auto version = value.toMap();
+        const QString id = version.value("id").toString();
+        QVariantMap row{{"versionId",id},{"abbreviation",version.value("abbreviation")},{"name",version.value("name")},
+                        {"active",id == m_versionId},{"available",false},{"reference",QString()},{"text",QString()}};
+        TagBible bible(installedPath(id),id);
+        auto candidate = scope;
+        candidate["versionId"] = id;
+        QVariantMap canonical;
+        QString text;
+        if (bible.scope(candidate,&canonical) && passageText(bible,canonical,false,&text)) {
+            row["available"] = true; row["reference"] = canonical.value("reference"); row["text"] = text;
+        }
+        rows.append(row);
+    }
+    return rows;
+}
+
 int BibleBackend::deskCountForVersion(QString versionId) const
 {
     if (!m_storeReady) return 0;
