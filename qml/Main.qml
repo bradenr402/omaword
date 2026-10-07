@@ -728,7 +728,8 @@ ApplicationWindow {
     // Motion feedback is paint-only: opacity and translucent layers never change
     // layout, text, selection, copy output, or hit-testing. Reduce motion (shared
     // app-wide on `sounds`) collapses every duration to an instant change.
-    readonly property bool reduceMotion: sounds.reduceMotion
+    // Motion needs both the app's Animations setting and Hyprland's.
+    readonly property bool reduceMotion: sounds.reduceMotion || !desktop.animations
     readonly property int fadeMs: reduceMotion ? 0 : 100
     // Side panels: enter 125 ms over the full slide; exit 85 ms over a short one.
     readonly property int panelEnterMs: reduceMotion ? 0 : 125
@@ -4554,7 +4555,8 @@ ApplicationWindow {
             break
         case "reduceMotion":
             sounds.reduceMotion = !sounds.reduceMotion
-            notify(sounds.reduceMotion ? "Animations off" : "Animations on", true)
+            notify(sounds.reduceMotion ? "Animations off" : desktop.animations ? "Animations on"
+                : "Animations on · they follow Hyprland's, which are off", true)
             sounds.play("tick")
             break
         }
@@ -4650,6 +4652,8 @@ ApplicationWindow {
         id: button
         property bool emphasized: false
         property bool compact: false
+        // Accessible description: the keys that do the same (also in the tooltip).
+        property string keys: ""
         property string tip: ""
         implicitHeight: compact ? 32 * app.scale : 38 * app.scale
         implicitWidth: Math.max(implicitHeight, buttonLabel.implicitWidth + 24)
@@ -4684,6 +4688,7 @@ ApplicationWindow {
         Connections { target: button; function onClicked() { app.buttonClicked(button) } }
         AppToolTip { theme: desktop; uiScale: app.scale; visible: (button.hovered || button.activeFocus) && button.tip.length > 0; text: button.tip }
         Accessible.name: text
+        Accessible.description: keys
     }
     component FineRule: Rectangle {
         color: desktop.border
@@ -4861,7 +4866,11 @@ ApplicationWindow {
     component FloatingButton: Button {
         id: floatingButton
         property string glyph: ""
-        property string tip: ""
+        // What it does (its accessible name) and the keys that do the same
+        // (its accessible description); the tooltip shows both.
+        property string label: ""
+        property string keys: ""
+        property string tip: label + (keys ? " · " + keys : "")
         property bool selected: false
         // Whether the button can act now; focus mode's quiet footer also hides
         // and disables every button but the persistent one, in place.
@@ -4904,7 +4913,8 @@ ApplicationWindow {
             visible: app.footerGuard && !floatingButton.persistent
             acceptedButtons: Qt.AllButtons
         }
-        Accessible.name: tip
+        Accessible.name: label || tip
+        Accessible.description: keys
         AppToolTip { theme: desktop; uiScale: app.scale; visible: floatingButton.hovered || floatingButton.activeFocus; text: floatingButton.tip }
         background: Rectangle {
             color: floatingButton.down ? app.tint(desktop.accent, 0.18)
@@ -5292,7 +5302,7 @@ ApplicationWindow {
             implicitHeight: errorRow.implicitHeight + 20
             radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
             visible: bible.error.length > 0 && !bible.focusMode
-            color: app.tint(desktop.accent, 0.08)
+            color: app.tint(desktop.error, 0.12)
             RowLayout {
                 id: errorRow
                 anchors.fill: parent
@@ -5300,7 +5310,7 @@ ApplicationWindow {
                 anchors.leftMargin: 24
                 spacing: 16
                 Label { objectName: "errorMessage"; text: bible.error; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 13 * app.scale; Accessible.role: Accessible.AlertMessage }
-                QuietButton { objectName: "errorDismiss"; text: "Dismiss"; compact: true; focusTarget: readerSurface; tip: "Dismiss · " + KeyNotation.format("Escape"); onClicked: bible.clearError() }
+                QuietButton { objectName: "errorDismiss"; text: "Dismiss"; compact: true; focusTarget: readerSurface; keys: KeyNotation.format("Escape"); tip: "Dismiss · " + keys; onClicked: bible.clearError() }
             }
         }
         Item {
@@ -5365,8 +5375,8 @@ ApplicationWindow {
                             opacity: chapterNav.revealed ? 1 : 0
                             // The destination passage and its key; at the Bible's bounds, where it is.
                             readonly property var destination: chapterNav.before ? app.chapterNeighbors.previous : app.chapterNeighbors.next
-                            tip: destination ? destination.title + " · " + app.keyText(chapterNav.modelData.id)
-                                : chapterNav.before ? "First chapter" : "Last chapter"
+                            label: destination ? destination.title : chapterNav.before ? "First chapter" : "Last chapter"
+                            keys: destination ? app.keyText(chapterNav.modelData.id) : ""
                             onClicked: { app.chapterStep(chapterNav.modelData.delta); app.readerFocus() }
                             MouseArea {
                                 anchors.fill: parent
@@ -5818,7 +5828,7 @@ ApplicationWindow {
                                     font.family: desktop.fontFamily
                                     font.pixelSize: app.readerSize * app.readerScale
                                     color: desktop.foreground
-                                    selectionColor: app.tint(desktop.accent, 0.35)
+                                    selectionColor: desktop.selection
                                     selectedTextColor: desktop.foreground
                                     readOnly: true
                                     selectByMouse: true
@@ -6288,8 +6298,8 @@ ApplicationWindow {
                     RowLayout {
                         visible: app.hasSelection
                         spacing: 4
-                        QuietButton { objectName: "writeButton"; text: "Write"; compact: true; emphasized: !app.notePreview; tip: "Write · " + app.keyText("notePreview"); onClicked: { app.notePreview = false; noteEditor.forceActiveFocus() } }
-                        QuietButton { objectName: "previewButton"; text: "Preview"; compact: true; emphasized: app.notePreview; tip: "Preview · " + app.keyText("notePreview"); onClicked: { if (app.flushNote()) { app.notePreview = true; notePreviewText.forceActiveFocus() } } }
+                        QuietButton { objectName: "writeButton"; text: "Write"; compact: true; emphasized: !app.notePreview; keys: app.keyText("notePreview"); tip: "Write · " + keys; onClicked: { app.notePreview = false; noteEditor.forceActiveFocus() } }
+                        QuietButton { objectName: "previewButton"; text: "Preview"; compact: true; emphasized: app.notePreview; keys: app.keyText("notePreview"); tip: "Preview · " + keys; onClicked: { if (app.flushNote()) { app.notePreview = true; notePreviewText.forceActiveFocus() } } }
                         Item { Layout.fillWidth: true }
                         Label { text: "Markdown"; color: desktop.muted; font.pixelSize: 11 * app.scale }
                     }
@@ -6313,7 +6323,7 @@ ApplicationWindow {
                                 objectName: "noteEditor"
                                 width: parent.width
                                 color: desktop.foreground
-                                selectionColor: app.tint(desktop.accent, 0.35)
+                                selectionColor: desktop.selection
                                 selectedTextColor: desktop.foreground
                                 font.family: desktop.fontFamily
                                 font.pixelSize: 15 * app.scale
@@ -6727,7 +6737,8 @@ ApplicationWindow {
             selected: bible.focusMode
             visible: app.footerShowsFocus
             available: !bible.busy && !app.modalOpen && app.actionAvailable("focus")
-            tip: (bible.focusMode ? "Focus mode · leave" : "Focus mode") + " · " + app.keyText("focus")
+            label: bible.focusMode ? "Focus mode · leave" : "Focus mode"
+            keys: app.keyText("focus")
             onClicked: { app.runCommand("focus"); app.readerFocus() }
         }
         FloatingButton {
@@ -6737,9 +6748,10 @@ ApplicationWindow {
             selected: app.verseMode || app.charMode
             visible: bible.ready
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
-            tip: app.charMode ? "Character selection · switch to normal · " + KeyNotation.format("Escape")
-                : (app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual") + " · " + app.keyText("visual")
-                  + "\nCharacters · " + app.keyText("characterVisual")
+            label: app.charMode ? "Character selection · switch to normal"
+                : app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual"
+            keys: app.charMode ? KeyNotation.format("Escape") : app.keyText("visual")
+            tip: label + " · " + keys + (app.charMode ? "" : "\nCharacters · " + app.keyText("characterVisual"))
             onClicked: {
                 if (app.charMode) app.endCharMode()
                 else app.setVisualMode(!app.verseMode)
@@ -6749,7 +6761,8 @@ ApplicationWindow {
         FloatingButton {
             objectName: "helpControl"
             glyph: "help"
-            tip: "Keybindings · " + app.keyText("help")
+            label: "Keybindings"
+            keys: app.keyText("help")
             visible: !app.footerCollapsed
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: helpDialog.open()
@@ -6770,7 +6783,8 @@ ApplicationWindow {
             id: searchControl
             objectName: "searchControl"
             glyph: "search"
-            tip: "Search Bible · " + app.keyText("bibleSearch")
+            label: "Search Bible"
+            keys: app.keyText("bibleSearch")
             available: bible.ready && !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.showPaletteMode("search")
         }
@@ -6779,7 +6793,8 @@ ApplicationWindow {
             objectName: "passageControl"
             width: Math.max(0, locationControls.width - locationControls.fixedWidth)
             text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
-            tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · " + app.keyText("books")
+            label: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage"
+            keys: app.keyText("books")
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.openPalette(false)
         }
@@ -6787,7 +6802,8 @@ ApplicationWindow {
             id: ribbonControl
             objectName: "ribbonControl"
             text: "↩ " + (bible.ribbon.chapterReference || "")
-            tip: "Back to the ribbon · " + (bible.ribbon.reference || "") + " · " + app.keyText("ribbon")
+            label: "Back to the ribbon · " + (bible.ribbon.reference || "")
+            keys: app.keyText("ribbon")
             visible: app.footerShowsRibbon
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("ribbon")
@@ -6797,7 +6813,8 @@ ApplicationWindow {
             objectName: "versionControl"
             width: Math.min(implicitWidth, locationControls.availableWidth * 0.4)
             text: bible.versionAbbreviation
-            tip: bible.edition + " · Switch version · " + app.keyText("switchVersion")
+            label: bible.edition + " · Switch version"
+            keys: app.keyText("switchVersion")
             visible: bible.ready
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.openVersions(false)
@@ -6806,7 +6823,8 @@ ApplicationWindow {
             id: layoutControl
             objectName: "layoutControl"
             glyph: "layout-" + bible.readingMode
-            tip: "Layout · " + app.readingModeName(bible.readingMode) + " · " + app.keyText("readingMode")
+            label: "Layout · " + app.readingModeName(bible.readingMode)
+            keys: app.keyText("readingMode")
             visible: bible.ready && !app.footerHideLayout
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("readingMode")
@@ -6828,7 +6846,8 @@ ApplicationWindow {
             visible: floatingActions.expanded
             glyph: "saved"
             selected: savedDrawer.visible
-            tip: "Annotations · " + app.keyText("annotations")
+            label: "Annotations"
+            keys: app.keyText("annotations")
             available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("annotations")
         }
@@ -6837,7 +6856,8 @@ ApplicationWindow {
             glyph: "study"
             visible: floatingActions.expanded
             available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
-            tip: "Study · " + app.keyText("related")
+            label: "Study"
+            keys: app.keyText("related")
             onClicked: app.runCommand("related")
         }
         FloatingButton {
@@ -6845,7 +6865,8 @@ ApplicationWindow {
             visible: floatingActions.expanded
             glyph: "desk"
             selected: deskDrawer.visible
-            tip: "Desk · " + app.keyText("desk")
+            label: "Desk"
+            keys: app.keyText("desk")
             available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("desk")
         }
@@ -6854,7 +6875,7 @@ ApplicationWindow {
             objectName: "footerMore"
             visible: bible.ready && app.footerCollapsed
             glyph: "more"
-            tip: "Panels"
+            label: "Panels"
             available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
             onClicked: {
                 const p = footerMore.mapToItem(null, 0, 0)
@@ -7005,8 +7026,9 @@ ApplicationWindow {
                     id: versionAdd
                     objectName: "versionAdd"
                     text: "+"
-                    tip: "Add version · " + app.keyText("addVersion")
-                    Accessible.name: tip
+                    keys: app.keyText("addVersion")
+                    tip: "Add version · " + keys
+                    Accessible.name: "Add version"
                     visible: !versionDialog.removing
                     enabled: !bible.busy
                     font.pixelSize: 24 * versionDialog.uiScale
@@ -7111,7 +7133,7 @@ ApplicationWindow {
                 objectName: "versionError"
                 text: bible.error
                 visible: text.length > 0
-                color: desktop.accent; font.pixelSize: 12 * versionDialog.uiScale
+                color: desktop.error; font.pixelSize: 12 * versionDialog.uiScale
                 Layout.fillWidth: true; wrapMode: Text.Wrap
             }
             FineRule { Layout.fillWidth: true }
@@ -7997,7 +8019,7 @@ ApplicationWindow {
                     visible: deskList.count === 0
                 }
             }
-            Label { objectName: "deskError"; text: bible.error; visible: text.length > 0; color: desktop.accent; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { objectName: "deskError"; text: bible.error; visible: text.length > 0; color: desktop.error; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             FineRule { Layout.fillWidth: true }
             // No-break spaces keep each key with its verb when the row wraps.
             HintRow {
@@ -8037,7 +8059,7 @@ ApplicationWindow {
                 text: "Remove all " + bible.desk.length + (bible.desk.length === 1 ? " passage" : " passages") + " from the Desk in every window. Your notes, bookmarks, highlights, and tags are kept."
                 color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
             }
-            Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: bible.error; visible: text.length > 0; color: desktop.error; Layout.fillWidth: true; wrapMode: Text.Wrap }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
@@ -8082,7 +8104,7 @@ ApplicationWindow {
                 text: "Remove all " + bible.history.length + (bible.history.length === 1 ? " passage" : " passages") + " and your recent searches from History in every window. Back and forward in each window still work."
                 color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
             }
-            Label { text: bible.error; visible: text.length > 0; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: bible.error; visible: text.length > 0; color: desktop.error; Layout.fillWidth: true; wrapMode: Text.Wrap }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
@@ -8619,7 +8641,7 @@ ApplicationWindow {
                     Label { objectName: "importOffline"; text: "After a successful import, you can move or delete the source USFM ZIP. No connection is needed to read or use your annotations."; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
             }
-            Label { objectName: "catalogError"; text: catalog.error || app.downloadMessage || bible.error; visible: text.length > 0; textFormat: Text.PlainText; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap; Accessible.role: Accessible.AlertMessage }
+            Label { objectName: "catalogError"; text: catalog.error || app.downloadMessage || bible.error; visible: text.length > 0; textFormat: Text.PlainText; color: desktop.error; Layout.fillWidth: true; wrapMode: Text.Wrap; Accessible.role: Accessible.AlertMessage }
             RowLayout {
                 visible: catalog.busy || ((catalog.error.length > 0 || app.downloadMessage.length > 0) && app.downloadId.length > 0)
                 Layout.fillWidth: true
@@ -8847,7 +8869,7 @@ ApplicationWindow {
             Label {
                 visible: bible.error.length > 0
                 text: bible.error
-                color: desktop.accent
+                color: desktop.error
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
             }

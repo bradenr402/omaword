@@ -262,7 +262,8 @@ These also work, but stay out of the in-app list:
 
 ### Feel
 - Annotations look like pen marks; highlights like a highlighter on paper, in your theme's yellow.
-- Moving to a verse slides briefly, jumps pulse, copies flash, and the text slides aside for margin notes. Menus and dialogs open instantly and fade out toward where they came from; side panels slide in and ease out. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows.
+- Moving to a verse slides briefly, jumps pulse, copies flash, and the text slides aside for margin notes. Menus and dialogs open instantly and fade out toward where they came from; side panels slide in and ease out. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows, and nothing moves while Hyprland's own animations are off.
+- Colors come from your Omarchy theme: secondary text uses the theme's quietest text color that still reads (4.5:1 contrast), errors its red, and selected text its selection color. Screen readers hear each button's action, with its keys as the description.
 - The footer holds focus, mode, and help on the left; search, passage, the way back to the ribbon (where there is room), version, and layout in the center; and Annotations, Study, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows the right group stacks into a column, then folds into a `…` menu.
 
 ### Keyboard and mouse

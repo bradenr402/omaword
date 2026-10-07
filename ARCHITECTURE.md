@@ -477,6 +477,18 @@ files.
   (`$XDG_RUNTIME_DIR/hypr/<instance>/.socket2.sock`); requests during a query
   make one more query after it. Failure resets to 0.
   Highlight segments stay square.
+- Colors: secondary text (`muted`) is the least prominent of the theme's
+  `muted`, `dark_foreground`, `light_foreground` with a WCAG contrast of at
+  least 4.5:1 on `background` and no more than `foreground` has; else
+  `foreground`. Errors use `red` (else `color1`, else the accent); selected
+  text uses `selection` (else the accent mixed into the background).
+- Motion: `desktop.animations` is Hyprland's `animations:enabled`, asked over
+  its request socket (`.socket.sock`, `j/getoption animations:enabled`) at
+  startup and on each config reload; true outside Hyprland or on a bad reply.
+  The app animates only while that and its own Animations setting are on.
+- Accessibility: buttons name their action (`label`) and describe their keys
+  (`keys`), and key hints name their label with the keys as the description;
+  tooltips show both.
 
 ## Verification
 

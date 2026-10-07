@@ -258,6 +258,77 @@ private slots:
         QTRY_COMPARE(desktop.cornerRadius(), 0.0);
     }
 
+    void readableSecondaryTextErrorAndSelection() {
+        // WCAG ratios: black on white is 21:1, a color on itself 1:1.
+        QCOMPARE(qRound(Desktop::contrast(Qt::black, Qt::white) * 100), 2100);
+        QCOMPARE(Desktop::contrast(QColor("#336699"), QColor("#336699")), 1.0);
+        const QString theme = m_dir.filePath("omarchy/current/theme");
+        QVERIFY(QDir().mkpath(theme));
+        QFile file(theme + "/colors.toml");
+        auto write = [&](const QByteArray &bytes) {
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate)); file.write(bytes); file.close();
+        };
+        // A readable muted is kept: the least prominent that reads.
+        write("background = \"#060B1E\"\nforeground = \"#ffcead\"\nmuted = \"#6d7db6\"\n"
+              "dark_foreground = \"#6d7db6\"\nlight_foreground = \"#c9b8a6\"\nred = \"#ED5B5A\"\nselection = \"#252e56\"\naccent = \"#7d82d9\"\n");
+        {
+            Desktop desktop(nullptr, command());
+            QCOMPARE(desktop.property("muted").value<QColor>(), QColor("#6d7db6"));
+            QVERIFY(Desktop::contrast(QColor("#6d7db6"), QColor("#060B1E")) >= 4.5);
+            QCOMPARE(desktop.property("error").value<QColor>(), QColor("#ED5B5A"));
+            QCOMPARE(desktop.property("selection").value<QColor>(), QColor("#252e56"));
+        }
+        // Too faint a muted (under 4.5:1) gives way to the next that reads.
+        write("background = \"#ffffff\"\nforeground = \"#000000\"\nmuted = \"#cccccc\"\n"
+              "dark_foreground = \"#333333\"\nlight_foreground = \"#767676\"\naccent = \"#2255aa\"\n");
+        {
+            Desktop desktop(nullptr, command());
+            QCOMPARE(desktop.property("muted").value<QColor>(), QColor("#767676"));
+            // No red: color1's fallback, the accent; no selection: a tint of the accent.
+            QCOMPARE(desktop.property("error").value<QColor>(), QColor("#2255aa"));
+            const auto selection = desktop.property("selection").value<QColor>();
+            QVERIFY(selection != QColor("#2255aa") && selection != QColor("#ffffff"));
+        }
+        // Nothing but the foreground reads: the foreground.
+        write("background = \"#ffffff\"\nforeground = \"#000000\"\nmuted = \"#eeeeee\"\n");
+        {
+            Desktop desktop(nullptr, command());
+            QCOMPARE(desktop.property("muted").value<QColor>(), QColor("#000000"));
+        }
+        QVERIFY(QFile::remove(file.fileName()));
+    }
+    void hyprlandAnimationsFollowReloads() {
+        // Hyprland's request socket answers getoption; a config reload asks again.
+        const QString requests = m_dir.filePath("hypr/desktop-test/.socket.sock");
+        const QString events = m_dir.filePath("hypr/desktop-test/.socket2.sock");
+        QVERIFY(QDir().mkpath(QFileInfo(requests).absolutePath()));
+        QLocalServer requestServer, eventServer;
+        QVERIFY2(requestServer.listen(requests), qPrintable(requestServer.errorString()));
+        QVERIFY2(eventServer.listen(events), qPrintable(eventServer.errorString()));
+        QByteArray reply = "{\"option\":\"animations:enabled\",\"int\":0,\"set\":true}";
+        QStringList asked;
+        connect(&requestServer, &QLocalServer::newConnection, this, [&] {
+            auto *client = requestServer.nextPendingConnection();
+            connect(client, &QLocalSocket::readyRead, client, [&, client] {
+                asked << QString::fromUtf8(client->readAll());
+                client->write(reply); client->flush(); client->disconnectFromServer();
+            });
+        });
+        Desktop desktop(nullptr, command());
+        QTRY_VERIFY(!desktop.animations());
+        QCOMPARE(asked, QStringList{"j/getoption animations:enabled"});
+        QTRY_VERIFY(eventServer.hasPendingConnections());
+        std::unique_ptr<QLocalSocket> hyprland(eventServer.nextPendingConnection());
+        reply = "{\"int\":1}";
+        hyprland->write("configreloaded>>\n"); QVERIFY(hyprland->waitForBytesWritten());
+        QTRY_VERIFY(desktop.animations());
+        QCOMPARE(asked.size(), 2);
+        // A malformed reply means enabled, as outside Hyprland.
+        reply = "{\"int\":0";
+        hyprland->write("configreloaded>>\n"); QVERIFY(hyprland->waitForBytesWritten());
+        QTRY_COMPARE(asked.size(), 3); QTest::qWait(100);
+        QVERIFY(desktop.animations());
+    }
     void configReloadEventsRequery() {
         // Hyprland's event socket: only config reloads ask for the rounding
         // again, never a timer or any other event.

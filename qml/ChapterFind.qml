@@ -97,7 +97,7 @@ Rectangle {
             objectName: "chapterFindCount"
             text: root.error || (root.matchCount ? (root.matchIndex < 0
                 ? root.matchCount + " matches" : (root.matchIndex + 1) + " / " + root.matchCount) : input.text.length ? "No matches" : "")
-            color: root.theme.muted; font.pixelSize: 12 * root.uiScale
+            color: root.error ? root.theme.error : root.theme.muted; font.pixelSize: 12 * root.uiScale
             Layout.maximumWidth: root.width * 0.3
             elide: Text.ElideRight
         }

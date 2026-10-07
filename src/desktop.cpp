@@ -15,6 +15,7 @@
 #include <QDBusPendingReply>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <fontconfig/fontconfig.h>
@@ -73,6 +74,18 @@ Desktop::Desktop(QObject *parent, const QString &hyprctlCommand) : QObject(paren
     // Hyprland announces every config reload (a theme switch reloads it) on its
     // event socket; the rounding is asked again only then.
     connect(&m_events, &QLocalSocket::readyRead, this, &Desktop::readEvents);
+    // animations:enabled comes over Hyprland's request socket: the reply is
+    // the whole stream, so it is read when the compositor closes it.
+    connect(&m_request, &QLocalSocket::connected, this, [this] { m_request.write("j/getoption animations:enabled"); });
+    connect(&m_request, &QLocalSocket::readyRead, this, [this] {
+        m_requestBuffer += m_request.read(8193 - m_requestBuffer.size());
+        if (m_requestBuffer.size() > 8192) m_request.abort();
+    });
+    connect(&m_request, &QLocalSocket::disconnected, this, [this] {
+        const auto value = QJsonDocument::fromJson(m_requestBuffer).object().value(QStringLiteral("int"));
+        const bool enabled = !value.isDouble() || value.toDouble() != 0;
+        if (enabled != m_animations) { m_animations = enabled; emit this->changed(); }
+    });
     const QString instance = qEnvironmentVariable("HYPRLAND_INSTANCE_SIGNATURE");
     const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
     if (!instance.isEmpty() && !runtime.isEmpty())
@@ -82,7 +95,36 @@ Desktop::Desktop(QObject *parent, const QString &hyprctlCommand) : QObject(paren
         this, SLOT(settingChanged(QString,QString,QDBusVariant)));
     refresh();
     refreshCornerRadius();
+    refreshAnimations();
     requestScale();
+}
+
+void Desktop::refreshAnimations() {
+    const QString instance = qEnvironmentVariable("HYPRLAND_INSTANCE_SIGNATURE");
+    const QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    if (instance.isEmpty() || runtime.isEmpty() || m_request.state() != QLocalSocket::UnconnectedState) return;
+    m_requestBuffer.clear();
+    m_request.connectToServer(runtime + QStringLiteral("/hypr/") + instance + QStringLiteral("/.socket.sock"));
+}
+
+double Desktop::contrast(const QColor &a, const QColor &b) {
+    const auto luminance = [](const QColor &color) {
+        const auto channel = [](double c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); };
+        return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF()) + 0.0722 * channel(color.blueF());
+    };
+    const double x = luminance(a), y = luminance(b);
+    return (std::max(x, y) + 0.05) / (std::min(x, y) + 0.05);
+}
+
+QColor Desktop::secondaryText(const QColor &background, const QColor &foreground, const QList<QColor> &candidates) {
+    QColor chosen = foreground;
+    double least = contrast(foreground, background);
+    for (const auto &color : candidates) {
+        if (!color.isValid()) continue;
+        const double ratio = contrast(color, background);
+        if (ratio >= 4.5 && ratio < least) { chosen = color; least = ratio; }
+    }
+    return chosen;
 }
 
 Desktop::~Desktop() {
@@ -137,7 +179,7 @@ void Desktop::readEvents() {
         reloaded |= m_eventBuffer.startsWith("configreloaded>>");
     // Events are short lines; a runaway one is dropped rather than buffered.
     if (m_eventBuffer.size() > 65536) m_eventBuffer.clear();
-    if (reloaded) refreshCornerRadius();
+    if (reloaded) { refreshCornerRadius(); refreshAnimations(); }
 }
 
 void Desktop::watch() {
@@ -162,7 +204,7 @@ void Desktop::refresh() {
     QColor accent = palette.color(QPalette::Highlight);
     QColor muted = palette.color(QPalette::PlaceholderText);
     QColor border = palette.color(QPalette::Mid);
-    QColor color1, color3;
+    QColor color1, color3, error, selection;
     bool dark = background.lightnessF() < 0.5;
     QFile theme(m_themePath);
     const bool readable = theme.open(QIODevice::ReadOnly) && theme.size() < 65536;
@@ -171,6 +213,7 @@ void Desktop::refresh() {
         // to move the new one in. Keep the last theme rather than flash Qt's.
         background = m_background; foreground = m_foreground; surface = m_surface; accent = m_accent;
         muted = m_muted; border = m_border; color1 = m_color1; color3 = m_color3; dark = m_dark;
+        error = m_error; selection = m_selection;
     } else if (readable) {
         m_themeLoaded = true;
         const QString contents = QString::fromUtf8(theme.readAll());
@@ -186,7 +229,10 @@ void Desktop::refresh() {
         dark = background.lightnessF() < 0.5;
         surface = colors.value(QStringLiteral("lighter_background"), dark ? background.lighter(145) : background.darker(105));
         accent = colors.value(QStringLiteral("accent"), accent);
-        muted = colors.value(QStringLiteral("muted"), foreground);
+        muted = secondaryText(background, foreground, {colors.value(QStringLiteral("muted")),
+            colors.value(QStringLiteral("dark_foreground")), colors.value(QStringLiteral("light_foreground"))});
+        error = colors.value(QStringLiteral("red"));
+        selection = colors.value(QStringLiteral("selection"));
         // Palette slot 1 (ANSI red): `color1`, or `red` in named palettes.
         color1 = colors.value(QStringLiteral("color1"), colors.value(QStringLiteral("red")));
         // Palette slot 3 (ANSI yellow): `color3`, or `yellow`.
@@ -210,11 +256,17 @@ void Desktop::refresh() {
     }
     if (!color1.isValid()) color1 = accent;
     if (!color3.isValid()) color3 = accent;
+    if (!error.isValid()) error = color1;
+    if (!selection.isValid())
+        selection = QColor::fromRgbF(background.redF() * .65 + accent.redF() * .35,
+            background.greenF() * .65 + accent.greenF() * .35, background.blueF() * .65 + accent.blueF() * .35);
     watch();
     if (background == m_background && foreground == m_foreground && surface == m_surface &&
-        accent == m_accent && muted == m_muted && border == m_border && color1 == m_color1 && color3 == m_color3 && family == m_fontFamily && dark == m_dark) return;
+        accent == m_accent && muted == m_muted && border == m_border && color1 == m_color1 && color3 == m_color3 && family == m_fontFamily && dark == m_dark
+        && error == m_error && selection == m_selection) return;
     m_background = background; m_foreground = foreground; m_surface = surface;
     m_accent = accent; m_color1 = color1; m_color3 = color3; m_muted = muted; m_border = border; m_fontFamily = family; m_dark = dark;
+    m_error = error; m_selection = selection;
     emit changed();
 }
 

@@ -92,7 +92,8 @@ Flow {
                 onClicked: part.activate()
             }
             Accessible.role: part.clickable ? Accessible.Button : Accessible.StaticText
-            Accessible.name: part.modelData.keys + " " + part.modelData.label
+            Accessible.name: part.modelData.label
+            Accessible.description: part.modelData.keys
             Accessible.onPressAction: part.activate()
         }
     }

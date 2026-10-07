@@ -379,7 +379,7 @@ Item {
         onFontChanged: if (!root.destroying) geometryTimer.restart()
         onWidthChanged: if (!root.destroying) geometryTimer.restart()
         color: root.theme.foreground
-        selectionColor: root.controller.tint(root.theme.accent, 0.35)
+        selectionColor: root.theme.selection
         selectedTextColor: root.theme.foreground
         readOnly: true
         persistentSelection: true

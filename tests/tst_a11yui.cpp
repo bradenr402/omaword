@@ -2814,6 +2814,33 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("findPromptOpen").toBool());
     }
+    void namesAreActionsKeysAreDescriptions() {
+        // Footer buttons: the accessible name says what it does, the
+        // description its keys; the tooltip shows both.
+        for (const auto &[name, label, action] : QList<std::tuple<QString, QString, QString>>{
+                {"searchControl", "Search Bible", "ctrl /"}, {"savedControl", "Annotations", "shift A"},
+                {"deskControl", "Desk", "shift D"}, {"helpControl", "Keybindings", "?"}}) {
+            auto button = item(name); QVERIFY(button);
+            QCOMPARE(button->property("label").toString(), label);
+            QCOMPARE(button->property("keys").toString(), action);
+            QCOMPARE(button->property("tip").toString(), label + " · " + action);
+            QObject *accessible = nullptr;
+            for (auto *child : button->children())
+                if (QByteArray(child->metaObject()->className()) == "QQuickAccessibleAttached") accessible = child;
+            QVERIFY(accessible);
+            QCOMPARE(accessible->property("name").toString(), label);
+            QCOMPARE(accessible->property("description").toString(), action);
+        }
+        // Errors take the theme's error color; selected text its selection color.
+        QVERIFY(!bible->navigate("Nowhere 99")); QTRY_VERIFY(shown("errorBanner"));
+        QVariant tinted;
+        QVERIFY(QMetaObject::invokeMethod(window, "tint", Q_RETURN_ARG(QVariant, tinted),
+            Q_ARG(QVariant, desktop->property("error")), Q_ARG(QVariant, 0.12)));
+        QCOMPARE(object("errorBanner")->property("color").value<QColor>(), tinted.value<QColor>());
+        auto body = item("verseBody1") ? item("verseBody1") : item("blockBody"); QVERIFY(body);
+        QCOMPARE(body->property("selectionColor").value<QColor>(), desktop->property("selection").value<QColor>());
+        bible->clearError();
+    }
 };
 
 int main(int argc, char **argv) {
