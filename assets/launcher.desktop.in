@@ -2,7 +2,7 @@
 Type=Application
 Name=$$BRAND_NAME
 GenericName=Bible Reader
-Comment=Read the NET Bible offline with bookmarks, highlights, and notes
+Comment=Read the Bible offline with highlights, tags, and Markdown notes
 Exec=$$BRAND_ID
 Icon=$$BRAND_ID
 Terminal=false

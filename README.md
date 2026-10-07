@@ -18,7 +18,14 @@ bin/build
 bin/install
 ```
 
-Launch **OmaWord** from your application launcher or run `omaword`. To update, `git pull` and run `bin/build` and `bin/install` again.
+Launch **OmaWord** from your application launcher or run `omaword`. To update, `git pull` and run `bin/build` and `bin/install` again. `bin/install` keeps the files it replaces from one previous install in `~/.local/state/omaword/previous-install`.
+
+To install it as an Arch package instead (to `/usr`, managed by pacman), build the recipe in `packaging/`; it builds the latest commit on GitHub:
+
+```sh
+cd packaging
+makepkg -si
+```
 
 ## Bible versions
 

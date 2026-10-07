@@ -44,7 +44,11 @@ preflight_destination() {
 for destination in "${destinations[@]}"; do
     preflight_destination "$destination"
 done
-backup_root="$data_home/$BRAND_ID/install-backups"
+# One previous installation is kept, in the state directory: never beside the
+# user's library and notes.
+state_home=${XDG_STATE_HOME:-$HOME/.local/state}
+state_home=$(realpath -m -- "$state_home")
+backup_root="$state_home/$BRAND_ID"
 preflight_destination "$backup_root/.preflight"
 
 changed=()
@@ -66,8 +70,7 @@ backup_existing() {
     [[ -e $destination || -L $destination ]] || return 0
     if [[ -z $backup_dir ]]; then
         mkdir -p -- "$backup_root"
-        backup_dir=$(mktemp -d "$backup_root/$(date -u +%Y%m%dT%H%M%SZ).XXXXXX")
-        printf 'Backing up changed installation files to %s\n' "$backup_dir"
+        backup_dir=$(mktemp -d "$backup_root/.previous-install.XXXXXX")
     fi
     mkdir -p -- "$(dirname -- "$backup_dir/$name")"
     cp -a -- "$destination" "$backup_dir/$name"
@@ -75,6 +78,11 @@ backup_existing() {
 for i in "${changed[@]}"; do
     backup_existing "${destinations[i]}" "${backup_names[i]}"
 done
+if [[ -n $backup_dir ]]; then
+    rm -rf -- "$backup_root/previous-install"
+    mv -T -- "$backup_dir" "$backup_root/previous-install"
+    printf 'Kept the replaced installation files in %s\n' "$backup_root/previous-install"
+fi
 
 # Same-directory rename replaces files and symlinks without following them and
 # allows an already-running executable to keep using its original inode.
@@ -96,3 +104,6 @@ if [[ -f $data_home/icons/hicolor/index.theme ]] && command -v gtk-update-icon-c
     gtk-update-icon-cache -f "$data_home/icons/hicolor"
 fi
 printf 'Installed %s to %s/.local/bin/%s\nEnsure %s/.local/bin is on PATH for the desktop launcher.\n' "$BRAND_NAME" "$HOME" "$BRAND_ID" "$HOME"
+if [[ -d $data_home/$BRAND_ID/install-backups ]]; then
+    printf 'Older installs kept backups in %s; nothing uses them now, so you can delete it.\n' "$data_home/$BRAND_ID/install-backups"
+fi
