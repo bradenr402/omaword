@@ -273,7 +273,8 @@ private slots:
     }
     void reimportFromCatalog() {
         catalog->entries = {QVariantMap{{"id","study"},{"name","Study fixture"},{"abbreviation","SF"},{"url","https://example.invalid/study.zip"},
-            {"detailsUrl","https://example.invalid"},{"copyright",""}}};
+            {"detailsUrl","https://example.invalid"},{"copyright",""},{"description","A fixture edition."},{"year","2026"},
+            {"license","Public domain"},{"size",1500000},{"features",QVariantList{}}}};
         emit catalog->changed();
         key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
         auto button = item("versionReimport:study"); QVERIFY(button); QTRY_VERIFY(button->isVisible());
