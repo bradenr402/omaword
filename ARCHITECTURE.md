@@ -340,8 +340,8 @@ files.
   (`characters`, `tags`, `rangeEditor`, `importGuide`, `versions`, `list`, …):
   listed in Keybindings and the README, bound by their owner, never globally.
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
-  settings → Layout (`readingMode`, still the id) draws `paintLayoutGlyph`, the
-  footer layout button's icons.
+  settings → Layout and the Aa popover (`readingMode`, still the id) draw
+  `paintLayoutGlyph`'s icons.
 - With a drawer side panel open (Annotations, Desk, Study), the keys
   of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
   keyboard to the reader, close the panel, then act (`runKey`) — so the
@@ -443,7 +443,15 @@ files.
   clicks wait 300 ms, so a click aimed at the focus button is never caught); hiding
   waits 200 ms so moving between the zone and a button never flickers; keyboard
   focus entering the footer reveals them too. The footer's left group is focus,
-  mode, Keybindings.
+  Aa, mode, Keybindings; the center group search, passage, ribbon, version.
+  Cramped, the footer sheds focus (`footerLeftFits(2)`), then Keybindings
+  (`footerLeftFits(1)`), then stacks the right group (`footerStacked`) and
+  folds it into "…" (`footerCollapsed`), Aa with it last (`footerShowsText`).
+- Aa (`textPopover`): a non-modal popup docked above the left group that keeps
+  the keyboard in the reader (its controls all have keys). While it is open
+  the reader's view ends above it (`reading`'s bottom margin,
+  `textPopoverReserve`), so it never covers text. Aa, `esc`, focus mode, and
+  any panel or dialog close it.
 - Chapter buttons (`chapterPreviousButton`/`chapterNextButton`): chevrons at the
   reader's outer edges, centred in the viewport, mouse only (h/l are the keys),
   disabled at the Bible's first/last chapter; steps are not History jumps. The

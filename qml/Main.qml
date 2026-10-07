@@ -5581,6 +5581,7 @@ ApplicationWindow {
                     id: reading
                     objectName: "reading"
                     anchors.fill: parent
+                    anchors.bottomMargin: app.textPopoverReserve
                     clip: true
                     contentWidth: width
                     contentHeight: readerColumn.height
@@ -6936,29 +6937,35 @@ ApplicationWindow {
     readonly property real footerButton: 40 * controlScale
     readonly property real footerGroupGap: 24 * controlScale
     readonly property int footerRightCount: bible.ready ? 3 : 0
-    // The focus button joins the left group where the footer has room for it
-    // without changing any other fold (and always in focus mode).
+    // The left group always has Aa and the mode (Keybindings before a version
+    // is installed). Keybindings, then focus, join it where the footer has room
+    // for them without changing any other fold, so a cramped footer sheds
+    // focus, then Keybindings (both have keys), before the right group stacks
+    // and folds. Focus mode always shows its button.
     readonly property real footerLeftBase: bible.ready ? 2 * footerButton : footerButton
-    readonly property bool footerFocusFits: bible.ready
-        && (footerCenterFull + 2 * Math.max(footerLeftBase + footerButton, footerRightFull) + 2 * footerGroupGap <= footerAvailable
-            || footerCenterMin + layoutControl.implicitWidth + 2 * (Math.max(footerLeftBase + footerButton, footerRightCount ? footerButton : 0) + footerGroupGap) <= footerAvailable)
+    function footerLeftFits(extra) {
+        return bible.ready
+            && (footerCenterFull + 2 * Math.max(footerLeftBase + extra * footerButton, footerRightFull) + 2 * footerGroupGap <= footerAvailable
+                || footerCenterMin + 2 * (Math.max(footerLeftBase + extra * footerButton, footerRightCount ? footerButton : 0) + footerGroupGap) <= footerAvailable)
+    }
+    readonly property bool footerShowsHelp: !bible.ready || footerLeftFits(1)
+    readonly property bool footerFocusFits: footerLeftFits(2)
     readonly property bool footerShowsFocus: bible.ready && (footerFocusFits || focusLayout)
-    readonly property real footerLeftFull: footerLeftBase + (footerShowsFocus ? footerButton : 0)
+    readonly property real footerLeftFull: footerLeftBase + (bible.ready && footerShowsHelp ? footerButton : 0) + (footerShowsFocus ? footerButton : 0)
     readonly property real footerRightFull: footerRightCount * footerButton
     readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
-        + (bible.ready ? versionControl.implicitWidth + layoutControl.implicitWidth : 0)
+        + (bible.ready ? versionControl.implicitWidth : 0)
     readonly property real footerAvailable: width - 2 * footerMargin
     readonly property bool footerStacked: footerCenterFull + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap > footerAvailable
     // With the right group stacked, the center keeps clear of the wider corner.
     readonly property real footerSideReserve: Math.max(footerLeftFull, footerRightCount ? footerButton : 0) + footerGroupGap
     readonly property real footerPassageMin: 96 * controlScale
-    // The passage elides first; the layout button goes only when the passage
-    // would drop below footerPassageMin, and the right group folds into "…"
-    // only when even that is not enough.
+    // The passage elides first; the right group folds into "…" only when it
+    // would drop below footerPassageMin.
     readonly property real footerCenterMin: searchControl.implicitWidth + footerPassageMin + (bible.ready ? versionControl.implicitWidth : 0)
-    readonly property bool footerHideLayout: footerStacked && bible.ready
-        && footerCenterMin + layoutControl.implicitWidth + 2 * footerSideReserve > footerAvailable
     readonly property bool footerCollapsed: footerStacked && bible.ready && footerCenterMin + 2 * footerSideReserve > footerAvailable
+    // Narrower still, Aa goes into the "…" menu too, so the passage keeps its room.
+    readonly property bool footerShowsText: bible.ready && !(footerCollapsed && footerCenterMin + 2 * footerSideReserve > footerAvailable)
     readonly property real footerHeight: footerButton
     // Room the reader text leaves at the right edge for the stacked column.
     readonly property real footerRightInset: footerStacked && !footerCollapsed && footerRightCount && !focusLayout
@@ -6970,6 +6977,7 @@ ApplicationWindow {
     function footerPanelEntries() {
         const ready = !rangeEditing && bible.ready && !bible.busy
         return [
+            footerShowsText ? null : { id: "text", text: "Text and layout (Aa)", enabled: ready, run: function() { app.toggleTextPopover() } },
             { id: "annotations", text: "Annotations", shortcut: menuKey("annotations"), enabled: ready, run: function() { app.runCommand("annotations") } },
             { id: "notes", text: "Notes", shortcut: menuKey("notes"), enabled: ready, run: function() { app.toggleNotes() } },
             { id: "related", text: "Study", shortcut: menuKey("related"), enabled: ready && hasSelection, run: function() { app.runCommand("related") } },
@@ -6999,7 +7007,7 @@ ApplicationWindow {
         anchors.margins: app.footerMargin
         spacing: 0
         visible: !app.findPromptOpen
-        // Focus, then the mode, then Keybindings (which hides when cramped).
+        // Focus, text and layout (Aa), the mode, then Keybindings (which hides when cramped).
         FloatingButton {
             id: focusControl
             objectName: "focusControl"
@@ -7012,6 +7020,18 @@ ApplicationWindow {
             label: bible.focusMode ? "Focus mode · leave" : "Focus mode"
             keys: app.keyText("focus")
             onClicked: { app.runCommand("focus"); app.readerFocus() }
+        }
+        FloatingButton {
+            id: textControl
+            objectName: "textControl"
+            text: "Aa"
+            selected: textPopover.visible
+            visible: app.footerShowsText
+            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            label: "Text size, line height, and layout"
+            tip: label + "\n" + app.keyText("smaller") + " " + app.keyText("larger") + " text · " + app.keyText("readingMode") + " layout · "
+                + app.keyText("settings") + " all reading settings"
+            onClicked: app.toggleTextPopover()
         }
         FloatingButton {
             id: modeControl
@@ -7035,7 +7055,7 @@ ApplicationWindow {
             glyph: "help"
             label: "Keybindings"
             keys: app.keyText("help")
-            visible: !app.footerCollapsed
+            visible: app.footerShowsHelp
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: helpDialog.open()
         }
@@ -7048,7 +7068,7 @@ ApplicationWindow {
         x: app.width / 2 - width / 2
         readonly property real availableWidth: Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
         readonly property real fixedWidth: searchControl.width + (ribbonControl.visible ? ribbonControl.width : 0)
-            + (versionControl.visible ? versionControl.width : 0) + (layoutControl.visible ? layoutControl.width : 0)
+            + (versionControl.visible ? versionControl.width : 0)
         width: Math.min(fixedWidth + passageControl.implicitWidth, availableWidth)
         visible: !app.findPromptOpen
         FloatingButton {
@@ -7090,16 +7110,6 @@ ApplicationWindow {
             visible: bible.ready
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.openVersions(false)
-        }
-        FloatingButton {
-            id: layoutControl
-            objectName: "layoutControl"
-            glyph: "layout-" + bible.readingMode
-            label: "Layout · " + app.readingModeName(bible.readingMode)
-            keys: app.keyText("readingMode")
-            visible: bible.ready && !app.footerHideLayout
-            available: !app.rangeEditing && !bible.busy && !app.modalOpen
-            onClicked: app.runCommand("readingMode")
         }
     }
     Grid {
@@ -7157,6 +7167,131 @@ ApplicationWindow {
         }
     }
 
+    // Aa: text size, line height, and layout at hand, docked above the left
+    // footer group. The keyboard stays in the reader (these all have keys),
+    // and it never covers the text: while it is open the reader's view ends
+    // above it (textPopoverReserve). Aa, esc, focus mode, or any panel or
+    // dialog closes it.
+    function toggleTextPopover() {
+        if (textPopover.visible) { textPopover.close(); return }
+        if (rangeEditing || modalOpen || !bible.ready) { rejected(); return }
+        textPopover.open()
+    }
+    readonly property real textPopoverReserve: textPopover.visible ? Math.max(0, height - textPopover.y + 6 * scale) : 0
+    onModalOpenChanged: if (modalOpen && textPopover.visible) textPopover.close()
+    onFocusLayoutChanged: if (focusLayout && textPopover.visible) textPopover.close()
+    Popup {
+        id: textPopover
+        objectName: "textPopover"
+        parent: Overlay.overlay
+        modal: false
+        dim: false
+        focus: false
+        closePolicy: Popup.NoAutoClose
+        enter: null
+        exit: null
+        padding: 12 * app.scale
+        x: app.footerMargin
+        y: app.height - app.footerMargin - app.footerButton - 6 * app.scale - height
+        onAboutToHide: menuGhost.release(textPopover, textControl.mapToItem(null, textControl.width / 2, 0))
+        background: Rectangle {
+            color: desktop.background
+            border.color: desktop.border
+            radius: Math.min(desktop.cornerRadius, 12 * app.scale)
+        }
+        contentItem: ColumnLayout {
+            spacing: 8 * app.scale
+            Accessible.role: Accessible.Pane
+            Accessible.name: "Text size, line height, and layout"
+            Repeater {
+                // [title, smaller, larger, value]
+                model: [["Text size", "smaller", "larger"], ["Line height", "lineLess", "lineMore"]]
+                delegate: RowLayout {
+                    id: stepRow
+                    required property var modelData
+                    required property int index
+                    spacing: 2 * app.scale
+                    Label { text: stepRow.modelData[0]; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true; Layout.minimumWidth: 96 * app.scale }
+                    QuietButton {
+                        objectName: "textPopover:" + stepRow.modelData[1]
+                        text: "−"; compact: true
+                        keys: app.keyText(stepRow.modelData[1]); tip: "Decrease · " + keys
+                        Accessible.name: "Decrease " + stepRow.modelData[0].toLowerCase()
+                        enabled: app.actionAvailable(stepRow.modelData[1])
+                        onClicked: app.runCommand(stepRow.modelData[1])
+                    }
+                    Label {
+                        objectName: "textPopover:value" + stepRow.index
+                        text: stepRow.index === 0 ? app.readerSize : bible.lineHeight.toFixed(1)
+                        color: desktop.accent; font.pixelSize: 14 * app.scale
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.preferredWidth: 36 * app.scale
+                    }
+                    QuietButton {
+                        objectName: "textPopover:" + stepRow.modelData[2]
+                        text: "+"; compact: true
+                        keys: app.keyText(stepRow.modelData[2]); tip: "Increase · " + keys
+                        Accessible.name: "Increase " + stepRow.modelData[0].toLowerCase()
+                        enabled: app.actionAvailable(stepRow.modelData[2])
+                        onClicked: app.runCommand(stepRow.modelData[2])
+                    }
+                }
+            }
+            RowLayout {
+                spacing: 4 * app.scale
+                Repeater {
+                    model: ["paragraph", "verse", "block"]
+                    delegate: QuietButton {
+                        id: popoverLayout
+                        required property string modelData
+                        objectName: "textPopover:" + modelData
+                        text: app.readingModeName(modelData)
+                        checkable: true
+                        autoExclusive: true
+                        checked: bible.readingMode === modelData
+                        emphasized: checked
+                        compact: true
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: implicitWidth
+                        keys: app.keyText("readingMode")
+                        tip: app.readingModeName(modelData) + " layout · " + keys + " cycles"
+                        Accessible.name: text + " layout"
+                        leftPadding: 10 + 16 * app.scale + 6 * app.scale
+                        implicitWidth: contentItem.implicitWidth + leftPadding + rightPadding
+                        onClicked: bible.setReadingMode(modelData)
+                        Canvas {
+                            objectName: "textPopoverIcon:" + popoverLayout.modelData
+                            width: 16 * app.scale
+                            height: width
+                            x: 10
+                            y: (popoverLayout.height - height) / 2
+                            property color ink: popoverLayout.emphasized ? desktop.accent : desktop.foreground
+                            onInkChanged: requestPaint()
+                            onPaint: {
+                                const ctx = getContext("2d")
+                                ctx.reset()
+                                ctx.scale(width / 24, height / 24)
+                                ctx.strokeStyle = ink
+                                ctx.lineWidth = 1.8
+                                ctx.lineCap = "square"
+                                ctx.beginPath()
+                                app.paintLayoutGlyph(ctx, popoverLayout.modelData)
+                                ctx.stroke()
+                            }
+                        }
+                    }
+                }
+            }
+            FineRule { Layout.fillWidth: true }
+            QuietButton {
+                objectName: "textPopover:settings"
+                text: "Reading settings…"; compact: true
+                keys: app.keyText("settings"); tip: "All reading settings · " + keys
+                Layout.alignment: Qt.AlignRight
+                onClicked: { textPopover.close(); app.runCommand("settings") }
+            }
+        }
+    }
     // While the find prompt is open, a click in the reader accepts the current
     // match and closes the prompt (or cancels when nothing matches); the click
     // itself selects nothing.
@@ -9417,6 +9552,7 @@ ApplicationWindow {
         enabled: app.readerKeys || (rangeEditor.sessionOpen && !app.modalOpen && !app.textInputActive())
         onActivated: {
             if (rangeEditor.sessionOpen) { rangeEditor.cancel(); return }
+            if (textPopover.visible) { textPopover.close(); return }
             if (app.selectionBarShown) { app.selectionBarWanted = false; return }
             if (app.acceptedSearchQuery.length) { app.clearSearch(); app.readerFocus(); return }
             if (app.freeSelectedText.length) { app.clearTextSelection(); app.readerFocus(); return }

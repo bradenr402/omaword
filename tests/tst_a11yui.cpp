@@ -369,10 +369,10 @@ private slots:
     }
     void buttonsActivateOnEnterAndOwnSpace() {
         // Keyboard: a focused footer button takes enter and space; space does not resume the palette.
-        auto layout = item("layoutControl"); QVERIFY(layout);
-        layout->forceActiveFocus(); QCOMPARE(bible->readingMode(), QString("verse"));
-        key(Qt::Key_Return); QCOMPARE(bible->readingMode(), QString("block"));
-        key(Qt::Key_Enter); QCOMPARE(bible->readingMode(), QString("paragraph"));
+        auto aa = item("textControl"); QVERIFY(aa);
+        aa->forceActiveFocus(); QVERIFY(!shown("textPopover"));
+        key(Qt::Key_Return); QTRY_VERIFY(shown("textPopover"));
+        key(Qt::Key_Enter); QTRY_VERIFY(!shown("textPopover"));
         auto search = item("searchControl"); search->forceActiveFocus();
         key(Qt::Key_Space); QTRY_VERIFY(opened("passagePalette"));
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
@@ -389,12 +389,12 @@ private slots:
     void chromeButtonsTakeFocusOnlyByTab() {
         // Mouse: a click never moves the keyboard off the reader.
         QVERIFY(readerFocused());
-        auto layout = item("layoutControl");
+        auto layout = item("textControl");
         QCOMPARE(layout->property("focusPolicy").toInt(), int(Qt::TabFocus));
-        click(layout); QCOMPARE(bible->readingMode(), QString("block")); QVERIFY(readerFocused());
+        click(layout); QTRY_VERIFY(shown("textPopover")); QVERIFY(readerFocused());
         // Reached by tab, a mouse click hands the keyboard back to the reader.
         layout->forceActiveFocus(); QVERIFY(layout->hasActiveFocus());
-        click(layout); QCOMPARE(bible->readingMode(), QString("paragraph")); QTRY_VERIFY(readerFocused());
+        click(layout); QTRY_VERIFY(!shown("textPopover")); QTRY_VERIFY(readerFocused());
         // Keyboard focus shows the tooltip as hover does.
         auto tip = toolTipOf(layout); QVERIFY(tip);
         layout->forceActiveFocus(); QTRY_VERIFY(tip->property("visible").toBool());
@@ -1147,6 +1147,7 @@ private slots:
         for (int i = 0; i < 30 && !reached; ++i) { key(Qt::Key_Tab); reached = focusName() == "focusControl"; }
         QVERIFY(reached); QVERIFY(!prop("footerQuiet").toBool()); QVERIFY(item("searchControl")->isEnabled());
         QVERIFY(!prop("footerGuard").toBool());
+        key(Qt::Key_Tab); QCOMPARE(focusName(), QString("textControl")); QVERIFY(!prop("footerQuiet").toBool());
         key(Qt::Key_Tab); QCOMPARE(focusName(), QString("modeControl")); QVERIFY(!prop("footerQuiet").toBool());
         key(Qt::Key_Tab); QCOMPARE(focusName(), QString("helpControl"));
         key(Qt::Key_Tab); QCOMPARE(focusName(), QString("searchControl")); QVERIFY(!prop("footerQuiet").toBool());
@@ -1157,15 +1158,15 @@ private slots:
         QCOMPARE(item("searchControl")->mapToScene(QPointF()), searchAt);
         // Mouse: the pointer on the footer reveals it at once; a click in the next 300 ms is ignored.
         call("readerFocus"); key(Qt::Key_F); QVERIFY(bible->focusMode());
-        QTest::mouseMove(window, center(item("layoutControl")));
+        QTest::mouseMove(window, center(item("modeControl")));
         QVERIFY(!prop("footerQuiet").toBool()); QVERIFY(prop("footerGuard").toBool());
-        const QString mode = bible->readingMode();
-        click(item("layoutControl")); QCOMPARE(bible->readingMode(), mode);
+        click(item("modeControl")); QVERIFY(!prop("verseMode").toBool());
         QTRY_VERIFY(!prop("footerGuard").toBool());
-        QTRY_COMPARE(item("layoutControl")->opacity(), 1.0);
+        QTRY_COMPARE(item("modeControl")->opacity(), 1.0);
         shot("focus-footer-revealed");
-        click(item("layoutControl")); QVERIFY(bible->readingMode() != mode);
+        click(item("modeControl")); QVERIFY(prop("verseMode").toBool());
         QVERIFY(readerFocused());
+        key(Qt::Key_Escape); QVERIFY(!prop("verseMode").toBool());
         QTest::mouseMove(window, QPoint(window->width() / 2, 200)); QTRY_VERIFY(prop("footerQuiet").toBool());
         // The focus button by mouse; the passage menu offers Leave focus mode (f).
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
@@ -2550,7 +2551,7 @@ private slots:
     void reauditFooterEscapeAndOutlineKeys() {
         // esc on a footer button hands the keyboard back to the reader first: the range stays.
         bible->selectVerses(3, 5); call("readerFocus");
-        item("layoutControl")->forceActiveFocus(); key(Qt::Key_Escape);
+        item("textControl")->forceActiveFocus(); key(Qt::Key_Escape);
         QTRY_VERIFY(readerFocused()); QCOMPARE(bible->selectionReference(), QString("John 3:3–5"));
         // The chapter outline: ↑ ↓ choose an entry, enter jumps, { } step sections.
         bible->setChapterOutline(true); navigate("John 3:3");
@@ -2784,7 +2785,7 @@ private slots:
         const QPoint inZone = zone->mapToScene(QPointF(zone->width() / 2 - 200, zone->height() - 4)).toPoint();
         QTest::mouseMove(window, inZone); QTRY_VERIFY(!prop("footerQuiet").toBool());
         // Moving onto a revealed button and back never hides the footer in between.
-        for (const char *name : {"layoutControl", "searchControl", "helpControl"}) {
+        for (const char *name : {"textControl", "searchControl", "helpControl"}) {
             QTest::mouseMove(window, center(item(name))); QTest::qWait(30); QVERIFY(!prop("footerQuiet").toBool());
             QTest::mouseMove(window, inZone); QTest::qWait(30); QVERIFY(!prop("footerQuiet").toBool());
         }

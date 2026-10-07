@@ -3410,12 +3410,9 @@ private slots:
         QVERIFY(search->width() > 0);
         QCOMPARE(passage->x(),search->width());
         QCOMPARE(version->x(),search->width() + passage->width());
-        const auto layout = item("layoutControl");
-        // Cramped and scaled, the layout button gives way to the passage.
-        QCOMPARE(layout->isVisible(),!window->property("footerHideLayout").toBool());
-        QCOMPARE(layout->isVisible(),size.width() > 640 || scale < 1.5);
-        if (layout->isVisible()) QCOMPARE(layout->x(),search->width() + passage->width() + version->width());
-        QCOMPARE(location->width(),search->width() + passage->width() + version->width() + (layout->isVisible() ? layout->width() : 0));
+        // Layout is in the Aa popover now, not the center group.
+        QVERIFY(!item("layoutControl"));
+        QCOMPARE(location->width(),search->width() + passage->width() + version->width());
         QCOMPARE(prop("searchControl","glyph").toString(),QString("search"));
         QCOMPARE(prop("versionControl","text").toString(),bible->versionAbbreviation());
         QVERIFY(passage->width() > 0);
@@ -3423,19 +3420,22 @@ private slots:
         // Stacked or not, the center row sits between the corner groups.
         QVERIFY(location->x() + location->width() < actions->x());
         QVERIFY(location->x() > item("leftActions")->x() + item("leftActions")->width());
-        for (const auto name : {"modeControl","searchControl","passageControl","versionControl","layoutControl","relatedControl","savedControl","deskControl","helpControl"}) {
+        for (const auto name : {"textControl","modeControl","searchControl","passageControl","versionControl","relatedControl","savedControl","deskControl","helpControl"}) {
             auto control = item(name);
-            if (control == layout && !layout->isVisible()) continue;
+            // A cramped footer sheds Keybindings first (it has its key, ?).
+            if (control == item("helpControl") && !window->property("footerShowsHelp").toBool()) continue;
             QVERIFY2(control->isVisible(), name);
             QVERIFY(QRectF(QPointF(),size).contains(control->mapRectToScene(QRectF(0,0,control->width(),control->height()))));
             const auto background = qvariant_cast<QQuickItem *>(control->property("background"));
             QVERIFY(background);
             QCOMPARE(background->property("color").value<QColor>().alpha(),0);
-            if (control != passage && control != version) QVERIFY(control->property("text").toString().isEmpty());
+            if (control != passage && control != version && control != item("textControl")) QVERIFY(control->property("text").toString().isEmpty());
             control->forceActiveFocus(Qt::TabFocusReason);
             QVERIFY(control->hasActiveFocus());
         }
-        key(Qt::Key_Return);
+        // enter on a focused footer button presses it (Keybindings, else F1 does).
+        if (item("helpControl")->isVisible()) { item("helpControl")->forceActiveFocus(Qt::TabFocusReason); key(Qt::Key_Return); }
+        else key(Qt::Key_F1);
         QTRY_VERIFY(prop("helpDialog","opened").toBool());
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("helpDialog","visible").toBool());
@@ -4503,14 +4503,14 @@ private slots:
     }
     void footerOrderAndResponsiveLayout() {
         reference("1 Thessalonians 5:16-18");
-        const QStringList names = {"focusControl","modeControl","helpControl","searchControl","passageControl","versionControl",
-            "layoutControl","savedControl","relatedControl","deskControl","footerMore"};
+        const QStringList names = {"focusControl","textControl","modeControl","helpControl","searchControl","passageControl","versionControl",
+            "savedControl","relatedControl","deskControl","footerMore"};
         window->setMinimumWidth(320);
-        struct Case { int width; int height; double scale; bool stacked; bool layout; bool collapsed; };
-        // Three right buttons (Annotations, Study, Desk): 700 px at 1× fits one row.
-        const QList<Case> cases = {{1120,820,1,false,true,false},{900,820,1.5,true,true,false},{700,820,1,false,true,false},
-            {700,820,1.5,true,true,false},{640,820,1.5,true,false,false},{560,820,1.5,true,false,true},{560,820,2.4,true,false,true},
-            {420,640,1,true,false,true},{360,640,1.5,true,false,true}};
+        struct Case { int width; int height; double scale; bool stacked; bool collapsed; };
+        // Four left buttons (focus, Aa, mode, help) and three right (Annotations, Study, Desk).
+        const QList<Case> cases = {{1120,820,1,false,false},{900,820,1.5,true,false},{700,820,1,false,false},
+            {700,820,1.5,true,false},{640,820,1.5,true,false},{560,820,1.5,true,true},{560,820,2.4,true,true},
+            {420,640,1,true,true},{360,640,1.5,true,true}};
         for (const auto &entry : cases) {
             window->resize(entry.width,entry.height);
             QVERIFY(desktop->setProperty("textScale",entry.scale));
@@ -4518,9 +4518,13 @@ private slots:
             QTest::qWait(120);
             const auto tag = QString("%1@%2").arg(entry.width).arg(entry.scale);
             QVERIFY2(window->property("footerStacked").toBool() == entry.stacked,qPrintable(tag));
-            QVERIFY2(item("layoutControl")->isVisible() == entry.layout,qPrintable(tag));
             QVERIFY2(item("footerMore")->isVisible() == entry.collapsed,qPrintable(tag));
-            QCOMPARE(item("helpControl")->isVisible(),!entry.collapsed);
+            // Aa folds into "…" only where the passage would lose its room.
+            QCOMPARE(item("textControl")->isVisible(),window->property("footerShowsText").toBool());
+            // Keybindings goes before the right group folds; focus before Keybindings.
+            QCOMPARE(item("helpControl")->isVisible(),window->property("footerShowsHelp").toBool());
+            if (entry.collapsed) QVERIFY2(!item("helpControl")->isVisible(),qPrintable(tag));
+            if (item("focusControl")->isVisible()) QVERIFY2(item("helpControl")->isVisible(),qPrintable(tag));
             QCOMPARE(item("savedControl")->isVisible(),!entry.collapsed);
             // The footer itself is always one row tall; only the right group stacks.
             QCOMPARE(window->property("footerHeight").toDouble(),window->property("footerButton").toDouble());
@@ -4563,15 +4567,16 @@ private slots:
                 QCOMPARE(item("deskControl")->mapRectToScene(item("deskControl")->boundingRect()).bottom(),modeBottom);
                 QVERIFY(location.right() <= x("deskControl"));
             }
-            // Left group: focus (where it fits), the mode, then Keybindings.
+            // Left group: focus (where it fits), Aa, the mode, then Keybindings.
             if (item("focusControl")->isVisible()) {
                 QCOMPARE(x("focusControl"),x("leftActions"));
-                QCOMPARE(x("modeControl"),x("focusControl") + w("focusControl"));
-            } else QCOMPARE(x("modeControl"),x("leftActions"));
-            if (!entry.collapsed) QCOMPARE(x("helpControl"),x("modeControl") + w("modeControl"));
+                QCOMPARE(x("textControl"),x("focusControl") + w("focusControl"));
+            } else if (item("textControl")->isVisible()) QCOMPARE(x("textControl"),x("leftActions"));
+            if (item("textControl")->isVisible()) QCOMPARE(x("modeControl"),x("textControl") + w("textControl"));
+            else QCOMPARE(x("modeControl"),x("leftActions"));
+            if (item("helpControl")->isVisible()) QCOMPARE(x("helpControl"),x("modeControl") + w("modeControl"));
             QCOMPARE(x("passageControl"),x("searchControl") + w("searchControl"));
             QCOMPARE(x("versionControl"),x("passageControl") + w("passageControl"));
-            if (entry.layout) QVERIFY(x("versionControl") < x("layoutControl"));
             const auto passage = item("passageControl")->mapRectToScene(item("passageControl")->boundingRect());
             QCOMPARE(passage.top(),item("modeControl")->mapRectToScene(item("modeControl")->boundingRect()).top());
             capture("footer-" + tag);
@@ -4583,32 +4588,63 @@ private slots:
         QTRY_VERIFY(prop("deskDrawer","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
     }
-    void layoutButtonCyclesWithDistinctIcons() {
+    void textPopoverSetsSizeLineAndLayoutWithoutCoveringText() {
         reference("John 3:16");
-        auto layout = item("layoutControl"); QVERIFY(layout && layout->isVisible());
-        QVERIFY(layout->property("tip").toString().contains("alt l"));
-        const QStringList cycle = {"paragraph","verse","block"};
+        auto aa = item("textControl"); QVERIFY(aa && aa->isVisible());
+        QCOMPARE(aa->property("text").toString(),QString("Aa"));
+        QVERIFY(aa->property("tip").toString().contains("alt l"));
+        const double fullHeight = item("reading")->height();
+        click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
+        QVERIFY(item("readerSurface")->hasActiveFocus() || window->activeFocusItem() == item("readerSurface"));
+        // Docked above the left group; the reader's view ends above it.
+        auto popover = item("textPopover");
+        const auto box = qvariant_cast<QQuickItem *>(object("textPopover")->property("contentItem"))->parentItem();
+        const double top = box->mapToScene(QPointF(0,0)).y();
+        QVERIFY(top + box->height() <= aa->mapToScene(QPointF(0,0)).y());
+        const double viewBottom = item("reading")->mapToScene(QPointF(0,item("reading")->height())).y();
+        QVERIFY2(viewBottom <= top,qPrintable(QString("%1 > %2").arg(viewBottom).arg(top)));
+        QVERIFY(item("reading")->height() < fullHeight);
+        Q_UNUSED(popover);
+        // Text size and line height step; the reader's keys still work meanwhile.
+        click(item("textPopover:larger")); QCOMPARE(bible->fontSize(),19);
+        QCOMPARE(prop("textPopover:value0","text").toString(),QString("19"));
+        click(item("textPopover:smaller")); QCOMPARE(bible->fontSize(),18);
+        click(item("textPopover:lineMore")); QCOMPARE(bible->lineHeight(),1.6);
+        click(item("textPopover:lineLess")); QCOMPARE(bible->lineHeight(),1.5);
+        key(Qt::Key_J); QCOMPARE(bible->selectionReference(),QString("John 3:17"));
+        // The three layouts, each with its own icon.
         QMap<QString,QImage> icons;
-        for (int step = 0; step < 3; ++step) {
-            const auto mode = bible->readingMode();
-            QCOMPARE(layout->property("glyph").toString(),"layout-" + mode);
-            QVERIFY(layout->property("tip").toString().contains(mode,Qt::CaseInsensitive));
-            QSignalSpy frames(window,&QQuickWindow::frameSwapped);
-            window->update(); QTRY_VERIFY(frames.count() > 0); QTest::qWait(80);
-            icons.insert(mode,window->grabWindow().copy(layout->mapRectToScene(layout->boundingRect()).toRect()));
-            capture("layout-icon-" + mode);
-            click(layout);
-            QTRY_COMPARE(bible->readingMode(),cycle[(cycle.indexOf(mode) + 1) % 3]);
+        for (const QString mode : {"verse","block","paragraph"}) {
+            click(item(qPrintable("textPopover:" + mode))); QTRY_COMPARE(bible->readingMode(),mode);
             QTRY_VERIFY(!window->property("restoringPosition").toBool());
+            QVERIFY(prop(qPrintable("textPopover:" + mode),"checked").toBool());
+            auto icon = item(qPrintable("textPopoverIcon:" + mode));
+            QSignalSpy frames(window,&QQuickWindow::frameSwapped);
+            window->update(); QTRY_VERIFY(frames.count() > 0); QTest::qWait(60);
+            icons.insert(mode,window->grabWindow().copy(icon->mapRectToScene(icon->boundingRect()).toRect()));
         }
-        QCOMPARE(icons.size(),3);
-        QVERIFY(icons["verse"] != icons["paragraph"]); QVERIFY(icons["paragraph"] != icons["block"]);
-        QVERIFY(icons["verse"] != icons["block"]);
-        capture("layout-icons");
-        // alt l cycles too.
-        const auto before = bible->readingMode();
-        key(Qt::Key_L,Qt::AltModifier); QTRY_COMPARE(bible->readingMode(),cycle[(cycle.indexOf(before) + 1) % 3]);
-        QCOMPARE(layout->property("glyph").toString(),"layout-" + bible->readingMode());
+        QVERIFY(icons["verse"] != icons["paragraph"]); QVERIFY(icons["paragraph"] != icons["block"]); QVERIFY(icons["verse"] != icons["block"]);
+        capture("text-popover");
+        for (const QString mode : {"verse","block","paragraph"}) QVERIFY(!prop(qPrintable("textPopover:" + mode),"contentItem").value<QObject *>()->property("truncated").toBool());
+        // alt l cycles; the chosen button follows.
+        key(Qt::Key_L,Qt::AltModifier); QTRY_COMPARE(bible->readingMode(),QString("verse"));
+        QVERIFY(prop("textPopover:verse","checked").toBool());
+        // esc closes it, and the view grows back; Aa toggles it.
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("textPopover","visible").toBool());
+        QTRY_COMPARE(item("reading")->height(),fullHeight);
+        QCOMPARE(bible->selectionReference(),QString("John 3:17"));
+        click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
+        click(aa); QTRY_VERIFY(!prop("textPopover","visible").toBool());
+        // All reading settings: the dialog opens, the popover closes.
+        click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
+        click(item("textPopover:settings"));
+        QTRY_VERIFY(prop("settingsDialog","opened").toBool()); QVERIFY(!prop("textPopover","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
+        // Any panel or dialog closes it too.
+        click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
+        key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QVERIFY(!prop("textPopover","visible").toBool());
+        key(Qt::Key_Escape);
     }
     void keyNotation() {
         const QList<QPair<QStringList,QString>> cases = {
@@ -4700,9 +4736,7 @@ private slots:
         QCOMPARE(searchButton->x(),0.0);
         QCOMPARE(passage->x(),searchButton->width());
         QCOMPARE(version->x(),searchButton->width() + passage->width());
-        const auto layoutButton = item("layoutControl");
-        const double layoutWidth = layoutButton->isVisible() ? layoutButton->width() : 0;
-        QCOMPARE(location->width(),searchButton->width() + passage->width() + version->width() + layoutWidth);
+        QCOMPARE(location->width(),searchButton->width() + passage->width() + version->width());
         QVERIFY(searchButton->width() > 0 && passage->width() > 0 && version->width() > 0);
         // Cramped or not, the center row sits between the corner groups.
         QVERIFY(location->x() > item("modeControl")->x() + item("modeControl")->width());
@@ -4749,6 +4783,8 @@ private slots:
         key(Qt::Key_V,Qt::ControlModifier);
         QTRY_VERIFY(prop("versionDialog","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
+        // The pointer away from the footer (on it, focus mode reveals it).
+        QTest::mouseMove(window,QPoint(window->width() / 2,60));
         key(Qt::Key_F); QVERIFY(bible->focusMode());
         // The quiet focus-mode footer keeps them in place, hidden and disabled.
         QTRY_COMPARE(version->opacity(),0.0); QTRY_COMPARE(passage->opacity(),0.0); QVERIFY(!version->isEnabled());
