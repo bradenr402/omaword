@@ -3095,16 +3095,40 @@ bool BibleBackend::toggleHighlight()
     const bool covered = highlightCovered(rows);
     const int start = std::min(m_anchor,m_cursor), end = std::max(m_anchor,m_cursor);
     const QString now = timestamp();
-    if (covered) {
-        QVector<Annotation> pieces;
-        for (auto &a : rows) {
-            if (!a.highlight || a.end < start || a.start > end) continue;
-            a.highlight = false; a.updated = now;
-            if (a.start < start) pieces.append({a.start,start-1,true,{},a.created,now});
-            if (a.end > end) pieces.append({end+1,a.end,true,{},a.created,now});
+    // Highlights are paint over verses. Where the selection is all painted,
+    // x erases it, keeping what lies outside; otherwise it paints it, joining
+    // the highlights it overlaps or touches (and theirs in turn) into one.
+    // Notes keep their own ranges: a row only gains or loses its highlight.
+    QSet<int> touched;
+    int first = start, last = end;
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (int i = 0; i < rows.size(); ++i) {
+            const auto &a = rows[i];
+            const bool reaches = covered ? a.end >= start && a.start <= end : a.end >= first - 1 && a.start <= last + 1;
+            if (!a.highlight || touched.contains(i) || !reaches) continue;
+            touched.insert(i);
+            first = std::min(first,a.start); last = std::max(last,a.end);
+            grew = !covered;
         }
-        rows += pieces;
-    } else rows.append({start,end,true,{},now,now});
+    }
+    QString created = now;
+    for (int i : std::as_const(touched)) {
+        auto &a = rows[i];
+        if (!a.created.isEmpty() && a.created < created) created = a.created;
+        a.highlight = false; a.updated = now;
+    }
+    QVector<QPair<int,int>> runs;
+    if (!covered) runs.append({first,last});
+    else {
+        if (first < start) runs.append({first,start - 1});
+        if (last > end) runs.append({end + 1,last});
+    }
+    for (const auto &run : std::as_const(runs)) {
+        auto it = std::find_if(rows.begin(),rows.end(),[&](const Annotation &a) { return a.start == run.first && a.end == run.second; });
+        if (it == rows.end()) rows.append({run.first,run.second,true,{},created,now});
+        else if (!it->highlight) { it->highlight = true; it->updated = now; }
+    }
     return commitAnnotations(rows,before,QString(covered ? "highlight removal on " : "highlight on ") + rangeReference(start,end));
 }
 bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows, const QVector<Annotation> &before, const QString &label)

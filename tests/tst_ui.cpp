@@ -2943,9 +2943,10 @@ private slots:
         bible->selectVerses(1,1); bible->toggleHighlight();
         bible->selectVerses(2,2); bible->toggleHighlight();
         QTest::qWait(100);
-        auto first = item("highlightSegment1:John 3:1"), second = item("highlightSegment2:John 3:2");
+        // Highlights are paint: the second stroke joins the first, drawn without a gap.
+        auto first = item("highlightSegment1:John 3:1–2"), second = item("highlightSegment2:John 3:1–2");
         QVERIFY(first && second);
-        QVERIFY(first->mapToScene(QPointF(0,first->height())).y() < second->mapToScene(QPointF()).y());
+        QCOMPARE(first->mapToScene(QPointF(0,first->height())).y(),second->mapToScene(QPointF()).y());
         bible->setBlockMode(true);
         QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() > 3);
         QTest::qWait(100);

@@ -132,6 +132,12 @@ files.
   column. Annotations gain `created`/`updated` and assignments `created` (UTC
   ISO 8601 with ms; `''` = saved before schema 9). Saves stamp them; undo
   restores them with the row, but a step that changes only times is no step.
+- Highlights are paint (`toggleHighlight`): a selection not all highlighted
+  is painted, and the highlight rows it overlaps or touches (transitively)
+  give way to one row over the union; an all-highlighted selection is erased,
+  leaving the parts of those rows outside it. Notes keep their own exact
+  ranges: a shared row only gains or loses its highlight flag. Older
+  overlapping highlight rows elsewhere are left as they are.
 - Tables: `annotations` (highlight + note per exact range), `reading` (per
   `version_id`); `tags(id,name,name_key)`;
   `tag_assignments` (PK version + both endpoints + tag); `desk` (global ordered

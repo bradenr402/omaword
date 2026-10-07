@@ -1011,6 +1011,45 @@ private slots:
         // Steps live in memory only.
         bible.reset(); bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->canUndo());
     }
+    void highlightsPaintJoinAndErase() {
+        install(net);
+        const auto highlights = [&]() {
+            QStringList out;
+            for (const auto &row : bible->collection()) if (row.toMap()["highlight"].toBool()) out << row.toMap()["reference"].toString();
+            return out;
+        };
+        QVERIFY(bible->navigate("John 3:16-17")); bible->setNoteText("Kept on its range"); QVERIFY(bible->toggleHighlight());
+        QCOMPARE(highlights(),QStringList{QString::fromUtf8("John 3:16–17")});
+        // Painting beside a highlight joins it; the note keeps its own range.
+        QVERIFY(bible->navigate("John 3:18-19")); QVERIFY(bible->toggleHighlight());
+        QCOMPARE(highlights(),QStringList{QString::fromUtf8("John 3:16–19")});
+        QCOMPARE(bible->undoLabel(),QString::fromUtf8("highlight on John 3:18–19"));
+        // Erasing inside leaves what lies outside.
+        QVERIFY(bible->navigate("John 3:17-18")); QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->toggleHighlight());
+        QCOMPARE(highlights(),(QStringList{"John 3:16","John 3:19"}));
+        QVERIFY(!bible->selectionHighlighted());
+        QCOMPARE(bible->undoLabel(),QString::fromUtf8("highlight removal on John 3:17–18"));
+        // Painting over both joins them, and what lies between, into one.
+        QVERIFY(bible->navigate("John 3:15-20")); QVERIFY(bible->toggleHighlight());
+        QCOMPARE(highlights(),QStringList{QString::fromUtf8("John 3:15–20")});
+        // Partly painted: x paints the rest, never erases.
+        QVERIFY(bible->navigate("John 3:20-22")); QVERIFY(!bible->selectionHighlighted()); QVERIFY(bible->toggleHighlight());
+        QCOMPARE(highlights(),QStringList{QString::fromUtf8("John 3:15–22")});
+        // Each stroke is one undo step, the rows put back exactly.
+        QVERIFY(bible->undo()); QCOMPARE(highlights(),QStringList{QString::fromUtf8("John 3:15–20")});
+        QVERIFY(bible->undo()); QCOMPARE(highlights(),(QStringList{"John 3:16","John 3:19"}));
+        QVERIFY(bible->redo()); QCOMPARE(highlights(),QStringList{QString::fromUtf8("John 3:15–20")});
+        // The note never moved.
+        QVERIFY(bible->navigate("John 3:16-17")); QCOMPARE(bible->noteText(),QString("Kept on its range"));
+        // Verses next to each other join across a chapter's end.
+        QVERIFY(bible->navigate("John 3:36")); QVERIFY(bible->toggleHighlight());
+        QVERIFY(bible->navigate("John 4:1")); QVERIFY(bible->toggleHighlight());
+        QVERIFY(highlights().contains(QString::fromUtf8("John 3:36–4:1")));
+        // Erasing the whole of a highlight leaves nothing behind.
+        QVERIFY(bible->navigate("John 3:36-4:1")); QVERIFY(bible->toggleHighlight());
+        QVERIFY(!highlights().contains(QString::fromUtf8("John 3:36–4:1")));
+        QVERIFY(!bible->navigate("John 4:1") || !bible->selectionHighlighted());
+    }
     void marksAcrossVersionsAndScopeNotes() {
         install(net); BibleBackend peer; QSignalSpy peerMarks(&peer,&BibleBackend::marksChanged);
         QVERIFY(bible->navigate("John 3:16-17")); bible->setNoteText("Net note"); QVERIFY(bible->toggleHighlight());
@@ -1072,14 +1111,14 @@ private slots:
     void undoAcrossWindowsAndVersions() {
         install(net); BibleBackend peer;
         QVERIFY(bible->navigate("John 3:16")); QVERIFY(peer.navigate("John 3:16"));
-        QVERIFY(bible->toggleHighlight()); QVERIFY(bible->navigate("John 3:17")); QVERIFY(bible->toggleHighlight());
-        // The peer changes 3:17: that step is dropped, the one before still applies.
-        QVERIFY(peer.navigate("John 3:17")); peer.setNoteText("Peer note");
+        QVERIFY(bible->toggleHighlight()); QVERIFY(bible->navigate("John 3:18")); QVERIFY(bible->toggleHighlight());
+        // The peer changes 3:18: that step is dropped, the one before still applies.
+        QVERIFY(peer.navigate("John 3:18")); peer.setNoteText("Peer note");
         QVERIFY(!bible->undo()); QVERIFY2(bible->error().contains("another window"),qPrintable(bible->error()));
         QVERIFY(bible->selectionHighlighted()); QCOMPARE(bible->undoLabel(),QString("highlight on John 3:16"));
         QVERIFY(bible->undo()); QVERIFY(!bible->canUndo());
         QVERIFY(peer.navigate("John 3:16")); QVERIFY(!peer.selectionHighlighted());
-        QVERIFY(peer.undo()); QVERIFY(peer.navigate("John 3:17")); QVERIFY(peer.noteText().isEmpty());
+        QVERIFY(peer.undo()); QVERIFY(peer.navigate("John 3:18")); QVERIFY(peer.noteText().isEmpty());
         // Another version's step applies there, without switching to it.
         install(kjv); QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->toggleHighlight());
         QVERIFY(bible->switchVersion("engnet")); QVERIFY(bible->undo()); QCOMPARE(bible->versionId(),QString("engnet"));

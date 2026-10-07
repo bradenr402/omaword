@@ -127,7 +127,8 @@ private slots:
         QVERIFY(bible->deleteAnnotation(scope.value("reference").toString(),bible->versionId()));
         QCOMPARE(count(id),0); QCOMPARE(bible->collection().size(),1);
         QVERIFY(bible->navigate("GEN 1:2")); QCOMPARE(bible->noteText(),QString("Keep overlapping note"));
-        QVERIFY(bible->selectionHighlighted());
+        // Highlights are paint: 1:2's joined the exact range's, and went with it.
+        QVERIFY(!bible->selectionHighlighted());
         QVERIFY(bible->setTag(scope,id,true));
         QVERIFY(bible->deleteAnnotation(scope.value("reference").toString())); // tags only
         QCOMPARE(count(id),0);
