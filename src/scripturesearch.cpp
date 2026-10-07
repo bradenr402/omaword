@@ -12,7 +12,6 @@
 #include <QTextBoundaryFinder>
 #include <QUuid>
 #include <algorithm>
-#include <limits>
 #include <tuple>
 
 namespace ScriptureSearch {
@@ -146,17 +145,7 @@ Query parse(const QString &input, bool syntax)
     else add(part,false);
     return query;
 }
-struct Occurrence { int start, end, first, last, term; bool exact; };
-bool wordAt(const QString &text, int at)
-{
-    if (at < 0 || at >= text.size()) return false;
-    char32_t c = text[at].unicode();
-    if (text[at].isLowSurrogate() && at > 0 && text[at-1].isHighSurrogate()) c = QChar::surrogateToUcs4(text[at-1],text[at]);
-    else if (text[at].isHighSurrogate() && at+1 < text.size() && text[at+1].isLowSurrogate()) c = QChar::surrogateToUcs4(text[at],text[at+1]);
-    const auto category = QChar::category(c);
-    return QChar::isLetterOrNumber(c) || category == QChar::Mark_NonSpacing
-        || category == QChar::Mark_SpacingCombining || category == QChar::Mark_Enclosing || c == '_';
-}
+struct Occurrence { int start, end, first, last, term; };
 
 // Sweep right endpoints, retaining the latest left endpoint for each label.
 // Equal-left later covers enclose an existing result and are discarded. This
@@ -198,11 +187,14 @@ struct PreparedChapter {
     }
 };
 struct Corpus { QVector<PreparedChapter> chapters; qint64 bytes = 0; };
-// One immutable generation, at most 64 MiB retained. Only worker value data is
-// shared, never SQL handles. In-flight readers own their snapshot after eviction.
+// Two immutable generations (two windows reading different versions keep
+// theirs), each at most 64 MiB, the least recently searched evicted. Only
+// worker value data is shared, never SQL handles. In-flight readers own their
+// snapshot after eviction.
 QMutex corpusMutex;
-QString corpusIdentity;
-std::shared_ptr<const Corpus> cachedCorpus;
+struct CachedCorpus { QString identity, versionId; std::shared_ptr<const Corpus> corpus; };
+QList<CachedCorpus> cachedCorpora; // Most recently searched first.
+constexpr int CachedCorpora = 2;
 constexpr qint64 MaximumCorpusBytes = 64 * 1024 * 1024;
 
 Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, const Cancellation &cancel)
@@ -231,7 +223,7 @@ Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, co
             // normalized hits on the identical source grapheme. Navigate once.
             if (start == previousStart && end == previousEnd) continue;
             previousStart = start; previousEnd = end;
-            occurrences.append({start,end,first,last,term,!wordAt(normalized.text,at-1) && !wordAt(normalized.text,at+needle.size())});
+            occurrences.append({start,end,first,last,term});
         }
         if (occurrences.size() == previousCount) return result;
     }
@@ -251,11 +243,10 @@ Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, co
         if (stopped(cancel)) return {};
         const auto range = ranges[r];
         QVector<Span> highlights;
-        QVector<bool> found(query.terms.size(),false), exact(query.terms.size(),false);
-        QVector<std::tuple<int,int,int>> events;
+        QVector<bool> found(query.terms.size(),false);
         auto collect = [&](const Occurrence &hit) {
-            found[hit.term] = true; exact[hit.term] = exact[hit.term] || hit.exact;
-            highlights.append({hit.start,hit.end}); events.append({hit.end,hit.start,hit.term});
+            found[hit.term] = true;
+            highlights.append({hit.start,hit.end});
         };
         if (!syntax) collect(occurrences[r]);
         else {
@@ -265,8 +256,6 @@ Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, co
                 if (it->first >= range.start && it->last <= range.end) collect(*it);
         }
         if (std::find(found.cbegin(),found.cend(),false) != found.cend()) continue;
-        int proximity = std::numeric_limits<int>::max();
-        for (const auto &cover : covers(events,query.terms.size())) proximity = std::min(proximity,cover.end-cover.start);
         QVector<Span> merged;
         for (const auto &span : highlights) {
             if (!merged.isEmpty() && span.start <= merged.last().end) merged.last().end = std::max(merged.last().end,span.end);
@@ -284,21 +273,12 @@ Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, co
         const int first = chapter.verses[range.start].number, last = chapter.verses[range.end].number;
         QString reference = chapter.name + ' ' + QString::number(chapter.number) + ':' + QString::number(first);
         if (first != last) reference += QChar(0x2013) + QString::number(last);
-        const int exactCount = std::count(exact.cbegin(),exact.cend(),true);
         result.matches.append(QVariantMap{{QStringLiteral("book"),chapter.book},{QStringLiteral("chapter"),chapter.number},{QStringLiteral("start"),first},
             {QStringLiteral("endBook"),chapter.book},{QStringLiteral("endChapter"),chapter.number},{QStringLiteral("end"),last},{QStringLiteral("reference"),reference},
             {QStringLiteral("segments"),segments},{QStringLiteral("text"),source.mid(starts[range.start],ends[range.end]-starts[range.start])},
-            {QStringLiteral("displaySegments"),displaySegments},{QStringLiteral("score"),exactCount},{QStringLiteral("_proximity"),proximity},
-            {QStringLiteral("_verses"),range.end-range.start+1}});
+            {QStringLiteral("displaySegments"),displaySegments}});
     }
     return result;
-}
-void removeRanking(QVariantList &rows)
-{
-    for (auto &row : rows) {
-        auto &map = *static_cast<QVariantMap *>(row.data());
-        map.remove(QStringLiteral("_proximity")); map.remove(QStringLiteral("_verses"));
-    }
 }
 }
 
@@ -306,9 +286,7 @@ Result find(const Chapter &chapter, const QString &query, bool bibleSyntax, cons
 {
     const auto parsed = parse(query,bibleSyntax);
     if (!parsed.error.isEmpty() || parsed.terms.isEmpty() || stopped(cancel)) return {parsed.error,{}};
-    auto result = scan(PreparedChapter(chapter),parsed,bibleSyntax,cancel);
-    removeRanking(result.matches);
-    return result;
+    return scan(PreparedChapter(chapter),parsed,bibleSyntax,cancel);
 }
 
 Result findPattern(const Chapter &chapter, const QString &input, const Cancellation &cancel)
@@ -354,8 +332,7 @@ Result findPattern(const Chapter &chapter, const QString &input, const Cancellat
                 {QStringLiteral("end"),verse.number},{QStringLiteral("reference"),reference},
                 {QStringLiteral("segments"),QVariantList{QVariantMap{{QStringLiteral("verse"),verse.number},{QStringLiteral("start"),start},{QStringLiteral("length"),length}}}},
                 {QStringLiteral("text"),verse.text},
-                {QStringLiteral("displaySegments"),QVariantList{QVariantMap{{QStringLiteral("start"),start},{QStringLiteral("length"),length}}}},
-                {QStringLiteral("score"),1}});
+                {QStringLiteral("displaySegments"),QVariantList{QVariantMap{{QStringLiteral("start"),start},{QStringLiteral("length"),length}}}}});
         }
     }
     return result;
@@ -385,7 +362,12 @@ Result search(const QString &path, const QString &versionId, const QString &abbr
     std::shared_ptr<const Corpus> corpus;
     {
         QMutexLocker lock(&corpusMutex);
-        if (corpusIdentity == identity) corpus = cachedCorpus;
+        for (qsizetype i = 0; i < cachedCorpora.size(); ++i) {
+            if (cachedCorpora[i].identity != identity) continue;
+            corpus = cachedCorpora[i].corpus;
+            cachedCorpora.move(i, 0);
+            break;
+        }
     }
     if (corpus) {
         for (const auto &chapter : corpus->chapters) {
@@ -420,31 +402,29 @@ Result search(const QString &path, const QString &versionId, const QString &abbr
         flush();
         if (building && !stopped(cancel) && QFileInfo::exists(path)) {
             QMutexLocker lock(&corpusMutex);
-            corpusIdentity = identity; cachedCorpus = std::move(building);
+            cachedCorpora.removeIf([&](const CachedCorpus &entry) { return entry.identity == identity; });
+            cachedCorpora.prepend({identity, versionId, std::move(building)});
+            while (cachedCorpora.size() > CachedCorpora) cachedCorpora.removeLast();
         }
     }
     if (stopped(cancel)) return {};
-    // Extract rank once, rather than allocating/converting QVariant lookup keys
-    // on every O(n log n) comparison. The index explicitly preserves source ties.
-    QVector<std::tuple<int,int,int,qsizetype,qsizetype>> ranked;
-    ranked.reserve(result.matches.size());
-    for (qsizetype i = 0; i < result.matches.size(); ++i) {
-        const auto map = result.matches[i].toMap();
-        ranked.append({-map.value(QStringLiteral("score")).toInt(),map.value(QStringLiteral("_proximity")).toInt(),
-            map.value(QStringLiteral("_verses")).toInt(),map.value(QStringLiteral("text")).toString().size(),i});
-    }
-    std::sort(ranked.begin(),ranked.end());
-    QVariantList ordered; ordered.reserve(result.matches.size());
-    for (const auto &rank : ranked) ordered.append(result.matches[std::get<4>(rank)]);
-    result.matches = std::move(ordered);
+    // Matches are in Bible order (the edition's book order, then chapter and
+    // verse), as the chapters were scanned.
     for (auto &row : result.matches) {
         if (stopped(cancel)) return {};
         // These are engine-owned QVariantMaps. Mutate the stored map directly;
-        // toMap() would share it and then detach/copy every map node on removal.
+        // toMap() would share it and then detach/copy every map node.
         auto &map = *static_cast<QVariantMap *>(row.data());
-        map.remove(QStringLiteral("_proximity")); map.remove(QStringLiteral("_verses"));
         map.insert(QStringLiteral("versionId"),versionId); map.insert(QStringLiteral("versionAbbreviation"),abbreviation);
     }
     return result;
 }
+}
+
+QStringList ScriptureSearch::cachedVersions()
+{
+    QMutexLocker lock(&corpusMutex);
+    QStringList versions;
+    for (const auto &entry : std::as_const(cachedCorpora)) versions << entry.versionId;
+    return versions;
 }

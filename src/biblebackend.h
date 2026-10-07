@@ -69,6 +69,9 @@ class BibleBackend : public QObject
     Q_PROPERTY(bool searchBusy READ searchBusy NOTIFY searchChanged)
     Q_PROPERTY(QString searchError READ searchError NOTIFY searchChanged)
     Q_PROPERTY(int searchResultCount READ searchResultCount NOTIFY searchChanged)
+    // The results' books in Bible order: {book, name, count, index} (index:
+    // the book's first result among all of them).
+    Q_PROPERTY(QVariantList searchBooks READ searchBooks NOTIFY searchChanged)
     Q_PROPERTY(QString textGeneration READ textGeneration NOTIFY versionChanged)
     Q_PROPERTY(QVariantList desk READ desk NOTIFY deskChanged)
     Q_PROPERTY(bool currentInDesk READ currentInDesk NOTIFY currentInDeskChanged)
@@ -178,6 +181,7 @@ public:
     bool searchBusy() const { return m_searchBusy; }
     QString searchError() const { return m_searchError; }
     int searchResultCount() const { return int(m_allSearchResults.size()); }
+    QVariantList searchBooks() const { return m_searchBooks; }
     QString textGeneration() const { return m_textGeneration; }
     // Bible syntax: AND substrings in one verse, quoted phrases across adjacent
     // source verses in a chapter. Quotes/backslashes can be backslash-escaped.
@@ -472,7 +476,7 @@ private:
     QFutureWatcher<UsfmImporter::Result> m_importWatcher;
     QTimer m_progressTimer;
     QString m_textGeneration, m_searchError;
-    QVariantList m_searchResults, m_allSearchResults;
+    QVariantList m_searchResults, m_allSearchResults, m_searchBooks;
     bool m_searchBusy = false;
     quint64 m_searchRequest = 0;
     std::shared_ptr<std::atomic_bool> m_searchCancellation;

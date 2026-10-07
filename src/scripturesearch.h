@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 #include <QVector>
 #include <atomic>
@@ -22,6 +23,9 @@ Result find(const Chapter &chapter, const QString &query, bool bibleSyntax = fal
 // insensitive, `\C` sensitive (`\c` wins). Empty matches are skipped. An
 // invalid pattern yields the error "invalid pattern" and no matches.
 Result findPattern(const Chapter &chapter, const QString &pattern, const Cancellation &cancel = {});
+// The whole edition, matches in Bible order (book order, chapter, verse).
 Result search(const QString &path, const QString &versionId, const QString &abbreviation,
               const QString &query, const Cancellation &cancel = {});
+// Test hook: the versions whose prepared text is cached, most recently searched first.
+QStringList cachedVersions();
 }

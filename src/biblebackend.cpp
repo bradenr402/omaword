@@ -2081,7 +2081,7 @@ void BibleBackend::cancelScriptureSearch()
     if (m_searchCancellation) m_searchCancellation->store(true);
     m_searchCancellation.reset();
     m_searchBusy = false; m_searchError.clear();
-    m_searchResults.clear(); m_allSearchResults.clear();
+    m_searchResults.clear(); m_allSearchResults.clear(); m_searchBooks.clear();
     emit searchChanged();
 }
 
@@ -2102,6 +2102,20 @@ void BibleBackend::searchScripture(QString query)
             if (cancel->load() || request != m_searchRequest || generation != m_textGeneration || id != m_versionId) return;
             m_searchBusy = false; m_searchError = result.error;
             m_allSearchResults = result.matches; m_searchResults = m_allSearchResults.mid(0,100);
+            // Results arrive in Bible order, so each book's are contiguous.
+            m_searchBooks.clear();
+            for (qsizetype i = 0; i < m_allSearchResults.size(); ++i) {
+                const auto row = m_allSearchResults[i].toMap();
+                const int book = row.value("book").toInt();
+                if (!m_searchBooks.isEmpty() && m_searchBooks.last().toMap().value("book").toInt() == book) {
+                    auto last = m_searchBooks.last().toMap(); last["count"] = last.value("count").toInt() + 1;
+                    m_searchBooks.last() = last;
+                    continue;
+                }
+                QString name;
+                for (const auto &entry : std::as_const(m_books)) if (entry.toMap().value("id").toInt() == book) name = entry.toMap().value("name").toString();
+                m_searchBooks.append(QVariantMap{{"book",book},{"name",name},{"count",1},{"index",int(i)}});
+            }
             emit searchChanged();
         });
     watcher->setFuture(QtConcurrent::run([path,id,abbreviation,query,cancel] {

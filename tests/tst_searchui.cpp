@@ -557,6 +557,59 @@ private slots:
         key(Qt::Key_K, Qt::ControlModifier); QCOMPARE(object("referenceInput")->property("text").toString(), QString());
         QVERIFY(!prop("paletteTextMode").toBool());
     }
+    void resultsInBibleOrderUnderBooks() {
+        // Genesis (120 matches, more than a page), Exodus (2), Matthew (1).
+        const QString path = session->filePath("books.zip");
+        {
+            auto zip = archive_write_new(); archive_write_set_format_zip(zip);
+            QVERIFY(archive_write_open_filename(zip, QFile::encodeName(path).constData()) == ARCHIVE_OK);
+            auto add = [&](const char *name, const char *code, const char *title, int verses, QList<int> lamps) {
+                QByteArray data = QString("\\id %1 Books fixture\n\\h %2\n\\toc1 %2\n\\toc2 %2\n\\c 1\n\\p\n").arg(code, title).toUtf8();
+                for (int verse = 1; verse <= verses; ++verse)
+                    data += QString("\\v %1 Original line %1%2.\n").arg(verse).arg(lamps.contains(verse) || lamps.contains(0) ? " with a lamp" : "").toUtf8();
+                auto entry = archive_entry_new(); archive_entry_set_pathname(entry, name); archive_entry_set_filetype(entry, AE_IFREG);
+                archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, data.size());
+                QVERIFY(archive_write_header(zip, entry) == ARCHIVE_OK); QCOMPARE(archive_write_data(zip, data.constData(), data.size()), data.size());
+                archive_entry_free(entry);
+            };
+            add("01-GENbooks.usfm", "GEN", "Genesis", 120, {0});
+            add("02-EXObooks.usfm", "EXO", "Exodus", 10, {3, 7});
+            add("40-MATbooks.usfm", "MAT", "Matthew", 5, {2});
+            QVERIFY(archive_write_close(zip) == ARCHIVE_OK); archive_write_free(zip);
+        }
+        install(path); navigate("Matthew 1:1");
+        search("lamp");
+        QCOMPARE(bible->searchResultCount(), 123); QCOMPARE(bible->searchResults().size(), 100);
+        const auto books = bible->searchBooks();
+        QCOMPARE(books.size(), 3);
+        QCOMPARE(books[0].toMap()["name"].toString(), QString("Genesis")); QCOMPARE(books[0].toMap()["count"].toInt(), 120);
+        QCOMPARE(books[1].toMap()["name"].toString(), QString("Exodus")); QCOMPARE(books[1].toMap()["index"].toInt(), 120);
+        QCOMPARE(books[2].toMap()["name"].toString(), QString("Matthew")); QCOMPARE(books[2].toMap()["count"].toInt(), 1);
+        // Bible order, not the reader's book first; each book's first row is headed.
+        QCOMPARE(bible->searchResults()[0].toMap()["reference"].toString(), QString("Genesis 1:1"));
+        QCOMPARE(bible->searchResults()[1].toMap()["reference"].toString(), QString("Genesis 1:2"));
+        QTRY_VERIFY(item("paletteGroup0") && item("paletteGroup0")->isVisible());
+        QCOMPARE(object("paletteGroup0")->property("text").toString(), QString("Genesis · 120"));
+        QVERIFY(object("searchResultCount")->property("text").toString().endsWith(" · 3 books"));
+        QVERIFY(object("paletteHints")->property("plainText").toString().contains("ctrl ↑ ctrl ↓ books"));
+        // ctrl ↓ jumps to the next book, loading the page it is on.
+        key(Qt::Key_Down, Qt::ControlModifier);
+        QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 120);
+        QVERIFY(bible->searchResults().size() > 120);
+        QTRY_VERIFY(item("paletteGroup120") && item("paletteGroup120")->isVisible());
+        QCOMPARE(object("paletteGroup120")->property("text").toString(), QString("Exodus · 2"));
+        key(Qt::Key_Down); QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 121);
+        // ctrl ↑ goes to this book's first result, then the previous book's.
+        key(Qt::Key_Up, Qt::ControlModifier); QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 120);
+        key(Qt::Key_Up, Qt::ControlModifier); QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 0);
+        key(Qt::Key_Down, Qt::ControlModifier); key(Qt::Key_Down, Qt::ControlModifier);
+        QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 122);
+        // Past the last book: the boundary sound, nowhere to go.
+        key(Qt::Key_Down, Qt::ControlModifier); QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 122);
+        QCOMPARE(sounds->lastSound(), QString("boundary"));
+        key(Qt::Key_Return); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        QCOMPARE(bible->selectionReference(), QString("Matthew 1:2"));
+    }
     void previewCancelAndVisualNormal() {
         find("alpha"); key(Qt::Key_Return); QTRY_VERIFY(!prop("findPromptOpen").toBool());
         navigate("John 1:35");

@@ -3791,6 +3791,8 @@ ApplicationWindow {
         { id: "nextMatch", group: "Search", title: "Next search match", sequences: ["N"] },
         { id: "previousMatch", group: "Search", title: "Previous search match", sequences: ["Shift+N"] },
         { id: "bibleSearch", group: "Search", title: "Search Bible", sequences: ["Ctrl+/"], scope: "palette", command: true },
+        // Bound by the palette's input itself.
+        { id: "searchBookJump", group: "Search", title: "Bible search: next book, previous book", sequences: ["Ctrl+Down", "Ctrl+Up"], scope: "search", explanation: true },
         { id: "bookmark", group: "Annotate", title: "Bookmark selection", sequences: ["M"], command: true },
         { id: "highlight", group: "Annotate", title: "Highlight selection", sequences: ["X"], command: true },
         { id: "notes", group: "Annotate", title: "Write a note", sequences: ["W"], scope: "notes", command: true },
@@ -3962,6 +3964,7 @@ ApplicationWindow {
         }
         return [[paletteChapterGrid ? ["Left", "Right", "Up", "Down"] : ["Up", "Down"], "choose"],
             paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
+            paletteTextMode && paletteSearchCurrent && bible.searchBooks.length > 1 ? [["Ctrl+Up", "Ctrl+Down"], "books", function() { app.jumpSearchBook(1) }] : null,
             ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
             paletteChapterGrid ? ["Backspace", "books", app.backToBooks] : paletteLeftGoesBack ? ["Left", "back", app.backToBooks] : null,
             // tab / shift tab cycle Passage → Search → Command.
@@ -4085,6 +4088,7 @@ ApplicationWindow {
     function scopeTitle(action) {
         if (action.scope === "list") return "List panels · Annotations, Desk, History, Study"
         if (action.scope === "history") return "History in the palette only"
+        if (action.scope === "search") return "Bible search results (" + keyText("bibleSearch") + ")"
         if (action.scope === "versions") return "Versions dialog"
         if (action.explanation) return "Reader gesture"
         if (textSizeActions.includes(action.id)) return "Anywhere in this window · panels, dialogs, and while typing"
@@ -4118,7 +4122,16 @@ ApplicationWindow {
             if (!paletteTextQuery.length) return Array.from(bible.recentQueries).slice(0, 5).map(function(query) {
                 return { title: query, hint: "Recent search", recentQuery: query }
             })
-            return paletteSearchCurrent ? Array.from(bible.searchResults) : []
+            if (!paletteSearchCurrent) return []
+            // Bible order; each book's first result carries its heading and count.
+            const books = {}
+            for (const entry of Array.from(bible.searchBooks)) books[entry.book] = entry
+            const rows = Array.from(bible.searchResults)
+            return rows.map(function(row, index) {
+                if (index > 0 && rows[index - 1].book === row.book) return row
+                const book = books[row.book]
+                return Object.assign({ firstOfGroup: true, group: book ? book.name + " · " + book.count : "" }, row)
+            })
         }
         let query = referenceInput.text.trim().toLowerCase()
         if (query.startsWith(">")) {
@@ -4273,6 +4286,23 @@ ApplicationWindow {
         referenceInput.text = ""
         paletteArrowUsed = false
         paletteResults.currentIndex = 0
+        referenceInput.forceActiveFocus()
+    }
+    // ctrl ↓ / ctrl ↑: the next book's first result, or this book's first
+    // (then the previous book's), loading pages as needed.
+    function jumpSearchBook(direction) {
+        const books = Array.from(bible.searchBooks)
+        if (!paletteTextMode || !paletteSearchCurrent || bible.searchBusy || !books.length) { rejected(); return }
+        const current = paletteResults.model[paletteResults.currentIndex]
+        const at = current ? books.findIndex(function(entry) { return entry.book === current.book }) : -1
+        const target = direction > 0 ? at + 1
+            : at >= 0 && paletteResults.currentIndex > books[at].index ? at : at - 1
+        if (target < 0 || target >= books.length) { sounds.play("boundary"); return }
+        const index = books[target].index
+        while (bible.searchResults.length <= index && bible.searchResults.length < bible.searchResultCount) bible.loadMoreSearchResults()
+        paletteArrowUsed = true
+        paletteResults.currentIndex = index
+        paletteResults.positionViewAtIndex(index, ListView.Beginning)
         referenceInput.forceActiveFocus()
     }
     // Bible search loads results a page at a time: moving past the last loaded
@@ -7147,8 +7177,9 @@ ApplicationWindow {
                         }
                     }
                     onAccepted: app.acceptPalette()
-                    Keys.onDownPressed: app.paletteRow(1)
-                    Keys.onUpPressed: app.paletteRow(-1)
+                    // ctrl ↓ / ctrl ↑ jump between the books of Bible search results.
+                    Keys.onDownPressed: function(event) { if (app.paletteTextMode && event.modifiers === Qt.ControlModifier) app.jumpSearchBook(1); else app.paletteRow(1) }
+                    Keys.onUpPressed: function(event) { if (app.paletteTextMode && event.modifiers === Qt.ControlModifier) app.jumpSearchBook(-1); else app.paletteRow(-1) }
 
                     // ← and → move through the chapter grid (← from the first
                     // chapter back to the books); in the book list → opens a
@@ -7364,7 +7395,12 @@ ApplicationWindow {
             RowLayout {
                 visible: app.paletteTextMode && app.paletteSearchCurrent && !bible.searchBusy && paletteResults.count > 0
                 Layout.fillWidth: true
-                Label { text: paletteResults.count + " of " + bible.searchResultCount + " results"; color: desktop.muted; font.pixelSize: 12 * app.scale; Layout.fillWidth: true }
+                Label {
+                    objectName: "searchResultCount"
+                    text: paletteResults.count + " of " + bible.searchResultCount + " results · "
+                        + bible.searchBooks.length + (bible.searchBooks.length === 1 ? " book" : " books")
+                    color: desktop.muted; font.pixelSize: 12 * app.scale; Layout.fillWidth: true
+                }
                 QuietButton { objectName: "searchLoadMore"; text: "Show more"; compact: true; visible: paletteResults.count < bible.searchResultCount; onClicked: bible.loadMoreSearchResults() }
             }
             FineRule { Layout.fillWidth: true }

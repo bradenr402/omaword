@@ -204,7 +204,10 @@ files.
   tags, decorations never searched.
 - Bible search: unquoted terms AND within a verse; quoted phrases may span
   adjacent verses; mixed queries anchor on the minimal phrase range. Never
-  crosses chapters. Max 4096 units; unbalanced quotes error.
+  crosses chapters. Max 4096 units; unbalanced quotes error. Results come in
+  Bible order (the edition's book order, chapter, verse), never ranked;
+  `searchBooks` sums them per book ({book, name, count, index}) for the
+  palette's book headings and `ctrl ↓`/`ctrl ↑` book jumps.
 - Chapter find (`/`) is a regular expression (`ScriptureSearch::findPattern`,
   `QRegularExpression` with Unicode properties) over each verse's source text:
   matches never cross verses (the old literal find could), empty matches are
@@ -214,8 +217,10 @@ files.
   then sounds the error and the prompt stays. `findInChapter` stays the literal
   / Bible-syntax engine (reapplying a Bible search's matches). `n`/`shift N`
   never wrap.
-- `ScriptureSearch` keeps grapheme-safe maps to original UTF-16 offsets; one
-  shared corpus cache (one generation, ≤ 64 MiB); stale requests dropped by token.
+- `ScriptureSearch` keeps grapheme-safe maps to original UTF-16 offsets; a
+  shared corpus cache of the two most recently searched generations (each ≤ 64
+  MiB, so two windows on different versions keep theirs); stale requests
+  dropped by token.
   `SearchDocument`/`BlockDocument` map those offsets into each layout, skipping
   decoration cells and verse-number labels.
 

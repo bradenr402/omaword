@@ -571,10 +571,13 @@ private slots:
         QVERIFY(QGuiApplication::clipboard()->text().contains("John"));
         QVERIFY(object("passagePalette")->property("opened").toBool());
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        // Results come in Bible order: John 1:2 (already on the Desk) first, then John 1:8.
+        key(Qt::Key_Down); QTRY_COMPARE(object("paletteResults")->property("currentIndex").toInt(), 1);
         rightClick(object("paletteResults")->property("currentItem").value<QQuickItem *>()); QTRY_VERIFY(menuOpen());
         const int before = bible->desk().size();
         clickEntry("desk");
         QCOMPARE(bible->desk().size(), before + 1);
+        QCOMPARE(bible->desk().last().toMap()["reference"].toString(), QString("John 1:8"));
         rightClick(object("paletteResults")->property("currentItem").value<QQuickItem *>()); QTRY_VERIFY(menuOpen());
         clickEntry("open");
         QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());

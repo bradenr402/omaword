@@ -237,7 +237,7 @@ private slots:
         QTest::qWait(30); QVERIFY(peer.textGeneration().isEmpty()); QVERIFY(peer.searchError().isEmpty());
         QCOMPARE(peer.searchResultCount(),0); QVERIFY(!peer.searchBusy()); QVERIFY(!searchChanged.isEmpty());
     }
-    void fullBiblePerformanceAndRanking() {
+    void fullBiblePerformanceAndBibleOrder() {
         QTemporaryDir directory; QVERIFY(directory.isValid());
         const QString path = directory.filePath("synthetic.sqlite"), connection = "search-fixture";
         {
@@ -263,13 +263,15 @@ private slots:
         auto result = search(path,"synthetic","SYN","mercy peace");
         const auto elapsed = timer.elapsed();
         QVERIFY2(result.error.isEmpty(),qPrintable(result.error)); QCOMPARE(result.matches.size(),30000);
-        QCOMPARE(result.matches.first().toMap()["start"].toInt(),3);
-        QCOMPARE(result.matches.first().toMap()["book"].toInt(),80);
-        // Equal ranks follow books.ordinal, then chapter and source verse keys.
-        QCOMPARE(result.matches[1].toMap()["book"].toInt(),80); QCOMPARE(result.matches[1].toMap()["start"].toInt(),4);
-        QCOMPARE(result.matches[14997].toMap()["book"].toInt(),80);
-        QCOMPARE(result.matches[14998].toMap()["book"].toInt(),1);
-        QCOMPARE(result.matches.last().toMap()["start"].toInt(),1); // Exact words beat closer substrings.
+        // Bible order: books.ordinal (book 80 first here), then chapter and
+        // source verse keys; partial words ("mercys peaceful") are matches too.
+        QCOMPARE(result.matches.first().toMap()["book"].toInt(),80); QCOMPARE(result.matches.first().toMap()["start"].toInt(),1);
+        QCOMPARE(result.matches[1].toMap()["start"].toInt(),2); QCOMPARE(result.matches[2].toMap()["start"].toInt(),3);
+        QCOMPARE(result.matches[100].toMap()["chapter"].toInt(),2); QCOMPARE(result.matches[100].toMap()["start"].toInt(),1);
+        QCOMPARE(result.matches[14999].toMap()["book"].toInt(),80);
+        QCOMPARE(result.matches[15000].toMap()["book"].toInt(),1);
+        QCOMPARE(result.matches.last().toMap()["chapter"].toInt(),150); QCOMPARE(result.matches.last().toMap()["start"].toInt(),100);
+        QVERIFY(!result.matches.first().toMap().contains("score"));
         qInfo("Synthetic 30,000 verses: AND search %lld ms; %lld results",elapsed,qint64(result.matches.size()));
         timer.restart();
         int heartbeats = 0;
@@ -317,6 +319,34 @@ private slots:
         QVERIFY(!search(path,"wrong","SYN","mercy").error.isEmpty());
         QVERIFY(QFile::remove(path));
         QVERIFY(!search(path,"synthetic","SYN","mercy").error.isEmpty()); // Cached generation must not revive an unlinked file.
+    }
+    void twoVersionsStayCached() {
+        // Two windows searching different versions keep both prepared texts;
+        // a third version evicts the least recently searched.
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        auto edition = [&](const QString &id) {
+            const QString path = directory.filePath(id + ".sqlite"), connection = "cache-" + id;
+            {
+                auto db = QSqlDatabase::addDatabase("QSQLITE",connection); db.setDatabaseName(path); db.open();
+                QSqlQuery q(db);
+                q.exec("CREATE TABLE metadata(key TEXT,value TEXT)");
+                q.exec("INSERT INTO metadata VALUES('version_id','" + id + "')");
+                q.exec("CREATE TABLE books(id INTEGER,ordinal INTEGER,name TEXT)");
+                q.exec("INSERT INTO books VALUES(1,1,'Genesis')");
+                q.exec("CREATE TABLE verses(book INTEGER,chapter INTEGER,number INTEGER,text TEXT,PRIMARY KEY(book,chapter,number))");
+                q.exec("INSERT INTO verses VALUES(1,1,1,'In the beginning " + id + "')");
+            }
+            QSqlDatabase::removeDatabase(connection);
+            return path;
+        };
+        const QString a = edition("alpha"), b = edition("beta"), c = edition("gamma");
+        QCOMPARE(search(a,"alpha","A","beginning").matches.size(),1);
+        QCOMPARE(search(b,"beta","B","beginning").matches.size(),1);
+        QCOMPARE(cachedVersions(),QStringList({"beta","alpha"}));
+        QCOMPARE(search(a,"alpha","A","alpha").matches.size(),1); // A hit moves it to the front.
+        QCOMPARE(cachedVersions(),QStringList({"alpha","beta"}));
+        QCOMPARE(search(c,"gamma","C","gamma").matches.size(),1);
+        QCOMPARE(cachedVersions(),QStringList({"gamma","alpha"}));
     }
 };
 QTEST_GUILESS_MAIN(SearchTest)

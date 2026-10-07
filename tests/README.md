@@ -81,8 +81,8 @@ fontconfig state.
 - **catalog**: catalog metadata, streamed atomic downloads, cancel/timeout/retry.
 - **backend**: library, references, annotations, backups, migrations, peers, History, file ownership, character-selection motions/objects and the quotation format.
 - **ui**: packaged Main: catalog, layouts, selection/copy, Annotations, Visual completion, footer.
-- **search**: matching semantics (incl. chapter find's smart-case regular expressions), async lifecycle, whitespace-preserving copy.
-- **searchui**: palette and chapter-find keyboard behavior.
+- **search**: matching semantics (incl. chapter find's smart-case regular expressions), results in Bible order, the two-version corpus cache, async lifecycle, whitespace-preserving copy.
+- **searchui**: palette and chapter-find keyboard behavior; Bible search results under book headings with counts, `ctrl ↓`/`ctrl ↑` book jumps across pages.
 - **searchrender**: rendered match offsets/geometry across layouts.
 - **deskui**: Desk add/remove, panel, peers, version removal.
 - **studyui**: words-of-Jesus coloring, Re-import offers, Study panel tabs (Related, Cross-references, Footnotes), reader footnote markers.
