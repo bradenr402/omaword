@@ -917,16 +917,20 @@ private slots:
         QVERIFY(bible->error().contains("duplicate JSON"));
         QSqlQuery q(store());
         QVERIFY(q.exec("CREATE TRIGGER reject_notes BEFORE INSERT ON annotations BEGIN SELECT RAISE(ABORT,'injected disk failure'); END"));
+        QVERIFY(q.exec("CREATE TRIGGER reject_notes_update BEFORE UPDATE ON annotations BEGIN SELECT RAISE(ABORT,'injected disk failure'); END"));
         bible->setNoteText("Must fail"); QVERIFY(bible->error().contains("injected disk failure"));
         QVERIFY(!bible->importBackup(backup)); QCOMPARE(bible->collection(),original); QCOMPARE(bible->noteText(),QString("Keep this note"));
         QVERIFY(q.exec("DROP TRIGGER reject_notes"));
+        QVERIFY(q.exec("DROP TRIGGER reject_notes_update"));
         // Deferred constraint tests a COMMIT failure after successful write/readback.
         QVERIFY(q.exec("PRAGMA foreign_keys=ON"));
         QVERIFY(q.exec("CREATE TABLE parent(id INTEGER PRIMARY KEY)"));
         QVERIFY(q.exec("CREATE TABLE failure(id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)"));
         QVERIFY(q.exec("CREATE TRIGGER fail_commit AFTER INSERT ON annotations BEGIN INSERT INTO failure VALUES(1); END"));
+        QVERIFY(q.exec("CREATE TRIGGER fail_commit_update AFTER UPDATE ON annotations BEGIN INSERT INTO failure VALUES(1); END"));
         bible->setNoteText("Commit must fail"); QVERIFY(bible->error().contains("Cannot commit annotations")); QCOMPARE(bible->collection(),original);
         QVERIFY(q.exec("DROP TRIGGER fail_commit"));
+        QVERIFY(q.exec("DROP TRIGGER fail_commit_update"));
         bible->setNoteText("Changed"); QVERIFY(bible->importBackup(backup)); QCOMPARE(bible->collection(),original);
         QVERIFY(bible->exportNotes(QUrl::fromLocalFile(session->path())));
         QVERIFY(!bible->exportBackup(QUrl::fromLocalFile(bible->dataDirectory()+"/personal.sqlite")));

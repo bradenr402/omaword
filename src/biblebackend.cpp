@@ -2929,13 +2929,21 @@ void BibleBackend::setNoteText(QString text)
     if (!m_start) { setError("Select the verse or range for this note first."); return; }
     if (text.size() > MaximumNoteSize || !safeString(text)) { setError("The note is too large or contains unsupported control characters."); return; }
     if (!m_store.transaction()) { setError("Cannot start note save: " + m_store.lastError().text()); return; }
-    QVector<Annotation> rows;
-    if (!loadAnnotations(&rows)) { m_store.rollback(); return; }
     const int start = std::min(m_anchor,m_cursor), end = std::max(m_anchor,m_cursor);
-    const auto found = std::find_if(rows.begin(),rows.end(),[&](const Annotation &a) {
-        return a.start == start && a.end == end;
-    });
-    const QString savedNote = found == rows.end() ? QString() : found->note;
+    const auto first = endpoint(start), last = endpoint(end);
+    // A note save reads and writes its own row only: typing must not rewrite
+    // every annotation.
+    const QString where = " WHERE version_id=? AND book=? AND chapter=? AND start=? AND endBook=? AND endChapter=? AND end=?";
+    QSqlQuery q(m_store);
+    const auto bindRange = [&] {
+        for (const QVariant &value : QVariantList{m_versionId,first.book,first.chapter,first.verse,last.book,last.chapter,last.verse})
+            q.addBindValue(value);
+    };
+    q.prepare("SELECT bookmark,highlight,note FROM annotations" + where); bindRange();
+    if (!q.exec()) { m_store.rollback(); setError("Cannot read the note: " + q.lastError().text()); return; }
+    const bool exists = q.next(), flagged = exists && (q.value(0).toBool() || q.value(1).toBool());
+    const QString savedNote = exists ? q.value(2).toString() : QString();
+    q.finish();
     // Peer delivery is deferred while all windows flush drafts. Compare against
     // this reader's last observed note inside the same transaction as the write,
     // including a missing/deleted note; reading fresh rows alone is not a merge.
@@ -2944,9 +2952,30 @@ void BibleBackend::setNoteText(QString text)
         setError("This note changed in another window. Your draft was not saved. Review the saved text before replacing it.");
         return;
     }
-    if (found != rows.end()) found->note = text;
-    else if (!text.isEmpty()) rows.append({start,end,false,false,text});
-    commitAnnotations(rows);
+    // savedNote == m_note != text: a missing row means a new, nonempty note.
+    const bool removed = exists && !flagged && text.isEmpty();
+    if (removed) { q.prepare("DELETE FROM annotations" + where); bindRange(); }
+    else if (exists) { q.prepare("UPDATE annotations SET note=?" + where); q.addBindValue(text); bindRange(); }
+    else {
+        q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,bookmark,highlight,note) VALUES(?,?,?,?,?,?,?,0,0,?)");
+        bindRange(); q.addBindValue(text);
+    }
+    if (!q.exec() || q.numRowsAffected() != 1) {
+        const QString error = q.lastError().text();
+        m_store.rollback(); setError("Cannot save the note: " + error); return;
+    }
+    q.prepare("SELECT note FROM annotations" + where); bindRange();
+    if (!q.exec() || q.next() != !removed || (!removed && q.value(0).toString() != text)) {
+        m_store.rollback(); setError("Cannot verify the saved note."); return;
+    }
+    q.finish();
+    QVector<Annotation> saved;
+    if (!loadAnnotations(&saved)) { m_store.rollback(); return; }
+    const auto collection = collectionRows(saved);
+    if (!m_store.commit()) { m_store.rollback(); setError("Cannot commit annotations: " + m_store.lastError().text()); return; }
+    m_annotations = saved; m_collection = collection;
+    publishAnnotations();
+    clearError(); emit collectionChanged(); updateAnnotations();
 }
 
 bool BibleBackend::deleteAnnotation(QString input, QString expectedVersionId)

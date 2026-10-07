@@ -342,6 +342,8 @@ class UiTest : public QObject
         QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(qmlWarnings.join('\n')));
         window = qobject_cast<QQuickWindow *>(engine->rootObjects().first());
         QVERIFY(window);
+        // Save notes on every change, as the assertions below expect (the app waits for a pause).
+        window->setProperty("noteSaveDelay",0);
         window->show();
         window->requestActivate();
         QVERIFY(QTest::qWaitForWindowExposed(window));
@@ -1044,6 +1046,7 @@ private slots:
             QVERIFY(db.open());
             QSqlQuery query(db);
             QVERIFY(query.exec("CREATE TRIGGER reject_note BEFORE INSERT ON annotations BEGIN SELECT RAISE(FAIL,'test note failure'); END"));
+            QVERIFY(query.exec("CREATE TRIGGER reject_note_update BEFORE UPDATE ON annotations BEGIN SELECT RAISE(FAIL,'test note failure'); END"));
             type(" unsaved");
             const auto draft = prop("noteEditor","text").toString();
             QVERIFY(draft != bible->noteText());
@@ -1083,6 +1086,7 @@ private slots:
                 QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
             }
             QVERIFY(query.exec("DROP TRIGGER reject_note"));
+            QVERIFY(query.exec("DROP TRIGGER reject_note_update"));
             QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,QPoint(30,200));
             QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
             QCOMPARE(bible->noteText(),draft);
@@ -1107,7 +1111,7 @@ private slots:
             auto db = QSqlDatabase::addDatabase("QSQLITE","ui-peer-note-failure");
             db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
             QVERIFY(db.open()); QSqlQuery q(db);
-            QVERIFY(q.exec("CREATE TRIGGER reject_peer_note BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'peer draft save failure'); END"));
+            QVERIFY(q.exec("CREATE TRIGGER reject_peer_note BEFORE UPDATE ON annotations BEGIN SELECT RAISE(ABORT,'peer draft save failure'); END"));
             QVERIFY(object("noteEditor")->setProperty("text","My unsaved draft"));
             QVERIFY(bible->error().contains("peer draft save failure"));
             QCOMPARE(window->property("loadedNoteText").toString(),QString("Clean peer update"));
@@ -1159,6 +1163,29 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(object("noteUseSaved"),"clicked"));
         QCOMPARE(prop("noteEditor","text").toString(),QString("Use this peer revision"));
         QVERIFY(!window->property("noteConflict").toBool());
+    }
+    void typedNotesSaveAfterAPauseWithoutRebuilding() {
+        QVERIFY(window->setProperty("noteSaveDelay",400)); // The app's own pause.
+        reference("John 3:16");
+        auto *reader = object("blockReader"); QVERIFY(reader);
+        key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        auto *timer = object("noteSaveTimer"); QVERIFY(timer);
+        type("Typed");
+        // Typing waits for a pause: nothing is written yet.
+        QVERIFY(bible->noteText().isEmpty()); QVERIFY(timer->property("running").toBool());
+        QTRY_COMPARE(bible->noteText(),QString("Typed"));
+        QCOMPARE(window->property("loadedNoteText").toString(),QString("Typed"));
+        QVERIFY(QMetaObject::invokeMethod(reader,"settle")); // The new note's mark.
+        const int rebuilds = reader->property("rebuildCount").toInt();
+        // Every flush (navigation, closing Notes or the window) saves a pending draft at once.
+        type(" more");
+        QCOMPARE(bible->noteText(),QString("Typed"));
+        QVariant flushed; QVERIFY(QMetaObject::invokeMethod(window,"flushNote",Q_RETURN_ARG(QVariant,flushed)));
+        QVERIFY(flushed.toBool()); QCOMPARE(bible->noteText(),QString("Typed more"));
+        QVERIFY(!timer->property("running").toBool());
+        // Note text is not layout: editing a note never rebuilds the chapter.
+        QVERIFY(QMetaObject::invokeMethod(reader,"settle"));
+        QCOMPARE(reader->property("rebuildCount").toInt(),rebuilds);
     }
     void dirtyDraftScopeGuard() {
         reference("John 3:16");
@@ -3680,11 +3707,13 @@ private slots:
             QTRY_VERIFY(prop("notesDrawer","opened").toBool());
             QCOMPARE(prop("toast","text").toString(),QString("Show verse numbers off"));
             QVERIFY(query.exec("CREATE TRIGGER reject_note BEFORE INSERT ON annotations BEGIN SELECT RAISE(FAIL,'test note failure'); END"));
+            QVERIFY(query.exec("CREATE TRIGGER reject_note_update BEFORE UPDATE ON annotations BEGIN SELECT RAISE(FAIL,'test note failure'); END"));
             type("An unsaved draft");
             key(Qt::Key_Escape);
             QVERIFY(prop("notesDrawer","opened").toBool());
             QCOMPARE(prop("toast","text").toString(),QString("Show verse numbers off"));
             QVERIFY(query.exec("DROP TRIGGER reject_note"));
+            QVERIFY(query.exec("DROP TRIGGER reject_note_update"));
             key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
             QCOMPARE(prop("toast","text").toString(),QString("Show verse numbers off"));
             QCOMPARE(bible->noteText(),QString("An unsaved draft"));
@@ -4814,6 +4843,7 @@ private slots:
             db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
             QVERIFY(db.open()); QSqlQuery q(db);
             QVERIFY(q.exec("CREATE TRIGGER reject_version_note BEFORE INSERT ON annotations BEGIN SELECT RAISE(FAIL,'version draft failure'); END"));
+            QVERIFY(q.exec("CREATE TRIGGER reject_version_note_update BEFORE UPDATE ON annotations BEGIN SELECT RAISE(FAIL,'version draft failure'); END"));
             QVERIFY(window->setProperty("syncingNote",true));
             QVERIFY(object("noteEditor")->setProperty("text","Unsaved version draft"));
             QVERIFY(window->setProperty("syncingNote",false));
@@ -4839,6 +4869,7 @@ private slots:
             QVERIFY(!prop("versionDialog","addPending").toBool());
             QCOMPARE(prop("noteEditor","text").toString(),QString("Unsaved version draft"));
             QVERIFY(q.exec("DROP TRIGGER reject_version_note"));
+            QVERIFY(q.exec("DROP TRIGGER reject_version_note_update"));
         }
         QSqlDatabase::removeDatabase("ui-version-note-failure");
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());

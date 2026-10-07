@@ -217,6 +217,8 @@ private slots:
         engine->load(QUrl::fromLocalFile(QFINDTESTDATA("../qml/Main.qml")));
         QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
         window = qobject_cast<QQuickWindow *>(engine->rootObjects().first()); QVERIFY(window);
+        // Save notes on every change, as the assertions below expect (the app waits for a pause).
+        window->setProperty("noteSaveDelay",0);
         window->requestActivate(); QVERIFY(QTest::qWaitForWindowExposed(window)); QTRY_VERIFY(window->isActive());
         navigate("John 1:1");
     }

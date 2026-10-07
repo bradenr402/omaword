@@ -83,6 +83,11 @@ ApplicationWindow {
     onNotesOpenChanged: clearCount()
     property bool notePreview: false
     property bool syncingNote: true
+    // Typing saves after this pause (ms), so a keystroke never waits on the
+    // disk; every flushNote() saves a pending draft at once. 0 saves on every
+    // change (the test harnesses' setting).
+    property int noteSaveDelay: 400
+    Timer { id: noteSaveTimer; objectName: "noteSaveTimer"; interval: Math.max(1, app.noteSaveDelay); onTriggered: app.flushNote() }
     property string loadedNoteReference: ""
     property string loadedVersionId: ""
     property string loadedNoteText: ""
@@ -2166,6 +2171,7 @@ ApplicationWindow {
         syncingNote = false
     }
     function flushNote() {
+        noteSaveTimer.stop()
         if (rangeEditing) return true
         if (syncingNote) return true
         syncNote()
@@ -6177,7 +6183,10 @@ ApplicationWindow {
                                     })
                                 }
                                 onTextChanged: {
-                                    if (!app.syncingNote) app.flushNote()
+                                    if (!app.syncingNote) {
+                                        if (app.noteSaveDelay > 0) noteSaveTimer.restart()
+                                        else app.flushNote()
+                                    }
                                     app.updateLinkSuggestions()
                                 }
                                 onCursorPositionChanged: app.updateLinkSuggestions()

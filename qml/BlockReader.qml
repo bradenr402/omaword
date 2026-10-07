@@ -80,9 +80,11 @@ Item {
             const copy = Object.assign({}, v); copy.html = html; return copy
         })
     }
+    // Note text is not layout: a typed note repaints the marks, never rebuilds.
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart,
-            bookmarkRanges: v.bookmarkRanges, noteRanges: v.noteRanges, tagRanges: v.tagRanges, footnotes: v.footnotes }
+            bookmarkRanges: v.bookmarkRanges, tagRanges: v.tagRanges, footnotes: v.footnotes,
+            noteRanges: Array.from(v.noteRanges || []).map(function(r) { return [r.reference, r.continuesBefore, r.continuesAfter] }) }
     })) + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + focusLayout + noteMarks + controller.readerSize + root.readerScale + controller.scale
     height: body.height
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()

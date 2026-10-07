@@ -113,6 +113,8 @@ private slots:
         windows->newWindow(); windows->newWindow();
         QCOMPARE(windows->count(), 2);
         QVERIFY(windows->backendAt(0)->ready()); QVERIFY(windows->backendAt(1)->ready());
+        // Save notes on every change, as the assertions below expect (the app waits for a pause).
+        for (int i = 0; i < windows->count(); ++i) windows->windowAt(i)->setProperty("noteSaveDelay",0);
     }
     void cleanup() {
         QCoreApplication::processEvents();
@@ -153,7 +155,7 @@ private slots:
             auto db = QSqlDatabase::addDatabase("QSQLITE","windows-failure");
             db.setDatabaseName(a->dataDirectory()+"/personal.sqlite"); QVERIFY(db.open());
             QSqlQuery q(db);
-            QVERIFY(q.exec("CREATE TRIGGER reject_notes BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'test save failure'); END"));
+            QVERIFY(q.exec("CREATE TRIGGER reject_notes BEFORE UPDATE ON annotations BEGIN SELECT RAISE(ABORT,'test save failure'); END"));
             a->setNoteText("Cannot save");
             QVERIFY(a->error().contains("test save failure")); QCOMPARE(commits.count(),0);
             QCOMPARE(b->collection(),collection); QCOMPARE(a->noteText(),b->noteText());
@@ -190,7 +192,7 @@ private slots:
         auto db = QSqlDatabase::addDatabase("QSQLITE","windows-editor-failure");
         db.setDatabaseName(a->dataDirectory()+"/personal.sqlite"); QVERIFY(db.open());
         QSqlQuery q(db);
-        QVERIFY(q.exec("CREATE TRIGGER reject_editor BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'editor draft save failure'); END"));
+        QVERIFY(q.exec("CREATE TRIGGER reject_editor BEFORE UPDATE ON annotations BEGIN SELECT RAISE(ABORT,'editor draft save failure'); END"));
         QVERIFY(editorB->setProperty("text","My failed draft"));
         QVERIFY(b->error().contains("editor draft save failure"));
         QCOMPARE(second->property("loadedNoteText").toString(),QString("Initial shared note"));
@@ -324,7 +326,7 @@ private slots:
             auto db = QSqlDatabase::addDatabase("QSQLITE","windows-flushed");
             db.setDatabaseName(a->dataDirectory()+"/personal.sqlite"); QVERIFY(db.open());
             QSqlQuery q(db);
-            QVERIFY(q.exec("CREATE TRIGGER reject_drafts BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'draft disk failure'); END"));
+            QVERIFY(q.exec("CREATE TRIGGER reject_drafts BEFORE UPDATE ON annotations BEGIN SELECT RAISE(ABORT,'draft disk failure'); END"));
             QVERIFY(firstEditor->setProperty("text","First draft"));
             QVERIFY(secondEditor->setProperty("text","Second draft"));
             QVERIFY(a->error().contains("draft disk failure")); QVERIFY(b->error().contains("draft disk failure"));
