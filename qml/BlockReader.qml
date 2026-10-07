@@ -450,6 +450,7 @@ Item {
                     if (root.wordClick) root.wordClick = false
                     else if (!root.dragging) root.controller.selectVerse(root.pressedVerse, !!(mouse.modifiers & Qt.ShiftModifier))
                     root.cancelDrag()
+                    if (typeof root.controller.mouseSelected === "function") root.controller.mouseSelected()
                 } else if (mouse.button === Qt.MiddleButton) {
                     root.controller.copyClickedVerse(root.hit(mouse.x, mouse.y), false)
                 } else {

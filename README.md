@@ -271,6 +271,7 @@ These also work, but stay out of the in-app list:
 - The footer holds focus, mode, and help on the left; search, passage, the way back to the ribbon (where there is room), version, and layout in the center; and Annotations, Study, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows the right group stacks into a column, then folds into a `…` menu.
 
 ### Keyboard and mouse
+- Selecting verses with the mouse brings up a small bar above them: **x highlight · w note · t tag · y copy** and `⋯` for Desk, Compare versions, plain text, and Study. Any key or `esc` puts it away.
 - Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Desk), and `menu` or `shift F10` opens it from the keyboard.
 - Footer and dialog buttons take the keyboard by `tab` only; a focused button takes `enter` and `space`. Scrollable dialogs scroll with `j` `k`, `pgup` `pgdn`, `ctrl d` `ctrl u`, `home` `end`.
 - Clicking outside a panel, dialog, or picker only closes it (in Edit range and confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error and say why ("Select a verse first"). Mouse back closes the top dialog.

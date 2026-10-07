@@ -529,6 +529,38 @@ private slots:
         QCOMPARE(entry("redo").value("shortcut").toString(), QString("ctrl shift Z"));
         escape();
     }
+    void mouseSelectionBar_data() { layouts(); }
+    void mouseSelectionBar() {
+        QFETCH(QString, mode);
+        setLayout(mode);
+        QVERIFY(!item("selectionBar")->isVisible());
+        // A click selects the verse and offers its actions above it.
+        QTest::mouseClick(window, Qt::LeftButton, {}, versePoint(3)); QCoreApplication::processEvents();
+        QTRY_COMPARE(bible->selectionReference(), QString("John 1:3"));
+        QTRY_VERIFY(item("selectionBar")->isVisible());
+        const auto bar = item("selectionBar")->mapToScene(QPointF(0, 0));
+        QVERIFY(bar.y() + item("selectionBar")->height() <= versePoint(3).y() + 2);
+        QCOMPARE(object("selectionBarHints")->property("plainText").toString(),
+                 QString::fromUtf8("x highlight    w note    t tag    y copy"));
+        // Its parts act on the selection and stay up.
+        QQuickItem *part = item("selectionBarHintsPart:highlight");
+        QVERIFY(part);
+        QTest::mouseClick(window, Qt::LeftButton, {}, part->mapToScene(QPointF(part->width() / 2, part->height() / 2)).toPoint());
+        QTRY_VERIFY(bible->selectionHighlighted());
+        QVERIFY(item("selectionBar")->isVisible());
+        // ⋯ offers the rest: Desk and Compare.
+        QTest::mouseClick(window, Qt::LeftButton, {}, item("selectionBarMore")->mapToScene(QPointF(4, 4)).toPoint());
+        QTRY_VERIFY(menuOpen());
+        QCOMPARE(target(), QString("selectionBar"));
+        QCOMPARE(ids(), (QStringList{"desk", "compare", "copyPlain", "related"}));
+        escape();
+        // A key (here a verse motion) puts it away; so does esc.
+        key(Qt::Key_J); QTRY_VERIFY(!item("selectionBar")->isVisible());
+        QTest::mouseClick(window, Qt::LeftButton, {}, versePoint(2)); QCoreApplication::processEvents();
+        QTRY_VERIFY(item("selectionBar")->isVisible());
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("selectionBar")->isVisible());
+        QCOMPARE(bible->selectionReference(), QString("John 1:2"));
+    }
     void deskAnnotationAndSearchMenus() {
         navigate("John 1:1"); key(Qt::Key_D); QCOMPARE(bible->desk().size(), 1);
         openDesk();

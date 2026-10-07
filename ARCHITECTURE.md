@@ -243,6 +243,13 @@ files.
   and Commands name the step; failures toast instead of the error banner.
   Deleting from Annotations or a marker menu has no confirmation.
 
+### Selection bar
+- A verse selection made with the mouse (`mouseSelected`, from Verse rows and
+  BlockReader releases) shows a bar of HintRow parts above the selection's
+  first line, inside the reader's flickable so it scrolls with the text; it
+  flips below at the top. Any catalog key (`runKey`), `esc`, a new chapter, or
+  losing the reader's keys hides it; its own parts keep it up.
+
 ### Compare
 - `compareVersions(scope)` reads the scope's endpoints in every installed
   generation (`TagBible`, read-only), in library order; a version missing

@@ -90,7 +90,7 @@ fontconfig state.
 - **marginsui**: chapter outline, `{`/`}` heading motions, margin notes (placement, truncation, connectors, reader shift, links, drawer), focus mode transitions with margins (frame by frame under a stepped animation driver: column glide, margin fades, anchored reading position, one rebuild, rapid toggles, Disable animations; `OMAWORD_FOCUS_TIMELINE=<dir>` writes the timelines and frames), and the pure `Margins.js`/`HandDrawn.js` functions.
 - **historyui**: jump stack (`[` `]` `-`), dwell recording, History in the palette (recents, All History, `ctrl h`, day groups, filter, remove and clear keys, row menu), the ribbon (`shift R`, `r`, tab, footer, Continue row, another version), two windows.
 - **motion**: focus dimming, jump pulses, copy flashes, held-key repeat, instant menus/modals with exit ghosts, side-panel enter/exit, hover colors, reduce motion.
-- **contextmenu**: shared context menu items, keyboard navigation, actions.
+- **contextmenu**: shared context menu items, keyboard navigation, actions, the mouse selection bar in every layout.
 - **tags**: tag identity, exact/overlap queries, persistence, backup, rollback.
 - **tagsui**: picker, Annotations summary, Related, management, Main integration.
 - **ranges**: atomic range moves, collisions, stale tokens, rollback, undoing a move.

@@ -938,6 +938,45 @@ ApplicationWindow {
         if (!draggingText) { clearTextSelection(); selectVerse(number, !!(mouse.modifiers & Qt.ShiftModifier)) }
         draggingText = false
         dragAnchorRow = -1
+        mouseSelected()
+    }
+    // A selection made with the mouse offers its common actions in a bar
+    // above it (Highlight · Note · Tag · Copy · more); any key, another
+    // selection by key, or a panel puts the bar away.
+    property bool selectionBarWanted: false
+    readonly property bool selectionBarShown: selectionBarWanted && hasSelection && readerKeys && !rangeEditing
+    function mouseSelected() { selectionBarWanted = hasSelection; Qt.callLater(app.placeSelectionBar) }
+    property real selectionBarY: 0
+    function placeSelectionBar() {
+        if (!selectionBarWanted || !hasSelection) return
+        const number = bible.selectedStart
+        const block = blockLoader.item as BlockReader
+        let at = Qt.point(verseGutter, 0)
+        if (block) { const r = block.verseRect(number); at = block.body.mapToItem(readerColumn, r.x, r.y) }
+        else {
+            const index = Array.from(bible.verses).findIndex(function(v) { return v.number === number })
+            const row = index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
+            if (row && row.body) at = row.body.mapToItem(readerColumn, 0, 0)
+        }
+        selectionBarX = readerColumn.x + at.x
+        selectionBarY = readerColumn.y + at.y
+    }
+    property real selectionBarX: 0
+    function selectionBarParts() {
+        const ready = selectionBarShown
+        return [["X", bible.selectionHighlighted ? "unhighlight" : "highlight", function() { app.runCommand("highlight") }, ready],
+            ["W", "note", function() { app.runCommand("notes") }, ready],
+            ["T", "tag", function() { app.runCommand("tags") }, ready],
+            ["Y", "copy", function() { app.runCommand("copyText") }, ready]]
+    }
+    function selectionBarMore() {
+        const p = selectionMore.mapToItem(null, 0, selectionMore.height)
+        contextMenu.show("selectionBar", [
+            menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "toggleDesk"),
+            menuAction("compare", "Compare versions", "compare"),
+            menuAction("copyPlain", "Copy plain text", "copyPlain"),
+            menuAction("related", "Study", "related")
+        ], p.x, p.y)
     }
     function copyFreeText() {
         if (freeSelectedText.length) bible.copyText(freeSelectedText)
@@ -4449,6 +4488,7 @@ ApplicationWindow {
     // Notes is not modal: palettes and dialogs open over it and return to it,
     // and the reading toggles act with it open.
     function runKey(action) {
+        selectionBarWanted = false
         // From the Notes editor a launcher closes Notes first: its draft saves,
         // and when it cannot, Notes stays open with its error and nothing opens.
         if (noteEditorTyping() && noteEditorLaunchActions.includes(action)) {
@@ -5483,6 +5523,43 @@ ApplicationWindow {
                         onClicked: function(mouse) {
                             const p = mapToItem(null, mouse.x, mouse.y)
                             app.openPassageMenuAt(p.x, p.y)
+                        }
+                    }
+                    // The mouse selection's bar, scrolling with the text above
+                    // the selection's first line (below it at the top).
+                    Rectangle {
+                        id: selectionBar
+                        objectName: "selectionBar"
+                        visible: app.selectionBarShown
+                        readonly property real gap: 6 * app.readerScale
+                        width: selectionBarRow.implicitWidth + 2 * 10 * app.scale
+                        height: selectionBarRow.implicitHeight + 2 * 6 * app.scale
+                        x: Math.max(0, Math.min(reading.width - width, app.selectionBarX))
+                        y: app.selectionBarY - height - gap < reading.contentY ? app.selectionBarY + app.readerLineHeight + gap : app.selectionBarY - height - gap
+                        z: 5
+                        color: desktop.background
+                        border.color: desktop.border
+                        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                        Row {
+                            id: selectionBarRow
+                            anchors.centerIn: parent
+                            spacing: 8 * app.scale
+                            HintRow {
+                                objectName: "selectionBarHints"
+                                theme: desktop
+                                parts: app.selectionBarParts()
+                                pixelSize: 12 * app.scale
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            QuietButton {
+                                id: selectionMore
+                                objectName: "selectionBarMore"
+                                text: "⋯"; compact: true
+                                tip: "More: Desk, Compare versions, Copy plain text, Study"
+                                Accessible.name: "More actions"
+                                anchors.verticalCenter: parent.verticalCenter
+                                onClicked: app.selectionBarMore()
+                            }
                         }
                     }
                     // In the ribbon's chapter an accent ribbon hangs from the
@@ -9124,10 +9201,12 @@ ApplicationWindow {
             // New marks (an undo while selecting characters) keep a character
             // selection; another chapter ends it (onNavigationChanged).
             app.relayoutTextSelection()
+            if (app.selectionBarWanted) Qt.callLater(app.placeSelectionBar)
             app.draggingText = false
             app.dragAnchorRow = -1
         }
         function onNavigationChanged() {
+            app.selectionBarWanted = false
             app.clearTextSelection()
             app.draggingText = false
             app.dragAnchorRow = -1
@@ -9225,6 +9304,7 @@ ApplicationWindow {
         enabled: app.readerKeys || (rangeEditor.sessionOpen && !app.modalOpen && !app.textInputActive())
         onActivated: {
             if (rangeEditor.sessionOpen) { rangeEditor.cancel(); return }
+            if (app.selectionBarShown) { app.selectionBarWanted = false; return }
             if (app.acceptedSearchQuery.length) { app.clearSearch(); app.readerFocus(); return }
             if (app.freeSelectedText.length) { app.clearTextSelection(); app.readerFocus(); return }
             if (app.verseCount.length) { app.clearCount(); return }
