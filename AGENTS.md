@@ -22,16 +22,17 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 
 - Omarchy (Hyprland on Arch) only. Dependencies are in README → Requirements.
 - `bin/build` builds out of tree into `build/` (`BUILD_DIR`, `JOBS` override); `bin/install` installs. Never run qmake in the source tree.
-- QML is embedded via `resources.qrc`: a new QML/JS file must be added there or it won't load (test `.pro` files share it).
+- `omaword.pro` builds two static libraries and the app: `src/src.pro` (every C++ source but `main.cpp` and the QML's own types), `qml/qml.pro` (`resources.qrc`, QML compiled ahead of time, plus the `OmaWord.Reader` types), and `app/app.pro`. A new C++ source goes in one of those two `.pro` files, not in the test projects.
+- QML is embedded via `resources.qrc` and compiled at build time: a new QML/JS file must be added there or it won't load.
 - `branding.env` feeds `src/brand.h.in` and the desktop file; use `Brand::` rather than hardcoding the app name or storage ID.
 - Personal DB schema (`PRAGMA user_version`), text DB schema, and backup format versions are documented in `ARCHITECTURE.md`. Bumping one needs a migration, tests, and an `ARCHITECTURE.md` update.
 
 ## Tests
 
-- `bin/test` builds and runs every suite (offscreen, software rendering, sandboxed home, sound off). Select with `--suite <name>` (repeatable); Qt args such as a function name need exactly one suite: `bin/test --suite ranges noteConfirmationAndDestinationDrift`.
+- `bin/test` builds the two libraries once, then builds and runs every suite (offscreen, software rendering, sandboxed home, sound off). Select with `--suite <name>` (repeatable); Qt args such as a function name need exactly one suite: `bin/test --suite ranges noteConfirmationAndDestinationDrift`. While a run is going, build elsewhere (`BUILD_DIR=/tmp/...`): its suites link the libraries in `build/`.
 - Full output lands in `build/test-logs/<suite>.log`.
 - Run the suites your change touches, then the rest before calling work done. CI runs `bin/shortcuts --check`, `bin/build`, `bash tests/test-runner.sh`, and the fast suites (`backend search tags ranges importer catalog sound`); GUI suites only run locally, so you must run them.
-- A new suite needs a `tests/<name>.pro`, entries in `bin/test` (usage, `available`, the `case`, `projects`, `directories`), and rows in `tests/README.md`.
+- A new suite needs a `tests/<name>.pro` (include `../src/core.pri`, and `../qml/qml.pri` if it loads QML or the reader types), entries in `bin/test` (usage, `available`, the `case`, `projects`, `directories`), and rows in `tests/README.md`.
 - Fixtures are small, original USFM generated in temporary dirs. Never add real Bible text or network access to tests.
 - Motion/timing tests drive animations deterministically; don't "fix" flakes with longer sleeps — find the missing settle condition.
 

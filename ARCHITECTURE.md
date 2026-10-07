@@ -4,9 +4,15 @@ Durable, non-obvious knowledge for developers. Code wins over this file; the
 tests (see [tests/README.md](tests/README.md)) pin the contracts below.
 
 Stack: C++17, Qt 6 Quick/QML (SQL, Concurrent, DBus, Network, Multimedia),
-libarchive for ZIPs, qmake (`omaword.pro`). `resources.qrc` embeds QML, the
-and the seven-entry `resources/catalog.json`. `branding.env` feeds generated headers
-(`src/brand.h.in`) and desktop files.
+libarchive for ZIPs, qmake. `omaword.pro` builds two static libraries, linked by
+the app (`app/app.pro`) and every test suite alike: `src/src.pro` (the C++
+core: everything but `main.cpp` and the QML types) and `qml/qml.pro`
+(`resources.qrc` with its QML and JavaScript compiled ahead of time by
+qmlcachegen, plus the `OmaWord.Reader` types, linked whole so their static
+registrations survive).
+`resources.qrc` embeds the QML, the seven-entry `resources/catalog.json`, and
+the icon. `branding.env` feeds generated headers (`src/brand.h.in`) and desktop
+files.
 
 ## Components
 

@@ -115,6 +115,20 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Every suite links the core and QML libraries (src/core.pri, qml/qml.pri):
+# build them once, with every job, before any suite starts.
+printf '[libraries] BUILD (jobs=%s; log=%s/libraries.log)\n' "$jobs" "$log_dir"
+(cd -- "$build_dir" && qmake6 "$root/omaword.pro" && make -j"$jobs" sub-src sub-qml) >"$log_dir/libraries.log" 2>&1 &
+pid=$!
+active[$pid]=libraries
+status=0
+wait "$pid" || status=$?
+unset 'active[$pid]'
+if (( status != 0 )); then
+    printf '[libraries] FAIL (exit=%s) — %s/libraries.log\n' "$status" "$log_dir" >&2
+    while IFS= read -r line || [[ -n $line ]]; do printf '  %s\n' "$line" >&2; done <"$log_dir/libraries.log"
+    exit 1
+fi
 next=0
 result=0
 while (( next < ${#selected[@]} || ${#active[@]} )); do

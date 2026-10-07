@@ -3,9 +3,8 @@ QT -= gui
 CONFIG += c++17 testcase console
 TEMPLATE = app
 TARGET = tst_catalog
-INCLUDEPATH += ../src
-SOURCES += tst_catalog.cpp ../src/versioncatalog.cpp
-HEADERS += ../src/versioncatalog.h
+include(../src/core.pri)
+SOURCES += tst_catalog.cpp
 catalog_resource.files = ../resources/catalog.json
 catalog_resource.prefix = /resources
 catalog_resource.base = ../resources

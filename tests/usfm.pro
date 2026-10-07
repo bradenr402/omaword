@@ -4,8 +4,6 @@ CONFIG += console testcase c++17 link_pkgconfig
 CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = tst_usfm
-PKGCONFIG += libarchive
-INCLUDEPATH += ../src
-SOURCES += tst_usfm.cpp ../src/usfmimporter.cpp ../src/biblebooks.cpp
-HEADERS += ../src/usfmimporter.h ../src/biblebooks.h
+include(../src/core.pri)
+SOURCES += tst_usfm.cpp
 HEADERS += testenvironment.h

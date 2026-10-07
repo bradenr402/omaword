@@ -2,7 +2,9 @@
 
 ## Running
 
-`bin/test` builds (incrementally) and runs every suite. Select suites with
+`bin/test` builds (incrementally) and runs every suite. It first builds the two
+libraries every suite links (`src/core.pri`, `qml/qml.pri`) once, with all
+jobs; the suites then compile only their own test file. Select suites with
 `--suite <selector>`; repeat it for several. `all` or no selector runs all;
 duplicates run once.
 

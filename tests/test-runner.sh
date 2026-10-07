@@ -8,6 +8,7 @@ trap 'if [[ -n $running ]]; then kill "$running" 2>/dev/null || true; wait "$run
 export STATE="$workspace/state" REAL_HOME="$HOME"
 mkdir -p "$workspace/checkout/bin" "$workspace/checkout/tests" "$workspace/tools" "$STATE"
 cp "$root/bin/test" "$workspace/checkout/bin/test"
+touch "$workspace/checkout/omaword.pro"
 for project in backend ui search searchui deskui historyui studyui a11yui marginsui motion contextmenu searchrender tags tagsui ranges rangesui sound desktop usfm catalog blockannotations singleinstance windows; do
     touch "$workspace/checkout/tests/$project.pro"
 done
@@ -27,8 +28,15 @@ phase=test
 weight=1
 if [[ ${0##*/} == make ]]; then
     phase=build
-    [[ $# == 1 && $1 == -j"$EXPECTED_JOBS" ]]
-    weight=${1#-j}
+    if [[ $project == omaword ]]; then
+        # The shared libraries build first, alone, with every job.
+        [[ $# == 3 && $1 == -j"$JOBS" && $2 == sub-src && $3 == sub-qml ]]
+        weight=$JOBS
+        [[ ${FAIL_LIBRARIES:-0} == 0 ]] || exit 7
+    else
+        [[ $# == 1 && $1 == -j"$EXPECTED_JOBS" && -e $STATE/omaword.build ]]
+        weight=${1#-j}
+    fi
 fi
 exec 9>"$STATE/lock"
 flock 9
@@ -36,7 +44,7 @@ printf '%s\n' "$weight" > "$STATE/active-$BASHPID"
 total=0
 for entry in "$STATE"/active-*; do total=$((total + $(<"$entry"))); done
 (( total <= JOBS )) || { printf 'CPU budget exceeded\n'; exit 91; }
-[[ $total -le 1 ]] || touch "$STATE/overlap"
+[[ $project == omaword || $total -le 1 ]] || touch "$STATE/overlap"
 flock -u 9
 trap 'rm -f "$STATE/active-$BASHPID"' EXIT
 if [[ $phase == test ]]; then
@@ -51,7 +59,7 @@ if [[ $phase == test ]]; then
         [[ ${!variable} == */test-home/*/"$variable" && -d ${!variable} && ${!variable} != "$REAL_HOME"/.local/* ]] || { printf 'unisolated %s\n' "$variable"; exit 92; }
     done
 fi
-if [[ ${HOLD:-0} == 1 ]]; then
+if [[ ${HOLD:-} == 1 && $project != omaword || ${HOLD:-} == libraries && $project == omaword ]]; then
     printf '%s\n' "$BASHPID" > "$STATE/held"
     sleep 30
 else
@@ -102,6 +110,15 @@ run_status --suite backend --suite ui
 [[ $status == 7 && ! -e $STATE/backend.test && -e $STATE/ui.test ]]
 assert_idle
 printf 'PASS build failure skips its test and preserves failure status\n'
+
+rm -f "$STATE"/*.test "$STATE"/*.build
+unset FAIL_PHASE
+FAIL_LIBRARIES=1 run_status --suite backend --suite ui
+[[ $status == 1 && ! -e $STATE/backend.build && ! -e $STATE/ui.build ]]
+assert_output '[libraries] FAIL'
+[[ $(<"$workspace/output") != *'START'* ]]
+assert_idle
+printf 'PASS a library build failure stops before any suite starts\n'
 
 unset FAIL_PHASE
 export EXPECTED_JOBS=3
@@ -155,26 +172,29 @@ run_status --suite all selectedFunction
 assert_output 'require a single --suite target'
 printf 'PASS default all includes catalog and windows, accepts optional fixtures, clamps concurrency, rejects ambiguous Qt arguments\n'
 
-HOLD=1 bash "$runner" --suite annotations > "$workspace/output" 2>&1 &
-running=$!
-for (( attempt=0; attempt < 100; attempt++ )); do
-    [[ ! -f $STATE/held ]] || break
-    sleep 0.05
+for hold in 1 libraries; do
+    rm -f "$STATE/held"
+    HOLD=$hold bash "$runner" --suite annotations > "$workspace/output" 2>&1 &
+    running=$!
+    for (( attempt=0; attempt < 100; attempt++ )); do
+        [[ ! -f $STATE/held ]] || break
+        sleep 0.05
+    done
+    [[ -f $STATE/held ]]
+    worker=$(<"$STATE/held")
+    kill -TERM "$running"
+    status=0
+    wait "$running" || status=$?
+    running=
+    [[ $status == 143 ]]
+    for (( attempt=0; attempt < 100; attempt++ )); do
+        if ! kill -0 "$worker" 2>/dev/null; then break; fi
+        sleep 0.05
+    done
+    ! kill -0 "$worker" 2>/dev/null
+    assert_idle
 done
-[[ -f $STATE/held ]]
-worker=$(<"$STATE/held")
-kill -TERM "$running"
-status=0
-wait "$running" || status=$?
-running=
-[[ $status == 143 ]]
-for (( attempt=0; attempt < 100; attempt++ )); do
-    if ! kill -0 "$worker" 2>/dev/null; then break; fi
-    sleep 0.05
-done
-! kill -0 "$worker" 2>/dev/null
-assert_idle
-printf 'PASS interruption terminates active worker process groups\n'
+printf 'PASS interruption terminates active worker process groups, the library build included\n'
 
 # The README shortcut section is generated from the QML action catalog.
 docs="$workspace/docs"
