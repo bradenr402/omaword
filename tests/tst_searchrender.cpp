@@ -98,6 +98,8 @@ ApplicationWindow {
         property color background: "#202020"
         property color surface: "#303030"
         property color border: "#505050"
+        property color selection: "#3a4a5a"
+        property color error: "#e06c75"
         property string fontFamily: "DejaVu Sans"
         property real cornerRadius: 0
         property real textScale: 1
