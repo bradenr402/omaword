@@ -1,5 +1,6 @@
 #include "testenvironment.h"
 #include <QtTest/QTest>
+#include <QtQuickTest/quicktest.h>
 #include <QApplication>
 #include <QClipboard>
 #include <QColor>
@@ -409,25 +410,31 @@ private slots:
         QVERIFY(bible->navigate("John 3:7")); QVERIFY(bible->addToDesk());
         navigate("John 3:3");
         run("desk"); QTRY_VERIFY(opened("deskDrawer")); QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        auto choose = item("deskHintsPart:choose"), copy = item("deskHintsPart:copy");
-        QVERIFY(choose && copy);
-        QVERIFY(!choose->property("clickable").toBool()); QVERIFY(copy->property("clickable").toBool());
+        // The row's parts are rebuilt whenever what they can do changes (the
+        // list taking focus, its current row): look them up by name each time,
+        // once the drawer's layout has settled where the pointer will go.
+        QVERIFY(QQuickTest::qWaitForPolish(window));
+        auto choose = [this] { return item("deskHintsPart:choose"); };
+        auto copy = [this] { return item("deskHintsPart:copy"); };
+        auto tint = [this] { return item("deskHintsPart:copy:tint"); };
+        QVERIFY(choose() && copy());
+        QVERIFY(!choose()->property("clickable").toBool()); QVERIFY(copy()->property("clickable").toBool());
         // The row reads as before: the same markup.
         QVERIFY(object("deskHints")->property("text").toString().contains("shift&nbsp;delete"));
         // Unhovered parts show no tint; hovering a clickable one tints it under a pointing hand.
-        auto tint = item("deskHintsPart:copy:tint"); QVERIFY(tint); QVERIFY(!tint->isVisible());
+        QVERIFY(tint()); QVERIFY(!tint()->isVisible());
         shot("hints-desk-unhovered");
-        QTest::mouseMove(window, center(copy)); QTRY_VERIFY(tint->isVisible());
+        QTest::mouseMove(window, center(copy())); QTRY_VERIFY(tint()->isVisible());
         shot("hints-desk-hover-copy");
         QQuickItem *area = nullptr;
-        for (auto child : copy->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) area = child;
+        for (auto child : copy()->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) area = child;
         QVERIFY(area); QCOMPARE(area->cursor().shape(), Qt::PointingHandCursor);
-        QTest::mouseMove(window, center(choose)); QTRY_VERIFY(!tint->isVisible());
+        QTest::mouseMove(window, center(choose())); QTRY_VERIFY(!tint()->isVisible());
         QVERIFY(!item("deskHintsPart:choose:tint")->isVisible());
         // Mouse: a part runs what its key does, and the keyboard stays in the list.
         const QString current = bible->desk().at(item("deskList")->property("currentIndex").toInt()).toMap()["reference"].toString();
         QGuiApplication::clipboard()->clear();
-        click(copy); QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(current));
+        click(copy()); QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(current));
         QVERIFY(item("deskList")->hasActiveFocus());
         // Keyboard: the key itself still works.
         QGuiApplication::clipboard()->clear(); key(Qt::Key_Y); QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(current));
