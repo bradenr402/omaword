@@ -50,7 +50,7 @@ All actions live in the `actions` catalog in `qml/Main.qml` (`id`, `group`, `tit
   - `esc` dismisses the top panel, selection, or step; `enter` performs; `backspace` steps back; `delete` removes.
 - Keys are contextual: the same key can mean different things in lists, notes, or character selection; document each meaning as its own catalog entry with the context in the title.
 - Conventional keys from other apps (`F1`, `ctrl shift P`, `ctrl +`) go in `aliases` with an `aliasReason`, so they work without cluttering the list.
-- Every key hint shown in a panel or modal goes through `qml/HintRow.qml` and is clickable where the action works. Keys that cannot act play the error sound.
+- Every key hint shown in a panel or modal goes through `qml/HintRow.qml` and is clickable where the action works. Keys that cannot act call `rejected(reason)`: the error sound plus a toast saying why (`unavailableReason(action)` for catalog actions).
 
 ## UI conventions
 

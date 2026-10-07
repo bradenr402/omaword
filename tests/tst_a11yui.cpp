@@ -665,14 +665,18 @@ private slots:
     }
     void rejectedKeysAndRowsSoundTheError() {
         bible->clearSelection(); call("readerFocus"); QTRY_VERIFY(!prop("hasSelection").toBool());
-        // Keyboard: a reader key that cannot act now (bookmark with nothing selected).
+        // Keyboard: a reader key that cannot act now (bookmark with nothing
+        // selected) sounds the error and says why.
         int before = playCount(); key(Qt::Key_M);
         QCOMPARE(playCount(), before + 1); QCOMPARE(lastSound(), QString("error")); QVERIFY(bible->collection().isEmpty());
+        QTRY_COMPARE(object("toast")->property("text").toString(), QString("Select a verse first"));
         // A disabled command row: enter sounds, the palette stays.
         run("commands"); QTRY_VERIFY(opened("passagePalette")); type("bookmark");
         QTRY_COMPARE(item("paletteResults")->property("count").toInt(), 1);
+        object("toast")->setProperty("text", QString());
         before = playCount(); key(Qt::Key_Return);
         QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before); QVERIFY(opened("passagePalette"));
+        QCOMPARE(object("toast")->property("text").toString(), QString("Select a verse first"));
         // Mouse: a click on a disabled row runs nothing and sounds the error.
         before = playCount();
         click(qobject_cast<QQuickItem *>(item("paletteResults")->property("currentItem").value<QObject *>()));
@@ -687,6 +691,12 @@ private slots:
         run("desk"); QTRY_VERIFY(opened("deskDrawer"));
         before = playCount(); key(Qt::Key_Y); QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        // Character selection: a key it does not have says how to leave.
+        bible->selectVerses(3, 3); call("readerFocus"); key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
+        before = playCount(); key(Qt::Key_Q);
+        QCOMPARE(playCount(), before + 1); QCOMPARE(lastSound(), QString("error"));
+        QVERIFY(object("toast")->property("text").toString().startsWith("Not a key in character selection"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("charMode").toBool());
     }
     void outsideClicksOnlyClose() {
         bible->selectVerses(3, 3); call("readerFocus");

@@ -3681,9 +3681,9 @@ private slots:
         QVERIFY(!item("verseHeading1")->isVisible());
         QVERIFY(!item("verseNumberLabel1")->isVisible());
         for (const auto &toggle : QList<QPair<Qt::Key,QString>>{{Qt::Key_N,"Show verse numbers"},
-                {Qt::Key_H,"Show headings"},{Qt::Key_P,"Verse picker"},
+                {Qt::Key_H,"Show headings"},{Qt::Key_O,"Chapter outline"},
                 {Qt::Key_V,"Visual selection"}}) {
-            const bool initiallyOn = toggle.first != Qt::Key_V;
+            const bool initiallyOn = toggle.first != Qt::Key_V && toggle.first != Qt::Key_O;
             // shift V: verse (Visual) selection; v selects characters.
             const auto modifiers = toggle.first == Qt::Key_V ? Qt::ShiftModifier : Qt::AltModifier;
             key(toggle.first,modifiers); checkToast(toggle.second + (initiallyOn ? " off" : " on"));

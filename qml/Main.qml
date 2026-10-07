@@ -362,7 +362,7 @@ ApplicationWindow {
             searchMatchIndex = 0
             searchError = ""
         }
-        if (searchError.length) { rejected(); return }
+        if (searchError.length) { rejected(searchError); return }
         const match = searchActiveMatch
         if (!query.trim().length || !match || !focusSearchMatch(match)) return
         chapterQueryHistory = query
@@ -995,7 +995,7 @@ ApplicationWindow {
     // selected), ctrl shift C as plain text, exactly as selected. A selection
     // that maps to no Scripture text (a heading alone) copies its plain text.
     function copySelectedText(plainText) {
-        if (!freeSelectedText.length || bible.busy) { rejected(); return false }
+        if (!freeSelectedText.length || bible.busy) { rejected(bible.busy ? unavailableReason("copy") : "Nothing selected to copy"); return false }
         // Plain text is the selection as shown (character selection: its source text).
         const range = plainText ? null : selectedSourceRange()
         const text = range ? bible.copyCharacters(range.start.verse, range.start.offset, range.end.verse, range.end.offset, false) : ""
@@ -1136,7 +1136,7 @@ ApplicationWindow {
         return i
     }
     function beginCharMode() {
-        if (!bible.ready || bible.busy || rangeEditing || !bible.verses.length) { rejected(); return false }
+        if (!bible.ready || bible.busy || rangeEditing || !bible.verses.length) { rejected(unavailableReason("characterVisual")); return false }
         clearCount()
         // A mouse-dragged selection becomes the character selection.
         const dragged = freeSelectedText.length ? selectedSourceRange() : null
@@ -1335,9 +1335,9 @@ ApplicationWindow {
         }
         if (mods & Qt.ControlModifier) {
             if (event.key === Qt.Key_C && !(mods & Qt.AltModifier)) { copyCharSelection(!!(mods & Qt.ShiftModifier)); return true }
-            clearCount(); rejected(); return true
+            clearCount(); rejected(charKeyReason); return true
         }
-        if (mods & Qt.AltModifier) { clearCount(); rejected(); return true }
+        if (mods & Qt.AltModifier) { clearCount(); rejected(charKeyReason); return true }
         // Named keys are motions, never count digits (home is 0's motion, not a 0).
         const named = { [Qt.Key_Left]: "h", [Qt.Key_Right]: "l", [Qt.Key_Up]: "k", [Qt.Key_Down]: "j", [Qt.Key_Home]: "0", [Qt.Key_End]: "$" }
         const isNamed = named[event.key] !== undefined
@@ -1345,7 +1345,7 @@ ApplicationWindow {
         // A shifted letter is its capital even where the event's text is not.
         if (!isNamed && (mods & Qt.ShiftModifier) && event.key >= Qt.Key_A && event.key <= Qt.Key_Z && text.length === 1)
             text = text.toUpperCase()
-        if (!text.length) { clearCount(); rejected(); return true }
+        if (!text.length) { clearCount(); rejected(charKeyReason); return true }
         if (charPending.length) {
             const pending = charPending
             charPending = ""
@@ -1373,10 +1373,11 @@ ApplicationWindow {
         // v (its own key) leaves; shift V switches to verse (Visual) selection.
         case "v": endCharMode(); readerFocus(); break
         case "V": endCharMode(); setVisualMode(true); readerFocus(); break
-        default: clearCount(); rejected()
+        default: clearCount(); rejected(charKeyReason)
         }
         return true
     }
+    readonly property string charKeyReason: "Not a key in character selection · " + KeyNotation.format("Escape") + " leaves it"
     function characterHintParts() {
         const ready = charMode && !bible.busy
         return [[["H", "L", "W", "B", "E", "J", "K"], "move"], ["O", "swap", app.charSwap, ready],
@@ -1555,7 +1556,7 @@ ApplicationWindow {
         })
     }
     function toggleScopeDesk(scope) {
-        if (rangeEditing || bible.busy || !scope) { sounds.play("error"); return }
+        if (rangeEditing || bible.busy || !scope) { rejected(unavailableReason("toggleDesk")); return }
         const existing = deskRowFor(scope)
         if (existing ? bible.removeFromDesk(existing.id) : bible.addToDesk(scope)) {
             const reference = (existing || {}).reference || scope.reference || "Passage"
@@ -1564,7 +1565,7 @@ ApplicationWindow {
         } else sounds.play("error")
     }
     function copyScope(scope, plainText) {
-        if (!scope || bible.busy) { sounds.play("error"); return }
+        if (!scope || bible.busy) { rejected(unavailableReason("copy")); return }
         const copied = bible.copyScope(scope, !!plainText)
         if (copied.length) {
             flashScope(scope)
@@ -1746,7 +1747,7 @@ ApplicationWindow {
             else if (leaveSidePanel("")) readerFocus()
             return
         }
-        if (!readerKeys || rangeEditing) { rejected(); return }
+        if (!readerKeys || rangeEditing) { rejected(unavailableReason("historyBack")); return }
         clearCount()
         historyStep(forward ? 1 : -1)
     }
@@ -2046,7 +2047,7 @@ ApplicationWindow {
     }
     // Tab from the note editor: the Linked from list takes the keyboard.
     function focusLinkedFrom() {
-        if (!linkedFrom.length) { rejected(); return }
+        if (!linkedFrom.length) { rejected("No other notes link here"); return }
         linkedList.currentIndex = Math.max(0, Math.min(linkedFrom.length - 1, linkedList.currentIndex))
         linkedList.forceActiveFocus()
     }
@@ -2131,7 +2132,27 @@ ApplicationWindow {
         flick.contentY = Math.max(top, Math.min(bottom, target))
     }
     // A key or row that cannot act sounds the error rather than doing nothing.
-    function rejected() { sounds.play("error") }
+    // A key or row that cannot act: the error sound, and a short toast saying
+    // why when there is a reason a reader can act on.
+    function rejected(reason) {
+        if (reason) notify(reason, true)
+        sounds.play("error")
+    }
+    // Why a catalog action cannot act right now ("" when it can, or when the
+    // reason is only that the key belongs elsewhere).
+    function unavailableReason(action) {
+        if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
+        if (!action) return ""
+        if (bible.busy) return "Wait for the import to finish"
+        if (rangeEditing) return "Finish editing the range first · " + KeyNotation.format("Return") + " saves, " + KeyNotation.format("Escape") + " cancels"
+        if (["bookmark", "highlight", "tags", "toggleDesk", "notes", "editRange", "copy", "copyPlain"].includes(action.id) && !hasSelection)
+            return "Select a verse first"
+        if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen)
+            return "Open a note first · " + keyText("notes")
+        if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
+        if (!bible.ready) return "Add a Bible version first"
+        return ""
+    }
     function textInputActive() {
         let item = activeFocusItem
         while (item) {
@@ -2886,7 +2907,7 @@ ApplicationWindow {
     // The Passage palette at the reader's book, its chapter grid with the
     // current one chosen (clicking the chapter title).
     function openChapterList() {
-        if (rangeEditing || !bible.ready || bible.busy) { rejected(); return }
+        if (rangeEditing || !bible.ready || bible.busy) { rejected(unavailableReason("books")); return }
         const book = Array.from(bible.books).find(function(b) { return b.id === bible.book })
         if (!book) { rejected(); return }
         openPalette(false)
@@ -3025,7 +3046,7 @@ ApplicationWindow {
         if (rangeEditing || bible.busy) return
         const entry = deskEntry(id)
         if (!entry || !flushNote()) return
-        if (!entry.available) { sounds.play("error"); notify(entry.versionAbbreviation + " is not installed", true); return }
+        if (!entry.available) { rejected(entry.versionAbbreviation + " is not installed"); return }
         const from = beginJump()
         if (!bible.openDeskItem(id)) return
         endJump(from)
@@ -3085,8 +3106,6 @@ ApplicationWindow {
     property int historyDwellMs: 5000
     property string dwellChapterKey: ""
     property bool dwellPending: false
-    property int historySelectedId: -1
-    property int historyRow: 0
     readonly property var locationKeys: ["versionId", "book", "chapter", "start", "endBook", "endChapter", "end"]
     function sameLocation(a, b) {
         return !!a && !!b && locationKeys.every(function(key) { return a[key] === b[key] })
@@ -3178,7 +3197,7 @@ ApplicationWindow {
         if (rangeEditing || bible.busy) return
         const entry = historyEntry(id)
         if (!entry || !flushNote()) return
-        if (!entry.available) { sounds.play("error"); notify(entry.versionAbbreviation + " is not installed", true); return }
+        if (!entry.available) { rejected(entry.versionAbbreviation + " is not installed"); return }
         const from = beginJump()
         if (!openLocation(entry)) return
         endJump(from)
@@ -3191,7 +3210,7 @@ ApplicationWindow {
         const entry = historyEntry(id)
         if (!entry) return
         const scope = historyScope(entry)
-        if (!scope) { sounds.play("error"); return }
+        if (!scope) { rejected(entry.versionAbbreviation + " is not installed"); return }
         if (bible.copyScope(scope, !!plainText).length > 0) {
             notify(entry.reference + " · " + entry.versionAbbreviation + (plainText ? " copied as plain text" : " copied"), true)
             sounds.play("chime")
@@ -3205,7 +3224,7 @@ ApplicationWindow {
         if (rangeEditing || bible.busy) return
         const entry = historyEntry(id)
         const scope = historyScope(entry)
-        if (!scope || !entry.available) { sounds.play("error"); return }
+        if (!scope || !entry.available) { rejected(entry.versionAbbreviation + " is not installed"); return }
         toggleScopeDesk(scope)
     }
     function removeHistoryItem(id) {
@@ -4164,7 +4183,7 @@ ApplicationWindow {
         })
     }
     function showPaletteHistory() {
-        if (!bible.historyEnabled) { notify("History is disabled · enable it in Commands", true); sounds.play("error"); return }
+        if (!bible.historyEnabled) { rejected("History is disabled · enable it in Commands"); return }
         paletteBook = 0
         paletteBookName = ""
         paletteHistory = true
@@ -4177,7 +4196,7 @@ ApplicationWindow {
     // ctrl h: the palette's History.
     function openHistoryPalette() {
         if (rangeEditing) return
-        if (!bible.historyEnabled) { notify("History is disabled · enable it in Commands", true); sounds.play("error"); return }
+        if (!bible.historyEnabled) { rejected("History is disabled · enable it in Commands"); return }
         if (!passagePalette.visible || paletteTextMode || referenceInput.text.trim().startsWith(">")) openPalette(false)
         if (passagePalette.visible) showPaletteHistory()
     }
@@ -4204,7 +4223,7 @@ ApplicationWindow {
         if (entry.recent) { openRecentPassage(entry.recent); return }
         if (entry.candidate) { jump(entry.reference); return }
         if (entry.action) {
-            if (!actionAvailable(entry.action)) { sounds.play("error"); return }
+            if (!actionAvailable(entry.action)) { rejected(unavailableReason(entry.action)); return }
             if (!flushNote()) return
             if (["books", "history", "bibleSearch", "commands", "resume"].includes(entry.action)) {
                 runCommand(entry.action)
@@ -4231,7 +4250,7 @@ ApplicationWindow {
         let destination = paletteDestination
         if (destination.entry) activatePaletteEntry(destination.entry)
         else if (paletteResolution.valid) jump(destination.reference)
-        else sounds.play("error")
+        else rejected(paletteResolution.error || "Type a passage, like John 3:16")
     }
     // Back from a book's chapters to the books, that book chosen (from
     // History, its row).
@@ -4317,8 +4336,8 @@ ApplicationWindow {
         // From the Notes editor a launcher closes Notes first: its draft saves,
         // and when it cannot, Notes stays open with its error and nothing opens.
         if (noteEditorTyping() && noteEditorLaunchActions.includes(action)) {
-            if (!actionAvailable(action)) { sounds.play("error"); return }
-            if (!closeNotes()) { sounds.play("error"); return }
+            if (!actionAvailable(action)) { rejected(unavailableReason(action)); return }
+            if (!closeNotes()) { rejected("The note could not be saved"); return }
         }
         if (sidePanel.length && sidePanel !== "notes" && panelLeavingActions.includes(action) && actionAvailable(action)) {
             if (!flushNote()) return
@@ -4328,7 +4347,7 @@ ApplicationWindow {
         runCommand(action)
     }
     function runCommand(action) {
-        if (!actionAvailable(action)) { sounds.play("error"); return }
+        if (!actionAvailable(action)) { rejected(unavailableReason(action)); return }
         if (action === "first" || action === "last") { countedVerse(action === "last"); return }
         const count = Math.max(1, Math.min(999999, Number(verseCount) || 1))
         clearCount()
@@ -4506,7 +4525,7 @@ ApplicationWindow {
         view.contentY = top
     }
     function activateKeybinding(action) {
-        if (!action || !actionAvailable(action)) { sounds.play("error"); return }
+        if (!action || !actionAvailable(action)) { rejected(unavailableReason(action)); return }
         if (!flushNote()) return
         helpDialog.pendingAction = action.id
         helpDialog.close()
@@ -7273,7 +7292,7 @@ ApplicationWindow {
                     }
                     // Unavailable rows read muted and stay clickable: a click sounds the error.
                     readonly property bool available: !modelData.action || app.actionAvailable(modelData.action)
-                    onClicked: { if (available) app.activatePaletteEntry(modelData); else app.rejected() }
+                    onClicked: { if (available) app.activatePaletteEntry(modelData); else app.rejected(app.unavailableReason(modelData.action)) }
                     TapHandler {
                         acceptedButtons: Qt.RightButton
                         enabled: !!paletteEntry.modelData.recentQuery || !!paletteEntry.modelData.recent || app.paletteTextMode
