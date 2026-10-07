@@ -18,6 +18,12 @@ Flow {
     property var parts: []
     property real pixelSize: 11
     property int markedPart: -1
+    // A toolbar (the selection bar): with a partHeight, every part is a
+    // button that tall, its hint centred between partPadding on each side,
+    // edge to edge with the next, its hover and press tint filling it.
+    property real partHeight: 0
+    property real partPadding: 0
+    readonly property bool buttons: partHeight > 0
     readonly property var entries: KeyNotation.hintParts(parts)
     readonly property string text: KeyNotation.hint(parts, theme.foreground, theme.muted)
     readonly property string plainText: KeyNotation.hintPlain(parts)
@@ -55,27 +61,31 @@ Flow {
             readonly property bool hovered: mouse.containsMouse
             function activate() { if (clickable) modelData.run() }
             objectName: row.objectName.length ? row.objectName + "Part:" + modelData.label : ""
-            readonly property real trailing: index < repeater.count - 1 ? row.gapWidth : 0
-            implicitWidth: label.implicitWidth + trailing
-            implicitHeight: label.implicitHeight
+            readonly property real trailing: !row.buttons && index < repeater.count - 1 ? row.gapWidth : 0
+            readonly property real padding: row.buttons ? row.partPadding : 0
+            implicitWidth: label.implicitWidth + trailing + 2 * padding
+            implicitHeight: row.buttons ? row.partHeight : label.implicitHeight
             width: Math.min(implicitWidth, Math.max(1, row.width))
-            height: label.height
+            height: row.buttons ? row.partHeight : label.height
             readonly property bool marked: row.markedPart >= 0 && row.partItems().indexOf(part) === row.markedPart
             Rectangle {
                 objectName: part.objectName.length ? part.objectName + ":tint" : ""
-                anchors.fill: label
-                anchors.leftMargin: -3
-                anchors.rightMargin: -3
+                anchors.fill: row.buttons ? part : label
+                anchors.leftMargin: row.buttons ? 0 : -3
+                anchors.rightMargin: row.buttons ? 0 : -3
                 z: -1
                 visible: part.clickable && (part.hovered || part.marked)
-                color: Qt.rgba(row.theme.accent.r, row.theme.accent.g, row.theme.accent.b, part.marked && !part.hovered ? 0.06 : 0.12)
+                color: Qt.rgba(row.theme.accent.r, row.theme.accent.g, row.theme.accent.b,
+                    mouse.pressed ? 0.18 : part.marked && !part.hovered ? 0.06 : row.buttons ? 0.09 : 0.12)
                 border.width: part.marked ? 1 : 0
                 border.color: row.theme.accent
                 radius: Math.min(row.theme.cornerRadius || 0, height / 2)
             }
             Text {
                 id: label
-                width: Math.max(1, part.width - part.trailing)
+                x: part.padding
+                anchors.verticalCenter: row.buttons ? part.verticalCenter : undefined
+                width: Math.max(1, part.width - part.trailing - 2 * part.padding)
                 text: KeyNotation.hint([[part.modelData.sequences, part.modelData.label]], row.theme.foreground, row.theme.muted)
                 textFormat: Text.StyledText
                 wrapMode: Text.Wrap
@@ -85,14 +95,14 @@ Flow {
             }
             MouseArea {
                 id: mouse
-                anchors.fill: label
+                anchors.fill: row.buttons ? part : label
                 enabled: part.clickable
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: part.activate()
             }
             Accessible.role: part.clickable ? Accessible.Button : Accessible.StaticText
-            Accessible.name: part.modelData.label
+            Accessible.name: part.modelData.name
             Accessible.description: part.modelData.keys
             Accessible.onPressAction: part.activate()
         }

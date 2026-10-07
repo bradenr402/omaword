@@ -66,23 +66,25 @@ function richList(sequences, foreground, muted) {
     }).join('<font color="' + muted + '">' + escapeHtml(separator) + "</font>")
 }
 
-// Hint rows: parts are [sequences, label, run, enabled]; several sequences
-// in one part read as a set ("↑ ↓ choose"). Pairs never break internally.
-// `run` (optional) makes the part clickable in HintRow while `enabled`
-// (default true) holds; parts without it are display only.
+// Hint rows: parts are [sequences, label, run, enabled, name]; several
+// sequences in one part read as a set ("↑ ↓ choose"). Pairs never break
+// internally. `run` (optional) makes the part clickable in HintRow while
+// `enabled` (default true) holds; parts without it are display only. `name`
+// (optional) is the accessible name where the label is a symbol ("⋯").
 function hintParts(parts) {
     return Array.from(parts || []).filter(function(part) { return !!part }).map(function(part) {
         var keys = typeof part[0] === "string" ? [part[0]] : Array.from(part[0])
         return { keys: keys.map(format).join(" "), label: part[1], sequences: keys,
-            run: typeof part[2] === "function" ? part[2] : null, enabled: part[3] !== false }
+            run: typeof part[2] === "function" ? part[2] : null, enabled: part[3] !== false, name: part[4] || part[1] }
     })
 }
+// A part without keys (a toolbar's "⋯") shows only its label.
 function hintPlain(parts) {
-    return hintParts(parts).map(function(part) { return part.keys + " " + part.label }).join("    ")
+    return hintParts(parts).map(function(part) { return part.keys ? part.keys + " " + part.label : part.label }).join("    ")
 }
 function hint(parts, foreground, muted) {
     return hintParts(parts).map(function(part) {
-        return '<font color="' + foreground + '">' + escapeHtml(part.keys).replace(/ /g, "&nbsp;") + "</font>"
-            + '<font color="' + muted + '">&nbsp;' + escapeHtml(part.label).replace(/ /g, "&nbsp;") + "</font>"
+        return (part.keys ? '<font color="' + foreground + '">' + escapeHtml(part.keys).replace(/ /g, "&nbsp;") + "</font>&nbsp;" : "")
+            + '<font color="' + muted + '">' + escapeHtml(part.label).replace(/ /g, "&nbsp;") + "</font>"
     }).join("&nbsp;&nbsp;&nbsp; ")
 }

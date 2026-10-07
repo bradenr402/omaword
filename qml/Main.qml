@@ -944,11 +944,15 @@ ApplicationWindow {
     // above it (Highlight · Note · Tag · Copy · more); any key, another
     // selection by key, or a panel puts the bar away.
     property bool selectionBarWanted: false
-    readonly property bool selectionBarShown: selectionBarWanted && hasSelection && readerKeys && !rangeEditing
+    // Its own ⋯ menu keeps it up.
+    readonly property bool selectionBarShown: selectionBarWanted && hasSelection && !rangeEditing
+        && (readerKeys || (contextMenu.visible && contextMenu.target === "selectionBar"))
     function mouseSelected() { selectionBarWanted = hasSelection; Qt.callLater(app.placeSelectionBar) }
     property real selectionBarY: 0
     function placeSelectionBar() {
         if (!selectionBarWanted || !hasSelection) return
+        // Rows rebuilt for new marks are placed at the next polish: place them now.
+        readerColumn.forceLayout()
         const number = bible.selectedStart
         const block = blockLoader.item as BlockReader
         let at = Qt.point(verseGutter, 0)
@@ -962,20 +966,32 @@ ApplicationWindow {
         selectionBarY = readerColumn.y + at.y
     }
     property real selectionBarX: 0
+    // Actions that open something else (Notes, the tag picker, Versions,
+    // Study) put the bar away; the rest keep it up for the next.
+    function selectionBarRun(action, leaves) {
+        if (leaves) selectionBarWanted = false
+        runCommand(action)
+    }
     function selectionBarParts() {
         const ready = selectionBarShown
-        return [["X", bible.selectionHighlighted ? "unhighlight" : "highlight", function() { app.runCommand("highlight") }, ready],
-            ["W", "note", function() { app.runCommand("notes") }, ready],
-            ["T", "tag", function() { app.runCommand("tags") }, ready],
-            ["Y", "copy", function() { app.runCommand("copyText") }, ready]]
+        return [["X", bible.selectionHighlighted ? "unhighlight" : "highlight", function() { app.selectionBarRun("highlight") }, ready],
+            ["W", "note", function() { app.selectionBarRun("notes", true) }, ready],
+            ["T", "tag", function() { app.selectionBarRun("tags", true) }, ready],
+            ["Y", "copy", function() { app.selectionBarRun("copyText") }, ready],
+            [[], "⋯", app.selectionBarMore, ready, "More: Desk, Compare versions, Copy plain text, Study"]]
     }
     function selectionBarMore() {
-        const p = selectionMore.mapToItem(null, 0, selectionMore.height)
+        const more = selectionBarHints.partItems()[4]
+        const p = more ? more.mapToItem(null, 0, more.height) : selectionBar.mapToItem(null, selectionBar.width, selectionBar.height)
         contextMenu.show("selectionBar", [
-            menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "toggleDesk"),
-            menuAction("compare", "Compare versions", "compare"),
-            menuAction("copyPlain", "Copy plain text", "copyPlain"),
-            menuAction("related", "Study", "related")
+            { id: "desk", text: bible.currentInDesk ? "Remove from Desk" : "Add to Desk", shortcut: menuKey("toggleDesk"),
+                enabled: actionAvailable("toggleDesk"), run: function() { app.selectionBarRun("toggleDesk") } },
+            { id: "compare", text: "Compare versions", shortcut: menuKey("compare"),
+                enabled: actionAvailable("compare"), run: function() { app.selectionBarRun("compare", true) } },
+            { id: "copyPlain", text: "Copy plain text", shortcut: menuKey("copyPlain"),
+                enabled: actionAvailable("copyPlain"), run: function() { app.selectionBarRun("copyPlain") } },
+            { id: "related", text: "Study", shortcut: menuKey("related"),
+                enabled: actionAvailable("related"), run: function() { app.selectionBarRun("related", true) } }
         ], p.x, p.y)
     }
     function copyFreeText() {
@@ -5528,39 +5544,30 @@ ApplicationWindow {
                     }
                     // The mouse selection's bar, scrolling with the text above
                     // the selection's first line (below it at the top).
+                    // Its actions are buttons the bar's full height, edge to edge.
                     Rectangle {
                         id: selectionBar
                         objectName: "selectionBar"
                         visible: app.selectionBarShown
                         readonly property real gap: 6 * app.readerScale
-                        width: selectionBarRow.implicitWidth + 2 * 10 * app.scale
-                        height: selectionBarRow.implicitHeight + 2 * 6 * app.scale
+                        width: selectionBarHints.implicitWidth + 2 * border.width
+                        height: selectionBarHints.implicitHeight + 2 * border.width
                         x: Math.max(0, Math.min(reading.width - width, app.selectionBarX))
                         y: app.selectionBarY - height - gap < reading.contentY ? app.selectionBarY + app.readerLineHeight + gap : app.selectionBarY - height - gap
                         z: 5
                         color: desktop.background
                         border.color: desktop.border
+                        border.width: 1
                         radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                        Row {
-                            id: selectionBarRow
-                            anchors.centerIn: parent
-                            spacing: 8 * app.scale
-                            HintRow {
-                                objectName: "selectionBarHints"
-                                theme: desktop
-                                parts: app.selectionBarParts()
-                                pixelSize: 12 * app.scale
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
-                            QuietButton {
-                                id: selectionMore
-                                objectName: "selectionBarMore"
-                                text: "⋯"; compact: true
-                                tip: "More: Desk, Compare versions, Copy plain text, Study"
-                                Accessible.name: "More actions"
-                                anchors.verticalCenter: parent.verticalCenter
-                                onClicked: app.selectionBarMore()
-                            }
+                        HintRow {
+                            id: selectionBarHints
+                            objectName: "selectionBarHints"
+                            x: parent.border.width; y: parent.border.width
+                            theme: desktop
+                            parts: app.selectionBarParts()
+                            pixelSize: 12 * app.scale
+                            partHeight: 30 * app.scale
+                            partPadding: 10 * app.scale
                         }
                     }
                     // In the ribbon's chapter an accent ribbon hangs from the
@@ -5613,8 +5620,8 @@ ApplicationWindow {
                         // margin notes may shift it left (app.marginSpace).
                         width: app.readerColumnWidth
                         x: app.columnTargetX + app.marginSlideOffset
-                        onHeightChanged: app.scheduleMargins()
-                        onWidthChanged: app.scheduleMargins()
+                        onHeightChanged: { app.scheduleMargins(); if (app.selectionBarWanted) Qt.callLater(app.placeSelectionBar) }
+                        onWidthChanged: { app.scheduleMargins(); if (app.selectionBarWanted) Qt.callLater(app.placeSelectionBar) }
                         topPadding: 48 * app.readerScale
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
@@ -6009,7 +6016,7 @@ ApplicationWindow {
                             sourceComponent: BlockReader {
                                 mode: bible.readingMode
                                 objectName: "blockReader"
-                                onLayoutRefreshed: app.scheduleMargins()
+                                onLayoutRefreshed: { app.scheduleMargins(); app.placeSelectionBar() }
                                 controller: app
                                 backend: bible
                                 theme: desktop

@@ -541,19 +541,40 @@ private slots:
         const auto bar = item("selectionBar")->mapToScene(QPointF(0, 0));
         QVERIFY(bar.y() + item("selectionBar")->height() <= versePoint(3).y() + 2);
         QCOMPARE(object("selectionBarHints")->property("plainText").toString(),
-                 QString::fromUtf8("x highlight    w note    t tag    y copy"));
+                 QString::fromUtf8("x highlight    w note    t tag    y copy    ⋯"));
+        // Its actions are buttons the bar's full height, edge to edge.
+        const QStringList labels{"highlight", "note", "tag", "copy", QString::fromUtf8("⋯")};
+        const double inner = item("selectionBar")->height() - 2;
+        for (int i = 0; i < labels.size(); ++i) {
+            auto button = item("selectionBarHintsPart:" + labels[i]); QVERIFY(button);
+            QCOMPARE(button->height(), inner);
+            if (i) {
+                auto previous = item("selectionBarHintsPart:" + labels[i - 1]);
+                QCOMPARE(button->x(), previous->x() + previous->width());
+            }
+        }
         // Its parts act on the selection and stay up.
         QQuickItem *part = item("selectionBarHintsPart:highlight");
         QVERIFY(part);
         QTest::mouseClick(window, Qt::LeftButton, {}, part->mapToScene(QPointF(part->width() / 2, part->height() / 2)).toPoint());
         QTRY_VERIFY(bible->selectionHighlighted());
         QVERIFY(item("selectionBar")->isVisible());
-        // ⋯ offers the rest: Desk and Compare.
-        QTest::mouseClick(window, Qt::LeftButton, {}, item("selectionBarMore")->mapToScene(QPointF(4, 4)).toPoint());
+        // New marks rebuild the text; the bar stays over the selection.
+        QTRY_VERIFY(item("selectionBar")->mapToScene(QPointF(0, 0)).y() + item("selectionBar")->height() <= versePoint(3).y() + 2);
+        QVERIFY(item("selectionBar")->mapToScene(QPointF(0, 0)).y() > versePoint(2).y() - 2 * item("selectionBar")->height());
+        // ⋯ offers the rest: Desk and Compare; the bar stays while its menu is open, and after.
+        auto more = item(QString::fromUtf8("selectionBarHintsPart:⋯"));
+        QTest::mouseClick(window, Qt::LeftButton, {}, more->mapToScene(QPointF(more->width() / 2, more->height() / 2)).toPoint());
         QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("selectionBar"));
         QCOMPARE(ids(), (QStringList{"desk", "compare", "copyPlain", "related"}));
+        QVERIFY(item("selectionBar")->isVisible());
+        clickEntry("desk"); QTRY_COMPARE(bible->desk().size(), 1);
+        QVERIFY(item("selectionBar")->isVisible());
+        QTest::mouseClick(window, Qt::LeftButton, {}, more->mapToScene(QPointF(more->width() / 2, more->height() / 2)).toPoint());
+        QTRY_VERIFY(menuOpen());
         escape();
+        QVERIFY(item("selectionBar")->isVisible());
         // A key (here a verse motion) puts it away; so does esc.
         key(Qt::Key_J); QTRY_VERIFY(!item("selectionBar")->isVisible());
         QTest::mouseClick(window, Qt::LeftButton, {}, versePoint(2)); QCoreApplication::processEvents();

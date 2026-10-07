@@ -245,10 +245,13 @@ files.
 
 ### Selection bar
 - A verse selection made with the mouse (`mouseSelected`, from Verse rows and
-  BlockReader releases) shows a bar of HintRow parts above the selection's
-  first line, inside the reader's flickable so it scrolls with the text; it
-  flips below at the top. Any catalog key (`runKey`), `esc`, a new chapter, or
-  losing the reader's keys hides it; its own parts keep it up.
+  BlockReader releases) shows a bar above the selection's first line: a
+  HintRow in buttons mode (`partHeight`: every part a full-height button,
+  edge to edge), inside the reader's flickable so it scrolls with the text;
+  it flips below at the top and is placed again after relayouts. Any catalog
+  key (`runKey`), `esc`, a new chapter, or losing the reader's keys hides it;
+  its own parts and its ⋯ menu keep it up, except those that open a panel or
+  dialog (note, tag, Compare, Study).
 
 ### Compare
 - `compareVersions(scope)` reads the scope's endpoints in every installed
