@@ -34,8 +34,8 @@ Item {
         ? bible.selectionReference : bible.passage) + (bible.versionAbbreviation ? " · " + bible.versionAbbreviation : "")
     // See also (the Study drawer; internal id "related"): one list, in
     // sections, of what goes with the reader's passage: the version's own
-    // cross references, its parallel passages, OpenBible.info's community
-    // cross references, and the passages tagged alike, in every version.
+    // cross references, its parallel passages, the passages tagged alike in
+    // every version, and last OpenBible.info's community cross references.
     // The filter (/) narrows every section, and #name keeps a tag's passages.
     property var crossRows: []
     property var tagRows: []
@@ -48,7 +48,7 @@ Item {
         const own = [], parallel = [], openBible = []
         crossRows.forEach(function(row) { (row.source === "parallel" ? parallel : row.openBible ? openBible : own).push(row) })
         const rows = []
-        for (const section of [["own", own], ["parallel", parallel], ["openBible", openBible], ["tags", tagRows]]) {
+        for (const section of [["own", own], ["parallel", parallel], ["tags", tagRows], ["openBible", openBible]]) {
             const matching = section[1].filter(function(row) { return panel.rowMatches(row) })
             matching.forEach(function(row, index) {
                 rows.push(Object.assign({}, row, { section: section[0], firstOfSection: index === 0, sectionCount: matching.length }))

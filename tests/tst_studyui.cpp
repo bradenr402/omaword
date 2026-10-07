@@ -472,8 +472,8 @@ private slots:
         QVERIFY(rows().isEmpty());
         QCOMPARE(object("studyEmpty")->property("text").toString(), QString("Nothing goes with Genesis 1:2 yet. Tag it (t) to gather the passages you tag alike."));
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
-        // No \\x of its own: OpenBible.info's, by votes, under their heading; then
-        // the passages tagged alike, in every version.
+        // No \\x of its own: the passages tagged alike, in every version; then,
+        // last, OpenBible.info's, by votes, under their heading.
         navigate("John 1:14"); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Word made flesh").isEmpty());
         navigate("John 3:16"); const QString love = bible->createAndAssignTag(bible->tagScope(), "Love");
         QVERIFY(!love.isEmpty()); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Word made flesh").isEmpty());
@@ -482,15 +482,15 @@ private slots:
         openStudy();
         references.clear(); sections.clear();
         for (const auto &row : rows()) { references << row.toMap()["reference"].toString(); sections << row.toMap()["section"].toString(); }
-        QCOMPARE(references, QStringList({"John 3:15", "John 3:36", "John 1:29", "John 1:14", "John 1:18", "John 1:14", "John 3:3"}));
-        QCOMPARE(sections, QStringList({"openBible", "openBible", "openBible", "openBible", "openBible", "tags", "tags"}));
+        QCOMPARE(references, QStringList({"John 1:14", "John 3:3", "John 3:15", "John 3:36", "John 1:29", "John 1:14", "John 1:18"}));
+        QCOMPARE(sections, QStringList({"tags", "tags", "openBible", "openBible", "openBible", "openBible", "openBible"}));
         QCOMPARE(object("studySectionTitle:openBible")->property("text").toString(), QString("OpenBible.info"));
-        QTRY_VERIFY(object("studyRowTitle:0"));
-        QCOMPARE(object("studyRowTitle:0")->property("text").toString(), QString("John 3:15"));
+        QTRY_VERIFY(object("studyRowTitle:2"));
+        QCOMPARE(object("studyRowTitle:2")->property("text").toString(), QString("John 3:15"));
         QCOMPARE(object("studySectionTitle:tags")->property("text").toString(), QString("Tagged alike"));
         QVERIFY(object("studySectionTag:Love") && object("studySectionTag:Word made flesh"));
         // A row's tags, the shared one in the accent.
-        const QString rowTags = object("studyRowTags:5")->property("text").toString();
+        const QString rowTags = object("studyRowTags:0")->property("text").toString();
         QVERIFY(rowTags.contains(desktop->property("accent").value<QColor>().name() + "\">#Word made flesh")); QVERIFY(!rowTags.contains("Love"));
         // Mouse: a heading's tag keeps only its passages; / filters by words too.
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
@@ -509,7 +509,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
         openStudy(); QCOMPARE(rows().size(), 7); QVERIFY(!item("studySearch")->isVisible());
         // t edits the current row's tags over the panel.
-        key(Qt::Key_G, Qt::ShiftModifier); key(Qt::Key_T);
+        key(Qt::Key_G); key(Qt::Key_J); key(Qt::Key_T);
         QTRY_VERIFY(object("tagsUi")->property("pickerVisible").toBool());
         QCOMPARE(value(object("tagsUi")->property("editingScope")).toMap()["start"].toInt(), 3);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsUi")->property("pickerVisible").toBool());

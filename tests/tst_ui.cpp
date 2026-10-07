@@ -4380,19 +4380,24 @@ private slots:
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Sent").isEmpty());
         key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        // The tagged-alike passage follows the cross references.
+        // The tagged-alike passage comes before OpenBible.info's, which are last.
         QVariantList rows;
         QTRY_VERIFY((rows = prop("tagsUi","studyRows").value<QJSValue>().toVariant().toList(), !rows.isEmpty()));
-        QCOMPARE(rows.last().toMap().value("reference").toString(),QString("John 3:17"));
-        QCOMPARE(rows.last().toMap().value("section").toString(),QString("tags"));
-        key(Qt::Key_G,Qt::ShiftModifier); QCOMPARE(prop("studyList","currentIndex").toInt(),rows.size() - 1);
+        int tagged = -1;
+        for (int i = 0; i < rows.size(); ++i) if (rows[i].toMap().value("section").toString() == "tags") tagged = i;
+        QVERIFY(tagged >= 0);
+        QCOMPARE(rows[tagged].toMap().value("reference").toString(),QString("John 3:17"));
+        for (int i = tagged + 1; i < rows.size(); ++i) QCOMPARE(rows[i].toMap().value("section").toString(),QString("openBible"));
+        key(Qt::Key_G);
+        for (int i = 0; i < tagged; ++i) key(Qt::Key_J);
+        QCOMPARE(prop("studyList","currentIndex").toInt(),tagged);
         QApplication::clipboard()->clear();
         key(Qt::Key_Y); QTRY_VERIFY(QApplication::clipboard()->text().contains("John 3:17"));
         key(Qt::Key_Y,Qt::ShiftModifier);
         QTRY_VERIFY(!QApplication::clipboard()->text().contains("John 3:17"));
         key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),1);
         QCOMPARE(bible->desk().first().toMap().value("reference").toString(),QString("John 3:17"));
-        key(Qt::Key_J); QCOMPARE(prop("studyList","currentIndex").toInt(),rows.size() - 1);
+        key(Qt::Key_J); key(Qt::Key_K); QCOMPARE(prop("studyList","currentIndex").toInt(),tagged);
         QVERIFY(item("studyList")->hasActiveFocus());
         QCOMPARE(bible->selectionReference(),QString("John 3:16"));
         // See also never removes tags: delete is inert on its rows.
