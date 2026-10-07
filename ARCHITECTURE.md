@@ -88,12 +88,20 @@ files.
 
 ## Versions and attribution
 
-- Cross references come only from the version's own source (`\x` notes,
-  schema 4); nothing is bundled. `crossReferences(scope)` reads the `\x`
-  targets of the selection's verses (≤ 50) in source order (verse, note, list
-  order; parsed with book/chapter carry-over), dedupes exact ranges keeping the
-  first, and hides absent targets and the passage itself. `hasCrossReferences`
-  drives Study's "This version has no cross-references." empty state.
+- Cross references: the version's own source first (`\x` notes, schema 4),
+  then OpenBible.info's community set (CC BY, credited in About and README,
+  every row labeled). `crossReferences(scope)` reads the `\x` targets of the
+  selection's verses (≤ 50) in source order (verse, note, list order; parsed
+  with book/chapter carry-over), then appends OpenBible's targets for the same
+  verses by votes (ties in canonical order), each exact range once (the
+  source's wins); absent targets and the passage itself are hidden. Rows carry
+  `openBible` and `votes`. OpenBible numbers verses as the KJV does; other
+  versifications are looked up by the same numbers. `bin/crossrefs` converts
+  its `cross_references.txt` at development time (OSIS → USFM codes → book IDs,
+  votes ≤ 0 dropped, columnar + delta/varint, `qCompress`ed: ≈ 0.9 MB for
+  341k rows) into `resources/crossrefs.bin`, embedded in the core library
+  (`src/core.qrc`) and decoded once per process. `hasCrossReferences` (the
+  source has `\x` notes) words Study's empty state.
 
 - Seven catalog entries (`engnet`, `eng-kjv2006`, `eng-kjv` = **KJV+**, `engojb`,
   `engylt`, `eng-asv`, `engbsb`) from `https://ebible.org/Scriptures/<id>_usfm.zip`.

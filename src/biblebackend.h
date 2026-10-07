@@ -285,10 +285,11 @@ public:
     // current selection, or the chapter without one. Collection-shaped rows.
     Q_INVOKABLE QVariantList linkedNotes() const;
     // Cross references for a scope in the active version (empty: the current
-    // selection; none without a verse): only the source's own \x targets
-    // (schema 4), in source order, deduplicated by exact range, targets absent
-    // from this version and the passage itself hidden.
-    // Rows: canonical scope fields + reference, excerpt.
+    // selection; none without a verse): the source's own \x targets (schema 4)
+    // in source order, then bundled OpenBible.info ones by votes (KJV verse
+    // numbers), each range once, targets absent from this version and the
+    // passage itself hidden.
+    // Rows: canonical scope fields + reference, excerpt, openBible, votes.
     Q_INVOKABLE QVariantList crossReferences(QVariantMap scope = QVariantMap()) const;
     Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
     Q_INVOKABLE void openChapter(int book, int chapter);

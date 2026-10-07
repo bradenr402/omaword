@@ -3530,6 +3530,76 @@ bool BibleBackend::importBackup(QUrl file)
     clearError(); setStatus(QString("Restored %1 annotations from backup.").arg(rows.size())); return true;
 }
 
+// A static library's resources register only when something references them.
+static void initCoreResources() { Q_INIT_RESOURCE(core); }
+
+// OpenBible.info cross references (CC BY), bundled as resources/crossrefs.bin
+// by bin/crossrefs: qCompress'ed columns keyed by KJV-style verse IDs. Decoded
+// once per process on first use; immutable afterwards (thread-safe static).
+namespace {
+quint32 verseCode(int b, int c, int v) { return quint32(b) << 16 | quint32(c) << 8 | quint32(v); }
+struct CrossTarget { quint32 start = 0, end = 0; int votes = 0; };
+struct CrossData { QHash<quint32, QPair<int, int>> index; QVector<CrossTarget> rows; };
+const CrossData &crossData()
+{
+    static const CrossData data = [] {
+        CrossData d;
+        initCoreResources();
+        QFile file(":/resources/crossrefs.bin");
+        if (!file.open(QIODevice::ReadOnly)) return d;
+        const QByteArray bytes = qUncompress(file.readAll());
+        const auto *p = reinterpret_cast<const uchar *>(bytes.constData());
+        const auto *end = p + bytes.size();
+        bool ok = true;
+        auto u8 = [&]() -> quint32 { if (p >= end) { ok = false; return 0; } return *p++; };
+        auto u32 = [&]() -> quint32 { quint32 v = 0; for (int i = 0; i < 4; ++i) v = v << 8 | u8(); return v; };
+        auto varint = [&]() -> quint32 {
+            quint32 v = 0;
+            for (int shift = 0; shift < 32; shift += 7) { const quint32 b = u8(); v |= (b & 0x7f) << shift; if (!(b & 0x80)) return v; }
+            ok = false; return 0;
+        };
+        if (bytes.size() < 13 || !bytes.startsWith("OWXR")) return d;
+        p += 4;
+        if (u8() != 1) return d;
+        const quint32 sourceCount = u32(), rowCount = u32();
+        if (sourceCount > 100000 || rowCount > 2000000) return d;
+        QVector<quint32> sources(sourceCount), counts(sourceCount);
+        int b = 0;
+        for (auto &source : sources) { b += int(u8()); const int c = int(u8()), v = int(u8()); source = verseCode(b,c,v); }
+        quint64 total = 0;
+        for (auto &count : counts) { count = varint(); total += count; }
+        if (!ok || total != rowCount) return d;
+        QVector<quint32> books(rowCount), chapters(rowCount), verses(rowCount), spans(rowCount), votes(rowCount);
+        for (auto &value : books) value = u8();
+        for (auto &value : chapters) value = u8();
+        for (auto &value : verses) value = varint();
+        int explicitEnds = 0;
+        for (auto &value : spans) { value = u8(); explicitEnds += value == 255; }
+        QVector<quint32> ends(explicitEnds);
+        for (auto &value : ends) { const int eb = int(u8()), ec = int(u8()), ev = int(u8()); value = verseCode(eb,ec,ev); }
+        for (auto &value : votes) value = varint();
+        if (!ok) return d;
+        d.rows.resize(rowCount);
+        int row = 0, endIndex = 0;
+        for (quint32 s = 0; s < sourceCount; ++s) {
+            d.index.insert(sources[s], {row, int(counts[s])});
+            int tb = 0, tc = 0, tv = 0;
+            for (quint32 i = 0; i < counts[s]; ++i, ++row) {
+                if (books[row]) { tb += int(books[row]); tc = int(chapters[row]); tv = int(verses[row]); }
+                else if (chapters[row]) { tc += int(chapters[row]); tv = int(verses[row]); }
+                else tv += int(verses[row]);
+                auto &target = d.rows[row];
+                target.start = verseCode(tb,tc,tv);
+                target.end = spans[row] == 255 ? ends.value(endIndex++) : verseCode(tb,tc,tv + int(spans[row]));
+                target.votes = int(votes[row]);
+            }
+        }
+        return d;
+    }();
+    return data;
+}
+}
+
 QVector<QPair<int, int>> BibleBackend::sourceTargets(const QString &text, int book, int chapter) const
 {
     // Source \xt lists: "Ps 33:6,9; Mk 16:2", "1 Cor 13", "Gen 1:1-2:3". A
@@ -3579,9 +3649,10 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
     const int first = absoluteVerse(scope.value("book").toInt(),scope.value("chapter").toInt(),scope.value("start").toInt());
     const int last = absoluteVerse(scope.value("endBook").toInt(),scope.value("endChapter").toInt(),scope.value("end").toInt());
     if (!first || last < first) return {};
-    // The source's own \x targets in source order (verse, note, list order);
-    // exact duplicates keep their first position.
-    struct Entry { int first = 0, last = 0; };
+    // The source's own \x targets first, in source order (verse, note, list
+    // order); exact duplicates keep their first position. Then OpenBible.info's
+    // community cross references by votes, minus any the source already gave.
+    struct Entry { int first = 0, last = 0, votes = 0; bool openBible = false; };
     QVector<Entry> entries;
     QSet<QPair<int, int>> seen;
     if (m_textSchema >= 4) {
@@ -3601,6 +3672,26 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
             }
         }
     }
+    // OpenBible numbers verses as the KJV does; other versifications are looked
+    // up by the same numbers, and targets absent from this version are hidden.
+    const auto &data = crossData();
+    QMap<QPair<int, int>, int> community;
+    for (int index = first; index <= last && index < first + 50; ++index) {
+        const auto verse = endpoint(index);
+        const auto found = data.index.constFind(verseCode(verse.book,verse.chapter,verse.verse));
+        if (found == data.index.cend()) continue;
+        for (int i = found->first; i < found->first + found->second; ++i) {
+            const auto &target = data.rows[i];
+            const int a = absoluteVerse(int(target.start >> 16),int(target.start >> 8 & 0xff),int(target.start & 0xff));
+            const int z = absoluteVerse(int(target.end >> 16),int(target.end >> 8 & 0xff),int(target.end & 0xff));
+            if (!a || z < a || (a >= first && z <= last) || seen.contains({a,z})) continue;
+            community[{a,z}] = std::max(community.value({a,z}),target.votes);
+        }
+    }
+    QVector<Entry> openBible;
+    for (auto it = community.cbegin(); it != community.cend(); ++it) openBible.append({it.key().first,it.key().second,it.value(),true});
+    std::stable_sort(openBible.begin(),openBible.end(),[](const Entry &a, const Entry &b) { return a.votes > b.votes; });
+    entries += openBible;
     QSqlQuery text(m_bible);
     text.prepare("SELECT text FROM verses WHERE book=? AND chapter=? AND number=?");
     QVariantList rows;
@@ -3615,7 +3706,8 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
         if (excerpt.size() > 320) excerpt = excerpt.left(319) + QChar(0x2026);
         rows.append(QVariantMap{{"versionId",m_versionId},{"versionAbbreviation",m_abbreviation},
             {"reference",rangeReference(entry.first,entry.last)},{"book",a.book},{"chapter",a.chapter},{"start",a.verse},
-            {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse},{"excerpt",excerpt}});
+            {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse},{"excerpt",excerpt},
+            {"openBible",entry.openBible},{"votes",entry.votes}});
     }
     return rows;
 }

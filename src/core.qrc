@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/resources">
+    <file alias="crossrefs.bin">../resources/crossrefs.bin</file>
+  </qresource>
+</RCC>

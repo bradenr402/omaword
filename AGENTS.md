@@ -23,7 +23,7 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 - Omarchy (Hyprland on Arch) only. Dependencies are in README → Requirements.
 - `bin/build` builds out of tree into `build/` (`BUILD_DIR`, `JOBS` override); `bin/install` installs. Never run qmake in the source tree.
 - `omaword.pro` builds two static libraries and the app: `src/src.pro` (every C++ source but `main.cpp` and the QML's own types), `qml/qml.pro` (`resources.qrc`, QML compiled ahead of time, plus the `OmaWord.Reader` types), and `app/app.pro`. A new C++ source goes in one of those two `.pro` files, not in the test projects.
-- QML is embedded via `resources.qrc` and compiled at build time: a new QML/JS file must be added there or it won't load.
+- QML is embedded via `resources.qrc` and compiled at build time: a new QML/JS file must be added there or it won't load. Data the C++ core reads itself goes in `src/core.qrc` instead (registered by `Q_INIT_RESOURCE(core)`), so suites that link only the core have it.
 - `branding.env` feeds `src/brand.h.in` and the desktop file; use `Brand::` rather than hardcoding the app name or storage ID.
 - Personal DB schema (`PRAGMA user_version`), text DB schema, and backup format versions are documented in `ARCHITECTURE.md`. Bumping one needs a migration, tests, and an `ARCHITECTURE.md` update.
 

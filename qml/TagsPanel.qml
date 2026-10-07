@@ -41,6 +41,16 @@ Item {
     readonly property var studyTitles: ["Cross-references", "Footnotes", "Tags"]
     property string studyTab: "crossrefs"
     property var crossRows: []
+    // The version's own cross references come first; OpenBible.info's follow,
+    // each row labeled with its source.
+    function crossCount() {
+        const community = crossRows.filter(function(row) { return row.openBible }).length
+        const own = crossRows.length - community
+        const plural = function(n) { return n === 1 ? " cross reference" : " cross references" }
+        if (!community) return own + plural(own) + " in " + bible.versionAbbreviation
+        if (!own) return community + plural(community) + " from OpenBible.info"
+        return own + plural(own) + " in " + bible.versionAbbreviation + " · " + community + " from OpenBible.info"
+    }
     readonly property var footnoteRows: Array.from(bible.footnotes || [])
     readonly property var studyRows: studyTab === "crossrefs" ? crossRows : studyTab === "footnotes" ? footnoteRows : []
     readonly property bool studyListTab: relatedDrawer.visible && studyTab !== "related"
@@ -1275,8 +1285,7 @@ Item {
                 visible: panel.studyListTab
                 Layout.fillWidth: true
                 font.pixelSize: 12 * panel.studyScale
-                text: panel.studyTab === "crossrefs"
-                    ? (panel.crossRows.length + (panel.crossRows.length === 1 ? " cross reference" : " cross references") + " in " + panel.bible.versionAbbreviation)
+                text: panel.studyTab === "crossrefs" ? panel.crossCount()
                     : (panel.footnoteRows.length + (panel.footnoteRows.length === 1 ? " footnote" : " footnotes") + " in " + panel.bible.passage + " · " + panel.bible.versionAbbreviation)
                 color: panel.desktop.muted
             }
@@ -1324,10 +1333,11 @@ Item {
                     contentItem: Column {
                         spacing: 4 * panel.uiScale
                         TagText {
+                            objectName: "studyRowTitle:" + studyDelegate.index
                             width: parent.width
                             text: studyDelegate.footnote
                                 ? panel.bible.passage + ":" + studyDelegate.modelData.verse + " · " + (studyDelegate.modelData.caller && studyDelegate.modelData.caller !== "+" && studyDelegate.modelData.caller !== "-" ? studyDelegate.modelData.caller : "note")
-                                : studyDelegate.modelData.reference || ""
+                                : (studyDelegate.modelData.reference || "") + (studyDelegate.modelData.openBible ? " · OpenBible.info" : "")
                             color: studyDelegate.atCursor ? panel.desktop.accent : panel.desktop.foreground
                         }
                         TagText {
@@ -1349,8 +1359,8 @@ Item {
                     text: panel.studyTab === "footnotes"
                         ? (panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? "Re-import this version (Versions) to read its footnotes." : "No footnotes in this chapter.")
                         : !panel.relatedSource || !panel.relatedSource.start ? "Select a verse to see its cross references."
-                        : panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? "Re-import this version (Versions) to read its cross-references."
-                        : !panel.bible.hasCrossReferences ? "This version has no cross-references."
+                        : panel.bible.textSchema > 0 && panel.bible.textSchema < 4 ? "Re-import this version (Versions) to read its own cross-references."
+                        : !panel.bible.hasCrossReferences ? "No cross-references for this passage; " + panel.bible.versionAbbreviation + " has none of its own."
                         : "No cross-references for this passage in " + panel.bible.versionAbbreviation + "."
                     color: panel.desktop.muted
                 }

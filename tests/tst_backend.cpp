@@ -1114,33 +1114,59 @@ private slots:
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16,16);
         QCOMPARE(bible->noteText(), QString("Kept across re-import"));
     }
-    void crossReferencesComeFromTheSourceInOrder() {
+    void crossReferencesComeFromTheSourceThenOpenBible() {
         const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
         install(path);
         QVERIFY(bible->hasCrossReferences());
         QVERIFY(bible->crossReferences().isEmpty()); // No verse selected.
+        // The source's own come first, in source order; OpenBible.info's follow,
+        // by votes, without the ranges the source already gave.
+        auto own = [](const QVariantList &rows) {
+            QStringList references; bool community = false; int votes = std::numeric_limits<int>::max();
+            for (const auto &value : rows) {
+                const auto row = value.toMap();
+                if (row["openBible"].toBool()) {
+                    community = true;
+                    if (row["votes"].toInt() > votes || row["votes"].toInt() <= 0) return QStringList({"votes out of order"});
+                    votes = row["votes"].toInt();
+                } else if (community) return QStringList({"own after OpenBible"});
+                else references << row["reference"].toString();
+            }
+            return references;
+        };
+        auto all = [](const QVariantList &rows) {
+            QStringList references;
+            for (const auto &value : rows) references << value.toMap()["reference"].toString();
+            return references;
+        };
         QVERIFY(bible->navigate("Genesis 1:1"));
-        // The source lists John 1:1-3 twice ("Jn" and "John"): one row.
+        // The source lists John 1:1-3 twice ("Jn" and "John"), and so does
+        // OpenBible (heavily voted): one row, the source's.
         auto rows = bible->crossReferences();
-        QCOMPARE(rows.size(), 1);
+        QCOMPARE(own(rows), QStringList({"John 1:1\u20133"}));
+        QCOMPARE(all(rows).count("John 1:1\u20133"), 1);
         auto row = rows[0].toMap();
-        QCOMPARE(row["reference"].toString(), QString("John 1:1\u20133"));
-        QVERIFY(!row.contains("votes")); QVERIFY(!row.contains("openBible"));
+        QVERIFY(!row["openBible"].toBool()); QCOMPARE(row["votes"].toInt(), 0);
         QCOMPARE(row["book"].toInt(), 43); QCOMPARE(row["start"].toInt(), 1); QCOMPARE(row["end"].toInt(), 3);
         QVERIFY(row["excerpt"].toString().startsWith("Word. Same."));
         QCOMPARE(row["versionId"].toString(), QString("study"));
         // Source order, not canonical order: a bare number continues the
         // previous chapter; unknown books are skipped.
         QVERIFY(bible->navigate("Genesis 1:2"));
-        QStringList references;
-        for (const auto &value : bible->crossReferences()) references << value.toMap()["reference"].toString();
-        QCOMPARE(references, QStringList({"John 1:3", "Matthew 1:2\u20133", "Matthew 1:1"}));
+        QCOMPARE(own(bible->crossReferences()), QStringList({"John 1:3", "Matthew 1:2\u20133", "Matthew 1:1"}));
         // A range unions its verses in verse order; the passage itself is never listed.
         QVERIFY(bible->navigate("Genesis 1:1-2"));
-        references.clear();
-        for (const auto &value : bible->crossReferences()) references << value.toMap()["reference"].toString();
-        QCOMPARE(references, QStringList({"John 1:1\u20133", "John 1:3", "Matthew 1:2\u20133", "Matthew 1:1"}));
-        // Verses without \\x have none: nothing is bundled.
+        rows = bible->crossReferences();
+        QCOMPARE(own(rows), QStringList({"John 1:1\u20133", "John 1:3", "Matthew 1:2\u20133", "Matthew 1:1"}));
+        QVERIFY(!all(rows).contains("Genesis 1:1")); QVERIFY(!all(rows).contains("Genesis 1:2"));
+        // A verse without \\x of its own still has OpenBible.info's (KJV verse
+        // numbers): John 1:1 points back to Genesis 1:1.
+        QVERIFY(bible->navigate("John 1:1"));
+        rows = bible->crossReferences();
+        QVERIFY(own(rows).isEmpty()); QVERIFY(!rows.isEmpty());
+        QVERIFY(all(rows).contains("Genesis 1:1"));
+        for (const auto &value : rows) QVERIFY(value.toMap()["openBible"].toBool() && value.toMap()["votes"].toInt() > 0);
+        // Targets absent from this version are hidden: John 3:16's are all absent here.
         QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->crossReferences().isEmpty());
         // Another version's scope is not answered from the active text.
         auto scope = bible->tagScope(); scope["versionId"] = "elsewhere";
@@ -1186,13 +1212,18 @@ private slots:
             bool psalm6 = false, psalm9 = false;
             for (const auto &value : bible->crossReferences()) {
                 const auto row = value.toMap();
-                if (row["book"].toInt() == 19 && row["chapter"].toInt() == 33 && row["start"].toInt() == 6) psalm6 = true;
-                if (row["book"].toInt() == 19 && row["chapter"].toInt() == 33 && row["start"].toInt() == 9) psalm9 = true;
+                if (row["book"].toInt() == 19 && row["chapter"].toInt() == 33 && row["start"].toInt() == 6) psalm6 = !row["openBible"].toBool();
+                if (row["book"].toInt() == 19 && row["chapter"].toInt() == 33 && row["start"].toInt() == 9) psalm9 = !row["openBible"].toBool();
             }
             QVERIFY(psalm6); QVERIFY(psalm9);
         }
         if (id == "eng-kjv2006") {
             QVERIFY(bible->navigate("Matthew 1")); QVERIFY(!bible->footnotes().isEmpty() || bible->hasWordsOfJesus());
+            // KJV versification matches OpenBible: John 3:16 has many of its cross references.
+            QVERIFY(bible->navigate("John 3:16"));
+            int community = 0;
+            for (const auto &value : bible->crossReferences()) community += value.toMap()["openBible"].toBool();
+            QVERIFY(community >= 20);
         }
         for (const auto &row : bible->books()) {
             const auto book = row.toMap();

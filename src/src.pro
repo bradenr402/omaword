@@ -10,3 +10,5 @@ SOURCES += singleinstance.cpp windowmanager.cpp desktop.cpp biblebackend.cpp usf
 HEADERS += singleinstance.h windowmanager.h desktop.h biblebackend.h usfmimporter.h biblebooks.h versioncatalog.h
 SOURCES += soundeffects.cpp scripturesearch.cpp textselection.cpp
 HEADERS += soundeffects.h scripturesearch.h textselection.h
+# Data the core reads itself (BibleBackend registers it: Q_INIT_RESOURCE(core)).
+RESOURCES += core.qrc
