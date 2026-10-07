@@ -1934,7 +1934,7 @@ private slots:
         // Mouse: right click opens the note marker's menu.
         click(note, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), QStringList({"open", "|", "editRange", "remove", "|", "copy", "copyPlain", "|", "desk"}));
-        QCOMPARE(value(menu()->property("layout")).toList().at(3).toMap()["text"].toString(), QString("Delete note…"));
+        QCOMPARE(value(menu()->property("layout")).toList().at(3).toMap()["text"].toString(), QString("Delete note"));
         chooseMenu("open"); QTRY_VERIFY(opened("notesDrawer")); QCOMPARE(bible->selectionReference(), QString("John 3:16"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         // Keyboard: the same menu by keys copies the passage.
