@@ -357,6 +357,8 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
     connect(this, &BibleBackend::selectionChanged, this, &BibleBackend::currentInDeskChanged);
     connect(this, &BibleBackend::versionChanged, this, &BibleBackend::currentInDeskChanged);
     connect(this, &BibleBackend::deskChanged, this, &BibleBackend::currentInDeskChanged);
+    // The ribbon's references use the active version's book names.
+    connect(this, &BibleBackend::versionChanged, this, &BibleBackend::ribbonChanged);
     m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     for (auto *peer : readers) {
         if (peer->m_directory != m_directory) continue;
@@ -401,6 +403,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
     if (!id.isEmpty()) changeVersion(id,{}, {},false,true);
     reloadDesk();
     reloadHistory();
+    reloadRibbon();
     if (!m_ready) setStatus("Import a USFM Bible to begin.");
 }
 
@@ -1473,6 +1476,79 @@ bool BibleBackend::setHistoryEnabled(bool enabled)
     clearError(); publishHistory(); return true;
 }
 
+void BibleBackend::reloadRibbon()
+{
+    m_ribbon.clear();
+    if (!m_storeReady) return;
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT version_id,book,chapter,start,endBook,endChapter,end,position,placed FROM ribbon WHERE id=1") || !q.next()) return;
+    QVariantMap row{{"versionId",q.value(0).toString()}};
+    for (int i = 0; i < scopeFields.size(); ++i) row[scopeFields[i]] = q.value(i + 1).toInt();
+    row["position"] = q.value(7).toDouble(); row["placedAt"] = q.value(8).toString();
+    m_ribbon = row;
+}
+
+QVariantMap BibleBackend::ribbon() const
+{
+    if (m_ribbon.isEmpty()) return {};
+    auto row = m_ribbon;
+    const int book = row["book"].toInt(), chapter = row["chapter"].toInt(), start = row["start"].toInt();
+    const int endBook = row["endBook"].toInt(), endChapter = row["endChapter"].toInt(), end = row["end"].toInt();
+    row["chapterReference"] = reference(book,chapter);
+    row["reference"] = !start ? reference(book,chapter)
+        : endBook == book && endChapter == chapter ? reference(book,chapter,start,end)
+        : reference(book,chapter,start) + QChar(0x2013)
+            + (endBook == book ? QString("%1:%2").arg(endChapter).arg(end) : reference(endBook,endChapter,end));
+    return row;
+}
+
+bool BibleBackend::placeRibbon()
+{
+    if (!requireReady()) return false;
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    const auto location = currentLocation();
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    const auto guard = qScopeGuard([this] { m_store.rollback(); });
+    QSqlQuery q(m_store);
+    q.prepare("INSERT OR REPLACE INTO ribbon(id,version_id,book,chapter,start,endBook,endChapter,end,position,placed) VALUES(1,?,?,?,?,?,?,?,?,?)");
+    bindScope(q,location); q.addBindValue(std::clamp(location.value("position").toDouble(),0.0,1.0));
+    q.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    if (!q.exec()) return setError("Cannot place the ribbon: " + q.lastError().text());
+    if (!m_store.commit()) return setError("Cannot place the ribbon: " + m_store.lastError().text());
+    QList<QPointer<BibleBackend>> snapshot;
+    for (auto *peer : readers) if (peer->m_directory == m_directory) snapshot.append(peer);
+    for (const auto &peer : snapshot) if (peer) { peer->reloadRibbon(); emit peer->ribbonChanged(); }
+    clearError(); return true;
+}
+
+QVariantMap BibleBackend::ribbonLocation() const
+{
+    if (m_ribbon.isEmpty()) return {};
+    QVariantMap location = m_ribbon;
+    location.remove("placedAt");
+    const int book = location["book"].toInt(), chapter = location["chapter"].toInt();
+    const bool verses = location["start"].toInt() > 0;
+    const auto has = [&](const QString &id) {
+        if (id.isEmpty() || installedPath(id).isEmpty()) return false;
+        if (id == m_versionId && !verses) return m_ready && m_chapters.value(book).contains(chapter);
+        auto candidate = location;
+        candidate["versionId"] = id;
+        if (verses) return validateScope(candidate);
+        TagBible bible(installedPath(id),id);
+        QSqlQuery q(bible.db);
+        q.prepare("SELECT 1 FROM verses WHERE book=? AND chapter=? LIMIT 1"); q.addBindValue(book); q.addBindValue(chapter);
+        return q.exec() && q.next();
+    };
+    // Version-independent: here when this version has it, else where it was placed.
+    if (has(m_versionId)) { location["versionId"] = m_versionId; return location; }
+    if (has(location["versionId"].toString())) return location;
+    // Its verses are missing here and its version is gone: their chapter here.
+    if (verses && m_ready && m_chapters.value(book).contains(chapter))
+        return {{"versionId",m_versionId},{"book",book},{"chapter",chapter},{"start",0},
+                {"endBook",book},{"endChapter",chapter},{"end",0},{"position",0.0}};
+    return {};
+}
+
 bool BibleBackend::openLocation(QVariantMap location)
 {
     if (!validLocation(location)) return setError("That reading location is invalid.");
@@ -1543,7 +1619,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 7) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
+    if (version > 8) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -1609,6 +1685,10 @@ bool BibleBackend::initializeStore()
         "CREATE TABLE history(id INTEGER PRIMARY KEY AUTOINCREMENT,seq INTEGER NOT NULL UNIQUE CHECK(seq>=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 0 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 0 AND 999),position REAL NOT NULL CHECK(position BETWEEN 0 AND 1),visited TEXT NOT NULL,UNIQUE(version_id,book,chapter,start,endBook,endChapter,end))" <<
         "CREATE TABLE recent_queries(query TEXT PRIMARY KEY CHECK(length(query) BETWEEN 1 AND 4096),seq INTEGER NOT NULL UNIQUE CHECK(seq>=1)) WITHOUT ROWID" <<
         "PRAGMA user_version=7";
+    // Schema 8: the ribbon, one global reading place (row 1); never backed up.
+    if (version < 8) schema <<
+        "CREATE TABLE ribbon(id INTEGER PRIMARY KEY CHECK(id=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 0 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 0 AND 999),position REAL NOT NULL CHECK(position BETWEEN 0 AND 1),placed TEXT NOT NULL)" <<
+        "PRAGMA user_version=8";
     schema << "CREATE TABLE IF NOT EXISTS tags(id TEXT PRIMARY KEY,name TEXT NOT NULL,name_key TEXT NOT NULL UNIQUE) WITHOUT ROWID"
            << "CREATE TABLE IF NOT EXISTS tag_assignments(version_id TEXT NOT NULL,book INTEGER NOT NULL,chapter INTEGER NOT NULL,start INTEGER NOT NULL,endBook INTEGER NOT NULL,endChapter INTEGER NOT NULL,end INTEGER NOT NULL,tag_id TEXT NOT NULL,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end,tag_id)) WITHOUT ROWID"
            << "CREATE INDEX IF NOT EXISTS tag_assignments_tag ON tag_assignments(tag_id,version_id)";

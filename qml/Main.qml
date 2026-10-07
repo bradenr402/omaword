@@ -1707,6 +1707,7 @@ ApplicationWindow {
                 open: function() { app.activatePaletteEntry(entry) }, copy: copy, copyPlain: copy })
         }
         if (entry.recent) return historyRowMenu(entry.recent)
+        if (entry.ribbon) return ribbonRowMenu()
         if (paletteTextMode && entry.reference && entry.start)
             return RowMenu.entries(app, { busy: bible.busy, keys: false, scope: entry,
                 open: function() { app.acceptBibleResult(entry) } })
@@ -2171,6 +2172,7 @@ ApplicationWindow {
         if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
         if (action.id === "undo" && !bible.canUndo) return "Nothing to undo"
         if (action.id === "redo" && !bible.canRedo) return "Nothing to redo"
+        if (action.id === "ribbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon yet · " + keyText("placeRibbon") + " places it"
         if (!bible.ready) return "Add a Bible version first"
         return ""
     }
@@ -3754,6 +3756,9 @@ ApplicationWindow {
         { id: "historyBack", group: "History", title: "Back to the previous jump", sequences: ["["] },
         { id: "historyForward", group: "History", title: "Forward to the next jump", sequences: ["]"] },
         { id: "historySwap", group: "History", title: "Swap with the previous jump", sequences: ["-"] },
+        // One ribbon for every window and version; it stays until placed again.
+        { id: "placeRibbon", group: "History", title: "Place the ribbon here", sequences: ["Shift+R"], command: true },
+        { id: "ribbon", group: "History", title: "Back to the ribbon", sequences: ["R"], command: true },
         { id: "mouseBack", group: "History", title: "Back a jump, back to the palette's books, or close the open panel", sequences: ["BackClick"], explanation: true },
         { id: "mouseForward", group: "History", title: "Forward to the next jump", sequences: ["ForwardClick"], explanation: true },
         { id: "selectVerse", group: "Select", title: "Select verse", sequences: ["Click"], explanation: true },
@@ -4017,6 +4022,8 @@ ApplicationWindow {
         if (action.id === "toggleHistory") return bible.historyEnabled ? "Disable History" : "Enable History"
         if (action.id === "undo" && bible.canUndo) return "Undo " + bible.undoLabel
         if (action.id === "redo" && bible.canRedo) return "Redo " + bible.redoLabel
+        if (action.id === "placeRibbon" && bible.ribbon.versionId) return "Move the ribbon here"
+        if (action.id === "ribbon" && bible.ribbon.versionId) return "Back to the ribbon · " + bible.ribbon.reference
         return action.title
     }
     function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
@@ -4075,6 +4082,7 @@ ApplicationWindow {
         if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
         if (action.id === "undo") return bible.canUndo
         if (action.id === "redo") return bible.canRedo
+        if (action.id === "ribbon") return bible.ready && !!bible.ribbon.versionId
         // Notes editor keys, run from Keybindings: they act in an open Notes panel.
         if (["noteLinkSuggest", "openNoteLink", "notePreview"].includes(action.id)) return notesOpen && hasSelection
         if (action.id === "noteKeepDraft") return notesOpen && canKeepDraft
@@ -4161,9 +4169,9 @@ ApplicationWindow {
         })
             .map(function(b) { return { title: b.name, hint: b.chapters + " chapters", book: b.id, chapter: 0 } }))
     }
-    // Up to five History passages, never the one being read, then "All
-    // History". The last row carries a rule that separates the group from the
-    // books.
+    // "Continue" at the ribbon, up to five History passages, never the one
+    // being read, then "All History". The last row carries a rule that
+    // separates the group from the books.
     readonly property int paletteRecentLimit: 5
     function recentPassages() {
         // Read notifying properties so the palette model follows the reader.
@@ -4178,7 +4186,10 @@ ApplicationWindow {
         // Then all of History, a step away; the rule follows the group.
         const all = bible.historyEnabled && bible.history.length
             ? [{ title: "All History", hint: bible.history.length + (bible.history.length === 1 ? " passage" : " passages"), allHistory: true }] : []
-        const group = recents.concat(all)
+        // The ribbon comes first, away from it.
+        const ribbon = bible.ribbon.versionId && !ribbonHere
+            ? [{ title: "Continue · " + bible.ribbon.reference, hint: "Ribbon · " + keyText("ribbon"), ribbon: true }] : []
+        const group = ribbon.concat(recents).concat(all)
         if (group.length) group[group.length - 1].lastRecent = true
         return group
     }
@@ -4221,6 +4232,33 @@ ApplicationWindow {
         passagePalette.close()
         readerFocus()
     }
+    // The ribbon (shift R places it, r returns): one reading place for every
+    // window, opened in this version where it has the passage.
+    readonly property bool ribbonHere: bible.ready && !!bible.ribbon.versionId
+        && bible.ribbon.book === bible.book && bible.ribbon.chapter === bible.chapter
+    function placeRibbon() {
+        if (rangeEditing) return
+        savePosition()
+        const moved = !!bible.ribbon.versionId
+        if (!bible.placeRibbon()) { sounds.play("error"); return }
+        notify("Ribbon " + (moved ? "moved to " : "placed at ") + bible.ribbon.reference, true)
+        sounds.play("chime")
+    }
+    function openRibbon() {
+        if (rangeEditing || !flushNote()) return false
+        const location = bible.ribbonLocation()
+        if (!location.versionId) { rejected("The ribbon's passage is in no installed version"); return false }
+        const from = beginJump()
+        if (!openLocation(location)) return false
+        endJump(from)
+        return true
+    }
+    function ribbonRowMenu() {
+        const location = bible.ribbonLocation()
+        const scope = location.start ? location : null
+        return RowMenu.entries(app, { busy: bible.busy, keys: false, scope: scope, canCopy: !!scope, canDesk: !!scope,
+            open: function() { app.activatePaletteEntry({ ribbon: true }) } })
+    }
     function activatePaletteEntry(entry) {
         if (!entry) return
         if (paletteTextMode) {
@@ -4233,6 +4271,10 @@ ApplicationWindow {
         }
         if (entry.allHistory) { showPaletteHistory(); return }
         if (entry.recent) { openRecentPassage(entry.recent); return }
+        if (entry.ribbon) {
+            if (openRibbon()) { passagePalette.navigated = true; passagePalette.close(); readerFocus() }
+            return
+        }
         if (entry.candidate) { jump(entry.reference); return }
         if (entry.action) {
             if (!actionAvailable(entry.action)) { rejected(unavailableReason(entry.action)); return }
@@ -4480,6 +4522,8 @@ ApplicationWindow {
         case "historyBack": historyStep(-count); break
         case "historyForward": historyStep(count); break
         case "historySwap": historySwap(); break
+        case "placeRibbon": placeRibbon(); break
+        case "ribbon": openRibbon(); break
         case "clearHistory": requestClearHistory(); break
         case "toggleHistory": toggleHistoryEnabled(); break
         case "copy": if (bible.ready) copyPassage(); break
@@ -5363,6 +5407,49 @@ ApplicationWindow {
                         onClicked: function(mouse) {
                             const p = mapToItem(null, mouse.x, mouse.y)
                             app.openPassageMenuAt(p.x, p.y)
+                        }
+                    }
+                    // In the ribbon's chapter an accent ribbon hangs from the
+                    // top of the view, just right of the column, wherever the
+                    // chapter is scrolled; a click returns to its place (r).
+                    Canvas {
+                        id: ribbonTab
+                        objectName: "ribbonTab"
+                        visible: app.ribbonHere
+                        opacity: app.focusDimmedOpacity
+                        width: 12 * app.readerScale
+                        height: 34 * app.readerScale
+                        x: readerColumn.x + readerColumn.width + 8 * app.readerScale
+                        y: reading.contentY
+                        readonly property color fill: desktop.accent
+                        onFillChanged: requestPaint()
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.reset()
+                            ctx.fillStyle = fill
+                            ctx.beginPath()
+                            ctx.moveTo(0, 0); ctx.lineTo(width, 0); ctx.lineTo(width, height)
+                            ctx.lineTo(width / 2, height - width / 2); ctx.lineTo(0, height)
+                            ctx.closePath()
+                            ctx.fill()
+                        }
+                        MouseArea {
+                            id: ribbonTabMouse
+                            objectName: "ribbonTabMouse"
+                            anchors.fill: parent
+                            anchors.margins: -6 * app.readerScale
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: app.runCommand("ribbon")
+                        }
+                        AppToolTip {
+                            theme: desktop
+                            uiScale: app.scale
+                            visible: ribbonTabMouse.containsMouse
+                            text: "Ribbon · " + (bible.ribbon.reference || "") + " · " + app.keyText("ribbon") + " returns here, "
+                                + app.keyText("placeRibbon") + " moves it"
                         }
                     }
                     Column {
@@ -6589,6 +6676,10 @@ ApplicationWindow {
     // Room the reader text leaves at the right edge for the stacked column.
     readonly property real footerRightInset: footerStacked && !footerCollapsed && footerRightCount && !focusLayout
         ? footerButton + footerMargin + 2 * footerGap : 0
+    // "↩ Mark 5" after the passage, away from the ribbon, only where it fits
+    // without folding anything else (r and the palette still reach it).
+    readonly property bool footerShowsRibbon: bible.ready && !!bible.ribbon.versionId && !ribbonHere && !footerStacked
+        && footerCenterFull + ribbonControl.implicitWidth + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap <= footerAvailable
     function footerPanelEntries() {
         const ready = !rangeEditing && bible.ready && !bible.busy
         return [
@@ -6666,7 +6757,8 @@ ApplicationWindow {
         anchors.bottomMargin: app.footerMargin
         x: app.width / 2 - width / 2
         readonly property real availableWidth: Math.max(0, app.width - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
-        readonly property real fixedWidth: searchControl.width + (versionControl.visible ? versionControl.width : 0) + (layoutControl.visible ? layoutControl.width : 0)
+        readonly property real fixedWidth: searchControl.width + (ribbonControl.visible ? ribbonControl.width : 0)
+            + (versionControl.visible ? versionControl.width : 0) + (layoutControl.visible ? layoutControl.width : 0)
         width: Math.min(fixedWidth + passageControl.implicitWidth, availableWidth)
         visible: !app.findPromptOpen
         FloatingButton {
@@ -6685,6 +6777,15 @@ ApplicationWindow {
             tip: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage · " + app.keyText("books")
             available: !app.rangeEditing && !bible.busy && !app.modalOpen
             onClicked: app.openPalette(false)
+        }
+        FloatingButton {
+            id: ribbonControl
+            objectName: "ribbonControl"
+            text: "↩ " + (bible.ribbon.chapterReference || "")
+            tip: "Back to the ribbon · " + (bible.ribbon.reference || "") + " · " + app.keyText("ribbon")
+            visible: app.footerShowsRibbon
+            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            onClicked: app.runCommand("ribbon")
         }
         FloatingButton {
             id: versionControl
@@ -7328,7 +7429,7 @@ ApplicationWindow {
                     onClicked: { if (available) app.activatePaletteEntry(modelData); else app.rejected(app.unavailableReason(modelData.action)) }
                     TapHandler {
                         acceptedButtons: Qt.RightButton
-                        enabled: !!paletteEntry.modelData.recentQuery || !!paletteEntry.modelData.recent || app.paletteTextMode
+                        enabled: !!paletteEntry.modelData.recentQuery || !!paletteEntry.modelData.recent || !!paletteEntry.modelData.ribbon || app.paletteTextMode
                         onTapped: function(eventPoint) { app.openSearchMenu(paletteEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
                     }
                     contentItem: ColumnLayout {

@@ -657,6 +657,50 @@ private slots:
         QCOMPARE(paletteRows().first().toMap()["title"].toString(), QString("John"));
         key(Qt::Key_Escape);
     }
+    void ribbonPlaceReturnFooterAndPalette() {
+        // r without a ribbon says how to place one.
+        key(Qt::Key_R); QCOMPARE(toast(), QString("No ribbon yet · shift R places it"));
+        QVERIFY(!item("ribbonTab")->isVisible()); QVERIFY(!item("ribbonControl")->isVisible());
+        // shift R places it at the selection; the tab hangs over this chapter.
+        navigate("John 1:5"); key(Qt::Key_R, Qt::ShiftModifier);
+        QCOMPARE(toast(), QString("Ribbon placed at John 1:5"));
+        QCOMPARE(bible->ribbon()["reference"].toString(), QString("John 1:5"));
+        QTRY_VERIFY(item("ribbonTab")->isVisible());
+        QCOMPARE(item("ribbonTab")->property("fill").value<QColor>(), desktop->property("accent").value<QColor>());
+        QVERIFY(!item("ribbonControl")->isVisible());
+        // Away from it: no tab, "↩ John 1" in the footer, Continue first in the palette.
+        jumpTo("John 2:3");
+        QTRY_VERIFY(!item("ribbonTab")->isVisible());
+        QTRY_VERIFY(item("ribbonControl")->isVisible());
+        QCOMPARE(item("ribbonControl")->property("text").toString(), QString::fromUtf8("↩ John 1"));
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        auto rows = paletteRows();
+        QCOMPARE(rows.first().toMap()["title"].toString(), QString("Continue · John 1:5"));
+        QCOMPARE(rows.first().toMap()["hint"].toString(), QString("Ribbon · r"));
+        QVERIFY(rows.first().toMap()["lastRecent"].toBool()); // Alone above the books.
+        key(Qt::Key_Return); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        QCOMPARE(here(), QString("John 1:5"));
+        // It records a jump: [ goes back.
+        QCOMPARE(stack().last(), QString("1:5:engnet"));
+        key(Qt::Key_BracketLeft); QCOMPARE(here(), QString("John 2:3"));
+        // r returns; the footer segment does too. It stays put as the reader moves.
+        key(Qt::Key_R); QCOMPARE(here(), QString("John 1:5"));
+        key(Qt::Key_L); QCOMPARE(bible->chapter(), 2);
+        QCOMPARE(bible->ribbon()["reference"].toString(), QString("John 1:5"));
+        QTRY_VERIFY(item("ribbonControl")->isVisible());
+        QTest::mouseClick(window, Qt::LeftButton, {}, item("ribbonControl")->mapToScene(QPointF(8, 8)).toPoint());
+        QTRY_COMPARE(here(), QString("John 1:5"));
+        // shift R again moves it (a chapter, here); Commands names both.
+        navigate("John 2"); key(Qt::Key_R, Qt::ShiftModifier);
+        QCOMPARE(toast(), QString("Ribbon moved to John 2"));
+        QCOMPARE(commandTitle("ribbon here"), QString("Move the ribbon here"));
+        QCOMPARE(commandTitle("back to the ribbon"), QString("Back to the ribbon · John 2"));
+        object("referenceInput")->setProperty("text", "");
+        // Another version opens it in itself.
+        install(second); QCOMPARE(bible->versionId(), QString("eng-kjv"));
+        navigate("John 1:1"); key(Qt::Key_R);
+        QCOMPARE(bible->versionId(), QString("eng-kjv")); QCOMPARE(here(), QString("John 2"));
+    }
     void twoWindowsShareHistoryButNotStacks() {
         BibleBackend peer; QVERIFY(peer.ready());
         SoundEffects peerSounds(nullptr, session->filePath("sound2.ini"), false);

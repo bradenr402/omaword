@@ -78,6 +78,7 @@ class BibleBackend : public QObject
     Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
     Q_PROPERTY(QStringList recentQueries READ recentQueries NOTIFY historyChanged)
     Q_PROPERTY(bool historyEnabled READ historyEnabled NOTIFY historyChanged)
+    Q_PROPERTY(QVariantMap ribbon READ ribbon NOTIFY ribbonChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
     Q_PROPERTY(QString undoLabel READ undoLabel NOTIFY undoChanged)
@@ -272,6 +273,19 @@ public:
     // Switches version when needed, then restores the range and reading position.
     Q_INVOKABLE bool openLocation(QVariantMap location);
 
+    // The ribbon: one global reading place in personal.sqlite (schema 8),
+    // shared live by every window, kept across restarts, never backed up.
+    // placeRibbon() puts it at this window's currentLocation() (the selection,
+    // else the chapter and its reading position); it stays there until placed
+    // again. ribbon: {} or {versionId, book, chapter, start, endBook,
+    // endChapter, end, position, placedAt, reference, chapterReference}, the
+    // references in the active version's book names. ribbonLocation() is where
+    // it opens: in the active version when that has the passage, else in the
+    // version it was placed in, else its chapter here; {} when none has it.
+    QVariantMap ribbon() const;
+    Q_INVOKABLE bool placeRibbon();
+    Q_INVOKABLE QVariantMap ribbonLocation() const;
+
     // Undo: this window's own annotation changes (bookmark, highlight, note,
     // tag assignment, deletion, range move), newest first, in memory only.
     // Each step keeps the exact saved state of every range it touched, before
@@ -388,6 +402,7 @@ signals:
     void currentInDeskChanged();
     void historyChanged();
     void undoChanged();
+    void ribbonChanged();
     void sharedCommitted(QString versionId, bool library, bool preferences);
 
 private:
@@ -496,6 +511,7 @@ private:
     bool commitDeskMutation();
     void reloadHistory();
     void publishHistory();
+    void reloadRibbon();
     bool validLocation(const QVariantMap &location) const;
     bool requireReady();
     bool setError(const QString &error);
@@ -528,6 +544,7 @@ private:
     int m_textSchema = 0;
     double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection, m_desk, m_history;
+    QVariantMap m_ribbon;
     QStringList m_recentQueries;
     bool m_historyEnabled = true;
     QVector<Annotation> m_annotations;

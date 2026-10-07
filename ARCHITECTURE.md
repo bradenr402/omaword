@@ -118,17 +118,18 @@ files.
 ## Persistence
 
 - Data root: Qt app-data for storage ID `omaword` (`~/.local/share/omaword/`).
-- `personal.sqlite`: `PRAGMA user_version` **7**, WAL, `synchronous=FULL`.
+- `personal.sqlite`: `PRAGMA user_version` **8**, WAL, `synchronous=FULL`.
   Newer versions refuse to open. Migrations run in one transaction in
   `BibleBackend` (2: cross-chapter endpoints; 3: version scoping + library;
-  4: MRU; 5: 80 books / 999 limits; 6: Desk; 7: History). `tags`/`tag_assignments` are
+  4: MRU; 5: 80 books / 999 limits; 6: Desk; 7: History; 8: ribbon). `tags`/`tag_assignments` are
   created `IF NOT EXISTS` independent of the version number.
 - Tables: `annotations`, `reading` (per `version_id`); `tags(id,name,name_key)`;
   `tag_assignments` (PK version + both endpoints + tag); `desk` (global ordered
   list, each item version-scoped); `history` (global, newest first by `seq`,
   unique per version + endpoints, start/end 0 = a whole chapter, scroll
   position, visit time; capped at 500) and `recent_queries` (last 5 Bible
-  searches); `preferences` (global, incl. `historyEnabled`); `installed`, `library`.
+  searches); `ribbon` (one row: version, endpoints as in `history`, position,
+  placed time); `preferences` (global, incl. `historyEnabled`); `installed`, `library`.
 - History: each window keeps an in-memory jump stack in QML (`[`/`]` browser
   semantics, `-` swaps with the previous location; never saved). Jumps
   (palette, search, panel opens, `g`/`G`/counts, version switches) push it; verse
@@ -139,6 +140,15 @@ files.
   "All History" row above the books, and `paletteHistory` (ctrl h, or that
   row) lists every row grouped by local day, filtered by the typed query, with
   `delete` / `shift delete` to remove one or clear all (the latter confirms).
+- Ribbon: one global reading place, placed only by `placeRibbon()` (`shift R`,
+  at `currentLocation()`) and never moved otherwise; shared live by every
+  window, excluded from backups and untouched by Clear History. It is
+  version-independent: `ribbonLocation()` opens it in the active version when
+  that has the passage, else in the version it was placed in, else its chapter
+  here. `r` opens it as a jump (`beginJump`/`endJump`). QML shows an accent tab
+  pinned at the top right of the column in its chapter, "↩ Mark 5" in the
+  footer elsewhere (only where it fits without folding anything), and
+  "Continue · …" first among the palette's recents.
 - Removal keeps annotations/tags/Desk by default (hidden until reimport);
   `removeVersion(id, true)` drops them. Global tag definitions always survive.
 - Backups: JSON `format: "omaword-backup"`, version **5** (3 = annotations,
