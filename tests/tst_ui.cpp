@@ -1166,8 +1166,10 @@ private slots:
     }
     void typedNotesSaveAfterAPauseWithoutRebuilding() {
         QVERIFY(window->setProperty("noteSaveDelay",400)); // The app's own pause.
+        bible->setReadingMode("paragraph"); // A flowing layout: one document per chapter.
         reference("John 3:16");
-        auto *reader = object("blockReader"); QVERIFY(reader);
+        QTRY_VERIFY(object("blockReader"));
+        auto *reader = object("blockReader");
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         auto *timer = object("noteSaveTimer"); QVERIFY(timer);
         type("Typed");
@@ -2099,6 +2101,8 @@ private slots:
             QVERIFY(db.open());
             QSqlQuery query(db);
             QVERIFY(query.exec("CREATE TRIGGER reject_visual BEFORE DELETE ON annotations BEGIN SELECT RAISE(ABORT,'visual save failure'); END"));
+            // A note on the bookmarked range is a single-row update: reject that too.
+            QVERIFY(query.exec("CREATE TRIGGER reject_visual_note BEFORE UPDATE ON annotations BEGIN SELECT RAISE(ABORT,'visual save failure'); END"));
             const auto toast = prop("toast","text");
             for (const auto action : {Qt::Key_M,Qt::Key_X}) {
                 key(action);
@@ -2116,6 +2120,7 @@ private slots:
             key(Qt::Key_Escape);
             QVERIFY(prop("notesDrawer","visible").toBool());
             QVERIFY(query.exec("DROP TRIGGER reject_visual"));
+            QVERIFY(query.exec("DROP TRIGGER reject_visual_note"));
             QVERIFY(QMetaObject::invokeMethod(window,"flushNote"));
             QVERIFY(!window->property("verseMode").toBool());
             QCOMPARE(bible->selectionReference(),reference);
