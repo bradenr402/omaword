@@ -173,7 +173,7 @@ Item {
             { id: "allChips", text: "Show all tags", shortcut: KeyNotation.format("0"), enabled: chipOff.length > 0,
                 run: function() { panel.restoreChips() } },
             { separator: true },
-            { id: "editTags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: !bible.busy && !app.rangeEditing && installed(relatedSource),
+            { id: "editTags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: !bible.busy && installed(relatedSource),
                 run: function() { panel.app.openPassageTags(panel.snapshot(panel.relatedSource)) } }
         ], sceneX, sceneY)
     }
@@ -236,10 +236,10 @@ Item {
         if (!entry || typeof app.showContextMenu !== "function") return
         resultList.currentIndex = index
         resultList.forceActiveFocus()
-        const ready = !app.rangeEditing && !bible.busy
+        const ready = !bible.busy
         app.showContextMenu("study", RowMenu.entries(app, { busy: bible.busy, scope: entry, open: function() { panel.openTagged(entry) },
             extras: [{ id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { panel.app.openPassageTags(panel.snapshot(entry)) } },
-                { id: "editRange", text: "Edit range", shortcut: KeyNotation.format("Shift+E"), enabled: ready, run: function() { panel.app.openRangeEditor(entry, "tag") } }] }),
+                panel.app.moveHereEntry([entry], sceneX, sceneY)] }),
             sceneX, sceneY)
     }
     // Cross-references and Footnotes rows: the shared row menu on the row's passage.
@@ -306,7 +306,7 @@ Item {
         const version = Array.from(bible.versions).find(function(row) { return row.id === scope.versionId })
         return version ? version.abbreviation : scope.versionId
     }
-    function canAct() { return !app.rangeEditing && !bible.busy && app.flushNote() }
+    function canAct() { return !bible.busy && app.flushNote() }
     function failed() { message = bible.error || "Could not save this change. Please try again." }
     function releaseEditing() {
         if (!editingScope) return
@@ -632,7 +632,7 @@ Item {
             ["Return", "toggle / create", function() { panel.pickerEnter() }, enter && scopeValid && !bible.busy], pageKey, escape]
     }
     // Study keys: off while typing, behind the picker or a menu, and while closing.
-    readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.rangeEditing && !app.contextMenuOpen
+    readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.contextMenuOpen
         && !textInputActive()
     readonly property bool relatedKeys: relatedMoveKeys
     readonly property bool listKeys: !bible.busy && relatedKeys && !chipFocused
@@ -944,7 +944,6 @@ Item {
             Shortcut { sequence: "Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope()) }
             Shortcut { sequence: "Shift+Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope(), true) }
             Shortcut { sequence: "D"; enabled: panel.listKeys; onActivated: panel.app.toggleScopeDesk(panel.listScope()) }
-            Shortcut { sequence: "Shift+E"; enabled: panel.listKeys && panel.tagsTab; onActivated: panel.app.openRangeEditor(panel.listScope(), "tag") }
             // Tags tab: t tags the row (or, with no tags yet, the passage), a
             // toggles all installed versions, 0 turns every chip back on.
             Shortcut { objectName: "studyTagKey"; sequence: "T"; enabled: panel.relatedMoveKeys && panel.tagsTab && !panel.bible.busy; onActivated: panel.tagCurrentResult() }

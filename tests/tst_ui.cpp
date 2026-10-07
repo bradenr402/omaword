@@ -3554,9 +3554,10 @@ private slots:
             isolatedKey(Qt::Key_A,Qt::ShiftModifier);
             QVERIFY(!bible->focusMode());
             QVERIFY(!prop("passagePalette","visible").toBool());
-            // Down skips the divider to Edit range; Up returns to Open.
+            // Down skips the divider and Move here (the note is already on the
+            // selection) to Delete note; Up returns to Open.
             key(Qt::Key_Down);
-            QCOMPARE(prop("contextMenu","currentIndex").toInt(),2);
+            QCOMPARE(prop("contextMenu","currentIndex").toInt(),3);
             QCOMPARE(bible->selectionReference(),selected);
             key(Qt::Key_Up);
             QCOMPARE(prop("contextMenu","currentIndex").toInt(),0);
@@ -4410,12 +4411,7 @@ private slots:
         // k from the first row climbs into the chips; j comes back.
         key(Qt::Key_K); QVERIFY(!item("tagResults")->hasActiveFocus());
         key(Qt::Key_J); QTRY_VERIFY(item("tagResults")->hasActiveFocus());
-        key(Qt::Key_E,Qt::ShiftModifier); QTRY_VERIFY(window->property("rangeEditing").toBool());
-        QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!window->property("rangeEditing").toBool());
         QCOMPARE(bible->selectionReference(),QString("John 3:16"));
-        if (!prop("relatedDrawer","visible").toBool()) { key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool()); }
-        QTRY_VERIFY(item("tagResults")->hasActiveFocus());
         // Study never removes tags: delete is inert on its results.
         key(Qt::Key_Delete); QTest::qWait(50);
         QCOMPARE(bible->tagsForScope(other).size(),1);
@@ -5399,14 +5395,6 @@ private slots:
         }
         capture("bookmark");
         click(item("bookmarkMarker16"));
-        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
-        // A bookmark-only range has a single component type, so Shift-click
-        // skips the chooser and enters the visual range editor directly.
-        click(item("bookmarkMarker16"),Qt::ShiftModifier);
-        QTRY_VERIFY(prop("rangeEditor","active").toBool());
-        QVERIFY(!prop("rangeChooser","visible").toBool());
-        QCOMPARE(prop("rangeEditor","components").value<QJSValue>().toVariant().toMap().value("bookmark").toBool(),true);
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditor","sessionOpen").toBool());
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:16–18"));
         // An overlapping range gets its own logical start, while shared rows
         // expose both references and a stable click target.

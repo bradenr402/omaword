@@ -413,12 +413,6 @@ private slots:
         key(Qt::Key_Delete, Qt::ShiftModifier); QTest::qWait(100);
         QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsSurface")->property("visible").toBool());
-        // Range editor.
-        QVERIFY(bible->toggleBookmark());
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
-        key(Qt::Key_Delete, Qt::ShiftModifier); QTest::qWait(100);
-        QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
         // Desk: shift delete asks to clean everything; delete removes one.
         openDesk();
         key(Qt::Key_Delete, Qt::ShiftModifier);
@@ -504,12 +498,6 @@ private slots:
         QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_J); QVERIFY(bible->selectionReference() != reference);
-        // Desk shortcuts are guarded while editing a range.
-        QVERIFY(bible->toggleBookmark());
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
-        key(Qt::Key_D); key(Qt::Key_D, Qt::ShiftModifier);
-        QCOMPARE(desk().size(), 1); QVERIFY(!deskOpen());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
     }
     void keybindingsListed() {
         QVariantList actions = prop("actions").toList();

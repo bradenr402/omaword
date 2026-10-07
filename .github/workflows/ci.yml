@@ -52,7 +52,7 @@ jobs:
       matrix:
         # Shards of similar length; ui is split by test function.
         shard: [ui-1, ui-2, ui-3, a11yui, searchui historyui contextmenu,
-                motion marginsui rangesui deskui,
+                motion marginsui deskui,
                 studyui tagsui windows annotations searchrender desktop instance]
     steps:
       - name: Install dependencies

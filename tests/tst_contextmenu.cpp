@@ -197,7 +197,7 @@ class ContextMenuTest : public QObject
         return "blockInlineMarker:" + kind + ":open:" + reference;
     }
     const QStringList passageIds = {"copy", "copyPlain", "|", "bookmark", "highlight", "note", "tags", "|", "desk", "|", "related", "chapterFind"};
-    const QStringList markerIds = {"open", "|", "editRange", "remove", "|", "copy", "copyPlain", "|", "desk"};
+    const QStringList markerIds = {"open", "|", "moveHere", "remove", "|", "copy", "copyPlain", "|", "desk"};
 private slots:
     void initTestCase() {
         first = fixtures.filePath("engnet.zip"); second = fixtures.filePath("eng-kjv.zip");
@@ -462,8 +462,8 @@ private slots:
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("marker"));
         QCOMPARE(ids(), markerIds);
-        // shift E edits the selection's range (here none): the key is not shown.
-        QCOMPARE(entry("editRange").value("shortcut").toString(), QString());
+        // Move here moves the mark to the verses selected now.
+        QCOMPARE(entry("moveHere").value("text").toString(), QString("Move here (John 1:1)"));
         QCOMPARE(entry("remove").value("text").toString(), QString("Remove bookmark"));
         QCOMPARE(entry("desk").value("text").toString(), QString("Add to Desk"));
         // Copy passage copies the marker's range without moving the reader.
@@ -478,17 +478,15 @@ private slots:
         QCOMPARE(bible->desk().first().toMap().value("reference").toString(), reference);
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         QCOMPARE(entry("desk").value("text").toString(), QString("Remove from Desk"));
-        clickEntry("editRange");
-        QTRY_VERIFY(prop("rangeEditing").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        escape();
         call("readerFocus");
         QTRY_VERIFY(item(name) && item(name)->isVisible());
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         clickEntry("open");
         QTRY_COMPARE(bible->selectionReference(), reference);
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
-        // With the marker's range selected, shift E edits it: the key shows.
-        QCOMPARE(entry("editRange").value("shortcut").toString(), QString("shift E"));
+        // With the marker's own range selected there is nowhere to move it.
+        QVERIFY(!entry("moveHere").value("enabled").toBool());
         clickEntry("remove");
         QTRY_VERIFY(bible->collection().isEmpty());
     }
@@ -604,7 +602,7 @@ private slots:
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("annotation"));
-        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "editRange", "delete", "undo"}));
+        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "moveHere", "delete", "undo"}));
         QCOMPARE(entry("undo").value("text").toString(), QString("Undo bookmark on John 1:2"));
         clickEntry("desk");
         QVERIFY2(bible->desk().size() == 1, qPrintable(object("toast")->property("text").toString() + " / " + bible->error() + " / " + QString::number(menu()->property("x").toDouble()) + "," + QString::number(menu()->property("y").toDouble())));
@@ -613,12 +611,7 @@ private slots:
         QTRY_VERIFY(bible->collection().isEmpty());
         key(Qt::Key_U); QTRY_COMPARE(bible->collection().size(), 1);
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
-        rightClick(item(saved)); QTRY_VERIFY(menuOpen());
-        clickEntry("editRange");
-        QTRY_VERIFY(prop("rangeEditing").toBool());
-        QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
-        QTRY_VERIFY(!prop("modalOpen").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
         // Bible search result in the palette.
         call("readerFocus");
         search("alpha");
@@ -669,16 +662,6 @@ private slots:
         QCOMPARE(item("contextMenuShortcut:copy")->property("color").value<QColor>(), QColor("#808080"));
         escape();
         QVERIFY(menu()->setProperty("theme", QVariant::fromValue(static_cast<QObject *>(desktop.get()))));
-        // During range editing the menu offers the session's actions, then the copies.
-        bible->selectVerses(2, 2); QVERIFY(bible->toggleBookmark()); call("readerFocus");
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
-        rightClick(versePoint(2)); QTRY_VERIFY(menuOpen());
-        QCOMPARE(target(), QString("rangeEdit"));
-        QVERIFY(entry("copy").value("enabled").toBool());
-        QVERIFY(entry("saveRange").value("enabled").toBool());
-        escape();
-        QVERIFY(prop("rangeEditing").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
         // Disabled items are muted and skipped; pressing one runs nothing.
         const QJSValue entries = engine->evaluate("[{ id: 'first', text: 'First' }, { separator: true }, { id: 'off', text: 'Off', enabled: false }]");
         QVERIFY(QMetaObject::invokeMethod(window, "showContextMenu", Q_ARG(QVariant, QString("test")), Q_ARG(QVariant, QVariant::fromValue(entries)),

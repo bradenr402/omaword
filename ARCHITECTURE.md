@@ -33,7 +33,6 @@ files.
 | `qml/Main.qml` | Reader, palettes, Notes, Annotations (one list for all four tabs; Tags rows grouped under tag headings), Desk, settings, catalog, About |
 | `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Annotations and Study drawers, which stay open) and the Study drawer (tabs Cross-references / Footnotes / Tags; the Tags tab keeps the internal id `related`, as do `relatedDrawer` and the `related` action). Study → Tags roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
 | `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Annotations and Study: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk: its count) |
-| `qml/RangeEditor.qml` | Annotation range editing session |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
 | `qml/ExitGhost.qml` | Exit motion for popups that close at once (menus, modals): a frozen `ShaderEffectSource` picture that fades and shrinks toward the trigger, never taking input |
@@ -204,20 +203,18 @@ files.
 - Query results sort by shared count desc, source-ordered start/end, version ID.
 - All writes are transactional with read-back before publishing.
 
-### Range editing (`RangeEditor` + `changeAnnotationRange`)
-- Moves selected components (bookmark/highlight/note/individual tags) between
-  two exact ranges in the same active version. Unselected components and
-  overlapping ranges stay.
-- Collisions: flags union, tags dedupe; differing nonempty notes need explicit
-  confirmation → `destination + "\n\n" + source`; equal notes dedupe.
+### Move here (`changeAnnotationRange`)
+- A mark's note and tags move from their exact range to the verses selected
+  now, in the same active version (`moveMark`: marker menus, Annotations and
+  Study rows). Overlapping ranges stay; highlights are paint and never move.
+- Collisions: tags dedupe; a different note already there comes first, the
+  moved one after a blank line (`needsNoteMerge` with the previewed
+  destination token); equal notes dedupe. Undo restores both ranges.
 - Snapshot token = SHA-256 of endpoints, source ID, every component (incl. tag
-  names) and the text generation. Save flushes drafts, re-validates source and
-  preview destination token in-transaction; any drift rejects. Same-range save is
-  a true no-op (no flush/write/publish).
+  names) and the text generation. Saving flushes drafts, re-validates the
+  source and the preview's destination token in-transaction; any drift
+  rejects. A move onto the same range is a true no-op.
 - Atomic: rows + assignments commit together or not at all.
-- Cancel restores locally via `restoreSelection` (no peer flush, no version
-  switch); failed restore keeps the session for Esc retry; window close vetoed.
-  Source removal ends the session automatically.
 
 ### Undo (`BibleBackend::undo`/`redo`)
 - Per window and in memory only (`UndoLimit` 100 steps). Recorded: flag
@@ -337,7 +334,7 @@ files.
 
 ### Keys
 - Panel- and mode-local keys are catalog rows with a non-global `scope`
-  (`characters`, `tags`, `rangeEditor`, `importGuide`, `versions`, `list`, …):
+  (`characters`, `tags`, `importGuide`, `versions`, `list`, …):
   listed in Keybindings and the README, bound by their owner, never globally.
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw
@@ -458,17 +455,11 @@ files.
   margins reserve their width (`chapterNavReserve` in `Margins.space` insets) and
   they hide when the column would reach them; in focus mode they appear only
   under the pointer (300 ms click guard).
-- Range editing marks the moving endpoint verse (`rangeEndpointGeometry`) with
-  an accent selection handle at the edge of its text (after the number in
-  flowing layouts): a caret spanning the line and a round knob in the line gap,
-  above the start's first line or below the end's last line; the knob is sized
-  to the gap (`readerLineGap`) and tucked a quarter into the line.
 - Keyboard focus hand-off: a `QuietButton`/`FloatingButton` pressed by key that
   hides itself passes the keyboard to its `focusTarget` (else `restorePanelFocus`).
-  Modal outside clicks: `RangeEditor`'s dialogs close on press outside and route
-  it to esc's action (`outside`); the tag picker's confirmation watches
+  Modal outside clicks: the tag picker's confirmation watches
   `Overlay.onPressed` with a passive `PointHandler` marking presses inside.
-- Margins (off by default; hidden in focus mode and range editing): one
+- Margins (off by default; hidden in focus mode): one
   `Margins.space()` split. Margin notes win: they may shift the reader column
   left (only in chapters that have notes) and sit right after their connector;
   the outline takes what is left and never moves the column. `updateMargins()`
@@ -501,7 +492,7 @@ files.
   (`marginEnter`, 100 ms). Opacity is the notes' toggle level times that focus
   level. A connector is clipped where the column's text, still gliding into
   place beside waiting margins, would cover it (`marginCover`). Resizes,
-  chapter changes, range editing, and Disable animations end margin motion at
+  chapter changes, and Disable animations end margin motion at
   once (`settleMargins`).
 - `Desktop` follows events, never a timer. The theme: `omarchy-theme-set`
   replaces `~/.local/state/omarchy/current/theme` (`rm -rf`, then `mv`), so

@@ -42,26 +42,6 @@ ApplicationWindow {
     palette.toolTipText: desktop.foreground
 
     readonly property bool notesOpen: notesDrawer.shown
-    readonly property alias rangeEditor: rangeEditor
-    readonly property bool rangeEditing: rangeEditor.sessionOpen
-    RangeEditor {
-        id: rangeEditor
-        objectName: "rangeEditor"
-        app: app; bible: app.tagBackend; desktop: app.tagDesktop
-        onFinished: function(saved) { if (saved) app.notify("Annotation range saved", true) }
-    }
-    // Public marker API: canonical scope (or exact overlapping scopes), optional kind.
-    function openRangeEditor(scope = null, kind = "") { return rangeEditor.open(scope, kind) }
-    function prepareRangeEditor() {
-        pendingActionCollapse = null
-        clearCount()
-        clearTextSelection()
-        dismissNotesDrawer()
-        tagsUi.close()
-        savedDrawer.close()
-        verseTagMenu.close()
-        contextMenu.close()
-    }
     function focusedSavedEntry() {
         let focused = activeFocusItem
         while (focused && focused !== collectionList) {
@@ -70,16 +50,6 @@ ApplicationWindow {
             focused = focused.parent
         }
         return collectionList.model[collectionList.currentIndex] || null
-    }
-    function editSavedRange() {
-        let focused = activeFocusItem
-        while (focused && focused !== collectionList) {
-            const row = focused as SavedEntry
-            if (row) { openRangeEditor(row.modelData, ["bookmark", "highlight", "note", "tag"][collectionTab]); return }
-            focused = focused.parent
-        }
-        const entry = collectionList.model[collectionList.currentIndex]
-        if (entry) openRangeEditor(entry, ["bookmark", "highlight", "note", "tag"][collectionTab])
     }
     onNotesOpenChanged: clearCount()
     property bool notePreview: false
@@ -103,7 +73,6 @@ ApplicationWindow {
         return Array.from(bible.versions).some(function(entry) { return entry.id === id })
     }
     function installVersion(id) {
-        if (rangeEditing) return
         if (closingWindow || bible.busy || catalog.busy || !flushNote()) return
         pendingDownload = ""
         downloadMessage = ""
@@ -117,7 +86,7 @@ ApplicationWindow {
     property string reimportId: ""
     function catalogEntry(id) { return Array.from(catalog.entries).find(function(entry) { return entry.id === id }) || null }
     function reimportVersion(entry) {
-        if (rangeEditing || !entry || closingWindow || bible.busy || catalog.busy || !flushNote()) return
+        if (!entry || closingWindow || bible.busy || catalog.busy || !flushNote()) return
         versionDialog.close()
         settingsDialog.close()
         if (catalogEntry(entry.id)) {
@@ -132,7 +101,7 @@ ApplicationWindow {
     function importChosen(file) {
         const expected = reimportId
         reimportId = ""
-        if (rangeEditing || closingWindow || bible.busy || catalog.busy || !flushNote()) return
+        if (closingWindow || bible.busy || catalog.busy || !flushNote()) return
         bible.clearError(); bible.importUsfm(file, expected)
     }
     function cancelDownload() {
@@ -142,7 +111,6 @@ ApplicationWindow {
         catalog.cancel()
     }
     function importDownloaded() {
-        if (rangeEditing) return
         if (closingWindow || !pendingDownload.toString().length) return
         if (bible.busy || !flushNote()) {
             downloadMessage = bible.busy ? "Download ready. Wait for the current import, then retry."
@@ -192,7 +160,6 @@ ApplicationWindow {
         })
     }
     function completeRangeAction(scope, pinned) {
-        if (rangeEditing) return
         if (!scope || !scope.visual || !verseMode || scope.identity !== selectionIdentity) return
         verseMode = false
         clearCount()
@@ -200,7 +167,6 @@ ApplicationWindow {
         if (!pinned) editingPanelClosed()
     }
     function editingPanelClosed() {
-        if (rangeEditing) return
         if (notesOpen || tagsUi.scopePinned || !pendingActionCollapse) return
         const scope = pendingActionCollapse
         pendingActionCollapse = null
@@ -217,7 +183,6 @@ ApplicationWindow {
         completeRangeAction(captured, true)
     }
     function openPassageTags(scope) {
-        if (rangeEditing) return
         if (bible.busy || !flushNote()) return
         if (typeof scope === "string") {
             if (!bible.navigate(scope)) return
@@ -232,7 +197,6 @@ ApplicationWindow {
         tagsUi.open(scope || bible.tagScope())
     }
     function openTagsBrowser(manage) {
-        if (rangeEditing) return
         if (bible.busy || !flushNote()) return
         clearCount()
         if (manage) tagsUi.openManage()
@@ -342,7 +306,7 @@ ApplicationWindow {
         searchMatchIdentity = ""; searchError = ""
     }
     function beginChapterFind() {
-        if (rangeEditing || !bible.ready || bible.busy || !flushNote()) return
+        if (!bible.ready || bible.busy || !flushNote()) return
         if (verseMode && !setVisualMode(false)) return
         clearCount(); clearTextSelection(); positionTimer.stop(); positionSaveTimer.stop()
         findSnapshot = { query: acceptedSearchQuery, bibleSyntax: acceptedSearchBibleSyntax,
@@ -408,7 +372,7 @@ ApplicationWindow {
         return true
     }
     function navigateSearch(direction, count) {
-        if (rangeEditing || !acceptedSearchQuery.length) return
+        if (!acceptedSearchQuery.length) return
         if (searchRefreshTimer.running) { searchRefreshTimer.stop(); refreshAcceptedSearch() }
         if (!searchMatches.length) { notify("No matches in this chapter", true); sounds.play("boundary"); return }
         let current = searchMatchIdentity === selectionIdentity ? searchMatchIndex : -1
@@ -451,7 +415,7 @@ ApplicationWindow {
         slideReader(target)
     }
     function openTextSearch() {
-        if (rangeEditing || !bible.ready || !flushNote()) return
+        if (!bible.ready || !flushNote()) return
         openPalette(false)
         referenceInput.text = "/ "
         referenceInput.cursorPosition = 2
@@ -549,7 +513,7 @@ ApplicationWindow {
     readonly property bool contextMenuOpen: contextMenu.visible
     readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || tagsUi.visibleModal
     // Everything modal except the side panels (Annotations, Desk, Study).
-    readonly property bool dialogOpen: rangeEditor.visibleModal || contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     readonly property bool notesClosableFromReader: notesOpen && bible.ready && !bible.busy && !modalOpen && !findPromptOpen && !textInputActive()
     // One side panel at a time. Its opening key does nothing while it is open;
     // another panel's key switches to that panel.
@@ -563,7 +527,7 @@ ApplicationWindow {
         "about", "import", "removeVersion", "focus", "numbers", "headings", "wordsOfJesus", "chapterOutline",
         "marginNotes", "readingMode", "soundEffects", "reduceMotion"]
     readonly property bool panelSwitchKeys: sidePanel.length > 0 && bible.ready && !bible.busy && !dialogOpen
-        && !findPromptOpen && !rangeEditing && !textInputActive()
+        && !findPromptOpen && !textInputActive()
     // Closes the open side panel before another opens. A Notes draft must
     // save first; when it cannot, Notes stays open with its error.
     function leaveSidePanel(target) {
@@ -584,8 +548,6 @@ ApplicationWindow {
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
     readonly property real notesWidth: Math.min(390 * scale, width - 40)
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
-    // The gap between two lines of one paragraph (line spacing above the font's height).
-    readonly property real readerLineGap: Math.max(0, readerLineHeight - readerMetrics.height)
     readonly property real observedLineHeight: bible.lineHeight
     // Passage text in panels follows the reader's line height proportionally:
     // 1.25 at the default 1.5, so the panels stay compact but track the setting.
@@ -883,7 +845,6 @@ ApplicationWindow {
         applyTextDrag()
     }
     function applyTextDrag() {
-        if (rangeEditing && gutterDrag) return
         let hit = textHit(dragPoint)
         if (hit.row < 0 || dragAnchorRow < 0) return
         if (gutterDrag) {
@@ -945,7 +906,7 @@ ApplicationWindow {
     // selection by key, or a panel puts the bar away.
     property bool selectionBarWanted: false
     // Its own ⋯ menu keeps it up.
-    readonly property bool selectionBarShown: selectionBarWanted && hasSelection && !rangeEditing
+    readonly property bool selectionBarShown: selectionBarWanted && hasSelection
         && (readerKeys || (contextMenu.visible && contextMenu.target === "selectionBar"))
     function mouseSelected() { selectionBarWanted = hasSelection; Qt.callLater(app.placeSelectionBar) }
     property real selectionBarY: 0
@@ -1027,7 +988,7 @@ ApplicationWindow {
         verseTagMenu.popup(sceneX, sceneY)
     }
     function openRangeEntries(sceneX, sceneY) {
-        const ready = !rangeEditing && !bible.busy
+        const ready = !bible.busy
         const entries = [["bookmark", "openBookmark", "Open bookmark"], ["note", "openNote", "Open note"], ["tag", "openTags", "Open tags…"]]
             .filter(function(kind) { return app.cursorRanges(kind[0]).length > 0 })
             .map(function(kind) {
@@ -1035,9 +996,6 @@ ApplicationWindow {
                 return { id: kind[1], text: kind[2] + (many ? " (choose)" : ""), enabled: ready,
                     run: function() { app.openCursorRanges(kind[0], sceneX, sceneY) } }
             })
-        // The selection holds annotations: their range can be edited from here (shift E).
-        if (bible.ready && Array.from(bible.annotationRanges(bible.tagScope())).length)
-            entries.push(menuAction("editRange", "Edit range", "editRange"))
         return entries.length ? [menuDivider].concat(entries) : []
     }
     function selectedTextEntries() {
@@ -1197,7 +1155,7 @@ ApplicationWindow {
         return i
     }
     function beginCharMode() {
-        if (!bible.ready || bible.busy || rangeEditing || !bible.verses.length) { rejected(unavailableReason("characterVisual")); return false }
+        if (!bible.ready || bible.busy || !bible.verses.length) { rejected(unavailableReason("characterVisual")); return false }
         clearCount()
         // A mouse-dragged selection becomes the character selection.
         const dragged = freeSelectedText.length ? selectedSourceRange() : null
@@ -1476,24 +1434,10 @@ ApplicationWindow {
         return (bible.canUndo ? [menuAction("undo", "Undo " + bible.undoLabel, "undo")] : [])
             .concat(bible.canRedo ? [menuAction("redo", "Redo " + bible.redoLabel, "redo")] : [])
     }
-    // While an annotation range is being moved, the menu offers the session's
-    // own actions (the same keys as the status bar), then the copies.
-    function rangeEditMenuEntries() {
-        const ready = rangeEditor.active && !rangeEditor.visibleModal && !bible.busy
-        return [
-            { id: "saveRange", text: "Save range", shortcut: KeyNotation.format("Return"), enabled: ready, run: function() { rangeEditor.accept() } },
-            { id: "swapEnds", text: "Swap ends", shortcut: KeyNotation.format("O"), enabled: ready, run: function() { rangeEditor.swap() } },
-            { id: "cancelRange", text: "Cancel", shortcut: KeyNotation.format("Escape"), enabled: rangeEditor.sessionOpen, run: function() { rangeEditor.cancel() } },
-            menuDivider,
-            menuAction("copy", "Copy quotation", "copy"),
-            menuAction("copyPlain", "Copy plain text", "copyPlain")
-        ]
-    }
     // Right-click outside the selection selects that verse; inside keeps the range.
     function openPassageMenu(number, sceneX, sceneY) {
         if (!bible.ready || bible.busy) return
         clearCount()
-        if (rangeEditor.active) { contextMenu.show("rangeEdit", rangeEditMenuEntries(), sceneX, sceneY); return }
         // Selected text (mouse-dragged or character selection) stays selected
         // when the click is on it: the menu leads with copying it. A click
         // elsewhere drops it and takes the verse path below.
@@ -1504,7 +1448,7 @@ ApplicationWindow {
             }
             clearTextSelection()
         }
-        if (!rangeEditing && number > 0) {
+        if (number > 0) {
             const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
             if (!inside) {
                 selectVerse(number, false)
@@ -1586,7 +1530,6 @@ ApplicationWindow {
     function openPassageMenuAt(sceneX, sceneY) {
         if (!bible.ready || bible.busy) return
         clearCount()
-        if (rangeEditor.active) { contextMenu.show("rangeEdit", rangeEditMenuEntries(), sceneX, sceneY); return }
         if (freeSelectedText.length) {
             if (pointInSelectedText(sceneX, sceneY)) {
                 contextMenu.show("passage", selectedTextEntries().concat(passageMenuEntries(sceneX, sceneY)), sceneX, sceneY)
@@ -1594,7 +1537,7 @@ ApplicationWindow {
             }
             clearTextSelection()
         }
-        if (!hasSelection && !rangeEditing) {
+        if (!hasSelection) {
             const rows = Array.from(bible.verses)
             const number = bible.cursorVerse > 0 ? bible.cursorVerse : rows.length ? rows[0].number : 0
             if (number > 0) selectVerse(number, false)
@@ -1603,11 +1546,6 @@ ApplicationWindow {
     }
     function openPassageMenuAtCursor() {
         if (!bible.ready || bible.busy) return
-        if (rangeEditor.active) {
-            const at = verseMenuPoint(bible.cursorVerse)
-            contextMenu.show("rangeEdit", rangeEditMenuEntries(), at.x, at.y)
-            return
-        }
         if (!hasSelection && !freeSelectedText.length) {
             const rows = Array.from(bible.verses)
             const number = bible.cursorVerse > 0 ? bible.cursorVerse : rows.length ? rows[0].number : 0
@@ -1630,7 +1568,7 @@ ApplicationWindow {
         })
     }
     function toggleScopeDesk(scope) {
-        if (rangeEditing || bible.busy || !scope) { rejected(unavailableReason("toggleDesk")); return }
+        if (bible.busy || !scope) { rejected(unavailableReason("toggleDesk")); return }
         const existing = deskRowFor(scope)
         if (existing ? bible.removeFromDesk(existing.id) : bible.addToDesk(scope)) {
             const reference = (existing || {}).reference || scope.reference || "Passage"
@@ -1648,7 +1586,7 @@ ApplicationWindow {
         } else sounds.play("error")
     }
     function removeMarkerAnnotation(scope, kind) {
-        if (rangeEditing || bible.busy || !scope || !flushNote()) return
+        if (bible.busy || !scope || !flushNote()) return
         if (kind === "bookmark") {
             if (!bible.openTaggedPassage(scope)) { sounds.play("error"); return }
             syncNote()
@@ -1663,7 +1601,7 @@ ApplicationWindow {
     // noteOnly deletes just the note on this exact range (marker menu);
     // otherwise every mark, the note, and tags go. Either is one undo step.
     function deleteScope(entry, noteOnly) {
-        if (rangeEditing || bible.busy || !entry) return false
+        if (bible.busy || !entry) return false
         // Freeze identity before flushing drafts can publish a replacement model.
         const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
             book: entry.book, chapter: entry.chapter, start: entry.start,
@@ -1677,15 +1615,36 @@ ApplicationWindow {
         return true
     }
     // Bookmark, note, and tag markers in every layout. One choice targets
-    // that range; several overlapping ranges keep Open's chooser and Edit range.
+    // that range; several overlapping ranges keep Open's chooser and Move here.
     function sameScope(a, b) {
         return !!a && !!b && ["versionId", "book", "chapter", "start", "endBook", "endChapter", "end"].every(function(key) { return a[key] === b[key] })
     }
-    // Whether shift E (Edit range at the selection) edits exactly `scope`.
-    function editKeyEdits(scope) {
-        if (!hasSelection || !scope || Array.isArray(scope)) return false
-        const ranges = Array.from(bible.annotationRanges(bible.tagScope()))
-        return ranges.length === 1 && sameScope(ranges[0], scope)
+    // Move here: a mark's note and tags move from their range to the verses
+    // selected now (in the same version); a note already there comes first,
+    // the moved one after a blank line. Highlights are paint: x paints and
+    // erases them. u undoes the move.
+    function moveHereEntry(choices, sceneX, sceneY) {
+        const here = hasSelection ? bible.tagScope() : null
+        const movable = here ? choices.filter(function(scope) { return scope.versionId === here.versionId && !sameScope(scope, here) }) : []
+        return { id: "moveHere", text: here ? "Move here (" + here.reference + ")" + (movable.length > 1 ? "…" : "") : "Move here",
+            enabled: !bible.busy && movable.length > 0,
+            run: function() { app.onMarkerScope(movable, function(scope) { app.moveMark(scope) }, sceneX, sceneY) } }
+    }
+    function moveMark(scope) {
+        if (bible.busy || !hasSelection || !flushNote()) return
+        const snapshot = bible.annotationSnapshot(scope)
+        if (!snapshot.ok) { rejected(snapshot.error); return }
+        const components = { note: snapshot.note.length > 0, tags: Array.from(snapshot.tags).map(function(tag) { return tag.id }) }
+        if (!components.note && !components.tags.length) { rejected("Only a highlight is there · x paints and erases highlights"); return }
+        const destination = bible.tagScope()
+        const preview = bible.previewRangeChange(snapshot, destination, components)
+        if (!preview.ok) { rejected(preview.error); return }
+        if (!bible.changeAnnotationRange(snapshot, destination, components, preview.needsNoteMerge, preview.destinationToken || "")) {
+            rejected(bible.error.replace(/\.$/, "")); bible.clearError(); return
+        }
+        syncNote()
+        notify((snapshot.scope.reference || "Mark") + " moved to " + destination.reference + (preview.needsNoteMerge ? " · notes combined" : ""), true)
+        sounds.play("chime")
     }
     // An action on one of overlapping ranges: run at once for one range, else
     // a second menu at the same point asks which range.
@@ -1695,22 +1654,16 @@ ApplicationWindow {
             return { id: "range:" + index, text: scope.reference || "Range " + (index + 1), enabled: !bible.busy, run: function() { run(scope) } }
         }), sceneX, sceneY)
     }
-    function openMarkerMenu(choices, kind, openMarker, editScope, sceneX, sceneY) {
+    function openMarkerMenu(choices, kind, openMarker, sceneX, sceneY) {
         choices = Array.from(choices || []).filter(function(scope) { return !!scope })
         const several = choices.length > 1
-        const ready = !rangeEditing && !bible.busy
+        const ready = !bible.busy
         const which = several ? "…" : ""
-        // Edit range edits the clicked marker's range (a chooser for overlaps);
-        // its key is shown only where shift E would edit that same range.
-        // (Verse layout passes its edit scope as a list: one range is that range.)
-        if (Array.isArray(editScope) && editScope.length === 1) editScope = editScope[0]
-        const edited = editScope || (several ? choices : choices[0])
         const removeText = kind === "bookmark" ? "Remove bookmark" : kind === "tag" ? "Remove tags" : "Delete note"
         contextMenu.show("marker", [
             { id: "open", text: "Open", enabled: ready, run: openMarker },
             menuDivider,
-            { id: "editRange", text: "Edit range", shortcut: editKeyEdits(edited) ? menuKey("editRange") : "", enabled: ready && !!edited,
-                run: function() { app.openRangeEditor(edited, kind) } },
+            moveHereEntry(choices, sceneX, sceneY),
             { id: "remove", text: removeText + which, enabled: ready && choices.length > 0,
                 run: function() { app.onMarkerScope(choices, function(scope) { app.removeMarkerAnnotation(scope, kind) }, sceneX, sceneY) } },
             menuDivider,
@@ -1740,14 +1693,13 @@ ApplicationWindow {
         if (!entry) return
         collectionList.currentIndex = row
         collectionList.forceActiveFocus()
-        const ready = !rangeEditing && !bible.busy
-        const kind = ["bookmark", "highlight", "note", "tag"][collectionTab]
-        const editRange = { id: "editRange", text: "Edit range", shortcut: menuKey("editRange"), enabled: ready, run: function() { app.openRangeEditor(entry, kind) } }
+        const ready = !bible.busy
+        const moveHere = moveHereEntry([entry])
         const extras = (collectionTab === 3 ? [
             { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { app.openPassageTags(tagsUi.snapshot(entry)) } },
-            editRange,
+            moveHere,
             { id: "removeTag", text: "Remove " + entry.group, shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeSavedTag(entry, row) } }
-        ] : [editRange,
+        ] : [moveHere,
             { id: "delete", text: "Delete", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() {
                 collectionList.currentIndex = row
                 collectionList.forceActiveFocus()
@@ -1809,7 +1761,6 @@ ApplicationWindow {
             else if (restoreConfirmation.visible) restoreConfirmation.close()
             else if (verseTagMenu.visible) verseTagMenu.close()
             else if (tagsUi.pickerVisible) tagsUi.handleEscape()
-            else if (rangeEditor.visibleModal) { if (rangeEditor.pending) rangeEditor.mergeBack(); else rangeEditor.cancel() }
             else if (backupScope.visible) backupScope.close()
             else if (importGuide.visible) importGuide.close()
             else if (versionDialog.visible) { if (versionDialog.step > 0) backVersion(); else versionDialog.close() }
@@ -1819,12 +1770,12 @@ ApplicationWindow {
             else rejected()
             return
         }
-        if (sidePanel.length && !rangeEditing) {
+        if (sidePanel.length) {
             if (forward) rejected()
             else if (leaveSidePanel("")) readerFocus()
             return
         }
-        if (!readerKeys || rangeEditing) { rejected(unavailableReason("historyBack")); return }
+        if (!readerKeys) { rejected(unavailableReason("historyBack")); return }
         clearCount()
         historyStep(forward ? 1 : -1)
     }
@@ -1890,7 +1841,6 @@ ApplicationWindow {
         onWheel: function(wheel) { wheel.accepted = true }
     }
     function copyClickedVerse(number, plainText) {
-        if (rangeEditing) { bible.copySelection(plainText); return }
         if (!flushNote()) return
         const scope = actionScope()
         const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
@@ -2105,7 +2055,7 @@ ApplicationWindow {
     }
     // Opens a note's passage link as a History jump; Notes stays open on it.
     function followPassageLink(reference) {
-        if (rangeEditing || !flushNote()) return false
+        if (!flushNote()) return false
         const from = beginJump()
         if (!bible.navigate(reference)) return false
         endJump(from)
@@ -2114,7 +2064,7 @@ ApplicationWindow {
         return true
     }
     function openLinkedNote(row) {
-        if (rangeEditing || !row || !flushNote()) return false
+        if (!row || !flushNote()) return false
         const from = beginJump()
         if (!bible.openTaggedPassage(row)) return false
         endJump(from)
@@ -2238,8 +2188,7 @@ ApplicationWindow {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action) return ""
         if (bible.busy) return "Wait for the import to finish"
-        if (rangeEditing) return "Finish editing the range first · " + KeyNotation.format("Return") + " saves, " + KeyNotation.format("Escape") + " cancels"
-        if (["bookmark", "highlight", "tags", "toggleDesk", "notes", "editRange", "copy", "copyPlain", "compare", "peek"].includes(action.id) && !hasSelection)
+        if (["bookmark", "highlight", "tags", "toggleDesk", "notes", "copy", "copyPlain", "compare", "peek"].includes(action.id) && !hasSelection)
             return "Select a verse first"
         if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen)
             return "Open a note first · " + keyText("notes")
@@ -2291,7 +2240,6 @@ ApplicationWindow {
     }
     function flushNote() {
         noteSaveTimer.stop()
-        if (rangeEditing) return true
         if (syncingNote) return true
         syncNote()
         if (noteConflict) return false
@@ -2352,7 +2300,6 @@ ApplicationWindow {
         })
     }
     function showFocusedError() {
-        if (rangeEditing) return
         if (bible.focusMode && bible.error.length && !bible.busy) {
             errorDialog.message = bible.error
             errorDialog.open()
@@ -2377,7 +2324,7 @@ ApplicationWindow {
     // The split the leaving margins keep (focus mode's layout has no
     // scrollbar or footer room to reserve).
     property var leavingSpace: null
-    readonly property bool marginsAllowed: bible.ready && (!focusLayout || marginsLeaving) && !rangeEditing
+    readonly property bool marginsAllowed: bible.ready && (!focusLayout || marginsLeaving)
     // bible.marginNotes as the margins show it: toggling off lags by the notes'
     // fade-out (applyMarginNotes) so they leave before the reader slides back.
     property bool marginNotesOn: false // set from bible.marginNotes on completion, then by applyMarginNotes
@@ -2530,51 +2477,13 @@ ApplicationWindow {
         marginSlide.stop(); marginSlideOffset = 0; marginsAttached = false
         chapterNavGlide.stop(); chapterNavShift = 0
     }
-    onRangeEditingChanged: settleMargins()
     Connections {
         target: reading
         function onHeightChanged() { app.scheduleMargins() }
     }
     function scheduleMargins() {
         if (readerInitialized) marginTimer.restart()
-        rangeEndpointTimer.restart()
         if (charMode) charReapplyTimer.restart()
-    }
-    // Range editing: the verse whose endpoint moves (the cursor) gets an accent
-    // selection handle at the moving edge of its text: a caret with a round knob
-    // above its start or below its end, apart from the range's tint.
-    // readerColumn coordinates.
-    property var rangeEndpointGeometry: null
-    Timer { id: rangeEndpointTimer; interval: 0; onTriggered: app.updateRangeEndpoint() }
-    readonly property var rangeEndpointKey: [rangeEditor.active, rangeEditor.endpoint, bible.verses, readerColumn.width, app.readerScale, app.readerLineHeight]
-    onRangeEndpointKeyChanged: rangeEndpointTimer.restart()
-    Connections {
-        target: bible
-        function onSelectionChanged() { rangeEndpointTimer.restart() }
-    }
-    function updateRangeEndpoint() {
-        const verse = bible.cursorVerse
-        const index = rangeEditor.active ? verseOrder(verse) : -1
-        if (index < 0) { rangeEndpointGeometry = null; return }
-        const block = blockLoader.item as BlockReader
-        let rects = []
-        if (block) rects = Array.from(block.verseTextRects(verse)).map(function(r) {
-            const p = block.body.mapToItem(readerColumn, r.x, r.y)
-            return { x: p.x, y: p.y, width: r.width, height: r.height }
-        })
-        else {
-            const row = verseRowFor(verse)
-            if (row && row.searchOverlay) rects = row.searchOverlay.lineRects(0, String(bible.verses[index].text || "").length).map(function(r) {
-                const p = row.body.mapToItem(readerColumn, r.x, r.y)
-                return { x: p.x, y: p.y, width: r.width, height: r.height }
-            })
-        }
-        rects = rects.filter(function(r) { return r.width > 0 && r.height > 0 })
-        if (!rects.length) { rangeEndpointGeometry = null; return }
-        const start = rangeEditor.endpoint === "start"
-        const edge = start ? rects[0] : rects[rects.length - 1]
-        rangeEndpointGeometry = { verse: verse, endpoint: rangeEditor.endpoint, rects: rects,
-            edge: { x: start ? edge.x : edge.x + edge.width, y: edge.y, height: edge.height } }
     }
     function measureVerses() {
         const rows = Array.from(bible.verses)
@@ -2673,7 +2582,7 @@ ApplicationWindow {
     }
     function openMarginNoteMenu(entry, sceneX, sceneY) {
         if (!entry || modalOpen || bible.busy) return
-        openMarkerMenu([entry.scope], "note", function() { app.openMarginNote(entry) }, entry.scope, sceneX, sceneY)
+        openMarkerMenu([entry.scope], "note", function() { app.openMarginNote(entry) }, sceneX, sceneY)
     }
     function followMarginLink(link) {
         if (modalOpen || bible.busy) return
@@ -2729,7 +2638,7 @@ ApplicationWindow {
         }
     }
     function jumpToHeading(verse) {
-        if (rangeEditing || !bible.ready || !flushNote()) return
+        if (!bible.ready || !flushNote()) return
         const jump = beginJump()
         selectVerse(verse, false)
         if (bible.cursorVerse !== verse) return
@@ -2752,7 +2661,7 @@ ApplicationWindow {
     // Footnote markers (all layouts) open Study → Footnotes at that note,
     // selecting its verse first (Study is a passage panel).
     function openFootnote(verse, seq) {
-        if (!bible.ready || bible.busy || rangeEditing || modalOpen) return
+        if (!bible.ready || bible.busy || modalOpen) return
         if (bible.selectedStart !== verse || bible.selectedEnd !== verse || bible.crossChapterSelection) selectVerse(verse, false)
         if (bible.cursorVerse !== verse) return
         if (sidePanel === "related") { tagsUi.setStudyTab("footnotes", { verse: verse, seq: seq }); return }
@@ -2763,7 +2672,7 @@ ApplicationWindow {
     property int peekIndex: -1
     readonly property var peekNote: peekIndex >= 0 ? bible.footnotes[peekIndex] || null : null
     function peekFootnote(verse, seq, sceneX, sceneY, lineHeight) {
-        if (!bible.ready || bible.busy || rangeEditing || modalOpen) return
+        if (!bible.ready || bible.busy || modalOpen) return
         const index = Array.from(bible.footnotes).findIndex(function(note) { return note.verse === verse && note.seq === seq })
         if (index < 0) { rejected(); return }
         const point = sceneX === undefined ? verseMenuPoint(verse) : Qt.point(sceneX, sceneY)
@@ -2859,13 +2768,6 @@ ApplicationWindow {
         return note.offset + 2 * k + 1
     }
     function selectVerse(number, extend) {
-        if (rangeEditor.active) {
-            const rows = Array.from(bible.verses)
-            const from = rows.findIndex(function(row) { return row.number === bible.cursorVerse })
-            const to = rows.findIndex(function(row) { return row.number === number })
-            if (from >= 0 && to >= 0) moveVerse(to - from, true)
-            return
-        }
         clearCount()
         if (!flushNote()) return
         pendingActionCollapse = null
@@ -2945,7 +2847,6 @@ ApplicationWindow {
     }
     onActiveChanged: if (!active) endHold()
     function moveVerse(delta, extend, bulk) {
-        if (rangeEditor.active) extend = true
         clearCount()
         if (!flushNote()) return
         clearTextSelection()
@@ -2970,7 +2871,6 @@ ApplicationWindow {
         })
     }
     function setVisualMode(enabled) {
-        if (rangeEditing) return false
         clearCount()
         if (!flushNote() || !bible.ready || bible.verses.length === 0) return false
         pendingActionCollapse = null
@@ -2985,7 +2885,6 @@ ApplicationWindow {
         return true
     }
     function extendVerse(delta) {
-        if (rangeEditor.active) { moveVerse(delta, true); return }
         if (!verseMode && !setVisualMode(true)) return
         moveVerse(delta, true)
     }
@@ -2999,7 +2898,6 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, false) })
     }
     function chapterStep(delta) {
-        if (rangeEditing) return
         clearCount()
         if (!flushNote()) return
         savePosition()
@@ -3018,7 +2916,6 @@ ApplicationWindow {
     // firstVerse: a chapter (no verse given) opens on its first verse, as the
     // palette does: "Galatians 2" selects Galatians 2:1.
     function goToReference(reference, firstVerse) {
-        if (rangeEditing) return
         if (!flushNote()) return
         const from = beginJump()
         if (bible.navigate(reference)) {
@@ -3032,7 +2929,6 @@ ApplicationWindow {
     }
     // The palette's chapters (its grid) open on their first verse too.
     function openChapter(book, chapter) {
-        if (rangeEditing) return
         if (!flushNote()) return
         const from = beginJump()
         bible.openChapter(book, chapter)
@@ -3054,7 +2950,6 @@ ApplicationWindow {
         syncNote()
     }
     function openPalette(commands, resume) {
-        if (rangeEditing) return
         clearCount()
         if (!flushNote()) return
         if (!resume) {
@@ -3083,7 +2978,7 @@ ApplicationWindow {
     // The Passage palette at the reader's book, its chapter grid with the
     // current one chosen (clicking the chapter title).
     function openChapterList() {
-        if (rangeEditing || !bible.ready || bible.busy) { rejected(unavailableReason("books")); return }
+        if (!bible.ready || bible.busy) { rejected(unavailableReason("books")); return }
         const book = Array.from(bible.books).find(function(b) { return b.id === bible.book })
         if (!book) { rejected(); return }
         openPalette(false)
@@ -3112,7 +3007,6 @@ ApplicationWindow {
         else openPalette(mode === "commands")
     }
     function openNotes(focusEditor) {
-        if (rangeEditing) return
         if (!bible.ready || bible.busy) return
         clearCount()
         if (!notesOpen) openedNoteActionScope = actionScope()
@@ -3143,13 +3037,11 @@ ApplicationWindow {
         else openNotes(true)
     }
     function requestRestore(file) {
-        if (rangeEditing) return
         if (!flushNote()) return
         restoreConfirmation.backupFile = file
         restoreConfirmation.open()
     }
     function confirmRestore() {
-        if (rangeEditing) return
         if (!flushNote()) return
         if (bible.importBackup(restoreConfirmation.backupFile)) {
             syncNote()
@@ -3171,7 +3063,6 @@ ApplicationWindow {
         }
     }
     function markPassage(highlight) {
-        if (rangeEditing) return
         if (!hasSelection || !flushNote()) return
         const scope = actionScope()
         const success = highlight ? bible.toggleHighlight() : bible.toggleBookmark()
@@ -3199,7 +3090,6 @@ ApplicationWindow {
     property int deskSelectedId: -1
     property int deskRow: 0
     function toggleDeskPassage() {
-        if (rangeEditing) return
         if (!hasSelection || !flushNote()) return
         const scope = actionScope()
         const reference = bible.selectionReference
@@ -3211,7 +3101,7 @@ ApplicationWindow {
         } else sounds.play("error")
     }
     function openDesk() {
-        if (rangeEditing || deskDrawer.shown) return
+        if (deskDrawer.shown) return
         deskDrawer.open()
     }
     function moveDesk(delta) {
@@ -3233,7 +3123,7 @@ ApplicationWindow {
     }
     function deskEntry(id) { return Array.from(bible.desk).find(function(entry) { return entry.id === id }) }
     function openDeskItem(id) {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         const entry = deskEntry(id)
         if (!entry || !flushNote()) return
         if (!entry.available) { rejected(entry.versionAbbreviation + " is not installed"); return }
@@ -3247,7 +3137,7 @@ ApplicationWindow {
         pulseDestination()
     }
     function copyDeskItem(id, plainText) {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         const entry = deskEntry(id)
         if (!entry) return
         if ((plainText ? bible.copyScope(entry, true) : bible.copyDeskItem(id)).length > 0) {
@@ -3256,7 +3146,7 @@ ApplicationWindow {
         } else sounds.play("error")
     }
     function removeDeskItem(id) {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         const row = Array.from(bible.desk).findIndex(function(entry) { return entry.id === id })
         if (row < 0) return
         if (bible.removeFromDesk(id)) {
@@ -3272,12 +3162,12 @@ ApplicationWindow {
         if (entry) removeDeskItem(entry.id)
     }
     function requestCleanDesk() {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         if (!bible.desk.length) { notify("The Desk is already clean", true); return }
         cleanDeskConfirmation.open()
     }
     function confirmCleanDesk() {
-        if (rangeEditing || bible.busy || !flushNote()) return
+        if (bible.busy || !flushNote()) return
         const count = bible.desk.length
         if (bible.cleanDesk()) {
             cleanDeskConfirmation.close()
@@ -3350,7 +3240,7 @@ ApplicationWindow {
         return true
     }
     function travelJump(target) {
-        if (rangeEditing || target < 0 || target >= jumpStack.length || target === jumpIndex) return false
+        if (target < 0 || target >= jumpStack.length || target === jumpIndex) return false
         if (!flushNote()) return false
         const stack = jumpStack.slice()
         const here = locationNow()
@@ -3384,7 +3274,7 @@ ApplicationWindow {
     }
     function historyEntry(id) { return Array.from(bible.history).find(function(entry) { return entry.id === id }) }
     function openHistoryItem(id) {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         const entry = historyEntry(id)
         if (!entry || !flushNote()) return
         if (!entry.available) { rejected(entry.versionAbbreviation + " is not installed"); return }
@@ -3396,7 +3286,7 @@ ApplicationWindow {
         readerFocus()
     }
     function copyHistoryItem(id, plainText) {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         const entry = historyEntry(id)
         if (!entry) return
         const scope = historyScope(entry)
@@ -3411,14 +3301,14 @@ ApplicationWindow {
         return entry.available && entry.firstVerse ? Object.assign({}, entry, { start: entry.firstVerse, end: entry.lastVerse }) : null
     }
     function toggleHistoryDesk(id) {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         const entry = historyEntry(id)
         const scope = historyScope(entry)
         if (!scope || !entry.available) { rejected(entry.versionAbbreviation + " is not installed"); return }
         toggleScopeDesk(scope)
     }
     function removeHistoryItem(id) {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         if (!historyEntry(id)) return
         // The palette's History keeps its place: the row below moves up.
         const row = paletteResults.currentIndex
@@ -3431,12 +3321,12 @@ ApplicationWindow {
         }
     }
     function requestClearHistory() {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         if (!bible.history.length && !bible.recentQueries.length) { notify("History is already empty", true); return }
         clearHistoryConfirmation.open()
     }
     function confirmClearHistory() {
-        if (rangeEditing || bible.busy) return
+        if (bible.busy) return
         const count = bible.history.length
         if (bible.clearHistory()) {
             clearHistoryConfirmation.close()
@@ -3471,7 +3361,7 @@ ApplicationWindow {
     })
     // A History row's menu (recent passages and the palette's History).
     function historyRowMenu(entry) {
-        const ready = !rangeEditing && !bible.busy
+        const ready = !bible.busy
         const id = entry.id
         const scope = historyScope(entry)
         return RowMenu.entries(app, { busy: bible.busy, keys: false, scope: scope,
@@ -3664,7 +3554,7 @@ ApplicationWindow {
         moveSaved(0)
     }
     function openSaved(entry) {
-        if (rangeEditing || !entry) { sounds.play("error"); return }
+        if (!entry) { sounds.play("error"); return }
         if (!flushNote()) return
         const from = beginJump()
         if (!bible.openTaggedPassage(entry)) return
@@ -3678,7 +3568,6 @@ ApplicationWindow {
     // delete / backspace: the row's range goes at once (on the Tags tab, only
     // that tag); u undoes it.
     function deleteSaved() {
-        if (rangeEditing) return
         let row = collectionList.currentIndex
         let focused = activeFocusItem
         while (focused && focused !== collectionList) {
@@ -3694,7 +3583,7 @@ ApplicationWindow {
         deleteFocusTimer.restart()
     }
     function removeSavedTag(entry, row) {
-        if (rangeEditing || !entry || !entry.groupId || bible.busy) return
+        if (!entry || !entry.groupId || bible.busy) return
         const scope = Object.freeze({ versionId: entry.versionId, reference: entry.reference,
             book: entry.book, chapter: entry.chapter, start: entry.start,
             endBook: entry.endBook, endChapter: entry.endChapter, end: entry.end })
@@ -3714,13 +3603,11 @@ ApplicationWindow {
             })
     }
     function openBookmark(scope) {
-        if (rangeEditing) return
         if (!flushNote()) return
         const from = beginJump()
         if (typeof scope === "string" ? bible.navigate(scope) : bible.openTaggedPassage(scope)) { endJump(from); syncNote(); readerFocus(); pulseDestination() }
     }
     function openNoteScope(scope) {
-        if (rangeEditing) return
         if (!scope || !flushNote()) return
         const from = beginJump()
         if (!bible.openTaggedPassage(scope)) return
@@ -3734,7 +3621,6 @@ ApplicationWindow {
     // starts on the list rather than the search.
     function openCompare() { if (openVersions(false)) versionResults.forceActiveFocus() }
     function openVersions(removing) {
-        if (rangeEditing) return false
         if (bible.busy || !flushNote()) return false
         clearCount()
         versionDialog.removing = !!removing
@@ -3766,7 +3652,7 @@ ApplicationWindow {
         if (!entry || versionDialog.removing || versionDialog.step !== 0) return
         versionResults.currentIndex = index
         versionResults.forceActiveFocus()
-        const ready = !bible.busy && !rangeEditing
+        const ready = !bible.busy
         const details = catalogEntry(entry.id)
         contextMenu.show("version", [
             { id: "switch", text: entry.active ? "Current version" : "Switch to " + (entry.abbreviation || entry.name), shortcut: KeyNotation.format("Return"),
@@ -3879,7 +3765,6 @@ ApplicationWindow {
         versionDialog.close()
     }
     function switchVersion(id) {
-        if (rangeEditing) return
         if (bible.busy || !flushNote()) return
         const selected = hasSelection
         const from = beginJump()
@@ -3893,7 +3778,6 @@ ApplicationWindow {
         notify(selected && !hasSelection ? bible.status : "Switched to " + bible.versionAbbreviation, true)
     }
     function confirmRemoveVersion() {
-        if (rangeEditing) return
         if (!versionDialog.removing || versionDialog.step !== 2 || !versionDialog.chosen || bible.busy || !flushNote()) return
         const deskRemoved = versionDialog.removeAnnotations ? bible.deskCountForVersion(versionDialog.chosen.id) : 0
         const abbreviation = versionDialog.chosen.abbreviation
@@ -3971,9 +3855,6 @@ ApplicationWindow {
         // This window's own changes to marks, notes, and tags (bible.undo()).
         { id: "undo", group: "Annotate", title: "Undo a mark, note, or tag change", sequences: ["U", "Ctrl+Z"], command: true },
         { id: "redo", group: "Annotate", title: "Redo the change undone", sequences: ["Ctrl+Shift+Z", "Ctrl+R"], command: true },
-        { id: "editRange", group: "Annotate", title: "Edit the selection's annotation range", sequences: ["Shift+E"], command: true },
-        { id: "rangeChooseAnother", group: "Annotate", title: "Edit range: choose another overlapping range", sequences: ["Backspace"], scope: "rangeEditor", explanation: true },
-        { id: "rangeMergeBack", group: "Annotate", title: "Edit range: back from Combine notes to moving the range", sequences: ["Escape"], scope: "rangeEditor", explanation: true },
         { id: "manageTags", group: "Annotate", title: "Manage tags", sequences: ["Ctrl+T"], command: true },
         // Bound by the tag picker's Manage tags page itself.
         { id: "manageRename", group: "Annotate", title: "Manage tags: rename the chosen tag", sequences: ["Return"], scope: "tags", explanation: true },
@@ -4052,7 +3933,6 @@ ApplicationWindow {
         { id: "listCopy", group: "Lists", title: "Copy item as quotation", sequences: ["Y"], scope: "list", explanation: true },
         { id: "listCopyPlain", group: "Lists", title: "Copy item as plain text", sequences: ["Shift+Y"], scope: "list", explanation: true },
         { id: "listDesk", group: "Lists", title: "Add item to Desk, or remove it", sequences: ["D"], scope: "list", explanation: true },
-        { id: "listEditRange", group: "Lists", title: "Edit item's annotation range (Annotations, Study's Tags)", sequences: ["Shift+E"], scope: "list", explanation: true },
         { id: "listRemove", group: "Lists", title: "Remove item", sequences: ["Delete", "Backspace"], scope: "list", explanation: true },
         { id: "listTag", group: "Lists", title: "Edit the item's tags (Annotations and Study Tags)", sequences: ["T"], scope: "list", explanation: true },
         { id: "studyChips", group: "Lists", title: "Between Study Tags results and tag chips", sequences: ["Tab", "Shift+Tab"], scope: "list", explanation: true },
@@ -4078,7 +3958,7 @@ ApplicationWindow {
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
-    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters", "tags", "rangeEditor", "importGuide"].includes(action.scope) }
+    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters", "tags", "importGuide"].includes(action.scope) }
     function actionById(id) { return actions.find(function(entry) { return entry.id === id }) }
     function actionKeys(action) {
         if (typeof action === "string") action = actionById(action)
@@ -4122,11 +4002,6 @@ ApplicationWindow {
     // Clickable hint rows (HintRow): [keys, label, run, enabled] per part. A
     // part runs what its key would, and is clickable only while that works
     // with the current focus. Navigation parts have no run.
-    function rangeEditHintParts() {
-        const ready = rangeEditor.active && !rangeEditor.visibleModal && !bible.busy
-        return [["O", "swap", function() { rangeEditor.swap() }, ready], ["Return", "save", function() { rangeEditor.accept() }, ready],
-            ["Escape", "cancel", function() { rangeEditor.cancel() }, rangeEditor.sessionOpen]]
-    }
     // ← steps back to the book list only where the palette's keys take it
     // (in the input: nothing selected and the caret at the start, or browsing).
     readonly property bool paletteLeftGoesBack: !paletteTextMode && (paletteBook > 0 || paletteHistory)
@@ -4135,10 +4010,10 @@ ApplicationWindow {
     function paletteHintParts() {
         if (paletteHistory && !paletteTextMode && !referenceInput.text.trim().startsWith(">")) {
             const entry = paletteResults.model[paletteResults.currentIndex]
-            const ready = !!entry && !bible.busy && !rangeEditing
+            const ready = !!entry && !bible.busy
             return [[["Up", "Down"], "choose"], ["Return", "open", app.acceptPalette, ready],
                 ["Delete", "remove", function() { app.removeHistoryItem(entry.recent.id) }, ready],
-                [actionKeys("historyClearKeys")[0], "clear", app.requestClearHistory, bible.history.length > 0 && !bible.busy && !rangeEditing],
+                [actionKeys("historyClearKeys")[0], "clear", app.requestClearHistory, bible.history.length > 0 && !bible.busy],
                 ["Backspace", "back", app.backToBooks], ["Escape", "close", app.escapePalette]]
         }
         return [[paletteChapterGrid ? ["Left", "Right", "Up", "Down"] : ["Up", "Down"], "choose"],
@@ -4164,26 +4039,25 @@ ApplicationWindow {
     }
     function savedHintParts() {
         const entry = focusedSavedEntry()
-        const ready = !!entry && !bible.busy && !rangeEditing
+        const ready = !!entry && !bible.busy
         const search = savedSearchVisible ? ["/", "search", app.focusSavedSearch] : null
         const close = ["Escape", "close", app.escapeSaved]
         const open = ["Return", "open", function() { app.openSaved(app.focusedSavedEntry()) }, ready]
         const copy = ["Y", "copy", function() { app.copyScope(app.focusedSavedEntry()) }, !!entry && !bible.busy]
         const desk = ["D", "Desk", function() { app.toggleScopeDesk(app.focusedSavedEntry()) }, ready]
-        const range = ["Shift+E", "range", app.editSavedRange, ready]
         if (collectionTab === 3) return [[["Left", "Right"], "tabs"], open,
             ["T", "tags", function() { app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry())) }, ready],
-            ["Delete", "remove tag", app.deleteSaved, ready], copy, desk, range,
-            [actionKeys("manageTags")[0], "manage", function() { tagsUi.openManage() }, !bible.busy && !rangeEditing], search, close]
-        return [[["Left", "Right"], "tabs"], open, copy, desk, range, ["Delete", "delete", app.deleteSaved, ready], search, close]
+            ["Delete", "remove tag", app.deleteSaved, ready], copy, desk,
+            [actionKeys("manageTags")[0], "manage", function() { tagsUi.openManage() }, !bible.busy], search, close]
+        return [[["Left", "Right"], "tabs"], open, copy, desk, ["Delete", "delete", app.deleteSaved, ready], search, close]
     }
     function deskHintParts() {
         const entry = deskList.model[deskList.currentIndex]
-        const ready = !!entry && !bible.busy && !rangeEditing
+        const ready = !!entry && !bible.busy
         return [[["Up", "Down"], "choose"], ["Return", "open", function() { app.openDeskItem(entry.id) }, ready && entry.available],
             ["Y", "copy", function() { app.copyDeskItem(entry.id) }, ready && entry.available],
             ["Delete", "remove", function() { app.removeDeskItem(entry.id) }, ready],
-            [actionKeys("cleanDesk")[0], "clean", app.requestCleanDesk, deskList.count > 0 && !bible.busy && !rangeEditing],
+            [actionKeys("cleanDesk")[0], "clean", app.requestCleanDesk, deskList.count > 0 && !bible.busy],
             ["Escape", "close", function() { deskDrawer.close() }]]
     }
     // Confirmations: arrows move between Cancel and Confirm; enter presses the focused one.
@@ -4261,7 +4135,6 @@ ApplicationWindow {
     function actionAvailable(action) {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action || action.explanation || bible.busy) return false
-        if (rangeEditing && !["newWindow", "contextMenu", "previousVerse", "nextVerse", "previousFive", "nextFive", "previousTen", "nextTen", "extendPrevious", "extendNext", "first", "last", "copy", "copyPlain", "copyText", "copyTextPlain", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)) return false
         if (action.id === "copyText" || action.id === "copyTextPlain") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
@@ -4294,7 +4167,6 @@ ApplicationWindow {
         if (action.scope === "noteEditor") return "Notes editor"
         if (action.scope === "characters") return "Character selection · " + keyText("characterVisual")
         if (action.scope === "importGuide") return "Add version guide"
-        if (action.scope === "rangeEditor") return "Range editing (" + keyText("editRange") + ")"
         if (action.scope === "tags") return "Tag picker · Manage tags (" + keyText("manageTags") + ")"
         if (undoActions.includes(action.id)) return "Reader and side panels · also selecting characters, not while typing"
         return "Reader · outside text editing and dialogs"
@@ -4405,13 +4277,12 @@ ApplicationWindow {
     }
     // ctrl h: the palette's History.
     function openHistoryPalette() {
-        if (rangeEditing) return
         if (!bible.historyEnabled) { rejected("History is disabled · enable it in Commands"); return }
         if (!passagePalette.visible || paletteTextMode || referenceInput.text.trim().startsWith(">")) openPalette(false)
         if (passagePalette.visible) showPaletteHistory()
     }
     function openRecentPassage(entry) {
-        if (rangeEditing || !flushNote()) return
+        if (!flushNote()) return
         const from = beginJump()
         if (!openLocation(entry)) return
         endJump(from)
@@ -4424,7 +4295,6 @@ ApplicationWindow {
     readonly property bool ribbonHere: bible.ready && !!bible.ribbon.versionId
         && bible.ribbon.book === bible.book && bible.ribbon.chapter === bible.chapter
     function placeRibbon() {
-        if (rangeEditing) return
         savePosition()
         const moved = !!bible.ribbon.versionId
         const shown = ribbonHere
@@ -4444,7 +4314,7 @@ ApplicationWindow {
         NumberAnimation { target: ribbonTab; property: "drop"; to: 0; duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
     }
     function openRibbon() {
-        if (rangeEditing || !flushNote()) return false
+        if (!flushNote()) return false
         const location = bible.ribbonLocation()
         if (!location.versionId) { rejected("The ribbon's passage is in no installed version"); return false }
         const from = beginJump()
@@ -4630,7 +4500,6 @@ ApplicationWindow {
         const previousLineHeight = bible.lineHeight
         const previousReaderSize = readerSize
         switch (action) {
-        case "editRange": openRangeEditor(); break
         case "contextMenu": openPassageMenuAtCursor(); break
         case "newWindow": if (!modalOpen) newWindowRequested(); break
         case "books": showPaletteMode("passage"); break
@@ -5273,7 +5142,6 @@ ApplicationWindow {
         padding: 0
         visible: ranges.length > 0 && !bible.focusMode
         Accessible.name: hint
-        enabled: !app.rangeEditing
         function openMarker() {
             if (choices.length === 1) {
                 if (kind === "tag") app.openPassageTags(choices[0])
@@ -5296,9 +5164,8 @@ ApplicationWindow {
             onClicked: function(mouse) {
                 if (mouse.button === Qt.RightButton) {
                     const p = mapToItem(null, mouse.x, mouse.y)
-                    app.openMarkerMenu(marker.choices, marker.kind, function() { marker.openMarker() }, marker.choices, p.x, p.y)
-                } else if (mouse.modifiers & Qt.ShiftModifier) app.openRangeEditor(marker.choices, marker.kind)
-                else marker.openMarker()
+                    app.openMarkerMenu(marker.choices, marker.kind, function() { marker.openMarker() }, p.x, p.y)
+                } else marker.openMarker()
             }
         }
         readonly property int markSeed: HandDrawn.seed(kind, bible.versionId,
@@ -5362,7 +5229,7 @@ ApplicationWindow {
             color: marker.hovered || marker.activeFocus ? app.tint(desktop.accent, 0.12) : "transparent"
             radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
         }
-        AppToolTip { theme: desktop; uiScale: app.scale; visible: marker.visible && (marker.hovered || marker.activeFocus); text: marker.hint + "\n" + KeyNotation.format("Shift+Click") + " · Edit range · " + app.menuKey("editRange") + " in reader" }
+        AppToolTip { theme: desktop; uiScale: app.scale; visible: marker.visible && (marker.hovered || marker.activeFocus); text: marker.hint }
     }
     component SectionLabel: Label {
         color: desktop.muted
@@ -5396,63 +5263,6 @@ ApplicationWindow {
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-        Rectangle {
-            objectName: "rangeEditStatus"
-            Layout.fillWidth: true
-            implicitHeight: rangeStatusContent.implicitHeight + 16
-            visible: rangeEditor.active
-            color: desktop.surface
-            ColumnLayout {
-                id: rangeStatusContent
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 2
-                // The title and its keys share a line while the title needs at
-                // most half the bar; otherwise the keys move to their own lines
-                // below. Either way a clear gap separates them (they used to touch).
-                GridLayout {
-                    id: rangeStatusTop
-                    readonly property real gap: 16 * app.scale
-                    readonly property bool sideBySide: rangeEditTitle.implicitWidth + gap <= width / 2
-                    Layout.fillWidth: true
-                    columns: sideBySide ? 2 : 1
-                    columnSpacing: gap
-                    rowSpacing: 2
-                    Label {
-                        id: rangeEditTitle
-                        objectName: "rangeEditTitle"
-                        Layout.alignment: Qt.AlignTop
-                        Layout.maximumWidth: rangeStatusTop.width
-                        text: "Edit range · " + rangeEditor.endpoint
-                        textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                        color: desktop.accent
-                        font.pixelSize: 13 * app.scale
-                    }
-                    HintRow {
-                        id: rangeEditKeys
-                        objectName: "rangeEditHints"
-                        // Fill what the title leaves; the parts wrap there.
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: 0
-                        Layout.alignment: Qt.AlignTop
-                        theme: desktop
-                        pixelSize: 13 * app.scale
-                        parts: app.rangeEditHintParts()
-                    }
-                }
-                Label {
-                    objectName: "rangeEditScope"
-                    Layout.fillWidth: true
-                    text: rangeEditor.source ? rangeEditor.source.scope.reference + " → " + bible.selectionReference + " · " + bible.versionAbbreviation : ""
-                    textFormat: Text.PlainText
-                    color: desktop.foreground
-                    wrapMode: Text.Wrap
-                    font.pixelSize: 12 * app.scale
-                }
-                Label { Layout.fillWidth: true; text: rangeEditor.message; visible: text.length > 0; color: desktop.foreground; wrapMode: Text.Wrap; textFormat: Text.PlainText }
-            }
-        }
         // Character selection (v): the mode, its keys, and what is selected.
         Rectangle {
             objectName: "characterStatus"
@@ -5561,7 +5371,7 @@ ApplicationWindow {
                             width: app.chapterNavSize
                             height: app.chapterNavSize
                             readonly property bool atEnd: chapterNav.before ? app.chapterBounds.first : app.chapterBounds.last
-                            available: chapterNav.revealed && !atEnd && !app.rangeEditing && !bible.busy && !app.modalOpen
+                            available: chapterNav.revealed && !atEnd && !bible.busy && !app.modalOpen
                             opacity: chapterNav.revealed ? 1 : 0
                             // The destination passage and its key; at the Bible's bounds, where it is.
                             readonly property var destination: chapterNav.before ? app.chapterNeighbors.previous : app.chapterNeighbors.next
@@ -5750,7 +5560,7 @@ ApplicationWindow {
                                 x: parent.leftPadding
                                 width: Math.min(parent.width - x, parent.contentWidth)
                                 height: parent.height - parent.bottomPadding
-                                enabled: bible.ready && !app.rangeEditing
+                                enabled: bible.ready
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: app.openChapterList()
@@ -6165,55 +5975,6 @@ ApplicationWindow {
                             AppToolTip { theme: desktop; uiScale: app.scale; visible: nextChapterMouse.containsMouse; text: "Next chapter · " + app.keyText("nextChapter") }
                         }
                     }
-                    // Range editing: the moving endpoint (updateRangeEndpoint).
-                    Item {
-                        id: rangeEndpointMarker
-                        objectName: "rangeEndpointMarker"
-                        readonly property var geometry: app.rangeEndpointGeometry
-                        readonly property real k: app.readerScale
-                        x: readerColumn.x
-                        y: readerColumn.y
-                        width: readerColumn.width
-                        height: readerColumn.height
-                        visible: !!geometry && app.rangeEditing
-                        // A selection handle at the moving edge: a caret spanning the line
-                        // with a round knob in the line gap, above the start's first line or
-                        // below the end's last line (the two are mirror images).
-                        Item {
-                            id: rangeEndpointCaret
-                            objectName: "rangeEndpointCaret"
-                            readonly property var edge: rangeEndpointMarker.geometry ? rangeEndpointMarker.geometry.edge : null
-                            readonly property bool atStart: !!rangeEndpointMarker.geometry && rangeEndpointMarker.geometry.endpoint === "start"
-                            readonly property real k: rangeEndpointMarker.k
-                            readonly property real barWidth: Math.max(2, Math.round(3 * k))
-                            // The knob fits the line gap where it can (6–11 px at scale 1),
-                            // tucked a quarter into the line beside the text's ascent or descent.
-                            readonly property real knob: Math.round(Math.max(6 * k, Math.min(11 * k, app.readerLineGap / 0.75)))
-                            readonly property real tuck: Math.round(knob * 0.25)
-                            visible: !!edge
-                            x: edge ? Math.round(edge.x - knob / 2) : 0
-                            y: edge ? (atStart ? edge.y - knob + tuck : edge.y) : 0
-                            width: knob
-                            height: edge ? edge.height + knob - tuck : 0
-                            Rectangle {
-                                objectName: "rangeEndpointBar"
-                                x: Math.round((parent.width - width) / 2)
-                                y: rangeEndpointCaret.atStart ? Math.round(rangeEndpointCaret.knob / 2) : 0
-                                width: rangeEndpointCaret.barWidth
-                                height: parent.height - Math.round(rangeEndpointCaret.knob / 2)
-                                radius: width / 2
-                                color: desktop.accent
-                            }
-                            Rectangle {
-                                objectName: "rangeEndpointKnob"
-                                y: rangeEndpointCaret.atStart ? 0 : parent.height - height
-                                width: rangeEndpointCaret.knob
-                                height: width
-                                radius: width / 2
-                                color: desktop.accent
-                            }
-                        }
-                    }
                     // Margin notes scroll with the text, beside their passages.
                     Item {
                         id: marginLayer
@@ -6260,7 +6021,7 @@ ApplicationWindow {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    // Right click: the same menu as a note marker (Open, Edit range, Delete note…, Copy, Desk).
+                                    // Right click: the same menu as a note marker (Open, Move here, Delete note, Copy, Desk).
                                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                                     onClicked: function(mouse) {
                                         if (mouse.button === Qt.RightButton) {
@@ -6975,7 +6736,7 @@ ApplicationWindow {
     readonly property bool footerShowsRibbon: bible.ready && !!bible.ribbon.versionId && !ribbonHere && !footerStacked
         && footerCenterFull + ribbonControl.implicitWidth + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap <= footerAvailable
     function footerPanelEntries() {
-        const ready = !rangeEditing && bible.ready && !bible.busy
+        const ready = bible.ready && !bible.busy
         return [
             footerShowsText ? null : { id: "text", text: "Text and layout (Aa)", enabled: ready, run: function() { app.toggleTextPopover() } },
             { id: "annotations", text: "Annotations", shortcut: menuKey("annotations"), enabled: ready, run: function() { app.runCommand("annotations") } },
@@ -7027,7 +6788,7 @@ ApplicationWindow {
             text: "Aa"
             selected: textPopover.visible
             visible: app.footerShowsText
-            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !bible.busy && !app.modalOpen
             label: "Text size, line height, and layout"
             tip: label + "\n" + app.keyText("smaller") + " " + app.keyText("larger") + " text · " + app.keyText("readingMode") + " layout · "
                 + app.keyText("settings") + " all reading settings"
@@ -7039,7 +6800,7 @@ ApplicationWindow {
             glyph: app.charMode ? "characters" : app.verseMode ? "visual" : "normal"
             selected: app.verseMode || app.charMode
             visible: bible.ready
-            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !bible.busy && !app.modalOpen
             label: app.charMode ? "Character selection · switch to normal"
                 : app.verseMode ? "Visual mode · switch to normal" : "Normal mode · switch to visual"
             keys: app.charMode ? KeyNotation.format("Escape") : app.keyText("visual")
@@ -7056,7 +6817,7 @@ ApplicationWindow {
             label: "Keybindings"
             keys: app.keyText("help")
             visible: app.footerShowsHelp
-            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !bible.busy && !app.modalOpen
             onClicked: helpDialog.open()
         }
     }
@@ -7077,7 +6838,7 @@ ApplicationWindow {
             glyph: "search"
             label: "Search Bible"
             keys: app.keyText("bibleSearch")
-            available: bible.ready && !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.showPaletteMode("search")
         }
         FloatingButton {
@@ -7087,7 +6848,7 @@ ApplicationWindow {
             text: bible.ready ? (bible.selectionReference || bible.passage) : "Open a passage"
             label: (app.hasSelection ? bible.selectionReference : bible.passage) + " · Open passage"
             keys: app.keyText("books")
-            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !bible.busy && !app.modalOpen
             onClicked: app.openPalette(false)
         }
         FloatingButton {
@@ -7097,7 +6858,7 @@ ApplicationWindow {
             label: "Back to the ribbon · " + (bible.ribbon.reference || "")
             keys: app.keyText("ribbon")
             visible: app.footerShowsRibbon
-            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !bible.busy && !app.modalOpen
             onClicked: app.runCommand("ribbon")
         }
         FloatingButton {
@@ -7108,7 +6869,7 @@ ApplicationWindow {
             label: bible.edition + " · Switch version"
             keys: app.keyText("switchVersion")
             visible: bible.ready
-            available: !app.rangeEditing && !bible.busy && !app.modalOpen
+            available: !bible.busy && !app.modalOpen
             onClicked: app.openVersions(false)
         }
     }
@@ -7130,14 +6891,14 @@ ApplicationWindow {
             selected: savedDrawer.visible
             label: "Annotations"
             keys: app.keyText("annotations")
-            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("annotations")
         }
         FloatingButton {
             objectName: "relatedControl"
             glyph: "study"
             visible: floatingActions.expanded
-            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: bible.ready && !bible.busy && !app.modalOpen
             label: "Study"
             keys: app.keyText("related")
             onClicked: app.runCommand("related")
@@ -7149,7 +6910,7 @@ ApplicationWindow {
             selected: deskDrawer.visible
             label: "Desk"
             keys: app.keyText("desk")
-            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: bible.ready && !bible.busy && !app.modalOpen
             onClicked: app.runCommand("desk")
         }
         FloatingButton {
@@ -7158,7 +6919,7 @@ ApplicationWindow {
             visible: bible.ready && app.footerCollapsed
             glyph: "more"
             label: "Panels"
-            available: !app.rangeEditing && bible.ready && !bible.busy && !app.modalOpen
+            available: bible.ready && !bible.busy && !app.modalOpen
             onClicked: {
                 const p = footerMore.mapToItem(null, 0, 0)
                 const entries = app.footerPanelEntries()
@@ -7174,7 +6935,7 @@ ApplicationWindow {
     // dialog closes it.
     function toggleTextPopover() {
         if (textPopover.visible) { textPopover.close(); return }
-        if (rangeEditing || modalOpen || !bible.ready) { rejected(); return }
+        if (modalOpen || !bible.ready) { rejected(); return }
         textPopover.open()
     }
     readonly property real textPopoverReserve: textPopover.visible ? Math.max(0, height - textPopover.y + 6 * scale) : 0
@@ -7323,7 +7084,7 @@ ApplicationWindow {
     // The match counter acts like n / shift N: click the next match, shift
     // click the previous; right click for Next / Previous / Clear search.
     function searchCounterMenu(sceneX, sceneY) {
-        const ready = !rangeEditing && acceptedSearchQuery.length > 0
+        const ready = acceptedSearchQuery.length > 0
         contextMenu.show("searchCount", [
             menuAction("nextMatch", "Next match", "nextMatch"),
             menuAction("previousMatch", "Previous match", "previousMatch"),
@@ -7990,7 +7751,7 @@ ApplicationWindow {
         rightPadding: padding
         // Esc is handled below: it first leaves the search field.
         closePolicy: closing || tagsUi.visibleModal ? Popup.NoAutoClose : Popup.CloseOnPressOutside
-        readonly property bool tabKeys: shown && !contextMenu.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal && !app.textInputActive()
+        readonly property bool tabKeys: shown && !contextMenu.visible && !tagsUi.visibleModal && !app.textInputActive()
         readonly property bool collectionKeys: tabKeys
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
@@ -8029,7 +7790,7 @@ ApplicationWindow {
             objectName: "savedContent"
             Shortcut {
                 sequence: "Escape"
-                enabled: savedDrawer.shown && !contextMenu.visible && !tagsUi.visibleModal && !rangeEditor.visibleModal
+                enabled: savedDrawer.shown && !contextMenu.visible && !tagsUi.visibleModal
                 onActivated: app.escapeSaved()
             }
             Shortcut { sequence: "/"; enabled: savedDrawer.tabKeys && app.savedSearchVisible; onActivated: app.focusSavedSearch() }
@@ -8038,7 +7799,6 @@ ApplicationWindow {
             ListMotionKeys { objectName: "savedMotionKeys"; active: savedDrawer.collectionKeys; count: collectionList.count; onMove: function(delta) { app.moveSaved(delta) } }
             Shortcut { sequences: ["H", "Left"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(-1) }
             Shortcut { sequences: ["L", "Right"]; enabled: savedDrawer.tabKeys; onActivated: app.filterSaved(1) }
-            Shortcut { sequence: "Shift+E"; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.editSavedRange() }
             // enter opens the current row from anywhere in the drawer (a focused button takes its own enter).
             Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
             Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.deleteSaved() }
@@ -8362,7 +8122,7 @@ ApplicationWindow {
                     objectName: "deskClean"
                     Layout.alignment: Qt.AlignTop | Qt.AlignRight
                     text: "Clean Desk"; compact: true
-                    enabled: deskList.count > 0 && !app.rangeEditing && !bible.busy
+                    enabled: deskList.count > 0 && !bible.busy
                     onClicked: app.requestCleanDesk()
                 }
             }
@@ -9479,8 +9239,6 @@ ApplicationWindow {
         readerInitialized = true; syncNote(); restorePosition(); restartDwell(); scheduleMargins()
     }
     onClosing: function(close) {
-        if (rangeEditing) rangeEditor.cancel()
-        if (rangeEditing) { close.accepted = false; return }
         close.accepted = flushNote()
         savePosition()
         if (close.accepted) { closingWindow = true; cancelDownload() }
@@ -9535,8 +9293,6 @@ ApplicationWindow {
     }
     Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
     Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
-    Shortcut { sequences: ["Return", "Enter"]; enabled: app.readerKeys && rangeEditor.active; onActivated: rangeEditor.accept() }
-    Shortcut { sequence: "O"; enabled: app.readerKeys && rangeEditor.active; onActivated: rangeEditor.swap() }
     // Escape closes the Notes drawer while focus sits outside the editor (the
     // editor and preview close it themselves). Application context reaches past
     // the drawer's popup focus scope, so only the active window may enable it.
@@ -9544,14 +9300,13 @@ ApplicationWindow {
         objectName: "closeNotesShortcut"
         context: Qt.ApplicationShortcut
         sequence: "Escape"
-        enabled: app.active && app.notesClosableFromReader && !rangeEditor.sessionOpen
+        enabled: app.active && app.notesClosableFromReader
         onActivated: if (app.closeNotes()) app.readerFocus()
     }
     Shortcut {
         sequence: "Escape"
-        enabled: app.readerKeys || (rangeEditor.sessionOpen && !app.modalOpen && !app.textInputActive())
+        enabled: app.readerKeys
         onActivated: {
-            if (rangeEditor.sessionOpen) { rangeEditor.cancel(); return }
             if (textPopover.visible) { textPopover.close(); return }
             if (app.selectionBarShown) { app.selectionBarWanted = false; return }
             if (app.acceptedSearchQuery.length) { app.clearSearch(); app.readerFocus(); return }

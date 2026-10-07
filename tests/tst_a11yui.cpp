@@ -521,7 +521,7 @@ private slots:
         bible->selectVerses(3, 3); QVERIFY(bible->toggleBookmark());
         run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), (shared + QStringList{"|", "editRange", "delete", "undo"}));
+        QCOMPARE(menuIds(), (shared + QStringList{"|", "moveHere", "delete", "undo"}));
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         // Study Cross-references: mouse and keyboard.
         navigate("John 1:1"); run("related"); QTRY_VERIFY(opened("relatedDrawer"));
@@ -648,7 +648,7 @@ private slots:
         key(Qt::Key_K); QTRY_VERIFY(contentY("notePreviewScroll") < travel("notePreviewScroll"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
     }
-    void outlineAndCombineDialogScrollByKey() {
+    void outlineScrollsByKey() {
         // The chapter outline: reached by tab; j scrolls it instead of moving the reader.
         bible->setChapterOutline(true); navigate("John 3:3");
         QTRY_VERIFY(item("chapterOutline")->isVisible());
@@ -661,15 +661,6 @@ private slots:
         key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), 4);
         // Mouse: clicking an outline entry still jumps.
         click(item("outlineEntry:20")); QTRY_COMPARE(bible->cursorVerse(), 20);
-        // Combine notes: the two notes scroll by key.
-        auto editor = object("rangeEditor"); auto merge = object("rangeNoteMerge");
-        QString note; for (int i = 0; i < 60; ++i) note += QString("Note line %1\n").arg(i);
-        editor->setProperty("pending", QVariantMap{{"preview", QVariantMap{{"sourceNote", note}, {"destinationNote", note}}}});
-        QVERIFY(QMetaObject::invokeMethod(merge, "open")); QTRY_VERIFY(merge->property("opened").toBool());
-        QTRY_VERIFY(travel("rangeMergeScroll") > 20);
-        key(Qt::Key_End); QTRY_VERIFY(contentY("rangeMergeScroll") > 0);
-        key(Qt::Key_Home); QTRY_COMPARE(contentY("rangeMergeScroll"), 0.0);
-        QVERIFY(QMetaObject::invokeMethod(merge, "close")); editor->setProperty("pending", QVariant());
     }
     void rejectedKeysAndRowsSoundTheError() {
         bible->clearSelection(); call("readerFocus"); QTRY_VERIFY(!prop("hasSelection").toBool());
@@ -754,38 +745,6 @@ private slots:
     }
     // ── Phase 2: critical and high
 
-    void rangeEditingMenuAndHints() {
-        bible->selectVerses(5, 5); QVERIFY(bible->toggleBookmark()); call("readerFocus");
-        // Keyboard: shift E, j, then the menu key offers Save · Swap · Cancel; enter saves.
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
-        key(Qt::Key_J); QCOMPARE(bible->selectedEnd(), 6);
-        // The status bar keeps its one-line height: title and hints share a row.
-        QVERIFY2(item("rangeEditStatus")->height() < 100, qPrintable(QString::number(item("rangeEditStatus")->height())));
-        QCOMPARE(item("rangeEditHints")->mapToScene(QPointF()).y(), item("rangeEditTitle")->mapToScene(QPointF()).y());
-        key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), (QStringList{"saveRange", "swapEnds", "cancelRange", "|", "copy", "copyPlain"}));
-        QCOMPARE(menuShortcut("saveRange"), QString("enter")); QCOMPARE(menuShortcut("swapEnds"), QString("o"));
-        QCOMPARE(menuShortcut("cancelRange"), QString("esc"));
-        key(Qt::Key_Return); QTRY_VERIFY(!prop("rangeEditing").toBool());
-        QCOMPARE(bible->collection().first().toMap()["end"].toInt(), 6);
-        // Mouse: right-click a verse while moving; Swap ends, then Cancel restores.
-        navigate("John 3:5"); bible->selectVerses(5, 6); call("readerFocus");
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
-        const int cursor = bible->cursorVerse();
-        clickAt(versePoint(7), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(bible->selectedStart(), 5); QCOMPARE(bible->selectedEnd(), 6);
-        chooseMenu("swapEnds"); QVERIFY(bible->cursorVerse() != cursor);
-        clickAt(versePoint(7), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        chooseMenu("cancelRange"); QTRY_VERIFY(!prop("rangeEditing").toBool());
-        // The status bar's hints are clickable: o swap, enter save, esc cancel.
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
-        QVERIFY(item("rangeEditHintsPart:save")->property("clickable").toBool());
-        key(Qt::Key_J); clickHint("rangeEditHintsPart:swap"); QCOMPARE(object("rangeEditor")->property("endpoint").toString(), QString("start"));
-        clickHint("rangeEditHintsPart:save"); QTRY_VERIFY(!prop("rangeEditing").toBool());
-        QCOMPARE(bible->collection().first().toMap()["end"].toInt(), 7);
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(object("rangeEditor")->property("active").toBool());
-        clickHint("rangeEditHintsPart:cancel"); QTRY_VERIFY(!prop("rangeEditing").toBool());
-    }
     void searchPaletteLoadsMoreByKeyAndHint() {
         auto results = item("paletteResults");
         auto search = [&] {
@@ -875,8 +834,7 @@ private slots:
         call("readerFocus");
         // Keyboard: the menu adds Open bookmark (two overlap: a chooser) and Open note.
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        // Then Edit range, as the selection is annotated.
-        QCOMPARE(menuIds().mid(menuIds().size() - 4), (QStringList{"|", "openBookmark", "openNote", "editRange"}));
+        QCOMPARE(menuIds().mid(menuIds().size() - 3), (QStringList{"|", "openBookmark", "openNote"}));
         menuKeyTo("openNote"); QTRY_VERIFY(opened("notesDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 3:5"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
@@ -1492,52 +1450,6 @@ private slots:
             QVERIFY(v16.size() > 0);
         }
     }
-    void rangeEditorBackspaceAndCombineKeys() {
-        bible->selectVerses(2, 5); bible->setNoteText("Destination");
-        bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
-        bible->selectVerses(2, 4); QVERIFY(bible->toggleBookmark()); bible->setNoteText("Source");
-        call("readerFocus"); auto editor = object("rangeEditor");
-        run("editRange"); QTRY_VERIFY(opened("rangeChooser")); QTest::qWait(60);
-        const QString source = QStringLiteral("rangeChoice:John 3:2–4");
-        // Keyboard: backspace goes from the components back to the range list.
-        click(source); QTRY_VERIFY(editor->property("source").isValid() && !editor->property("source").value<QJSValue>().isNull());
-        QTRY_VERIFY(shown("rangeChooseAnother"));
-        QVERIFY(object("rangeChooserKeys")->property("plainText").toString().contains("backspace another range"));
-        key(Qt::Key_Backspace); QTRY_VERIFY(shown(source)); QVERIFY(!shown("rangeChooseAnother"));
-        // Mouse: the hint part does the same.
-        click(source); QTRY_VERIFY(shown("rangeChooseAnother"));
-        clickHint("rangeChooserKeysPart:another range"); QTRY_VERIFY(shown(source));
-        click(source); QTRY_VERIFY(shown("rangeContinue")); key(Qt::Key_Return);
-        QTRY_VERIFY(editor->property("active").toBool()); QTRY_VERIFY(prop("readerKeys").toBool()); call("readerFocus");
-        // Combine notes: Combine has the keyboard; esc steps back to moving the range.
-        key(Qt::Key_J); key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge"));
-        QTRY_VERIFY(item("rangeMergeCombine")->hasActiveFocus());
-        QVERIFY(object("rangeMergeKeys")->property("plainText").toString().contains("enter combine")); shot("range-merge");
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("rangeNoteMerge"));
-        QVERIFY(editor->property("active").toBool()); QVERIFY(editor->property("sessionOpen").toBool()); QTRY_VERIFY(readerFocused());
-        // ← → move between the buttons.
-        key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge")); QTRY_VERIFY(item("rangeMergeCombine")->hasActiveFocus());
-        key(Qt::Key_Right); QVERIFY(item("rangeMergeBack")->hasActiveFocus());
-        // The enter hint follows the focused button.
-        QTRY_VERIFY(object("rangeMergeKeys")->property("plainText").toString().contains("enter step back"));
-        key(Qt::Key_Right); QTRY_VERIFY(object("rangeMergeKeys")->property("plainText").toString().contains("enter cancel"));
-        key(Qt::Key_Left); key(Qt::Key_Left); QVERIFY(item("rangeMergeCombine")->hasActiveFocus());
-        QTRY_VERIFY(object("rangeMergeKeys")->property("plainText").toString().contains("enter combine"));
-        // Mouse: back by its hint, then combine by its hint.
-        clickHint("rangeMergeKeysPart:back"); QTRY_VERIFY(!shown("rangeNoteMerge")); QVERIFY(editor->property("sessionOpen").toBool());
-        call("readerFocus"); key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge"));
-        clickHint("rangeMergeKeysPart:combine"); QTRY_VERIFY(!editor->property("sessionOpen").toBool());
-        bible->selectVerses(2, 5); QCOMPARE(bible->noteText(), QString("Destination\n\nSource"));
-        // Keyboard: enter on the focused Combine button combines too.
-        bible->selectVerses(6, 6); QVERIFY(bible->toggleBookmark()); bible->setNoteText("Six");
-        bible->selectVerses(6, 7); bible->setNoteText("Seven"); bible->selectVerses(6, 6); call("readerFocus");
-        run("editRange"); QTRY_VERIFY(opened("rangeChooser")); QTest::qWait(60);
-        click(QStringLiteral("rangeChoice:John 3:6")); QTRY_VERIFY(shown("rangeContinue")); key(Qt::Key_Return);
-        QTRY_VERIFY(editor->property("active").toBool()); QTRY_VERIFY(prop("readerKeys").toBool()); call("readerFocus");
-        key(Qt::Key_J); key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge")); QTRY_VERIFY(item("rangeMergeCombine")->hasActiveFocus());
-        key(Qt::Key_Return); QTRY_VERIFY(!editor->property("sessionOpen").toBool());
-        bible->selectVerses(6, 7); QCOMPARE(bible->noteText(), QString("Seven\n\nSix"));
-    }
     QString tagId(const QString &name) const {
         for (const auto &tag : bible->tags()) if (tag.toMap()["name"].toString() == name) return tag.toMap()["id"].toString();
         return {};
@@ -1937,7 +1849,7 @@ private slots:
         auto note = item("marginNote:John 3:16");
         // Mouse: right click opens the note marker's menu.
         click(note, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), QStringList({"open", "|", "editRange", "remove", "|", "copy", "copyPlain", "|", "desk"}));
+        QCOMPARE(menuIds(), QStringList({"open", "|", "moveHere", "remove", "|", "copy", "copyPlain", "|", "desk"}));
         QCOMPARE(value(menu()->property("layout")).toList().at(3).toMap()["text"].toString(), QString("Delete note"));
         chooseMenu("open"); QTRY_VERIFY(opened("notesDrawer")); QCOMPARE(bible->selectionReference(), QString("John 3:16"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
@@ -2102,9 +2014,9 @@ private slots:
     }
     void helpTitlesSayWhereKeysWork() {
         // Keyboard: search Keybindings for the clarified rows.
-        run("help"); QTRY_VERIFY(opened("helpDialog")); type("range");
-        QTRY_VERIFY(item("keybindingEdit the selection's annotation range"));
-        QTRY_VERIFY(item("keybindingEdit item's annotation range (Annotations, Study's Tags)"));
+        run("help"); QTRY_VERIFY(opened("helpDialog")); type("tab");
+        QTRY_VERIFY(item("keybindingPrevious tab (Annotations, Study)"));
+        QTRY_VERIFY(item("keybindingNext tab (Annotations, Study)"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
         run("help"); QTRY_VERIFY(opened("helpDialog")); type("search the list");
         QQuickItem *row = nullptr;
@@ -2217,38 +2129,6 @@ private slots:
         navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         item("noteEditor")->setProperty("cursorPosition", 10);
         key(Qt::Key_Return, Qt::AltModifier); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5"));
-    }
-    void passageMenuEditsTheSelectionsRange() {
-        bible->selectVerses(5, 5); QVERIFY(bible->toggleBookmark());
-        // No annotations here: no Edit range.
-        navigate("John 3:3"); clickAt(versePoint(3), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QVERIFY(!menuIds().contains("editRange"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
-        // Mouse: on the bookmark, Edit range (shift E) starts editing.
-        navigate("John 3:5"); clickAt(versePoint(5), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QVERIFY(menuIds().contains("editRange")); QCOMPARE(menuShortcut("editRange"), QString("shift E"));
-        chooseMenu("editRange"); QTRY_VERIFY(prop("rangeEditing").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
-        // Keyboard: the menu key and the same row.
-        navigate("John 3:5"); key(Qt::Key_Menu); menuKeyTo("editRange"); QTRY_VERIFY(prop("rangeEditing").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
-    }
-    void rangeDialogsUseTheOverlayScrollbar() {
-        auto editor = object("rangeEditor"); auto merge = object("rangeNoteMerge");
-        QString note; for (int i = 0; i < 60; ++i) note += QString("Note line %1\n").arg(i);
-        editor->setProperty("pending", QVariantMap{{"preview", QVariantMap{{"sourceNote", note}, {"destinationNote", note}}}});
-        QVERIFY(QMetaObject::invokeMethod(merge, "open")); QTRY_VERIFY(merge->property("opened").toBool());
-        QTRY_VERIFY(travel("rangeMergeScroll") > 20);
-        auto bar = item("rangeMergeScrollbar"); QVERIFY(bar); QTRY_VERIFY(bar->isVisible());
-        auto thumb = item("rangeMergeScrollbarThumb"); QVERIFY(thumb);
-        QVERIFY(thumb->width() < bar->width()); // a thin thumb over the content, no track
-        shot("range-merge-scrollbar");
-        // Keyboard: end scrolls the notes. Mouse: the wheel does too.
-        key(Qt::Key_End); QTRY_VERIFY(contentY("rangeMergeScroll") > 0);
-        key(Qt::Key_Home); QTRY_COMPARE(contentY("rangeMergeScroll"), 0.0);
-        wheel(item("rangeMergeScroll"), -360); QTRY_VERIFY(contentY("rangeMergeScroll") > 0);
-        QVERIFY(QMetaObject::invokeMethod(merge, "close")); editor->setProperty("pending", QVariant());
-        QVERIFY(item("rangeChoiceScrollbar"));
     }
     void chapterTitleOpensItsChapterList() {
         navigate("John 3:1"); call("setReaderY", 0);
@@ -2692,13 +2572,33 @@ private slots:
         QTRY_VERIFY(object("errorDialogHints")->property("plainText").toString().contains("enter dismiss"));
         clickHint("errorDialogHintsPart:dismiss"); QTRY_VERIFY(!shown("errorDialog")); QTRY_VERIFY(readerFocused());
     }
+    void moveHereFromAMarkerMenu() {
+        bible->selectVerses(5, 5); bible->setNoteText("Moving note");
+        // The verses to move it to are selected first.
+        navigate("John 3:3"); bible->selectVerses(6, 7);
+        auto marker = item("verseNoteMarker5"); QTRY_VERIFY(marker && marker->isVisible());
+        // Mouse: the note's marker menu moves it here.
+        click(marker, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QCOMPARE(QString::fromUtf8(value(menu()->property("layout")).toList().at(2).toMap()["text"].toString().toUtf8()), QString::fromUtf8("Move here (John 3:6–7)"));
+        chooseMenu("moveHere");
+        QTRY_VERIFY(bible->selectionReference() == QString::fromUtf8("John 3:6–7") && bible->noteText() == "Moving note");
+        QVERIFY(object("toast")->property("text").toString().startsWith(QString::fromUtf8("John 3:5 moved to John 3:6–7")));
+        // u puts it back.
+        call("readerFocus"); key(Qt::Key_U); QTRY_VERIFY(bible->noteText().isEmpty());
+        bible->selectVerses(5, 5); QCOMPARE(bible->noteText(), QString("Moving note"));
+        // With the mark's own verses selected, there is nowhere to move it.
+        auto again = item("verseNoteMarker5"); QTRY_VERIFY(again && again->isVisible());
+        click(again, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
+        QVERIFY(!menuEnabled("moveHere"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
+    }
     void reauditMarkerMenusChooseOverlappingRanges() {
         bible->selectVerses(5, 6); QVERIFY(bible->toggleBookmark());
         bible->selectVerses(5, 7); QVERIFY(bible->toggleBookmark());
         navigate("John 3:3");
         auto marker = item("bookmarkMarker5"); QTRY_VERIFY(marker && marker->isVisible());
         click(marker, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QVERIFY(menuIds().contains("copyPlain")); QCOMPARE(menuShortcut("editRange"), QString());
+        QVERIFY(menuIds().contains("copyPlain"));
         // Copy plain text…: a second menu asks which range.
         QGuiApplication::clipboard()->clear(); QTest::qWait(60); click(item("contextMenuItem:copyPlain"));
         QTRY_COMPARE(menu()->property("target").toString(), QString("markerChoice")); QTRY_VERIFY(menu()->property("opened").toBool());
@@ -2761,23 +2661,6 @@ private slots:
         QVERIFY(shown.top() >= -1 && shown.bottom() <= content->height() + 1);
         key(Qt::Key_Home); QTRY_COMPARE(content->property("contentY").toReal(), 0.0);
         key(Qt::Key_Escape);
-    }
-    void reauditRangeDialogsCloseOnOutsideClicks() {
-        bible->selectVerses(2, 5); bible->setNoteText("Destination");
-        bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
-        bible->selectVerses(2, 4); QVERIFY(bible->toggleBookmark()); bible->setNoteText("Source");
-        call("readerFocus"); auto editor = object("rangeEditor");
-        run("editRange"); QTRY_VERIFY(opened("rangeChooser")); QTest::qWait(60);
-        // Mouse: outside the chooser cancels, like esc.
-        clickAt(QPoint(6, 6)); QTRY_VERIFY(!editor->property("sessionOpen").toBool()); QVERIFY(!shown("rangeChooser"));
-        // Outside Combine notes steps back to moving the range.
-        call("readerFocus"); run("editRange"); QTRY_VERIFY(opened("rangeChooser")); QTest::qWait(60);
-        click(QStringLiteral("rangeChoice:John 3:2–4")); QTRY_VERIFY(shown("rangeContinue")); key(Qt::Key_Return);
-        QTRY_VERIFY(editor->property("active").toBool()); QTRY_VERIFY(prop("readerKeys").toBool()); call("readerFocus");
-        key(Qt::Key_J); key(Qt::Key_Return); QTRY_VERIFY(opened("rangeNoteMerge"));
-        clickAt(QPoint(6, 6)); QTRY_VERIFY(!shown("rangeNoteMerge"));
-        QVERIFY(editor->property("sessionOpen").toBool()); QVERIFY(editor->property("active").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!editor->property("sessionOpen").toBool());
     }
     void reauditFocusFooterHoverAndWheel() {
         key(Qt::Key_F); QVERIFY(bible->focusMode());

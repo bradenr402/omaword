@@ -139,10 +139,8 @@ public:
     Q_INVOKABLE QVariantList relatedPassages(QVariantMap source, QVariantList tagIds,
                                            bool matchAll = false, bool allVersions = false);
     Q_INVOKABLE bool openTaggedPassage(QVariantMap scope);
-    // Exact saved ranges intersecting aroundScope, in installed USFM source order.
     // Snapshot: {ok,error,scope,bookmark,highlight,note,tags:[{id,name}],token}.
     // Tokens fingerprint all exact components and the installed Bible generation.
-    Q_INVOKABLE QVariantList annotationRanges(QVariantMap aroundScope);
     Q_INVOKABLE QVariantMap annotationSnapshot(QVariantMap scope);
     // components: {bookmark:bool,highlight:bool,note:bool,tags:[ids]}.
     // Pure preview: {ok,error,needsNoteMerge,sourceNote,destinationNote,
@@ -153,7 +151,6 @@ public:
     Q_INVOKABLE bool changeAnnotationRange(QVariantMap sourceSnapshot, QVariantMap destination,
                                           QVariantMap components, bool combineNotes = false,
                                           QString destinationToken = QString());
-    Q_INVOKABLE bool swapSelectionEnds();
     // Local reading-only restoration in the active version; never flushes peer drafts.
     // An unselected chapter uses {versionId,book,chapter,start:0,end:0}.
     Q_INVOKABLE bool restoreSelection(QVariantMap scope, bool reversed = false, double position = -1);

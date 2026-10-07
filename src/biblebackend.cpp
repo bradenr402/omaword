@@ -601,37 +601,6 @@ QVariantMap BibleBackend::annotationSnapshot(QVariantMap scope)
     return snapshot;
 }
 
-QVariantList BibleBackend::annotationRanges(QVariantMap aroundScope)
-{
-    QVariantMap around;
-    if (!rangeEditScope(aroundScope,&around)) return {};
-    QSqlQuery q(m_store);
-    q.prepare("SELECT book,chapter,start,endBook,endChapter,end FROM annotations WHERE version_id=? AND (bookmark<>0 OR highlight<>0 OR note<>'') "
-              "UNION SELECT book,chapter,start,endBook,endChapter,end FROM tag_assignments WHERE version_id=?");
-    q.addBindValue(m_versionId); q.addBindValue(m_versionId);
-    if (!q.exec()) return {};
-    QVariantList result;
-    while (q.next()) {
-        QVariantMap scope{{"versionId",m_versionId}}, canonical;
-        for (int i = 0; i < scopeFields.size(); ++i) scope[scopeFields[i]] = q.value(i);
-        if (!rangeEditScope(scope,&canonical)) return {};
-        if (!rangesOverlap(around,canonical)) continue;
-        const auto snapshot = readRangeSnapshot(canonical);
-        if (!snapshot.value("ok").toBool()) return {};
-        auto row = canonical;
-        for (const auto &key : {"bookmark","highlight","note","tags"}) row[key] = snapshot.value(key);
-        result.append(row);
-    }
-    if (q.lastError().isValid()) return {};
-    std::sort(result.begin(),result.end(),[](const QVariant &a, const QVariant &b) {
-        const auto x = a.toMap(), y = b.toMap();
-        return std::make_pair(x.value("_order").toLongLong(),x.value("_endOrder").toLongLong())
-            < std::make_pair(y.value("_order").toLongLong(),y.value("_endOrder").toLongLong());
-    });
-    for (auto &row : result) row = publicRange(row.toMap());
-    return result;
-}
-
 QVariantMap BibleBackend::prepareRangeChange(const QVariantMap &snapshot, const QVariantMap &destination,
                                             const QVariantMap &components, QVariantMap *source, QVariantMap *target) const
 {
@@ -769,15 +738,6 @@ bool BibleBackend::changeAnnotationRange(QVariantMap snapshot, QVariantMap desti
     if (!m_store.commit()) return setError("Cannot commit range change: " + m_store.lastError().text());
     clearError(); publishTags(); recordUndo(step);
     return true;
-}
-
-bool BibleBackend::swapSelectionEnds()
-{
-    if (!requireReady()) return false;
-    if (!m_anchor || !m_cursor) return setError("Select a verse range first.");
-    const auto active = endpoint(m_anchor);
-    return goToSelection(active.book,active.chapter,m_cursor,m_anchor,
-                         active.book == m_book && active.chapter == m_chapter ? m_position : 0);
 }
 
 bool BibleBackend::restoreSelection(QVariantMap scope, bool reversed, double position)

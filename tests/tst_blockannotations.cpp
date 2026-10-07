@@ -178,8 +178,6 @@ ApplicationWindow {
         property string openedBookmark: ""
         property var openedBookmarkScope: ({})
         property var openedTags: ({})
-        property var editedScope: ({})
-        property string editedKind: ""
         property string calls: ""
         property bool canFlush: true
         property string copied: ""
@@ -190,18 +188,13 @@ ApplicationWindow {
         function openNotes(edit) { calls += edit ? "edit;" : "preview;" }
         function openBookmark(scope) { openedBookmarkScope = scope; openedBookmark = typeof scope === "string" ? scope : scope.reference }
         function openPassageTags(scope) { openedTags = scope }
-        function openRangeEditor(scope, kind) { editedScope = scope; editedKind = kind; calls += "range;" }
         function copyFreeText() { copied = freeSelectedText }
         function copyPassage(plain) { calls += "passage:" + plain + ";" }
         function selectVerse(verse, extend) { backend.cursorVerse = verse }
         function openPassageMenu(verse, x, y) { calls += "menu:" + verse + ";" }
-        function openMarkerMenu(choices, kind, open, editScope, x, y) {
+        function openMarkerMenu(choices, kind, open, x, y) {
             calls += "markerMenu:" + kind + ";"
-            contextMenu.show("marker", [
-                { id: "open", text: "Open", run: open },
-                { separator: true },
-                { id: "editRange", text: "Edit range", shortcut: "shift E", run: function() { controller.openRangeEditor(editScope, kind) } }
-            ], x, y)
+            contextMenu.show("marker", [{ id: "open", text: "Open", run: open }], x, y)
         }
     }
     QtObject {
@@ -982,13 +975,9 @@ ApplicationWindow {
                  qPrintable(QString("annotated %1, plain %2, font ascent %3; line %4/%5 plain %6/%7").arg(annotatedHeight).arg(body->height()).arg(metrics.ascent())
                             .arg(annotatedAscent).arg(annotatedDescent).arg(doc->begin().layout()->lineAt(0).ascent()).arg(doc->begin().layout()->lineAt(0).descent())));
     }
-    void markerRangeEditing() {
+    void markerMenusAndOpen() {
         auto scope = note("Cross-book",78,2,16,1);
         scope.remove("note"); scope["book"] = 80; scope["endBook"] = 40; scope["versionId"] = "frozen-edition";
-        auto editedScope = [this]() {
-            const auto value = controller->property("editedScope");
-            return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
-        };
         for (const QString &kind : {QString("bookmark"),QString("note"),QString("tag")}) {
             QVariantMap range{{"reference","Cross-book"},{"scope",scope}};
             backend->setProperty("verses",QVariantList{QVariantMap{{"number",2},{"text","Endpoint."},
@@ -997,29 +986,15 @@ ApplicationWindow {
             QTRY_VERIFY(item("blockInlineMarker:"+kind+":open:Cross-book"));
             auto marker = item("blockInlineMarker:"+kind+":open:Cross-book");
             QVERIFY(marker);
-            QVERIFY(marker->property("hint").toString().contains("shift click to edit range"));
+            QVERIFY(!marker->property("hint").toString().contains("edit range"));
             const QPoint point = marker->mapToScene(marker->boundingRect().center()).toPoint();
-            controller->setProperty("calls","");
-            QTest::mouseClick(window,Qt::LeftButton,Qt::ShiftModifier,point);
-            QCOMPARE(controller->property("calls").toString(),QString("range;"));
-            QCOMPARE(controller->property("editedKind").toString(),kind);
-            QCOMPARE(editedScope(),scope);
             controller->setProperty("calls","");
             QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,point);
             QTRY_VERIFY(menuOpen());
             QCOMPARE(controller->property("calls").toString(),"markerMenu:" + kind + ";");
             controller->setProperty("calls","");
-            click(item("contextMenuItem:editRange"));
-            QTRY_VERIFY(!menuOpen());
-            QCOMPARE(controller->property("calls").toString(),QString("range;"));
-            QCOMPARE(editedScope(),scope);
-            controller->setProperty("calls","");
-            QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,point);
-            QTRY_VERIFY(menuOpen());
-            controller->setProperty("calls","");
             click(item("contextMenuItem:open"));
             QTRY_VERIFY(!menuOpen());
-            QVERIFY(!controller->property("calls").toString().contains("range;"));
             if (kind == "note") QCOMPARE(controller->property("calls").toString(),QString("flush;scope;clear;sync;edit;"));
         }
     }

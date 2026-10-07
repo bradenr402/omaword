@@ -756,19 +756,6 @@ private slots:
         // Smart case: an uppercase letter matches case, \c ignores it.
         find("ALPh"); QCOMPARE(prop("searchMatches").toList().size(), 0); key(Qt::Key_Escape);
         find("ALPh\\c"); QVERIFY(prop("searchMatches").toList().size() > 4); key(Qt::Key_Return);
-        QVERIFY(bible->toggleBookmark());
-        key(Qt::Key_E, Qt::ShiftModifier); QTRY_VERIFY(prop("rangeEditing").toBool());
-        const auto scope = bible->tagScope(); key(Qt::Key_Slash); key(Qt::Key_Slash, Qt::ControlModifier); key(Qt::Key_N);
-        QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!object("passagePalette")->property("visible").toBool());
-        const auto y = QVariant(settledY());
-        for (auto suffix : {Qt::Key_Z, Qt::Key_T, Qt::Key_B}) {
-            key(Qt::Key_Z); key(suffix);
-            QCOMPARE(QVariant(settledY()), y);
-            QCOMPARE(bible->readingMode(), QString("verse"));
-            QCOMPARE(bible->tagScope(), scope);
-            QVERIFY(prop("rangeEditing").toBool());
-        }
-        QCOMPARE(bible->tagScope(), scope); key(Qt::Key_Escape); QTRY_VERIFY(!prop("rangeEditing").toBool());
         find("\"alpha\""); QCOMPARE(prop("searchMatches").toList().size(), 0); QVERIFY(prop("searchError").toString().isEmpty());
         key(Qt::Key_Escape);
         search("beta"); const auto original = bible->tagScope(); window->setProperty("noteConflict", true);

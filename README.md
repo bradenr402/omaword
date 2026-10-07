@@ -117,9 +117,6 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `d`: Add to Desk
 - `u` · `ctrl z`: Undo a mark, note, or tag change
 - `ctrl shift Z` · `ctrl r`: Redo the change undone
-- `shift E`: Edit the selection's annotation range
-- `backspace`: Edit range: choose another overlapping range
-- `esc`: Edit range: back from Combine notes to moving the range
 - `ctrl t`: Manage tags
 - `enter`: Manage tags: rename the chosen tag
 - `delete`: Manage tags: delete a tag
@@ -202,7 +199,6 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `y`: Copy item as quotation
 - `shift Y`: Copy item as plain text
 - `d`: Add item to Desk, or remove it
-- `shift E`: Edit item's annotation range (Annotations, Study's Tags)
 - `delete` · `backspace`: Remove item
 - `t`: Edit the item's tags (Annotations and Study Tags)
 - `tab` · `shift tab`: Between Study Tags results and tag chips
@@ -276,10 +272,10 @@ These also work, but stay out of the in-app list:
 - Selecting verses with the mouse brings up a small bar above them: **x highlight · w note · t tag · y copy** and `⋯` for Desk, Compare versions, plain text, and Study. Any key or `esc` puts it away.
 - Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Desk), and `menu` or `shift F10` opens it from the keyboard.
 - Footer and dialog buttons take the keyboard by `tab` only; a focused button takes `enter` and `space`. Scrollable dialogs scroll with `j` `k`, `pgup` `pgdn`, `ctrl d` `ctrl u`, `home` `end`.
-- Clicking outside a panel, dialog, or picker only closes it (in Edit range and confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error and say why ("Select a verse first"). Mouse back closes the top dialog.
+- Clicking outside a panel, dialog, or picker only closes it (in confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error and say why ("Select a verse first"). Mouse back closes the top dialog.
 - Text fields use the app's own menu (Cut · Copy · Paste · Select all; in a note also Open link and Preview). Right-clicking selected text keeps it only when the click is on it; the passage menu (`menu`) keeps a `v` selection, and its copy entries copy it.
 - If a note changes in another window while you type, typing is not interrupted: `ctrl s` keeps your draft, `ctrl shift S` takes the saved text.
-- With Annotations, Desk, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl ,`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. The passage menu offers **Edit range** when the selection is annotated, and tooltips on the outline, margin notes, and verse numbers name their keys.
+- With Annotations, Desk, or Study open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl ,`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes, Study tag chips, and the search match counter have right-click menus. Mark menus offer **Move here**: select the verses a note or tag belongs on, then move it there from its marker or its Annotations row (`u` undoes). Tooltips on the outline, margin notes, and verse numbers name their keys.
 
 ### Your data
 Bible versions, annotations, the Desk, History, and the ribbon stay on this device, in `~/.local/share/omaword/`. Backup, restore, and Markdown export are in Commands. Reader windows have independent passages and share one library.

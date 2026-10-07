@@ -157,11 +157,10 @@ ApplicationWindow {
     property var menuEntries: []
     property string menuKind: ""
     property var copied: null
-    property var ranged: null
     function showContextMenu(kind, entries, x, y) { menuKind = kind; menuEntries = entries.map(function(entry) { return entry.separator ? "|" : entry.id }) }
     function copyScope(scope, plain) { copied = scope }
     function toggleScopeDesk(scope) {}
-    function openRangeEditor(scope, kind) { ranged = scope }
+    function moveHereEntry(choices, x, y) { return { id: "moveHere", text: "Move here", enabled: false } }
     function flushNote() { return flushAllowed }
     function savePosition() {}
     function beginJump() { return null }
@@ -582,14 +581,13 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
         openTagsTab(); QCOMPARE(prop("studyQuery").toString(), QString());
         QCOMPARE(refs().size(), 2);
-        // The shared row menu (Open, Copy, Copy plain text, Desk), then Edit tags…, Edit range. No delete.
+        // The shared row menu (Open, Copy, Copy plain text, Desk), then Edit tags…, Move here. No delete.
         key(Qt::Key_Menu);
         QCOMPARE(root->property("menuKind").toString(), QString("study"));
-        QCOMPARE(variant(root->property("menuEntries")).toStringList(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "editRange"}));
+        QCOMPARE(variant(root->property("menuEntries")).toStringList(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "moveHere"}));
         key(Qt::Key_Delete); QCOMPARE(bible->tagsForScope(first).size(), 2);
-        // y copies; shift E edits the row's range.
+        // y copies.
         key(Qt::Key_Y); QCOMPARE(variant(root->property("copied")).toMap()["start"], first["start"]);
-        key(Qt::Key_E, Qt::ShiftModifier); QCOMPARE(variant(root->property("ranged")).toMap()["start"], first["start"]);
         // t opens the picker on the row's range; Study stays open beneath it.
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), first);
@@ -937,7 +935,7 @@ private slots:
         QStringList menuIds;
         for (const auto &entry : variant(root->findChild<QObject *>("contextMenu")->property("layout")).toList())
             menuIds << (entry.toMap().value("separator").toBool() ? QString("|") : entry.toMap().value("id").toString());
-        QCOMPARE(menuIds, (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "editRange", "removeTag", "undo"}));
+        QCOMPARE(menuIds, (QStringList{"open", "copy", "copyPlain", "desk", "|", "tags", "moveHere", "removeTag", "undo"}));
         key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("contextMenu")->property("visible").toBool());
         // t: the picker on the row's range, over the drawer, which stays.
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());

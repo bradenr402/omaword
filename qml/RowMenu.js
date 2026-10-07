@@ -13,10 +13,10 @@
 //   keys        false where the list does not bind y, shift Y, d
 //   busy        the backend is busy
 //   extras      further entries (null entries are skipped)
-// `app` supplies rangeEditing, copyScope, toggleScopeDesk, and deskRowFor.
+// `app` supplies copyScope, toggleScopeDesk, and deskRowFor.
 function entries(app, spec) {
     var busy = !!spec.busy
-    var ready = !busy && !app.rangeEditing
+    var ready = !busy
     var scope = spec.scope || null
     var keys = spec.keys !== false
     function key(sequence) { return keys ? KeyNotation.format(sequence) : "" }

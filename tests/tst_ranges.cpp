@@ -87,27 +87,18 @@ private slots:
         install(net);
     }
     void cleanup() { bible.reset(); session.reset(); }
-    void exactUnionAndSourceOrder() {
+    void exactSnapshotsAcrossBooks() {
         const auto first = scope("ESG 3:6");
         bible->moveSelection(2,true); const auto cross = bible->tagScope();
         QCOMPARE(cross.value("endBook").toInt(),1);
         QVERIFY(cross.value("book").toInt() > cross.value("endBook").toInt());
         seed(cross,true,false,"cross-book note");
-        const auto tagOnly = scope("GEN 1:1");
-        const QString id = bible->createAndAssignTag(tagOnly,"tag only"); QVERIFY(!id.isEmpty());
-        const auto markOnly = scope("GEN 1:3"); seed(markOnly,false,true);
-        const auto outside = scope("TOB 1:1"); seed(outside,true,false);
         const auto before = bible->tagScope(); const auto verses = bible->verses();
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged), errors(bible.get(),&BibleBackend::errorChanged);
-        const auto rows = bible->annotationRanges(cross); QCOMPARE(rows.size(),3);
-        QCOMPARE(rows[0].toMap().value("reference"),cross.value("reference"));
-        QCOMPARE(rows[1].toMap().value("reference"),tagOnly.value("reference"));
-        QCOMPARE(rows[2].toMap().value("reference"),markOnly.value("reference"));
-        QVERIFY(!rows[1].toMap().value("bookmark").toBool());
-        QCOMPARE(rows[1].toMap().value("tags").toList().size(),1);
-        QVERIFY(!rows[0].toMap().contains("_order"));
+        // Identity is the endpoints: a display reference or order changes nothing.
         auto fakeDisplay = cross; fakeDisplay["reference"] = "TOB 1:1"; fakeDisplay["_order"] = -100;
         QCOMPARE(bible->annotationSnapshot(fakeDisplay),bible->annotationSnapshot(cross));
+        QCOMPARE(bible->annotationSnapshot(cross).value("note").toString(),QString("cross-book note"));
         QVERIFY(!bible->annotationSnapshot(first).value("ok").toBool()); // coverage is not an exact assignment
         QCOMPARE(bible->tagScope(),before); QCOMPARE(bible->verses(),verses);
         QCOMPARE(navigation.count(),0); QCOMPARE(errors.count(),0);
@@ -169,7 +160,7 @@ private slots:
         QCOMPARE(source.value("note").toString(),QString("source stays")); QCOMPARE(tagIds(source),QVariantList{stay});
         QVERIFY(target.value("bookmark").toBool()); QVERIFY(target.value("highlight").toBool());
         QCOMPARE(target.value("note").toString(),QString("destination stays")); QCOMPARE(tagIds(target),QVariantList{move});
-        QCOMPARE(bible->annotationSnapshot(overlap),other); QCOMPARE(bible->annotationRanges(overlap).size(),3);
+        QCOMPARE(bible->annotationSnapshot(overlap),other);
         QVERIFY(bible->openTaggedPassage(s)); QVERIFY(bible->selectionBookmarked()); // independent overlap remains
         QVERIFY(bible->changeAnnotationRange(source,d,components(false,true,false)));
         QVERIFY(!bible->annotationSnapshot(s).value("highlight").toBool());
@@ -338,25 +329,6 @@ private slots:
         QCOMPARE(local.count(),0); QCOMPARE(remote.count(),0); QCOMPARE(annotations.count(),0);
         QVERIFY(q.exec("DROP TRIGGER fail"));
         QVERIFY2(bible->changeAnnotationRange(snapshot,d,choice),qPrintable(bible->error()));
-    }
-    void swapAcrossOmissionsAndDirection() {
-        QVERIFY(!bible->swapSelectionEnds());
-        const auto s = scope("ESG 3:6"); bible->moveSelection(2,true);
-        const auto range = bible->tagScope(); QCOMPARE(bible->book(),1); QCOMPARE(bible->cursorVerse(),3);
-        QVERIFY(bible->swapSelectionEnds()); QCOMPARE(bible->tagScope(),range);
-        QCOMPARE(bible->book(),s.value("book").toInt()); QCOMPARE(bible->chapter(),3); QCOMPARE(bible->cursorVerse(),6);
-        bible->moveSelection(-1,true); QCOMPARE(bible->cursorVerse(),4); // moves the swapped endpoint
-        QVERIFY(bible->swapSelectionEnds()); QCOMPARE(bible->book(),1); QCOMPARE(bible->cursorVerse(),3);
-        scope("GEN 1:6"); bible->moveSelection(1,true); const auto chapterRange = bible->tagScope();
-        QCOMPARE(bible->chapter(),3); QCOMPARE(bible->cursorVerse(),1);
-        QVERIFY(bible->swapSelectionEnds()); QCOMPARE(bible->chapter(),1); QCOMPARE(bible->cursorVerse(),6);
-        QCOMPARE(bible->tagScope(),chapterRange);
-        QSqlQuery q(store());
-        QVERIFY(q.exec("CREATE TRIGGER fail BEFORE UPDATE ON reading BEGIN SELECT RAISE(ABORT,'reading failure'); END"));
-        const auto before = bible->verses(); QVERIFY(!bible->swapSelectionEnds());
-        QCOMPARE(bible->tagScope(),chapterRange); QCOMPARE(bible->chapter(),1); QCOMPARE(bible->cursorVerse(),6); QCOMPARE(bible->verses(),before);
-        QVERIFY(q.exec("DROP TRIGGER fail"));
-        QVERIFY(bible->swapSelectionEnds()); QCOMPARE(bible->chapter(),3);
     }
 };
 
