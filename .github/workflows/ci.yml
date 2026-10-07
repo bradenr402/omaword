@@ -5,6 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  JOBS: 4
+  TEST_JOBS: 2
+  QT_QPA_PLATFORM: offscreen
+  OMAWORD_SOUND: "0"
+
 jobs:
   test:
     name: Build and fast tests
@@ -12,11 +18,6 @@ jobs:
     # OmaWord targets Omarchy (Arch Linux); Arch's current Qt 6 matches it.
     container: archlinux:latest
     timeout-minutes: 30
-    env:
-      JOBS: 4
-      TEST_JOBS: 2
-      QT_QPA_PLATFORM: offscreen
-      OMAWORD_SOUND: "0"
     steps:
       - name: Install dependencies
         run: |
@@ -38,5 +39,46 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
+          path: build/test-logs/
+          if-no-files-found: ignore
+
+  gui:
+    name: GUI tests (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # Shards of similar length; ui is split by test function.
+        shard: [ui-1, ui-2, ui-3, a11yui, searchui historyui contextmenu,
+                motion marginsui rangesui deskui,
+                studyui tagsui windows annotations searchrender desktop instance]
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git qt6-base qt6-declarative \
+            libpipewire libarchive fontconfig ttf-dejavu python
+      - uses: actions/checkout@v4
+      - name: Run
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [[ $SHARD == ui-* ]]; then
+            # Build tst_ui, then run every third function, round-robin.
+            bin/test --suite ui -functions
+            index=${SHARD#ui-}
+            mapfile -t functions < <(build/ui-tests/tst_ui -functions | sed 's/()$//' | awk -v n="$index" 'NR % 3 == n % 3')
+            bin/test --suite ui "${functions[@]}"
+          else
+            suites=()
+            for suite in $SHARD; do suites+=(--suite "$suite"); done
+            bin/test "${suites[@]}"
+          fi
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ strategy.job-index }}
           path: build/test-logs/
           if-no-files-found: ignore

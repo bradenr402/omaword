@@ -31,8 +31,8 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 
 - `bin/test` builds the two libraries once, then builds and runs every suite (offscreen, software rendering, sandboxed home, sound off). Select with `--suite <name>` (repeatable); Qt args such as a function name need exactly one suite: `bin/test --suite ranges noteConfirmationAndDestinationDrift`. While a run is going, build elsewhere (`BUILD_DIR=/tmp/...`): its suites link the libraries in `build/`.
 - Full output lands in `build/test-logs/<suite>.log`.
-- Run the suites your change touches, then the rest before calling work done. CI runs `bin/shortcuts --check`, `bin/build`, `bash tests/test-runner.sh`, and the fast suites (`backend search tags ranges importer catalog sound`); GUI suites only run locally, so you must run them.
-- A new suite needs a `tests/<name>.pro` (include `../src/core.pri`, and `../qml/qml.pri` if it loads QML or the reader types), entries in `bin/test` (usage, `available`, the `case`, `projects`, `directories`), and rows in `tests/README.md`.
+- Run the suites your change touches, then the rest before calling work done. CI runs `bin/shortcuts --check`, `bin/build`, `bash tests/test-runner.sh`, and the fast suites (`backend search tags ranges importer catalog sound`) in one job, and the GUI suites in parallel shards (`tst_ui` split three ways by function); a new suite must be added to a shard in `.github/workflows/ci.yml`. CI only runs on GitHub, so run everything locally before calling work done.
+- A new suite needs a `tests/<name>.pro` (include `../src/core.pri`, and `../qml/qml.pri` if it loads QML or the reader types), entries in `bin/test` (usage, `available`, the `case`, `projects`, `directories`), a place in a CI shard, and rows in `tests/README.md`.
 - Fixtures are small, original USFM generated in temporary dirs. Never add real Bible text or network access to tests.
 - Motion/timing tests drive animations deterministically; don't "fix" flakes with longer sleeps — find the missing settle condition.
 
