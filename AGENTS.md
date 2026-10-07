@@ -1,0 +1,72 @@
+# AGENTS.md
+
+Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Omarchy (C++17, Qt 6 Quick/QML, qmake). `README.md` covers features and shortcuts, `ARCHITECTURE.md` the durable internals, `tests/README.md` the test suites; this file only covers what costs agents time when they don't know it. Treat it as defaults: the engineer directing you can override anything here.
+
+**Keep this file current.** When your change makes anything here wrong or incomplete (commands, paths, conventions, traps), update this file in the same change. Always tell the user explicitly when you edit this file, and state EXACTLY what changed: quote each removed or replaced line and its replacement (or show the diff). Never update it silently.
+
+## Hard rules
+
+1. **No GitHub writes** (`git push`, PRs, issues, comments, via any channel) without an explicit instruction. Read operations are always fine.
+2. **Never touch the user's real data** in `~/.local/share/omaword/` (Bible versions, annotations, Desk, History). Tests sandbox `HOME` and `XDG_*`; keep it that way, and launch the app manually only with a throwaway data dir.
+3. **Never kill OmaWord processes by name**; stop only the PID you started. The user may be reading in it, and it is single-instance (`omaword.lock`).
+4. **Never commit Bible content or local data**: USFM ZIPs, `*.sqlite`, backups, exported notes (see `.gitignore`). Bible text has its own copyright.
+
+## Behavior
+
+- State assumptions; if multiple interpretations exist, present them. Push back when a simpler approach exists.
+- Minimum code that solves the problem. No speculative abstractions or error handling for impossible cases.
+- Surgical changes: touch only what you must, match the style of the file you're in, no drive-by reformatting. Remove code your change made unused; mention pre-existing dead code instead of deleting it.
+- If evidence contradicts something you said, retract it plainly.
+
+## Dev environment
+
+- Omarchy (Hyprland on Arch) only. Dependencies are in README → Requirements.
+- `bin/build` builds out of tree into `build/` (`BUILD_DIR`, `JOBS` override); `bin/install` installs. Never run qmake in the source tree.
+- QML is embedded via `resources.qrc`: a new QML/JS file must be added there or it won't load (test `.pro` files share it).
+- `branding.env` feeds `src/brand.h.in` and the desktop file; use `Brand::` rather than hardcoding the app name or storage ID.
+- Personal DB schema (`PRAGMA user_version`), text DB schema, and backup format versions are documented in `ARCHITECTURE.md`. Bumping one needs a migration, tests, and an `ARCHITECTURE.md` update.
+
+## Tests
+
+- `bin/test` builds and runs every suite (offscreen, software rendering, sandboxed home, sound off). Select with `--suite <name>` (repeatable); Qt args such as a function name need exactly one suite: `bin/test --suite ranges noteConfirmationAndDestinationDrift`.
+- Full output lands in `build/test-logs/<suite>.log`.
+- Run the suites your change touches, then the rest before calling work done. CI runs `bin/shortcuts --check`, `bin/build`, `bash tests/test-runner.sh`, and the fast suites (`backend search tags ranges importer catalog sound`); GUI suites only run locally, so you must run them.
+- A new suite needs a `tests/<name>.pro`, entries in `bin/test` (usage, `available`, the `case`, `projects`, `directories`), and rows in `tests/README.md`.
+- Fixtures are small, original USFM generated in temporary dirs. Never add real Bible text or network access to tests.
+- Motion/timing tests drive animations deterministically; don't "fix" flakes with longer sleeps — find the missing settle condition.
+
+## Keybindings
+
+All actions live in the `actions` catalog in `qml/Main.qml` (`id`, `group`, `title`, `sequences`, optional `aliases`/`aliasReason`, `command`, `explanation`). It feeds the in-app Keybindings list (`?`), the command palette, and README.
+
+- **After changing the catalog, run `bin/shortcuts`** to regenerate README's shortcut section (between the `shortcuts:` markers). Never edit that section by hand; CI fails on `--check`.
+- Display every key through `qml/KeyNotation.js` (lowercase modifiers, `shift G`, `ctrl k`, arrows as `↑`). `bin/shortcuts` mirrors it; keep them in sync.
+- Conventions (with deliberate exceptions; check the catalog for prior art before choosing):
+  - **Single letters for common actions**, Vim-flavored: `j`/`k`/`h`/`l` move, `y` copies, `m` bookmark, `x` highlight, `w` note, `t` tag, `d` Desk, `f` focus, `/` find, `n`/`shift N` next/previous match. Multi-key sequences follow Vim (`zz`, `20g`, `[[`, and `gg` in character selection).
+  - **`shift` + letter opens panels** (side drawers): `shift A` Annotations, `shift S` Study, `shift D` Desk, `shift H` History. Shift also gives the "bigger" variant of a letter: `shift Y` plain-text copy, `shift G` last, `shift J`/`shift K` extend, `shift V` verse visual.
+  - **`ctrl` + letter opens modals** (palettes and dialogs): `ctrl k` passage palette, `ctrl space` commands, `ctrl r` Reading settings, `ctrl v` versions, `ctrl t` Manage tags, `ctrl /` Bible search. Ctrl also keeps standard desktop meanings (`ctrl c`, `ctrl s`, `ctrl =`/`ctrl -`/`ctrl 0`, `ctrl n` new window) and Vim scrolling (`ctrl d`/`u`/`f`/`b`).
+  - **`alt` + letter toggles a setting**: `alt n` verse numbers, `alt h` headings, `alt o` outline, `alt w` margin notes, `alt j` words of Jesus, `alt s` sounds, `alt m` animations, `alt l` layout, `alt v` Write/Preview.
+  - `esc` dismisses the top panel, selection, or step; `enter` performs; `backspace` steps back; `delete` removes.
+- Keys are contextual: the same key can mean different things in lists, notes, or character selection; document each meaning as its own catalog entry with the context in the title.
+- Conventional keys from other apps (`F1`, `ctrl shift P`, `ctrl +`) go in `aliases` with an `aliasReason`, so they work without cluttering the list.
+- Every key hint shown in a panel or modal goes through `qml/HintRow.qml` and is clickable where the action works. Keys that cannot act play the error sound.
+
+## UI conventions
+
+- Follow the live Omarchy theme, system font, and Hyprland corner radius (`src/desktop.*`); never hardcode colors, fonts, or radii.
+- Reuse shared components: `PanelHeader`, `PanelTabs`, `HintRow`, `AppContextMenu`/`RowMenu.js` (every list row has the same menu), `AppToolTip`, `ExitGhost`.
+- Everything must work by keyboard and by mouse; `a11yui` pins this. Respect **Disable animations** and **Disable sound effects**.
+- User-visible feature changes update README's Features section; durable internal contracts update `ARCHITECTURE.md`; suite changes update `tests/README.md`.
+
+## Code style
+
+- C++17, Qt idioms: `QStringLiteral`, `auto` for obvious types, `m_` members, early returns, braces on their own line for functions. Match the surrounding file.
+- QML: 4-space indent, logic in small functions or `.js` libraries (pure JS like `Margins.js` stays testable).
+- Comments explain why, never what. Fail loudly at boundaries (import, catalog, backup validation); don't swallow errors.
+- Keep temporary scripts, notes, and screenshots out of the repo. `screenshots/` holds only README images.
+
+## Git & commits
+
+- Small imperative commits with capitalized descriptive titles, no prefixes, no trailing period, each a working state. Titles describe the user-visible behavior, and may run long: "Open a key's hold window after its step's deferred work, so a tap over a chapter layout never repeats".
+- Wrap code references in backticks.
+- Always sign yourself as a co-author with a `Co-authored by:` trailer at the end of the commit message, naming the model you're running as (e.g., `Co-authored by: Claude Opus 5.5 <noreply@anthropic.com>`)
