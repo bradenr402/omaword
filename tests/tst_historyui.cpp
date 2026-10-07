@@ -256,7 +256,9 @@ private slots:
         // Restoring brings back the scroll position as well as the range.
         navigate("John 2"); bible->clearSelection(); QTRY_VERIFY(!prop("restoringPosition").toBool());
         jumpTo("John 1:2");
+        // The palette opens a chapter on its first verse; a chapter without one is restored too.
         QVERIFY(QMetaObject::invokeMethod(window, "openChapter", Q_ARG(QVariant, 43), Q_ARG(QVariant, 2)));
+        QCOMPARE(here(), QString("John 2:1")); bible->clearSelection();
         auto reading = item("reading"); QTRY_VERIFY(!prop("restoringPosition").toBool());
         const double travel = reading->property("contentHeight").toDouble() - reading->height();
         QVERIFY(travel > 400);
