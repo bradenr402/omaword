@@ -3631,11 +3631,12 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
-    // With a selection, Versions shows its text in each version (Compare,
-    // c, starts on the list rather than the search).
-    function openVersions(removing, compare) {
-        if (rangeEditing) return
-        if (bible.busy || !flushNote()) return
+    // With a selection, Versions shows its text in each version; Compare (c)
+    // starts on the list rather than the search.
+    function openCompare() { if (openVersions(false)) versionResults.forceActiveFocus() }
+    function openVersions(removing) {
+        if (rangeEditing) return false
+        if (bible.busy || !flushNote()) return false
         clearCount()
         versionDialog.removing = !!removing
         versionDialog.step = 0
@@ -3649,7 +3650,7 @@ ApplicationWindow {
         versionSearch.text = ""
         versionResults.currentIndex = 0
         versionDialog.open()
-        if (compare) versionResults.forceActiveFocus()
+        return true
     }
     function copyComparedVersion(plainText) {
         const entry = versionResults.model[versionResults.currentIndex]
@@ -4618,7 +4619,7 @@ ApplicationWindow {
         case "restore": restoreDialog.open(); break
         case "import": importGuide.open(); break
         case "switchVersion": openVersions(false); break
-        case "compare": openVersions(false, true); break
+        case "compare": openCompare(); break
         case "removeVersion": openVersions(true); break
         case "help": helpDialog.open(); break
         case "about": aboutDialog.open(); break
