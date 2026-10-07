@@ -557,7 +557,8 @@ private slots:
         QQuickItem *row = nullptr;
         QTRY_VERIFY((row = qobject_cast<QQuickItem *>(item("paletteResults")->property("currentItem").value<QObject *>())));
         click(row, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), (QStringList{"open", "copy", "copyPlain", "desk"}));
+        // A recent passage is a History row: the shared four, then Remove.
+        QCOMPARE(menuIds(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "remove"}));
         chooseMenu("open"); QTRY_VERIFY(!shown("passagePalette"));
         QCOMPARE(bible->selectionReference(), QString("John 2:4"));
         // Notes → Linked from rows.
