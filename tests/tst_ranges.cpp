@@ -55,17 +55,17 @@ class RangesTest : public QObject
         }
         return {};
     }
-    void seed(const QVariantMap &s, bool bookmark, bool highlight, const QString &note = {}) {
-        // Seed exact overlapping flags without toggleFlag's coverage subtraction.
+    void seed(const QVariantMap &s, bool highlight, const QString &note = {}) {
+        // Seed exact overlapping highlights without toggleHighlight's coverage subtraction.
         QSqlQuery q(store());
-        q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,bookmark,highlight,note) VALUES(?,?,?,?,?,?,?,?,?,?)");
+        q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,highlight,note) VALUES(?,?,?,?,?,?,?,?,?)");
         for (const auto &key : {"versionId","book","chapter","start","endBook","endChapter","end"}) q.addBindValue(s.value(key));
-        q.addBindValue(bookmark); q.addBindValue(highlight); q.addBindValue(note.isNull() ? QString("") : note);
+        q.addBindValue(highlight); q.addBindValue(note.isNull() ? QString("") : note);
         QVERIFY2(q.exec(),qPrintable(q.lastError().text()));
         bible->refreshCollection();
     }
-    static QVariantMap components(bool bookmark = true, bool highlight = true, bool note = true, QVariantList tags = {}) {
-        return {{"bookmark",bookmark},{"highlight",highlight},{"note",note},{"tags",tags}};
+    static QVariantMap components(bool highlight = true, bool note = true, QVariantList tags = {}) {
+        return {{"highlight",highlight},{"note",note},{"tags",tags}};
     }
     static QVariantList tagIds(const QVariantMap &snapshot) {
         QVariantList ids;
@@ -92,7 +92,7 @@ private slots:
         bible->moveSelection(2,true); const auto cross = bible->tagScope();
         QCOMPARE(cross.value("endBook").toInt(),1);
         QVERIFY(cross.value("book").toInt() > cross.value("endBook").toInt());
-        seed(cross,true,false,"cross-book note");
+        seed(cross,false,"cross-book note");
         const auto before = bible->tagScope(); const auto verses = bible->verses();
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged), errors(bible.get(),&BibleBackend::errorChanged);
         // Identity is the endpoints: a display reference or order changes nothing.
@@ -115,11 +115,11 @@ private slots:
     void moveAll() {
         QFETCH(QString,from); QFETCH(QString,to);
         const auto s = scope(from), d = scope(to);
-        seed(s,true,true,"Moved note");
+        seed(s,true,"Moved note");
         const QString tag = bible->createAndAssignTag(s,"Move me"); QVERIFY(!tag.isEmpty());
         const auto snapshot = bible->annotationSnapshot(s);
         QVERIFY(snapshot.value("ok").toBool());
-        const auto choice = components(true,true,true,{tag});
+        const auto choice = components(true,true,{tag});
         BibleBackend peer; QVERIFY(peer.openTaggedPassage(s));
         const auto before = bible->tagScope(), peerBefore = peer.tagScope();
         bible->setReadingPosition(0.42);
@@ -132,7 +132,7 @@ private slots:
         QVERIFY2(bible->changeAnnotationRange(snapshot,d,choice),qPrintable(bible->error()));
         QVERIFY(!bible->annotationSnapshot(s).value("ok").toBool());
         const auto dest = bible->annotationSnapshot(d);
-        for (const auto &key : {"bookmark","highlight","note","tags"}) QCOMPARE(dest.value(key),snapshot.value(key));
+        for (const auto &key : {"highlight","note","tags"}) QCOMPARE(dest.value(key),snapshot.value(key));
         QCOMPARE(peer.annotationSnapshot(d),dest); QCOMPARE(peer.collection(),bible->collection());
         QVERIFY(local.count() > 0); QVERIFY(remote.count() > 0);
         QVERIFY(peer.noteText().isEmpty()); QVERIFY(peer.selectionTags().isEmpty());
@@ -149,21 +149,21 @@ private slots:
     }
     void subsetOverlapAndDestinationUnion() {
         const auto s = scope("GEN 1:1-4"), d = scope("GEN 1:3-6"), overlap = scope("GEN 1:1-6");
-        seed(s,true,true,"source stays"); seed(d,false,true,"destination stays"); seed(overlap,true,true,"overlap stays");
+        seed(s,true,"source stays"); seed(d,false,"destination stays"); seed(overlap,true,"overlap stays");
         const QString move = bible->createAndAssignTag(s,"Move"), stay = bible->createAndAssignTag(s,"Stay");
         QVERIFY(!move.isEmpty() && !stay.isEmpty()); QVERIFY(bible->setTag(d,move,true));
         const auto snapshot = bible->annotationSnapshot(s), other = bible->annotationSnapshot(overlap);
-        const auto choice = components(true,false,false,{move,move});
+        const auto choice = components(false,false,{move,move});
         QVERIFY2(bible->changeAnnotationRange(snapshot,d,choice),qPrintable(bible->error()));
         const auto source = bible->annotationSnapshot(s), target = bible->annotationSnapshot(d);
-        QVERIFY(!source.value("bookmark").toBool()); QVERIFY(source.value("highlight").toBool());
+        QVERIFY(source.value("highlight").toBool());
         QCOMPARE(source.value("note").toString(),QString("source stays")); QCOMPARE(tagIds(source),QVariantList{stay});
-        QVERIFY(target.value("bookmark").toBool()); QVERIFY(target.value("highlight").toBool());
+        QVERIFY(!target.value("highlight").toBool());
         QCOMPARE(target.value("note").toString(),QString("destination stays")); QCOMPARE(tagIds(target),QVariantList{move});
         QCOMPARE(bible->annotationSnapshot(overlap),other);
-        QVERIFY(bible->openTaggedPassage(s)); QVERIFY(bible->selectionBookmarked()); // independent overlap remains
-        QVERIFY(bible->changeAnnotationRange(source,d,components(false,true,false)));
-        QVERIFY(!bible->annotationSnapshot(s).value("highlight").toBool());
+        QVERIFY(bible->changeAnnotationRange(source,d,components(true,false)));
+        QVERIFY(!bible->annotationSnapshot(s).value("highlight").toBool()); QVERIFY(bible->annotationSnapshot(d).value("highlight").toBool());
+        QVERIFY(bible->openTaggedPassage(s)); QVERIFY(bible->selectionHighlighted()); // independent overlap remains
         QCOMPARE(bible->annotationSnapshot(overlap),other);
     }
     void tagsOnlyAndExactValidation() {
@@ -171,21 +171,22 @@ private slots:
         const QString a = bible->createAndAssignTag(s,"A"), b = bible->createAndAssignTag(s,"B"), c = bible->createAndAssignTag(d,"C");
         const auto snapshot = bible->annotationSnapshot(s);
         const auto before = bible->collection();
-        for (const auto &bad : {components(true,false,false),components(false,false,false,{c}),components(false,false,false),
-                                QVariantMap{{"tags",QVariantList{42}}},QVariantMap{{"bookmark","true"}},QVariantMap{{"unknown",true}}}) {
+        for (const auto &bad : {components(true,false),components(false,false,{c}),components(false,false),
+                                QVariantMap{{"tags",QVariantList{42}}},QVariantMap{{"highlight","true"}},QVariantMap{{"bookmark",true}},
+                                QVariantMap{{"unknown",true}}}) {
             QVERIFY(!bible->previewRangeChange(snapshot,d,bad).value("ok").toBool());
             QVERIFY(!bible->changeAnnotationRange(snapshot,d,bad)); QCOMPARE(bible->collection(),before);
         }
         bible->clearError();
-        QVERIFY(bible->changeAnnotationRange(snapshot,d,components(false,false,false,{a,b})));
+        QVERIFY(bible->changeAnnotationRange(snapshot,d,components(false,false,{a,b})));
         QVERIFY(!bible->annotationSnapshot(s).value("ok").toBool());
         QCOMPARE(tagIds(bible->annotationSnapshot(d)).size(),3);
         QSqlQuery q(store()); QVERIFY(q.exec("SELECT COUNT(*) FROM annotations")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0);
     }
     void noteConfirmationAndDestinationDrift() {
         const auto s = scope("GEN 1:1"), d = scope("TOB 1:1");
-        seed(s,true,false,"source text"); seed(d,false,true,"destination text");
-        const auto snapshot = bible->annotationSnapshot(s), choice = components(false,false,true);
+        seed(s,true,"source text"); seed(d,true,"destination text");
+        const auto snapshot = bible->annotationSnapshot(s), choice = components(false,true);
         bible->navigate("bogus reference"); const QString previousError = bible->error(); QVERIFY(!previousError.isEmpty());
         QSignalSpy errors(bible.get(),&BibleBackend::errorChanged);
         auto preview = bible->previewRangeChange(snapshot,d,choice);
@@ -210,14 +211,14 @@ private slots:
         QVERIFY(bible->changeAnnotationRange(snapshot,d,choice,true,preview.value("destinationToken").toString()));
         QCOMPARE(peer.noteText(),QString("new destination\n\nsource text"));
         QVERIFY(bible->annotationSnapshot(s).value("note").toString().isEmpty());
-        QVERIFY(bible->annotationSnapshot(s).value("bookmark").toBool());
+        QVERIFY(bible->annotationSnapshot(s).value("highlight").toBool());
         QVERIFY(bible->annotationSnapshot(d).value("highlight").toBool());
     }
     void identicalNotesAndSameRangeNoop() {
         const auto s = scope("GEN 1:1"), d = scope("TOB 1:1");
-        seed(s,true,true,"same note"); seed(d,false,false,"same note");
+        seed(s,true,"same note"); seed(d,false,"same note");
         const QString tag = bible->createAndAssignTag(s,"same");
-        const auto snapshot = bible->annotationSnapshot(s), choice = components(true,true,true,{tag});
+        const auto snapshot = bible->annotationSnapshot(s), choice = components(true,true,{tag});
         BibleBackend peer; int flushes = 0;
         peer.setFlushCallback([&] { ++flushes; return false; });
         QSignalSpy published(&peer,&BibleBackend::tagsChanged);
@@ -233,29 +234,28 @@ private slots:
     }
     void sourceDrift_data() {
         QTest::addColumn<QString>("component");
-        for (const auto &key : {"note","bookmark","highlight","tag","rename","delete"}) QTest::newRow(key) << QString(key);
+        for (const auto &key : {"note","highlight","tag","rename","delete"}) QTest::newRow(key) << QString(key);
     }
     void sourceDrift() {
         QFETCH(QString,component);
-        const auto s = scope("GEN 1:1"), d = scope("TOB 1:1"); seed(s,true,true,"source");
+        const auto s = scope("GEN 1:1"), d = scope("TOB 1:1"); seed(s,true,"source");
         const QString tag = bible->createAndAssignTag(s,"original");
         const auto snapshot = bible->annotationSnapshot(s);
         BibleBackend peer; QVERIFY(peer.openTaggedPassage(s));
         if (component == "note") peer.setNoteText("changed");
-        else if (component == "bookmark") QVERIFY(peer.toggleBookmark());
         else if (component == "highlight") QVERIFY(peer.toggleHighlight());
         else if (component == "tag") QVERIFY(peer.setTag(s,tag,false));
         else if (component == "rename") QVERIFY(peer.renameTag(tag,"renamed"));
         else QVERIFY(peer.deleteAnnotationScope(s));
         const auto before = bible->collection();
-        QVERIFY(!bible->previewRangeChange(snapshot,d,components(false,false,true)).value("ok").toBool());
-        QVERIFY(!bible->changeAnnotationRange(snapshot,d,components(false,false,true)));
+        QVERIFY(!bible->previewRangeChange(snapshot,d,components(false,true)).value("ok").toBool());
+        QVERIFY(!bible->changeAnnotationRange(snapshot,d,components(false,true)));
         QVERIFY(bible->error().contains("source annotation changed")); QCOMPARE(bible->collection(),before);
     }
     void draftsFlushBeforeValidation() {
         const auto s = scope("GEN 1:1"), d = scope("TOB 1:1"), unrelated = scope("ESG 1:1");
-        seed(s,true,false,"old source"); seed(d,false,false,"old destination"); seed(unrelated,false,false,"unrelated");
-        auto snapshot = bible->annotationSnapshot(s); const auto choice = components(false,false,true);
+        seed(s,false,"old source"); seed(d,false,"old destination"); seed(unrelated,false,"unrelated");
+        auto snapshot = bible->annotationSnapshot(s); const auto choice = components(false,true);
         BibleBackend peer, second; QVERIFY(peer.openTaggedPassage(s)); QVERIFY(second.openTaggedPassage(unrelated));
         int flushed = 0;
         peer.setFlushCallback([&] { ++flushed; peer.setNoteText("draft source"); return peer.error().isEmpty(); });
@@ -273,7 +273,7 @@ private slots:
         QVERIFY(!bible->changeAnnotationRange(snapshot,d,choice)); QVERIFY(bible->error().contains("unsaved note"));
     }
     void invalidScopesSnapshotsAndVersions() {
-        const auto s = scope("GEN 1:1"), d = scope("TOB 1:1"); seed(s,true,true,"source");
+        const auto s = scope("GEN 1:1"), d = scope("TOB 1:1"); seed(s,true,"source");
         const auto snapshot = bible->annotationSnapshot(s), choice = components();
         for (const auto &key : {"book","chapter","start","endBook","endChapter","end"}) {
             auto bad = d; bad[key] = 2; // absent book/chapter/verse
@@ -310,9 +310,9 @@ private slots:
     }
     void rollback() {
         QFETCH(QString,trigger); QFETCH(bool,commitFailure);
-        const auto s = scope("GEN 1:1"), d = scope("TOB 1:1"); seed(s,true,true,"source");
+        const auto s = scope("GEN 1:1"), d = scope("TOB 1:1"); seed(s,true,"source");
         const QString tag = bible->createAndAssignTag(s,"rollback");
-        const auto snapshot = bible->annotationSnapshot(s), choice = components(true,true,true,{tag});
+        const auto snapshot = bible->annotationSnapshot(s), choice = components(true,true,{tag});
         QSqlQuery q(store()); // writer connection, before opening another reader
         if (commitFailure) {
             QVERIFY(q.exec("PRAGMA foreign_keys=ON")); QVERIFY(q.exec("CREATE TABLE parent(id INTEGER PRIMARY KEY)"));

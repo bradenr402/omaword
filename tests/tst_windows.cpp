@@ -137,9 +137,9 @@ private slots:
         QCOMPARE(a->collection().size(),2); QCOMPARE(a->collection(),b->collection());
         QVERIFY(b->navigate("John 3:17-18"));
         QCOMPARE(b->noteText(),QString("First window note"));
-        b->toggleBookmark(); QVERIFY(a->selectionBookmarked());
+        b->toggleHighlight(); QVERIFY(a->selectionHighlighted());
         QVERIFY(a->deleteAnnotation(selection));
-        QVERIFY(b->noteText().isEmpty()); QVERIFY(!b->selectionBookmarked());
+        QVERIFY(b->noteText().isEmpty()); QVERIFY(!b->selectionHighlighted());
         a->setFontSize(23); QCOMPARE(b->fontSize(),23);
         b->setReadingMode("verse"); QCOMPARE(a->readingMode(),QString("verse"));
         b->setShowHeadings(false); QVERIFY(!a->showHeadings());

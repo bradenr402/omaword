@@ -17,7 +17,7 @@ function hash(text) {
     return h >>> 0
 }
 
-// seed("bookmark", version, reference, segment) -> uint32
+// seed("highlight", version, reference, segment) -> uint32
 function seed() {
     return hash(Array.prototype.slice.call(arguments).join("\u241f"))
 }
@@ -235,7 +235,7 @@ function bandPolygon(rect, s, scale, opts) {
     return pts
 }
 
-// Annotation tints (paint only): each bookmark, highlight, note, or tag range
+// Annotation tints (paint only): each highlight, note, or tag range
 // covering a verse adds one translucent layer of the accent, capped so text
 // stays readable. Highlights still paint their stronger band on top.
 function tintAlpha() { return 0.045 }
@@ -243,8 +243,7 @@ function tintLayers() { return 3 }
 function tintCount(verse) {
     if (!verse) return 0
     const count = function(list) { return list ? list.length : 0 }
-    return Math.min(tintLayers(), count(verse.bookmarkRanges) + count(verse.highlightRanges)
-        + count(verse.noteRanges) + count(verse.tagRanges))
+    return Math.min(tintLayers(), count(verse.highlightRanges) + count(verse.noteRanges) + count(verse.tagRanges))
 }
 // counts: per-verse layer counts in reading order -> [{layer, first, last}],
 // the runs of consecutive indexes with at least `layer` layers.

@@ -10,6 +10,7 @@
 #include <QVariantList>
 #include <QSet>
 #include <functional>
+#include <optional>
 
 class BibleBackend : public QObject
 {
@@ -41,7 +42,6 @@ class BibleBackend : public QObject
     Q_PROPERTY(QVariantList selectionTags READ selectionTags NOTIFY tagsChanged)
     Q_PROPERTY(QVariantList overlappingTags READ overlappingTags NOTIFY tagsChanged)
     Q_PROPERTY(QString noteText READ noteText WRITE setNoteText NOTIFY noteTextChanged)
-    Q_PROPERTY(bool selectionBookmarked READ selectionBookmarked NOTIFY annotationChanged)
     Q_PROPERTY(bool selectionHighlighted READ selectionHighlighted NOTIFY annotationChanged)
     Q_PROPERTY(double readingPosition READ readingPosition WRITE setReadingPosition NOTIFY readingPositionChanged)
     Q_PROPERTY(bool showVerseNumbers READ showVerseNumbers WRITE setShowVerseNumbers NOTIFY preferencesChanged)
@@ -139,10 +139,10 @@ public:
     Q_INVOKABLE QVariantList relatedPassages(QVariantMap source, QVariantList tagIds,
                                            bool matchAll = false, bool allVersions = false);
     Q_INVOKABLE bool openTaggedPassage(QVariantMap scope);
-    // Snapshot: {ok,error,scope,bookmark,highlight,note,tags:[{id,name}],token}.
+    // Snapshot: {ok,error,scope,highlight,note,tags:[{id,name}],token}.
     // Tokens fingerprint all exact components and the installed Bible generation.
     Q_INVOKABLE QVariantMap annotationSnapshot(QVariantMap scope);
-    // components: {bookmark:bool,highlight:bool,note:bool,tags:[ids]}.
+    // components: {highlight:bool,note:bool,tags:[ids]}.
     // Pure preview: {ok,error,needsNoteMerge,sourceNote,destinationNote,
     // destinationToken,combinedNote,message}. Combined order is destination,
     // two newlines, then source. Equal notes are deduplicated without confirmation.
@@ -155,7 +155,6 @@ public:
     // An unselected chapter uses {versionId,book,chapter,start:0,end:0}.
     Q_INVOKABLE bool restoreSelection(QVariantMap scope, bool reversed = false, double position = -1);
     QString noteText() const { return m_note; }
-    bool selectionBookmarked() const { return m_bookmarked; }
     bool selectionHighlighted() const { return m_highlighted; }
     double readingPosition() const { return m_position; }
     void setReadingPosition(double position);
@@ -284,8 +283,8 @@ public:
     Q_INVOKABLE bool placeRibbon();
     Q_INVOKABLE QVariantMap ribbonLocation() const;
 
-    // Undo: this window's own annotation changes (bookmark, highlight, note,
-    // tag assignment, deletion, range move), newest first, in memory only.
+    // Undo: this window's own annotation changes (highlight, note, tag
+    // assignment, deletion, range move), newest first, in memory only.
     // Each step keeps the exact saved state of every range it touched, before
     // and after: undo writes "before" back only while those ranges still read
     // "after" (redo the reverse), otherwise it fails with a "changed in another
@@ -348,7 +347,6 @@ public:
     // Multi-verse steps stop at its edge; a subsequent step crosses by one verse.
     Q_INVOKABLE void moveByVerses(int delta, bool extend = false);
     // True only after persistence succeeds; false must not complete Visual mode.
-    Q_INVOKABLE bool toggleBookmark();
     Q_INVOKABLE bool toggleHighlight();
     Q_INVOKABLE void setNoteText(QString text);
     // Saved UI passes its captured range map; reference is display-only.
@@ -356,7 +354,7 @@ public:
     Q_INVOKABLE bool deleteAnnotationScope(QVariantMap scope);
     Q_INVOKABLE bool deleteAnnotation(QString reference, QString expectedVersionId = QString());
     // Clears only the note on this exact range, keeping marks and tags; a row
-    // left with no bookmark, highlight, or note is removed.
+    // left with no highlight or note is removed.
     Q_INVOKABLE bool deleteNoteScope(QVariantMap scope);
     Q_INVOKABLE QString copySelection(bool plainText = false);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
@@ -415,10 +413,13 @@ private:
     struct Annotation {
         // Inclusive indices in the active SQL verse keys; persisted as references.
         int start = 0, end = 0;
-        bool bookmark = false, highlight = false;
+        bool highlight = false;
         QString note;
+        // UTC ISO 8601 with milliseconds; empty for rows saved before schema 9.
+        QString created, updated;
     };
     bool initializeStore();
+    bool migrateBookmarks();
     bool loadPreferences();
     bool savePreference(const QString &key, const QVariant &value);
     QString copyRange(int first, int last, const QString &reference, bool plainText);
@@ -462,7 +463,7 @@ private:
     bool chapterBounds(int book, int chapter, int *first, int *last) const;
     void intersectSelection();
     bool commitAnnotations(const QVector<Annotation> &annotations, const QVector<Annotation> &before, const QString &label);
-    bool flagCovered(const QVector<Annotation> &annotations, bool highlight) const;
+    bool highlightCovered(const QVector<Annotation> &annotations) const;
     QString rangeReference(int start, int end) const;
     bool validRange(int book, int chapter, int start, int end) const;
     bool verseExists(int book, int chapter, int verse) const;
@@ -471,7 +472,6 @@ private:
     void updateAnnotations();
     bool loadAnnotations(QVector<Annotation> *annotations);
     bool saveAnnotations(const QVector<Annotation> &annotations);
-    bool toggleFlag(bool highlight);
     bool validateScope(const QVariantMap &scope, QVariantMap *canonical = nullptr) const;
     bool rangeEditScope(const QVariantMap &scope, QVariantMap *canonical) const;
     QVariantMap readRangeSnapshot(const QVariantMap &scope) const;
@@ -479,22 +479,30 @@ private:
                                    const QVariantMap &components, QVariantMap *source,
                                    QVariantMap *target) const;
     QVariantList tagRangeRows(const QString &versionId, bool excerpts) const;
-    bool writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned);
+    // created: the assignment's time when restoring one (else now).
+    bool writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned,
+                            const std::optional<QString> &created = std::nullopt);
     QString ensureTag(const QString &name);
     QString tagName(const QString &id) const;
     bool commitTagMutation();
     void publishTags();
     // One exact range's saved state: its annotation row (annotated false: no
-    // marks, no note) and its tag ids in SQLite order.
+    // highlight, no note) with its times, and its tag ids in SQLite order with
+    // when each was assigned.
     struct ScopeState {
-        bool annotated = false, bookmark = false, highlight = false;
-        QString note;
-        QStringList tags;
+        bool annotated = false, highlight = false;
+        QString note, created, updated;
+        QStringList tags, tagCreated;
         bool operator==(const ScopeState &other) const {
-            return annotated == other.annotated && bookmark == other.bookmark && highlight == other.highlight
-                && note == other.note && tags == other.tags;
+            return annotated == other.annotated && highlight == other.highlight && note == other.note
+                && created == other.created && updated == other.updated && tags == other.tags
+                && tagCreated == other.tagCreated;
         }
         bool operator!=(const ScopeState &other) const { return !(*this == other); }
+        // The same highlight, note, and tags, whenever they were saved.
+        bool sameMarks(const ScopeState &other) const {
+            return annotated == other.annotated && highlight == other.highlight && note == other.note && tags == other.tags;
+        }
     };
     struct UndoStep {
         UndoStep() = default;
@@ -543,7 +551,7 @@ private:
     QString m_bibleConnection, m_storeConnection;
     QSqlDatabase m_bible, m_store;
     bool m_storeReady = false;
-    bool m_ready = false, m_busy = false, m_bookmarked = false, m_highlighted = false;
+    bool m_ready = false, m_busy = false, m_highlighted = false;
     int m_book = 1, m_chapter = 1, m_start = 0, m_end = 0;
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;

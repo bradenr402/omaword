@@ -475,7 +475,7 @@ private slots:
         clickHint("lineHeightHintsPart:reset"); QCOMPARE(bible->lineHeight(), 1.5);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
         // Annotations: open the current row by its hint.
-        QVERIFY(bible->navigate("John 3:9")); bible->selectVerses(9, 9); QVERIFY(bible->toggleBookmark());
+        QVERIFY(bible->navigate("John 3:9")); bible->selectVerses(9, 9); QVERIFY(bible->toggleHighlight());
         navigate("John 1:1");
         run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
         QTRY_VERIFY(item("savedHintsPart:open")->property("clickable").toBool());
@@ -517,8 +517,8 @@ private slots:
         QCOMPARE(menuIds(), (shared + QStringList{"|", "remove"}));
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
-        // Annotations rows: the shared four, then Edit range, Delete, and the undo it offers.
-        bible->selectVerses(3, 3); QVERIFY(bible->toggleBookmark());
+        // Annotations rows: the shared four, then Move here, Delete, and the undo it offers.
+        bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
         run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), (shared + QStringList{"|", "moveHere", "delete", "undo"}));
@@ -664,13 +664,13 @@ private slots:
     }
     void rejectedKeysAndRowsSoundTheError() {
         bible->clearSelection(); call("readerFocus"); QTRY_VERIFY(!prop("hasSelection").toBool());
-        // Keyboard: a reader key that cannot act now (bookmark with nothing
+        // Keyboard: a reader key that cannot act now (highlight with nothing
         // selected) sounds the error and says why.
-        int before = playCount(); key(Qt::Key_M);
+        int before = playCount(); key(Qt::Key_X);
         QCOMPARE(playCount(), before + 1); QCOMPARE(lastSound(), QString("error")); QVERIFY(bible->collection().isEmpty());
         QTRY_COMPARE(object("toast")->property("text").toString(), QString("Select a verse first"));
         // A disabled command row: enter sounds, the palette stays.
-        run("commands"); QTRY_VERIFY(opened("passagePalette")); type("bookmark");
+        run("commands"); QTRY_VERIFY(opened("passagePalette")); type("highlight selection");
         QTRY_COMPARE(item("paletteResults")->property("count").toInt(), 1);
         object("toast")->setProperty("text", QString());
         before = playCount(); key(Qt::Key_Return);
@@ -682,7 +682,7 @@ private slots:
         QCOMPARE(playCount(), before + 1); QCOMPARE(lastSound(), QString("error")); QVERIFY(opened("passagePalette"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         // A disabled keybinding row.
-        run("help"); QTRY_VERIFY(opened("helpDialog")); type("bookmark selection");
+        run("help"); QTRY_VERIFY(opened("helpDialog")); type("highlight selection");
         before = playCount(); key(Qt::Key_Return);
         QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before); QVERIFY(opened("helpDialog"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
@@ -823,8 +823,9 @@ private slots:
         click(dismiss); QVERIFY(bible->error().isEmpty()); QVERIFY(readerFocused());
     }
     void passageMenuOpensTheCursorsRangesAndMarkersSkipTab() {
-        bible->selectVerses(5, 5); QVERIFY(bible->toggleBookmark()); bible->setNoteText("A note on five");
-        bible->selectVerses(4, 6); QVERIFY(bible->toggleBookmark());
+        bible->selectVerses(5, 5); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Five").isEmpty());
+        bible->setNoteText("A note on five");
+        bible->selectVerses(4, 6); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Five").isEmpty());
         navigate("John 3:5"); bible->selectVerses(5, 5); call("readerFocus");
         // The verse rails are mouse only: tab never lands on them.
         for (int i = 0; i < 25; ++i) {
@@ -832,25 +833,28 @@ private slots:
             QVERIFY2(!focusName().contains("Marker"), qPrintable(focusName()));
         }
         call("readerFocus");
-        // Keyboard: the menu adds Open bookmark (two overlap: a chooser) and Open note.
+        // Keyboard: the menu adds Open note and Open tags (two overlap: a chooser).
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds().mid(menuIds().size() - 3), (QStringList{"|", "openBookmark", "openNote"}));
+        QCOMPARE(menuIds().mid(menuIds().size() - 3), (QStringList{"|", "openNote", "openTags"}));
         menuKeyTo("openNote"); QTRY_VERIFY(opened("notesDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 3:5"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
-        // Mouse: right-click, Open bookmark, then pick the wider range in the chooser.
+        // Mouse: right-click, Open tags, then pick the wider range in the
+        // chooser: its tags open in place.
         clickAt(versePoint(5), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        chooseMenu("openBookmark");
+        chooseMenu("openTags");
         QTRY_VERIFY(object("verseTagMenu")->property("opened").toBool());
         auto wide = item("verseTagAction:John 3:4–6"); QTRY_VERIFY(wide && wide->isVisible());
-        click(wide); QTRY_COMPARE(bible->selectionReference(), QString("John 3:4–6"));
+        click(wide); QTRY_VERIFY(object("tagsUi")->property("scopePinned").toBool());
+        QCOMPARE(bible->selectionReference(), QString("John 3:5"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsUi")->property("scopePinned").toBool());
     }
     void notesTabReachesLinkedFrom() {
         QVERIFY(bible->navigate("John 1:5")); bible->selectVerses(5, 5); bible->setNoteText("See John 3:16 here.");
         QVERIFY(bible->navigate("John 1:7")); bible->selectVerses(7, 7); bible->setNoteText("Also John 3:16.");
         navigate("John 3:16"); bible->selectVerses(16, 16); call("readerFocus");
         key(Qt::Key_W); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        // No Bookmark, Highlight, or Copy buttons in the panel.
+        // No Highlight or Copy buttons in the panel.
         QVERIFY(!item("notesCopy"));
         // Tab types a tab; shift tab takes it back; the editor keeps the keyboard.
         key(Qt::Key_Tab); QCOMPARE(item("noteEditor")->property("text").toString(), QString("\t"));
@@ -1073,7 +1077,7 @@ private slots:
             }
             setMode("verse");
             run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
-            window->setProperty("collectionTab", 1); QTRY_COMPARE(prop("collectionTab").toInt(), 1); QTest::qWait(200);
+            window->setProperty("collectionTab", 0); QTRY_COMPARE(prop("collectionTab").toInt(), 0); QTest::qWait(200);
             shot("highlight-" + theme.first + "-panel");
             if (!qEnvironmentVariableIsSet("OMAWORD_HIGHLIGHT_BEFORE")) {
                 auto mark = item("savedHighlightJohn 3:16"); QVERIFY(mark && mark->isVisible());
@@ -1512,7 +1516,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
     }
     void annotationRowsTakeNoFocus() {
-        for (const int verse : {5, 7}) { bible->selectVerses(verse, verse); QVERIFY(bible->toggleBookmark()); }
+        for (const int verse : {5, 7}) { bible->selectVerses(verse, verse); QVERIFY(bible->toggleHighlight()); }
         navigate("John 3:3");
         run("annotations"); QTRY_VERIFY(opened("savedDrawer")); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         auto row = item("savedEntryJohn 3:5"); QVERIFY(row);
@@ -1632,10 +1636,10 @@ private slots:
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("peekCard"));
         }
         // Inline annotation markers too (flowing layouts).
-        bible->selectVerses(5, 6); QVERIFY(bible->toggleBookmark()); navigate("John 3:3");
+        bible->selectVerses(5, 6); bible->setNoteText("Five and six"); navigate("John 3:3");
         setMode("block");
-        auto glyph = visualPrefix(window->contentItem(), "blockInlineMarker:bookmark:open");
-        auto glyphHit = visualPrefix(window->contentItem(), "blockInlineHit:bookmark:open");
+        auto glyph = visualPrefix(window->contentItem(), "blockInlineMarker:note:open");
+        auto glyphHit = visualPrefix(window->contentItem(), "blockInlineHit:note:open");
         QVERIFY(glyph && glyphHit); QCOMPARE(glyphHit->width(), glyph->width()); QVERIFY(glyphHit->height() > glyph->height() + 6);
         // Keyboard: out of the tab order, as in the Verse layout (the passage menu opens its ranges).
         QVERIFY(!glyph->property("activeFocusOnTab").toBool());
@@ -1685,7 +1689,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
     }
     void globalKeysLeaveSidePanels() {
-        QVERIFY(bible->addToDesk()); bible->selectVerses(3, 3); QVERIFY(bible->toggleBookmark());
+        QVERIFY(bible->addToDesk()); bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
         struct Panel { Qt::Key key; const char *drawer; };
         const QList<Panel> panels = {{Qt::Key_D, "deskDrawer"}, {Qt::Key_A, "savedDrawer"}, {Qt::Key_S, "relatedDrawer"}};
         for (const auto &panel : panels) {
@@ -1878,7 +1882,7 @@ private slots:
     void listsReserveTheScrollbar() {
         window->resize(1000, 520);
         for (int verse = 1; verse <= 24; ++verse) {
-            bible->selectVerses(verse, verse); QVERIFY(bible->addToDesk()); QVERIFY(bible->toggleBookmark());
+            bible->selectVerses(verse, verse); QVERIFY(bible->addToDesk()); bible->setNoteText("Long");
             bible->createAndAssignTag(bible->tagScope(), "Long");
         }
         navigate("John 3:3");
@@ -1892,10 +1896,11 @@ private slots:
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer"));
         check("deskList", "deskEntry0", "deskScrollbar"); shot("scrollbar-desk");
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        window->setProperty("collectionTab", 1);
         key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer"));
         check("collectionList", "savedEntryJohn 3:1", "savedScrollbar");
         // Tags: the "here" label stays clear of the scrollbar.
-        call("filterSaved", 3); QTRY_VERIFY(item("savedHereJohn 3:3"));
+        call("filterSaved", 1); QTRY_VERIFY(item("savedHereJohn 3:3"));
         auto here = item("savedHereJohn 3:3");
         QTRY_VERIFY(here->mapToItem(item("collectionList"), QPointF(here->width(), 0)).x() <= item("collectionList")->width() - item("savedScrollbar")->width() + 0.5);
         shot("scrollbar-annotations-tags");
@@ -2059,11 +2064,11 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
     }
     void pointingHandsAndHoveredSuggestions() {
-        bible->selectVerses(5, 5); QVERIFY(bible->toggleBookmark());
+        bible->selectVerses(5, 5); bible->setNoteText("Five");
         navigate("John 3:3");
         // Mouse: rails, menu rows, and chips show a pointing hand.
-        QTRY_VERIFY(item("bookmarkMarker5Hit"));
-        QCOMPARE(item("bookmarkMarker5Hit")->cursor().shape(), Qt::PointingHandCursor);
+        QTRY_VERIFY(item("verseNoteMarker5Hit"));
+        QCOMPARE(item("verseNoteMarker5Hit")->cursor().shape(), Qt::PointingHandCursor);
         clickAt(versePoint(3), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         auto row = item("contextMenuItem:copy"); QVERIFY(row);
         QCOMPARE(mouseAreaOf(row)->cursor().shape(), Qt::PointingHandCursor);
@@ -2483,7 +2488,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
     }
     void reauditListsTakeHomeEndAndEnterAnywhere() {
-        for (const int verse : {5, 7, 9}) { bible->selectVerses(verse, verse); QVERIFY(bible->toggleBookmark()); }
+        for (const int verse : {5, 7, 9}) { bible->selectVerses(verse, verse); QVERIFY(bible->toggleHighlight()); }
         navigate("John 3:3");
         run("annotations"); QTRY_VERIFY(opened("savedDrawer")); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         key(Qt::Key_End); QCOMPARE(item("collectionList")->property("currentIndex").toInt(), 2);
@@ -2520,7 +2525,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         // Mouse: an unavailable command row reads muted; a click sounds the error.
         bible->clearSelection(); run("commands"); QTRY_VERIFY(opened("passagePalette"));
-        type("Bookmark"); QTRY_VERIFY(object("paletteResults")->property("currentItem").value<QQuickItem *>());
+        type("highlight selection"); QTRY_VERIFY(object("paletteResults")->property("currentItem").value<QQuickItem *>());
         auto entry = object("paletteResults")->property("currentItem").value<QQuickItem *>();
         QVERIFY(!entry->property("available").toBool());
         const int plays = playCount(); QTest::qWait(50); click(entry);
@@ -2593,10 +2598,10 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
     }
     void reauditMarkerMenusChooseOverlappingRanges() {
-        bible->selectVerses(5, 6); QVERIFY(bible->toggleBookmark());
-        bible->selectVerses(5, 7); QVERIFY(bible->toggleBookmark());
+        bible->selectVerses(5, 6); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Overlap").isEmpty());
+        bible->selectVerses(5, 7); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Overlap").isEmpty());
         navigate("John 3:3");
-        auto marker = item("bookmarkMarker5"); QTRY_VERIFY(marker && marker->isVisible());
+        auto marker = item("verseTagMarker5"); QTRY_VERIFY(marker && marker->isVisible());
         click(marker, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         QVERIFY(menuIds().contains("copyPlain"));
         // Copy plain text…: a second menu asks which range.

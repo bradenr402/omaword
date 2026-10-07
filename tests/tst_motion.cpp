@@ -632,7 +632,7 @@ private slots:
         QCOMPARE(background->property("color").value<QColor>().alpha(), 0);
         call("openPassageMenuAtCursor"); QVERIFY(menu()->property("visible").toBool());
         QTest::qWait(30);
-        auto row = item("contextMenuItem:bookmark");
+        auto row = item("contextMenuItem:highlight");
         QTest::mouseMove(window, row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
         QCoreApplication::processEvents();
         auto highlight = item("contextMenuHighlight" + QString::number(menu()->property("currentIndex").toInt()));

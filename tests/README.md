@@ -78,7 +78,7 @@ fontconfig state.
 
 - **importer**: USFM parsing, metadata, source order, poetry line levels (schema 5), malformed/unsafe input, staged publication.
 - **catalog**: catalog metadata, streamed atomic downloads, cancel/timeout/retry.
-- **backend**: library, references, annotations, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), comparing versions, reading the next chapter ahead, backups, migrations, peers, History, the ribbon, file ownership, character-selection motions/objects and the quotation format.
+- **backend**: library, references, annotations, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), comparing versions, reading the next chapter ahead, backups, migrations (schema 9: bookmarks become the Bookmarked tag, times), peers, History, the ribbon, file ownership, character-selection motions/objects and the quotation format.
 - **ui**: packaged Main: catalog, layouts (the 66ch column, the type scale, poetry indents, the next-chapter link, `ctrl` + wheel zoom), the Aa popover, footer folding, selection/copy, Annotations (immediate delete, undo from the panel), undo keys, toasts and Commands, Visual completion, footer.
 - **search**: matching semantics (incl. chapter find's smart-case regular expressions), results in Bible order, the two-version corpus cache, async lifecycle, whitespace-preserving copy.
 - **searchui**: palette and chapter-find keyboard behavior; Bible search results under book headings with counts, `ctrl ↓`/`ctrl ↑` book jumps across pages.
@@ -90,7 +90,7 @@ fontconfig state.
 - **historyui**: jump stack (`[` `]` `-`), dwell recording, History in the palette (recents, All History, `ctrl h`, day groups, filter, remove and clear keys, row menu), the ribbon (`shift R`, `r`, tab, footer, Continue row, another version), two windows.
 - **motion**: focus dimming, jump pulses, copy flashes, held-key repeat, instant menus/modals with exit ghosts, side-panel enter/exit, hover colors, reduce motion.
 - **contextmenu**: shared context menu items, keyboard navigation, actions, the mouse selection bar in every layout.
-- **tags**: tag identity, exact/overlap queries, persistence, backup, rollback.
+- **tags**: tag identity, exact/overlap queries, persistence, backup (older backups' bookmarks restore as the Bookmarked tag), rollback.
 - **tagsui**: picker, Annotations summary, Related, management, Main integration.
 - **ranges**: atomic range moves, collisions, stale tokens, rollback, undoing a move.
 - **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, annotation tints.

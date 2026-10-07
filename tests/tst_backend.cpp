@@ -82,6 +82,16 @@ class BackendTest : public QObject
         }
         return {};
     }
+    // A store as schema 8 left it: annotations kept a bookmark flag, and
+    // neither they nor tag assignments had times.
+    static bool schemaEight(QSqlQuery &q) {
+        return q.exec("ALTER TABLE annotations RENAME TO annotations_v9")
+            && q.exec("CREATE TABLE annotations(book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),bookmark INTEGER NOT NULL CHECK(bookmark IN(0,1)),highlight INTEGER NOT NULL CHECK(highlight IN(0,1)),note TEXT NOT NULL,endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),version_id TEXT NOT NULL,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(bookmark OR highlight OR length(note)>0)) WITHOUT ROWID")
+            && q.exec("INSERT INTO annotations SELECT book,chapter,start,end,0,highlight,note,endBook,endChapter,version_id FROM annotations_v9")
+            && q.exec("DROP TABLE annotations_v9")
+            && q.exec("ALTER TABLE tag_assignments DROP COLUMN created")
+            && q.exec("PRAGMA user_version=8");
+    }
     QString installedPath(const QString &id = {}) const {
         QSqlQuery q(store()); q.prepare("SELECT path FROM installed WHERE version_id=?");
         q.addBindValue(id.isEmpty() ? bible->versionId() : id);
@@ -207,7 +217,7 @@ private slots:
         QVERIFY(bible->focusMode()); QCOMPARE(bible->readingMode(),QString("block"));
         QCOMPARE(bible->fontSize(),23); QCOMPARE(bible->lineHeight(),2.3);
         QSqlQuery q(store());
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),8); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
         QVERIFY(q.exec("CREATE TRIGGER reject_preferences BEFORE UPDATE ON preferences BEGIN SELECT RAISE(ABORT,'preference failure'); END"));
         bible->setFontSize(19); QCOMPARE(bible->fontSize(),23); QVERIFY(bible->error().contains("preference failure"));
     }
@@ -223,7 +233,7 @@ private slots:
         QVERIFY(bible->navigate("ESG 16:36")); bible->moveSelection(1,true);
         QCOMPARE(bible->book(),40); QCOMPARE(bible->cursorVerse(),1); QVERIFY(bible->crossChapterSelection());
         const auto range = bible->selectionReference();
-        QVERIFY(range.contains("Matthew")); bible->setNoteText("Across source ordinal boundary"); bible->toggleBookmark();
+        QVERIFY(range.contains("Matthew")); bible->setNoteText("Across source ordinal boundary"); bible->toggleHighlight();
         QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
         QVERIFY(bible->navigate(range)); QCOMPARE(bible->noteText(),QString("Across source ordinal boundary"));
         bible.reset(); bible = std::make_unique<BibleBackend>();
@@ -345,8 +355,8 @@ private slots:
     void sourceOmissionsCopyAndRangeAnnotations() {
         install(net); QVERIFY(bible->navigate("MRK 7:15"));
         bible->moveSelection(1,true); QCOMPARE(bible->selectedEnd(),17);
-        bible->setNoteText("Original range note"); bible->toggleBookmark(); bible->toggleHighlight();
-        QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->selectionBookmarked());
+        bible->setNoteText("Original range note"); bible->toggleHighlight();
+        QVERIFY(bible->selectionHighlighted());
         const QString copy = bible->copySelection();
         QVERIFY(copy.startsWith("“¹⁵ ")); QVERIFY(copy.contains("¹⁷ ")); QVERIFY(!copy.contains("¹⁶ "));
         QCOMPARE(QGuiApplication::clipboard()->text(),copy);
@@ -627,7 +637,7 @@ private slots:
         QSqlQuery q(db);
         QVERIFY(q.exec("DROP TABLE desk")); // Schema 4 stores predate the Desk, History, and the ribbon.
         QVERIFY(q.exec("DROP TABLE history")); QVERIFY(q.exec("DROP TABLE recent_queries")); QVERIFY(q.exec("DROP TABLE ribbon"));
-        QVERIFY(q.exec("DROP TABLE annotations"));
+        QVERIFY(schemaEight(q)); QVERIFY(q.exec("DROP TABLE annotations"));
         QVERIFY(q.exec("CREATE TABLE annotations(book INTEGER,chapter INTEGER,start INTEGER,end INTEGER,bookmark INTEGER,highlight INTEGER,note TEXT,endBook INTEGER,endChapter INTEGER,version_id TEXT,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(book BETWEEN 1 AND 66),CHECK(chapter BETWEEN 1 AND 150),CHECK(start BETWEEN 1 AND 176)) WITHOUT ROWID"));
         QVERIFY(q.exec("INSERT INTO annotations VALUES(1,1,1,1,1,0,'Archived note',1,1,'net-2.1')"));
         QVERIFY(q.exec("INSERT OR REPLACE INTO reading VALUES(1,1,1,1,1,0.42,1,1,1,1,'net-2.1')"));
@@ -644,7 +654,10 @@ private slots:
         QVERIFY(q.exec("SELECT note,version_id FROM annotations")); QVERIFY(q.next());
         QCOMPARE(q.value(0).toString(),QString("Archived note")); QCOMPARE(q.value(1).toString(),QString("net-2.1")); q.finish();
         QVERIFY(q.exec("SELECT position FROM reading WHERE version_id='net-2.1'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toDouble(),0.42); q.finish();
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),8);
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
+        // The archived bookmark became the Bookmarked tag, in its own version.
+        QVERIFY(q.exec("SELECT t.name,a.version_id FROM tag_assignments a JOIN tags t ON t.id=a.tag_id")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toString(),QString("Bookmarked")); QCOMPARE(q.value(1).toString(),QString("net-2.1"));
     }
     void schemaFiveDeskMigrationRollsBack() {
         install(net); QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Pre-desk note");
@@ -653,6 +666,7 @@ private slots:
         const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("desk-migration"); });
         auto db = QSqlDatabase::addDatabase("QSQLITE","desk-migration"); db.setDatabaseName(path); QVERIFY(db.open());
         QSqlQuery q(db);
+        QVERIFY(schemaEight(q));
         QVERIFY(q.exec("DROP TABLE desk")); QVERIFY(q.exec("DROP TABLE history")); QVERIFY(q.exec("DROP TABLE recent_queries"));
         QVERIFY(q.exec("DROP TABLE ribbon")); QVERIFY(q.exec("PRAGMA user_version=5"));
         // A conflicting object makes the schema 6 step fail; nothing may change.
@@ -663,7 +677,7 @@ private slots:
         QVERIFY(q.exec("DROP VIEW desk"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
         QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-desk note"));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),8); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
         QVERIFY(bible->desk().isEmpty()); QVERIFY(bible->addToDesk()); QCOMPARE(bible->desk().size(),1);
     }
     void schemaSixHistoryMigrationRollsBack() {
@@ -674,6 +688,7 @@ private slots:
         const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("history-migration"); });
         auto db = QSqlDatabase::addDatabase("QSQLITE","history-migration"); db.setDatabaseName(path); QVERIFY(db.open());
         QSqlQuery q(db);
+        QVERIFY(schemaEight(q));
         QVERIFY(q.exec("DROP TABLE history")); QVERIFY(q.exec("DROP TABLE recent_queries")); QVERIFY(q.exec("DROP TABLE ribbon"));
         QVERIFY(q.exec("PRAGMA user_version=6"));
         // recent_queries is created after history: a conflict there must roll back both.
@@ -685,7 +700,7 @@ private slots:
         QVERIFY(q.exec("DROP VIEW recent_queries"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
         QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-history note")); QCOMPARE(bible->desk().size(),1);
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),8); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
         QVERIFY(bible->historyEnabled()); QVERIFY(bible->history().isEmpty()); QVERIFY(bible->recentQueries().isEmpty());
         QVERIFY(bible->recordHistory()); QCOMPARE(bible->history().size(),1);
     }
@@ -696,15 +711,63 @@ private slots:
         const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("ribbon-migration"); });
         auto db = QSqlDatabase::addDatabase("QSQLITE","ribbon-migration"); db.setDatabaseName(path); QVERIFY(db.open());
         QSqlQuery q(db);
-        QVERIFY(q.exec("DROP TABLE ribbon")); QVERIFY(q.exec("PRAGMA user_version=7"));
+        QVERIFY(schemaEight(q)); QVERIFY(q.exec("DROP TABLE ribbon")); QVERIFY(q.exec("PRAGMA user_version=7"));
         QVERIFY(q.exec("CREATE VIEW ribbon AS SELECT 1 AS id"));
         bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->error().isEmpty()); QVERIFY(bible->ribbon().isEmpty()); bible.reset();
         QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),7); q.finish();
         QVERIFY(q.exec("DROP VIEW ribbon"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),8); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
         QCOMPARE(bible->history().size(),1); QVERIFY(bible->ribbon().isEmpty()); QVERIFY(bible->ribbonLocation().isEmpty());
         QVERIFY(bible->placeRibbon()); QCOMPARE(bible->ribbon()["reference"].toString(),QString("John 3:16"));
+    }
+    void schemaEightBookmarksBecomeTheBookmarkedTag() {
+        install(net); const QString version = bible->versionId();
+        QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Kept note"); const auto noted = bible->tagScope();
+        QVERIFY(bible->navigate("John 3:17")); QVERIFY(bible->toggleHighlight()); const auto highlighted = bible->tagScope();
+        QVERIFY(bible->navigate("John 3:20")); const auto tagged = bible->tagScope();
+        // An equivalent name already in use is reused, spelling and all.
+        const QString id = bible->createAndAssignTag(tagged,"bookmarked"); QVERIFY(!id.isEmpty());
+        const QString path = bible->dataDirectory()+"/personal.sqlite";
+        bible.reset();
+        const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("bookmark-migration"); });
+        auto db = QSqlDatabase::addDatabase("QSQLITE","bookmark-migration"); db.setDatabaseName(path); QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(schemaEight(q));
+        QVERIFY(q.exec("UPDATE annotations SET bookmark=1 WHERE start=16"));
+        q.prepare("INSERT INTO annotations VALUES(43,3,18,19,1,0,'',43,3,?)"); q.addBindValue(version); QVERIFY(q.exec());
+        // A failing step leaves schema 8 exactly as it was.
+        QVERIFY(q.exec("CREATE VIEW annotations_v8 AS SELECT 1"));
+        bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->error().isEmpty()); bible.reset();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),8); q.finish();
+        QVERIFY(q.exec("SELECT COUNT(*) FROM annotations WHERE bookmark")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),2); q.finish();
+        QVERIFY(q.exec("SELECT COUNT(*) FROM tag_assignments")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),1); q.finish();
+        QVERIFY(q.exec("DROP VIEW annotations_v8"));
+        bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
+        QCOMPARE(bible->tags().size(),1); QCOMPARE(bible->tags().first().toMap()["name"].toString(),QString("bookmarked"));
+        auto bookmarkedAt = [&](QVariantMap scope) {
+            const auto tags = bible->tagsForScope(scope);
+            return tags.size() == 1 && tags.first().toMap()["id"].toString() == id;
+        };
+        auto bare = noted; bare["start"] = 18; bare["end"] = 19;
+        QVERIFY(bookmarkedAt(noted)); QVERIFY(bookmarkedAt(bare)); QVERIFY(bookmarkedAt(tagged));
+        QVERIFY(bible->tagsForScope(highlighted).isEmpty());
+        // The bookmark-only row is gone; the note and the highlight stay, their times unknown.
+        QVERIFY(q.exec("SELECT start,highlight,note,created,updated FROM annotations ORDER BY start")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),16); QVERIFY(!q.value(1).toBool()); QCOMPARE(q.value(2).toString(),QString("Kept note"));
+        QVERIFY(q.value(3).toString().isEmpty()); QVERIFY(q.value(4).toString().isEmpty()); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),17); QVERIFY(q.value(1).toBool()); QVERIFY(!q.next()); q.finish();
+        QVERIFY(q.exec("SELECT COUNT(*) FROM pragma_table_info('annotations') WHERE name='bookmark'")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),0); q.finish();
+        QVERIFY(bible->openTaggedPassage(noted)); QCOMPARE(bible->noteText(),QString("Kept note"));
+        // New marks are timed.
+        bible->setNoteText("Kept note, edited");
+        QVERIFY(q.exec("SELECT created,updated FROM annotations WHERE start=16")); QVERIFY(q.next());
+        QVERIFY(q.value(0).toString().isEmpty()); QVERIFY(QDateTime::fromString(q.value(1).toString(),Qt::ISODateWithMs).isValid()); q.finish();
+        QVERIFY(bible->setTag(highlighted,id,true));
+        q.prepare("SELECT created FROM tag_assignments WHERE start=17"); QVERIFY(q.exec()); QVERIFY(q.next());
+        QVERIFY(QDateTime::fromString(q.value(0).toString(),Qt::ISODateWithMs).isValid()); q.finish();
     }
     void ribbonPlacesStaysAndCrossesVersions() {
         // Nothing to place it in before a version is installed.
@@ -875,7 +938,7 @@ private slots:
         install(net); BibleBackend peer;
         QVERIFY(bible->navigate("MRK 7:15")); bible->moveSelection(2,true);
         const auto scope = bible->tagScope();
-        bible->setNoteText("A long thought"); QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight());
+        bible->setNoteText("A long thought"); QVERIFY(bible->toggleHighlight());
         QVERIFY(!bible->createAndAssignTag(scope,"Kept").isEmpty());
         // A note on an overlapping, different range survives.
         bible->selectVerses(15,15); bible->setNoteText("Other range");
@@ -883,12 +946,12 @@ private slots:
         QSignalSpy peerChanged(&peer,&BibleBackend::collectionChanged);
         QVERIFY2(bible->deleteNoteScope(scope),qPrintable(bible->error()));
         QVERIFY(bible->noteText().isEmpty());
-        QVERIFY(bible->selectionBookmarked()); QVERIFY(bible->selectionHighlighted());
+        QVERIFY(bible->selectionHighlighted());
         QCOMPARE(bible->tagsForScope(scope).size(),1);
         QVERIFY(peerChanged.count() > 0);
         QVariantMap row;
         for (const auto &v : peer.collection()) if (v.toMap()["reference"] == scope["reference"]) row = v.toMap();
-        QVERIFY(row["bookmark"].toBool()); QVERIFY(row["highlight"].toBool()); QVERIFY(row["note"].toString().isEmpty());
+        QVERIFY(row["highlight"].toBool()); QVERIFY(row["note"].toString().isEmpty());
         bible->selectVerses(15,15); QCOMPARE(bible->noteText(),QString("Other range"));
         // No note left on the exact range: nothing to delete.
         QVERIFY(!bible->deleteNoteScope(scope)); QVERIFY(!bible->error().isEmpty());
@@ -925,7 +988,7 @@ private slots:
         // Typing back to the saved text leaves no step, but any change clears redo.
         bible->setNoteText("Gone"); bible->setNoteText("");
         QCOMPARE(bible->undoLabel(),QString("highlight removal on John 3:17")); QVERIFY(!bible->canRedo());
-        QVERIFY(bible->toggleBookmark()); QCOMPARE(bible->undoLabel(),QString("bookmark on John 3:16"));
+        QVERIFY(bible->toggleHighlight()); QCOMPARE(bible->undoLabel(),QString("highlight removal on John 3:16"));
         // A tag the step created goes with its undo, and comes back (same ID) with redo.
         const QString grace = bible->createAndAssignTag(scope,"Grace"); QVERIFY(!grace.isEmpty());
         QCOMPARE(bible->undoLabel(),QString("tag Grace on John 3:16"));
@@ -953,22 +1016,22 @@ private slots:
         QVERIFY(bible->navigate("John 3:16")); QVERIFY(peer.navigate("John 3:16"));
         QVERIFY(bible->toggleHighlight()); QVERIFY(bible->navigate("John 3:17")); QVERIFY(bible->toggleHighlight());
         // The peer changes 3:17: that step is dropped, the one before still applies.
-        QVERIFY(peer.navigate("John 3:17")); QVERIFY(peer.toggleBookmark());
+        QVERIFY(peer.navigate("John 3:17")); peer.setNoteText("Peer note");
         QVERIFY(!bible->undo()); QVERIFY2(bible->error().contains("another window"),qPrintable(bible->error()));
         QVERIFY(bible->selectionHighlighted()); QCOMPARE(bible->undoLabel(),QString("highlight on John 3:16"));
         QVERIFY(bible->undo()); QVERIFY(!bible->canUndo());
         QVERIFY(peer.navigate("John 3:16")); QVERIFY(!peer.selectionHighlighted());
-        QVERIFY(peer.undo()); QVERIFY(peer.navigate("John 3:17")); QVERIFY(!peer.selectionBookmarked());
+        QVERIFY(peer.undo()); QVERIFY(peer.navigate("John 3:17")); QVERIFY(peer.noteText().isEmpty());
         // Another version's step applies there, without switching to it.
-        install(kjv); QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->toggleBookmark());
+        install(kjv); QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->toggleHighlight());
         QVERIFY(bible->switchVersion("engnet")); QVERIFY(bible->undo()); QCOMPARE(bible->versionId(),QString("engnet"));
-        QVERIFY(bible->switchVersion("eng-kjv")); QVERIFY(bible->navigate("John 3:16")); QVERIFY(!bible->selectionBookmarked());
-        QVERIFY(bible->redo()); QVERIFY(bible->selectionBookmarked());
+        QVERIFY(bible->switchVersion("eng-kjv")); QVERIFY(bible->navigate("John 3:16")); QVERIFY(!bible->selectionHighlighted());
+        QVERIFY(bible->redo()); QVERIFY(bible->selectionHighlighted());
         // Removing a version drops its steps.
         QVERIFY(bible->removeVersion("eng-kjv",true)); QVERIFY(bible->canUndo());
         QVERIFY(!bible->undo()); QVERIFY(!bible->canUndo()); QVERIFY(!bible->canRedo());
         // Deleting a tag (Manage tags) clears this window's steps.
-        QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->toggleBookmark());
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->toggleHighlight());
         const QString id = bible->createAndAssignTag(bible->tagScope(),"Passing"); QVERIFY(!id.isEmpty());
         QVERIFY(bible->deleteTag(id)); QVERIFY(!bible->canUndo());
     }

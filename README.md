@@ -2,7 +2,7 @@
 
 [![Built for Omarchy: App](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-app.svg)](https://github.com/tcballard/omarchy-badges)
 
-A minimal, keyboard-first Bible reader built with Qt Quick and C++ that follows your Omarchy theme, system font, and desktop corners. Read offline, bookmark, highlight, and tag passages, and keep Markdown notes alongside the text.
+A minimal, keyboard-first Bible reader built with Qt Quick and C++ that follows your Omarchy theme, system font, and desktop corners. Read offline, highlight and tag passages, and keep Markdown notes alongside the text.
 
 ![OmaWord reading John 1 with a highlighted range and inline annotation brackets](screenshots/reader.png)
 
@@ -110,7 +110,6 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 ### Annotate
 
-- `m`: Bookmark selection
 - `x`: Highlight selection
 - `w`: Write a note
 - `t`: Tag passage
@@ -253,7 +252,7 @@ These also work, but stay out of the in-app list:
 - History keeps the passages you stayed on for a few seconds, shared by every window. The passage palette lists the latest five above the books, then **All History**; `ctrl h` opens it directly: newest first under Today, Yesterday, and Earlier, typing narrows it, `delete` removes a passage and `shift delete` clears it. It never goes into backups, and Commands can clear or disable it.
 
 ### Studying
-- Bookmark, highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from).
+- Highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. Bookmarks are a tag, **Bookmarked**: bookmarks made in earlier versions carry it, and `t` adds it like any tag. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from).
 - `u` or `ctrl z` undoes this window's last change to marks, notes, or tags, deletions included, so deleting asks nothing first; `ctrl shift Z` or `ctrl r` redoes. It works from the side panels and while selecting characters, and the passage menu, row menus, and Commands name the step ("Undo highlight on John 3:16"). A passage changed since in another window is left as it is, and a toast says so.
 - In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
 - Quote part of a passage: `v` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.

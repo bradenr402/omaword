@@ -193,10 +193,10 @@ class ContextMenuTest : public QObject
     }
     QString markerName(const QString &kind, int verse, const QString &reference) const {
         if (!prop("continuousReader").toBool())
-            return (kind == "bookmark" ? QString("bookmarkMarker") : kind == "note" ? QString("verseNoteMarker") : QString("verseTagMarker")) + QString::number(verse);
+            return (kind == "note" ? QString("verseNoteMarker") : QString("verseTagMarker")) + QString::number(verse);
         return "blockInlineMarker:" + kind + ":open:" + reference;
     }
-    const QStringList passageIds = {"copy", "copyPlain", "|", "bookmark", "highlight", "note", "tags", "|", "desk", "|", "related", "chapterFind"};
+    const QStringList passageIds = {"copy", "copyPlain", "|", "highlight", "note", "tags", "|", "desk", "|", "related", "chapterFind"};
     const QStringList markerIds = {"open", "|", "moveHere", "remove", "|", "copy", "copyPlain", "|", "desk"};
 private slots:
     void initTestCase() {
@@ -237,7 +237,7 @@ private slots:
         QCOMPARE(bible->selectionReference(), QString("John 1:3"));
         QCOMPARE(ids(), passageIds);
         QVERIFY(prop("modalOpen").toBool()); QVERIFY(!prop("readerKeys").toBool());
-        const QHash<QString, QString> shortcuts = {{"copy", "y"}, {"copyPlain", "shift Y"}, {"bookmark", "m"}, {"highlight", "x"},
+        const QHash<QString, QString> shortcuts = {{"copy", "y"}, {"copyPlain", "shift Y"}, {"highlight", "x"},
             {"note", "w"}, {"tags", "t"}, {"desk", "d"}, {"related", "shift S"}, {"chapterFind", "/"}};
         for (auto it = shortcuts.cbegin(); it != shortcuts.cend(); ++it) {
             QCOMPARE(entry(it.key()).value("shortcut").toString(), it.value());
@@ -250,7 +250,6 @@ private slots:
             auto row = item("contextMenuItem:" + it.key());
             QVERIFY(label->mapToItem(row, QPointF(label->width(), 0)).x() > row->width() - 20);
         }
-        QCOMPARE(entry("bookmark").value("text").toString(), QString("Bookmark"));
         QCOMPARE(entry("highlight").value("text").toString(), QString("Highlight"));
         QCOMPARE(entry("desk").value("text").toString(), QString("Add to Desk"));
         QCOMPARE(entry("note").value("text").toString(), QString("Write note"));
@@ -363,10 +362,10 @@ private slots:
         escape();
         // Mouse-opened at a fractional-looking point, hovered row.
         rightClick(versePoint(3)); QTRY_VERIFY(menuOpen());
-        auto row = item("contextMenuItem:bookmark");
+        auto row = item("contextMenuItem:highlight");
         QTest::mouseMove(window, row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
-        QTRY_COMPARE(menu()->property("currentIndex").toInt(), passageIds.indexOf("bookmark"));
-        check(passageIds.indexOf("bookmark"));
+        QTRY_COMPARE(menu()->property("currentIndex").toInt(), passageIds.indexOf("highlight"));
+        check(passageIds.indexOf("highlight"));
         // Visual check: OMAWORD_SHOTS saves the menu, magnified.
         if (const auto directory = qEnvironmentVariable("OMAWORD_SHOTS"); !directory.isEmpty()) {
             QTest::qWait(30);
@@ -390,7 +389,7 @@ private slots:
         key(Qt::Key_Home); QCOMPARE(menu()->property("currentIndex").toInt(), 0);
         QVERIFY(item("contextMenuHighlight0")->isVisible());
         // Reader keys never act behind the menu.
-        key(Qt::Key_J); key(Qt::Key_M); key(Qt::Key_D);
+        key(Qt::Key_J); key(Qt::Key_X); key(Qt::Key_D);
         QVERIFY(menuOpen()); QCOMPARE(bible->selectionReference(), QString("John 1:1"));
         QVERIFY(bible->collection().isEmpty()); QVERIFY(bible->desk().isEmpty());
         escape();
@@ -418,26 +417,26 @@ private slots:
         QCOMPARE(QGuiApplication::clipboard()->text(), bible->copySelection());
         QVERIFY(object("toast")->property("text").toString().contains("John 1:2 copied"));
         rightClick(versePoint(2)); QTRY_VERIFY(menuOpen());
-        clickEntry("bookmark");
-        QVERIFY(bible->selectionBookmarked());
+        clickEntry("highlight");
+        QVERIFY(bible->selectionHighlighted());
         rightClick(versePoint(2)); QTRY_VERIFY(menuOpen());
-        QCOMPARE(entry("bookmark").value("text").toString(), QString("Remove bookmark"));
+        QCOMPARE(entry("highlight").value("text").toString(), QString("Remove highlight"));
         clickEntry("desk");
         QCOMPARE(bible->desk().size(), 1);
         QVERIFY(bible->currentInDesk());
         rightClick(versePoint(2)); QTRY_VERIFY(menuOpen());
         QCOMPARE(entry("desk").value("text").toString(), QString("Remove from Desk"));
         clickEntry("highlight");
-        QVERIFY(bible->selectionHighlighted());
+        QVERIFY(!bible->selectionHighlighted());
         // A Visual range completes after an action, exactly like the key.
         navigate("John 1:4"); key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J);
         QVERIFY(prop("verseMode").toBool());
         rightClick(versePoint(5)); QTRY_VERIFY(menuOpen());
         QCOMPARE(bible->selectedStart(), 4); QCOMPARE(bible->selectedEnd(), 5);
-        clickEntry("bookmark");
+        clickEntry("highlight");
         QVERIFY(!prop("verseMode").toBool());
         QVERIFY(std::any_of(bible->collection().cbegin(), bible->collection().cend(), [](const QVariant &row) {
-            return row.toMap().value("reference").toString() == QString::fromUtf8("John 1:4–5") && row.toMap().value("bookmark").toBool();
+            return row.toMap().value("reference").toString() == QString::fromUtf8("John 1:4–5") && row.toMap().value("highlight").toBool();
         }));
         // Write note opens the notes editor; Find in chapter opens the prompt.
         rightClick(versePoint(7)); QTRY_VERIFY(menuOpen());
@@ -453,18 +452,18 @@ private slots:
     void markerMenusInEveryLayout_data() { layouts(); }
     void markerMenusInEveryLayout() {
         QFETCH(QString, mode);
-        bible->selectVerses(2, 3); QVERIFY(bible->toggleBookmark());
+        bible->selectVerses(2, 3); bible->setNoteText("Marked");
         const auto reference = bible->selectionReference();
-        bible->selectVerses(1, 1);
+        bible->selectVerses(1, 1); call("syncNote");
         setLayout(mode);
-        const auto name = markerName("bookmark", 2, reference);
+        const auto name = markerName("note", 2, reference);
         QTRY_VERIFY(item(name) && item(name)->isVisible());
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("marker"));
         QCOMPARE(ids(), markerIds);
         // Move here moves the mark to the verses selected now.
         QCOMPARE(entry("moveHere").value("text").toString(), QString("Move here (John 1:1)"));
-        QCOMPARE(entry("remove").value("text").toString(), QString("Remove bookmark"));
+        QCOMPARE(entry("remove").value("text").toString(), QString("Delete note"));
         QCOMPARE(entry("desk").value("text").toString(), QString("Add to Desk"));
         // Copy passage copies the marker's range without moving the reader.
         QGuiApplication::clipboard()->setText("replace me");
@@ -484,6 +483,10 @@ private slots:
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         clickEntry("open");
         QTRY_COMPARE(bible->selectionReference(), reference);
+        // Open goes to the note, ready to write.
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
+        QTRY_VERIFY(item(name) && item(name)->isVisible());
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         // With the marker's own range selected there is nowhere to move it.
         QVERIFY(!entry("moveHere").value("enabled").toBool());
@@ -494,7 +497,7 @@ private slots:
     void deleteNoteKeepsMarks() {
         QFETCH(QString, mode);
         bible->selectVerses(2, 3);
-        bible->setNoteText("A long note worth confirming"); QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight());
+        bible->setNoteText("A long note worth confirming"); QVERIFY(bible->toggleHighlight());
         const auto scope = bible->tagScope(); const auto reference = bible->selectionReference();
         QVERIFY(!bible->createAndAssignTag(scope, "Kept").isEmpty());
         bible->selectVerses(1, 1); call("syncNote");
@@ -509,7 +512,7 @@ private slots:
         QCOMPARE(bible->collection().size(), 1);
         const auto row = bible->collection().first().toMap();
         QCOMPARE(row.value("reference").toString(), reference);
-        QVERIFY(row.value("bookmark").toBool()); QVERIFY(row.value("highlight").toBool());
+        QVERIFY(row.value("highlight").toBool());
         QCOMPARE(bible->tagsForScope(scope).size(), 1);
         QTRY_VERIFY(!item(name) || !item(name)->isVisible());
         QCOMPARE(object("toast")->property("text").toString(), reference + " note deleted");
@@ -596,14 +599,14 @@ private slots:
         QTRY_VERIFY(bible->desk().isEmpty());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         // Annotations panel row.
-        navigate("John 1:2"); key(Qt::Key_M);
+        navigate("John 1:2"); key(Qt::Key_X);
         key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         const auto saved = "savedEntry" + bible->collection().first().toMap().value("reference").toString();
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
         QCOMPARE(target(), QString("annotation"));
         QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "moveHere", "delete", "undo"}));
-        QCOMPARE(entry("undo").value("text").toString(), QString("Undo bookmark on John 1:2"));
+        QCOMPARE(entry("undo").value("text").toString(), QString("Undo highlight on John 1:2"));
         clickEntry("desk");
         QVERIFY2(bible->desk().size() == 1, qPrintable(object("toast")->property("text").toString() + " / " + bible->error() + " / " + QString::number(menu()->property("x").toDouble()) + "," + QString::number(menu()->property("y").toDouble())));
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());

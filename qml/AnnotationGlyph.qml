@@ -76,10 +76,6 @@ Item {
                     return
                 }
                 ctx.moveTo(3, 3); ctx.lineTo(4, 4)
-            } else if (kind === "bookmark") {
-                ctx.moveTo(6, 3); ctx.lineTo(18, 3); ctx.lineTo(18, 21)
-                ctx.lineTo(12, 17); ctx.lineTo(6, 21); ctx.closePath()
-                if (filled) ctx.fill()
             }
             ctx.stroke()
         }

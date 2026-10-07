@@ -143,7 +143,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     QMap<QString, QPair<int, int>> extents;
     for (int i = 0; annotationsVisible && i < verses.size(); ++i) {
         const auto verse = verses[i].toMap();
-        for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("note"), QStringLiteral("tag")}) {
+        for (const QString &kind : {QStringLiteral("note"), QStringLiteral("tag")}) {
             for (const auto &entry : verse.value(kind + "Ranges").toList()) {
                 const auto range = entry.toMap();
                 const QString key = kind + ':' + range.value("reference").toString();
@@ -188,7 +188,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         auto decorate = [&](bool opening) {
             if (!annotationsVisible) return;
             QVariantList entries;
-            for (const QString &kind : {QStringLiteral("bookmark"), QStringLiteral("note"), QStringLiteral("tag")}) {
+            for (const QString &kind : {QStringLiteral("note"), QStringLiteral("tag")}) {
                 if (kind == QStringLiteral("note") && !noteMarks) continue;
                 QSet<QString> seen;
                 for (const auto &entry : verse.value(kind + "Ranges").toList()) {
@@ -196,8 +196,8 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
                     const auto reference = range.value("reference").toString();
                     if (seen.contains(reference)) continue;
                     seen.insert(reference);
-                    const bool before = range.value(kind == "bookmark" ? "bookmarkContinuesBefore" : "continuesBefore").toBool();
-                    const bool after = range.value(kind == "bookmark" ? "bookmarkContinuesAfter" : "continuesAfter").toBool();
+                    const bool before = range.value("continuesBefore").toBool();
+                    const bool after = range.value("continuesAfter").toBool();
                     if (opening ? (before && verseIndex != 0) : after) continue;
                     range["kind"] = kind;
                     range["scope"] = range.value("scope", entry);
@@ -489,12 +489,6 @@ QVariantList BlockDocument::annotations(const QVariantList &verses, const QVaria
         for (const auto &row : verses) {
             const auto verse = row.toMap();
             if (verse.value("number").toInt() != number) continue;
-            for (const auto &entry : verse.value("bookmarkRanges").toList()) {
-                const auto range = entry.toMap();
-                include("bookmark",range.value("reference").toString(),span,
-                        range.value("bookmarkContinuesBefore").toBool(),
-                        range.value("bookmarkContinuesAfter").toBool(),range);
-            }
             for (const auto &entry : verse.value("noteRanges").toList()) {
                 const auto range = entry.toMap();
                 include("note",range.value("reference").toString(),span,

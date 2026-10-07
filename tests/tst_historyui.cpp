@@ -512,7 +512,7 @@ private slots:
         for (int v = 1; v <= 24; ++v) refs << QString("John 1:%1").arg(v * 2);
         navigate("John 2:1"); const auto tag = bible->createAndAssignTag(bible->tagScope(), "Alpha");
         for (const auto &r : refs) {
-            navigate(r); QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleDesk()); QVERIFY(bible->recordHistory());
+            navigate(r); QVERIFY(bible->toggleHighlight()); QVERIFY(bible->toggleDesk()); QVERIFY(bible->recordHistory());
             QVERIFY(bible->setTag(bible->tagScope(), tag, true));
         }
         navigate("John 2:1");
@@ -525,7 +525,7 @@ private slots:
         key(Qt::Key_Down); key(Qt::Key_End); QCOMPARE(paletteRow(), 23);
         key(Qt::Key_Home); QCOMPARE(paletteRow(), 0);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
-        // Annotations (Bookmarks), then not while typing in its search field.
+        // Annotations (Highlights), then not while typing in its search field.
         call("readerFocus"); key(Qt::Key_A, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         auto saved = object("collectionList"); expectMotions(saved, "annotations");
@@ -535,7 +535,7 @@ private slots:
         QVERIFY(item("savedSearch")->hasActiveFocus());
         object("savedSearch")->setProperty("text", QString()); key(Qt::Key_Escape); QTRY_VERIFY(!item("savedSearch")->hasActiveFocus());
         // Annotations · Tags tab: the same list and motions (25 tagged ranges).
-        key(Qt::Key_H); QTRY_COMPARE(prop("collectionTab").toInt(), 3);
+        key(Qt::Key_H); QTRY_COMPARE(prop("collectionTab").toInt(), 2);
         QTRY_COMPARE(saved->property("count").toInt(), 25);
         expectMotions(saved, "annotations tags");
         key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());

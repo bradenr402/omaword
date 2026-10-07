@@ -664,7 +664,7 @@ private slots:
         const auto original = bible->tagScope();
         const auto a = bible->createAndAssignTag(original, "Alpha");
         const auto b = bible->createAndAssignTag(original, "Beta");
-        bible->setNoteText("Preserve note"); QVERIFY(bible->toggleBookmark());
+        bible->setNoteText("Preserve note"); QVERIFY(bible->toggleHighlight());
         QVERIFY(invoke("open").toBool()); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QVERIFY(rows().isEmpty());
         invoke("manage"); click("tag:" + a);
@@ -679,7 +679,7 @@ private slots:
         click("mergeTarget:" + b); click("mergeTags");
         QCOMPARE(bible->tags().size(), 2); click("confirmTagManagement");
         QCOMPARE(ids(bible->tagsForScope(original)), QStringList{b});
-        QCOMPARE(bible->noteText(), QString("Preserve note")); QVERIFY(bible->selectionBookmarked());
+        QCOMPARE(bible->noteText(), QString("Preserve note")); QVERIFY(bible->selectionHighlighted());
         click("tag:" + b); click("deleteTag"); click("cancelTagManagement");
         QCOMPARE(bible->tags().size(), 1);
         // A second window deletes the selected tag while its confirmation is open.
@@ -692,7 +692,7 @@ private slots:
         QTRY_VERIFY(prop("confirmation").toMap().isEmpty());
         QCOMPARE(prop("managedId").toString(), QString());
         invoke("back"); QVERIFY(rows().isEmpty());
-        QCOMPARE(bible->noteText(), QString("Preserve note")); QVERIFY(bible->selectionBookmarked());
+        QCOMPARE(bible->noteText(), QString("Preserve note")); QVERIFY(bible->selectionHighlighted());
     }
     void removedVersionInvalidatesPinnedScope() {
         const auto original = bible->tagScope();
@@ -883,7 +883,7 @@ private:
         return variant(list->property("model")).toList().value(index).toMap();
     }
     void openAnnotationsTags() {
-        root->setProperty("collectionTab", 3);
+        root->setProperty("collectionTab", 2);
         QVERIFY(QMetaObject::invokeMethod(root.get(), "runCommand", Q_ARG(QVariant, QString("annotations"))));
         QTRY_VERIFY(root->findChild<QObject *>("savedDrawer")->property("opened").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
@@ -921,7 +921,7 @@ private slots:
         QCOMPARE(item("savedTagLineJohn 3:8")->property("text").toString(), QString("Alpha · Beta"));
         QVERIFY(!item("savedTagLineJohn 3:5")->isVisible());
         QVERIFY(item("savedTagJohn 3:5")->isVisible());
-        QVERIFY(!item("savedBookmarkJohn 3:5")->isVisible());
+        QVERIFY(!item("savedNoteJohn 3:5")->isVisible());
         // j/k step rows, never headings.
         key(Qt::Key_J); QCOMPARE(list->property("currentIndex").toInt(), 2);
         key(Qt::Key_K); key(Qt::Key_K); QCOMPARE(list->property("currentIndex").toInt(), 0);
@@ -957,10 +957,10 @@ private slots:
         QTRY_COMPARE(list->property("count").toInt(), 3);
         bible->openChapter(43, 3); bible->selectVerses(8, 8);
         // Every Annotations tab has a hint row and the passage header.
-        for (int tab = 0; tab < 4; ++tab) {
+        for (int tab = 0; tab < 3; ++tab) {
             QVERIFY(QMetaObject::invokeMethod(root.get(), "filterSaved", Q_ARG(QVariant, tab - root->property("collectionTab").toInt())));
             QVERIFY(item("savedHints")->isVisible());
-            QVERIFY(item("savedHints")->property("text").toString().contains(tab == 3 ? "remove&nbsp;tag" : "delete"));
+            QVERIFY(item("savedHints")->property("text").toString().contains(tab == 2 ? "remove&nbsp;tag" : "delete"));
             QCOMPARE(item("savedPassage")->property("text").toString(), QString("John 3:8 · NET"));
         }
         bible->clearSelection();

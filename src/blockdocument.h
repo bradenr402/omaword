@@ -51,7 +51,7 @@ public:
     Q_INVOKABLE QVariantMap sourceAt(int position, bool forward) const;
     // One entry per logical annotation intersecting this chapter. Geometry is
     // in document coordinates, including reserved inline decoration cells.
-    // Membership comes from per-verse bookmarkRanges/noteRanges/tagRanges in source order.
+    // Membership comes from per-verse noteRanges/tagRanges in source order.
     // The remaining arguments retain the reader call signature, not ordering data.
     Q_INVOKABLE QVariantList annotations(const QVariantList &verses, const QVariantList &collection,
                                          int book, int chapter) const;

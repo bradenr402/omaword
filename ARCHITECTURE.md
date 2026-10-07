@@ -33,7 +33,7 @@ files.
 | `qml/Main.qml` | Reader, palettes, Notes, Annotations (one list for all four tabs; Tags rows grouped under tag headings), Desk, settings, catalog, About |
 | `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Annotations and Study drawers, which stay open) and the Study drawer (tabs Cross-references / Footnotes / Tags; the Tags tab keeps the internal id `related`, as do `relatedDrawer` and the `related` action). Study → Tags roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
 | `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Annotations and Study: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk: its count) |
-| `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared bookmark/tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
+| `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
 | `qml/ExitGhost.qml` | Exit motion for popups that close at once (menus, modals): a frozen `ShaderEffectSource` picture that fades and shrinks toward the trigger, never taking input |
 | `qml/AppContextMenu.qml`, `qml/AppToolTip.qml`, `qml/RowMenu.js` | Shared context menu (scrolls when taller than the window; also replaces Qt's text-field menu via `ContextMenu.menu: null` → `openTextMenu`) and themed tooltip; `RowMenu.entries` builds every list row's menu (Open · Copy · Copy plain text · Desk, then the row's extras) |
@@ -120,12 +120,20 @@ files.
 ## Persistence
 
 - Data root: Qt app-data for storage ID `omaword` (`~/.local/share/omaword/`).
-- `personal.sqlite`: `PRAGMA user_version` **8**, WAL, `synchronous=FULL`.
+- `personal.sqlite`: `PRAGMA user_version` **9**, WAL, `synchronous=FULL`.
   Newer versions refuse to open. Migrations run in one transaction in
   `BibleBackend` (2: cross-chapter endpoints; 3: version scoping + library;
-  4: MRU; 5: 80 books / 999 limits; 6: Desk; 7: History; 8: ribbon). `tags`/`tag_assignments` are
-  created `IF NOT EXISTS` independent of the version number.
-- Tables: `annotations`, `reading` (per `version_id`); `tags(id,name,name_key)`;
+  4: MRU; 5: 80 books / 999 limits; 6: Desk; 7: History; 8: ribbon; 9:
+  bookmarks become tags, times). `tags`/`tag_assignments` are created
+  `IF NOT EXISTS` independent of the version number; schema 9 runs after them.
+- Schema 9 (`migrateBookmarks`): every bookmarked range gets the tag
+  "Bookmarked" (an existing equivalent name is reused), rows left with no
+  highlight or note go, and `annotations` is rebuilt without its `bookmark`
+  column. Annotations gain `created`/`updated` and assignments `created` (UTC
+  ISO 8601 with ms; `''` = saved before schema 9). Saves stamp them; undo
+  restores them with the row, but a step that changes only times is no step.
+- Tables: `annotations` (highlight + note per exact range), `reading` (per
+  `version_id`); `tags(id,name,name_key)`;
   `tag_assignments` (PK version + both endpoints + tag); `desk` (global ordered
   list, each item version-scoped); `history` (global, newest first by `seq`,
   unique per version + endpoints, start/end 0 = a whole chapter, scroll
@@ -154,7 +162,9 @@ files.
 - Removal keeps annotations/tags/Desk by default (hidden until reimport);
   `removeVersion(id, true)` drops them. Global tag definitions always survive.
 - Backups: JSON `format: "omaword-backup"`, version **5** (3 = annotations,
-  4 = + tags, 5 = + Desk). Scoped to the active source; restore requires matching
+  4 = + tags, 5 = + Desk). Exports write `bookmark: false` (bookmarks travel as
+  the Bookmarked tag); restoring a `bookmark: true` row assigns that tag, and a
+  format 3 restore replaces only that tag's assignments in the version. Scoped to the active source; restore requires matching
   `versionId`/edition, exact keys, endpoint validation, 32 MiB bound. Tag names
   reuse existing global identities; colliding IDs are remapped; existing global
   definitions are never renamed/deleted. Preferences and text are excluded.
@@ -372,7 +382,7 @@ files.
   dense, with line breaks only.
 - Verse layout: one row per verse; annotation rails packed by
   `packAnnotationLanes` into nearest free gutter lanes by source-row ordinal
-  (not verse labels), tie priority bookmark/tag/note, lane kept for an interval's life.
+  (not verse labels), tie priority tag/note, lane kept for an interval's life.
 - Paragraph/Block: one `BlockDocument`. Annotation endpoints are reserved
   transparent inline cells (+ word joiners, no font merging) where QML paints
   brackets and superscript glyphs. Outer starts first, inner ends first;
@@ -383,7 +393,7 @@ files.
 - Paint-only overlays (never alter text formats, layout, selection, or copy):
   - Hand-drawn marks (`HandDrawn.js`): deterministic seeded paths (seed from
     kind/version/reference/segment, no `Math.random`) so repaint/scroll is stable.
-  - Annotation tints: every bookmark/highlight/note/tag range covering a verse
+  - Annotation tints: every highlight/note/tag range covering a verse
     adds one hand-drawn accent layer (`HandDrawn.tintCount`/`tintRuns`, 4.5%
     each, capped at 3), joined across verses that keep the layer; highlights,
     then search matches, paint over them.

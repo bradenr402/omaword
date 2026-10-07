@@ -860,7 +860,8 @@ private slots:
     }
     void marginNotesHideInlineNoteMarks() {
         note("John 3:16", 16, 16, "A note shown in the margin.");
-        QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QVERIFY(bible->toggleBookmark());
+        QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16);
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Stays").isEmpty());
         resize(1400, 900);
         setMode("verse"); navigate("John 3:16");
         const auto shown = [this](const QString &name) { auto found = item(name); return found && found->isVisible(); };
@@ -868,13 +869,13 @@ private slots:
             const auto directory = qEnvironmentVariable("OMAWORD_MARGINS_SCREENSHOTS");
             if (!directory.isEmpty()) { settle(); QVERIFY(window->grabWindow().save(directory + "/" + name + ".png")); }
         };
-        QTRY_VERIFY(shown("verseNoteMarker16")); QVERIFY(shown("bookmarkMarker16"));
+        QTRY_VERIFY(shown("verseNoteMarker16")); QVERIFY(shown("verseTagMarker16"));
         shot("inline-notes-verse-off");
         bible->setMarginNotes(true); QTRY_VERIFY(notesShown());
         // Only the note mark goes; the rails do not shift.
-        const double bookmarkX = item("bookmarkMarker16")->x();
-        QTRY_VERIFY(!shown("verseNoteMarker16")); QVERIFY(shown("bookmarkMarker16"));
-        QCOMPARE(item("bookmarkMarker16")->x(), bookmarkX);
+        const double tagX = item("verseTagMarker16")->x();
+        QTRY_VERIFY(!shown("verseNoteMarker16")); QVERIFY(shown("verseTagMarker16"));
+        QCOMPARE(item("verseTagMarker16")->x(), tagX);
         shot("inline-notes-verse-margin");
         // No room for the margin: the inline mark returns.
         resize(900, 900); QTRY_VERIFY(!notesShown()); QTRY_VERIFY(shown("verseNoteMarker16"));
@@ -888,10 +889,10 @@ private slots:
         };
         for (const QString mode : {"paragraph", "block"}) {
             setMode(mode); navigate("John 3:16");
-            QTRY_VERIFY(blockKinds().contains("bookmark")); QVERIFY(!blockKinds().contains("note"));
+            QTRY_VERIFY(blockKinds().contains("tag")); QVERIFY(!blockKinds().contains("note"));
             shot("inline-notes-" + mode + "-margin");
             bible->setMarginNotes(false); QTRY_VERIFY(!notesShown());
-            QTRY_VERIFY(blockKinds().contains("note")); QVERIFY(blockKinds().contains("bookmark"));
+            QTRY_VERIFY(blockKinds().contains("note")); QVERIFY(blockKinds().contains("tag"));
             shot("inline-notes-" + mode + "-off");
             bible->setMarginNotes(true); QTRY_VERIFY(notesShown());
             QTRY_VERIFY(!blockKinds().contains("note"));

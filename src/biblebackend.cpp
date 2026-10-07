@@ -40,6 +40,7 @@ QList<BibleBackend *> readers;
 constexpr qsizetype MaximumNoteSize = 1024 * 1024;
 constexpr qint64 MaximumBackupSize = 32 * 1024 * 1024;
 QString connectionName() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
+QString timestamp() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs); }
 int verseKey(int book, int chapter, int verse) { return (book * 1000 + chapter) * 1000 + verse; }
 QString aliasKey(QString name) {
     name = name.toCaseFolded();
@@ -553,17 +554,16 @@ QVariantMap BibleBackend::readRangeSnapshot(const QVariantMap &scope) const
     auto fail = [](const QString &error) { return QVariantMap{{"ok",false},{"error",error}}; };
     QVariantMap canonical;
     if (!rangeEditScope(scope,&canonical)) return fail("The Bible version or passage changed. Choose the source again.");
-    QVariantMap state{{"scope",publicRange(canonical)},{"bookmark",false},{"highlight",false},
+    QVariantMap state{{"scope",publicRange(canonical)},{"highlight",false},
                       {"note",QString("")},{"tags",QVariantList()}};
     QSqlQuery q(m_store);
-    q.prepare("SELECT bookmark,highlight,note FROM annotations WHERE " + scopeWhere);
+    q.prepare("SELECT highlight,note FROM annotations WHERE " + scopeWhere);
     bindScope(q,canonical);
     if (!q.exec()) return fail("Cannot read annotations: " + q.lastError().text());
     bool exists = false;
     if (q.next()) {
-        state["bookmark"] = q.value(0).toBool(); state["highlight"] = q.value(1).toBool();
-        state["note"] = q.value(2).toString();
-        exists = state.value("bookmark").toBool() || state.value("highlight").toBool() || !state.value("note").toString().isEmpty();
+        state["highlight"] = q.value(0).toBool(); state["note"] = q.value(1).toString();
+        exists = state.value("highlight").toBool() || !state.value("note").toString().isEmpty();
     }
     if (q.lastError().isValid()) return fail("Cannot read annotations: " + q.lastError().text());
     if (state.value("note").toString().size() > MaximumNoteSize || !safeString(state.value("note").toString()))
@@ -617,15 +617,15 @@ QVariantMap BibleBackend::prepareRangeChange(const QVariantMap &snapshot, const 
     if (!source->value("exists").toBool() || source->value("token") != snapshot.value("token"))
         return fail("The source annotation changed. Choose the annotation again.");
     // Never trust caller-supplied note text, flags or tag assignments as write data.
-    for (const auto &key : {"bookmark","highlight","note","tags"}) {
+    for (const auto &key : {"highlight","note","tags"}) {
         if (snapshot.value(key).metaType() != source->value(key).metaType() || snapshot.value(key) != source->value(key))
             return fail("The source snapshot does not match the saved annotation.");
     }
     bool chosen = false;
     for (auto it = components.cbegin(); it != components.cend(); ++it)
-        if (it.key() != "bookmark" && it.key() != "highlight" && it.key() != "note" && it.key() != "tags")
+        if (it.key() != "highlight" && it.key() != "note" && it.key() != "tags")
             return fail("Unknown annotation component.");
-    for (const auto &key : {"bookmark","highlight","note"}) {
+    for (const auto &key : {"highlight","note"}) {
         if (components.contains(key) && components.value(key).metaType().id() != QMetaType::Bool)
             return fail("Invalid annotation component choice.");
         if (!components.value(key).toBool()) continue;
@@ -689,24 +689,29 @@ bool BibleBackend::changeAnnotationRange(QVariantMap snapshot, QVariantMap desti
     if ((!destinationToken.isEmpty() && destinationToken != target.value("token").toString())
         || (preview.value("needsNoteMerge").toBool() && (!combineNotes || destinationToken.isEmpty())))
         return setError("Preview and explicitly confirm combining the current destination note before saving.");
-    for (const auto &key : {"bookmark","highlight"}) if (components.value(key).toBool()) {
-        source[key] = false; target[key] = true;
-    }
+    if (components.value("highlight").toBool()) { source["highlight"] = false; target["highlight"] = true; }
     if (components.value("note").toBool()) { source["note"] = QString(""); target["note"] = preview.value("combinedNote"); }
     const auto sourceScope = source.value("scope").toMap(), targetScope = target.value("scope").toMap();
     UndoStep step("range move to " + targetScope.value("reference").toString(),m_versionId,{sourceScope,targetScope});
     if (!captureStates(&step,false)) return false;
     // Only the two exact annotation rows are touched. Other overlapping marks
-    // retain their independent coverage, notes and assignments.
-    if (components.value("bookmark").toBool() || components.value("highlight").toBool() || components.value("note").toBool()) {
+    // retain their independent coverage, notes and assignments. A row keeps
+    // when it was created and is updated now.
+    if (components.value("highlight").toBool() || components.value("note").toBool()) {
+        const QString now = timestamp();
         for (const auto &state : {source,target}) {
             const auto scope = state.value("scope").toMap();
             QSqlQuery q(m_store);
+            q.prepare("SELECT created FROM annotations WHERE " + scopeWhere); bindScope(q,scope);
+            if (!q.exec()) return setError("Cannot move annotation: " + q.lastError().text());
+            const QString created = q.next() ? q.value(0).toString() : now;
+            q.finish();
             q.prepare("DELETE FROM annotations WHERE " + scopeWhere); bindScope(q,scope);
             if (!q.exec()) return setError("Cannot move annotation: " + q.lastError().text());
-            if (state.value("bookmark").toBool() || state.value("highlight").toBool() || !state.value("note").toString().isEmpty()) {
-                q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,bookmark,highlight,note) VALUES(?,?,?,?,?,?,?,?,?,?)");
-                bindScope(q,scope); q.addBindValue(state.value("bookmark")); q.addBindValue(state.value("highlight")); q.addBindValue(state.value("note"));
+            if (state.value("highlight").toBool() || !state.value("note").toString().isEmpty()) {
+                q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,highlight,note,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+                bindScope(q,scope); q.addBindValue(state.value("highlight")); q.addBindValue(state.value("note"));
+                q.addBindValue(created); q.addBindValue(now);
                 if (!q.exec()) return setError("Cannot move annotation: " + q.lastError().text());
             }
         }
@@ -731,7 +736,7 @@ bool BibleBackend::changeAnnotationRange(QVariantMap snapshot, QVariantMap desti
     for (const auto &state : {source,target}) {
         const auto actual = readRangeSnapshot(state.value("scope").toMap());
         if (!actual.value("ok").toBool()) return setError(actual.value("error").toString());
-        for (const auto &key : {"bookmark","highlight","note","tags"})
+        for (const auto &key : {"highlight","note","tags"})
             if (actual.value(key) != state.value(key)) return setError("Cannot verify moved annotation components.");
     }
     if (!captureStates(&step,true)) return false;
@@ -782,7 +787,7 @@ QVariantList BibleBackend::tagRangeRows(const QString &id, bool excerpts) const
     if (!bible.db.isOpen()) return {};
     QSqlQuery q(m_store);
     q.prepare("SELECT a.book,a.chapter,a.start,a.endBook,a.endChapter,a.end,t.id,t.name,i.abbreviation,"
-              "COALESCE(n.bookmark,0),COALESCE(n.highlight,0),COALESCE(n.note,'') "
+              "COALESCE(n.highlight,0),COALESCE(n.note,'') "
               "FROM tag_assignments a JOIN tags t ON t.id=a.tag_id JOIN installed i ON i.version_id=a.version_id "
               "LEFT JOIN annotations n ON n.version_id=a.version_id AND n.book=a.book AND n.chapter=a.chapter "
               "AND n.start=a.start AND n.endBook=a.endBook AND n.endChapter=a.endChapter AND n.end=a.end "
@@ -798,7 +803,7 @@ QVariantList BibleBackend::tagRangeRows(const QString &id, bool excerpts) const
             QVariantMap row;
             if (!bible.scope(scope,&row)) continue;
             row["versionAbbreviation"] = q.value(8);
-            row["bookmark"] = q.value(9).toBool(); row["highlight"] = q.value(10).toBool(); row["note"] = q.value(11);
+            row["highlight"] = q.value(9).toBool(); row["note"] = q.value(10);
             row["sharedCount"] = 0;
             row["excerpt"] = excerpts ? bible.excerpt(row) : QString();
             ranges.insert(key,row);
@@ -865,15 +870,17 @@ QString BibleBackend::tagName(const QString &id) const
     return q.exec() && q.next() ? q.value(0).toString() : QString();
 }
 
-bool BibleBackend::writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned)
+bool BibleBackend::writeTagAssignment(const QVariantMap &scope, const QString &id, bool assigned,
+                                      const std::optional<QString> &created)
 {
     QSqlQuery q(m_store);
     q.prepare("SELECT id FROM tags WHERE id=?"); q.addBindValue(id);
     if (!q.exec() || !q.next()) return setError("That tag no longer exists.");
     q.finish();
-    q.prepare(assigned ? "INSERT INTO tag_assignments(version_id,book,chapter,start,endBook,endChapter,end,tag_id) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING"
+    q.prepare(assigned ? "INSERT INTO tag_assignments(version_id,book,chapter,start,endBook,endChapter,end,tag_id,created) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING"
                        : "DELETE FROM tag_assignments WHERE " + scopeWhere + " AND tag_id=?");
     bindScope(q,scope); q.addBindValue(id);
+    if (assigned) q.addBindValue(created.value_or(timestamp()));
     if (!q.exec()) return setError("Cannot save tag assignment: " + q.lastError().text());
     q.prepare("SELECT COUNT(*) FROM tag_assignments WHERE " + scopeWhere + " AND tag_id=?");
     bindScope(q,scope); q.addBindValue(id);
@@ -1005,7 +1012,8 @@ bool BibleBackend::mergeTags(QString source, QString target)
     if (!q.exec() || !q.next() || q.value(0).toInt() != (source == target ? 1 : 2)) return setError("A tag no longer exists.");
     q.finish();
     if (source == target) return commitTagMutation();
-    q.prepare("INSERT INTO tag_assignments SELECT version_id,book,chapter,start,endBook,endChapter,end,? FROM tag_assignments WHERE tag_id=? ON CONFLICT DO NOTHING");
+    q.prepare("INSERT INTO tag_assignments(version_id,book,chapter,start,endBook,endChapter,end,tag_id,created) "
+              "SELECT version_id,book,chapter,start,endBook,endChapter,end,?,created FROM tag_assignments WHERE tag_id=? ON CONFLICT DO NOTHING");
     q.addBindValue(target); q.addBindValue(source);
     if (!q.exec()) return setError("Cannot merge tags: " + q.lastError().text());
     q.prepare("SELECT COUNT(*) FROM (SELECT version_id,book,chapter,start,endBook,endChapter,end FROM tag_assignments WHERE tag_id=? EXCEPT SELECT version_id,book,chapter,start,endBook,endChapter,end FROM tag_assignments WHERE tag_id=?)");
@@ -1162,7 +1170,7 @@ bool BibleBackend::addToDesk(QVariantMap scope)
     q.finish();
     q.prepare("INSERT INTO desk(position,version_id,book,chapter,start,endBook,endChapter,end,created) "
               "VALUES((SELECT COALESCE(MAX(position),0)+1 FROM desk),?,?,?,?,?,?,?,?)");
-    bindScope(q,canonical); q.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    bindScope(q,canonical); q.addBindValue(timestamp());
     if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot add to the Desk: " + q.lastError().text());
     q.prepare("SELECT COUNT(*) FROM desk WHERE " + scopeWhere); bindScope(q,canonical);
     if (!q.exec() || !q.next() || q.value(0).toInt() != 1) return setError("Cannot verify the Desk addition.");
@@ -1383,7 +1391,7 @@ bool BibleBackend::recordHistory(QVariantMap location)
               "ON CONFLICT(version_id,book,chapter,start,endBook,endChapter,end) DO UPDATE SET "
               "seq=(SELECT COALESCE(MAX(seq),0)+1 FROM history),position=excluded.position,visited=excluded.visited");
     bindScope(q,location); q.addBindValue(position);
-    q.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    q.addBindValue(timestamp());
     if (!q.exec()) return setError("Cannot save History: " + q.lastError().text());
     q.prepare("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY seq DESC LIMIT ?)");
     q.addBindValue(HistoryLimit);
@@ -1489,7 +1497,7 @@ bool BibleBackend::placeRibbon()
     QSqlQuery q(m_store);
     q.prepare("INSERT OR REPLACE INTO ribbon(id,version_id,book,chapter,start,endBook,endChapter,end,position,placed) VALUES(1,?,?,?,?,?,?,?,?,?)");
     bindScope(q,location); q.addBindValue(std::clamp(location.value("position").toDouble(),0.0,1.0));
-    q.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    q.addBindValue(timestamp());
     if (!q.exec()) return setError("Cannot place the ribbon: " + q.lastError().text());
     if (!m_store.commit()) return setError("Cannot place the ribbon: " + m_store.lastError().text());
     QList<QPointer<BibleBackend>> snapshot;
@@ -1596,7 +1604,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 8) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
+    if (version > 9) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -1672,8 +1680,40 @@ bool BibleBackend::initializeStore()
     for (const auto &sql : schema) {
         if (!q.exec(sql)) { m_store.rollback(); return setError("Cannot initialize notes: " + q.lastError().text()); }
     }
+    if (version < 9 && !migrateBookmarks()) { m_store.rollback(); return false; }
     if (!m_store.commit()) { m_store.rollback(); return setError("Cannot save notes database schema: " + m_store.lastError().text()); }
     return loadPreferences();
+}
+
+// Schema 9: bookmarks become the tag "Bookmarked" on the same ranges, and
+// annotations keep only highlights and notes. Annotations gain created and
+// updated times and tag assignments a created time ('' where unknown: saved
+// before schema 9). Runs inside initializeStore's transaction.
+bool BibleBackend::migrateBookmarks()
+{
+    QSqlQuery q(m_store);
+    const auto fail = [&](const QString &what) { return setError("Cannot move bookmarks to the Bookmarked tag (" + what + "): " + q.lastError().text()); };
+    if (!q.exec("ALTER TABLE tag_assignments ADD COLUMN created TEXT NOT NULL DEFAULT ''")) return fail("tag times");
+    if (!q.exec("SELECT EXISTS(SELECT 1 FROM annotations WHERE bookmark)") || !q.next()) return fail("reading");
+    const bool bookmarks = q.value(0).toBool();
+    q.finish();
+    if (bookmarks) {
+        const QString id = ensureTag(QStringLiteral("Bookmarked"));
+        if (id.isEmpty()) return false;
+        q.prepare("INSERT INTO tag_assignments(version_id,book,chapter,start,endBook,endChapter,end,tag_id) "
+                  "SELECT version_id,book,chapter,start,endBook,endChapter,end,? FROM annotations WHERE bookmark ON CONFLICT DO NOTHING");
+        q.addBindValue(id);
+        if (!q.exec()) return fail("tagging");
+    }
+    for (const QString &sql : {
+        QStringLiteral("ALTER TABLE annotations RENAME TO annotations_v8"),
+        QStringLiteral("CREATE TABLE annotations(version_id TEXT NOT NULL,book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),highlight INTEGER NOT NULL CHECK(highlight IN(0,1)),note TEXT NOT NULL,created TEXT NOT NULL DEFAULT '',updated TEXT NOT NULL DEFAULT '',PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(highlight OR length(note)>0)) WITHOUT ROWID"),
+        QStringLiteral("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,highlight,note) "
+                       "SELECT version_id,book,chapter,start,endBook,endChapter,end,highlight,note FROM annotations_v8 WHERE highlight OR length(note)>0"),
+        QStringLiteral("DROP TABLE annotations_v8"),
+        QStringLiteral("PRAGMA user_version=9")})
+        if (!q.exec(sql)) return fail("annotations");
+    return true;
 }
 
 bool BibleBackend::loadPreferences()
@@ -2375,7 +2415,7 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
         QString text = q.value(1).toString(), html = q.value(2).toString();
         rows.append(QVariantMap{{"number",q.value(0)}, {"text",text}, {"html",html},
             {"paragraphStart",endpoint(absoluteVerse(book,chapter,q.value(0).toInt())).paragraphStart},
-            {"heading",q.value(3)}, {"poetry",q.value(4).toBool()}, {"highlighted",false}, {"bookmarked",false}, {"hasNote",false}});
+            {"heading",q.value(3)}, {"poetry",q.value(4).toBool()}, {"highlighted",false}, {"hasNote",false}});
     }
     if (m_textSchema >= 4) {
         // Schema 4: footnotes (\f, \fe) and words-of-Jesus ranges, both as
@@ -2859,16 +2899,16 @@ void BibleBackend::moveByVerses(int delta, bool extend)
 bool BibleBackend::loadAnnotations(QVector<Annotation> *result)
 {
     QSqlQuery q(m_store);
-    q.prepare("SELECT book,chapter,start,end,bookmark,highlight,note,endBook,endChapter FROM annotations WHERE version_id=? ORDER BY book,chapter,start,endBook,endChapter,end");
+    q.prepare("SELECT book,chapter,start,end,highlight,note,endBook,endChapter,created,updated FROM annotations WHERE version_id=? ORDER BY book,chapter,start,endBook,endChapter,end");
     q.addBindValue(m_versionId);
     if (!q.exec())
         return setError("Cannot read your annotations: " + q.lastError().text());
     QVector<Annotation> rows;
     while (q.next()) {
         const int start = absoluteVerse(q.value(0).toInt(),q.value(1).toInt(),q.value(2).toInt());
-        const int end = absoluteVerse(q.value(7).toInt(),q.value(8).toInt(),q.value(3).toInt());
+        const int end = absoluteVerse(q.value(6).toInt(),q.value(7).toInt(),q.value(3).toInt());
         if (!start || end < start) return setError("Cannot read your annotations: invalid range endpoints.");
-        rows.append({start,end,q.value(4).toBool(),q.value(5).toBool(),q.value(6).toString()});
+        rows.append({start,end,q.value(4).toBool(),q.value(5).toString(),q.value(8).toString(),q.value(9).toString()});
     }
     if (q.lastError().isValid()) return setError("Cannot read your annotations: " + q.lastError().text());
     std::sort(rows.begin(),rows.end(),[](const Annotation &a, const Annotation &b) {
@@ -2884,15 +2924,15 @@ void BibleBackend::updateSelection()
     for (const auto &a : m_annotations)
         if (a.start == std::min(m_anchor,m_cursor) && a.end == std::max(m_anchor,m_cursor)) note = a.note;
     if (note != m_note) { m_note = note; emit noteTextChanged(); }
-    m_bookmarked = flagCovered(m_annotations,false); m_highlighted = flagCovered(m_annotations,true);
+    m_highlighted = highlightCovered(m_annotations);
     emit annotationChanged();
 }
-bool BibleBackend::flagCovered(const QVector<Annotation> &annotations, bool highlight) const
+bool BibleBackend::highlightCovered(const QVector<Annotation> &annotations) const
 {
     if (!m_anchor) return false;
     QVector<QPair<int,int>> ranges;
     for (const auto &a : annotations)
-        if (highlight ? a.highlight : a.bookmark) ranges.append({a.start,a.end});
+        if (a.highlight) ranges.append({a.start,a.end});
     std::sort(ranges.begin(),ranges.end());
     int next = std::min(m_anchor,m_cursor);
     const int end = std::max(m_anchor,m_cursor);
@@ -2909,13 +2949,12 @@ void BibleBackend::updateAnnotations()
     for (auto &row : m_verses) {
         auto map = row.toMap();
         const int v = absoluteVerse(m_book,m_chapter,map.value("number").toInt());
-        bool bookmark = false, highlight = false, note = false;
-        bool start = false, end = false, before = false, after = false;
+        bool highlight = false, note = false;
         bool highlightStart = false, highlightEnd = false, highlightBefore = false, highlightAfter = false;
-        QVariantList ranges, highlightRanges, noteRanges;
+        QVariantList highlightRanges, noteRanges;
         for (const auto &a : m_annotations) {
             if (v >= a.start && v <= a.end) {
-                bookmark |= a.bookmark; highlight |= a.highlight; note |= !a.note.isEmpty();
+                highlight |= a.highlight; note |= !a.note.isEmpty();
                 if (!a.note.isEmpty()) {
                     const auto first = endpoint(a.start), last = endpoint(a.end);
                     noteRanges.append(QVariantMap{{"reference",rangeReference(a.start,a.end)},{"note",a.note},
@@ -2923,15 +2962,6 @@ void BibleBackend::updateAnnotations()
                         {"endBook",last.book},{"endChapter",last.chapter},{"end",last.verse},
                         {"noteStart",v == a.start},{"noteEnd",v == a.end},
                         {"continuesBefore",v > a.start},{"continuesAfter",v < a.end}});
-                }
-                if (a.bookmark) {
-                    start |= v == a.start; end |= v == a.end; before |= v > a.start; after |= v < a.end;
-                    const auto first = endpoint(a.start), last = endpoint(a.end);
-                    ranges.append(QVariantMap{{"reference",rangeReference(a.start,a.end)},
-                        {"versionId",m_versionId},{"book",first.book},{"chapter",first.chapter},{"start",first.verse},
-                        {"endBook",last.book},{"endChapter",last.chapter},{"end",last.verse},
-                        {"bookmarkStart",v == a.start},{"bookmarkEnd",v == a.end},
-                        {"bookmarkContinuesBefore",v > a.start},{"bookmarkContinuesAfter",v < a.end}});
                 }
                 if (a.highlight) {
                     highlightStart |= v == a.start; highlightEnd |= v == a.end;
@@ -2942,10 +2972,7 @@ void BibleBackend::updateAnnotations()
                 }
             }
         }
-        map["bookmarked"] = bookmark; map["highlighted"] = highlight; map["hasNote"] = note;
-        map["bookmarkStart"] = start; map["bookmarkEnd"] = end;
-        map["bookmarkContinuesBefore"] = before; map["bookmarkContinuesAfter"] = after;
-        map["bookmarkRanges"] = ranges;
+        map["highlighted"] = highlight; map["hasNote"] = note;
         map["noteRanges"] = noteRanges;
         QVariantList tagRanges;
         for (const auto &value : tagged) {
@@ -2984,7 +3011,7 @@ QVariantList BibleBackend::collectionRows(const QVector<Annotation> &rows) const
             {"start",start.verse},{"end",end.verse},{"endBook",end.book},{"endChapter",end.chapter},
             {"reference",rangeReference(a.start,a.end)},{"versionId",m_versionId},
             {"versionAbbreviation",m_abbreviation},{"tags",QVariantList()},
-            {"bookmark",a.bookmark},{"highlight",a.highlight},{"note",a.note}});
+            {"highlight",a.highlight},{"note",a.note}});
     }
     for (const auto &value : tagRangeRows(m_versionId,false)) {
         const auto tagged = publicRange(value.toMap());
@@ -3008,28 +3035,32 @@ QVariantList BibleBackend::collectionRows(const QVector<Annotation> &rows) const
 bool BibleBackend::saveAnnotations(const QVector<Annotation> &annotations)
 {
     // Called inside an existing transaction. Coalesce identical ranges so that
-    // flags and the exact-range note share a single collection entry.
+    // the highlight and the exact-range note share a single collection entry
+    // (the earliest created time, the latest updated one).
     QMap<QString,Annotation> merged;
     for (const auto &a : annotations) {
-        if (!a.bookmark && !a.highlight && a.note.isEmpty()) continue;
+        if (!a.highlight && a.note.isEmpty()) continue;
         const QString key = QString("%1:%2").arg(a.start).arg(a.end);
         if (!merged.contains(key)) merged.insert(key,a);
         else {
             auto &target = merged[key];
-            target.bookmark |= a.bookmark; target.highlight |= a.highlight;
+            target.highlight |= a.highlight;
             if (!a.note.isEmpty()) target.note = a.note;
+            if (!a.created.isEmpty() && (target.created.isEmpty() || a.created < target.created)) target.created = a.created;
+            target.updated = std::max(target.updated,a.updated);
         }
     }
     QSqlQuery q(m_store);
     q.prepare("DELETE FROM annotations WHERE version_id=?"); q.addBindValue(m_versionId);
     if (!q.exec()) return setError("Cannot save annotations: " + q.lastError().text());
-    if (!q.prepare("INSERT INTO annotations(book,chapter,start,end,bookmark,highlight,note,endBook,endChapter,version_id) VALUES(?,?,?,?,?,?,?,?,?,?)")) return setError(q.lastError().text());
+    if (!q.prepare("INSERT INTO annotations(book,chapter,start,end,highlight,note,endBook,endChapter,version_id,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)")) return setError(q.lastError().text());
     for (const auto &a : merged) {
         const auto start = endpoint(a.start), end = endpoint(a.end);
         q.bindValue(0,start.book); q.bindValue(1,start.chapter); q.bindValue(2,start.verse); q.bindValue(3,end.verse);
-        q.bindValue(4,a.bookmark); q.bindValue(5,a.highlight); q.bindValue(6,a.note.isNull() ? QString("") : a.note);
-        q.bindValue(7,end.book); q.bindValue(8,end.chapter);
-        q.bindValue(9,m_versionId);
+        q.bindValue(4,a.highlight); q.bindValue(5,a.note.isNull() ? QString("") : a.note);
+        q.bindValue(6,end.book); q.bindValue(7,end.chapter);
+        q.bindValue(8,m_versionId);
+        q.bindValue(9,a.created.isNull() ? QString("") : a.created); q.bindValue(10,a.updated.isNull() ? QString("") : a.updated);
         if (!q.exec()) return setError("Cannot save annotations: " + q.lastError().text());
     }
     QVector<Annotation> verified;
@@ -3037,13 +3068,14 @@ bool BibleBackend::saveAnnotations(const QVector<Annotation> &annotations)
     if (verified.size() != merged.size()) return setError("Cannot verify saved annotations.");
     for (const auto &a : verified) {
         const auto it = merged.constFind(QString("%1:%2").arg(a.start).arg(a.end));
-        if (it == merged.cend() || it->bookmark != a.bookmark || it->highlight != a.highlight || it->note != a.note)
+        if (it == merged.cend() || it->highlight != a.highlight || it->note != a.note
+            || it->created != a.created || it->updated != a.updated)
             return setError("Cannot verify saved annotations.");
     }
     return true;
 }
 
-bool BibleBackend::toggleFlag(bool highlight)
+bool BibleBackend::toggleHighlight()
 {
     if (!requireReady()) return false;
     if (!m_start) return setError("Select one or more verses first.");
@@ -3051,21 +3083,20 @@ bool BibleBackend::toggleFlag(bool highlight)
     QVector<Annotation> rows;
     if (!loadAnnotations(&rows)) { m_store.rollback(); return false; }
     const auto before = rows;
-    const bool covered = flagCovered(rows,highlight);
+    const bool covered = highlightCovered(rows);
     const int start = std::min(m_anchor,m_cursor), end = std::max(m_anchor,m_cursor);
+    const QString now = timestamp();
     if (covered) {
         QVector<Annotation> pieces;
         for (auto &a : rows) {
-            bool &flag = highlight ? a.highlight : a.bookmark;
-            if (!flag || a.end < start || a.start > end) continue;
-            flag = false;
-            if (a.start < start) pieces.append({a.start,start-1,!highlight,highlight,{}});
-            if (a.end > end) pieces.append({end+1,a.end,!highlight,highlight,{}});
+            if (!a.highlight || a.end < start || a.start > end) continue;
+            a.highlight = false; a.updated = now;
+            if (a.start < start) pieces.append({a.start,start-1,true,{},a.created,now});
+            if (a.end > end) pieces.append({end+1,a.end,true,{},a.created,now});
         }
         rows += pieces;
-    } else rows.append({start,end,!highlight,highlight,{}});
-    const QString kind = highlight ? "highlight" : "bookmark";
-    return commitAnnotations(rows,before,kind + (covered ? " removal on " : " on ") + rangeReference(start,end));
+    } else rows.append({start,end,true,{},now,now});
+    return commitAnnotations(rows,before,QString(covered ? "highlight removal on " : "highlight on ") + rangeReference(start,end));
 }
 bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows, const QVector<Annotation> &before, const QString &label)
 {
@@ -3079,13 +3110,15 @@ bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows, const QVec
     for (const auto &a : saved) changes[{a.start,a.end}].second = &a;
     for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
         const auto *was = it->first, *now = it->second;
-        if (was && now && was->bookmark == now->bookmark && was->highlight == now->highlight && was->note == now->note) continue;
+        if (was && now && was->highlight == now->highlight && was->note == now->note
+            && was->created == now->created && was->updated == now->updated) continue;
         const auto scope = annotationScope(it.key().first,it.key().second);
         ScopeState after;
         if (!readScopeState(scope,&after)) { m_store.rollback(); return false; }
         auto prior = after;
-        prior.annotated = was != nullptr; prior.bookmark = was && was->bookmark; prior.highlight = was && was->highlight;
+        prior.annotated = was != nullptr; prior.highlight = was && was->highlight;
         prior.note = was ? was->note : QString();
+        prior.created = was ? was->created : QString(); prior.updated = was ? was->updated : QString();
         step.scopes << scope; step.before << prior; step.after << after;
     }
     const auto collection = collectionRows(saved);
@@ -3095,8 +3128,6 @@ bool BibleBackend::commitAnnotations(const QVector<Annotation> &rows, const QVec
     publishAnnotations();
     clearError(); emit collectionChanged(); updateAnnotations(); return true;
 }
-bool BibleBackend::toggleBookmark() { return toggleFlag(false); }
-bool BibleBackend::toggleHighlight() { return toggleFlag(true); }
 
 void BibleBackend::setNoteText(QString text)
 {
@@ -3115,10 +3146,10 @@ void BibleBackend::setNoteText(QString text)
         for (const QVariant &value : QVariantList{m_versionId,first.book,first.chapter,first.verse,last.book,last.chapter,last.verse})
             q.addBindValue(value);
     };
-    q.prepare("SELECT bookmark,highlight,note FROM annotations" + where); bindRange();
+    q.prepare("SELECT highlight,note FROM annotations" + where); bindRange();
     if (!q.exec()) { m_store.rollback(); setError("Cannot read the note: " + q.lastError().text()); return; }
-    const bool exists = q.next(), flagged = exists && (q.value(0).toBool() || q.value(1).toBool());
-    const QString savedNote = exists ? q.value(2).toString() : QString();
+    const bool exists = q.next(), flagged = exists && q.value(0).toBool();
+    const QString savedNote = exists ? q.value(1).toString() : QString();
     q.finish();
     // Peer delivery is deferred while all windows flush drafts. Compare against
     // this reader's last observed note inside the same transaction as the write,
@@ -3133,11 +3164,12 @@ void BibleBackend::setNoteText(QString text)
     UndoStep step("note on " + rangeReference(start,end),m_versionId,{scope},"note:" + rangeKey(scope));
     if (!captureStates(&step,false)) { m_store.rollback(); return; }
     const bool removed = exists && !flagged && text.isEmpty();
+    const QString now = timestamp();
     if (removed) { q.prepare("DELETE FROM annotations" + where); bindRange(); }
-    else if (exists) { q.prepare("UPDATE annotations SET note=?" + where); q.addBindValue(text); bindRange(); }
+    else if (exists) { q.prepare("UPDATE annotations SET note=?,updated=?" + where); q.addBindValue(text); q.addBindValue(now); bindRange(); }
     else {
-        q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,bookmark,highlight,note) VALUES(?,?,?,?,?,?,?,0,0,?)");
-        bindRange(); q.addBindValue(text);
+        q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,highlight,note,created,updated) VALUES(?,?,?,?,?,?,?,0,?,?,?)");
+        bindRange(); q.addBindValue(text); q.addBindValue(now); q.addBindValue(now);
     }
     if (!q.exec() || q.numRowsAffected() != 1) {
         const QString error = q.lastError().text();
@@ -3215,10 +3247,11 @@ bool BibleBackend::deleteNoteScope(QVariantMap scope)
     if (!captureStates(&step,false)) return false;
     QSqlQuery q(m_store);
     // Same semantics as saving an empty note: a row with nothing else goes.
-    q.prepare("DELETE FROM annotations WHERE " + scopeWhere + " AND NOT bookmark AND NOT highlight AND note<>''"); bindScope(q,canonical);
+    q.prepare("DELETE FROM annotations WHERE " + scopeWhere + " AND NOT highlight AND note<>''"); bindScope(q,canonical);
     if (!q.exec()) return setError("Cannot delete note: " + q.lastError().text());
     qint64 changed = q.numRowsAffected();
-    q.prepare("UPDATE annotations SET note='' WHERE " + scopeWhere + " AND note<>''"); bindScope(q,canonical);
+    q.prepare("UPDATE annotations SET note='',updated=? WHERE " + scopeWhere + " AND note<>''");
+    q.addBindValue(timestamp()); bindScope(q,canonical);
     if (!q.exec()) return setError("Cannot delete note: " + q.lastError().text());
     changed += q.numRowsAffected();
     if (!changed) return setError("No saved note exists for that exact range.");
@@ -3245,15 +3278,16 @@ bool BibleBackend::readScopeState(const QVariantMap &scope, ScopeState *state)
 {
     *state = {};
     QSqlQuery q(m_store);
-    q.prepare("SELECT bookmark,highlight,note FROM annotations WHERE " + scopeWhere); bindScope(q,scope);
+    q.prepare("SELECT highlight,note,created,updated FROM annotations WHERE " + scopeWhere); bindScope(q,scope);
     if (!q.exec()) return setError("Cannot read annotations: " + q.lastError().text());
     if (q.next()) {
         state->annotated = true;
-        state->bookmark = q.value(0).toBool(); state->highlight = q.value(1).toBool(); state->note = q.value(2).toString();
+        state->highlight = q.value(0).toBool(); state->note = q.value(1).toString();
+        state->created = q.value(2).toString(); state->updated = q.value(3).toString();
     }
-    q.prepare("SELECT tag_id FROM tag_assignments WHERE " + scopeWhere + " ORDER BY tag_id"); bindScope(q,scope);
+    q.prepare("SELECT tag_id,created FROM tag_assignments WHERE " + scopeWhere + " ORDER BY tag_id"); bindScope(q,scope);
     if (!q.exec()) return setError("Cannot read tags: " + q.lastError().text());
-    while (q.next()) state->tags << q.value(0).toString();
+    while (q.next()) { state->tags << q.value(0).toString(); state->tagCreated << q.value(1).toString(); }
     if (q.lastError().isValid()) return setError("Cannot read tags: " + q.lastError().text());
     return true;
 }
@@ -3266,12 +3300,13 @@ bool BibleBackend::writeScopeState(const QVariantMap &scope, const ScopeState &s
         if (!q.exec()) return setError("Cannot restore annotations: " + q.lastError().text());
     }
     if (state.annotated) {
-        q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,bookmark,highlight,note) VALUES(?,?,?,?,?,?,?,?,?,?)");
-        bindScope(q,scope); q.addBindValue(state.bookmark); q.addBindValue(state.highlight);
-        q.addBindValue(state.note.isNull() ? QString("") : state.note);
+        q.prepare("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,highlight,note,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+        bindScope(q,scope); q.addBindValue(state.highlight);
+        for (const auto &text : {state.note,state.created,state.updated}) q.addBindValue(text.isNull() ? QString("") : text);
         if (!q.exec()) return setError("Cannot restore annotations: " + q.lastError().text());
     }
-    for (const auto &id : state.tags) if (!writeTagAssignment(scope,id,true)) return false;
+    for (int i = 0; i < state.tags.size(); ++i)
+        if (!writeTagAssignment(scope,state.tags[i],true,state.tagCreated.value(i))) return false;
     ScopeState written;
     if (!readScopeState(scope,&written)) return false;
     if (written != state) return setError("Cannot verify the restored annotations.");
@@ -3296,7 +3331,10 @@ void BibleBackend::recordUndo(UndoStep step)
     if (!step.group.isEmpty() && step.group == m_undoGroup && !m_undo.isEmpty() && m_undo.last().group == step.group)
         step.before = m_undo.takeLast().before;
     m_undoGroup = step.group;
-    if (step.before != step.after) {
+    // Typing a note back to its saved text changes only its times: no step.
+    bool changed = false;
+    for (int i = 0; i < step.before.size(); ++i) changed |= !step.before[i].sameMarks(step.after.value(i));
+    if (changed) {
         m_redo.clear();
         m_undo << step;
         if (m_undo.size() > UndoLimit) m_undo.removeFirst();
@@ -3522,10 +3560,7 @@ bool BibleBackend::exportNotes(QUrl directory)
     for (const auto &value : collectionRows(rows)) {
         const auto a = value.toMap();
         markdown += "## " + markdownText(a.value("reference").toString()) + "\n\n";
-        QStringList flags;
-        if (a.value("bookmark").toBool()) flags << "Bookmark";
-        if (a.value("highlight").toBool()) flags << "Highlight";
-        if (!flags.isEmpty()) markdown += "*" + flags.join(" · ") + "*\n\n";
+        if (a.value("highlight").toBool()) markdown += "*Highlight*\n\n";
         QStringList names;
         for (const auto &tag : a.value("tags").toList()) names << markdownText(tag.toMap().value("name").toString());
         if (!names.isEmpty()) markdown += "Tags: " + names.join(" · ") + "\n\n";
@@ -3633,10 +3668,11 @@ bool BibleBackend::exportBackup(QUrl file)
         const auto start = endpoint(a.start), end = endpoint(a.end);
         annotations.append(QJsonObject{{"book",start.book},{"chapter",start.chapter},
             {"start",start.verse},{"end",end.verse},{"endBook",end.book},{"endChapter",end.chapter},
-            {"bookmark",a.bookmark},{"highlight",a.highlight},{"note",a.note}});
+            {"bookmark",false},{"highlight",a.highlight},{"note",a.note}});
     }
+    // Bookmarks travel as the Bookmarked tag; format 5 readers still expect the field.
     const QJsonObject root{{"format","omaword-backup"},{"version",5},{"edition",edition()},{"versionId",versionId()},
-        {"created",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}, {"reading",reading},{"annotations",annotations},
+        {"created",timestamp()}, {"reading",reading},{"annotations",annotations},
         {"tags",tagDefinitions},{"tagAssignments",assignments},{"desk",desk}};
     const QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (bytes.size() > MaximumBackupSize) return setError("This backup exceeds the supported 32 MiB size. Export Markdown notes instead.");
@@ -3701,6 +3737,7 @@ bool BibleBackend::importBackup(QUrl file)
     const auto array = root.value("annotations").toArray();
     if (array.size() > 100000) return setError("The backup has too many annotations.");
     QVector<Annotation> rows;
+    QVariantList bookmarked;
     QSet<QString> ranges;
     for (const auto &value : array) {
         if (!value.isObject()) return setError("The backup contains an invalid annotation.");
@@ -3711,12 +3748,16 @@ bool BibleBackend::importBackup(QUrl file)
         if (!exactKeys(object,keys) || !start || end < start
             || !object.value("bookmark").isBool() || !object.value("highlight").isBool() || !object.value("note").isString())
             return setError("The backup contains an invalid annotation reference or field type.");
-        Annotation a{start,end,object.value("bookmark").toBool(),object.value("highlight").toBool(),object.value("note").toString()};
-        if (a.note.size() > MaximumNoteSize || !safeString(a.note) || (!a.bookmark && !a.highlight && a.note.isEmpty()))
+        const bool bookmark = object.value("bookmark").toBool();
+        // Formats 3–5 carry no times.
+        Annotation a{start,end,object.value("highlight").toBool(),object.value("note").toString(),{},{}};
+        if (a.note.size() > MaximumNoteSize || !safeString(a.note) || (!bookmark && !a.highlight && a.note.isEmpty()))
             return setError("The backup contains an empty, oversized, or invalid annotation.");
         const QString key = rangeReference(a.start,a.end);
         if (ranges.contains(key)) return setError("The backup contains duplicate annotation ranges.");
-        ranges.insert(key); rows.append(a);
+        ranges.insert(key);
+        if (a.highlight || !a.note.isEmpty()) rows.append(a);
+        if (bookmark) bookmarked.append(annotationScope(a.start,a.end));
     }
     QMap<QString,QString> definitions;
     QVariantList assignments;
@@ -3809,6 +3850,19 @@ bool BibleBackend::importBackup(QUrl file)
             if (!writeTagAssignment(scope,ids.value(scope.value("tagId").toString()),true)) return false;
         }
     }
+    // Bookmarks come back as the Bookmarked tag. Format 3 carried no tags, so
+    // of this version's tags it replaces only that one's assignments.
+    if (!withTags) {
+        QSqlQuery q(m_store);
+        q.prepare("DELETE FROM tag_assignments WHERE version_id=? AND tag_id IN (SELECT id FROM tags WHERE name_key=?)");
+        q.addBindValue(restoreVersion); q.addBindValue(tagKey(QStringLiteral("Bookmarked")));
+        if (!q.exec()) return setError("Cannot replace bookmarks: " + q.lastError().text());
+    }
+    if (!bookmarked.isEmpty()) {
+        const QString id = ensureTag(QStringLiteral("Bookmarked"));
+        if (id.isEmpty()) return false;
+        for (const auto &scope : bookmarked) if (!writeTagAssignment(scope.toMap(),id,true,QString(""))) return false;
+    }
     if (withDesk) {
         // Replace only this version's items; they rejoin the global order at the end.
         QSqlQuery q(m_store);
@@ -3838,13 +3892,13 @@ bool BibleBackend::importBackup(QUrl file)
     intersectSelection();
     m_verses = chapterRows; m_annotations = savedRows; m_collection = savedCollection;
     publishAnnotations();
-    if (withTags) publishTags();
+    publishTags();
     if (withDesk) publishDesk();
     updateAnnotations(); emit collectionChanged();
     emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
     // A restore replaced what undo steps would write back.
     clearUndo();
-    clearError(); setStatus(QString("Restored %1 annotations from backup.").arg(rows.size())); return true;
+    clearError(); setStatus(QString("Restored %1 annotations from backup.").arg(array.size())); return true;
 }
 
 // A static library's resources register only when something references them.

@@ -200,7 +200,7 @@ ApplicationWindow {
         if (bible.busy || !flushNote()) return
         clearCount()
         if (manage) tagsUi.openManage()
-        else { collectionTab = 3; savedDrawer.open() }
+        else { collectionTab = 2; savedDrawer.open() }
     }
     readonly property alias tagsUi: tagsUi
     readonly property var tagBackend: bible
@@ -567,7 +567,7 @@ ApplicationWindow {
     // share one rail. Allocate once per interval so later starts/ends never bend it.
     readonly property var annotationLanes: packAnnotationLanes(bible.verses)
     function packAnnotationLanes(sourceRows) {
-        const rows = Array.from(sourceRows), kinds = ["bookmark", "tag", "note"]
+        const rows = Array.from(sourceRows), kinds = ["tag", "note"]
         const intervals = [], lanes = rows.map(function() { return {} })
         kinds.forEach(function(kind, priority) {
             let interval = null
@@ -582,7 +582,7 @@ ApplicationWindow {
             })
         })
         intervals.sort(function(a, b) { return a.start - b.start || a.priority - b.priority })
-        const occupiedUntil = [-1, -1, -1]
+        const occupiedUntil = [-1, -1]
         intervals.forEach(function(interval) {
             const lane = occupiedUntil.findIndex(function(end) { return end < interval.start })
             occupiedUntil[lane] = interval.end
@@ -978,7 +978,6 @@ ApplicationWindow {
         if (!ranges.length) { rejected(); return }
         if (ranges.length === 1) {
             if (kind === "tag") openPassageTags(ranges[0])
-            else if (kind === "bookmark") openBookmark(ranges[0])
             else openNoteScope(ranges[0])
             return
         }
@@ -989,7 +988,7 @@ ApplicationWindow {
     }
     function openRangeEntries(sceneX, sceneY) {
         const ready = !bible.busy
-        const entries = [["bookmark", "openBookmark", "Open bookmark"], ["note", "openNote", "Open note"], ["tag", "openTags", "Open tags…"]]
+        const entries = [["note", "openNote", "Open note"], ["tag", "openTags", "Open tags…"]]
             .filter(function(kind) { return app.cursorRanges(kind[0]).length > 0 })
             .map(function(kind) {
                 const many = app.cursorRanges(kind[0]).length > 1
@@ -1416,7 +1415,6 @@ ApplicationWindow {
             menuAction("copy", "Copy quotation", "copy"),
             menuAction("copyPlain", "Copy plain text", "copyPlain"),
             menuDivider,
-            menuAction("bookmark", bible.selectionBookmarked ? "Remove bookmark" : "Bookmark", "bookmark"),
             menuAction("highlight", bible.selectionHighlighted ? "Remove highlight" : "Highlight", "highlight"),
             menuAction("note", bible.noteText.length ? "Edit note" : "Write note", "notes"),
             menuAction("tags", "Tags…", "tags")
@@ -1587,11 +1585,7 @@ ApplicationWindow {
     }
     function removeMarkerAnnotation(scope, kind) {
         if (bible.busy || !scope || !flushNote()) return
-        if (kind === "bookmark") {
-            if (!bible.openTaggedPassage(scope)) { sounds.play("error"); return }
-            syncNote()
-            if (bible.selectionBookmarked) markPassage(false)
-        } else if (kind === "tag") {
+        if (kind === "tag") {
             const tags = Array.from(bible.tagsForScope(scope))
             if (tags.length && bible.setTags(scope, tags.map(function(tag) { return tag.id }), false)) {
                 notify((scope.reference || "Passage") + " tags removed", true); sounds.play("remove")
@@ -1614,7 +1608,7 @@ ApplicationWindow {
         sounds.play("remove")
         return true
     }
-    // Bookmark, note, and tag markers in every layout. One choice targets
+    // Note and tag markers in every layout. One choice targets
     // that range; several overlapping ranges keep Open's chooser and Move here.
     function sameScope(a, b) {
         return !!a && !!b && ["versionId", "book", "chapter", "start", "endBook", "endChapter", "end"].every(function(key) { return a[key] === b[key] })
@@ -1659,7 +1653,7 @@ ApplicationWindow {
         const several = choices.length > 1
         const ready = !bible.busy
         const which = several ? "…" : ""
-        const removeText = kind === "bookmark" ? "Remove bookmark" : kind === "tag" ? "Remove tags" : "Delete note"
+        const removeText = kind === "tag" ? "Remove tags" : "Delete note"
         contextMenu.show("marker", [
             { id: "open", text: "Open", enabled: ready, run: openMarker },
             menuDivider,
@@ -1695,7 +1689,7 @@ ApplicationWindow {
         collectionList.forceActiveFocus()
         const ready = !bible.busy
         const moveHere = moveHereEntry([entry])
-        const extras = (collectionTab === 3 ? [
+        const extras = (collectionTab === 2 ? [
             { id: "tags", text: "Edit tags…", shortcut: KeyNotation.format("T"), enabled: ready, run: function() { app.openPassageTags(tagsUi.snapshot(entry)) } },
             moveHere,
             { id: "removeTag", text: "Remove " + entry.group, shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeSavedTag(entry, row) } }
@@ -1927,11 +1921,9 @@ ApplicationWindow {
                 id: verseTagAction
                 required property var modelData
                 objectName: "verseTagAction:" + modelData.reference
-                text: modelData.reference + (verseTagMenu.annotationKind === "tag" ? " · " + app.tagsPlainText(modelData.tags)
-                    : verseTagMenu.annotationKind === "bookmark" ? " · Bookmark" : " · Note")
+                text: modelData.reference + (verseTagMenu.annotationKind === "tag" ? " · " + app.tagsPlainText(modelData.tags) : " · Note")
                 onTriggered: {
                     if (verseTagMenu.annotationKind === "note") app.openNoteScope(modelData)
-                    else if (verseTagMenu.annotationKind === "bookmark") app.openBookmark(modelData)
                     else app.openPassageTags(modelData)
                 }
                 Keys.onPressed: function(event) { if (event.modifiers !== Qt.NoModifier) event.accepted = true }
@@ -2188,7 +2180,7 @@ ApplicationWindow {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action) return ""
         if (bible.busy) return "Wait for the import to finish"
-        if (["bookmark", "highlight", "tags", "toggleDesk", "notes", "copy", "copyPlain", "compare", "peek"].includes(action.id) && !hasSelection)
+        if (["highlight", "tags", "toggleDesk", "notes", "copy", "copyPlain", "compare", "peek"].includes(action.id) && !hasSelection)
             return "Select a verse first"
         if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen)
             return "Open a note first · " + keyText("notes")
@@ -3062,12 +3054,11 @@ ApplicationWindow {
             sounds.play("chime")
         }
     }
-    function markPassage(highlight) {
+    function highlightPassage() {
         if (!hasSelection || !flushNote()) return
         const scope = actionScope()
-        const success = highlight ? bible.toggleHighlight() : bible.toggleBookmark()
-        if (success) {
-            const added = highlight ? bible.selectionHighlighted : bible.selectionBookmarked
+        if (bible.toggleHighlight()) {
+            const added = bible.selectionHighlighted
             completeRangeAction(scope, false)
             sounds.play(added ? "chime" : "remove")
         } else sounds.play("error")
@@ -3455,10 +3446,9 @@ ApplicationWindow {
         positionTimer.restart()
     }
     function collectionForTab() {
-        if (collectionTab === 3) return taggedRows()
+        if (collectionTab === 2) return taggedRows()
         return Array.from(bible.collection).filter(function(entry) {
-            return (collectionTab === 0 && entry.bookmark)
-                || (collectionTab === 1 && entry.highlight) || (collectionTab === 2 && entry.note.length > 0)
+            return (collectionTab === 0 && entry.highlight) || (collectionTab === 1 && entry.note.length > 0)
         })
     }
     // Annotations → Tags: every tagged passage in this version, grouped by tag
@@ -3498,7 +3488,7 @@ ApplicationWindow {
     readonly property var savedHereKey: [bible.versionId, bible.selectionReference, bible.selectedStart, bible.selectedEnd, bible.passage]
     // Opening the Tags tab starts at the first row here, else the first row.
     function initialSavedRow() {
-        if (collectionTab !== 3) return collectionList.count ? 0 : -1
+        if (collectionTab !== 2) return collectionList.count ? 0 : -1
         const rows = collectionList.model || []
         const here = rows.findIndex(function(entry) { return app.savedHere(entry) })
         return here >= 0 ? here : rows.length ? 0 : -1
@@ -3510,14 +3500,14 @@ ApplicationWindow {
     function savedMatches(entry, query) {
         if (!query.length) return true
         // Tags: a match on the tag's name keeps its whole group.
-        const fields = collectionTab === 3 ? [entry.reference, entry.note || "", entry.group, entry.excerpt || ""]
+        const fields = collectionTab === 2 ? [entry.reference, entry.note || "", entry.group, entry.excerpt || ""]
             : [entry.reference, entry.note || "", tagsPlainText(entry.tags), entry.excerpt || ""]
         return fields.join("\n").toLowerCase().indexOf(query.toLowerCase()) >= 0
     }
     function filteredCollection() {
         const query = savedQuery.trim()
         const rows = collectionForTab().filter(function(entry) { return app.savedMatches(entry, query) })
-        if (collectionTab !== 3) return rows
+        if (collectionTab !== 2) return rows
         // Section headings: "name · count" over the rows shown.
         const counts = {}
         rows.forEach(function(row) { counts[row.groupId] = (counts[row.groupId] || 0) + 1 })
@@ -3546,10 +3536,10 @@ ApplicationWindow {
         collectionList.forceActiveFocus()
     }
     function filterSaved(delta) {
-        const tab = (collectionTab + delta + 4) % 4
+        const tab = (collectionTab + delta + 3) % 3
         clearSavedQuery()
         collectionTab = tab
-        if (tab === 3) refreshTagExcerpts()
+        if (tab === 2) refreshTagExcerpts()
         collectionList.currentIndex = initialSavedRow()
         moveSaved(0)
     }
@@ -3561,7 +3551,7 @@ ApplicationWindow {
         endJump(from)
         syncNote()
         savedDrawer.close()
-        if (entry.note.length > 0 && collectionTab !== 3) openNotes(false)
+        if (entry.note.length > 0 && collectionTab !== 2) openNotes(false)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
@@ -3577,7 +3567,7 @@ ApplicationWindow {
         }
         let entry = focused instanceof SavedEntry ? (focused as SavedEntry).modelData : collectionList.model[row]
         if (!entry || bible.busy) return
-        if (collectionTab === 3) { removeSavedTag(entry, row); return }
+        if (collectionTab === 2) { removeSavedTag(entry, row); return }
         if (!deleteScope(entry, false)) return
         collectionList.currentIndex = Math.min(row, collectionList.count - 1)
         deleteFocusTimer.restart()
@@ -3601,11 +3591,6 @@ ApplicationWindow {
                     return entry[key] === scope[key]
                 })
             })
-    }
-    function openBookmark(scope) {
-        if (!flushNote()) return
-        const from = beginJump()
-        if (typeof scope === "string" ? bible.navigate(scope) : bible.openTaggedPassage(scope)) { endJump(from); syncNote(); readerFocus(); pulseDestination() }
     }
     function openNoteScope(scope) {
         if (!scope || !flushNote()) return
@@ -3670,7 +3655,7 @@ ApplicationWindow {
     function versionEntries() {
         if (versionDialog.step === 1) return [
             { name: "Keep annotations", hint: "Reconnect when this version is reimported", remove: false },
-            { name: "Remove annotations too", hint: "Delete this version's notes, bookmarks, and highlights", remove: true }
+            { name: "Remove annotations too", hint: "Delete this version's notes, highlights, and tags", remove: true }
         ]
         const query = versionSearch.text.trim().toLowerCase()
         return Array.from(bible.versions).filter(function(entry) {
@@ -3847,7 +3832,6 @@ ApplicationWindow {
         { id: "bibleSearch", group: "Search", title: "Search Bible", sequences: ["Ctrl+/"], scope: "palette", command: true },
         // Bound by the palette's input itself.
         { id: "searchBookJump", group: "Search", title: "Bible search: next book, previous book", sequences: ["Ctrl+Down", "Ctrl+Up"], scope: "search", explanation: true },
-        { id: "bookmark", group: "Annotate", title: "Bookmark selection", sequences: ["M"], command: true },
         { id: "highlight", group: "Annotate", title: "Highlight selection", sequences: ["X"], command: true },
         { id: "notes", group: "Annotate", title: "Write a note", sequences: ["W"], scope: "notes", command: true },
         { id: "tags", group: "Annotate", title: "Tag passage", sequences: ["T"], command: true },
@@ -4045,7 +4029,7 @@ ApplicationWindow {
         const open = ["Return", "open", function() { app.openSaved(app.focusedSavedEntry()) }, ready]
         const copy = ["Y", "copy", function() { app.copyScope(app.focusedSavedEntry()) }, !!entry && !bible.busy]
         const desk = ["D", "Desk", function() { app.toggleScopeDesk(app.focusedSavedEntry()) }, ready]
-        if (collectionTab === 3) return [[["Left", "Right"], "tabs"], open,
+        if (collectionTab === 2) return [[["Left", "Right"], "tabs"], open,
             ["T", "tags", function() { app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry())) }, ready],
             ["Delete", "remove tag", app.deleteSaved, ready], copy, desk,
             [actionKeys("manageTags")[0], "manage", function() { tagsUi.openManage() }, !bible.busy], search, close]
@@ -4116,7 +4100,7 @@ ApplicationWindow {
         // Undo works where changes are made: the reader and its side panels.
         if (sidePanel.length && undoActions.includes(action.id)) return panelSwitchKeys
         // ctrl t opens Manage tags over a side panel (Annotations → Tags binds it itself).
-        if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && !(sidePanel === "annotations" && collectionTab === 3)
+        if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && !(sidePanel === "annotations" && collectionTab === 2)
         if (settingsDialog.opened && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         // visible, not opened: the palette accepts keys during its fade-in.
@@ -4137,7 +4121,7 @@ ApplicationWindow {
         if (!action || action.explanation || bible.busy) return false
         if (action.id === "copyText" || action.id === "copyTextPlain") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
-        if (["bookmark", "highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
+        if (["highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
         if (action.id === "compare") return hasSelection && bible.versions.length > 1
         if (action.id === "peek") return hasSelection && Array.from(bible.footnotes).some(function(note) { return note.verse === bible.cursorVerse })
         if (action.id === "undo") return bible.canUndo
@@ -4565,15 +4549,14 @@ ApplicationWindow {
         case "annotations":
             if (!leaveSidePanel("annotations")) break
             bible.refreshCollection()
-            if (collectionTab === 3) openTagsBrowser()
+            if (collectionTab === 2) openTagsBrowser()
             else savedDrawer.open()
             break
         case "notes": if (sidePanel === "notes" || leaveSidePanel("notes")) openNotes(true); break
         case "desk": if (leaveSidePanel("desk")) openDesk(); break
         case "toggleDesk": toggleDeskPassage(); break
         case "cleanDesk": requestCleanDesk(); break
-        case "bookmark": markPassage(false); break
-        case "highlight": markPassage(true); break
+        case "highlight": highlightPassage(); break
         case "undo": undoChange(true); break
         case "redo": undoChange(false); break
         case "tags": openPassageTags(); break
@@ -5103,13 +5086,6 @@ ApplicationWindow {
             }
         }
     }
-    component BookmarkGlyph: AnnotationGlyph {
-        kind: "bookmark"
-        ink: desktop.accent
-        implicitWidth: 11 * app.scale
-        implicitHeight: 15 * app.scale
-        width: implicitWidth; height: implicitHeight
-    }
     component NoteGlyph: AnnotationGlyph {
         kind: "note"
         implicitWidth: 14 * app.scale
@@ -5135,7 +5111,7 @@ ApplicationWindow {
             return r.reference + (marker.kind === "tag" ? " · " + app.tagsPlainText(r.tags) : "")
         }).join("\n")
         width: 16 * app.readerScale
-        // Mouse only: the passage menu's Open bookmark / note / tags reach the same ranges by key.
+        // Mouse only: the passage menu's Open note / tags reach the same ranges by key.
         focusPolicy: Qt.NoFocus
         readonly property int lane: (app.annotationLanes[rowIndex] || {})[kind] || 0
         x: (36 - lane * 18) * app.readerScale
@@ -5145,7 +5121,6 @@ ApplicationWindow {
         function openMarker() {
             if (choices.length === 1) {
                 if (kind === "tag") app.openPassageTags(choices[0])
-                else if (kind === "bookmark") app.openBookmark(choices[0])
                 else app.openNoteScope(choices[0])
             } else {
                 verseTagMenu.annotationKind = kind
@@ -5590,13 +5565,6 @@ ApplicationWindow {
                                 // Focus-mode dimming: paint-only, so layout and hit-testing are unchanged.
                                 readonly property bool dimmed: app.verseDimmed(modelData.number)
                                 opacity: modelData.number < app.focusFirst || modelData.number > app.focusLast ? app.focusDimmedOpacity : 1
-                                RangeMarker {
-                                    objectName: "bookmarkMarker" + verseRow.modelData.number
-                                    kind: "bookmark"; number: verseRow.modelData.number; rowIndex: verseRow.index
-                                    ranges: Array.from(verseRow.modelData.bookmarkRanges || [])
-                                    headingHeight: verseHeading.height; bodyHeight: verseBody.height
-                                    height: verseRow.height
-                                }
                                 Item {
                                     id: verseHeading
                                     objectName: "verseHeading" + verseRow.modelData.number
@@ -5755,7 +5723,7 @@ ApplicationWindow {
                                     y: verseHeading.height
                                     height: Math.max(32, verseBody.height)
                                     Accessible.role: Accessible.Button
-                                    Accessible.name: "Verse " + verseRow.modelData.number + (verseRow.modelData.hasNote ? ", has note" : "") + (verseRow.modelData.bookmarked ? ", bookmarked" : "")
+                                    Accessible.name: "Verse " + verseRow.modelData.number + (verseRow.modelData.hasNote ? ", has note" : "") + (verseRow.modelData.hasTags ? ", tagged" : "")
                                     Accessible.onPressAction: app.selectVerse(verseRow.modelData.number, false)
                                     Label {
                                         id: numberLabel
@@ -5805,7 +5773,7 @@ ApplicationWindow {
                                         theme: desktop
                                         uiScale: app.scale
                                         visible: numberMouse.containsMouse && numberLabel.visible
-                                        text: "Select verse " + verseRow.modelData.number + " · " + KeyNotation.format("Shift+Click") + " extends · " + KeyNotation.format("MiddleClick") + " copies" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.bookmarked ? "\nBookmarked" : "") + (verseRow.modelData.hasTags ? "\nTagged" : "")
+                                        text: "Select verse " + verseRow.modelData.number + " · " + KeyNotation.format("Shift+Click") + " extends · " + KeyNotation.format("MiddleClick") + " copies" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.hasTags ? "\nTagged" : "")
                                     }
                                 }
                                 Repeater {
@@ -6179,7 +6147,7 @@ ApplicationWindow {
                 Label { objectName: "setupTitle"; text: desktop.appName; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -0.8; color: desktop.foreground; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label {
                     objectName: "setupDescription"
-                    text: "Add a version to begin. Install from the catalog or import a USFM ZIP.\nRead offline, bookmark and highlight passages, and keep your notes alongside the text."
+                    text: "Add a version to begin. Install from the catalog or import a USFM ZIP.\nRead offline, highlight and tag passages, and keep your notes alongside the text."
                     color: desktop.muted
                     font.pixelSize: 15 * app.scale
                     horizontalAlignment: Text.AlignHCenter
@@ -6188,7 +6156,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                 }
                 QuietButton { id: setupImport; objectName: "setupImport"; text: "Add version"; emphasized: true; Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 6; onClicked: app.runCommand("import") }
-                Label { objectName: "setupPrivacy"; text: "All your Bible versions, highlights, bookmarks, and notes stay on this device."; color: desktop.muted; font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Label { objectName: "setupPrivacy"; text: "All your Bible versions, highlights, tags, and notes stay on this device."; color: desktop.muted; font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 QuietButton { objectName: "setupAbout"; text: "About & Attribution"; compact: true; Layout.alignment: Qt.AlignHCenter; onClicked: aboutDialog.open() }
             }
             }
@@ -7304,10 +7272,10 @@ ApplicationWindow {
                     objectName: "versionSummary"
                     width: versionSummaryScroll.availableWidth
                     text: versionDialog.chosen ? "Remove " + versionDialog.chosen.name + " (" + versionDialog.chosen.abbreviation + ") from this library?\n\n"
-                        + (versionDialog.removeAnnotations ? "Delete its notes, bookmarks, and highlights"
+                        + (versionDialog.removeAnnotations ? "Delete its notes, highlights, and tags"
                             + (versionDialog.deskCount > 0 ? ", and " + versionDialog.deskCount + (versionDialog.deskCount === 1 ? " Desk item" : " Desk items") : "")
                             + ". This cannot be undone."
-                            : "Keep its notes, bookmarks, and highlights. They will reconnect when the same version is reimported.")
+                            : "Keep its notes, highlights, and tags. They will reconnect when the same version is reimported.")
                         + "\n\n" + (bible.versions.length === 1 ? "The library will be empty. You can add a version again at any time." : "Other installed versions remain available.")
                         + " Your settings and source USFM files are kept." : ""
                     textFormat: Text.PlainText
@@ -7777,13 +7745,13 @@ ApplicationWindow {
         onAboutToHide: { closing = true; app.restorePanelFocus() }
         function focusContent() { app.focusSavedList() }
         onVisibleChanged: if (visible && !closing) {
-            if (app.collectionTab === 3) { app.refreshTagExcerpts(); collectionList.currentIndex = app.initialSavedRow() }
+            if (app.collectionTab === 2) { app.refreshTagExcerpts(); collectionList.currentIndex = app.initialSavedRow() }
             focusContent()
         }
         onClosed: { closing = false; position = 0; app.restorePanelFocus() }
         Connections {
             target: bible
-            enabled: savedDrawer.visible && app.collectionTab === 3
+            enabled: savedDrawer.visible && app.collectionTab === 2
             function onTagsChanged() { app.refreshTagExcerpts() }
         }
         contentItem: ColumnLayout {
@@ -7810,10 +7778,10 @@ ApplicationWindow {
             Shortcut {
                 objectName: "savedTagKey"
                 sequence: "T"
-                enabled: savedDrawer.collectionKeys && app.collectionTab === 3 && !bible.busy && !!app.focusedSavedEntry()
+                enabled: savedDrawer.collectionKeys && app.collectionTab === 2 && !bible.busy && !!app.focusedSavedEntry()
                 onActivated: app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry()))
             }
-            Shortcut { sequences: app.actionKeys("manageTags"); enabled: savedDrawer.collectionKeys && app.collectionTab === 3 && !bible.busy; onActivated: tagsUi.openManage() }
+            Shortcut { sequences: app.actionKeys("manageTags"); enabled: savedDrawer.collectionKeys && app.collectionTab === 2 && !bible.busy; onActivated: tagsUi.openManage() }
             Shortcut {
                 sequences: ["Menu", "Shift+F10"]
                 enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0
@@ -7835,7 +7803,7 @@ ApplicationWindow {
                 id: savedTabs
                 objectName: "savedTabs"
                 Layout.fillWidth: true
-                labels: ["Bookmarks", "Highlights", "Notes", "Tags"]
+                labels: ["Highlights", "Notes", "Tags"]
                 theme: desktop
                 uiScale: app.controlScale
                 namePrefix: "savedTab"
@@ -7853,7 +7821,7 @@ ApplicationWindow {
                 implicitHeight: 36 * app.controlScale
                 font.pixelSize: 14 * app.controlScale
                 color: desktop.foreground
-                placeholderText: "Search " + ["bookmarks", "highlights", "notes", "tagged passages"][app.collectionTab] + "…"
+                placeholderText: "Search " + ["highlights", "notes", "tagged passages"][app.collectionTab] + "…"
                 placeholderTextColor: desktop.muted
                 selectByMouse: true
                 leftPadding: 10 * app.controlScale; rightPadding: 10 * app.controlScale
@@ -7889,7 +7857,7 @@ ApplicationWindow {
                     width: collectionList.width - app.scrollGutter(collectionList)
                     Label {
                         objectName: "savedTagGroup:" + (savedBlock.modelData.group || "")
-                        visible: app.collectionTab === 3 && !!savedBlock.modelData.firstOfGroup
+                        visible: app.collectionTab === 2 && !!savedBlock.modelData.firstOfGroup
                         width: parent.width
                         text: (savedBlock.modelData.group || "") + " · " + (savedBlock.modelData.groupCount || 0)
                         textFormat: Text.PlainText
@@ -7904,7 +7872,7 @@ ApplicationWindow {
                     id: savedEntry
                     modelData: savedBlock.modelData
                     index: savedBlock.index
-                    objectName: app.collectionTab === 3 ? "savedTagEntry:" + modelData.group + ":" + modelData.reference : "savedEntry" + modelData.reference
+                    objectName: app.collectionTab === 2 ? "savedTagEntry:" + modelData.group + ":" + modelData.reference : "savedEntry" + modelData.reference
                     // Like Desk and History rows: the list keeps the keyboard (tab
                     // never stops on a row); the current row is the list's.
                     focusPolicy: Qt.NoFocus
@@ -7918,12 +7886,11 @@ ApplicationWindow {
                         acceptedButtons: Qt.RightButton
                         onTapped: function(eventPoint) { app.openSavedMenu(savedEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
                     }
-                    // Each tab shows only its own annotation kind: Bookmarks the
-                    // bookmark, Highlights the highlight mark, Notes the note.
-                    readonly property bool showBookmark: app.collectionTab === 0 && !!modelData.bookmark
-                    readonly property bool showHighlight: app.collectionTab === 1 && !!modelData.highlight
-                    readonly property bool showNote: app.collectionTab === 2 && modelData.note.length > 0
-                    readonly property bool showTag: app.collectionTab === 3
+                    // Each tab shows only its own annotation kind: Highlights the
+                    // highlight mark, Notes the note.
+                    readonly property bool showHighlight: app.collectionTab === 0 && !!modelData.highlight
+                    readonly property bool showNote: app.collectionTab === 1 && modelData.note.length > 0
+                    readonly property bool showTag: app.collectionTab === 2
                     // Tags: the reader's range (equal or overlapping) is "here".
                     readonly property bool here: { app.savedHereKey; return showTag && app.savedHere(modelData) }
                     // Other tags on the range; omitted when the group's tag is its only one.
@@ -7935,8 +7902,7 @@ ApplicationWindow {
                         ColumnLayout {
                             Layout.alignment: Qt.AlignTop
                             spacing: 7 * app.scale
-                            visible: savedEntry.showBookmark || savedEntry.showNote || savedEntry.showTag
-                            BookmarkGlyph { objectName: "savedBookmark" + savedEntry.modelData.reference; visible: savedEntry.showBookmark; Layout.alignment: Qt.AlignHCenter }
+                            visible: savedEntry.showNote || savedEntry.showTag
                             NoteGlyph { objectName: "savedNote" + savedEntry.modelData.reference; visible: savedEntry.showNote; Layout.alignment: Qt.AlignHCenter }
                             AnnotationGlyph {
                                 objectName: "savedTag" + savedEntry.modelData.reference
@@ -8013,12 +7979,12 @@ ApplicationWindow {
                     objectName: "savedEmpty"
                     anchors.centerIn: parent
                     width: parent.width - 24
-                    text: app.collectionTab === 3
+                    text: app.collectionTab === 2
                         ? (app.savedQuery.trim().length && app.collectionForTab().length ? "No matching tagged passages."
                             : Array.from(bible.tags).some(function(tag) { return tag.count > 0 }) ? "No tagged passages in " + bible.versionAbbreviation + ". Tags in other versions stay with them."
                             : "No tagged passages yet. Press " + app.keyText("tags") + " on a passage to tag it.")
                         : app.savedQuery.trim().length && app.collectionForTab().length ? "No matching annotations."
-                        : ["No bookmarks yet.", "No highlights yet.", "No notes yet."][app.collectionTab] || ""
+                        : ["No highlights yet.", "No notes yet."][app.collectionTab] || ""
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     color: desktop.muted
@@ -8240,7 +8206,7 @@ ApplicationWindow {
             Label { text: "Clean the Desk?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label {
                 objectName: "cleanDeskExplanation"
-                text: "Remove all " + bible.desk.length + (bible.desk.length === 1 ? " passage" : " passages") + " from the Desk in every window. Your notes, bookmarks, highlights, and tags are kept."
+                text: "Remove all " + bible.desk.length + (bible.desk.length === 1 ? " passage" : " passages") + " from the Desk in every window. Your notes, highlights, and tags are kept."
                 color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
             }
             Label { text: bible.error; visible: text.length > 0; color: desktop.error; Layout.fillWidth: true; wrapMode: Text.Wrap }
@@ -8622,11 +8588,11 @@ ApplicationWindow {
                 Label { text: desktop.appName; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
             }
             Label { text: "About & Attribution"; color: desktop.foreground; font.pixelSize: 18 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { text: "An offline Bible reader with local bookmarks, highlights, and Markdown notes."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
+            Label { text: "An offline Bible reader with local highlights, tags, and Markdown notes."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
             FineRule { Layout.fillWidth: true }
             Label { objectName: "aboutEdition"; text: bible.ready ? bible.edition : "No version installed"; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale }
             Label { objectName: "aboutCopyright"; text: bible.versionCopyright; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
-            Label { objectName: "aboutSources"; text: "Install versions directly from eBible.org or import your own local USFM ZIP. Bible text is stored in this app's local library. No connection is needed to read, bookmark, highlight, or write notes after import."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
+            Label { objectName: "aboutSources"; text: "Install versions directly from eBible.org or import your own local USFM ZIP. Bible text is stored in this app's local library. No connection is needed to read, highlight, tag, or write notes after import."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
             QuietButton {
                 readonly property var entry: Array.from(catalog.entries).find(function(version) { return version.id === bible.versionId })
                 text: "Version details & permissions ↗"; visible: !!entry; compact: true
@@ -8818,7 +8784,7 @@ ApplicationWindow {
                     Label {
                         objectName: "importReplacement"
                         visible: bible.ready
-                        text: "Importing the same edition replaces its Bible data and preserves your notes, bookmarks, highlights, and settings. Adding another supported version keeps the installed editions. Annotations belong to their own version."
+                        text: "Importing the same edition replaces its Bible data and preserves your notes, highlights, tags, and settings. Adding another supported version keeps the installed editions. Annotations belong to their own version."
                         color: desktop.accent; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     Label { objectName: "importDataPath"; text: bible.dataDirectory(); textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
@@ -8950,7 +8916,7 @@ ApplicationWindow {
                 Label {
                     objectName: "backupScopeExplanation"
                     width: backupScopeScroll.availableWidth
-                    text: "This backup includes only " + bible.edition + " (" + bible.versionAbbreviation + ") bookmarks, highlights, notes, and reading location.\n\n"
+                    text: "This backup includes only " + bible.edition + " (" + bible.versionAbbreviation + ") highlights, notes, tags, and reading location.\n\n"
                         + "Other editions are excluded. Switch to each edition to back it up separately. To back up retained annotations from a removed edition, reimport that edition first.\n\n"
                         + "Bible text, source USFM files, and global preferences are not included."
                     textFormat: Text.PlainText; color: desktop.foreground
@@ -9044,7 +9010,7 @@ ApplicationWindow {
             }
             Label {
                 objectName: "restoreScopeExplanation"
-                text: "This replaces only the active edition's bookmarks, highlights, notes, and reading location: " + bible.edition + " (" + bible.versionAbbreviation + "). The backup must match this edition. Other editions and global preferences are untouched. Your imported Bible stays in place."
+                text: "This replaces only the active edition's highlights, notes, tags, and reading location: " + bible.edition + " (" + bible.versionAbbreviation + "). The backup must match this edition. Other editions and global preferences are untouched. Your imported Bible stays in place."
                 color: desktop.foreground
                 font.pixelSize: 14 * app.scale
                 Layout.fillWidth: true

@@ -483,11 +483,11 @@ private slots:
         navigate("John 1:5"); key(Qt::Key_D);
         openDesk();
         const auto reference = bible->selectionReference(); const auto chapter = bible->chapter();
-        for (auto k : {Qt::Key_M, Qt::Key_X, Qt::Key_H, Qt::Key_L, Qt::Key_V, Qt::Key_T, Qt::Key_S, Qt::Key_Slash, Qt::Key_G, Qt::Key_3})
+        for (auto k : {Qt::Key_X, Qt::Key_H, Qt::Key_L, Qt::Key_V, Qt::Key_T, Qt::Key_S, Qt::Key_Slash, Qt::Key_G, Qt::Key_3})
             key(k);
         QVERIFY(deskOpen());
         QCOMPARE(bible->selectionReference(), reference); QCOMPARE(bible->chapter(), chapter);
-        QCOMPARE(desk().size(), 1); QVERIFY(!bible->selectionBookmarked());
+        QCOMPARE(desk().size(), 1); QVERIFY(!bible->selectionHighlighted());
         QVERIFY(!prop("verseMode").toBool()); QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!prop("notesOpen").toBool());
         QVERIFY(!object("passagePalette")->property("visible").toBool());
         QCOMPARE(prop("verseCount").toString(), QString());

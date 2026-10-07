@@ -82,7 +82,7 @@ private slots:
     }
     void cleanup() { bible.reset(); session.reset(); }
     void namesAndDurability() {
-        QVERIFY(!bible->toggleBookmark()); QVERIFY(!bible->toggleHighlight());
+        QVERIFY(!bible->toggleHighlight());
         const QString name = QString::fromUtf8("  Café / [Hope] ✨ 👩‍💻  ");
         const QString id = bible->createTag(name); QVERIFY2(!id.isEmpty(),qPrintable(bible->error()));
         QCOMPARE(bible->createTag(QString::fromUtf8("CAFÉ / [HOPE] ✨ 👩‍💻")),id);
@@ -110,7 +110,7 @@ private slots:
         const auto scope = bible->tagScope();
         const auto id = bible->createAndAssignTag(scope,"Hope"); QVERIFY2(!id.isEmpty(),qPrintable(bible->error()));
         QCOMPARE(bible->selectionTags().size(),1); QCOMPARE(bible->collection().size(),1);
-        QVERIFY(!bible->collection().first().toMap().value("bookmark").toBool());
+        QVERIFY(!bible->collection().first().toMap().value("highlight").toBool());
         QCOMPARE(bible->collection().first().toMap().value("versionId").toString(),bible->versionId());
         QVERIFY(bible->setTag(scope,id,true)); QCOMPARE(count(id),1);
         QVERIFY(bible->navigate("GEN 1:2")); QVERIFY(bible->selectionTags().isEmpty());
@@ -121,20 +121,20 @@ private slots:
         QVERIFY(rail.value("continuesAfter").toBool()); QVERIFY(!rail.value("tagStart").toBool());
         QVERIFY(bible->verses()[0].toMap().value("tagRanges").toList().first().toMap().value("tagStart").toBool());
         QVERIFY(!bible->verses()[3].toMap().value("hasTags").toBool());
-        bible->setNoteText("Keep overlapping note"); QVERIFY(bible->toggleBookmark());
+        bible->setNoteText("Keep overlapping note"); QVERIFY(bible->toggleHighlight());
         QVERIFY(bible->openTaggedPassage(scope)); QVERIFY(bible->toggleHighlight()); bible->setNoteText("Exact note");
         QCOMPARE(bible->collection().size(),2);
         QVERIFY(bible->deleteAnnotation(scope.value("reference").toString(),bible->versionId()));
         QCOMPARE(count(id),0); QCOMPARE(bible->collection().size(),1);
         QVERIFY(bible->navigate("GEN 1:2")); QCOMPARE(bible->noteText(),QString("Keep overlapping note"));
-        QVERIFY(bible->selectionBookmarked());
+        QVERIFY(bible->selectionHighlighted());
         QVERIFY(bible->setTag(scope,id,true));
         QVERIFY(bible->deleteAnnotation(scope.value("reference").toString())); // tags only
         QCOMPARE(count(id),0);
         auto bad = scope; bad["end"] = 99; QVERIFY(!bible->setTag(bad,id,true));
         bad = scope; bad["start"] = "1"; QVERIFY(!bible->setTag(bad,id,true));
         bad = scope; bad["book"] = 40; QVERIFY(!bible->openTaggedPassage(bad));
-        bible->clearSelection(); QVERIFY(bible->tagScope().isEmpty()); QVERIFY(!bible->toggleBookmark());
+        bible->clearSelection(); QVERIFY(bible->tagScope().isEmpty()); QVERIFY(!bible->toggleHighlight());
     }
     void sourceOrderVersionsRelatedAndPeers() {
         install(net); QVERIFY(bible->navigate("TOB 2:4")); bible->moveSelection(2,true);
@@ -193,7 +193,7 @@ private slots:
     void backupsScopedLegacyAndMarkdown() {
         install(net); QVERIFY(bible->navigate("GEN 1:1-2")); const auto scope = bible->tagScope();
         const QString id = bible->createAndAssignTag(scope,"[Hope] <&> | *"); QVERIFY(!id.isEmpty());
-        bible->setNoteText("Saved note"); QVERIFY(bible->toggleBookmark());
+        bible->setNoteText("Saved note"); QVERIFY(bible->toggleHighlight());
         const QString unused = bible->createTag("Unused"); QVERIFY(!unused.isEmpty());
         const auto backup = QUrl::fromLocalFile(session->filePath("backup.json")); QVERIFY(bible->exportBackup(backup));
         auto root = json(backup.toLocalFile()); QCOMPARE(root.value("version").toInt(),5);
@@ -220,10 +220,49 @@ private slots:
         const auto collection = bible->collection(); QVERIFY(!bible->importBackup(bad)); QCOMPARE(bible->collection(),collection);
         QVERIFY(!bible->exportBackup(QUrl::fromLocalFile(bible->dataDirectory()+"/personal.sqlite")));
     }
+    void legacyBookmarksRestoreAsTheBookmarkedTag() {
+        install(net); QVERIFY(bible->navigate("GEN 1:1-2")); const auto noted = bible->tagScope();
+        bible->setNoteText("Noted");
+        QVERIFY(bible->navigate("GEN 1:3")); const auto bare = bible->tagScope();
+        QVERIFY(bible->navigate("GEN 2:1")); const auto elsewhere = bible->tagScope();
+        const auto backup = QUrl::fromLocalFile(session->filePath("backup.json")); QVERIFY(bible->exportBackup(backup));
+        auto root = json(backup.toLocalFile());
+        // Older versions kept bookmarks as a flag: one on the noted range, one alone.
+        auto annotations = root.value("annotations").toArray();
+        auto withNote = annotations.first().toObject(); QCOMPARE(withNote.value("bookmark").toBool(),false);
+        withNote["bookmark"] = true; annotations[0] = withNote;
+        auto alone = withNote; alone["note"] = ""; alone["start"] = 3; alone["end"] = 3; annotations.append(alone);
+        root["annotations"] = annotations;
+        const auto bookmarked = [&](const QVariantMap &scope) {
+            const auto tags = bible->tagsForScope(scope);
+            return std::any_of(tags.cbegin(),tags.cend(),[](const QVariant &tag) { return tag.toMap().value("name") == "Bookmarked"; });
+        };
+        const auto restore = [&](int version) {
+            auto legacy = root; legacy["version"] = version;
+            if (version == 3) { legacy.remove("tags"); legacy.remove("tagAssignments"); legacy.remove("desk"); }
+            const auto file = QUrl::fromLocalFile(session->filePath(QString("legacy%1.json").arg(version)));
+            return write(file.toLocalFile(),QJsonDocument(legacy).toJson()) && bible->importBackup(file);
+        };
+        QVERIFY2(restore(5),qPrintable(bible->error()));
+        QVERIFY(bookmarked(noted)); QVERIFY(bookmarked(bare)); QCOMPARE(bible->tags().size(),1);
+        QVERIFY(bible->openTaggedPassage(noted)); QCOMPARE(bible->noteText(),QString("Noted"));
+        // The bookmark alone leaves no annotation row behind, only its tag.
+        QSqlQuery q(store()); QVERIFY(q.exec("SELECT COUNT(*) FROM annotations")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),1); q.finish();
+        // Format 3 had no tags: it replaces only Bookmarked among them.
+        const QString other = bible->createAndAssignTag(elsewhere,"Other"); QVERIFY(!other.isEmpty());
+        QVERIFY(bible->setTag(elsewhere,bible->tagsForScope(bare).first().toMap().value("id").toString(),true));
+        QVERIFY2(restore(3),qPrintable(bible->error()));
+        QVERIFY(bookmarked(noted)); QVERIFY(bookmarked(bare)); QVERIFY(!bookmarked(elsewhere));
+        QCOMPARE(bible->tagsForScope(elsewhere).size(),1);
+        // Backups now carry them as the tag.
+        QVERIFY(bible->exportBackup(backup)); const auto again = json(backup.toLocalFile());
+        for (const auto &value : again.value("annotations").toArray()) QVERIFY(!value.toObject().value("bookmark").toBool());
+        QCOMPARE(again.value("tagAssignments").toArray().size(),3);
+    }
     void rollbackAndPublication() {
         install(net); QVERIFY(bible->navigate("GEN 1:1")); const auto scope = bible->tagScope();
         const QString id = bible->createAndAssignTag(scope,"Existing"); QVERIFY(!id.isEmpty());
-        bible->setNoteText("Preserve me"); QVERIFY(bible->toggleBookmark());
+        bible->setNoteText("Preserve me");
         // Capture the writer connection before peers exist: foreign_keys is
         // connection-local, so an arbitrary peer cannot inject COMMIT failure.
         QSqlQuery q(store());
@@ -294,7 +333,7 @@ private slots:
         QVERIFY(bible->navigate("GEN 1:2")); const auto genesis = bible->tagScope();
         QCOMPARE(genesis.value("book").toInt(),1); QCOMPARE(genesis.value("reference").toString(),QString("John 1:2"));
         const QString tag = bible->createAndAssignTag(genesis,"Shared name"); QVERIFY(!tag.isEmpty());
-        bible->setNoteText("Genesis note"); QVERIFY(bible->toggleBookmark()); QVERIFY(bible->toggleHighlight());
+        bible->setNoteText("Genesis note"); QVERIFY(bible->toggleHighlight());
         QVERIFY(bible->navigate("JHN 1:2")); const auto john = bible->tagScope();
         QCOMPARE(john.value("book").toInt(),43); QCOMPARE(john.value("reference"),genesis.value("reference"));
         QVERIFY(bible->setTag(john,tag,true)); bible->setNoteText("John note");
@@ -324,7 +363,7 @@ private slots:
         QCOMPARE(peer.collection().size(),1); QCOMPARE(peer.collection().first().toMap().value("book").toInt(),43);
         QCOMPARE(peer.noteText(),QString("John note"));
         QVERIFY(bible->openTaggedPassage(genesis)); QVERIFY(bible->noteText().isEmpty());
-        QVERIFY(!bible->selectionBookmarked()); QVERIFY(!bible->selectionHighlighted());
+        QVERIFY(!bible->selectionHighlighted());
         QVERIFY(!bible->deleteAnnotationScope(savedGenesis));
         QVERIFY(bible->openTaggedPassage(john)); QCOMPARE(bible->noteText(),QString("John note"));
         QVERIFY(bible->deleteAnnotation("JHN 1:2",bible->versionId())); QCOMPARE(count(tag),0);

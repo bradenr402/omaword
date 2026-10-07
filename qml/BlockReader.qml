@@ -48,8 +48,7 @@ Item {
     }
     function openAnnotation(entry) {
         if (entry.kind === "footnote") { controller.peekFootnote(entry.verse, entry.seq); return }
-        if (entry.kind === "bookmark") controller.openBookmark(entry.scope || entry.reference)
-        else if (entry.kind === "tag") controller.openPassageTags(entry.scope || entry.reference)
+        if (entry.kind === "tag") controller.openPassageTags(entry.scope || entry.reference)
         else {
             if (!controller.flushNote()) return
             const scope = entry.scope
@@ -84,7 +83,7 @@ Item {
     // Note text is not layout: a typed note repaints the marks, never rebuilds.
     readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart, indents: v.indents,
-            bookmarkRanges: v.bookmarkRanges, tagRanges: v.tagRanges, footnotes: v.footnotes,
+            tagRanges: v.tagRanges, footnotes: v.footnotes,
             noteRanges: Array.from(v.noteRanges || []).map(function(r) { return [r.reference, r.continuesBefore, r.continuesAfter] }) }
     })) + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + focusLayout + noteMarks + controller.readerSize + root.readerScale + controller.scale
     height: body.height
@@ -519,7 +518,7 @@ Item {
             readonly property bool opening: modelData.edge !== "close"
             readonly property bool footnote: modelData.kind === "footnote"
             readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\n" + (root.controller.footnoteHint || "Click: peek")
-                : (modelData.kind === "bookmark" ? "Bookmark" : modelData.kind === "note" ? "Note" : "Tag") + "\n"
+                : (modelData.kind === "note" ? "Note" : "Tag") + "\n"
                 + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
                 + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
             objectName: "blockInlineMarker:" + modelData.kind + ":" + modelData.edge + ":" + modelData.reference
