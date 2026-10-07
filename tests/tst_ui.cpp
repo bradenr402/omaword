@@ -498,8 +498,10 @@ private slots:
         QVERIFY(!item("catalogInstall:engojb")->isEnabled());
         QVERIFY(!item("catalogInstalled:engnet")->isVisible());
         catalog->progress = 0.42; emit catalog->changed();
-        QCOMPARE(prop("catalogProgress","value").toDouble(),0.42);
-        QVERIFY(prop("catalogStatus","text").toString().contains("42%"));
+        // Progress shows in the downloading version's own card.
+        QVERIFY(item("catalogProgress:engnet")->isVisible()); QVERIFY(!item("catalogProgress:engojb")->isVisible());
+        QCOMPARE(prop("catalogProgress:engnet","value").toDouble(),0.42);
+        QVERIFY(prop("catalogStatus:engnet","text").toString().contains("42%"));
         QVERIFY(!prop("toast","text").toString().contains("Installed"));
         catalog->fail("Synthetic connection failure");
         QCOMPARE(prop("catalogError","text").toString(),QString("Synthetic connection failure"));

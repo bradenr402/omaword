@@ -3,6 +3,13 @@
     "id": "engnet",
     "name": "NET Bible",
     "abbreviation": "NET",
+    "description": "A completely new translation in modern English.",
+    "year": "1996–2016",
+    "license": "© Biblical Studies Press",
+    "size": 2912759,
+    "features": [
+      "headings"
+    ],
     "url": "https://ebible.org/Scriptures/engnet_usfm.zip",
     "detailsUrl": "https://ebible.org/find/details.php?id=engnet&all=1",
     "copyright": "Copyright © 1996-2016 Biblical Studies Press, L. L. C. See https://netbible.com/copyright/ for full copyright and permissions information."
@@ -11,6 +18,14 @@
     "id": "eng-kjv2006",
     "name": "King James (Authorized) Version",
     "abbreviation": "KJV",
+    "description": "The Authorized Version in its standard 1769 text.",
+    "year": "1611 (1769 text)",
+    "license": "Public domain outside the UK",
+    "size": 2461785,
+    "features": [
+      "footnotes",
+      "wordsOfJesus"
+    ],
     "url": "https://ebible.org/Scriptures/eng-kjv2006_usfm.zip",
     "detailsUrl": "https://ebible.org/find/details.php?id=eng-kjv2006&all=1",
     "copyright": "Public Domain outside the United Kingdom. Crown printing rights apply in the United Kingdom; see the source details. Courtesy of the Crosswire Bible Society and eBible.org."
@@ -19,6 +34,15 @@
     "id": "eng-kjv",
     "name": "King James Version + Apocrypha",
     "abbreviation": "KJV+",
+    "description": "The Authorized Version in its standard 1769 text, with the Apocrypha.",
+    "year": "1611 (1769 text)",
+    "license": "Public domain outside the UK",
+    "size": 2765647,
+    "features": [
+      "footnotes",
+      "wordsOfJesus",
+      "apocrypha"
+    ],
     "url": "https://ebible.org/Scriptures/eng-kjv_usfm.zip",
     "detailsUrl": "https://ebible.org/find/details.php?id=eng-kjv&all=1",
     "copyright": "Public Domain outside the United Kingdom. Crown printing rights apply in the United Kingdom; see the source details. Courtesy of the Crosswire Bible Society and eBible.org."
@@ -27,6 +51,13 @@
     "id": "engojb",
     "name": "The Orthodox Jewish Bible",
     "abbreviation": "OJB",
+    "description": "Tanakh and Brit Chadasha in Orthodox Jewish idiom, with Hebrew and Yiddish terms.",
+    "year": "2002–2024",
+    "license": "CC BY 4.0",
+    "size": 1822094,
+    "features": [
+      "footnotes"
+    ],
     "url": "https://ebible.org/Scriptures/engojb_usfm.zip",
     "detailsUrl": "https://ebible.org/find/details.php?id=engojb&all=1",
     "copyright": "Copyright © 2002-2011, 2021, 2024 Artists for Israel International (https://www.afii.org/). Source: https://ebible.org/engojb/. Creative Commons Attribution 4.0 (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/. Include copyright and source information when sharing; indicate any changes."
@@ -35,6 +66,11 @@
     "id": "engylt",
     "name": "Young's Literal Translation",
     "abbreviation": "YLT",
+    "description": "A strictly literal translation by Robert Young.",
+    "year": "1862",
+    "license": "Public domain",
+    "size": 1381464,
+    "features": [],
     "url": "https://ebible.org/Scriptures/engylt_usfm.zip",
     "detailsUrl": "https://ebible.org/find/details.php?id=engylt&all=1",
     "copyright": "Public Domain. Translation by Robert Young. Courtesy of eBible.org."
@@ -43,6 +79,11 @@
     "id": "eng-asv",
     "name": "American Standard Version (1901)",
     "abbreviation": "ASV",
+    "description": "The American edition of the Revised Version.",
+    "year": "1901",
+    "license": "Public domain",
+    "size": 2870455,
+    "features": [],
     "url": "https://ebible.org/Scriptures/eng-asv_usfm.zip",
     "detailsUrl": "https://ebible.org/find/details.php?id=eng-asv&all=1",
     "copyright": "Public Domain. Courtesy of eBible.org."
@@ -51,6 +92,14 @@
     "id": "engbsb",
     "name": "Berean Standard Bible",
     "abbreviation": "BSB",
+    "description": "A modern translation in clear, contemporary English.",
+    "year": "2016",
+    "license": "Public domain",
+    "size": 3017139,
+    "features": [
+      "footnotes",
+      "headings"
+    ],
     "url": "https://ebible.org/Scriptures/engbsb_usfm.zip",
     "detailsUrl": "https://ebible.org/find/details.php?id=engbsb&all=1",
     "copyright": "Public Domain. Contributor: BSB Publishing, LLC. Source: https://berean.bible/ and eBible.org."

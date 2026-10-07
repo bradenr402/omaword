@@ -212,14 +212,23 @@ private slots:
         const QStringList abbreviations = {"NET", "KJV", "KJV+", "OJB", "YLT", "ASV", "BSB"};
         for (int i = 0; i < ids.size(); ++i) {
             const auto entry = bundled.entries()[i].toMap();
-            QCOMPARE(entry.size(), 6);
+            QCOMPARE(entry.size(), 11);
             QCOMPARE(entry.value("id").toString(), ids[i]);
             QCOMPARE(entry.value("abbreviation").toString(), abbreviations[i]);
             QCOMPARE(entry.value("url").toString(), "https://ebible.org/Scriptures/" + ids[i] + "_usfm.zip");
             QCOMPARE(entry.value("detailsUrl").toString(), "https://ebible.org/find/details.php?id=" + ids[i] + "&all=1");
             QVERIFY(!entry.value("name").toString().isEmpty());
             QVERIFY(!entry.value("copyright").toString().isEmpty());
+            for (const char *key : {"description", "year", "license"}) QVERIFY2(!entry.value(key).toString().isEmpty(), key);
+            QVERIFY(entry.value("size").toDouble() > 1000000);
+            QVERIFY(entry.value("features").canConvert<QVariantList>());
         }
+        // What each edition carries, as measured from its source.
+        auto features = [&](int index) { return bundled.entries()[index].toMap()["features"].toStringList(); };
+        QCOMPARE(features(0), QStringList({"headings"}));
+        QCOMPARE(features(2), QStringList({"footnotes", "wordsOfJesus", "apocrypha"}));
+        QVERIFY(features(4).isEmpty());
+        QCOMPARE(bundled.entries()[3].toMap()["license"].toString(), QString("CC BY 4.0"));
         QVERIFY(bundled.entries()[0].toMap()["copyright"].toString().contains("© 1996-2016 Biblical Studies Press, L. L. C."));
         QVERIFY(bundled.entries()[3].toMap()["copyright"].toString().contains("CC BY 4.0"));
         QCOMPARE(bundled.entries()[6].toMap()["name"].toString(), "Berean Standard Bible");

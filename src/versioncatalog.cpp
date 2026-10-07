@@ -59,8 +59,15 @@ void VersionCatalog::loadEntries()
             && QRegularExpression(QStringLiteral("^[a-z0-9-]+$")).match(id).hasMatch()
             && entry.value("url").toString() == QStringLiteral("https://ebible.org/Scriptures/%1_usfm.zip").arg(id)
             && entry.value("detailsUrl").toString() == QStringLiteral("https://ebible.org/find/details.php?id=%1&all=1").arg(id);
-        for (const char *key : {"name", "abbreviation", "copyright"})
+        for (const char *key : {"name", "abbreviation", "copyright", "description", "year", "license"})
             valid = valid && !entry.value(QLatin1String(key)).toString().trimmed().isEmpty();
+        // The download's size in bytes, and what the app shows of the edition.
+        const QJsonObject object = value.toObject();
+        valid = valid && object.value(QStringLiteral("size")).isDouble() && object.value(QStringLiteral("size")).toDouble() > 0
+            && object.value(QStringLiteral("features")).isArray();
+        static const QSet<QString> features = {"footnotes", "headings", "wordsOfJesus", "apocrypha"};
+        for (const auto &feature : object.value(QStringLiteral("features")).toArray())
+            valid = valid && features.contains(feature.toString());
         seen.insert(id);
         m_entries.append(entry);
     }

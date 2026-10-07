@@ -2134,6 +2134,11 @@ ApplicationWindow {
     // A key or row that cannot act sounds the error rather than doing nothing.
     // A key or row that cannot act: the error sound, and a short toast saying
     // why when there is a reason a reader can act on.
+    // "2.9 MB"; the bytes are a catalog snapshot, so approximate.
+    function downloadSize(bytes) { return "≈" + (bytes / 1000000).toFixed(1) + " MB" }
+    function featureName(feature) {
+        return ({ footnotes: "Footnotes", headings: "Section headings", wordsOfJesus: "Words of Jesus", apocrypha: "Apocrypha" })[feature] || feature
+    }
     function rejected(reason) {
         if (reason) notify(reason, true)
         sounds.play("error")
@@ -6866,7 +6871,7 @@ ApplicationWindow {
             Keys.onPressed: function(event) { app.versionKey(event) }
             Label {
                 objectName: "versionTitle"
-                text: !versionDialog.removing ? "Switch version" : versionDialog.step === 0 ? "Remove version"
+                text: !versionDialog.removing ? "Versions" : versionDialog.step === 0 ? "Remove version"
                     : versionDialog.step === 1 ? "Remove annotations too?" : "Confirm removal"
                 color: desktop.foreground; font.pixelSize: 22 * versionDialog.uiScale
                 Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -8529,7 +8534,19 @@ ApplicationWindow {
                             id: catalogRowContent
                             width: parent.width
                             spacing: 6 * app.scale
+                            readonly property bool downloading: catalog.busy && app.downloadId === catalogRow.modelData.id
                             Label { text: catalogRow.modelData.abbreviation + " · " + catalogRow.modelData.name; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            // What it is, when, how big, under what terms, and what it carries.
+                            Label { objectName: "catalogDescription:" + catalogRow.modelData.id; text: catalogRow.modelData.description; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            Label {
+                                objectName: "catalogFacts:" + catalogRow.modelData.id
+                                text: [catalogRow.modelData.year, app.downloadSize(catalogRow.modelData.size), catalogRow.modelData.license]
+                                    .concat(Array.from(catalogRow.modelData.features).map(app.featureName)).join(" · ")
+                                textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
+                            }
+                            // The download's progress, in its own card.
+                            ProgressBar { objectName: "catalogProgress:" + catalogRow.modelData.id; visible: catalogRowContent.downloading; Layout.fillWidth: true; from: 0; to: 1; value: Math.max(0, Math.min(1, catalog.progress)); indeterminate: catalog.progress <= 0 }
+                            Label { objectName: "catalogStatus:" + catalogRow.modelData.id; visible: catalogRowContent.downloading; text: "Downloading… " + (catalog.progress > 0 ? Math.round(catalog.progress * 100) + "%" : ""); color: desktop.foreground; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
                             RowLayout {
                                 Layout.fillWidth: true
                                 Label { objectName: "catalogInstalled:" + catalogRow.modelData.id; visible: app.installedVersion(catalogRow.modelData.id); text: "Installed"; color: desktop.accent; font.pixelSize: 12 * app.scale }
@@ -8558,8 +8575,6 @@ ApplicationWindow {
                     Label { objectName: "importOffline"; text: "After a successful import, you can move or delete the source USFM ZIP. No connection is needed to read or use your annotations."; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 }
             }
-            ProgressBar { objectName: "catalogProgress"; visible: catalog.busy; Layout.fillWidth: true; from: 0; to: 1; value: Math.max(0, Math.min(1, catalog.progress)); indeterminate: catalog.progress <= 0 }
-            Label { objectName: "catalogStatus"; visible: catalog.busy; text: "Downloading USFM ZIP… " + (catalog.progress > 0 ? Math.round(catalog.progress * 100) + "%" : ""); color: desktop.foreground; Layout.fillWidth: true; wrapMode: Text.Wrap }
             Label { objectName: "catalogError"; text: catalog.error || app.downloadMessage || bible.error; visible: text.length > 0; textFormat: Text.PlainText; color: desktop.accent; Layout.fillWidth: true; wrapMode: Text.Wrap; Accessible.role: Accessible.AlertMessage }
             RowLayout {
                 visible: catalog.busy || ((catalog.error.length > 0 || app.downloadMessage.length > 0) && app.downloadId.length > 0)
@@ -8571,18 +8586,19 @@ ApplicationWindow {
             FineRule { Layout.fillWidth: true }
             RowLayout {
                 Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                QuietButton { objectName: "importCancel"; text: "Close"; font.pixelSize: 14 * importGuide.uiScale; onClicked: importGuide.close() }
+                // A local USFM ZIP: a quiet link beside the catalog, not its main action.
                 QuietButton {
                     id: importChoose
                     objectName: "importChoose"
                     text: "Import USFM ZIP…"
-                    font.pixelSize: 14 * importGuide.uiScale
-                    emphasized: true
+                    font.pixelSize: 13 * importGuide.uiScale
+                    compact: true
                     enabled: !bible.busy && !catalog.busy
                     tip: "Import a local USFM ZIP · " + KeyNotation.format("Ctrl+I")
                     onClicked: { if (bible.busy || catalog.busy || !app.flushNote()) return; importGuide.choosePending = true; importGuide.close() }
                 }
+                Item { Layout.fillWidth: true }
+                QuietButton { objectName: "importCancel"; text: "Close"; font.pixelSize: 14 * importGuide.uiScale; onClicked: importGuide.close() }
             }
             HintRow {
                 objectName: "importGuideHints"

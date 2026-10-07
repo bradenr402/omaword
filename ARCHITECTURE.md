@@ -106,6 +106,11 @@ files.
 
 - Seven catalog entries (`engnet`, `eng-kjv2006`, `eng-kjv` = **KJV+**, `engojb`,
   `engylt`, `eng-asv`, `engbsb`) from `https://ebible.org/Scriptures/<id>_usfm.zip`.
+  Each also carries a one-line `description`, `year`, `license`, the ZIP's
+  `size` in bytes, and `features` (`footnotes`, `headings`, `wordsOfJesus`,
+  `apocrypha`), measured from the source when the entry was written (the
+  Add version cards show the size as approximate); `VersionCatalog` rejects
+  the catalog when any is missing or unknown.
 - The reader and About show the imported `copr.htm` title/rights (site footer
   stripped), not the catalog summary. OJB is CC BY 4.0 (attribution required).
 - Personal data keys on source ID: same-ID reimport reconnects it.

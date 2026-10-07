@@ -29,7 +29,7 @@ makepkg -si
 
 ## Bible versions
 
-Choose **Add version** to install NET, KJV, KJV with Apocrypha, OJB, YLT, ASV, or BSB directly from eBible.org. You can also import a local USFM ZIP.
+Choose **Add version** to install NET, KJV, KJV with Apocrypha, OJB, YLT, ASV, or BSB directly from eBible.org. Each version's card says what it is, its year, download size, and license, and what it carries (footnotes, section headings, words of Jesus, the Apocrypha); the download's progress shows in its card. You can also import a local USFM ZIP.
 
 Internet is needed only to download a version. Once installed, reading and annotations work offline, and the original ZIP is no longer needed. Bible text has its own copyright and attribution, shown in About & Attribution.
 

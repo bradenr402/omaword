@@ -610,7 +610,7 @@ private slots:
         // Details & Attribution takes focus and scrolls by key.
         QVariantList entries;
         for (int i = 0; i < 12; ++i) entries << QVariantMap{{"id", QString("v%1").arg(i)}, {"name", QString("Version %1 with a long descriptive name").arg(i)},
-            {"abbreviation", QString("V%1").arg(i)}, {"copyright", QString("A long copyright notice. ").repeated(40)}, {"detailsUrl", "https://example.invalid"}};
+            {"abbreviation", QString("V%1").arg(i)}, {"copyright", QString("A long copyright notice. ").repeated(40)}, {"detailsUrl", "https://example.invalid"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}};
         catalog->entries = entries; emit catalog->changed();
         bible->setFontSize(26); window->resize(900, 480); QTRY_COMPARE(window->width(), 900);
         run("import"); QTRY_VERIFY(opened("importGuide")); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
@@ -618,7 +618,14 @@ private slots:
         key(Qt::Key_PageDown); QTRY_VERIFY(contentY("importGuideScroll") > 0);
         QVERIFY(item("catalogSearch")->hasActiveFocus());
         key(Qt::Key_PageUp); QTRY_COMPARE(contentY("importGuideScroll"), 0.0);
-        click(item("catalogDetails:v0")); QTRY_VERIFY(opened("catalogDetails")); QTRY_VERIFY(item("detailsScroll")->hasActiveFocus());
+        // A card (name, description, facts, buttons) can be taller than this short
+        // window's viewport: scroll its Details button into view, then click it.
+        auto guideFlick = qvariant_cast<QQuickItem *>(object("importGuideScroll")->property("contentItem"));
+        auto details = item("catalogDetails:v0");
+        const qreal buttonY = details->mapToItem(guideFlick->property("contentItem").value<QQuickItem *>(), QPointF()).y();
+        guideFlick->setProperty("contentY", qMax(0.0, buttonY + details->height() - guideFlick->height()));
+        QTRY_VERIFY(guideFlick->mapRectFromItem(details, details->boundingRect()).bottom() <= guideFlick->height());
+        click(details); QTRY_VERIFY(opened("catalogDetails")); QTRY_VERIFY(item("detailsScroll")->hasActiveFocus());
         QTRY_VERIFY(travel("detailsScroll") > 20);
         key(Qt::Key_End); QTRY_VERIFY(contentY("detailsScroll") > 0);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("catalogDetails"));
@@ -819,7 +826,7 @@ private slots:
     }
     void reimportFromVersionsByKeyAndButton() {
         const QString id = bible->versionId();
-        catalog->entries = {QVariantMap{{"id", id}, {"name", "Access fixture"}, {"abbreviation", "OAF"}, {"copyright", "Original"}, {"detailsUrl", "https://example.invalid"}}};
+        catalog->entries = {QVariantMap{{"id", id}, {"name", "Access fixture"}, {"abbreviation", "OAF"}, {"copyright", "Original"}, {"detailsUrl", "https://example.invalid"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}}};
         emit catalog->changed();
         // Keyboard: ctrl shift I re-imports the highlighted row; the hint names the key.
         run("switchVersion"); QTRY_VERIFY(opened("versionDialog"));
@@ -1634,8 +1641,8 @@ private slots:
         QDesktopServices::unsetUrlHandler("https");
     }
     void addVersionGuideKeys() {
-        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"name", "King James Version"}, {"abbreviation", "KJV"}, {"copyright", "Public domain"}, {"detailsUrl", "https://ebible.org/kjv"}},
-                            QVariantMap{{"id", "engweb"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}, {"copyright", "Public domain"}, {"detailsUrl", "https://ebible.org/web"}}};
+        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"name", "King James Version"}, {"abbreviation", "KJV"}, {"copyright", "Public domain"}, {"detailsUrl", "https://ebible.org/kjv"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}},
+                            QVariantMap{{"id", "engweb"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}, {"copyright", "Public domain"}, {"detailsUrl", "https://ebible.org/web"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}}};
         emit catalog->changed();
         run("import"); QTRY_VERIFY(opened("importGuide")); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
         auto guide = object("importGuide");
@@ -2522,8 +2529,8 @@ private slots:
         item("catalogCancel")->forceActiveFocus(); key(Qt::Key_Space);
         QTRY_VERIFY(!item("catalogCancel")->isVisible()); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
         // The guide's keys work from anywhere in it: from Close, ↓ chooses, ctrl i imports.
-        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"name", "King James Version"}, {"abbreviation", "KJV"}},
-                            QVariantMap{{"id", "engweb"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}}};
+        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"name", "King James Version"}, {"abbreviation", "KJV"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}},
+                            QVariantMap{{"id", "engweb"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}}};
         emit catalog->changed();
         item("importCancel")->forceActiveFocus(); key(Qt::Key_Down);
         QCOMPARE(object("importGuide")->property("catalogIndex").toInt(), 1); QVERIFY(item("importCancel")->hasActiveFocus());
