@@ -246,6 +246,13 @@ class UiTest : public QObject
         QSqlDatabase::removeDatabase("ui-drag-fixture");
         reference("John 3:1");
     }
+    // A chapter with nothing selected (as h and l leave it), not through the palette.
+    void chapter(const QString &text) {
+        QVERIFY2(bible->navigate(text),qPrintable(bible->error()));
+        QCOMPARE(bible->selectedStart(),0);
+        QVERIFY(QMetaObject::invokeMethod(window,"readerFocus")); QCoreApplication::processEvents();
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+    }
     void reference(const QString &text) {
         // Ctrl keys belong to the note editor while typing: leave it first.
         if (item("noteEditor") && item("noteEditor")->hasActiveFocus()) item("notesPanel")->forceActiveFocus();
@@ -893,6 +900,27 @@ private slots:
         unloadUi(); loadUi();
         reference("John 1");
         QCOMPARE(bodyText(1),importedText);
+    }
+    void paletteChaptersOpenOnTheFirstVerse() {
+        // Typed: "John 3" selects John 3:1, scrolled to the chapter's top.
+        reference("John 3:20"); QCOMPARE(bible->selectionReference(),QString("John 3:20"));
+        reference("John 4");
+        QCOMPARE(bible->selectionReference(),QString("John 4:1"));
+        QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
+        key(Qt::Key_J); QCOMPARE(bible->selectionReference(),QString("John 4:2"));
+        // [ goes back to John 3:20, ] returns to where John 4 was left.
+        key(Qt::Key_BracketLeft); QCOMPARE(bible->selectionReference(),QString("John 3:20"));
+        key(Qt::Key_BracketRight); QCOMPARE(bible->selectionReference(),QString("John 4:2"));
+        // A verse given is kept.
+        reference("John 3:16"); QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        // The chapter grid: John, then 3.
+        key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("John"); key(Qt::Key_Return); QTRY_COMPARE(window->property("paletteBook").toInt(),43);
+        type("3"); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("John 3:1"));
+        // Chapter steps (h, l) still leave the chapter unselected.
+        key(Qt::Key_L); QCOMPARE(bible->chapter(),4); QCOMPARE(bible->selectedStart(),0);
     }
     void referenceAliasesAndBrowsing() {
         reference("John3:16");
@@ -2702,8 +2730,7 @@ private slots:
     void chapterCopyFallbackAndEditorIsolation() {
         QFETCH(bool,block);
         bible->setBlockMode(block);
-        reference("John 3");
-        QCOMPARE(bible->selectedStart(),0);
+        chapter("John 3");
         const auto quoted = bible->copySelection();
         QVERIFY(quoted.endsWith(QString::fromUtf8("”\n\n—John 3")));
         QApplication::clipboard()->setText("replace chapter");
@@ -3551,16 +3578,16 @@ private slots:
     void countedMotionsWithoutSelection() {
         for (bool block : {false,true}) {
             bible->setBlockMode(block);
-            reference("John 3"); type("4j"); QCOMPARE(bible->selectionReference(),QString("John 3:4"));
-            reference("John 3"); type("4k"); QCOMPARE(bible->selectionReference(),QString("John 3:33"));
-            reference("John 3"); type("38"); key(Qt::Key_Down); QCOMPARE(bible->selectionReference(),QString("John 4:2"));
-            reference("John 3"); type("38"); key(Qt::Key_Up); QCOMPARE(bible->selectionReference(),QString("John 2:24"));
-            reference("Matthew 17"); type("21j"); QCOMPARE(bible->selectionReference(),QString("Matthew 17:22"));
-            reference("Matthew 17"); type("7k"); QCOMPARE(bible->selectionReference(),QString("Matthew 17:20"));
-            reference("John 3"); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(),1);
-            reference("John 3"); key(Qt::Key_K); QCOMPARE(bible->cursorVerse(),36);
-            reference("John 3"); type("999999j"); QCOMPARE(bible->selectionReference(),QString("Revelation 22:21"));
-            reference("John 3"); type("999999k"); QCOMPARE(bible->selectionReference(),QString("Genesis 1:1"));
+            chapter("John 3"); type("4j"); QCOMPARE(bible->selectionReference(),QString("John 3:4"));
+            chapter("John 3"); type("4k"); QCOMPARE(bible->selectionReference(),QString("John 3:33"));
+            chapter("John 3"); type("38"); key(Qt::Key_Down); QCOMPARE(bible->selectionReference(),QString("John 4:2"));
+            chapter("John 3"); type("38"); key(Qt::Key_Up); QCOMPARE(bible->selectionReference(),QString("John 2:24"));
+            chapter("Matthew 17"); type("21j"); QCOMPARE(bible->selectionReference(),QString("Matthew 17:22"));
+            chapter("Matthew 17"); type("7k"); QCOMPARE(bible->selectionReference(),QString("Matthew 17:20"));
+            chapter("John 3"); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(),1);
+            chapter("John 3"); key(Qt::Key_K); QCOMPARE(bible->cursorVerse(),36);
+            chapter("John 3"); type("999999j"); QCOMPARE(bible->selectionReference(),QString("Revelation 22:21"));
+            chapter("John 3"); type("999999k"); QCOMPARE(bible->selectionReference(),QString("Genesis 1:1"));
         }
     }
     void composableMotions() {
@@ -3826,7 +3853,7 @@ private slots:
                 <= item("reading")->height() - window->property("floatingSafety").toDouble() + 1);
     }
     void normalScrollingAndChapterNavigation() {
-        reference("John 3");
+        chapter("John 3");
         const double before = prop("reading","contentY").toDouble();
         key(Qt::Key_Space,Qt::ShiftModifier);
         QCOMPARE(prop("reading","contentY").toDouble(),before);

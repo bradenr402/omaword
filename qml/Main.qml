@@ -2944,11 +2944,15 @@ ApplicationWindow {
         if (current >= 0 && target !== current) bible.openChapter(chapters[target].book, chapters[target].chapter)
         readerFocus()
     }
-    function jump(reference) {
+    function jump(reference) { goToReference(reference, false) }
+    // firstVerse: a chapter (no verse given) opens on its first verse, as the
+    // palette does: "Galatians 2" selects Galatians 2:1.
+    function goToReference(reference, firstVerse) {
         if (rangeEditing) return
         if (!flushNote()) return
         const from = beginJump()
         if (bible.navigate(reference)) {
+            if (firstVerse) selectFirstVerse()
             endJump(from)
             passagePalette.navigated = true
             passagePalette.close()
@@ -2956,6 +2960,7 @@ ApplicationWindow {
             pulseDestination()
         }
     }
+    // The palette's chapters (its grid) open on their first verse too.
     function openChapter(book, chapter) {
         if (rangeEditing) return
         if (!flushNote()) return
@@ -2965,10 +2970,18 @@ ApplicationWindow {
         setReaderY(0)
         restoringPosition = false
         savePosition()
+        selectFirstVerse()
         endJump(from)
         passagePalette.navigated = true
         passagePalette.close()
         readerFocus()
+    }
+    function selectFirstVerse() {
+        if (hasSelection || !bible.ready || !bible.verses.length) return
+        const first = bible.verses[0].number
+        selectionAnchor = first
+        bible.selectVerses(first, first)
+        syncNote()
     }
     function openPalette(commands, resume) {
         if (rangeEditing) return
@@ -4388,7 +4401,7 @@ ApplicationWindow {
             if (openRibbon()) { passagePalette.navigated = true; passagePalette.close(); readerFocus() }
             return
         }
-        if (entry.candidate) { jump(entry.reference); return }
+        if (entry.candidate) { goToReference(entry.reference, true); return }
         if (entry.action) {
             if (!actionAvailable(entry.action)) { rejected(unavailableReason(entry.action)); return }
             if (!flushNote()) return
@@ -4416,7 +4429,7 @@ ApplicationWindow {
         if (paletteBack.activeFocus) { backToBooks(); return }
         let destination = paletteDestination
         if (destination.entry) activatePaletteEntry(destination.entry)
-        else if (paletteResolution.valid) jump(destination.reference)
+        else if (paletteResolution.valid) goToReference(destination.reference, true)
         else rejected(paletteResolution.error || "Type a passage, like John 3:16")
     }
     // Back from a book's chapters to the books, that book chosen (from
