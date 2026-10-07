@@ -1495,8 +1495,8 @@ private slots:
         QTRY_VERIFY(!bar->property("hovered").toBool());
         QTRY_COMPARE(prop("keybindingScrollbarThumb","opacity").toDouble(),0.5);
         QTRY_COMPARE(prop("keybindingScrollbarThumb","opacity").toDouble(),0.2);
-        type("alt p"); QCOMPARE(prop("keybindingResults","count").toInt(),1);
-        QVERIFY(item("keybindingVerse picker"));
+        type("alt o"); QCOMPARE(prop("keybindingResults","count").toInt(),1);
+        QVERIFY(item("keybindingChapter outline"));
         key(Qt::Key_A,Qt::ControlModifier); type("reading settings");
         QCOMPARE(prop("keybindingResults","count").toInt(),1);
         key(Qt::Key_A,Qt::ControlModifier); type("no such binding");
@@ -2027,7 +2027,8 @@ private slots:
                 QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    tab mode    esc close"));
                 QVERIFY(!item("paletteBack")->isVisible());
             } else if (mode == "chapters") {
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    ← back    tab mode    esc close"));
+                // A book's chapter grid: every arrow chooses; backspace returns to the books.
+                QCOMPARE(text,QString::fromUtf8("← → ↑ ↓ choose    enter select    backspace books    tab mode    esc close"));
             } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    tab mode    esc close"));
         }
     }
@@ -4593,7 +4594,7 @@ private slots:
         // Every catalog key reads in the shared notation: lowercase except a
         // shifted letter or function key, arrows as glyphs, muted separators.
         const QRegularExpression notation(QString::fromUtf8(
-            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}()$^]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|mouse back|mouse forward|[A-Z])$"));
+            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}()$^,]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|mouse back|mouse forward|[A-Z])$"));
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         for (const auto &record : records) {
             const auto action = record.toMap();
@@ -5787,10 +5788,9 @@ private slots:
         }
         key(Qt::Key_J,Qt::ShiftModifier);
         key(Qt::Key_Right,Qt::AltModifier);
-        key(Qt::Key_H,Qt::ControlModifier);
         key(Qt::Key_D,Qt::ControlModifier);
         key(Qt::Key_N,Qt::ControlModifier);
-        // (ctrl k now closes the panel and opens the palette: a11yui globalKeysLeaveSidePanels.)
+        // (ctrl k and ctrl h now close the panel and open the palette: a11yui globalKeysLeaveSidePanels.)
         QCOMPARE(navigation.count(),0); QCOMPARE(selection.count(),0);
         QCOMPARE(bible->collection(),collection);
         QCOMPARE(prop("reading","contentY").toDouble(),position);
