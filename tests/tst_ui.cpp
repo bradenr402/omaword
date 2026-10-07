@@ -5494,8 +5494,10 @@ private slots:
         const auto modeBounds = item("modeControl")->mapRectToScene(item("modeControl")->boundingRect());
         QVERIFY(relatedBounds.left() > modeBounds.right());
         QVERIFY(relatedBounds.left() > window->width() / 2);
+        // Edge to edge: focus, Aa, mode, then help (which a cramped footer sheds first).
         const auto helpBounds = item("helpControl")->mapRectToScene(item("helpControl")->boundingRect());
-        QCOMPARE(helpBounds.left(),modeBounds.right()); // Edge to edge: focus, mode, then help.
+        if (item("helpControl")->isVisible()) QCOMPARE(helpBounds.left(),modeBounds.right());
+        else QVERIFY(!window->property("footerShowsHelp").toBool());
         // Right group order: Annotations, Study, Desk (no Notes); a column when cramped.
         const auto scene = [this](const char *name) { return item(name)->mapRectToScene(item(name)->boundingRect()); };
         if (window->property("footerStacked").toBool()) {
