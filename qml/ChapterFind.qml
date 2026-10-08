@@ -19,12 +19,19 @@ Rectangle {
     signal rejected()
     // Right click (or the menu key) in the field: the app's text menu.
     signal textMenu(Item field, point position)
-    // Fade only: closed prompts take no input while fading out.
+    // Like a modal: it opens at once, and closes with a quick fade as it
+    // sinks a little, taking no input meanwhile.
     property int fadeDuration: 85
     visible: opacity > 0
     enabled: opened
-    opacity: opened ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: root.fadeDuration } }
+    opacity: 0
+    onOpenedChanged: {
+        exitFade.stop()
+        if (opened) opacity = 1
+        else exitFade.start()
+    }
+    NumberAnimation { id: exitFade; target: root; property: "opacity"; to: 0; duration: root.fadeDuration; easing.type: Easing.InQuad }
+    transform: Translate { y: root.opened ? 0 : (1 - root.opacity) * 6 * root.uiScale }
     height: 40 * Math.min(uiScale, 1.4)
     color: theme.background
     border.color: theme.border

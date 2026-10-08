@@ -536,11 +536,10 @@ private slots:
         QVERIFY(object("relatedDrawer")->property("visible").toBool());
         QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
         call("readerFocus");
-        // Chapter find prompt fades; input is immediate; closing releases keys.
+        // Chapter find opens at once and fades out quickly; closing releases keys.
         key(Qt::Key_Slash);
         QVERIFY(item("chapterFindInput")->hasActiveFocus());
-        QVERIFY(item("chapterFind")->opacity() < 1);
-        QTRY_COMPARE(item("chapterFind")->opacity(), 1.0);
+        QCOMPARE(item("chapterFind")->opacity(), 1.0); // No entrance: at once, like a modal.
         key(Qt::Key_Escape); QVERIFY(!prop("findPromptOpen").toBool());
         QVERIFY(item("chapterFind")->isVisible()); QVERIFY(!item("chapterFind")->isEnabled());
         QTRY_VERIFY(!item("chapterFind")->isVisible());

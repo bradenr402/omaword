@@ -536,7 +536,8 @@ files.
     cursor verse 40% down. Instant when animations are disabled.
   - Popup motion (interfaces.dev: exits subtler than entrances, from their
     trigger; frequent popups open instantly): menus and modals (palette,
-    dialogs, tag picker, range dialogs) open and close at once, so a closed
+    dialogs, tag picker, range dialogs, and chapter find's bar, which fades
+    and sinks out in 85 ms) open and close at once, so a closed
     one stops counting as open, focus returns, and it (or another) reopens
     immediately; `ExitGhost` (`menuGhost`, 75 ms toward the pointer or anchor
     point; `modalGhost`, 85 ms toward the centre, with its dim) plays the
