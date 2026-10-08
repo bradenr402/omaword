@@ -56,7 +56,8 @@ All actions live in the `actions` catalog in `qml/Main.qml` (`id`, `group`, `tit
 ## UI conventions
 
 - Follow the live Omarchy theme, system font, and Hyprland corner radius (`src/desktop.*`); never hardcode colors, fonts, or radii.
-- Reuse shared components: `PanelHeader`, `PanelTabs`, `HintRow`, `AppContextMenu`/`RowMenu.js` (every list row has the same menu), `AppToolTip`, `ExitGhost`.
+- Reuse shared components: `PanelHeader`, `PanelTabs`, `HintRow`, `AppContextMenu`/`RowMenu.js` (every list row has the same menu), `AppToolTip`, `ExitGhost`, and Main's controls (`QuietButton`, `FloatingButton`, `ModalCard`, `KeyScrollView`, …).
+- A QML file that needs the window takes `controller` and `theme` (not `app`/`desktop`), and Main binds them once in a same-named inline component (`component QuietButton: Shared.QuietButton { controller: app; theme: desktop }`). Inside an inline component a property named like an outer id binds to itself (`app: app` is undefined), so name it differently.
 - Everything must work by keyboard and by mouse; `a11yui` pins this. Respect **Disable animations** and **Disable sound effects**.
 - User-visible feature changes update README's Features section; durable internal contracts update `ARCHITECTURE.md`; suite changes update `tests/README.md`.
 

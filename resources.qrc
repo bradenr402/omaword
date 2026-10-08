@@ -21,6 +21,18 @@
     <file>qml/QuoteBars.qml</file>
     <file>qml/Rule.qml</file>
     <file>qml/SectionTitle.qml</file>
+    <file>qml/VerseItem.qml</file>
+    <file>qml/SavedEntry.qml</file>
+    <file>qml/QuietButton.qml</file>
+    <file>qml/OverlayScrollbar.qml</file>
+    <file>qml/OverlayScrollView.qml</file>
+    <file>qml/KeyScrollView.qml</file>
+    <file>qml/SettingSwitch.qml</file>
+    <file>qml/SquareSlider.qml</file>
+    <file>qml/FloatingButton.qml</file>
+    <file>qml/RangeMarker.qml</file>
+    <file>qml/ModalCard.qml</file>
+    <file>qml/DrawerOutside.qml</file>
     <file>qml/KeyNotation.js</file>
     <file>qml/RowMenu.js</file>
     <file>resources/catalog.json</file>
