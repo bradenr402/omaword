@@ -1034,16 +1034,14 @@ private slots:
         click(note, QPointF(note->width() - 4, 4));
         QTRY_VERIFY(object("notesDrawer")->property("opened").toBool());
         QCOMPARE(bible->selectionReference(), QString("John 3:16"));
-        // Docked, Notes narrows the reader: the margin notes lay out beside it.
+        // Docked, Notes narrows the reader, and margin notes step aside until it closes.
         auto drawer = object("notesDrawer");
         QVERIFY(window->property("notesDocked").toBool());
         QTRY_COMPARE(window->property("notesDock").toDouble(), drawer->property("width").toDouble());
         settle();
-        QTRY_VERIFY(notesShown());
-        note = item("marginNote:John 3:16"); QTRY_VERIFY(note && note->isVisible());
-        const QRectF noteRect(note->mapToScene(QPointF(0, 0)), QSizeF(note->width(), note->height()));
-        QVERIFY(noteRect.right() <= drawer->property("x").toDouble());
+        QTRY_VERIFY(!notesShown());
         QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!drawer->property("visible").toBool());
+        QTRY_VERIFY(notesShown());
         QTRY_COMPARE(window->property("notesDock").toDouble(), 0.0);
         settle();
         text = item("marginNoteText:John 3:16"); QTRY_VERIFY(text && text->isVisible());
@@ -1063,7 +1061,8 @@ private slots:
     }
 
     // Opening docked Notes: the reader lays out once at its new width and
-    // glides there, its margin notes with it, never stale; closing glides back.
+    // glides there, its margin notes stepping aside; closing glides back with
+    // them, never stale.
     void notesDockGlidesWithItsMargins() {
         sounds->setProperty("reduceMotion", false);
         note("John 3:16", 16, 16, "A note beside its passage.");
@@ -1096,9 +1095,10 @@ private slots:
         const double docked = columnX();
         QVERIFY(docked < before);
         check(open, before, docked);
-        QVERIFY(open.last().shownNotes > 0);
+        QCOMPARE(open.last().shownNotes, 0);
         const auto close = stepped("notes-close", [&] { QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); }, 30);
         check(close, docked, before);
+        QVERIFY(close.last().shownNotes > 0);
         // Disable animations: it jumps.
         sounds->setProperty("reduceMotion", true);
         const auto jump = stepped("notes-jump", [&] { key(Qt::Key_W); }, 3);

@@ -455,8 +455,8 @@ files.
   docks beside the text where the window holds the comfortable column and the
   reader's widest insets beside it (`notesDocked`), and is a sheet over the
   reader's right side when narrower. Docked, it is 390 px (× scale) or wider:
-  it takes the room the text does not need (keeping margin notes' preferred
-  room while they are on) up to 620 px. The window's content gives up
+  it takes the room the text does not need, up to 620 px, and margin notes
+  step aside until it closes (`marginSpace`'s `wantNotes`). The window's content gives up
   `notesDock` at once and the reader lays out once at its new width, then
   glides there from where it was (`dockMargin`/`glideFromDock`, the margins
   moving with it); the footer and bottom chrome follow `chromeDock`, which

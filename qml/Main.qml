@@ -605,13 +605,10 @@ ApplicationWindow {
     readonly property real notesMinWidth: Math.min(390 * scale, width - 40)
     readonly property real notesMaxWidth: 620 * scale
     readonly property bool notesDocked: width >= readerComfortWidth + notesMinWidth
-    // Docked, it grows into the room the text does not need, keeping margin
-    // notes' preferred room while they are on (the column may shift left
-    // into its inset for them), up to notesMaxWidth.
-    readonly property real marginNotesRoom: marginsAllowed && marginNotesOn
-        ? marginConnectorWidth + marginNotesPreferred + marginRightInset - 48 : 0
+    // Docked, it grows into the room the text does not need, up to
+    // notesMaxWidth; margin notes step aside while it is open (marginSpace).
     readonly property real notesWidth: notesDocked
-        ? Math.max(notesMinWidth, Math.min(notesMaxWidth, width - readerComfortWidth - marginNotesRoom)) : notesMinWidth
+        ? Math.max(notesMinWidth, Math.min(notesMaxWidth, width - readerComfortWidth)) : notesMinWidth
     // The room docked Notes takes from the reader (dockMargin): the reader
     // lays out once at its new width and glides there from where it was
     // (glideFromDock, as soon as the column's new place is known); the footer
@@ -2512,7 +2509,7 @@ ApplicationWindow {
         width: reading.width, columnX: readerNaturalX, columnWidth: readerColumnWidth,
         minLeft: readerSideInset, leftInset: Math.max(24 * readerScale, chapterNavReserve),
         rightInset: Math.max(28 * readerScale, footerRightInset, marginRightInset),
-        wantNotes: marginsAllowed && marginNotesOn, connectorWidth: marginConnectorWidth,
+        wantNotes: marginsAllowed && marginNotesOn && !(marginOpen && notesDocked), connectorWidth: marginConnectorWidth,
         notesMin: 170 * readerScale, notesPreferred: marginNotesPreferred, notesMax: 330 * readerScale,
         wantOutline: marginsAllowed && bible.chapterOutline, outlineGap: 12 * readerScale,
         outlineMin: 120 * readerScale, outlineMax: 220 * readerScale
