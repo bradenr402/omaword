@@ -666,7 +666,7 @@ private slots:
         QStringList commands;
         QVERIFY(QMetaObject::invokeMethod(window, "openPalette", Q_ARG(QVariant, true), Q_ARG(QVariant, false)));
         for (const auto &entry : js("paletteEntries").toList()) commands << entry.toMap()["title"].toString();
-        QVERIFY2(commands.contains("Chapter outline") && commands.contains("Margin notes"), qPrintable(commands.join(", ")));
+        QVERIFY2(commands.contains("Chapter outline") && commands.contains("Show notes in margin"), qPrintable(commands.join(", ")));
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         // No headings in this chapter: hidden.
         navigate("John 2:1"); QTRY_VERIFY(!outlineShown());
@@ -806,7 +806,7 @@ private slots:
         navigate("John 3:1");
         QVERIFY(!bible->marginNotes()); QVERIFY(!item("marginNote:John 3:16") || !item("marginNote:John 3:16")->isVisible());
         key(Qt::Key_W, Qt::AltModifier); QTRY_VERIFY(bible->marginNotes());
-        QCOMPARE(toast(), QString("Margin notes on"));
+        QCOMPARE(toast(), QString("Show notes in margin on"));
         { BibleBackend reopened; QVERIFY(reopened.marginNotes()); }
         for (const QString mode : {"verse", "paragraph", "block"}) {
             setMode(mode); navigate("John 3:1");

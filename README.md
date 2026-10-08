@@ -172,7 +172,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt n`: Show verse numbers
 - `alt h`: Show headings
 - `alt o`: Chapter outline
-- `alt w`: Margin notes
+- `alt w`: Show notes in margin
 - `alt j`: Highlight words of Jesus
 - `alt l`: Layout
 - `alt s`: Sound effects

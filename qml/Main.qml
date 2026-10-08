@@ -4017,7 +4017,7 @@ ApplicationWindow {
         { id: "headings", group: "Reading", title: "Show headings", sequences: ["Alt+H"], setting: "showHeadings", command: true },
         { id: "chapterOutline", group: "Reading", title: "Chapter outline", sequences: ["Alt+O"], setting: "chapterOutline", command: true },
         // alt w: w writes a note; alt w shows notes in the margin.
-        { id: "marginNotes", group: "Reading", title: "Margin notes", sequences: ["Alt+W"], setting: "marginNotes", command: true },
+        { id: "marginNotes", group: "Reading", title: "Show notes in margin", sequences: ["Alt+W"], setting: "marginNotes", command: true },
         // Last of the switches: right above Reading settings' "not marked" hint.
         { id: "wordsOfJesus", group: "Reading", title: "Highlight words of Jesus", sequences: ["Alt+J"], setting: "wordsOfJesus", command: true },
         { id: "readingMode", group: "Reading", title: "Layout", sequences: ["Alt+L"], command: true },
@@ -5154,25 +5154,22 @@ ApplicationWindow {
                         ctx.arc(12, 12, 2.2, 0, 2 * Math.PI)
                         ctx.fill()
                         ctx.beginPath()
-                    } else if (glyph === "characters") {
-                        // Two text lines, the second partly selected, and a text caret.
-                        ctx.moveTo(3, 6); ctx.lineTo(21, 6)
-                        ctx.moveTo(3, 12); ctx.lineTo(9, 12)
-                        ctx.moveTo(3, 18); ctx.lineTo(8, 18)
-                        ctx.moveTo(16, 9); ctx.lineTo(16, 21)
-                        ctx.moveTo(13, 9); ctx.lineTo(19, 9)
-                        ctx.moveTo(13, 21); ctx.lineTo(19, 21)
-                        ctx.stroke()
-                        ctx.beginPath()
-                        ctx.fillRect(9, 10, 6, 4)
-                    } else if (glyph === "visual") {
-                        // The bracket and square handles span all three verse lines.
-                        ctx.moveTo(8, 6); ctx.lineTo(21, 6)
-                        ctx.moveTo(8, 12); ctx.lineTo(21, 12)
-                        ctx.moveTo(8, 19); ctx.lineTo(17, 19)
-                        ctx.moveTo(5, 3); ctx.lineTo(3, 3); ctx.lineTo(3, 22); ctx.lineTo(5, 22)
-                        ctx.fillRect(4, 2, 3, 3)
-                        ctx.fillRect(4, 21, 3, 3)
+                    } else if (glyph === "characters" || glyph === "visual") {
+                        // Three lines of text under a selection's tint: whole
+                        // lines (verses), or a few characters ending at a text
+                        // caret.
+                        ctx.globalAlpha = 0.4
+                        if (glyph === "visual") ctx.fillRect(1.5, 8.5, 21, 14)
+                        else ctx.fillRect(8, 8.5, 8, 7)
+                        ctx.globalAlpha = 1
+                        ctx.moveTo(4, 5); ctx.lineTo(20, 5)
+                        ctx.moveTo(4, 12); ctx.lineTo(20, 12)
+                        ctx.moveTo(4, 19); ctx.lineTo(14, 19)
+                        if (glyph === "characters") {
+                            ctx.moveTo(16, 7); ctx.lineTo(16, 17)
+                            ctx.moveTo(14.5, 7); ctx.lineTo(17.5, 7)
+                            ctx.moveTo(14.5, 17); ctx.lineTo(17.5, 17)
+                        }
                     } else {
                         ctx.moveTo(12, 6); ctx.lineTo(8, 4); ctx.lineTo(2, 4)
                         ctx.lineTo(2, 19); ctx.lineTo(8, 19); ctx.lineTo(12, 21)
