@@ -4,9 +4,11 @@
 #include "desktop.h"
 #include "soundeffects.h"
 #include "versioncatalog.h"
+#include <QCoreApplication>
 #include <QPointer>
-#include <QQmlApplicationEngine>
+#include <QQmlComponent>
 #include <QQmlContext>
+#include <QQmlEngine>
 #include <QTextStream>
 #include <QTimer>
 #include <QWindow>
@@ -20,10 +22,14 @@ WindowManager::~WindowManager()
     for (const auto &reader : m_readers) {
         reader.window->disconnect(this);
         reader.bible->setFlushCallback({});
-        delete reader.engine; // QML dies while its context objects are still valid.
+        // QML dies while its context objects are still valid.
+        delete reader.window;
+        delete reader.context;
         delete reader.catalog;
         delete reader.bible;
     }
+    delete m_component;
+    delete m_engine;
 }
 
 bool WindowManager::flush(QObject *root)
@@ -34,17 +40,26 @@ bool WindowManager::flush(QObject *root)
 
 WindowManager::Reader *WindowManager::createWindow()
 {
+    if (!m_engine) {
+        m_engine = new QQmlEngine(this);
+        // Qt.quit() and Qt.exit() reach the application, as with QQmlApplicationEngine.
+        connect(m_engine, &QQmlEngine::quit, QCoreApplication::instance(), &QCoreApplication::quit, Qt::QueuedConnection);
+        connect(m_engine, &QQmlEngine::exit, QCoreApplication::instance(), &QCoreApplication::exit, Qt::QueuedConnection);
+        m_engine->rootContext()->setContextProperty(QStringLiteral("desktop"), m_desktop);
+        m_engine->rootContext()->setContextProperty(QStringLiteral("sounds"), m_sounds);
+        m_engine->rootContext()->setContextProperty(QStringLiteral("windows"), this);
+        m_component = new QQmlComponent(m_engine, m_source, QQmlComponent::PreferSynchronous, this);
+    }
     auto *bible = new BibleBackend(this);
     auto *catalog = new VersionCatalog(this);
-    auto *engine = new QQmlApplicationEngine(this);
-    engine->rootContext()->setContextProperty(QStringLiteral("desktop"), m_desktop);
-    engine->rootContext()->setContextProperty(QStringLiteral("sounds"), m_sounds);
-    engine->rootContext()->setContextProperty(QStringLiteral("bible"), bible);
-    engine->rootContext()->setContextProperty(QStringLiteral("catalog"), catalog);
-    engine->rootContext()->setContextProperty(QStringLiteral("windows"), this);
-    engine->load(m_source);
-    auto *window = engine->rootObjects().isEmpty() ? nullptr : qobject_cast<QWindow *>(engine->rootObjects().first());
-    if (!window) { delete engine; delete catalog; delete bible; return nullptr; }
+    auto *context = new QQmlContext(m_engine->rootContext(), this);
+    context->setContextProperty(QStringLiteral("bible"), bible);
+    context->setContextProperty(QStringLiteral("catalog"), catalog);
+    auto *window = qobject_cast<QWindow *>(m_component->create(context));
+    if (!window) {
+        QTextStream(stderr) << m_component->errorString() << Qt::endl;
+        delete context; delete catalog; delete bible; return nullptr;
+    }
     const QString suffix = QStringLiteral(" · Window %1").arg(++m_serial);
     // Distinguish surfaces belonging to this PID even when passages/titles match.
     connect(window, &QWindow::windowTitleChanged, window, [window, suffix](const QString &title) {
@@ -55,7 +70,7 @@ WindowManager::Reader *WindowManager::createWindow()
     bible->setFlushCallback([root] { return flush(root); });
     if (window->metaObject()->indexOfSignal("newWindowRequested()") >= 0)
         connect(window, SIGNAL(newWindowRequested()), this, SLOT(newWindow()));
-    m_readers.append({engine, bible, window, catalog});
+    m_readers.append({context, bible, window, catalog});
     connect(window, &QWindow::visibleChanged, this, [this, root](bool visible) {
         if (!visible && root) QTimer::singleShot(0, this, [this, root] {
             if (root && !root->isVisible()) retire(root);
@@ -74,7 +89,8 @@ void WindowManager::retire(QWindow *window)
         reader.window->disconnect(this);
         reader.bible->setFlushCallback({});
         // This runs on the next event turn, after the QML close handler returned.
-        delete reader.engine;
+        delete reader.window;
+        delete reader.context;
         delete reader.catalog;
         reader.bible->deleteLater();
         emit countChanged();

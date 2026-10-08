@@ -6,7 +6,9 @@ class BibleBackend;
 class Desktop;
 class SoundEffects;
 class VersionCatalog;
-class QQmlApplicationEngine;
+class QQmlComponent;
+class QQmlContext;
+class QQmlEngine;
 class QWindow;
 
 class WindowManager : public QObject
@@ -29,13 +31,17 @@ public slots:
 signals:
     void countChanged();
 private:
-    struct Reader { QQmlApplicationEngine *engine = nullptr; BibleBackend *bible = nullptr; QWindow *window = nullptr; VersionCatalog *catalog = nullptr; };
+    // Every window shares one QML engine (types compiled once, one JavaScript
+    // heap): each has its own context, where `bible` and `catalog` are its own.
+    struct Reader { QQmlContext *context = nullptr; BibleBackend *bible = nullptr; QWindow *window = nullptr; VersionCatalog *catalog = nullptr; };
     Reader *createWindow();
     void retire(QWindow *window);
     static bool flush(QObject *root);
     Desktop *m_desktop;
     SoundEffects *m_sounds; // Shared by every window; preference changes notify all.
     QUrl m_source;
+    QQmlEngine *m_engine = nullptr;
+    QQmlComponent *m_component = nullptr;
     QList<Reader> m_readers;
     int m_serial = 0;
 };

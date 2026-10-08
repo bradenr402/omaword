@@ -454,7 +454,9 @@ BibleBackend::~BibleBackend()
 {
     if (m_searchCancellation) m_searchCancellation->store(true);
     readers.removeAll(this);
-    disconnect(this, nullptr, nullptr, nullptr);
+    // Nothing it emits from here on reaches QML; destroyed() still does, so
+    // a shared engine's context lets go of it.
+    blockSignals(true);
     // The worker captures only paths and shared progress, never this QObject.
     // Waiting ensures a normal application exit cannot leave a half-finished import.
     m_importWatcher.waitForFinished();

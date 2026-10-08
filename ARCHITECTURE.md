@@ -220,6 +220,11 @@ files.
   and `boundary` sound once per 500 ms burst (a held key), other cues per
   50 ms. The first cue ever heard (`sound/introduced`) shows how to turn them
   off. Offscreen sessions and `OMAWORD_SOUND=0` never open PipeWire.
+- Windows: one QML engine for every reader window (`WindowManager`: Main.qml
+  compiled once, one JavaScript heap); each window is created in its own
+  child context holding its own `bible` and `catalog`, while `desktop`,
+  `sounds`, and `windows` are shared in the root context. A closed window is
+  deleted before its context.
 - Peer sync: readers in one process share committed annotations, tags, Desk, History,
   prefs, and library; each keeps its own version, passage, selection, scroll.
   Commits publish to peers without navigating them. Imports use a shared busy
