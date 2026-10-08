@@ -10,6 +10,7 @@
 #include <QQuickItemGrabResult>
 #include <QQuickStyle>
 #include <QQuickTextDocument>
+#include <algorithm>
 #include <QQuickWindow>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -331,6 +332,40 @@ private slots:
         key(Qt::Key_S, Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_VERIFY(!prop("deskConflict").toBool());
         QCOMPARE(item("deskEditor")->property("text").toString(), QString("Peer again")); QCOMPARE(desk(), QString("Peer again"));
+    }
+    void quotesShowAMutedBarAndASmallIndent() {
+        navigate("John 1:4"); key(Qt::Key_D);
+        openDesk(); key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        auto preview = item("deskPreview");
+        QTRY_VERIFY(item("deskQuoteBars:0"));
+        auto bar = item("deskQuoteBars:0");
+        const auto document = preview->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        const auto first = document->find("Common original"), last = document->find("John 1:4");
+        QVERIFY(!first.isNull() && !last.isNull());
+        const QRectF top = caret(preview, first.selectionStart()), bottom = caret(preview, last.selectionStart());
+        // A small indent: 14 px from the bar's left edge to the text (Qt's own
+        // is 40, on both sides).
+        QCOMPARE(qRound(top.x() - bar->x()), 14);
+        QVERIFY(bar->width() >= 2 && bar->width() <= 4);
+        QCOMPARE(bar->property("color").value<QColor>(), prop("quoteBarColor").value<QColor>());
+        // One bar spans the quote: its text and the reference below it.
+        QVERIFY(bar->y() <= top.y() + 1); QVERIFY(bar->y() + bar->height() >= bottom.bottom() - 1);
+        QVERIFY(!item("deskQuoteBars:1"));
+        // A nested quote gets a bar per level (the bars are made anew).
+        const double barX = bar->x();
+        QVERIFY(bible->setDeskPage(desk() + "\n> > Deeper\n", desk()));
+        QTRY_VERIFY(item("deskQuoteBars:2"));
+        QList<double> xs;
+        for (int i = 0; i < 3; ++i) xs << item("deskQuoteBars:" + QString::number(i))->x() - barX;
+        std::sort(xs.begin(), xs.end());
+        QCOMPARE(xs, (QList<double>{0, 0, 14}));
+        // Notes' preview draws them the same way.
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        type("Thought"); key(Qt::Key_Return); type("> quoted");
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
+        QTRY_VERIFY(item("noteQuoteBars:0")); QVERIFY(!item("noteQuoteBars:1"));
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
     void keybindingsListed() {
         QVariantList actions = prop("actions").toList();

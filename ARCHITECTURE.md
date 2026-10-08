@@ -24,6 +24,7 @@ files.
 | `src/biblebackend.*` | Per-reader `bible`: active text, references, annotations, tags, Desk, prefs, library ops, backup/export |
 | `src/scripturesearch.*` | Normalized, cancellable Bible-wide search on a worker pool |
 | `src/searchdocument.*` | Offset mapping into rich text (both directions); LTR forcing helpers |
+| `src/markdownquotes.*`, `qml/QuoteBars.qml` | Block quotes in the Markdown previews (Notes, the Desk): Qt's 40 px indents on both sides narrowed to 14 px on the left, and a muted bar per level beside them (`MarkdownQuotes` measures the blocks; Qt keeps no quote boundaries, so `previewMarkdown` opens each quote with a zero-width space) |
 | `src/textselection.*` | Character selection (`v`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
 | `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing |

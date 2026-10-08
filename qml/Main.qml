@@ -1880,6 +1880,8 @@ ApplicationWindow {
     }
 
     function tint(color, alpha) { return Qt.rgba(color.r, color.g, color.b, alpha) }
+    // The bar beside a block quote in Markdown previews (QuoteBars).
+    readonly property color quoteBarColor: tint(desktop.muted, 0.55)
     // Words of Jesus: the importer marks \wj as <span class="wj">. Coloring only
     // swaps that span's style, so glyphs, layout, offsets, and copy never change.
     readonly property string wordsOfJesusColor: bible.wordsOfJesus ? String(desktop.color1) : ""
@@ -2007,6 +2009,25 @@ ApplicationWindow {
                 + text.slice(link.start + link.length)
         }
         return text
+    }
+    // A Markdown preview's text: passage links, and a zero-width space opening
+    // each block quote's first line, so QuoteBars (MarkdownQuotes) draws
+    // quotes that follow one another with separate bars.
+    function previewMarkdown(text) {
+        const lines = linkedMarkdown(text).split("\n")
+        let quoting = false, opening = false, fenced = false
+        for (let i = 0; i < lines.length; ++i) {
+            if (/^ {0,3}(```|~~~)/.test(lines[i])) fenced = !fenced
+            const marks = fenced ? null : /^( {0,3}(?:> ?)+)/.exec(lines[i])
+            if (marks && !quoting) opening = true
+            if (marks && opening && lines[i].length > marks[1].length) {
+                lines[i] = marks[1] + "\u200b" + lines[i].slice(marks[1].length)
+                opening = false
+            }
+            // A blank line ends a quote; other lines continue it (lazily).
+            quoting = !!marks || (quoting && lines[i].trim().length > 0)
+        }
+        return lines.join("\n")
     }
     function activateNoteLink(link) {
         if (link.startsWith("omaword-passage:")) followPassageLink(decodeURIComponent(link.substring(16)))
@@ -6509,7 +6530,7 @@ ApplicationWindow {
                                 // Focusable for reading by key: the scroll keys move the preview.
                                 activeFocusOnTab: true
                                 Keys.onPressed: function(event) { app.scrollKey(notePreviewScroll.contentItem as Flickable, event) }
-                                text: noteEditor.text.length ? app.linkedMarkdown(noteEditor.text) : "*Your note preview will appear here.*"
+                                text: noteEditor.text.length ? app.previewMarkdown(noteEditor.text) : "*Your note preview will appear here.*"
                                 textFormat: TextEdit.MarkdownText
                                 readOnly: true
                                 selectByMouse: true
@@ -6520,6 +6541,7 @@ ApplicationWindow {
                                 background: Item {}
                                 onLinkActivated: function(link) { app.activateNoteLink(link) }
                                 Accessible.name: "Note preview"
+                                QuoteBars { objectName: "noteQuoteBars"; target: notePreviewText; color: app.quoteBarColor; uiScale: app.scale }
                             }
                         }
                         Label {
@@ -6798,7 +6820,7 @@ ApplicationWindow {
                                 // Focusable for reading by key: the scroll keys move the preview.
                                 activeFocusOnTab: true
                                 Keys.onPressed: function(event) { app.scrollKey(deskPreviewScroll.contentItem as Flickable, event) }
-                                text: deskEditor.text.length ? app.linkedMarkdown(deskEditor.text) : "*Press " + app.keyText("toggleDesk") + " on a passage to quote it here.*"
+                                text: deskEditor.text.length ? app.previewMarkdown(deskEditor.text) : "*Press " + app.keyText("toggleDesk") + " on a passage to quote it here.*"
                                 textFormat: TextEdit.MarkdownText
                                 readOnly: true
                                 selectByMouse: true
@@ -6809,6 +6831,7 @@ ApplicationWindow {
                                 background: Item {}
                                 onLinkActivated: function(link) { app.activateNoteLink(link) }
                                 Accessible.name: "Desk preview"
+                                QuoteBars { objectName: "deskQuoteBars"; target: deskPreviewText; color: app.quoteBarColor; uiScale: app.scale }
                             }
                         }
                     }
