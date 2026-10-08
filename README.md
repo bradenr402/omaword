@@ -21,14 +21,19 @@ bin/install
 Launch **OmaWord** from your application launcher or run `omaword`. From a terminal, a script, or a Hyprland binding:
 
 ```sh
-omaword "John 3:16"          # a new window at a passage
-omaword open jn316 --here    # the window you were reading, at a passage
-omaword lookup               # the passage palette, in the window you were reading
-omaword quote jn316          # print it as a quotation (--plain: the text alone)
-omaword quote ps23 | wl-copy
+omaword "John 3:16"                  # a new window at a passage
+omaword open jn316 --here            # the window you were reading, at a passage
+omaword lookup                       # the passage palette, in the window you were reading
+omaword quote jn316                  # print it as a quotation (--plain: the text alone)
+omaword quote ps23 -t KJV | wl-copy  # in another translation
+omaword search "living water"        # search the version you read (--all: every one)
+omaword translations                 # the installed translations
+omaword link jn316                   # an omaword: link to a passage
 ```
 
-`quote` needs no window and never moves your reading place. Links like `omaword:John%203:16` open where you were reading (the launcher registers the `omaword:` scheme), and the launcher's menu has **Look Up a Passage** and **New Window**.
+`quote`, `search`, `translations`, and `link` print without a window and never move your reading place; `-t` (`--translation`) names a translation by its abbreviation or ID. `omaword help` lists every command, `omaword help <command>` explains one, and `man omaword` has the manual. `bin/install` installs bash completion; `omaword completion zsh` and `omaword completion fish` print the others.
+
+Links like `omaword:John%203:16`, or `omaword:jn316?translation=KJV`, open where you were reading: the launcher registers the `omaword:` scheme, so `xdg-open` and browsers hand them to OmaWord. The launcher's menu has **Look Up a Passage** and **New Window**.
 
 To update, `git pull` and run `bin/build` and `bin/install` again. `bin/install` keeps the files it replaces from one previous install in `~/.local/state/omaword/previous-install`.
 

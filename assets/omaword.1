@@ -1,0 +1,181 @@
+.TH OMAWORD 1 "2026" "OmaWord" "User Commands"
+.SH NAME
+omaword \- a quiet, offline Bible reader for Omarchy
+.SH SYNOPSIS
+.B omaword
+.RI [ passage ]
+.br
+.B omaword open
+.I passage
+.RB [ \-\-here ]
+.RB [ \-t
+.IR name ]
+.br
+.B omaword lookup
+.RI [ text ]
+.br
+.B omaword quote
+.IR passage ...
+.RB [ \-\-plain ]
+.RB [ \-\-json ]
+.RB [ \-t
+.IR name ]
+.br
+.B omaword search
+.IR words ...
+.RB [ \-\-all " | " \-t
+.IR name ]
+.RB [ \-\-limit
+.IR n ]
+.RB [ \-\-json ]
+.br
+.B omaword translations
+.RB [ \-\-names ]
+.RB [ \-\-json ]
+.br
+.B omaword link
+.IR passage ...
+.RB [ \-t
+.IR name ]
+.br
+.B omaword import
+.I file
+.br
+.B omaword completion
+.BR bash | zsh | fish
+.br
+.B omaword help
+.RI [ command ]
+.SH DESCRIPTION
+OmaWord reads the Bible offline, with highlights, tags, Markdown notes, and a
+study Desk, following the Omarchy theme. Without arguments it starts, or
+brings forward the window you were reading; with a passage it opens it in a
+new window.
+.PP
+.BR quote ,
+.BR search ,
+.BR translations ,
+.BR link ,
+.BR completion ,
+and
+.B help
+print and exit without a window, and never move your reading place. The other
+commands go to the running OmaWord, which starts if it is not running yet.
+.SH PASSAGES
+Full or compact references, as the passage palette reads them:
+.IR "John 3:16" ,
+.IR jn316 ,
+.IR 1co13 ,
+.IR "rev 3 14-22" ,
+.I ps23
+(a whole chapter),
+.IR "Genesis 1:1-2:3" .
+Unquoted words that make one passage together count as one
+.RB ( "omaword quote john 3:16" ).
+.SH COMMANDS
+.TP
+.BI open " passage"
+Opens the passage in a new window;
+.B \-\-here
+opens it in the window you were reading. A translation other than that
+window's switches it.
+.TP
+.BI lookup " \fR[\fPtext\fR]\fP"
+Opens the passage palette in the window you were reading, with
+.I text
+typed into it, if given. Suits a key binding.
+.TP
+.BI quote " passage..."
+Prints each passage as OmaWord copies it: the text in quotation marks, a
+number before each verse, and the reference after an em dash, a blank line
+between passages.
+.B \-\-plain
+prints the text alone;
+.B \-\-json
+a JSON array with each passage's verses. Given
+.BR \- ,
+or no passage while input is piped in, it reads passages from standard input,
+one per line.
+.TP
+.BI search " words..."
+Searches as OmaWord does: every word in one verse, partial words included,
+case ignored; a "quoted phrase" may run across verses. Matches print in Bible
+order.
+.B \-\-all
+searches every installed translation, the one you read first;
+.BI \-\-limit " n"
+prints at most
+.I n
+(0: all; the default is 20 on a terminal and all otherwise);
+.BR \-\-color " auto|always|never"
+emphasizes matched words;
+.B \-\-json
+prints a JSON array.
+.TP
+.B translations
+Lists the installed translations;
+.B *
+marks the one you read.
+.B \-\-names
+prints the abbreviations alone.
+.RB ( "omaword versions"
+is the same.)
+.TP
+.BI link " passage..."
+Prints an
+.B omaword:
+link to each passage.
+.TP
+.BI import " file"
+Installs a translation from a USFM ZIP archive or a single USFM file.
+.TP
+.BI completion " shell"
+Prints the completion script for
+.BR bash ,
+.BR zsh ,
+or
+.BR fish .
+.SH OPTIONS
+.TP
+.BR \-t ", " \-\-translation " \fIname\fP"
+The translation to use: its abbreviation (NET) or ID (engnet), in any case.
+By default, the one you read.
+.TP
+.BR \-h ", " \-\-help
+Shows help; after a command, that command's.
+.TP
+.BR \-v ", " \-\-version
+Shows OmaWord's version.
+.SH LINKS
+.B omaword:John%203:16
+and
+.B omaword:jn316?translation=KJV
+open the passage in the window you were reading. The desktop entry registers
+the scheme, so
+.BR xdg-open (1)
+and browsers hand such links to OmaWord.
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+When set,
+.B search
+emphasizes nothing unless asked with
+.BR "\-\-color always" .
+.SH FILES
+.TP
+.I ~/.local/share/omaword/
+Translations, marks, the Desk, History, and the ribbon.
+.TP
+.I ~/.cache/omaword/search-index.sqlite
+The search index, rebuilt whenever it is missing.
+.SH EXIT STATUS
+0 on success; 1 when it fails (an unknown passage or translation, no match,
+nothing installed); 2 for a usage error.
+.SH EXAMPLES
+.nf
+omaword quote jn316
+omaword quote ps23 \-t KJV \-\-plain | wl\-copy
+omaword search '"living water"' \-\-all
+omaword open "Romans 8" \-\-here
+xdg\-open "$(omaword link jn316)"
+.fi

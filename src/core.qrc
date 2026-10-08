@@ -2,4 +2,9 @@
   <qresource prefix="/resources">
     <file alias="crossrefs.bin">../resources/crossrefs.bin</file>
   </qresource>
+  <qresource prefix="/completions">
+    <file alias="omaword.bash">../assets/completions/omaword.bash</file>
+    <file alias="_omaword">../assets/completions/_omaword</file>
+    <file alias="omaword.fish">../assets/completions/omaword.fish</file>
+  </qresource>
 </RCC>

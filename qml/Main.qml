@@ -3096,6 +3096,11 @@ ApplicationWindow {
         passagePalette.open()
         referenceInput.forceActiveFocus()
     }
+    // `omaword lookup [text]`: the passage palette, with the text typed into it.
+    function lookUp(text) {
+        openPalette(false, false)
+        if (passagePalette.visible && text) referenceInput.text = text
+    }
     // The Passage palette at the reader's book, its chapter grid with the
     // current one chosen (clicking the chapter title).
     function openChapterList() {

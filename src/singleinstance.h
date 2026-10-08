@@ -20,8 +20,12 @@ public:
         QString activationToken;
         QString startupId;
         bool newWindow = true;
-        // `omaword lookup`: the passage palette, where you were reading.
+        // `omaword lookup [text]`: the passage palette, where you were
+        // reading, with `reference` typed into it.
         bool lookup = false;
+        // --translation (or a link's ?translation=): the version to read the
+        // passage in, by ID or abbreviation.
+        QString translation;
         static Request fromArguments(const QStringList &references, const QString &importArgument,
                                      bool importProvided);
     };

@@ -30,8 +30,8 @@ files.
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
 | `src/annotationpaint.*` | The flowing layouts' annotation marks (`AnnotationPaint`, a `QQuickPaintedItem`): tint bands and highlighter strokes from HandDrawn.js's shapes ported to C++ (same seeds and arithmetic). BlockReader lays them out (`layOut`, once per event loop turn); a selection move only refreshes `blockSelectionBackground` (plain rectangles), and a changed shape list repaints only the changed shapes' area (Psalm 119 in Block with 88 highlights, 58 noted and 44 tagged verses, offscreen software rendering: a verse move went from 4.3 s to 86 ms, a highlight toggle from 4.3 s to 0.47 s). `BlockDocument::rectangles` walks every character only on lines with right-to-left text |
 | `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing |
-| `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC (a request: reference, import, activation token, `newWindow`, `lookup`) |
-| `src/main.cpp` | Command line: `quote <reference> [--plain]` runs headless (a `QCoreApplication` and one `BibleBackend`, `quote()`: no window, instance, clipboard, or saved place); `open <reference> [--here]`, `lookup` (the passage palette where you read), an `omaword:` link (percent-decoded, opened where you read), or a bare reference (a new window) go to the running instance |
+| `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC (a request: reference, translation, import, activation token, `newWindow`, `lookup`) |
+| `src/commandline.*`, `src/main.cpp` | The command line (`omaword help`). `quote`, `search`, `translations`, `link`, `completion`, `help`, and `--version` run headless: a `QCoreApplication` and one `BibleBackend` (`readPassage`; `readVersion` for `--translation`, which records neither the version as the one you read nor a place in it), with no window, instance, clipboard, or saved place. `open [--here]`, `lookup [text]`, `import`, an `omaword:` link (`omaword:John%203:16?translation=KJV`; the scheme is the desktop file's `x-scheme-handler/` + `BRAND_ID`, opened where you read), or a bare passage (a new window) become a request for the running instance, whose window reads the passage as the palette does (compact forms too) and switches to the translation asked for. Exit status 0, 1 (failure), 2 (usage). The completion scripts (`assets/completions/`, in `core.qrc`) and the manual (`assets/omaword.1`) are installed by `bin/install` (bash's) and `packaging/` |
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (`lastSound`/`playCount` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds) |
 | `qml/Main.qml` | Reader, palettes, the Margin (`notesDrawer`: Notes, or the Desk page in its place), Marks (`savedDrawer`: every version's marks from `marks()`, one row per exact range, filtered, notes written in place), settings, catalog, About |
@@ -414,7 +414,7 @@ files.
   quotation marks: `“… so loved`, `world …”`), superscript numbers only for verses whose
   beginning is selected and never for one verse, reference over the verses
   touched after an em dash and a space (`— John 3:16`, as every quotation
-  ends: `copySelection`, `copyScope`, `quote`) — `ctrl shift C`/`shift Y`
+  ends: `copySelection`, `copyScope`, `readPassage`) — `ctrl shift C`/`shift Y`
   plain text, never with ellipses. Joins
   follow the source as above; headings and decorations never copy.
 - Character selection: positions are source `{verse, offset}` in all layouts;

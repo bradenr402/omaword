@@ -133,7 +133,7 @@ private slots:
         QTRY_COMPARE(completed, 2);
     }
 
-    // `open --here` and `lookup` reach the primary as such.
+    // `open --here -t`, and `lookup` with its text, reach the primary as such.
     void forwardsWhereToOpen()
     {
         QTemporaryDir dir;
@@ -141,8 +141,8 @@ private slots:
         QCOMPARE(primary.start(), SingleInstance::Role::Primary);
         QList<SingleInstance::Request> received;
         primary.setHandler([&](const auto &request, auto reply) { received << request; reply({true, {}}); });
-        SingleInstance::Request here; here.reference = "John 3:16"; here.newWindow = false;
-        SingleInstance::Request lookup; lookup.newWindow = false; lookup.lookup = true;
+        SingleInstance::Request here; here.reference = "John 3:16"; here.newWindow = false; here.translation = "KJV";
+        SingleInstance::Request lookup; lookup.newWindow = false; lookup.lookup = true; lookup.reference = "rom 8";
         int done = 0;
         secondary.forward(here, [&](auto result) { QVERIFY(result.ok); ++done; });
         QTRY_COMPARE(done, 1);
@@ -150,7 +150,9 @@ private slots:
         QTRY_COMPARE(done, 2);
         QCOMPARE(received.size(), 2);
         QCOMPARE(received[0].reference, QString("John 3:16")); QVERIFY(!received[0].newWindow); QVERIFY(!received[0].lookup);
-        QVERIFY(received[1].lookup); QVERIFY(!received[1].newWindow); QVERIFY(received[1].reference.isEmpty());
+        QCOMPARE(received[0].translation, QString("KJV"));
+        QVERIFY(received[1].lookup); QVERIFY(!received[1].newWindow); QCOMPARE(received[1].reference, QString("rom 8"));
+        QVERIFY(received[1].translation.isEmpty());
     }
 
     void retriesUntilServerStarts()
@@ -180,6 +182,8 @@ private slots:
         QTest::newRow("reference-type") << QByteArray("{\"version\":1,\"activate\":true,\"reference\":8}\n");
         QTest::newRow("newWindow-type") << QByteArray("{\"version\":1,\"activate\":true,\"newWindow\":8}\n");
         QTest::newRow("lookup-type") << QByteArray("{\"version\":1,\"activate\":true,\"lookup\":\"yes\"}\n");
+        QTest::newRow("translation-type") << QByteArray("{\"version\":1,\"activate\":true,\"translation\":8}\n");
+        QTest::newRow("long-translation") << QByteArray("{\"version\":1,\"activate\":true,\"translation\":\"") + QByteArray(129, 'x') + "\"}\n";
         QTest::newRow("unknown-field") << QByteArray("{\"version\":1,\"activate\":true,\"path\":\"/tmp/x\"}\n");
         QTest::newRow("relative-import") << QByteArray("{\"version\":1,\"activate\":true,\"import\":\"x.zip\"}\n");
         QTest::newRow("long-reference") << QByteArray("{\"version\":1,\"activate\":true,\"reference\":\"") + QByteArray(1025, 'x') + "\"}\n";
@@ -391,11 +395,25 @@ private slots:
         secondary.start(executable, {"lookup"});
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 0);
-        // quote prints without a window or the running instance.
+        // A translation not installed fails where the passage would open.
+        secondary.start(executable, {"open", "jn316", "-t", "KJV"});
+        QVERIFY(secondary.waitForFinished(5000));
+        QCOMPARE(secondary.exitCode(), 1); QVERIFY(secondary.readAllStandardError().contains("No installed translation"));
+        // Usage errors stop before reaching it.
+        secondary.start(executable, {"open"});
+        QVERIFY(secondary.waitForFinished(5000));
+        QCOMPARE(secondary.exitCode(), 2); QVERIFY(secondary.readAllStandardError().contains("omaword help open"));
+        // quote, search, and help print without a window or the running instance.
         secondary.start(executable, {"quote", "jn316"});
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 1);
-        QVERIFY(secondary.readAllStandardError().contains("add a Bible version first"));
+        QVERIFY(secondary.readAllStandardError().contains("no translation is installed yet"));
+        secondary.start(executable, {"search", "light"});
+        QVERIFY(secondary.waitForFinished(5000));
+        QCOMPARE(secondary.exitCode(), 1);
+        secondary.start(executable, {"help"});
+        QVERIFY(secondary.waitForFinished(5000));
+        QCOMPARE(secondary.exitCode(), 0); QVERIFY(secondary.readAllStandardOutput().contains("Commands:"));
         QCOMPARE(primary.state(), QProcess::Running);
     }
 

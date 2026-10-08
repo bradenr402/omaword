@@ -12,14 +12,29 @@ fi
 
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 data_home=$(realpath -m -- "$data_home")
+completion_home=${BASH_COMPLETION_USER_DIR:-$data_home/bash-completion}
+completion_home=$(realpath -m -- "$completion_home")
+
+# The bash completion and the manual page, named as branding.env names the
+# command: the completion as the built binary prints it.
+temporary=
+generated=$(mktemp -d "${TMPDIR:-/tmp}/$BRAND_ID-install.XXXXXX")
+trap 'if [[ -n $temporary ]]; then rm -f -- "$temporary"; fi; rm -rf -- "$generated"' EXIT
+"$build_dir/$BRAND_ID" completion bash > "$generated/completion.bash"
+sed -e "s/OMAWORD/${BRAND_ID^^}/g; s/OmaWord/$BRAND_NAME/g; s/omaword/$BRAND_ID/g" \
+    "$root/assets/omaword.1" > "$generated/$BRAND_ID.1"
+
 sources=("$build_dir/$BRAND_ID" "$build_dir/$BRAND_ID.desktop"
-    "$root/assets/app.svg" "$root/assets/app-symbolic.svg")
+    "$root/assets/app.svg" "$root/assets/app-symbolic.svg"
+    "$generated/completion.bash" "$generated/$BRAND_ID.1")
 destinations=("$HOME/.local/bin/$BRAND_ID" "$data_home/applications/$BRAND_ID.desktop"
     "$data_home/icons/hicolor/scalable/apps/$BRAND_ID.svg"
-    "$data_home/icons/hicolor/symbolic/apps/$BRAND_ID-symbolic.svg")
+    "$data_home/icons/hicolor/symbolic/apps/$BRAND_ID-symbolic.svg"
+    "$completion_home/completions/$BRAND_ID" "$data_home/man/man1/$BRAND_ID.1")
 backup_names=("bin/$BRAND_ID" "applications/$BRAND_ID.desktop"
-    "icons/scalable/$BRAND_ID.svg" "icons/symbolic/$BRAND_ID-symbolic.svg")
-modes=(755 644 644 644)
+    "icons/scalable/$BRAND_ID.svg" "icons/symbolic/$BRAND_ID-symbolic.svg"
+    "bash-completion/$BRAND_ID" "man/$BRAND_ID.1")
+modes=(755 644 644 644 644 644)
 
 # Check every input and destination before backing up or installing anything.
 for source_file in "${sources[@]}"; do
@@ -86,8 +101,6 @@ fi
 
 # Same-directory rename replaces files and symlinks without following them and
 # allows an already-running executable to keep using its original inode.
-temporary=
-trap 'if [[ -n $temporary ]]; then rm -f -- "$temporary"; fi' EXIT
 for i in "${changed[@]}"; do
     destination=${destinations[i]}
     parent=$(dirname -- "$destination")

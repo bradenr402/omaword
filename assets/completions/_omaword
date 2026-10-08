@@ -1,0 +1,47 @@
+#compdef omaword
+# zsh completion for omaword: `omaword completion zsh > ~/.zfunc/_omaword`, with
+# fpath+=(~/.zfunc) before compinit in ~/.zshrc.
+
+_omaword_translations() {
+    local -a names
+    names=(${(f)"$(omaword translations --names 2>/dev/null)"})
+    _describe -t translations 'translation' names
+}
+
+_omaword() {
+    local -a commands
+    commands=(
+        'open:open a passage in a window'
+        'lookup:open the passage palette'
+        'quote:print passages as quotations'
+        'search:search the Bible'
+        'translations:list the installed translations'
+        'link:print an omaword: link to a passage'
+        'import:install a translation from a USFM ZIP or file'
+        'completion:print a shell completion script'
+        'help:show help for OmaWord or a command'
+    )
+    local -a translation
+    translation=('(-t --translation)'{-t+,--translation=}'[use a translation (abbreviation or ID)]:translation:_omaword_translations')
+    if (( CURRENT == 2 )); then
+        _describe -t commands 'command' commands
+        _arguments '(- *)'{-h,--help}'[show help]' '(- *)'{-v,--version}'[show the version]'
+        return
+    fi
+    local command=$words[2]
+    shift words; (( CURRENT-- ))
+    case $command in
+        open) _arguments $translation '--here[in the window you were reading]' '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
+        lookup) _arguments '(- *)'{-h,--help}'[show help]' '*:text:' ;;
+        quote) _arguments $translation '--plain[the text alone]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
+        search) _arguments $translation '--all[every installed translation]' '--limit=[at most this many matches]:count:' \
+                    '--json[JSON output]' '--color=[when to color]:when:(auto always never)' '(- *)'{-h,--help}'[show help]' '*:words:' ;;
+        translations|versions) _arguments '--names[abbreviations only]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
+        link) _arguments $translation '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
+        import) _arguments '(- *)'{-h,--help}'[show help]' ':file:_files' ;;
+        completion) _arguments ':shell:(bash zsh fish)' ;;
+        help) _describe -t commands 'command' commands ;;
+    esac
+}
+
+_omaword "$@"

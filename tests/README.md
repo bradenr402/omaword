@@ -43,6 +43,7 @@ suite reports status/timing; full output goes to `build/test-logs/<selector>.log
 | `annotations` | `tests/blockannotations.pro` | `build/blockannotations/` | `tst_blockannotations` |
 | `instance` | `tests/singleinstance.pro` | `build/singleinstance-tests/` | `tst_singleinstance` |
 | `windows` | `tests/windows.pro` | `build/windows-tests/` | `tst_windows` |
+| `cli` | `tests/cli.pro` | `build/cli-tests/` | `tst_cli` |
 
 ## Environment
 
@@ -78,7 +79,7 @@ fontconfig state.
 
 - **importer**: USFM parsing, metadata, source order, poetry line levels (schema 5), parallel passage lines (schema 6), malformed/unsafe input, staged publication.
 - **catalog**: catalog metadata, streamed atomic downloads, cancel/timeout/retry.
-- **backend**: library, references, annotations (highlights paint, join, and erase), Marks across versions and notes written in place, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), comparing versions, cross references and parallel passages, reading the next chapter ahead, backups (format 7, and the Desk of formats 5 and 6), migrations (schema 9: bookmarks become the Bookmarked tag, times; schema 10: the Desk becomes a page of quotations), the Desk page (quotations, compare-and-set saves, undo, other windows' drafts), peers, History, the ribbon, file ownership, character-selection motions/objects and the quotation format, `quote` (compact references, chapters, no navigation).
+- **backend**: library, references, annotations (highlights paint, join, and erase), Marks across versions and notes written in place, undo/redo (exact rows back, note sessions, created tags, other windows' changes, other versions), comparing versions, cross references and parallel passages, reading the next chapter ahead, backups (format 7, and the Desk of formats 5 and 6), migrations (schema 9: bookmarks become the Bookmarked tag, times; schema 10: the Desk becomes a page of quotations), the Desk page (quotations, compare-and-set saves, undo, other windows' drafts), peers, History, the ribbon, file ownership, character-selection motions/objects and the quotation format, the command line's passages (`readPassage`: compact references, chapters, no navigation; `readVersion` saving nothing; `versionIdFor`, `searchEditions`).
 - **ui**: packaged Main: catalog, layouts (the 66ch column, the type scale, poetry indents, the next-chapter link, `ctrl` + wheel zoom), the Aa popover, footer folding, selection/copy, Marks (one row per passage, `#tag` filter, notes written in place with conflicts kept, immediate delete, undo from the panel), the live theme throughout the QML (no color literals, font families, or fixed radii), key discovery (Keybindings' essentials and group headers, which key after `z` and counts, the mode pill, the first-install key strip shown once), Notes beside the text (docked in wide windows with the reader and footer making room, wider where there is room up to its maximum, a sheet in narrow ones, clicks reaching the text, `esc` back to the reader and `esc` again to close, `j`/`k` followed, its `×`), undo keys, toasts and Commands, Visual completion, footer.
 - **search**: matching semantics (incl. chapter find's smart-case regular expressions), results in Bible order, the two-version corpus cache, the search index across editions (narrowing, phrases across verses, full folding, short terms, rebuilds, dropped editions, a broken file), async lifecycle, whitespace-preserving copy.
 - **searchui**: palette and chapter-find keyboard behavior; Bible search results under book headings with counts, `ctrl ↓`/`ctrl ↑` book jumps across pages, searching every version (`alt a`, version headings, opening in another version, the kept choice).
@@ -96,8 +97,9 @@ fontconfig state.
 - **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, annotation tints (and that a selection move never repaints them).
 - **desktop**: async compositor rounding and `animations:enabled` (re-asked on Hyprland config reloads, never polled), readable secondary text, error and selection colors, Omarchy theme swaps and font changes followed by events, themed tooltips.
 - **sound**: sound effects and settings.
-- **windows**: multiple readers, shared commits, draft conflicts, closing, `open --here` and `lookup` in the window you read.
-- **instance**: single-instance lock, handoff (where to open, lookup), IPC bounds, stale recovery; with `OMAWORD_TEST_APP=<built omaword>`, the real application's command line (`open --here`, `omaword:` links, `lookup`, `quote`).
+- **windows**: multiple readers, shared commits, draft conflicts, closing, `open --here` (compact passages, `--translation` by abbreviation or ID) and `lookup` (its text typed) in the window you read.
+- **instance**: single-instance lock, handoff (where to open, lookup, translation), IPC bounds, stale recovery; with `OMAWORD_TEST_APP=<built omaword>`, the real application's command line (`open --here`, `omaword:` links, `lookup`, `-t`, usage errors, `quote`, `search`, `help`).
+- **cli**: the command line in process: help (every line within 80 columns), usage errors and exit statuses, typo hints, `quote` (several passages, words of one passage joined, standard input, `--plain`, `--json`, `-t`), `search` (`--all`, `--limit`, `--color`, `--json`, no match), `translations`, `link`, the completion scripts, nothing installed, and the requests the running app takes (`open --here -t`, `lookup` text, links, `import`).
 
 `tests/test-runner.sh` checks `bin/test` itself (selection, argument
 forwarding, concurrency, logs, failure propagation) with fake tools.

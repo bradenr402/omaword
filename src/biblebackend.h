@@ -1,5 +1,6 @@
 #pragma once
 
+#include "scripturesearch.h"
 #include "usfmimporter.h"
 #include <QObject>
 #include <QFutureWatcher>
@@ -105,6 +106,13 @@ public:
     QString versionAbbreviation() const { return m_abbreviation; }
     QString versionCopyright() const { return m_copyright; }
     QVariantList versions() const { return m_versions; }
+    // The installed version a name means, by ID or abbreviation in any case
+    // ("" for none): the command line's --translation.
+    QString versionIdFor(const QString &name) const;
+    // Reads another installed version in this backend alone (the command
+    // line's --translation): unlike switchVersion, it records neither the
+    // version as the one you read nor a place in it.
+    bool readVersion(const QString &id);
     int book() const { return m_book; }
     int chapter() const { return m_chapter; }
     int selectedStart() const { return m_start; }
@@ -220,6 +228,9 @@ public:
     // index}. A search index in the cache directory (ScriptureSearch::
     // searchEditions) finds the chapters to read.
     Q_INVOKABLE void searchScripture(QString query);
+    // What a search reads: the version being read, then with `every` each
+    // other installed version, in library order.
+    QVector<ScriptureSearch::Edition> searchEditions(bool every) const;
     Q_INVOKABLE void cancelScriptureSearch();
     Q_INVOKABLE void loadMoreSearchResults();
     // Pure cached-chapter scan; source UTF-16 segments, one semantic range per
@@ -376,10 +387,14 @@ public:
     // left with no highlight or note is removed.
     Q_INVOKABLE bool deleteNoteScope(QVariantMap scope);
     Q_INVOKABLE QString copySelection(bool plainText = false);
-    // `omaword quote`: a reference's passage (a whole chapter for "John 3")
-    // laid out as copySelection() lays it out, without navigating, saving,
-    // or touching the clipboard. "" with the error set when it is unknown.
-    Q_INVOKABLE QString quote(QString reference, bool plainText = false);
+    // The command line's passages (omaword quote, link): a reference's
+    // passage in the version being read (a whole chapter for "John 3"),
+    // without navigating, saving, or touching the clipboard: {reference,
+    // versionId, abbreviation, name, plain, quotation (both laid out as
+    // copySelection() lays them out), verses [{book, chapter, verse, text}]},
+    // or {error}. Compact input (jn316) is read as the passage palette reads
+    // it, unless strict.
+    QVariantMap readPassage(const QString &text, bool strict = false);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
     Q_INVOKABLE void copyText(QString text);
     // Character selection over the current chapter's source text (see

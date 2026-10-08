@@ -829,19 +829,37 @@ private slots:
         QCOMPARE(bible->deskPage(),john + "\n\n" + genesis + QStringLiteral("\n\n> \u2014 Psalms 23:1–2 (eng-gone)\n"));
         QVERIFY(bible->navigate("John 3:17")); QCOMPARE(bible->noteText(),QString("Kept note"));
     }
-    void quoteLeavesTheReaderAlone() {
-        install(net); QVERIFY(bible->navigate("John 3:16")); const QString verse = bible->copySelection(), plain = bible->copySelection(true);
+    // The command line's passages and --translation: nothing moves the
+    // reading place or changes the version you read.
+    void readPassageLeavesTheReaderAlone() {
+        install(kjv); install(net); QVERIFY(bible->navigate("John 3:16"));
+        const QString verse = bible->copySelection(), plain = bible->copySelection(true);
         QVERIFY(bible->navigate("John 3:16-17")); const QString range = bible->copySelection();
-        QVERIFY(bible->navigate("GEN 1:2")); const QString place = bible->selectionReference();
+        QVERIFY(bible->navigate("GEN 1:2")); const QString place = bible->selectionReference(), reading = bible->versionId();
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
-        QCOMPARE(bible->quote("John 3:16"),verse);
-        QCOMPARE(bible->quote("jn316"),verse); // Compact, as the palette reads it.
-        QCOMPARE(bible->quote("John 3:16",true),plain);
-        QCOMPARE(bible->quote("John 3:16-17"),range);
-        QVERIFY(bible->quote("John 3").endsWith(QStringLiteral("\u2014 John 3")));
-        QVERIFY(bible->quote("Nowhere at all").isEmpty()); QVERIFY(!bible->error().isEmpty());
+        const auto passage = bible->readPassage("John 3:16");
+        QCOMPARE(passage.value("quotation").toString(),verse); QCOMPARE(passage.value("plain").toString(),plain);
+        QCOMPARE(passage.value("reference").toString(),QString("John 3:16")); QCOMPARE(passage.value("versionId").toString(),reading);
+        QCOMPARE(passage.value("abbreviation").toString(),bible->versionAbbreviation());
+        const auto verses = passage.value("verses").toList();
+        QCOMPARE(verses.size(),1); QCOMPARE(verses.first().toMap().value("verse").toInt(),16);
+        QCOMPARE(verses.first().toMap().value("book").toString(),QString("John"));
+        QCOMPARE(bible->readPassage("jn316").value("quotation").toString(),verse); // Compact, as the palette reads it.
+        QVERIFY(bible->readPassage("jn316",true).contains("error")); // Strict: exact forms only.
+        QCOMPARE(bible->readPassage("John 3:16-17").value("quotation").toString(),range);
+        const auto chapter = bible->readPassage("John 3");
+        QVERIFY(chapter.value("quotation").toString().endsWith(QStringLiteral("\u2014 John 3"))); QCOMPARE(chapter.value("verses").toList().size(),36);
+        QVERIFY(bible->readPassage("Nowhere at all").contains("error"));
         QCOMPARE(navigation.count(),0); QCOMPARE(bible->selectionReference(),place);
-        bible.reset(); bible = std::make_unique<BibleBackend>(); QCOMPARE(bible->selectionReference(),place);
+        // Another version, by ID or abbreviation, read in this backend alone.
+        QCOMPARE(bible->versionIdFor("kjv+"),QString("eng-kjv")); QCOMPARE(bible->versionIdFor(" ENG-KJV"),QString("eng-kjv"));
+        QVERIFY(bible->versionIdFor("xyz").isEmpty());
+        QCOMPARE(bible->searchEditions(false).size(),1); QCOMPARE(bible->searchEditions(true).size(),2);
+        QVERIFY2(bible->readVersion("eng-kjv"),qPrintable(bible->error())); QCOMPARE(bible->versionId(),QString("eng-kjv"));
+        QCOMPARE(bible->readPassage("jn316").value("versionId").toString(),QString("eng-kjv"));
+        QCOMPARE(bible->searchEditions(true).first().versionId,QString("eng-kjv"));
+        bible.reset(); bible = std::make_unique<BibleBackend>();
+        QCOMPARE(bible->versionId(),reading); QCOMPARE(bible->selectionReference(),place);
     }
     void ribbonPlacesStaysAndCrossesVersions() {
         // Nothing to place it in before a version is installed.

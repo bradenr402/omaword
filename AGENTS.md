@@ -7,7 +7,7 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 ## Hard rules
 
 1. **No GitHub writes** (`git push`, PRs, issues, comments, via any channel) without an explicit instruction. Read operations are always fine.
-2. **Never touch the user's real data** in `~/.local/share/omaword/` (Bible versions, annotations, Desk, History). Tests sandbox `HOME` and `XDG_*`; keep it that way, and launch the app manually only with a throwaway data dir.
+2. **Never touch the user's real data** in `~/.local/share/omaword/` (Bible versions, annotations, Desk, History). Tests sandbox `HOME` and `XDG_*`; keep it that way, and launch the app manually only with a throwaway data dir (every `XDG_*` and `HOME`). Offscreen, also unset `QT_QPA_PLATFORMTHEME`: Omarchy's `gtk3` theme exits the app when there is no display.
 3. **Never kill OmaWord processes by name**; stop only the PID you started. The user may be reading in it, and it is single-instance (`omaword.lock`).
 4. **Never commit Bible content or local data**: USFM ZIPs, `*.sqlite`, backups, exported notes (see `.gitignore`). Bible text has its own copyright.
 
@@ -32,8 +32,8 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 
 - `bin/test` builds the two libraries once, then builds and runs every suite (offscreen, software rendering, sandboxed home, sound off). Select with `--suite <name>` (repeatable); Qt args such as a function name need exactly one suite: `bin/test --suite ranges noteConfirmationAndDestinationDrift`. While a run is going, build elsewhere (`BUILD_DIR=/tmp/...`): its suites link the libraries in `build/`.
 - Full output lands in `build/test-logs/<suite>.log`.
-- Run the suites your change touches, then the rest before calling work done. CI runs `bin/shortcuts --check`, `bin/build`, `bash tests/test-runner.sh`, and the fast suites (`backend search tags ranges importer catalog sound`) in one job, and the GUI suites in parallel shards (`tst_ui` split three ways by function); a new suite must be added to a shard in `.github/workflows/ci.yml`. CI only runs on GitHub, so run everything locally before calling work done.
-- A new suite needs a `tests/<name>.pro` (include `../src/core.pri`, and `../qml/qml.pri` if it loads QML or the reader types), entries in `bin/test` (usage, `available`, the `case`, `projects`, `directories`), a place in a CI shard, and rows in `tests/README.md`.
+- Run the suites your change touches, then the rest before calling work done. CI runs `bin/shortcuts --check`, `bin/build`, `bash tests/test-runner.sh`, and the fast suites (`backend search tags ranges importer catalog sound cli`) in one job, and the GUI suites in parallel shards (`tst_ui` split three ways by function); a new suite must be added to a shard in `.github/workflows/ci.yml`. CI only runs on GitHub, so run everything locally before calling work done.
+- A new suite needs a `tests/<name>.pro` (include `../src/core.pri`, and `../qml/qml.pri` if it loads QML or the reader types), entries in `bin/test` (usage, `available`, the `case`, `projects`, `directories`) and in both project lists of `tests/test-runner.sh`, a place in a CI shard, and rows in `tests/README.md`.
 - Fixtures are small, original USFM generated in temporary dirs. Never add real Bible text or network access to tests.
 - Motion/timing tests drive animations deterministically; don't "fix" flakes with longer sleeps — find the missing settle condition.
 

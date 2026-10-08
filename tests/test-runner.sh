@@ -9,7 +9,7 @@ export STATE="$workspace/state" REAL_HOME="$HOME"
 mkdir -p "$workspace/checkout/bin" "$workspace/checkout/tests" "$workspace/tools" "$STATE"
 cp "$root/bin/test" "$workspace/checkout/bin/test"
 touch "$workspace/checkout/omaword.pro"
-for project in backend ui search searchui deskui historyui studyui a11yui marginsui motion contextmenu searchrender tags tagsui ranges sound desktop usfm catalog blockannotations singleinstance windows; do
+for project in backend ui search searchui deskui historyui studyui a11yui marginsui motion contextmenu searchrender tags tagsui ranges sound desktop usfm catalog blockannotations singleinstance windows cli; do
     touch "$workspace/checkout/tests/$project.pro"
 done
 cat > "$workspace/tools/qmake6" <<'SH'
@@ -161,7 +161,7 @@ rm -f "$STATE"/*.test "$STATE"/*.build
 export JOBS=1 TEST_JOBS=8 EXPECTED_JOBS=1
 run_status
 [[ $status == 0 ]]
-for project in backend ui search searchui deskui historyui studyui a11yui marginsui motion contextmenu searchrender tags tagsui ranges sound desktop usfm catalog blockannotations singleinstance windows; do
+for project in backend ui search searchui deskui historyui studyui a11yui marginsui motion contextmenu searchrender tags tagsui ranges sound desktop usfm catalog blockannotations singleinstance windows cli; do
     [[ -f $STATE/$project.test ]]
 done
 assert_output '[windows] PASS'

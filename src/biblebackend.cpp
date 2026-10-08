@@ -1965,6 +1965,22 @@ bool BibleBackend::readVersions(QVariantList *result)
     *result = rows; return true;
 }
 
+QString BibleBackend::versionIdFor(const QString &name) const
+{
+    for (const QString key : {QStringLiteral("id"),QStringLiteral("abbreviation")})
+        for (const auto &value : m_versions)
+            if (value.toMap().value(key).toString().compare(name.trimmed(),Qt::CaseInsensitive) == 0) return value.toMap().value("id").toString();
+    return {};
+}
+
+bool BibleBackend::readVersion(const QString &id)
+{
+    if (id.isEmpty()) return setError("That Bible version is not installed.");
+    if (id == m_versionId && m_ready) { clearError(); return true; }
+    // As a peer reloads: neither the active version nor a reading place is saved.
+    return changeVersion(id,{},{},false,false,true);
+}
+
 bool BibleBackend::switchVersion(QString id)
 {
     if (m_busy) return setError("Wait for the USFM import to finish before switching versions.");
@@ -2269,15 +2285,9 @@ void BibleBackend::searchScripture(QString query)
     if (!m_ready) { m_searchError = "Import a USFM Bible first."; emit searchChanged(); return; }
     const quint64 request = m_searchRequest;
     const QString generation = m_textGeneration, id = m_versionId;
-    QVector<ScriptureSearch::Edition> editions{{m_bible.databaseName(),m_versionId,m_abbreviation}};
+    const auto editions = searchEditions(m_searchAllVersions);
     QStringList installed;
-    for (const auto &value : std::as_const(m_versions)) {
-        const auto version = value.toMap();
-        const QString other = version.value("id").toString();
-        installed << other;
-        if (m_searchAllVersions && other != m_versionId && !installedPath(other).isEmpty())
-            editions.append({installedPath(other),other,version.value("abbreviation").toString()});
-    }
+    for (const auto &value : std::as_const(m_versions)) installed << value.toMap().value("id").toString();
     const auto cancel = std::make_shared<std::atomic_bool>(false);
     m_searchCancellation = cancel; m_searchBusy = true;
     auto *watcher = new QFutureWatcher<ScriptureSearch::Result>(this);
@@ -2311,6 +2321,20 @@ void BibleBackend::searchScripture(QString query)
         return ScriptureSearch::searchEditions(editions,query,ScriptureSearch::defaultIndexPath(),installed,cancel);
     }));
     emit searchChanged();
+}
+
+QVector<ScriptureSearch::Edition> BibleBackend::searchEditions(bool every) const
+{
+    QVector<ScriptureSearch::Edition> editions;
+    if (!m_ready) return editions;
+    editions.append({m_bible.databaseName(),m_versionId,m_abbreviation});
+    for (const auto &value : m_versions) {
+        const auto version = value.toMap();
+        const QString other = version.value("id").toString();
+        if (every && other != m_versionId && !installedPath(other).isEmpty())
+            editions.append({installedPath(other),other,version.value("abbreviation").toString()});
+    }
+    return editions;
 }
 
 void BibleBackend::loadMoreSearchResults()
@@ -3624,23 +3648,38 @@ QString BibleBackend::copySelection(bool plainText)
     copyText(text); clearError(); return text;
 }
 
-QString BibleBackend::quote(QString reference, bool plainText)
+QVariantMap BibleBackend::readPassage(const QString &text, bool strict)
 {
-    if (!requireReady()) return {};
+    if (!m_ready) return {{"error","Import a USFM Bible first."}};
     int b = 0, c = 0, start = 0, end = 0;
     QString error;
-    if (!parseReference(reference,&b,&c,&start,&end,&error)) {
-        // Compact references (jn316) as the passage palette reads them.
-        const auto candidates = referenceCandidates(reference,1);
-        if (candidates.isEmpty() || !parseReference(candidates.first().toMap().value("reference").toString(),&b,&c,&start,&end,&error)) {
-            setError(error); return {};
+    if (!parseReference(text,&b,&c,&start,&end,&error)) {
+        const auto candidates = strict ? QVariantList() : referenceCandidates(text,1);
+        if (candidates.isEmpty() || !parseReference(candidates.first().toMap().value("reference").toString(),&b,&c,&start,&end,&error))
+            return {{"error",error}};
+    }
+    const QString label = start ? rangeReference(start,end) : reference(b,c);
+    if (!start && !chapterBounds(b,c,&start,&end)) return {{"error","That chapter is not in " + edition() + "."}};
+    QVariantList verses, rows;
+    QString name;
+    for (int i = start, atBook = 0, atChapter = 0; i <= end; ++i) {
+        const auto key = endpoint(i);
+        if (key.book == atBook && key.chapter == atChapter) continue;
+        atBook = key.book; atChapter = key.chapter;
+        if (!readChapter(atBook,atChapter,&rows)) return {{"error","Cannot read " + label + "."}};
+        for (const auto &value : std::as_const(m_books))
+            if (value.toMap().value("id").toInt() == atBook) name = value.toMap().value("name").toString();
+        for (const auto &row : std::as_const(rows)) {
+            const auto verse = row.toMap();
+            const int index = absoluteVerse(atBook,atChapter,verse.value("number").toInt());
+            if (index >= start && index <= end)
+                verses.append(QVariantMap{{"book",name},{"chapter",atChapter},{"verse",verse.value("number")},{"text",verse.value("text")}});
         }
     }
-    const QString label = start ? rangeReference(start,end) : this->reference(b,c);
-    if (!start && !chapterBounds(b,c,&start,&end)) { setError("That chapter is not in " + edition() + "."); return {}; }
-    const QString text = copyRange(start,end,label,plainText);
-    if (!text.isEmpty()) clearError();
-    return text;
+    const QString plain = copyRange(start,end,label,true);
+    if (plain.isEmpty()) return {{"error","Cannot read " + label + "."}};
+    return {{"reference",label},{"versionId",m_versionId},{"abbreviation",m_abbreviation},{"name",m_edition},
+            {"plain",plain},{"quotation",copyRange(start,end,label,false)},{"verses",verses}};
 }
 
 QString BibleBackend::copyVerse(int number, bool plainText)

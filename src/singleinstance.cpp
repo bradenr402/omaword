@@ -20,6 +20,7 @@ QJsonObject encode(const SingleInstance::Request &request)
     QJsonObject object{{"version", 1}, {"activate", true}, {"newWindow", request.newWindow}};
     if (request.lookup) object.insert("lookup", true);
     if (!request.reference.isEmpty()) object.insert("reference", request.reference);
+    if (!request.translation.isEmpty()) object.insert("translation", request.translation);
     if (!request.importPath.isEmpty()) object.insert("import", request.importPath);
     if (!request.activationToken.isEmpty()) object.insert("token", request.activationToken);
     if (!request.startupId.isEmpty()) object.insert("startupId", request.startupId);
@@ -33,17 +34,18 @@ bool decode(const QByteArray &frame, SingleInstance::Request *request)
     if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
     const auto object = document.object();
     if (object.value("version") != QJsonValue(1) || object.value("activate") != QJsonValue(true)) return false;
-    const QStringList keys{"version", "activate", "reference", "import", "token", "startupId", "newWindow", "lookup"};
+    const QStringList keys{"version", "activate", "reference", "translation", "import", "token", "startupId", "newWindow", "lookup"};
     for (auto it = object.begin(); it != object.end(); ++it) {
         if (!keys.contains(it.key())) return false;
         if (it.key() == "version" || it.key() == "activate") continue;
         if (it.key() == "newWindow" || it.key() == "lookup") { if (!it.value().isBool()) return false; else continue; }
         if (!it.value().isString()) return false;
         const auto text = it.value().toString();
-        const int limit = it.key() == "reference" ? 1024 : 4096;
+        const int limit = it.key() == "reference" ? 1024 : it.key() == "translation" ? 128 : 4096;
         if (text.isEmpty() || text.size() > limit || text.contains(QChar::Null)) return false;
     }
     request->reference = object.value("reference").toString();
+    request->translation = object.value("translation").toString();
     request->importPath = object.value("import").toString();
     request->activationToken = object.value("token").toString();
     request->startupId = object.value("startupId").toString();

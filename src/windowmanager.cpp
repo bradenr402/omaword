@@ -14,6 +14,15 @@
 #include <QWindow>
 #include <memory>
 
+// A requested passage as the passage palette reads it: an exact reference,
+// else its first suggestion (compact input such as jn316).
+static QString palettePassage(const BibleBackend *bible, const QString &text)
+{
+    if (bible->resolveReference(text).value("valid").toBool()) return text;
+    const auto candidates = bible->referenceCandidates(text, 1);
+    return candidates.isEmpty() ? text : candidates.first().toMap().value("reference").toString();
+}
+
 WindowManager::WindowManager(Desktop *desktop, QObject *parent, QUrl source)
     : QObject(parent), m_desktop(desktop), m_sounds(new SoundEffects(this)), m_source(std::move(source)) {}
 
@@ -119,7 +128,10 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
     auto *bible = reader->bible;
     QPointer<QWindow> root(reader->window);
     SingleInstance::Result action{true, {}};
-    if (!request.importPath.isEmpty() || !request.reference.isEmpty()) {
+    const QString versionId = request.translation.isEmpty() ? QString() : bible->versionIdFor(request.translation);
+    if (!request.translation.isEmpty() && versionId.isEmpty())
+        action = {false, QStringLiteral("No installed translation \u201c%1\u201d.").arg(request.translation)};
+    else if (!request.lookup && (!request.importPath.isEmpty() || !request.reference.isEmpty() || !versionId.isEmpty())) {
         if (!flush(root)) action = {false, QStringLiteral("The unsaved note could not be saved.")};
         else {
             QMetaObject::invokeMethod(root, "savePosition");
@@ -134,15 +146,24 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
                             [bible, root, reference = request.reference, connection] {
                                 if (bible->busy()) return;
                                 QObject::disconnect(*connection);
-                                if (root && bible->ready() && bible->error().isEmpty() && flush(root)) bible->navigate(reference);
+                                if (root && bible->ready() && bible->error().isEmpty() && flush(root)) bible->navigate(palettePassage(bible, reference));
                             });
                     }
                 }
-            } else if (!bible->navigate(request.reference)) action = {false, bible->error()};
+            } else {
+                // --translation: the window switches to it, as Versions would.
+                if (!versionId.isEmpty() && versionId != bible->versionId()) {
+                    QMetaObject::invokeMethod(root, "switchVersion", Q_ARG(QVariant, versionId));
+                    if (bible->versionId() != versionId)
+                        action = {false, bible->error().isEmpty() ? QStringLiteral("Cannot switch to %1.").arg(request.translation) : bible->error()};
+                }
+                if (action.ok && !request.reference.isEmpty() && !bible->navigate(palettePassage(bible, request.reference)))
+                    action = {false, bible->error()};
+            }
         }
     }
-    // Lookup: the passage palette, ready to type.
-    if (request.lookup && action.ok) QMetaObject::invokeMethod(root, "openPalette", Q_ARG(QVariant, false), Q_ARG(QVariant, false));
+    // Lookup: the passage palette, ready to type, with any text typed into it.
+    if (request.lookup && action.ok) QMetaObject::invokeMethod(root, "lookUp", Q_ARG(QVariant, request.reference));
     if (!activate) { reply(action); return; }
     SingleInstance::activateWindow(root, request, this, [action, reply](SingleInstance::Result activation) {
         if (!action.ok) reply(action);

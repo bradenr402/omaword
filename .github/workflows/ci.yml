@@ -33,7 +33,7 @@ jobs:
       - name: Fast test suites
         run: >
           bin/test --suite backend --suite search --suite tags --suite ranges
-          --suite importer --suite catalog --suite sound
+          --suite importer --suite catalog --suite sound --suite cli
       - name: Upload test logs
         if: failure()
         uses: actions/upload-artifact@v4

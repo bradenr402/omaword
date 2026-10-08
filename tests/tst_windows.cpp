@@ -450,7 +450,8 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(child.state(),QProcess::NotRunning,5000);
         QCOMPARE(child.exitCode(),0);
     }
-    // open --here navigates the window you read; lookup opens its palette.
+    // open --here navigates the window you read, switching it to a
+    // translation asked for; lookup opens its palette with the text typed.
     void hereAndLookupStayInTheWindowYouRead() {
         const int count = windows->count();
         SingleInstance::Request here; here.reference = "Romans 8:2"; here.newWindow = false;
@@ -458,12 +459,36 @@ private slots:
         windows->openRequest(here,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
         QTRY_VERIFY(done); QCOMPARE(windows->count(),count);
         QCOMPARE(windows->backendAt(count - 1)->selectionReference(),QString("Romans 8:2"));
-        SingleInstance::Request lookup; lookup.newWindow = false; lookup.lookup = true;
+        SingleInstance::Request lookup; lookup.newWindow = false; lookup.lookup = true; lookup.reference = "rom 8";
         done = false;
         windows->openRequest(lookup,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
         QTRY_VERIFY(done); QCOMPARE(windows->count(),count);
         auto palette = windows->windowAt(count - 1)->findChild<QObject *>("passagePalette"); QVERIFY(palette);
         QTRY_VERIFY(palette->property("opened").toBool());
+        QCOMPARE(windowObject(windows->windowAt(count - 1),"referenceInput")->property("text").toString(),QString("rom 8"));
+        QCOMPARE(windows->backendAt(count - 1)->selectionReference(),QString("Romans 8:2")); // Typed, not opened.
+        QVERIFY(QMetaObject::invokeMethod(palette,"close"));
+        // --translation: by abbreviation or ID, in any case; the passage as
+        // the palette reads it (compact).
+        {
+            BibleBackend other;
+            other.importUsfm(QUrl::fromLocalFile(structuredUsfm));
+            QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000);
+            QVERIFY2(other.ready(),qPrintable(other.error()));
+        }
+        auto *bible = windows->backendAt(count - 1);
+        const QString first = bible->versionId();
+        QTRY_VERIFY(!bible->versionIdFor("owb").isEmpty());
+        here.reference = "jn316"; here.translation = "owb"; done = false;
+        windows->openRequest(here,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
+        QTRY_VERIFY(done); QCOMPARE(windows->count(),count);
+        QCOMPARE(bible->versionId(),QString("window-original")); QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        here.reference.clear(); here.translation = first.toUpper(); done = false;
+        windows->openRequest(here,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
+        QTRY_VERIFY(done); QCOMPARE(bible->versionId(),first); QCOMPARE(bible->selectionReference(),QString("John 3:16"));
+        here.translation = "nothing"; done = false;
+        windows->openRequest(here,[&](auto result) { QVERIFY(!result.ok); QVERIFY(result.error.contains("nothing")); done = true; },false);
+        QTRY_VERIFY(done); QCOMPARE(bible->versionId(),first);
     }
     void realSecondaryCreatesAnotherWindow() {
         const auto directory = windows->backendAt(0)->dataDirectory();
