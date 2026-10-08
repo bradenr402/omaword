@@ -21,6 +21,11 @@ MarkdownQuotes::MarkdownQuotes(QObject *parent) : QObject(parent)
     m_measure.setSingleShot(true);
     m_measure.setInterval(0);
     connect(&m_measure, &QTimer::timeout, this, &MarkdownQuotes::measure);
+    // New text is laid out once Qt has finished importing it, never while
+    // it is still inserting it.
+    m_narrow.setSingleShot(true);
+    m_narrow.setInterval(0);
+    connect(&m_narrow, &QTimer::timeout, this, &MarkdownQuotes::narrow);
 }
 
 void MarkdownQuotes::setDocument(QQuickTextDocument *target)
@@ -35,13 +40,21 @@ void MarkdownQuotes::setDocument(QQuickTextDocument *target)
     if (m_document) {
         // A new text (QQuickTextEdit parses its Markdown again) brings Qt's
         // margins back: narrow them before the next frame.
-        connect(m_document, &QTextDocument::contentsChanged, this, &MarkdownQuotes::narrow);
+        connect(m_document, &QTextDocument::contentsChanged, this, [this] { if (!m_narrowing) m_narrow.start(); });
         connect(m_document->documentLayout(), &QAbstractTextDocumentLayout::documentSizeChanged,
                 &m_measure, qOverload<>(&QTimer::start));
         connect(m_document, &QObject::destroyed, this, [this] { m_bars.clear(); emit barsChanged(); });
     }
     narrow();
     emit documentChanged();
+}
+
+void MarkdownQuotes::setGap(qreal gap)
+{
+    if (qFuzzyCompare(gap, m_gap)) return;
+    m_gap = gap;
+    narrow();
+    emit gapChanged();
 }
 
 void MarkdownQuotes::setIndent(qreal indent)
@@ -52,25 +65,70 @@ void MarkdownQuotes::setIndent(qreal indent)
     emit indentChanged();
 }
 
+namespace {
+enum Flag { StartsQuote = 1, Continues = 2 };
+enum Kind { Paragraph, List, Code, Heading };
+Kind kind(const QTextBlock &block)
+{
+    const auto format = block.blockFormat();
+    if (format.hasProperty(QTextFormat::BlockCodeFence) || format.nonBreakableLines()) return Code;
+    if (block.textList()) return List;
+    if (format.headingLevel() > 0) return Heading;
+    return Paragraph;
+}
+}
+
 void MarkdownQuotes::narrow()
 {
     if (!m_document || m_narrowing) return;
     m_narrowing = true;
     QTextCursor cursor(m_document);
-    bool editing = false;
+    cursor.beginEditBlock();
+    const QChar marker(0x200b);
+    QTextBlock previous;
     for (auto block = m_document->begin(); block.isValid(); block = block.next()) {
         const auto format = block.blockFormat();
-        const int level = format.intProperty(QTextFormat::BlockQuoteLevel);
-        if (level <= 0) continue;
-        if (qFuzzyCompare(format.leftMargin(), level * m_indent) && qFuzzyIsNull(format.rightMargin())) continue;
-        if (!editing) { cursor.beginEditBlock(); editing = true; }
-        QTextBlockFormat narrowed;
-        narrowed.setLeftMargin(level * m_indent);
-        narrowed.setRightMargin(0);
-        cursor.setPosition(block.position());
-        cursor.mergeBlockFormat(narrowed);
+        const int level = std::max(0, format.intProperty(QTextFormat::BlockQuoteLevel));
+        // Fresh text (previewMarkdown's): read its markers into the block, then drop them.
+        if (block.userState() < 0) {
+            const QString text = block.text();
+            const bool starts = level > 0 && text.startsWith(marker), continues = text.endsWith(marker) && text.size() > (starts ? 1 : 0);
+            block.setUserState((starts ? StartsQuote : 0) | (continues ? Continues : 0));
+            if (continues) {
+                cursor.setPosition(block.position() + text.size() - 1);
+                cursor.deleteChar();
+            }
+            if (starts) {
+                cursor.setPosition(block.position());
+                cursor.deleteChar();
+            }
+        }
+        // A paragraph's next line (a single Enter) follows without a gap, as
+        // do a list's items and a code block's lines; anything else starts
+        // after one.
+        qreal top = m_gap;
+        if (!previous.isValid()) top = 0;
+        else {
+            const Kind before = kind(previous), now = kind(block);
+            const int previousLevel = std::max(0, previous.blockFormat().intProperty(QTextFormat::BlockQuoteLevel));
+            if (before == Paragraph && now == Paragraph && (previous.userState() & Continues) && previousLevel == level
+                && !(block.userState() & StartsQuote)) top = 0;
+            else if (before == Code && now == Code) top = 0;
+            else if (before == List && now == List && previous.textList() == block.textList()) top = 0;
+        }
+        const qreal left = level > 0 ? level * m_indent : format.leftMargin();
+        if (!qFuzzyCompare(format.leftMargin() + 1, left + 1) || !qFuzzyIsNull(format.rightMargin())
+            || !qFuzzyCompare(format.topMargin() + 1, top + 1) || !qFuzzyIsNull(format.bottomMargin())) {
+            QTextBlockFormat spaced;
+            if (level > 0) { spaced.setLeftMargin(left); spaced.setRightMargin(0); }
+            spaced.setTopMargin(top);
+            spaced.setBottomMargin(0);
+            cursor.setPosition(block.position());
+            cursor.mergeBlockFormat(spaced);
+        }
+        previous = block;
     }
-    if (editing) cursor.endEditBlock();
+    cursor.endEditBlock();
     m_narrowing = false;
     m_measure.start();
 }
@@ -93,9 +151,8 @@ void MarkdownQuotes::measure()
         };
         for (auto block = m_document->begin(); block.isValid(); block = block.next()) {
             const int level = std::max(0, block.blockFormat().intProperty(QTextFormat::BlockQuoteLevel));
-            // The preview marks each quote's first line with a zero-width
-            // space: a quote right after another starts its own bars.
-            close(block.text().startsWith(QChar(0x200b)) ? 0 : level);
+            // A quote right after another starts its own bars.
+            close(block.userState() > 0 && (block.userState() & StartsQuote) ? 0 : level);
             if (!level) continue;
             const QRectF rect = layout->blockBoundingRect(block);
             for (auto &span : open) span.second = rect.bottom();

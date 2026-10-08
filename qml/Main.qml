@@ -2087,22 +2087,40 @@ ApplicationWindow {
         }
         return text
     }
-    // A Markdown preview's text: passage links, and a zero-width space opening
-    // each block quote's first line, so QuoteBars (MarkdownQuotes) draws
-    // quotes that follow one another with separate bars.
+    // A Markdown preview's text: passage links, and a single Enter as a line
+    // break (as GitHub comments and Obsidian take it). Qt keeps no trace of
+    // where a quote starts or which blocks a hard break split, so zero-width
+    // spaces mark them for MarkdownQuotes (QuoteBars), which reads and
+    // removes them: one opening each quote's first line, one closing each
+    // line a paragraph goes on from. Lines in lists, tables, and code keep
+    // Markdown's rule (Qt would turn a break in a list item into an item).
     function previewMarkdown(text) {
         const lines = linkedMarkdown(text).split("\n")
-        let quoting = false, opening = false, fenced = false
+        const fence = /^ {0,3}(```|~~~)/, listMarker = /^ {0,3}([-*+]|\d{1,9}[.)])( +|$)/
+        const delimiterRow = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
+        const content = function(line) { return line.replace(/^ {0,3}(?:> ?)*/, "") }
+        const blank = function(line) { return !content(line).trim().length }
+        let quoting = false, opening = false, fenced = false, listing = false
         for (let i = 0; i < lines.length; ++i) {
-            if (/^ {0,3}(```|~~~)/.test(lines[i])) fenced = !fenced
-            const marks = fenced ? null : /^( {0,3}(?:> ?)+)/.exec(lines[i])
+            const line = lines[i]
+            if (fence.test(line)) { fenced = !fenced; continue }
+            if (fenced) continue
+            const marks = /^( {0,3}(?:> ?)+)/.exec(line), body = content(line)
             if (marks && !quoting) opening = true
-            if (marks && opening && lines[i].length > marks[1].length) {
-                lines[i] = marks[1] + "\u200b" + lines[i].slice(marks[1].length)
+            if (listMarker.test(body)) listing = true
+            else if (!blank(line) && i > 0 && blank(lines[i - 1]) && !/^ {2,}/.test(body)) listing = false
+            let out = line
+            if (marks && opening && line.length > marks[1].length) {
+                out = marks[1] + "\u200b" + line.slice(marks[1].length)
                 opening = false
             }
             // A blank line ends a quote; other lines continue it (lazily).
-            quoting = !!marks || (quoting && lines[i].trim().length > 0)
+            quoting = !!marks || (quoting && line.trim().length > 0)
+            const next = lines[i + 1]
+            if (next !== undefined && !listing && !blank(line) && !blank(next) && !fence.test(next) && !/^(\t| {4})/.test(body)
+                    && body.indexOf("|") < 0 && !delimiterRow.test(content(next)) && !listMarker.test(content(next)))
+                out = out.replace(/\s+$/, "") + "\u200b  "
+            lines[i] = out
         }
         return lines.join("\n")
     }

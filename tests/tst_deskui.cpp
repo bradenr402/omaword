@@ -367,6 +367,22 @@ private slots:
         QTRY_VERIFY(item("noteQuoteBars:0")); QVERIFY(!item("noteQuoteBars:1"));
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
+    // In Preview a single Enter breaks the line, and paragraphs, lists, and
+    // quotes stand a gap apart; the markers telling them apart never show.
+    void previewLineBreaksAndGaps() {
+        QVERIFY(bible->setDeskPage("Line one\nLine two\n\nNext paragraph\n- a\n- b\n\n> q1\n> q2\n>\n> q3\n\n> r1\n\nAfter", desk()));
+        openDesk(); key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        const auto document = item("deskPreview")->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTRY_VERIFY(!document->toPlainText().contains(QChar(0x200b)));
+        QStringList texts; QList<double> tops;
+        for (auto block = document->begin(); block.isValid(); block = block.next()) { texts << block.text(); tops << block.blockFormat().topMargin(); }
+        QCOMPARE(texts, (QStringList{"Line one", "Line two", "Next paragraph", "a", "b", "q1", "q2", "q3", "r1", "After"}));
+        const double gap = 9;
+        QCOMPARE(tops, (QList<double>{0, 0, gap, gap, 0, gap, 0, gap, gap, gap}));
+        // Two quotes in a row keep separate bars; q1–q3 is one quote.
+        QTRY_VERIFY(item("deskQuoteBars:1")); QVERIFY(!item("deskQuoteBars:2"));
+        key(Qt::Key_Escape); key(Qt::Key_Escape);
+    }
     void cleanDeskAsksFirstAndUndoes() {
         navigate("John 1:4"); key(Qt::Key_D); navigate("John 1:5"); key(Qt::Key_D);
         const auto page = desk(); QVERIFY(!page.isEmpty());

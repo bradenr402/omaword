@@ -1,7 +1,8 @@
 import QtQuick
 import OmaWord.Reader 1.0
 
-// Block quotes in a Markdown preview (TextEdit.MarkdownText): a small indent
+// A Markdown preview's layout (TextEdit.MarkdownText, MarkdownQuotes): a gap
+// between paragraphs, lists, and quotes, and for block quotes a small indent
 // per level and a muted bar beside each, the way quotes are usually drawn.
 // A child of the TextEdit, so the bars scroll with its text.
 Item {
@@ -14,6 +15,7 @@ Item {
         id: quotes
         document: root.target.textDocument
         indent: Math.round(14 * root.uiScale)
+        gap: Math.round(9 * root.uiScale)
     }
     Repeater {
         model: quotes.bars
