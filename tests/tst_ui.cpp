@@ -1159,7 +1159,11 @@ private slots:
         QVERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(window->property("notesDocked").toBool());
         QVERIFY(!prop("notesDrawer","modal").toBool()); QVERIFY(!prop("notesDrawer","dim").toBool());
+        // It takes the room the text does not need, from 390 px up to 620.
         const auto drawerWidth = prop("notesDrawer","width").toDouble();
+        const auto comfort = window->property("readerComfortWidth").toDouble();
+        QCOMPARE(drawerWidth,qBound(390.0,1500 - comfort,620.0));
+        QVERIFY(drawerWidth > 390);
         QTRY_COMPARE(window->property("notesDock").toDouble(),drawerWidth);
         QTRY_VERIFY(qAbs(item("reading")->width() - (readingWidth - drawerWidth)) < 1);
         QCOMPARE(item("readerColumn")->width(),columnWidth);
@@ -1183,6 +1187,11 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QTRY_COMPARE(window->property("notesDock").toDouble(),0.0);
         QCOMPARE(item("reading")->width(),readingWidth);
+        // Wider still, it stops at its maximum.
+        window->resize(2400,900); QTRY_COMPARE(window->contentItem()->width(),2400.0);
+        key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        QCOMPARE(prop("notesDrawer","width").toDouble(),620.0);
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QCOMPARE(bible->selectionReference(),QString("John 3:17"));
         // Narrow: a sheet over the text's right side; the text stays clickable.
         window->resize(1000,800); QTRY_COMPARE(window->contentItem()->width(),1000.0);

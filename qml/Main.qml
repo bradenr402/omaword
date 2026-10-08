@@ -559,14 +559,52 @@ ApplicationWindow {
     // Character selection takes the reader's keys itself (charKey).
     readonly property bool readerKeys: readerBase && !charMode
     onReaderKeysChanged: { if (!readerKeys) clearCount() }
-    readonly property real notesWidth: Math.min(390 * scale, width - 40)
     // Notes docks beside the text where the window keeps a comfortable column
     // (and the reader's widest side insets) beside it: the reader and footer
-    // make room (notesDock follows it in and out). Narrower, it is a sheet
-    // over the reader's right side. Neither dims or blocks the text.
-    readonly property bool notesDocked: width >= readerMeasure + verseGutter + 9 + 2 * 48 + notesWidth
-    property real notesDock: notesDocked && marginOpen ? notesWidth : 0
-    Behavior on notesDock { NumberAnimation { duration: app.panelEnterMs; easing.type: Easing.OutCubic } }
+    // make room. Narrower, it is a sheet over the reader's right side.
+    // Neither dims or blocks the text.
+    readonly property real readerComfortWidth: readerMeasure + verseGutter + 9 + 2 * 48
+    readonly property real notesMinWidth: Math.min(390 * scale, width - 40)
+    readonly property real notesMaxWidth: 620 * scale
+    readonly property bool notesDocked: width >= readerComfortWidth + notesMinWidth
+    // Docked, it grows into the room the text does not need, keeping margin
+    // notes' preferred room while they are on (the column may shift left
+    // into its inset for them), up to notesMaxWidth.
+    readonly property real marginNotesRoom: marginsAllowed && marginNotesOn
+        ? marginConnectorWidth + marginNotesPreferred + marginRightInset - 48 : 0
+    readonly property real notesWidth: notesDocked
+        ? Math.max(notesMinWidth, Math.min(notesMaxWidth, width - readerComfortWidth - marginNotesRoom)) : notesMinWidth
+    // The room docked Notes takes from the reader (dockMargin): the reader
+    // lays out once at its new width and glides there from where it was
+    // (glideFromDock, as soon as the column's new place is known); the footer
+    // and the other chrome at the bottom follow chromeDock, which glides
+    // alongside. Resizes jump.
+    property real notesDock: 0
+    property real chromeDock: 0
+    // The column's x before a dock change whose new width is still to land.
+    property real dockSlideFrom: NaN
+    NumberAnimation { id: chromeGlide; target: app; property: "chromeDock"; duration: app.panelEnterMs; easing.type: Easing.OutCubic }
+    function dockMargin() {
+        const target = notesDocked && marginOpen ? notesWidth : 0
+        if (target === notesDock) return
+        const glide = (target > 0) !== (notesDock > 0) && !reduceMotion && readerInitialized && bible.ready
+        dockSlideFrom = glide ? readerColumn.x : NaN
+        notesDock = target
+        chromeGlide.stop()
+        if (glide) { chromeGlide.from = chromeDock; chromeGlide.to = target; chromeGlide.start() }
+        else chromeDock = target
+    }
+    onMarginOpenChanged: dockMargin()
+    onNotesDockedChanged: dockMargin()
+    onNotesWidthChanged: dockMargin()
+    onColumnTargetXChanged: if (!isNaN(dockSlideFrom)) glideFromDock()
+    function glideFromDock() {
+        marginSlide.stop()
+        marginSlideOffset = dockSlideFrom - columnTargetX
+        marginsAttached = marginSlideOffset !== 0
+        if (marginsAttached) marginSlide.start()
+    }
+    function endDockGlide() { dockSlideFrom = NaN }
     // The window's width beside docked Notes: the footer's.
     readonly property real stageWidth: width - notesDock
     readonly property real readerLineHeight: readerMetrics.height * bible.lineHeight
@@ -658,7 +696,7 @@ ApplicationWindow {
         const fromX = readerColumn.x
         // The chapter buttons' centre, less the part the layout moves.
         const navFrom = chapterNavShift - floatingSafety / 2
-        const marginsShown = marginFocusLevel > 0 && (marginSpace.notes.visible || marginSpace.outline.visible)
+        const marginsShown = marginFocusLevel > 0 && (marginSpace.notes.visible || outlineShown)
         // Entering, shown margins stay laid out (beside the reflowed text) while they fade.
         if (entering) { leavingSpace = marginSpace; marginsLeaving = motion && marginsShown; focusLayout = true }
         else { focusLayout = false; marginsLeaving = false }
@@ -2417,12 +2455,18 @@ ApplicationWindow {
     readonly property var marginSpace: marginsLeaving && leavingSpace ? leavingSpace : Margins.space({
         width: reading.width, columnX: readerNaturalX, columnWidth: readerColumnWidth,
         minLeft: readerSideInset, leftInset: Math.max(24 * readerScale, chapterNavReserve),
-        rightInset: Math.max(28 * readerScale, footerRightInset, chapterNavReserve + readerScrollbar.width),
-        wantNotes: marginsAllowed && marginNotesOn, connectorWidth: 3 * readerScale + 2 * marginBraceWidth + 34 * readerScale,
-        notesMin: 170 * readerScale, notesPreferred: 250 * readerScale, notesMax: 330 * readerScale,
-        wantOutline: outlineHeadings.length > 0, outlineGap: 12 * readerScale,
+        rightInset: Math.max(28 * readerScale, footerRightInset, marginRightInset),
+        wantNotes: marginsAllowed && marginNotesOn, connectorWidth: marginConnectorWidth,
+        notesMin: 170 * readerScale, notesPreferred: marginNotesPreferred, notesMax: 330 * readerScale,
+        wantOutline: marginsAllowed && bible.chapterOutline, outlineGap: 12 * readerScale,
         outlineMin: 120 * readerScale, outlineMax: 220 * readerScale
     })
+    readonly property real marginConnectorWidth: 3 * readerScale + 2 * marginBraceWidth + 34 * readerScale
+    readonly property real marginNotesPreferred: 250 * readerScale
+    readonly property real marginRightInset: chapterNavReserve + readerScrollbar.width
+    // The outline's room is kept while it is on, headings or not (as margin
+    // notes' is): it draws only in chapters with headings.
+    readonly property bool outlineShown: marginSpace.outline.visible && outlineHeadings.length > 0
     // While margin notes show for this chapter, the reader drops its inline
     // note marks (Verse rails, Paragraph/Block brackets); other kinds stay.
     readonly property bool inlineNoteMarks: !marginSpace.notes.visible
@@ -2540,7 +2584,7 @@ ApplicationWindow {
         return item ? { number: number, top: item.y + item.textOffset, bottom: item.y + item.textOffset + item.textHeight } : null
     }
     // Margins measure only while one is shown; `{`/`}` measure on demand.
-    readonly property bool marginsMeasured: (marginSpace.notes.visible && marginNoteEntries.length > 0) || marginSpace.outline.visible
+    readonly property bool marginsMeasured: (marginSpace.notes.visible && marginNoteEntries.length > 0) || outlineShown
     onMarginsMeasuredChanged: scheduleMargins()
     function updateMargins() {
         if (!bible.ready || !marginsMeasured) {
@@ -5481,7 +5525,9 @@ ApplicationWindow {
                     boundsBehavior: Flickable.StopAtBounds
                     flickableDirection: Flickable.VerticalFlick
                     onWidthChanged: {
-                        app.settleMargins()
+                        // A dock change glides (glideFromDock); any other resize jumps.
+                        if (isNaN(app.dockSlideFrom)) app.settleMargins()
+                        else Qt.callLater(app.endDockGlide)
                         if (app.hasSelection)
                             Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
                     }
@@ -6189,7 +6235,7 @@ ApplicationWindow {
                 ChapterOutline {
                     id: chapterOutline
                     objectName: "chapterOutline"
-                    visible: app.marginSpace.outline.visible
+                    visible: app.outlineShown
                     x: app.marginSpace.outline.x + app.marginDrift
                     opacity: app.marginFocusLevel
                     y: 48 * app.readerScale
@@ -6996,7 +7042,7 @@ ApplicationWindow {
         objectName: "footerZone"
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.rightMargin: app.notesDock
+        anchors.rightMargin: app.chromeDock
         anchors.bottom: parent.bottom
         height: app.footerHeight + 2 * app.footerMargin
         visible: bible.ready && bible.focusMode && !app.findPromptOpen
@@ -7072,7 +7118,7 @@ ApplicationWindow {
         objectName: "locationControls"
         anchors.bottom: parent.bottom
         anchors.bottomMargin: app.footerMargin
-        x: app.stageWidth / 2 - width / 2
+        x: (app.width - app.chromeDock) / 2 - width / 2
         readonly property real availableWidth: Math.max(0, app.stageWidth - 2 * (Math.max(leftActions.width, floatingActions.width) + app.footerMargin + app.footerGroupGap))
         readonly property real fixedWidth: searchControl.width + (ribbonControl.visible ? ribbonControl.width : 0)
             + (versionControl.visible ? versionControl.width : 0)
@@ -7125,7 +7171,7 @@ ApplicationWindow {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: app.footerMargin
-        anchors.rightMargin: app.footerMargin + app.notesDock
+        anchors.rightMargin: app.footerMargin + app.chromeDock
         spacing: 0
         // One row, or a column bottom-aligned in the corner when cramped.
         columns: app.footerStacked ? 1 : 5
@@ -7317,7 +7363,7 @@ ApplicationWindow {
         fadeDuration: app.reduceMotion ? 0 : 85
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
         anchors.margins: 16 * app.controlScale
-        anchors.rightMargin: 16 * app.controlScale + app.notesDock
+        anchors.rightMargin: 16 * app.controlScale + app.chromeDock
         theme: desktop
         uiScale: app.scale
         matchIndex: app.searchMatchIndex
@@ -7345,7 +7391,7 @@ ApplicationWindow {
         id: searchMatchCount
         objectName: "searchMatchCount"
         anchors.right: parent.right; anchors.bottom: parent.bottom
-        anchors.rightMargin: 20 * app.controlScale + app.footerRightInset + app.notesDock
+        anchors.rightMargin: 20 * app.controlScale + app.footerRightInset + app.chromeDock
         // Above the footer row, which focus mode keeps (quiet, revealed on hover).
         anchors.bottomMargin: app.footerMargin + app.footerHeight + 6 * app.controlScale
         visible: !app.findPromptOpen && app.acceptedSearchQuery.length > 0
@@ -9243,7 +9289,7 @@ ApplicationWindow {
     Rectangle {
         parent: Overlay.overlay
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.horizontalCenterOffset: -app.notesDock / 2
+        anchors.horizontalCenterOffset: -app.chromeDock / 2
         anchors.bottom: parent.bottom
         anchors.bottomMargin: bible.focusMode ? 68 : Math.max(68, app.footerMargin + app.footerHeight + 12 * app.controlScale)
         width: Math.min(toast.implicitWidth + 36, app.stageWidth - 2 * Math.max(24, app.footerRightInset))

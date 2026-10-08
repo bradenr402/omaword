@@ -7,7 +7,8 @@
 // Splits the space beside the reading column. Margin notes have priority:
 // they may shift the column left (never past minLeft) to reach their
 // preferred width, and sit right after the connector; the outline uses only
-// what is left of the shifted column and never moves it.
+// what is left of the shifted column and never moves it. Where both fit at
+// their minimums, the notes stop shifting where the outline keeps its own.
 // o: width, columnX, columnWidth, minLeft, leftInset, rightInset,
 //    wantNotes, connectorWidth, notesMin, notesPreferred, notesMax,
 //    wantOutline, outlineGap, outlineMin, outlineMax
@@ -18,7 +19,14 @@ function space(o) {
     if (o.wantNotes) {
         const right = o.width - o.rightInset
         const room = right - (o.columnX + o.columnWidth + o.connectorWidth)
-        const shift = Math.max(0, Math.min(o.notesPreferred - room, o.columnX - o.minLeft))
+        let limit = o.columnX - o.minLeft
+        // Where both fit, the notes shift the column only as far as leaves
+        // the outline its minimum; where they cannot, the notes win.
+        if (o.wantOutline) {
+            const keep = o.columnX - o.outlineGap - o.leftInset - o.outlineMin
+            if (keep >= 0 && room + Math.min(limit, keep) >= o.notesMin) limit = Math.min(limit, keep)
+        }
+        const shift = Math.max(0, Math.min(o.notesPreferred - room, limit))
         const width = Math.min(o.notesMax, room + shift)
         if (width >= o.notesMin) {
             result.shift = shift

@@ -528,10 +528,18 @@ private slots:
         auto wide = split(1920, true, true);
         QVERIFY(wide["notes"].toMap()["visible"].toBool() && wide["outline"].toMap()["visible"].toBool());
         QCOMPARE(wide["shift"].toDouble(), 0.0);
-        // Medium: notes shift the column; the outline only uses what is left.
+        // Medium: notes shift the column, but only as far as leaves the
+        // outline its minimum while the notes keep theirs.
         auto medium = split(1200, true, true);
         QVERIFY(medium["notes"].toMap()["visible"].toBool()); QVERIFY(medium["shift"].toDouble() > 0);
-        QVERIFY(!medium["outline"].toMap()["visible"].toBool());
+        QVERIFY(medium["outline"].toMap()["visible"].toBool());
+        QCOMPARE(medium["outline"].toMap()["width"].toDouble(), 120.0);
+        QVERIFY(medium["notes"].toMap()["width"].toDouble() >= 170);
+        QVERIFY(medium["shift"].toDouble() < split(1200, true, false)["shift"].toDouble());
+        // Where both cannot fit, the notes win; the outline uses what is left.
+        auto crowded = split(1100, true, true);
+        QVERIFY(crowded["notes"].toMap()["visible"].toBool()); QVERIFY(!crowded["outline"].toMap()["visible"].toBool());
+        QCOMPARE(crowded["shift"].toDouble(), split(1100, true, false)["shift"].toDouble());
         QVERIFY(split(1200, false, true)["outline"].toMap()["visible"].toBool());
         QCOMPARE(split(1200, false, true)["shift"].toDouble(), 0.0);
         // The outline never shifts.
@@ -921,6 +929,17 @@ private slots:
         settle(); QCOMPARE(columnX(), shifted); QVERIFY(notesShown()); QVERIFY(!outlineShown());
         QVERIFY(prop("marginLayout").toList().isEmpty());
         navigate("John 3:1"); QCOMPARE(columnX(), shifted); QTRY_VERIFY(outlineShown() == false);
+        // Where both fit at their minimums, the notes shift the column only
+        // as far as leaves the outline its own.
+        navigate("John 3:16");
+        bool both = false;
+        for (int width = 1200; width <= 1800 && !both; width += 20) { resize(width, 900); both = notesShown() && outlineShown(); }
+        QVERIFY(both);
+        const double kept = space()["shift"].toDouble();
+        bible->setChapterOutline(false); QTRY_VERIFY(!outlineShown()); settle();
+        QVERIFY2(space()["shift"].toDouble() > kept, qPrintable(QString("%1 / %2").arg(space()["shift"].toDouble()).arg(kept)));
+        bible->setChapterOutline(true); QTRY_VERIFY(outlineShown());
+        resize(1200, 900); navigate("John 3:1");
         // The scrollbar's width is kept too: a chapter that fits without
         // scrolling keeps the place (wide enough that the room sets the shift).
         resize(1400, 900);
@@ -1041,6 +1060,49 @@ private slots:
         QTRY_COMPARE(bible->selectionReference(), QString("John 1:1"));
         QCOMPARE(jumpIndex(), jumps + 1);
         QVERIFY(!object("notesDrawer")->property("visible").toBool());
+    }
+
+    // Opening docked Notes: the reader lays out once at its new width and
+    // glides there, its margin notes with it, never stale; closing glides back.
+    void notesDockGlidesWithItsMargins() {
+        sounds->setProperty("reduceMotion", false);
+        note("John 3:16", 16, 16, "A note beside its passage.");
+        bible->setMarginNotes(true);
+        resize(1800, 900);
+        navigate("John 3:16");
+        QTRY_VERIFY(notesShown()); QTRY_VERIFY(item("marginNote:John 3:16") && item("marginNote:John 3:16")->isVisible()); settle();
+        const double before = columnX();
+        const auto check = [&](const QList<Frame> &frames, double from, double to) {
+            QVERIFY(frames.size() > 4);
+            QVERIFY2(std::abs(frames.first().columnX - from) < 0.5, qPrintable(describe(frames.first())));
+            QVERIFY2(std::abs(frames.last().columnX - to) < 0.5, qPrintable(describe(frames.last())));
+            int between = 0;
+            for (int i = 1; i < frames.size(); ++i) {
+                const auto &f = frames[i];
+                // Monotonic toward its place, and the notes beside it laid out for it.
+                QVERIFY2((to - frames[i - 1].columnX) * (to - f.columnX) >= 0 && std::abs(to - f.columnX) <= std::abs(to - frames[i - 1].columnX) + 0.5,
+                         qPrintable(describe(frames[i - 1]) + "\n" + describe(f)));
+                if (f.shownNotes) {
+                    QVERIFY2(f.stale < 1, qPrintable(describe(f)));
+                    QVERIFY2(std::abs((f.noteX - f.columnX) - (frames.last().noteX - frames.last().columnX)) < 1, qPrintable(describe(f)));
+                }
+                between += std::abs(f.columnX - from) > 1 && std::abs(f.columnX - to) > 1;
+            }
+            if (!between) for (const auto &f : frames) qWarning().noquote() << describe(f);
+            QVERIFY2(between > 0, "the column jumped rather than glided");
+        };
+        const auto open = stepped("notes-open", [&] { key(Qt::Key_W); }, 30);
+        QVERIFY(prop("notesDocked").toBool()); QVERIFY(object("notesDrawer")->property("opened").toBool());
+        const double docked = columnX();
+        QVERIFY(docked < before);
+        check(open, before, docked);
+        QVERIFY(open.last().shownNotes > 0);
+        const auto close = stepped("notes-close", [&] { QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); }, 30);
+        check(close, docked, before);
+        // Disable animations: it jumps.
+        sounds->setProperty("reduceMotion", true);
+        const auto jump = stepped("notes-jump", [&] { key(Qt::Key_W); }, 3);
+        QCOMPARE(jump[1].columnX, docked);
     }
 
     // ---- Focus mode with margins ----------------------------------------------

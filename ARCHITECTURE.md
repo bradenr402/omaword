@@ -417,9 +417,14 @@ files.
   binding stale).
 - Notes (`notesDrawer`, the Margin) is a non-modal drawer that never dims: it
   docks beside the text where the window holds the comfortable column and the
-  reader's widest insets beside it (`notesDocked`; the window's content and
-  the footer give up `notesDock`, animated with the drawer), and is a sheet
-  over the reader's right side when narrower. It shows the note or, in its
+  reader's widest insets beside it (`notesDocked`), and is a sheet over the
+  reader's right side when narrower. Docked, it is 390 px (× scale) or wider:
+  it takes the room the text does not need (keeping margin notes' preferred
+  room while they are on) up to 620 px. The window's content gives up
+  `notesDock` at once and the reader lays out once at its new width, then
+  glides there from where it was (`dockMargin`/`glideFromDock`, the margins
+  moving with it); the footer and bottom chrome follow `chromeDock`, which
+  glides alongside. Resizes jump. It shows the note or, in its
   place, the Desk page (`marginMode`; `shift D` turns it to the Desk, `w`
   back), which saves like a note: after a pause and on every `flushNote`,
   only over the page it loaded (`setDeskPage`), keeping a draft another
@@ -555,7 +560,11 @@ files.
   left and sit right after their connector; while they are on, their room is
   kept in every chapter, notes or not, and the scrollbar's width is reserved
   whether it shows or not, so the column keeps its place between chapters.
-  The outline takes what is left and never moves the column. `updateMargins()`
+  The outline takes what is left and never moves the column; where both fit
+  at their minimums, the notes shift the column only as far as leaves the
+  outline its own. The outline's room is likewise kept while it is on, in
+  chapters without headings too (it draws only where there are headings,
+  `outlineShown`). `updateMargins()`
   measures verse spans (Verse rows or `BlockReader.verseRangeRects`, re-run on
   `layoutRefreshed`/size changes) into `verseExtents`, then `Margins.place()`
   lays notes out in content coordinates: aligned to the passage top, pushed
