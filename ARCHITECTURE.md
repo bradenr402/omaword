@@ -188,7 +188,8 @@ files.
   (undone only while the page still reads as it left it); `setDeskPage(text,
   expected)` writes only over the text the editor started from (else "changed
   in another window"), like a note save it runs while windows flush, and both
-  publish to every window (`deskChanged`). 4 MiB bound.
+  publish to every window (`deskChanged`). `cleanDesk()` (Clean Desk, after a
+  confirmation) empties it, an undo step too. 4 MiB bound.
 - Backups: JSON `format: "omaword-backup"`, version **7**: `tags` (the
   definitions in use), `versions` (each installed version: `versionId`,
   `edition`, `annotations` with highlight, note, and times, `tagAssignments`

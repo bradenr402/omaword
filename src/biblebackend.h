@@ -244,6 +244,8 @@ public:
     // as the addition left it.
     Q_INVOKABLE QString appendToDesk(QVariantMap scope = QVariantMap());
     Q_INVOKABLE bool setDeskPage(QString text, QString expected);
+    // Clean Desk: empties the page in every window, as an undo step.
+    Q_INVOKABLE bool cleanDesk();
     // Copies any canonical scope (marker, annotation, search result) without navigating.
     Q_INVOKABLE QString copyScope(QVariantMap scope, bool plainText = false);
 

@@ -526,7 +526,7 @@ ApplicationWindow {
     readonly property bool contextMenuOpen: contextMenu.visible
     readonly property bool modalOpen: dialogOpen || savedDrawer.shown || tagsUi.visibleModal
     // Everything modal except the side panels (Marks, See also).
-    readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     // One side panel at a time. Its opening key does nothing while it is open;
     // another panel's key switches to that panel.
     readonly property string sidePanel: notesOpen ? "notes" : deskOpen ? "desk" : savedDrawer.shown ? "annotations"
@@ -1743,6 +1743,7 @@ ApplicationWindow {
             if (errorDialog.visible) errorDialog.close()
             else if (peekCard.visible) peekCard.close()
             else if (catalogDetails.visible) catalogDetails.close()
+            else if (cleanDeskConfirmation.visible) cleanDeskConfirmation.close()
             else if (clearHistoryConfirmation.visible) clearHistoryConfirmation.close()
             else if (restoreConfirmation.visible) restoreConfirmation.close()
             else if (verseTagMenu.visible) verseTagMenu.close()
@@ -3236,6 +3237,19 @@ ApplicationWindow {
         })
         return true
     }
+    // Clean Desk empties the page in every window, after confirming (u undoes it).
+    function requestCleanDesk() {
+        if (bible.busy || !flushNote()) return
+        if (!bible.deskPage.length) { notify("The Desk is already clean", true); return }
+        cleanDeskConfirmation.open()
+    }
+    function confirmCleanDesk() {
+        if (bible.busy || !flushNote()) return
+        if (!bible.cleanDesk()) return
+        cleanDeskConfirmation.close()
+        sounds.play("remove")
+        notify("Cleaned the Desk · " + keyText("undo") + " brings it back", true)
+    }
     function addPassageToDesk() {
         if (!hasSelection) { rejected(unavailableReason("toggleDesk")); return }
         const scope = actionScope()
@@ -4041,6 +4055,7 @@ ApplicationWindow {
         { id: "export", group: "Commands only", title: "Export your marks as Markdown", command: true },
         { id: "backup", group: "Commands only", title: "Back up your marks", command: true },
         { id: "restore", group: "Commands only", title: "Restore a backup of your marks", command: true },
+        { id: "cleanDesk", group: "Commands only", title: "Clean Desk", command: true },
         { id: "clearHistory", group: "Commands only", title: "Clear History", command: true },
         { id: "toggleHistory", group: "Commands only", title: "Disable / Enable History", command: true },
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
@@ -4650,6 +4665,7 @@ ApplicationWindow {
         case "notes": if (sidePanel === "notes" || leaveSidePanel("notes")) openNotes(true); break
         case "desk": if (sidePanel === "desk" || leaveSidePanel("desk")) openDesk(); break
         case "toggleDesk": addPassageToDesk(); break
+        case "cleanDesk": requestCleanDesk(); break
         case "highlight": highlightPassage(); break
         case "undo": undoChange(true); break
         case "redo": undoChange(false); break
@@ -6718,6 +6734,13 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         SectionLabel { text: "DESK"; Layout.fillWidth: true }
                         QuietButton {
+                            objectName: "deskClean"
+                            text: "Clean…"; compact: true
+                            enabled: bible.deskPage.length > 0 && !bible.busy
+                            tip: "Clean Desk: empty the page in every window (asks first; " + app.keyText("undo") + " brings it back)"
+                            onClicked: app.requestCleanDesk()
+                        }
+                        QuietButton {
                             objectName: "deskClose"
                             text: "×"; compact: true
                             keys: KeyNotation.format("Escape")
@@ -8297,6 +8320,48 @@ ApplicationWindow {
                 QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("export") }
                 Item { Layout.fillWidth: true }
                 QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("backup") }
+            }
+        }
+    }
+
+    ModalCard {
+        id: cleanDeskConfirmation
+        objectName: "cleanDeskConfirmation"
+        // Outside clicks cancel, like esc; they never reach what is underneath.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) { cleanDeskCancel.forceActiveFocus() }
+        onClosed: app.restorePanelFocus()
+        Shortcut {
+            sequences: ["Left", "Up", "Right", "Down"]
+            enabled: cleanDeskConfirmation.opened && !errorDialog.visible
+            onActivated: {
+                if (cleanDeskCancel.activeFocus) cleanDeskConfirm.forceActiveFocus()
+                else cleanDeskCancel.forceActiveFocus()
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: 18 * app.scale
+            Label { text: "Clean the Desk?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label {
+                objectName: "cleanDeskExplanation"
+                text: "Everything on the Desk goes, in every window: its quotations and what you wrote around them. Your notes, highlights, and tags are kept, and "
+                    + app.keyText("undo") + " brings the page back."
+                color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            Label { text: bible.error; visible: text.length > 0; color: desktop.error; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                QuietButton { id: cleanDeskCancel; objectName: "cleanDeskCancel"; text: "Cancel"; onClicked: cleanDeskConfirmation.close() }
+                QuietButton { id: cleanDeskConfirm; objectName: "cleanDeskConfirm"; text: "Clean Desk"; emphasized: true; onClicked: app.confirmCleanDesk() }
+            }
+            HintRow {
+                objectName: "cleanDeskHints"
+                theme: desktop
+                parts: app.confirmationHintParts(cleanDeskCancel, cleanDeskConfirm, cleanDeskConfirmation)
+                pixelSize: 11 * app.scale
+                Layout.fillWidth: true
             }
         }
     }

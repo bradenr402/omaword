@@ -1217,6 +1217,25 @@ QString BibleBackend::appendToDesk(QVariantMap scope)
     return reference;
 }
 
+bool BibleBackend::cleanDesk()
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    if (!flushDrafts()) return false;
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT text FROM desk_page WHERE id=1") || !q.next()) return setError("Cannot read the Desk: " + q.lastError().text());
+    const QString before = q.value(0).toString();
+    q.finish();
+    if (before.isEmpty()) { clearError(); return true; }
+    if (!writeDeskPage(QString()) || !m_store.commit()) return setError("Cannot clean the Desk: " + m_store.lastError().text());
+    UndoStep step("cleaning of the Desk",{},{});
+    step.desk = true; step.deskBefore = before;
+    recordUndo(step);
+    clearError(); publishDesk(); return true;
+}
+
 bool BibleBackend::setDeskPage(QString text, QString expected)
 {
     // Like a note save, this runs while other windows flush their drafts.

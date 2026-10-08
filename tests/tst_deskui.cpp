@@ -367,11 +367,44 @@ private slots:
         QTRY_VERIFY(item("noteQuoteBars:0")); QVERIFY(!item("noteQuoteBars:1"));
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
+    void cleanDeskAsksFirstAndUndoes() {
+        navigate("John 1:4"); key(Qt::Key_D); navigate("John 1:5"); key(Qt::Key_D);
+        const auto page = desk(); QVERIFY(!page.isEmpty());
+        QCOMPARE(commandTitle("clean desk"), QString("Clean Desk"));
+        // From the Desk: its Clean… button asks first; esc cancels.
+        openDesk();
+        QTest::mouseClick(window, Qt::LeftButton, {}, item("deskClean")->mapToScene(QPointF(6, 6)).toPoint());
+        QTRY_VERIFY(object("cleanDeskConfirmation")->property("opened").toBool());
+        QTRY_VERIFY(item("cleanDeskCancel")->hasActiveFocus());
+        key(Qt::Key_X); QCOMPARE(desk(), page);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("cleanDeskConfirmation")->property("visible").toBool());
+        QCOMPARE(desk(), page); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        // From Commands, confirmed: the page empties in every window.
+        BibleBackend peer;
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("> clean desk"); key(Qt::Key_Return);
+        QTRY_VERIFY(object("cleanDeskConfirmation")->property("opened").toBool());
+        QTRY_VERIFY(item("cleanDeskCancel")->hasActiveFocus());
+        key(Qt::Key_Right); QVERIFY(item("cleanDeskConfirm")->hasActiveFocus()); key(Qt::Key_Return);
+        QTRY_VERIFY(!object("cleanDeskConfirmation")->property("visible").toBool());
+        QCOMPARE(desk(), QString()); QCOMPARE(peer.deskPage(), QString());
+        QVERIFY(toast().startsWith("Cleaned the Desk"));
+        QTRY_COMPARE(item("deskEditor")->property("text").toString(), QString());
+        // u brings it back.
+        QTRY_VERIFY(readerFocused()); key(Qt::Key_U); QCOMPARE(desk(), page);
+        QTRY_COMPARE(item("deskEditor")->property("text").toString(), page);
+        // An empty Desk has nothing to clean.
+        QVERIFY(bible->cleanDesk()); call("requestCleanDesk");
+        QVERIFY(!object("cleanDeskConfirmation")->property("visible").toBool());
+        QCOMPARE(toast(), QString("The Desk is already clean"));
+    }
     void keybindingsListed() {
         QVariantList actions = prop("actions").toList();
         QStringList ids; for (const auto &a : actions) ids << a.toMap()["id"].toString();
-        for (auto id : {"desk", "toggleDesk"}) QVERIFY(ids.contains(id));
-        QVERIFY(!ids.contains("cleanDesk"));
+        for (auto id : {"desk", "toggleDesk", "cleanDesk"}) QVERIFY(ids.contains(id));
+        for (const auto &a : actions)
+            if (a.toMap()["id"] == "cleanDesk") { QVERIFY(a.toMap()["sequences"].toStringList().isEmpty()); QCOMPARE(a.toMap()["group"].toString(), QString("Commands only")); }
         key(Qt::Key_Question); QTRY_VERIFY(object("helpDialog")->property("opened").toBool());
         object("keybindingSearch")->setProperty("text", "desk");
         QVariant rows; QMetaObject::invokeMethod(window, "filteredKeybindings", Q_RETURN_ARG(QVariant, rows));
