@@ -1967,7 +1967,7 @@ bool BibleBackend::readVersions(QVariantList *result)
 
 QString BibleBackend::versionIdFor(const QString &name) const
 {
-    for (const QString key : {QStringLiteral("id"),QStringLiteral("abbreviation")})
+    for (const char *key : {"id","abbreviation"})
         for (const auto &value : m_versions)
             if (value.toMap().value(key).toString().compare(name.trimmed(),Qt::CaseInsensitive) == 0) return value.toMap().value("id").toString();
     return {};
