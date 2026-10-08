@@ -423,6 +423,15 @@ files.
 - Panel- and mode-local keys are catalog rows with a non-global `scope`
   (`characters`, `tags`, `importGuide`, `versions`, `list`, …):
   listed in Keybindings and the README, bound by their owner, never globally.
+- Key discovery: Keybindings (`?`) opens on an Essentials card (`essentialParts`,
+  clickable where they act) above the list, sorted by group (the order groups
+  first appear in the catalog) under sticky section headers (rows reached by
+  key scroll clear of them, `clearKeybindingHeader`). A key waiting for
+  another (`keyPending`: `z`, a count, character selection's `g`/`i`/`a`)
+  shows `whichKeyParts` in `keyStrip` after 400 ms; the same strip shows the
+  first keys (`introParts`) once, when the library goes from empty to ready,
+  remembered in `discovery.ini` (`AppConfigLocation`). `modePill` names Visual
+  or Characters above the footer's mode button.
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw
   `paintLayoutGlyph`'s icons.

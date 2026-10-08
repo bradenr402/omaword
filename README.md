@@ -277,6 +277,7 @@ These also work, but stay out of the in-app list:
 
 ### Keyboard and mouse
 - Selecting verses with the mouse brings up a small bar above them: **x highlight · w note · t tag · y copy** and `⋯` for Desk, Compare versions, plain text, and See also. Any key or `esc` puts it away.
+- Keybindings (`?`) opens on the essentials, then lists every key under its group's header, which stays in view as you scroll. A key that waits for another (`z`, a count, character selection's `g`, `i`, `a`) shows what can follow after a moment, a pill above the footer names the selection mode (Visual, Characters), and the first time a version is installed a strip shows the keys to start with.
 - Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Add to Desk), and `menu` or `shift F10` opens it from the keyboard.
 - Footer and dialog buttons take the keyboard by `tab` only; a focused button takes `enter` and `space`. Scrollable dialogs scroll with `j` `k`, `pgup` `pgdn`, `ctrl d` `ctrl u`, `home` `end`.
 - Clicking outside a panel, dialog, or picker only closes it (in confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error and say why ("Select a verse first"). Mouse back closes the top dialog.

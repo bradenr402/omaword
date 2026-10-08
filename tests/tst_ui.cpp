@@ -390,7 +390,7 @@ private slots:
         QVERIFY(QDir().mkpath(data));
         const QString testName = QString::fromLatin1(QTest::currentTestFunction());
         if (testName != "emptyAndImportError" && testName != "asyncFirstImportLayout" && testName != "fontControlsBeforeImport"
-                && testName != "catalogDownloadLifecycle") {
+                && testName != "catalogDownloadLifecycle" && testName != "firstInstallShowsTheKeysOnce") {
             BibleBackend setup;
             const QString filename = "bible-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.sqlite";
             QVERIFY(QFile::copy(fixture, data + '/' + filename));
@@ -407,12 +407,69 @@ private slots:
         qmlWarnings.clear();
         loadUi(true);
         if (testName != "emptyAndImportError" && testName != "asyncFirstImportLayout" && testName != "fontControlsBeforeImport"
-                && testName != "catalogDownloadLifecycle") QVERIFY2(bible->ready(),qPrintable(bible->error()));
+                && testName != "catalogDownloadLifecycle" && testName != "firstInstallShowsTheKeysOnce") QVERIFY2(bible->ready(),qPrintable(bible->error()));
     }
     void cleanup() {
         unloadUi();
         QVERIFY2(qmlWarnings.isEmpty(), qPrintable(qmlWarnings.join('\n')));
         session.reset();
+    }
+    void firstInstallShowsTheKeysOnce() {
+        QVERIFY(!bible->ready()); QVERIFY(!item("keyStrip")->isVisible());
+        bible->importUsfm(QUrl::fromLocalFile(syntheticSource)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY2(bible->ready(),qPrintable(bible->error()));
+        // The keys to start with, once the first version is in.
+        QTRY_VERIFY(item("keyStrip")->isVisible());
+        QVERIFY(prop("keyStripHints","plainText").toString().contains("? all keys"));
+        QVERIFY(item("keyStripClose")->isVisible());
+        // esc puts it away, for good: not again after removing every version
+        // and adding one back.
+        item("readerSurface")->forceActiveFocus();
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("keyStrip")->isVisible());
+        QVERIFY(bible->removeVersion(bible->versionId(),false)); QTRY_VERIFY(!bible->ready());
+        bible->importUsfm(QUrl::fromLocalFile(syntheticSource)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);
+        QVERIFY(bible->ready()); QTest::qWait(100); QVERIFY(!item("keyStrip")->isVisible());
+    }
+    void keyDiscovery() {
+        reference("John 3:16");
+        // ?: the essentials first, each runnable from the card.
+        key(Qt::Key_Question); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
+        QVERIFY(item("keybindingEssentials")->isVisible());
+        const auto essentials = prop("essentialHints","plainText").toString();
+        QVERIFY2(essentials.contains("ctrl k go to") && essentials.contains("w note") && essentials.contains("j k verses"),qPrintable(essentials));
+        // The rest come group by group under headers.
+        QTRY_VERIFY(item("keybindingGroup:Navigate"));
+        QStringList groups;
+        for (const auto &row : prop("keybindingResults","model").toList()) {
+            const auto group = row.toMap()["group"].toString();
+            if (groups.isEmpty() || groups.last() != group) { QVERIFY2(!groups.contains(group),qPrintable(group)); groups << group; }
+        }
+        QCOMPARE(groups.first(),QString("Navigate"));
+        // Typing filters; the essentials step aside.
+        type("note"); QTRY_VERIFY(!item("keybindingEssentials")->isVisible());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
+        key(Qt::Key_Question); QTRY_VERIFY(item("keybindingEssentials")->isVisible());
+        click(item("essentialHintsPart:note")); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        // Which key: z waits for another; after a moment, what can follow.
+        key(Qt::Key_Z); QVERIFY(!item("keyStrip")->isVisible());
+        QTRY_VERIFY(item("keyStrip")->isVisible());
+        QVERIFY(prop("keyStripHints","plainText").toString().contains("z center"));
+        QCOMPARE(prop("keyStripPending","text").toString(),QString("z"));
+        key(Qt::Key_Z); QTRY_VERIFY(!item("keyStrip")->isVisible());
+        // A count names what it would count.
+        key(Qt::Key_3); QTRY_VERIFY(item("keyStrip")->isVisible());
+        QVERIFY(prop("keyStripHints","plainText").toString().contains("j k 3 verses"));
+        key(Qt::Key_J); QTRY_VERIFY(!item("keyStrip")->isVisible()); QCOMPARE(bible->cursorVerse(),19);
+        // The mode pill names the selection mode.
+        QVERIFY(!item("modePill")->isVisible());
+        key(Qt::Key_V,Qt::ShiftModifier); QTRY_VERIFY(item("modePill")->isVisible());
+        QCOMPARE(prop("modePillLabel","text").toString(),QString("VISUAL"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("modePill")->isVisible());
+        key(Qt::Key_V); QTRY_VERIFY(item("modePill")->isVisible());
+        QCOMPARE(prop("modePillLabel","text").toString(),QString("CHARACTERS"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("modePill")->isVisible());
     }
     void fontControlsBeforeImport() {
         QVERIFY(!bible->ready());
@@ -1614,7 +1671,8 @@ private slots:
         auto visible = [list](const QRectF &r) { return qMin(r.bottom(),list->height()) - qMax(r.top(),0.0); };
         const auto content = qvariant_cast<QQuickItem *>(list->property("contentItem"));
         for (auto child : content->childItems()) {
-            if (!child->isVisible() || child->height() <= 0) continue;
+            // Group headers are not rows.
+            if (!child->isVisible() || child->height() <= 0 || child->objectName().startsWith("keybindingGroup:")) continue;
             const auto r = child->mapRectToItem(list,child->boundingRect());
             if (inside(r) || visible(r) > visible(rect) + 1) return false;
         }

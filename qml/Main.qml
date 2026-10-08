@@ -5,6 +5,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQml
+import QtCore
 import "HandDrawn.js" as HandDrawn
 import "KeyNotation.js" as KeyNotation
 import "Margins.js" as Margins
@@ -143,7 +144,7 @@ ApplicationWindow {
     readonly property string observedNoteText: bible.noteText
     onObservedNoteTextChanged: syncNote()
     readonly property bool observedReady: bible.ready
-    onObservedReadyChanged: { if (observedReady) restorePosition() }
+    onObservedReadyChanged: { if (observedReady) { restorePosition(); introduceKeys() } }
     property bool verseMode: false
     property var pendingActionCollapse: null
     readonly property string selectionIdentity: bible.versionId + "\n" + bible.selectionReference
@@ -220,6 +221,30 @@ ApplicationWindow {
     // since Qt's multi-key sequences stay in a partial-match state that
     // swallows unrelated keys (digits, Ctrl+K) across focus changes.
     property bool zPending: false
+    // Which key: a key that waits for another (z, a count, character
+    // selection's g, i, a) shows what can follow after a moment.
+    readonly property bool keyPending: zPending || verseCount.length > 0 || (charMode && charPending.length > 0)
+    property bool whichKeyShown: false
+    onKeyPendingChanged: { whichKeyShown = false; if (keyPending) whichKeyTimer.restart(); else whichKeyTimer.stop() }
+    Timer { id: whichKeyTimer; objectName: "whichKeyTimer"; interval: 400; onTriggered: app.whichKeyShown = app.keyPending }
+    function whichKeyParts() {
+        if (charMode && charPending === "g") return [["G", "chapter start"], ["E", "previous word end"]]
+        if (charMode && (charPending === "i" || charPending === "a")) return [["W", charPending === "i" ? "word" : "word and space"], ["S", "sentence"]]
+        if (zPending) return [["Z", "center"], ["T", "to top"], ["B", "to bottom"]]
+        if (verseCount.length) return [[["J", "K"], verseCount + " verses"], ["G", "verse " + verseCount], [["H", "L"], verseCount + " chapters"],
+            ["Escape", "cancel", function() { app.clearCount() }]]
+        return []
+    }
+    // Shown once, after the first version is installed: the keys to start with.
+    Settings {
+        id: discovery
+        location: StandardPaths.writableLocation(StandardPaths.AppConfigLocation) + "/discovery.ini"
+        category: "keys"
+        property bool introduced: false
+    }
+    property bool keyStripShown: false
+    function introduceKeys() { if (readerInitialized && !discovery.introduced) { keyStripShown = true; discovery.introduced = true } }
+    function dismissKeyStrip() { keyStripShown = false }
     onActiveFocusItemChanged: {
         clearCount()
         if (activeFocusItem && focusWithin(notesDrawer.contentItem.parent)) marginKeys = true
@@ -4327,9 +4352,17 @@ ApplicationWindow {
         if (undoActions.includes(action.id)) return "Reader and side panels · also selecting characters, not while typing"
         return "Reader · outside text editing and dialogs"
     }
+    // Keybindings come group by group (each under its sticky header), in the
+    // order the groups first appear in the catalog.
+    readonly property var keybindingGroups: {
+        const groups = []
+        for (const action of actions) if (!groups.includes(action.group)) groups.push(action.group)
+        return groups
+    }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
-        return actions.filter(function(binding) {
+        return actions.slice().sort(function(a, b) { return keybindingGroups.indexOf(a.group) - keybindingGroups.indexOf(b.group) })
+            .filter(function(binding) {
             if (!binding.sequences) return false
             // Single-letter searches match a key, rather than every action containing it.
             const keys = binding.sequences.map(function(sequence) { return KeyNotation.format(sequence) })
@@ -4786,11 +4819,33 @@ ApplicationWindow {
     function moveKeybinding(delta) {
         keybindingResults.currentIndex = Math.max(0, Math.min(keybindingResults.count - 1, keybindingResults.currentIndex + delta))
         keybindingResults.positionViewAtIndex(keybindingResults.currentIndex, ListView.Contain)
+        clearKeybindingHeader()
     }
     function keybindingEdge(last) {
         let row = last ? keybindingResults.count - 1 : 0
         keybindingResults.currentIndex = keybindingResults.count ? row : -1
         if (keybindingResults.count) keybindingResults.positionViewAtIndex(row, ListView.Contain)
+        clearKeybindingHeader()
+    }
+    // The sticky group header covers the list's top: a current row under it
+    // scrolls down clear of it.
+    function clearKeybindingHeader() {
+        const view = keybindingResults, item = view.currentItem
+        if (!item) return
+        const covered = view.contentY + keybindingHeaderHeight - item.y
+        if (covered > 0 && view.currentIndex > 0) view.contentY = Math.max(view.originY, view.contentY - covered)
+    }
+    readonly property real keybindingHeaderHeight: 26 * scale
+    // The Keybindings card's essentials: the keys to start with, each
+    // clickable where it acts (moves are shown, not clickable).
+    function essentialParts() {
+        const label = { nextVerse: "verses", nextChapter: "chapters", books: "go to", bibleSearch: "search", notes: "note",
+            highlight: "highlight", tags: "tag", toggleDesk: "Desk", copy: "copy", visual: "select verses", focus: "focus", commands: "commands" }
+        const keys = function(id) { return actionKeys(id)[0] }
+        return [[[keys("nextVerse"), keys("previousVerse")], label.nextVerse], [[keys("previousChapter"), keys("nextChapter")], label.nextChapter]]
+            .concat(["books", "bibleSearch", "notes", "highlight", "tags", "toggleDesk", "copy", "visual", "focus", "commands"].map(function(id) {
+                return [keys(id), label[id], function() { app.activateKeybinding(app.actionById(id)) }, actionAvailable(id)]
+            }))
     }
     function pageKeybindings(direction) {
         if (!keybindingResults.count) return
@@ -8481,7 +8536,7 @@ ApplicationWindow {
         property string pendingAction: ""
         height: Math.min(660 * app.scale, app.height - 48)
         // Focus at once, while the modal is still fading in.
-        onVisibleChanged: if (visible) { keybindingSearch.text = ""; keybindingSearch.forceActiveFocus() }
+        onVisibleChanged: if (visible) { keybindingSearch.text = ""; keybindingSearch.forceActiveFocus(); app.dismissKeyStrip() }
         onClosed: {
             let action = pendingAction
             pendingAction = ""
@@ -8533,9 +8588,37 @@ ApplicationWindow {
                 Accessible.name: "Search keybindings by action or key"
             }
             }
+            ColumnLayout {
+                objectName: "keybindingEssentials"
+                // Where the list keeps room to scroll: short windows show the list alone.
+                visible: !keybindingSearch.text.length && helpDialog.height >= 420 * app.scale
+                Layout.fillWidth: true
+                spacing: 6 * app.scale
+                SectionLabel { text: "ESSENTIALS"; Layout.fillWidth: true }
+                HintRow {
+                    objectName: "essentialHints"
+                    theme: desktop
+                    parts: app.essentialParts()
+                    pixelSize: 13 * app.scale
+                    Layout.fillWidth: true
+                }
+                FineRule { Layout.fillWidth: true }
+            }
             ListView {
                 id: keybindingResults
                 objectName: "keybindingResults"
+                section.property: "group"
+                section.labelPositioning: ViewSection.InlineLabels | ViewSection.CurrentLabelAtStart
+                section.delegate: Rectangle {
+                    required property string section
+                    objectName: "keybindingGroup:" + section
+                    width: keybindingResults.width - app.scrollGutter(keybindingResults)
+                    height: app.keybindingHeaderHeight
+                    // Opaque, so rows pass under it while it sticks.
+                    color: desktop.background
+                    z: 2
+                    SectionLabel { anchors.verticalCenter: parent.verticalCenter; x: 8 * app.scale; text: parent.section.toUpperCase() }
+                }
                 // This small catalog is fully laid out for geometric paging of wrapped rows.
                 cacheBuffer: Math.max(0, contentHeight)
                 Layout.fillWidth: true
@@ -9254,6 +9337,78 @@ ApplicationWindow {
         }
     }
 
+    // Which key (what can follow a waiting key) and, once, the keys to start
+    // with: one strip above the footer, centered beside docked Notes.
+    function introParts() {
+        return [[["J", "K"], "verses"], [["H", "L"], "chapters"], [actionKeys("books")[0], "go to", function() { app.runCommand("books") }],
+            [actionKeys("bibleSearch")[0], "search", function() { app.runCommand("bibleSearch") }], [actionKeys("notes")[0], "note", function() { app.runCommand("notes") }],
+            [actionKeys("help")[0], "all keys", function() { app.dismissKeyStrip(); app.runCommand("help") }]]
+    }
+    Rectangle {
+        id: keyStrip
+        objectName: "keyStrip"
+        parent: Overlay.overlay
+        readonly property bool whichKey: app.whichKeyShown && app.whichKeyParts().length > 0
+        visible: (whichKey || app.keyStripShown) && bible.ready && !app.modalOpen && !app.findPromptOpen
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.horizontalCenterOffset: -app.chromeDock / 2
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: app.footerMargin + app.footerHeight + 12 * app.controlScale
+        width: Math.min(560 * app.scale, app.stageWidth - 48)
+        height: keyStripRow.implicitHeight + 16 * app.scale
+        radius: Math.min(desktop.cornerRadius, height / 2)
+        color: desktop.surface
+        border.color: desktop.border
+        RowLayout {
+            id: keyStripRow
+            anchors.verticalCenter: parent.verticalCenter
+            x: 16 * app.scale
+            width: parent.width - 2 * x
+            spacing: 12 * app.scale
+            Label {
+                objectName: "keyStripPending"
+                visible: keyStrip.whichKey
+                text: app.zPending ? "z" : app.charMode && app.charPending.length ? app.charPending : app.verseCount
+                color: desktop.accent; font.pixelSize: 13 * app.scale; font.weight: Font.DemiBold
+            }
+            HintRow {
+                objectName: "keyStripHints"
+                theme: desktop
+                parts: keyStrip.whichKey ? app.whichKeyParts() : app.introParts()
+                pixelSize: 12 * app.scale
+                Layout.fillWidth: true
+            }
+            QuietButton {
+                objectName: "keyStripClose"
+                visible: !keyStrip.whichKey
+                text: "×"; compact: true
+                keys: KeyNotation.format("Escape"); tip: "Close · " + keys
+                Accessible.name: "Close the key strip"
+                onClicked: app.dismissKeyStrip()
+            }
+        }
+    }
+    // The selection mode, named above the footer's mode button.
+    Rectangle {
+        objectName: "modePill"
+        visible: bible.ready && (app.verseMode || app.charMode) && !app.findPromptOpen && modeControl.visible
+        x: leftActions.x + modeControl.x + modeControl.width / 2 - width / 2
+        y: leftActions.y - height - 6 * app.controlScale
+        width: modePillLabel.implicitWidth + 16 * app.scale
+        height: modePillLabel.implicitHeight + 6 * app.scale
+        radius: height / 2
+        color: app.tint(desktop.accent, 0.14)
+        border.color: app.tint(desktop.accent, 0.4)
+        Label {
+            id: modePillLabel
+            objectName: "modePillLabel"
+            anchors.centerIn: parent
+            text: app.charMode ? "CHARACTERS" : "VISUAL"
+            color: desktop.accent
+            font.pixelSize: 10.5 * app.scale; font.weight: Font.DemiBold; font.letterSpacing: 1
+        }
+    }
+
     ModalCard {
         id: errorDialog
         objectName: "errorDialog"
@@ -9473,6 +9628,7 @@ ApplicationWindow {
         enabled: app.readerKeys
         onActivated: {
             if (textPopover.visible) { textPopover.close(); return }
+            if (app.keyStripShown) { app.dismissKeyStrip(); return }
             if (app.selectionBarShown) { app.selectionBarWanted = false; return }
             if (app.marginOpen) {
                 // Open Notes closes before the reading state it follows (search,
