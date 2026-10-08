@@ -122,13 +122,13 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl m`: Manage tags: choose a tag to merge into
 - `backspace`: Manage tags: back to the picker (empty filter)
 - `[[`: Suggest a passage to link (in a note)
-- `alt enter`: Open the passage or web link at the cursor (in a note)
-- `ctrl click`: Open the passage or web link clicked (in a note)
-- `alt v`: Switch a note between Write and Preview (Notes panel)
-- `ctrl s`: Note changed in another window: save my draft (in a note)
-- `ctrl shift S`: Note changed in another window: use the saved text (in a note)
+- `alt enter`: Open the passage or web link at the cursor (in a note or the Desk)
+- `ctrl click`: Open the passage or web link clicked (in a note or the Desk)
+- `alt v`: Switch a note or the Desk between Write and Preview
+- `ctrl s`: Note or Desk changed in another window: save my draft
+- `ctrl shift S`: Note or Desk changed in another window: use the saved text
 - `ctrl ↓`: From a note to its Linked from list (esc returns)
-- `esc`: From a note back to reading: Notes stays open and follows the selection (esc again closes it)
+- `esc`: From a note or the Desk back to reading: it stays open, a note follows the selection (esc again closes it)
 
 ### Copy
 
@@ -198,12 +198,11 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `enter`: Open item
 - `y`: Copy item as quotation
 - `shift Y`: Copy item as plain text
-- `d`: Add item to Desk, or remove it
+- `d`: Add item to Desk
 - `delete` · `backspace`: Remove item
 - `t`: Edit the item's tags (Marks, See also)
 - `w`: Write the item's note in place (Marks)
 - `/`: Filter the list, #name for a tag (Marks with more than 10 items, See also)
-- `shift delete` · `shift backspace`: Clean Desk
 
 ### Commands only
 
@@ -248,12 +247,12 @@ These also work, but stay out of the in-app list:
 
 ### Studying
 - Highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. Highlights are paint: `x` paints the selected verses, joining any highlight they overlap or touch, and on verses already all highlighted it erases them, keeping the rest. Bookmarks are a tag, **Bookmarked**: bookmarks made in earlier versions carry it, and `t` adds it like any tag. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from). Notes (`w`) sits beside the text where the window is wide enough, the text making room for it, and over the text's right edge in narrower windows; either way the text stays in view and clickable. `esc` in a note saves it and hands the keyboard back to the text, where `j` and `k` move on and Notes follows the selection; `esc` again closes it, as does its `×`.
-- `u` or `ctrl z` undoes this window's last change to marks, notes, or tags, deletions included, so deleting asks nothing first; `ctrl shift Z` or `ctrl r` redoes. It works from the side panels and while selecting characters, and the passage menu, row menus, and Commands name the step ("Undo highlight on John 3:16"). A passage changed since in another window is left as it is, and a toast says so.
+- `u` or `ctrl z` undoes this window's last change to marks, notes, or tags, deletions included, or its last addition to the Desk, so deleting asks nothing first; `ctrl shift Z` or `ctrl r` redoes. It works from the side panels and while selecting characters, and the passage menu, row menus, and Commands name the step ("Undo highlight on John 3:16"). A passage changed since in another window is left as it is, and a toast says so.
 - In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
 - Quote part of a passage: `v` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.
 - **See also** (`shift S`) follows the passage you are reading with one list, in sections: the version's own cross-references, its parallel passages (where its source lists them under headings, as the BSB does), the passages you tagged alike, in every version, most shared tags first, and last OpenBible.info's community-ranked cross-references. Click a tag in that section's heading, or type `#grace` in the filter (`/`), to keep only its passages; `t` edits a row's tags. Footnotes appear as small marks in the text: click one (or press `i` on its verse) to peek at it in place, where `↑` `↓` step through the chapter's notes, `y` copies one, and `enter` opens See also for its verse.
 - Compare a passage across your versions (two or more): `c` (or Versions, `ctrl v`, with verses selected) shows each version's text for the selection, "Not in this version" where its numbering differs; `y` copies the highlighted version's quotation (`shift Y` plain text) and `enter` switches to it at the same passage.
-- The Desk (`d`, `shift D`) collects passages for side-by-side study across windows and versions.
+- The Desk is one Markdown page for study, shared by every window: `d` quotes the selected passage at its end (the text as a blockquote, then "— John 3:16 (NET)", a link back), `u` takes it off again, and `shift D` shows the page in the Notes margin, where you write around the quotations as in a note (`alt v` previews it, links and all). `w` turns the margin back to the note, `shift D` to the Desk.
 - **Marks** (`shift M`) lists everything you have marked, one row per passage: its highlight, tags, and note (or the verse, where there is no note), in Bible order, starting at the passage you are reading (`here`). Marks kept in another version say "from KJV". Edit a row where it is: `w` writes its note right in the row (`esc` is done), `t` edits its tags, `delete` removes the mark (`u` undoes). Past ten marks a filter appears (`/`): words match the reference, note, and verse, and `#grace` keeps a tag's marks; clicking a row's tag does the same. **Manage tags** (`ctrl t`) renames, deletes, or merges tags; names are shared across versions, assignments belong to one version.
 
 ### Feel
@@ -264,15 +263,15 @@ These also work, but stay out of the in-app list:
 
 ### Keyboard and mouse
 - Selecting verses with the mouse brings up a small bar above them: **x highlight · w note · t tag · y copy** and `⋯` for Desk, Compare versions, plain text, and See also. Any key or `esc` puts it away.
-- Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Desk), and `menu` or `shift F10` opens it from the keyboard.
+- Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Add to Desk), and `menu` or `shift F10` opens it from the keyboard.
 - Footer and dialog buttons take the keyboard by `tab` only; a focused button takes `enter` and `space`. Scrollable dialogs scroll with `j` `k`, `pgup` `pgdn`, `ctrl d` `ctrl u`, `home` `end`.
 - Clicking outside a panel, dialog, or picker only closes it (in confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error and say why ("Select a verse first"). Mouse back closes the top dialog.
 - Text fields use the app's own menu (Cut · Copy · Paste · Select all; in a note also Open link and Preview). Right-clicking selected text keeps it only when the click is on it; the passage menu (`menu`) keeps a `v` selection, and its copy entries copy it.
 - If a note changes in another window while you type, typing is not interrupted: `ctrl s` keeps your draft, `ctrl shift S` takes the saved text.
-- With Marks, Desk, or See also open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl ,`, `f`, `alt n`, …) close it first; over Notes they act directly. Double-click a verse number for Notes, a word to select it; margin notes and the search match counter have right-click menus. Mark menus offer **Move here**: select the verses a note or tag belongs on, then move it there from its marker or its row in Marks (`u` undoes). Tooltips on the outline, margin notes, and verse numbers name their keys.
+- With Marks or See also open, palette, dialog, and reading keys (`ctrl k`, `?`, `ctrl ,`, `f`, `alt n`, …) close it first; over Notes and the Desk they act directly. Double-click a verse number for Notes, a word to select it; margin notes and the search match counter have right-click menus. Mark menus offer **Move here**: select the verses a note or tag belongs on, then move it there from its marker or its row in Marks (`u` undoes). Tooltips on the outline, margin notes, and verse numbers name their keys.
 
 ### Your data
-Bible versions, marks, the Desk, History, and the ribbon stay on this device, in `~/.local/share/omaword/`. Commands back up your marks in every installed version (with the Desk), restore them, and export them as Markdown; backups from earlier versions of OmaWord still restore. Reader windows have independent passages and share one library.
+Bible versions, marks, the Desk, History, and the ribbon stay on this device, in `~/.local/share/omaword/`. Commands back up your marks in every installed version (with the Desk), restore them, and export them as Markdown; backups from earlier versions of OmaWord still restore (their Desk passages become quotations on the page). Reader windows have independent passages and share one library.
 
 Versions installed before footnotes or poetry indents were supported (or, for a source that lists them, parallel passages) show **Re-import** in Versions (`ctrl shift I` on the highlighted row) and Reading settings; it replaces the text and keeps your annotations.
 

@@ -76,8 +76,7 @@ class BibleBackend : public QObject
     // the book's first result among all of them).
     Q_PROPERTY(QVariantList searchBooks READ searchBooks NOTIFY searchChanged)
     Q_PROPERTY(QString textGeneration READ textGeneration NOTIFY versionChanged)
-    Q_PROPERTY(QVariantList desk READ desk NOTIFY deskChanged)
-    Q_PROPERTY(bool currentInDesk READ currentInDesk NOTIFY currentInDeskChanged)
+    Q_PROPERTY(QString deskPage READ deskPage NOTIFY deskChanged)
     Q_PROPERTY(QVariantList history READ history NOTIFY historyChanged)
     Q_PROPERTY(QStringList recentQueries READ recentQueries NOTIFY historyChanged)
     Q_PROPERTY(bool historyEnabled READ historyEnabled NOTIFY historyChanged)
@@ -231,38 +230,22 @@ public:
     Q_INVOKABLE void setReadingMode(QString value);
     Q_INVOKABLE void setFontSize(int value);
 
-    // Desk: one global, ordered study list in personal.sqlite (schema 6), shared
-    // live by every window of this data directory and kept across restarts.
-    // Identity is versionId + the six canonical endpoints (as tag scopes);
-    // adding an identical scope is a successful no-op. Items keep insertion
-    // order. desk rows: {id,versionId,versionAbbreviation,reference,book,chapter,
-    // start,endBook,endChapter,end,created,text,available}. text is the full
-    // passage laid out exactly like copySelection(true), read read-only from the
-    // item's own installed generation. available is false (text empty, reference
-    // from canonical names) when the version is not installed or its endpoints
-    // no longer exist; such items are retained so a re-import revives them.
-    // removeVersion(id,true) deletes that version's Desk items together with its
-    // annotations; removeVersion(id,false) keeps them (shown unavailable).
-    // deskCountForVersion lets confirmation UI report how many will be removed.
-    // Backups (format 5) carry the active version's Desk items; restoring one
-    // replaces that version's items (appended in backup order). Format 3/4
-    // backups leave the Desk untouched.
-    QVariantList desk() const { return m_desk; }
-    bool currentInDesk() const { return inDesk(tagScope()); }
-    // Empty scope means the current selection (tagScope()).
-    Q_INVOKABLE bool addToDesk(QVariantMap scope = QVariantMap());
-    Q_INVOKABLE bool removeFromDesk(int id);
-    // Adds the current selection, or removes it when already present.
-    Q_INVOKABLE bool toggleDesk();
-    Q_INVOKABLE bool inDesk(QVariantMap scope) const;
-    Q_INVOKABLE bool cleanDesk();
-    // Switches version when needed, then selects the range (openTaggedPassage).
-    Q_INVOKABLE bool openDeskItem(int id);
-    // Quotation format identical to copySelection(); also sets the clipboard.
-    Q_INVOKABLE QString copyDeskItem(int id);
+    // The Desk: one global Markdown page in personal.sqlite (schema 10),
+    // shared live by every window of this data directory and kept across
+    // restarts. appendToDesk adds a scope's quotation at the end: the passage
+    // laid out as copySelection() lays it out, as a Markdown blockquote,
+    // followed by "— John 3:16 (NET)" (deskQuotation). setDeskPage replaces
+    // the page only while it still reads `expected` (else the "changed in
+    // another window" error). Backups (format 7) carry the page.
+    QString deskPage() const { return m_deskPage; }
+    // Empty scope means the current selection. Returns the scope's reference
+    // ("" on failure, with the error set). Other windows' drafts save first.
+    // An undo step: undo takes the quotation off while the page still reads
+    // as the addition left it.
+    Q_INVOKABLE QString appendToDesk(QVariantMap scope = QVariantMap());
+    Q_INVOKABLE bool setDeskPage(QString text, QString expected);
     // Copies any canonical scope (marker, annotation, search result) without navigating.
     Q_INVOKABLE QString copyScope(QVariantMap scope, bool plainText = false);
-    Q_INVOKABLE int deskCountForVersion(QString versionId) const;
 
     // History: one global, most-recent-first list of visited passages in
     // personal.sqlite (schema 7), shared live by every window and never part of
@@ -313,8 +296,9 @@ public:
     // window" error and the stale step is dropped. A new change clears redo.
     // Successive note saves on one range are one step until closeUndoGroup()
     // (the editor closing) or any other step. Labels read after "Undo"/"Redo":
-    // "highlight on John 3:16". Tag management, backups, version removal, the
-    // Desk and History are not undoable.
+    // "highlight on John 3:16". Desk additions are steps too (the page must
+    // still read as they left it). Tag management, backups, version removal,
+    // typing on the Desk, and History are not undoable.
     static constexpr int UndoLimit = 100;
     bool canUndo() const { return !m_undo.isEmpty(); }
     bool canRedo() const { return !m_redo.isEmpty(); }
@@ -427,7 +411,6 @@ signals:
     void annotationChanged();
     void preferencesChanged();
     void deskChanged();
-    void currentInDeskChanged();
     void historyChanged();
     void undoChanged();
     void ribbonChanged();
@@ -446,7 +429,8 @@ private:
     };
     bool initializeStore();
     bool migrateBookmarks();
-    // Backup format 6: every installed version's marks, Desk, and reading place.
+    // Backup formats 6 and 7: every installed version's marks and reading
+    // place, and the Desk (format 6 as passages, 7 as the page).
     bool restoreEveryVersion(const QJsonObject &root);
     // A backup's tag definitions by name: existing global identities are
     // reused (never renamed or deleted); ids maps each backup id to the store's.
@@ -546,6 +530,9 @@ private:
         QVector<QVariantMap> scopes;
         QVector<ScopeState> before, after;
         QVector<QPair<QString, QString>> createdTags; // {id, name} the step created
+        // A Desk addition: the page before and after it (no scopes).
+        bool desk = false;
+        QString deskBefore, deskAfter;
     };
     QVector<UndoStep> m_undo, m_redo;
     QString m_undoGroup;
@@ -556,10 +543,15 @@ private:
     void recordUndo(UndoStep step);
     void clearUndo();
     bool applyUndo(bool undo);
+    bool migrateDeskPage();
+    // A scope's Desk quotation (see deskPage); a version that is not
+    // installed, or no longer has the passage, gives just its reference.
+    QString deskQuotation(const QVariantMap &scope) const;
+    // The page with each scope's quotation added at its end, a blank line apart.
+    QString withQuotations(QString page, const QVariantList &scopes) const;
+    bool writeDeskPage(const QString &text);
     void reloadDesk();
     void publishDesk();
-    QVariantMap deskItem(int id) const;
-    bool commitDeskMutation();
     void reloadHistory();
     void publishHistory();
     void reloadRibbon();
@@ -594,7 +586,8 @@ private:
     bool m_hasParagraphs = false, m_hasWordsOfJesus = false, m_hasHeadings = false, m_hasCrossReferences = false;
     int m_textSchema = 0;
     double m_lineHeight = 1.5;
-    QVariantList m_verses, m_collection, m_desk, m_history;
+    QVariantList m_verses, m_collection, m_history;
+    QString m_deskPage;
     QVariantMap m_ribbon;
     QStringList m_recentQueries;
     bool m_historyEnabled = true;

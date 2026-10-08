@@ -111,7 +111,6 @@ class HistoryUiTest : public QObject
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
-    QVariantList desk() const { return bible->desk(); }
     static bool psalm(const QString &path) {
         auto zip = archive_write_new(); archive_write_set_format_zip(zip);
         if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
@@ -145,8 +144,6 @@ class HistoryUiTest : public QObject
             .arg(line.naturalTextRect().left()).arg(doc->textWidth())));
     }
     QString toast() const { return object("toast")->property("text").toString(); }
-    bool deskOpen() const { return object("deskDrawer")->property("opened").toBool(); }
-    void openDesk() { key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(deskOpen()); QTRY_VERIFY(item("deskList")->hasActiveFocus()); }
     QString commandTitle(const QString &query) {
         QVariant entries; window->setProperty("verseCount", "");
         object("referenceInput")->setProperty("text", "> " + query);
@@ -295,10 +292,10 @@ private slots:
         QCOMPARE(bible->versionId(), kjv); QCOMPARE(stack().size(), before + 1);
         key(Qt::Key_BracketLeft); QCOMPARE(bible->versionId(), net); QCOMPARE(here(), QString("John 1:7"));
         key(Qt::Key_Minus); QCOMPARE(bible->versionId(), kjv);
-        // Desk and search opens are jumps too.
-        QVERIFY(bible->navigate("John 2:3")); QVERIFY(bible->addToDesk()); navigate("John 1:1");
+        // A passage link followed from the Desk is a jump too.
+        QVERIFY(bible->navigate("John 2:3")); QVERIFY(!bible->appendToDesk().isEmpty()); navigate("John 1:1");
         const int count = stack().size();
-        QVERIFY(QMetaObject::invokeMethod(window, "openDeskItem", Q_ARG(QVariant, bible->desk().first().toMap()["id"].toInt())));
+        QVERIFY(QMetaObject::invokeMethod(window, "followPassageLink", Q_ARG(QVariant, QString("John 2:3"))));
         QCOMPARE(here(), QString("John 2:3")); QCOMPARE(stack().size(), count + 1);
     }
     void dwellThresholdRecordsOnlyKeptPassages() {
@@ -358,7 +355,7 @@ private slots:
         QTRY_VERIFY(object("contextMenu")->property("visible").toBool());
         for (auto name : {"contextMenuItem:open", "contextMenuItem:copy", "contextMenuItem:desk", "contextMenuItem:remove"}) QVERIFY2(object(name), name);
         QVERIFY(QMetaObject::invokeMethod(object("contextMenu"), "triggerId", Q_ARG(QVariant, QString("desk"))));
-        QTRY_COMPARE(bible->desk().size(), 1); QCOMPARE(bible->desk().first().toMap()["reference"].toString(), QString("John 2:4–6"));
+        QTRY_VERIFY(bible->deskPage().endsWith(QStringLiteral("> \u2014 John 2:4–6 (") + bible->versionAbbreviation() + ")\n"));
         QTRY_VERIFY(!object("contextMenu")->property("visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(window, "openSearchMenu", Q_ARG(QVariant, 1), Q_ARG(QVariant, 200), Q_ARG(QVariant, 200)));
         QTRY_VERIFY(object("contextMenu")->property("visible").toBool());
@@ -399,20 +396,20 @@ private slots:
     // Text size scales every UI text proportionally (the reader by size alone),
     // and both size and line height keys work from panels, modals, and inputs.
     void textSizeAndLineHeightWorkEverywhere() {
-        record("John 1:3"); navigate("John 1:2"); QVERIFY(bible->toggleDesk()); navigate("John 1:1");
+        record("John 1:3"); navigate("John 1:2"); QVERIFY(!bible->appendToDesk().isEmpty()); navigate("John 1:1");
         QCOMPARE(prop("scale").toDouble(), 1.0);
         const double readerFont = item("verseBody1")->property("font").value<QFont>().pixelSize();
         QCOMPARE(readerFont, 18.0);
-        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
+        // From the Desk's page, where typing has the keys.
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         key(Qt::Key_Equal, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 19);
         QVERIFY(qAbs(prop("scale").toDouble() - 19.0 / 18) < 1e-9);
-        QTRY_COMPARE(object("deskText0")->property("font").value<QFont>().pixelSize(), qRound(13 * 19.0 / 18));
+        QTRY_COMPARE(object("deskEditor")->property("font").value<QFont>().pixelSize(), qRound(15 * 19.0 / 18));
         QCOMPARE(item("verseBody1")->property("font").value<QFont>().pixelSize(), 19);
         QCOMPARE(object("toast")->property("font").value<QFont>().pixelSize(), qRound(13 * 19.0 / 18));
         key(Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.6);
-        QVERIFY(qAbs(object("deskText0")->property("lineHeight").toDouble() - 1.6 / 1.5 * 1.25) < 1e-6);
-        QVERIFY(object("deskDrawer")->property("opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
+        QVERIFY(prop("deskOpen").toBool()); QVERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         call("readerFocus"); openHistory();
         key(Qt::Key_Minus, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.5);
         QVERIFY(historyOpen());
@@ -502,14 +499,10 @@ private slots:
         for (int v = 1; v <= 24; ++v) refs << QString("John 1:%1").arg(v * 2);
         navigate("John 2:1"); const auto tag = bible->createAndAssignTag(bible->tagScope(), "Alpha");
         for (const auto &r : refs) {
-            navigate(r); QVERIFY(bible->toggleHighlight()); QVERIFY(bible->toggleDesk()); QVERIFY(bible->recordHistory());
+            navigate(r); QVERIFY(bible->toggleHighlight()); QVERIFY(bible->recordHistory());
             QVERIFY(bible->setTag(bible->tagScope(), tag, true));
         }
         navigate("John 2:1");
-        // Desk.
-        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool()); QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        expectMotions(object("deskList"), "desk");
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         // History, in the palette: ↓ moves, end and home reach the ends.
         call("readerFocus"); openHistory();
         key(Qt::Key_Down); key(Qt::Key_End); QCOMPARE(paletteRow(), 23);
@@ -541,9 +534,9 @@ private slots:
     void historyKeyLeavesPanels() {
         record("John 1:3"); navigate("John 1:1");
         // ctrl h from a side panel closes it and opens History in the palette.
-        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         key(Qt::Key_H, Qt::ControlModifier);
-        QTRY_VERIFY(historyOpen()); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
+        QTRY_VERIFY(historyOpen()); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
         // From the palette's other modes too; ctrl k returns to the books.
         key(Qt::Key_K, Qt::ControlModifier); QVERIFY(!prop("paletteHistory").toBool());
         key(Qt::Key_H, Qt::ControlModifier); QVERIFY(historyOpen());

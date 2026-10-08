@@ -115,10 +115,11 @@ class ContextMenuTest : public QObject
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
-    QVariantList desk() const { return bible->desk(); }
     QString toast() const { return object("toast")->property("text").toString(); }
-    bool deskOpen() const { return object("deskDrawer")->property("opened").toBool(); }
-    void openDesk() { key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(deskOpen()); QTRY_VERIFY(item("deskList")->hasActiveFocus()); }
+    // The Desk's last quotation names this reference.
+    bool deskEndsWith(const QString &reference) const {
+        return bible->deskPage().endsWith(QStringLiteral("> \u2014 ") + reference + " (" + bible->versionAbbreviation() + ")\n");
+    }
     QString commandTitle(const QString &query) {
         QVariant entries; window->setProperty("verseCount", "");
         object("referenceInput")->setProperty("text", "> " + query);
@@ -391,7 +392,7 @@ private slots:
         // Reader keys never act behind the menu.
         key(Qt::Key_J); key(Qt::Key_X); key(Qt::Key_D);
         QVERIFY(menuOpen()); QCOMPARE(bible->selectionReference(), QString("John 1:1"));
-        QVERIFY(bible->collection().isEmpty()); QVERIFY(bible->desk().isEmpty());
+        QVERIFY(bible->collection().isEmpty()); QVERIFY(bible->deskPage().isEmpty());
         escape();
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         QVERIFY(bible->collection().isEmpty());
@@ -422,10 +423,9 @@ private slots:
         rightClick(versePoint(2)); QTRY_VERIFY(menuOpen());
         QCOMPARE(entry("highlight").value("text").toString(), QString("Remove highlight"));
         clickEntry("desk");
-        QCOMPARE(bible->desk().size(), 1);
-        QVERIFY(bible->currentInDesk());
+        QVERIFY(deskEndsWith("John 1:2"));
         rightClick(versePoint(2)); QTRY_VERIFY(menuOpen());
-        QCOMPARE(entry("desk").value("text").toString(), QString("Remove from Desk"));
+        QCOMPARE(entry("desk").value("text").toString(), QString("Add to Desk"));
         clickEntry("highlight");
         QVERIFY(!bible->selectionHighlighted());
         // A Visual range completes after an action, exactly like the key.
@@ -473,10 +473,9 @@ private slots:
         QCOMPARE(bible->selectionReference(), QString("John 1:1"));
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         clickEntry("desk");
-        QCOMPARE(bible->desk().size(), 1);
-        QCOMPARE(bible->desk().first().toMap().value("reference").toString(), reference);
+        QVERIFY(deskEndsWith(reference)); QCOMPARE(bible->selectionReference(), QString("John 1:1"));
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
-        QCOMPARE(entry("desk").value("text").toString(), QString("Remove from Desk"));
+        QCOMPARE(entry("desk").value("text").toString(), QString("Add to Desk"));
         escape();
         call("readerFocus");
         QTRY_VERIFY(item(name) && item(name)->isVisible());
@@ -570,7 +569,7 @@ private slots:
         QCOMPARE(target(), QString("selectionBar"));
         QCOMPARE(ids(), (QStringList{"desk", "compare", "copyPlain", "related"}));
         QVERIFY(item("selectionBar")->isVisible());
-        clickEntry("desk"); QTRY_COMPARE(bible->desk().size(), 1);
+        clickEntry("desk"); QTRY_VERIFY(deskEndsWith("John 1:3"));
         QVERIFY(item("selectionBar")->isVisible());
         QTest::mouseClick(window, Qt::LeftButton, {}, more->mapToScene(QPointF(more->width() / 2, more->height() / 2)).toPoint());
         QTRY_VERIFY(menuOpen());
@@ -583,22 +582,8 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!item("selectionBar")->isVisible());
         QCOMPARE(bible->selectionReference(), QString("John 1:2"));
     }
-    void deskAnnotationAndSearchMenus() {
-        navigate("John 1:1"); key(Qt::Key_D); QCOMPARE(bible->desk().size(), 1);
-        openDesk();
-        rightClick(item("deskText0")); QTRY_VERIFY(menuOpen());
-        QCOMPARE(target(), QString("desk"));
-        QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk"}));
-        QGuiApplication::clipboard()->setText("replace me");
-        clickEntry("copy");
-        QVERIFY(QGuiApplication::clipboard()->text().contains("John 1:1"));
-        QVERIFY(deskOpen()); QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        key(Qt::Key_F10, Qt::ShiftModifier); QTRY_VERIFY(menuOpen());
-        QCOMPARE(target(), QString("desk"));
-        clickEntry("desk");
-        QTRY_VERIFY(bible->desk().isEmpty());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        // Annotations panel row.
+    void annotationAndSearchMenus() {
+        // Marks panel row.
         navigate("John 1:2"); key(Qt::Key_X);
         key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
         const auto saved = "savedEntry" + bible->collection().first().toMap().value("reference").toString();
@@ -608,7 +593,7 @@ private slots:
         QCOMPARE(ids(), (QStringList{"open", "copy", "copyPlain", "desk", "|", "note", "tags", "moveHere", "delete", "undo"}));
         QCOMPARE(entry("undo").value("text").toString(), QString("Undo highlight on John 1:2"));
         clickEntry("desk");
-        QVERIFY2(bible->desk().size() == 1, qPrintable(object("toast")->property("text").toString() + " / " + bible->error() + " / " + QString::number(menu()->property("x").toDouble()) + "," + QString::number(menu()->property("y").toDouble())));
+        QVERIFY2(deskEndsWith("John 1:2"), qPrintable(object("toast")->property("text").toString() + " / " + bible->error() + " / " + QString::number(menu()->property("x").toDouble()) + "," + QString::number(menu()->property("y").toDouble())));
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
         clickEntry("delete");
         QTRY_VERIFY(bible->collection().isEmpty());
@@ -631,10 +616,8 @@ private slots:
         // Results come in Bible order: John 1:2 (already on the Desk) first, then John 1:8.
         key(Qt::Key_Down); QTRY_COMPARE(object("paletteResults")->property("currentIndex").toInt(), 1);
         rightClick(object("paletteResults")->property("currentItem").value<QQuickItem *>()); QTRY_VERIFY(menuOpen());
-        const int before = bible->desk().size();
         clickEntry("desk");
-        QCOMPARE(bible->desk().size(), before + 1);
-        QCOMPARE(bible->desk().last().toMap()["reference"].toString(), QString("John 1:8"));
+        QVERIFY(deskEndsWith("John 1:8"));
         rightClick(object("paletteResults")->property("currentItem").value<QQuickItem *>()); QTRY_VERIFY(menuOpen());
         clickEntry("open");
         QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());

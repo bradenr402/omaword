@@ -1,7 +1,8 @@
 #pragma once
 // The backup an earlier OmaWord wrote (format 5: one version, bookmarks as a
-// flag, no times) holding one version of a format 6 backup, so suites can
-// keep checking that older backups restore.
+// flag, no times, the Desk as passages) holding one version of a format 6 or
+// 7 backup, so suites can keep checking that older backups restore. Only a
+// format 6 root has Desk passages to carry.
 
 #include <QJsonArray>
 #include <QJsonObject>

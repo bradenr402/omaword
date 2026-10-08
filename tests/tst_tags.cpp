@@ -204,7 +204,7 @@ private slots:
         bible->setNoteText("Saved note"); QVERIFY(bible->toggleHighlight());
         const QString unused = bible->createTag("Unused"); QVERIFY(!unused.isEmpty());
         const auto backup = QUrl::fromLocalFile(session->filePath("backup.json")); QVERIFY(bible->exportBackup(backup));
-        auto root = json(backup.toLocalFile()); QCOMPARE(root.value("version").toInt(),6);
+        auto root = json(backup.toLocalFile()); QCOMPARE(root.value("version").toInt(),7);
         QCOMPARE(root.value("tags").toArray().size(),1); QCOMPARE(root.value("versions").toArray().size(),1);
         const auto netEntry = versionIn(root,"engnet");
         QCOMPARE(netEntry.value("tagAssignments").toArray().size(),1); QCOMPARE(netEntry.value("annotations").toArray().size(),1);

@@ -107,7 +107,12 @@ class DeskUiTest : public QObject
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
-    QVariantList desk() const { return bible->desk(); }
+    QString desk() const { return bible->deskPage(); }
+    // The Desk's quotation of the selected verse: its text, then its reference.
+    QString quote() {
+        return "> " + bible->copySelection(true) + QStringLiteral("\n>\n> \u2014 ") + bible->selectionReference()
+            + " (" + bible->versionAbbreviation() + ")";
+    }
     static bool psalm(const QString &path) {
         auto zip = archive_write_new(); archive_write_set_format_zip(zip);
         if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
@@ -141,8 +146,10 @@ class DeskUiTest : public QObject
             .arg(line.naturalTextRect().left()).arg(doc->textWidth())));
     }
     QString toast() const { return object("toast")->property("text").toString(); }
-    bool deskOpen() const { return object("deskDrawer")->property("opened").toBool(); }
-    void openDesk() { key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(deskOpen()); QTRY_VERIFY(item("deskList")->hasActiveFocus()); }
+    bool deskOpen() const { return prop("deskOpen").toBool() && object("notesDrawer")->property("opened").toBool(); }
+    bool readerFocused() const { return window->activeFocusItem() == item("readerSurface"); }
+    void openDesk() { key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(deskOpen()); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); }
+    QString hints() const { return object("deskHints")->property("plainText").toString(); }
     QString commandTitle(const QString &query) {
         QVariant entries; window->setProperty("verseCount", "");
         object("referenceInput")->setProperty("text", "> " + query);
@@ -172,6 +179,8 @@ private slots:
         engine->load(QUrl::fromLocalFile(QFINDTESTDATA("../qml/Main.qml")));
         QVERIFY2(!engine->rootObjects().isEmpty(), qPrintable(warnings.join('\n')));
         window = qobject_cast<QQuickWindow *>(engine->rootObjects().first()); QVERIFY(window);
+        // Save on every change, as the assertions below expect (the app waits for a pause).
+        window->setProperty("noteSaveDelay", 0);
         window->requestActivate(); QVERIFY(QTest::qWaitForWindowExposed(window)); QTRY_VERIFY(window->isActive());
         navigate("John 1:1");
     }
@@ -180,108 +189,159 @@ private slots:
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
     }
 
-    void toggleWithKeysVisualAndCommandTitle() {
+    void addWithKeysVisualCountsAndUndo() {
         QCOMPARE(commandTitle("add to desk"), QString("Add to Desk"));
-        const auto reference = bible->selectionReference();
+        const auto first = quote(), reference = bible->selectionReference();
         key(Qt::Key_D);
-        QCOMPARE(desk().size(), 1);
-        QCOMPARE(desk().first().toMap()["reference"].toString(), reference);
-        QVERIFY(bible->currentInDesk());
-        QVERIFY(toast().contains("added to Desk"));
-        QCOMPARE(commandTitle("from desk"), QString("Remove from Desk"));
-        key(Qt::Key_D);
-        QVERIFY(desk().isEmpty()); QVERIFY(!bible->currentInDesk());
-        QVERIFY(toast().contains("removed from Desk"));
-        // Visual range: the whole range is added, then Visual completes.
+        QCOMPARE(desk(), first + "\n");
+        QCOMPARE(toast(), reference + " added to the Desk");
+        // d adds again, never removes; u takes the latest addition off.
+        key(Qt::Key_D); QCOMPARE(desk(), first + "\n\n" + first + "\n");
+        key(Qt::Key_U); QCOMPARE(desk(), first + "\n");
+        QCOMPARE(toast(), "Addition of " + reference + " to the Desk undone");
+        // Visual range: the whole range is quoted, then Visual completes.
         key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_J);
         QVERIFY(prop("verseMode").toBool());
         const auto range = bible->selectionReference();
         QVERIFY(range != reference);
         key(Qt::Key_D);
-        QCOMPARE(desk().size(), 1);
-        QCOMPARE(desk().first().toMap()["reference"].toString(), range);
+        QVERIFY(desk().endsWith(QStringLiteral("\n>\n> \u2014 ") + range + " (" + bible->versionAbbreviation() + ")\n"));
         QVERIFY(!prop("verseMode").toBool());
-        // Counts are consumed rather than repeating the toggle.
-        navigate("John 1:5"); type("3"); key(Qt::Key_D);
-        QCOMPARE(desk().size(), 2); QCOMPARE(prop("verseCount").toString(), QString());
+        // Counts are consumed rather than repeating the addition.
+        navigate("John 1:5"); const auto before = desk();
+        type("3"); key(Qt::Key_D);
+        QCOMPARE(desk(), before + "\n" + quote() + "\n"); QCOMPARE(prop("verseCount").toString(), QString());
     }
-    void panelShowsFullTextOpensAndSwitchesVersion() {
-        QVERIFY(bible->navigate("John 1:2-3")); call("readerFocus"); key(Qt::Key_D);
-        install(second); navigate("John 2:8"); key(Qt::Key_D);
-        const auto kjv = bible->versionId();
-        QVERIFY(bible->switchVersion(secondId())); navigate("John 1:1");
-        const auto net = bible->versionId(); QVERIFY(net != kjv);
-        QCOMPARE(desk().size(), 2);
+    void deskShowsInTheMarginAndTurnsWithNotes() {
+        navigate("John 1:4"); key(Qt::Key_D);
+        // shift D: the Margin shows the Desk, the keyboard on its page's end.
         openDesk();
         QVERIFY(item("deskControl")->property("selected").toBool());
-        const auto firstItem = desk().first().toMap();
-        QCOMPARE(object("deskHeader0")->property("text").toString(), firstItem["reference"].toString() + " · " + firstItem["versionAbbreviation"].toString());
-        QCOMPARE(object("deskText0")->property("text").toString().remove(QChar(0x200e)), firstItem["text"].toString());
-        QVERIFY(firstItem["text"].toString().contains("ALPHA and beta"));
-        // Styled like History excerpts: muted, 13 px at scale 1, the panel line height.
-        QCOMPARE(object("deskText0")->property("color").value<QColor>(), desktop->property("muted").value<QColor>());
-        QCOMPARE(object("deskText0")->property("font").value<QFont>().pixelSize(), 13);
-        QCOMPARE(object("deskText0")->property("lineHeight").toDouble(), window->property("panelLineHeight").toDouble());
-        QVERIFY(firstItem["text"].toString().contains("here across verses"));
-        QCOMPARE(object("deskList")->property("currentIndex").toInt(), 0);
-        key(Qt::Key_J); QCOMPARE(object("deskList")->property("currentIndex").toInt(), 1);
-        {
-            auto *current = qvariant_cast<QQuickItem *>(object("deskList")->property("currentItem")); QVERIFY(current);
-            auto *rowBackground = qvariant_cast<QQuickItem *>(current->property("background")); QVERIFY(rowBackground);
-            QVERIFY(rowBackground->property("color").value<QColor>().alpha() > 0);
-            QCOMPARE(qvariant_cast<QObject *>(rowBackground->property("border"))->property("width").toReal(), 0.0);
-        }
-        key(Qt::Key_Down); QCOMPARE(object("deskList")->property("currentIndex").toInt(), 1);
-        key(Qt::Key_K); QCOMPARE(object("deskList")->property("currentIndex").toInt(), 0);
-        key(Qt::Key_J); key(Qt::Key_Return);
-        QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        QCOMPARE(bible->versionId(), kjv);
-        QCOMPARE(bible->selectionReference(), desk()[1].toMap()["reference"].toString());
-        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
-        // Click opens too, back in the other version.
+        QVERIFY(item("deskPanel")->isVisible()); QVERIFY(!item("notesPanel")->isVisible());
+        QCOMPARE(prop("sidePanel").toString(), QString("desk"));
+        QCOMPARE(item("deskEditor")->property("text").toString(), desk());
+        QCOMPARE(item("deskEditor")->property("cursorPosition").toInt(), desk().size());
+        type("Thoughts.");
+        QCOMPARE(desk(), quote() + "\nThoughts.");
+        QVERIFY(hints().contains("esc back to reading"));
+        // Writing owns the keys: w and j type.
+        type(" wj"); QVERIFY(desk().endsWith("Thoughts. wj")); QCOMPARE(bible->selectionReference(), QString("John 1:4"));
+        // esc: back to the reader, the Desk still open; j moves; shift D returns to the page.
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused()); QVERIFY(deskOpen());
+        key(Qt::Key_J); QCOMPARE(bible->selectionReference(), QString("John 1:5"));
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(deskOpen());
+        // w turns the Margin to the note, and shift D back: it stays open.
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        QVERIFY(prop("notesOpen").toBool()); QVERIFY(!prop("deskOpen").toBool());
+        QVERIFY(item("notesPanel")->isVisible()); QVERIFY(!item("deskPanel")->isVisible());
+        QVERIFY(object("notesDrawer")->property("opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(deskOpen());
+        // Other panels close it; the reader's esc closes it; so does its ×.
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         openDesk();
-        QTest::mouseClick(window, Qt::LeftButton, {}, item("deskText0")->mapToScene(QPointF(4, 4)).toPoint());
-        QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        QCOMPARE(bible->versionId(), net);
-        QCOMPARE(bible->selectionReference(), firstItem["reference"].toString());
-        key(Qt::Key_Escape);
+        QTest::mouseClick(window, Qt::LeftButton, {}, item("deskClose")->mapToScene(QPointF(6, 6)).toPoint());
+        QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
+        openDesk(); key(Qt::Key_Escape);
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        QCOMPARE(desk(), bible->deskPage());
     }
-    void panelSpacingMatchesAnnotations() {
-        for (auto r : {"John 1:1", "John 1:4"}) { navigate(r); key(Qt::Key_D); }
-        const auto saved = object("savedDrawer");
-        QVERIFY(QMetaObject::invokeMethod(saved, "open")); QTRY_VERIFY(saved->property("opened").toBool());
-        const auto savedContent = item("savedContent");
-        const QPointF savedOrigin = savedContent->position();
-        const auto savedSpacing = savedContent->property("spacing").toReal();
-        const auto savedListSpacing = item("collectionList")->property("spacing").toReal();
-        QVERIFY(QMetaObject::invokeMethod(saved, "close")); QTRY_VERIFY(!saved->property("visible").toBool());
+    void pageWritesPreviewsAndFollowsLinks() {
         openDesk();
-        const auto drawer = object("deskDrawer");
-        for (auto side : {"topPadding", "bottomPadding", "leftPadding", "rightPadding"})
-            QCOMPARE(drawer->property(side).toReal(), saved->property(side).toReal());
-        QVERIFY(saved->property("topPadding").toReal() > 0);
-        const auto content = item("deskContent");
-        QCOMPARE(content->position(), savedOrigin);
-        QCOMPARE(content->property("spacing").toReal(), savedSpacing);
-        const auto list = item("deskList");
-        QCOMPARE(list->property("spacing").toReal(), savedListSpacing);
-        // Rows are separated by the list spacing, with padded content.
-        auto first = item("deskEntry0"), second = item("deskEntry1");
-        QVERIFY(first && second);
-        QTRY_COMPARE(second->y() - (first->y() + first->height()), savedListSpacing);
-        QVERIFY(first->property("topPadding").toReal() > 0);
-        const auto header = item("deskHeader0");
-        QCOMPARE(header->mapToItem(first, QPointF()).x(), first->property("leftPadding").toReal());
-        // Minimal rows: no per-item buttons; Clean Desk sits across from the title, count below it.
-        QVERIFY(!item("deskCopy0") && !item("deskRemove0"));
-        const auto title = item("deskTitle"), count = item("deskCount"), clean = item("deskClean");
-        const auto titleRect = title->mapRectToItem(content, QRectF(0, 0, title->width(), title->height()));
-        const auto countRect = count->mapRectToItem(content, QRectF(0, 0, count->width(), count->height()));
-        const auto cleanRect = clean->mapRectToItem(content, QRectF(0, 0, clean->width(), clean->height()));
-        QVERIFY(countRect.top() >= titleRect.bottom() - 0.5); QCOMPARE(countRect.left(), titleRect.left());
-        QCOMPARE(cleanRect.top(), titleRect.top()); QVERIFY(qAbs(cleanRect.right() - content->width()) < 1);
-        // The title starts at the drawer's padding, just like Annotations.
-        QCOMPARE(item("deskTitle")->mapToItem(content, QPointF()).y(), item("savedTitle")->mapToItem(savedContent, QPointF()).y());
+        type("See John 1:4 here."); QCOMPARE(desk(), QString("See John 1:4 here."));
+        // alt enter on a link follows it; the Desk stays open.
+        item("deskEditor")->setProperty("cursorPosition", 6);
+        QTRY_VERIFY(hints().contains("alt enter open link"));
+        key(Qt::Key_Return, Qt::AltModifier);
+        QTRY_COMPARE(bible->selectionReference(), QString("John 1:4")); QVERIFY(deskOpen());
+        // tab types a tab: the page keeps the keyboard.
+        item("deskEditor")->forceActiveFocus(); item("deskEditor")->setProperty("cursorPosition", desk().size());
+        key(Qt::Key_Tab); QCOMPARE(desk(), QString("See John 1:4 here.\t")); QVERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_Backtab); QCOMPARE(desk(), QString("See John 1:4 here."));
+        // alt v: Preview renders the link; a click on it jumps there.
+        navigate("John 1:1"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        QVERIFY(prop("deskPreview").toBool()); QVERIFY(hints().contains("alt v write"));
+        const auto preview = item("deskPreview");
+        const auto document = preview->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QVERIFY(document->toHtml().contains("omaword-passage:"));
+        const auto found = document->find("John 1:4"); QVERIFY(!found.isNull());
+        const auto point = preview->mapToScene(caret(preview, found.selectionStart() + 2).center()).toPoint();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point);
+        QTRY_COMPARE(bible->selectionReference(), QString("John 1:4")); QVERIFY(deskOpen());
+        // Its esc returns to the reader too; alt v there leaves the Desk alone.
+        preview->forceActiveFocus(); key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_V, Qt::AltModifier); QVERIFY(prop("deskPreview").toBool());
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(!prop("deskPreview").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+    }
+    void additionsReachAnOpenDeskAndItsDraft() {
+        openDesk(); key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        // From the reader, d adds to the open page.
+        navigate("John 1:6"); const auto six = quote(); key(Qt::Key_D);
+        QTRY_COMPARE(item("deskEditor")->property("text").toString(), six + "\n");
+        // A draft on the page saves before an addition: both are kept.
+        window->setProperty("noteSaveDelay", 400);
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        type("Mine."); QCOMPARE(desk(), six + "\n");
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        QCOMPARE(desk(), six + "\nMine.");
+        item("deskEditor")->forceActiveFocus(); type(" More."); QCOMPARE(desk(), six + "\nMine.");
+        navigate("John 1:7"); const auto seven = quote(); key(Qt::Key_D);
+        QCOMPARE(desk(), six + "\nMine. More.\n\n" + seven + "\n");
+        QTRY_COMPARE(item("deskEditor")->property("text").toString(), desk());
+        // Marks adds its row with d too.
+        bible->setNoteText("Noted"); call("readerFocus");
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        key(Qt::Key_D); QCOMPARE(desk(), six + "\nMine. More.\n\n" + seven + "\n\n" + seven + "\n");
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+    }
+    void liveUpdatesAndConflicts() {
+        openDesk();
+        QCOMPARE(item("deskEditor")->property("text").toString(), QString());
+        QVERIFY(!item("deskEditor")->property("placeholderText").toString().isEmpty());
+        // Another window's addition shows at once.
+        BibleBackend peer;
+        QVERIFY(bible->navigate("John 1:2")); const auto scope = bible->tagScope();
+        QVERIFY(!peer.appendToDesk(scope).isEmpty());
+        QTRY_COMPARE(item("deskEditor")->property("text").toString(), peer.deskPage());
+        // A draft the page changed under keeps its text and offers both.
+        window->setProperty("noteSaveDelay", 100000);
+        item("deskEditor")->forceActiveFocus(); type(" Draft");
+        const auto draft = item("deskEditor")->property("text").toString();
+        QVERIFY(peer.setDeskPage("Peer page", peer.deskPage()));
+        QTRY_VERIFY(prop("deskConflict").toBool());
+        QCOMPARE(item("deskEditor")->property("text").toString(), draft);
+        QVERIFY(item("deskConflictMessage")->isVisible());
+        QVERIFY(hints().contains("ctrl s save my draft"));
+        // While it stands, nothing else may replace or lose it.
+        QVariant flushed; QVERIFY(QMetaObject::invokeMethod(window, "flushNote", Q_RETURN_ARG(QVariant, flushed)));
+        QVERIFY(!flushed.toBool()); QCOMPARE(desk(), QString("Peer page"));
+        // ctrl s keeps the draft; ctrl shift S would take the page.
+        key(Qt::Key_S, Qt::ControlModifier);
+        QTRY_VERIFY(!prop("deskConflict").toBool()); QCOMPARE(desk(), draft); QCOMPARE(peer.deskPage(), draft);
+        type("!");
+        QVERIFY(peer.setDeskPage("Peer again", peer.deskPage()));
+        QTRY_VERIFY(prop("deskConflict").toBool());
+        key(Qt::Key_S, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(!prop("deskConflict").toBool());
+        QCOMPARE(item("deskEditor")->property("text").toString(), QString("Peer again")); QCOMPARE(desk(), QString("Peer again"));
+    }
+    void keybindingsListed() {
+        QVariantList actions = prop("actions").toList();
+        QStringList ids; for (const auto &a : actions) ids << a.toMap()["id"].toString();
+        for (auto id : {"desk", "toggleDesk"}) QVERIFY(ids.contains(id));
+        QVERIFY(!ids.contains("cleanDesk"));
+        key(Qt::Key_Question); QTRY_VERIFY(object("helpDialog")->property("opened").toBool());
+        object("keybindingSearch")->setProperty("text", "desk");
+        QVariant rows; QMetaObject::invokeMethod(window, "filteredKeybindings", Q_RETURN_ARG(QVariant, rows));
+        QStringList titles; for (const auto &r : value(rows).toList()) titles << r.toMap()["title"].toString();
+        QVERIFY(titles.contains("Open Desk")); QVERIFY(titles.contains("Add to Desk"));
         key(Qt::Key_Escape);
     }
     void hebrewFirstTextStaysLeftToRight_data() {
@@ -320,198 +380,13 @@ private slots:
         for (auto mark : {0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x2066, 0x2067, 0x2068, 0x2069}) QVERIFY(!copied.contains(QChar(mark)));
         QCOMPARE(copied, bible->copySelection());
         if (mode != "verse") return;
-        // Search results and the Desk use the same LTR paragraph.
+        // Search results use the same LTR paragraph.
         search("blessed blameless"); QTRY_VERIFY(item("searchResultText0"));
         expectLeftToRight(item("searchResultText0"), word, "Blessed");
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
-        call("readerFocus"); navigate("PSA 119:1"); key(Qt::Key_D); openDesk();
-        const auto shown = object("deskText0")->property("text").toString();
-        QVERIFY(!shown.isRightToLeft()); QCOMPARE(QString(shown).remove(QChar(0x200e)), desk().first().toMap()["text"].toString());
-        QCOMPARE(item("deskText0")->property("effectiveHorizontalAlignment").toInt(), int(Qt::AlignLeft));
-        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
-        QTRY_VERIFY(!QGuiApplication::clipboard()->text().isEmpty());
-        QVERIFY(!QGuiApplication::clipboard()->text().contains(QChar(0x200e)));
-        key(Qt::Key_Escape);
-    }
-    void copyAndRemove() {
-        for (auto r : {"John 1:1", "John 1:4", "John 1:6", "John 1:7"}) { navigate(r); key(Qt::Key_D); }
-        QCOMPARE(desk().size(), 4);
-        openDesk();
-        QGuiApplication::clipboard()->clear();
-        key(Qt::Key_Y);
-        QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("John 1:1"));
-        QVERIFY(toast().contains("copied"));
-        QVERIFY(deskOpen());
-        key(Qt::Key_J); QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
-        QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("John 1:4"));
-        // shift Y copies plain text; x no longer removes anything.
-        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y, Qt::ShiftModifier);
-        QTRY_VERIFY(!QGuiApplication::clipboard()->text().isEmpty());
-        QVERIFY(!QGuiApplication::clipboard()->text().contains("John 1:4"));
-        QVERIFY(!QGuiApplication::clipboard()->text().contains(QString::fromUtf8("“")));
-        QVERIFY(toast().contains("copied as plain text"));
-        key(Qt::Key_X); QCOMPARE(desk().size(), 4);
-        // d, the Desk toggle, removes the current passage.
-        key(Qt::Key_K); key(Qt::Key_D);
-        QTRY_COMPARE(desk().size(), 3);
-        QCOMPARE(desk().first().toMap()["reference"].toString(), QString("John 1:4"));
-        QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        key(Qt::Key_J); key(Qt::Key_Backspace);
-        QCOMPARE(desk().size(), 2);
-        QCOMPARE(desk()[1].toMap()["reference"].toString(), QString("John 1:7"));
-        QTRY_COMPARE(object("deskList")->property("currentIndex").toInt(), 1);
-        key(Qt::Key_Delete);
-        QCOMPARE(desk().size(), 1);
-        QVERIFY(deskOpen());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
-    }
-    void cleanDeskConfirmAndCancel() {
-        for (auto r : {"John 1:1", "John 1:4"}) { navigate(r); key(Qt::Key_D); }
-        openDesk();
-        QTest::mouseClick(window, Qt::LeftButton, {}, item("deskClean")->mapToScene(QPointF(4, 4)).toPoint());
-        QTRY_VERIFY(object("cleanDeskConfirmation")->property("opened").toBool());
-        QTRY_VERIFY(item("cleanDeskCancel")->hasActiveFocus());
-        key(Qt::Key_X); key(Qt::Key_J);
-        QCOMPARE(desk().size(), 2);
-        key(Qt::Key_Escape);
-        QTRY_VERIFY(!object("cleanDeskConfirmation")->property("visible").toBool());
-        QVERIFY(deskOpen()); QCOMPARE(desk().size(), 2);
-        QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        // Command palette route.
-        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
-        type("> clean desk"); key(Qt::Key_Return);
-        QTRY_VERIFY(object("cleanDeskConfirmation")->property("opened").toBool());
-        QTRY_VERIFY(item("cleanDeskCancel")->hasActiveFocus());
-        key(Qt::Key_Return);
-        QTRY_VERIFY(!object("cleanDeskConfirmation")->property("visible").toBool());
-        QCOMPARE(desk().size(), 2);
-        call("requestCleanDesk"); QTRY_VERIFY(object("cleanDeskConfirmation")->property("opened").toBool());
-        QTRY_VERIFY(item("cleanDeskCancel")->hasActiveFocus());
-        key(Qt::Key_Right); QVERIFY(item("cleanDeskConfirm")->hasActiveFocus());
-        key(Qt::Key_Return);
-        QTRY_VERIFY(!object("cleanDeskConfirmation")->property("visible").toBool());
-        QVERIFY(desk().isEmpty());
-        QVERIFY(toast().contains("Cleaned the Desk"));
-        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
-    }
-    void cleanDeskShiftDeleteOnlyInDesk() {
-        for (auto r : {"John 1:1", "John 1:4"}) { navigate(r); key(Qt::Key_D); }
-        QCOMPARE(desk().size(), 2);
-        auto confirmation = object("cleanDeskConfirmation");
-        // Reader: shift delete is unbound.
-        key(Qt::Key_Delete, Qt::ShiftModifier); QTest::qWait(100);
-        QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
-        // Annotations panel.
-        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
-        key(Qt::Key_Delete, Qt::ShiftModifier); QTest::qWait(100);
-        QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
-        // Tag panel.
-        key(Qt::Key_T); QTRY_VERIFY(object("tagsSurface")->property("opened").toBool());
-        key(Qt::Key_Delete, Qt::ShiftModifier); QTest::qWait(100);
-        QVERIFY(!confirmation->property("visible").toBool()); QCOMPARE(desk().size(), 2);
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsSurface")->property("visible").toBool());
-        // Desk: shift delete asks to clean everything; delete removes one.
-        openDesk();
-        key(Qt::Key_Delete, Qt::ShiftModifier);
-        QTRY_VERIFY(confirmation->property("opened").toBool());
-        QTRY_VERIFY(item("cleanDeskCancel")->hasActiveFocus());
-        QCOMPARE(desk().size(), 2);
-        key(Qt::Key_Escape); QTRY_VERIFY(!confirmation->property("visible").toBool());
-        QVERIFY(deskOpen()); QCOMPARE(desk().size(), 2);
-        QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        key(Qt::Key_Backspace, Qt::ShiftModifier);
-        QTRY_VERIFY(confirmation->property("opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!confirmation->property("visible").toBool());
-        QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        key(Qt::Key_X, Qt::ShiftModifier); QTest::qWait(100); QVERIFY(!confirmation->property("visible").toBool());
-        key(Qt::Key_Delete); QCOMPARE(desk().size(), 1);
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-    }
-    void liveUpdateFromPeer() {
-        openDesk();
-        QCOMPARE(item("deskList")->property("count").toInt(), 0);
-        QVERIFY(object("deskEmpty")->property("visible").toBool());
-        const auto scope = bible->tagScope();
-        BibleBackend peer;
-        QVERIFY(peer.addToDesk(scope));
-        QTRY_COMPARE(item("deskList")->property("count").toInt(), 1);
-        QVERIFY(!object("deskEmpty")->property("visible").toBool());
-        QVERIFY(bible->currentInDesk());
-        QVERIFY(peer.cleanDesk());
-        QTRY_COMPARE(item("deskList")->property("count").toInt(), 0);
-    }
-    void versionRemovalReportsDeskItems() {
-        install(second); const auto kjv = bible->versionId();
-        navigate("John 1:1"); key(Qt::Key_D); navigate("John 1:4"); key(Qt::Key_D);
-        QVERIFY(bible->switchVersion(secondId())); navigate("John 1:1"); key(Qt::Key_D);
-        QCOMPARE(desk().size(), 3);
-        QVERIFY(QMetaObject::invokeMethod(window, "openVersions", Q_ARG(QVariant, true)));
-        QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
-        int row = -1; const auto entries = value(object("versionResults")->property("model")).toList();
-        for (int i = 0; i < entries.size(); ++i) if (entries[i].toMap()["id"].toString() == kjv) row = i;
-        QVERIFY(row >= 0);
-        object("versionResults")->setProperty("currentIndex", row);
-        key(Qt::Key_Return); key(Qt::Key_Down); key(Qt::Key_Return);
-        QTRY_COMPARE(object("versionDialog")->property("step").toInt(), 2);
-        QVERIFY(object("versionDialog")->property("removeAnnotations").toBool());
-        QVERIFY(object("versionSummary")->property("text").toString().contains("2 Desk items"));
-        key(Qt::Key_Right); QVERIFY(item("versionNext")->hasActiveFocus()); key(Qt::Key_Return);
-        QTRY_VERIFY(!object("versionDialog")->property("visible").toBool());
-        QCOMPARE(desk().size(), 1);
-        QVERIFY(toast().contains("2 Desk items removed"));
-    }
-    void keepingAnnotationsKeepsUnavailableItems() {
-        install(second); const auto kjv = bible->versionId();
-        navigate("John 1:1"); key(Qt::Key_D);
-        QVERIFY(bible->removeVersion(kjv, false));
-        QTRY_VERIFY(bible->ready());
-        call("readerFocus");
-        QCOMPARE(desk().size(), 1);
-        openDesk();
-        QVERIFY(object("deskUnavailable0")->property("visible").toBool());
-        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
-        QVERIFY(QGuiApplication::clipboard()->text().isEmpty());
-        const auto version = bible->versionId(); const auto reference = bible->selectionReference();
-        key(Qt::Key_Return);
-        QVERIFY(deskOpen()); QCOMPARE(bible->versionId(), version); QCOMPARE(bible->selectionReference(), reference);
-        key(Qt::Key_Escape);
-    }
-    void keysDoNotLeakWhilePanelOpen() {
-        navigate("John 1:5"); key(Qt::Key_D);
-        openDesk();
-        const auto reference = bible->selectionReference(); const auto chapter = bible->chapter();
-        for (auto k : {Qt::Key_X, Qt::Key_H, Qt::Key_L, Qt::Key_V, Qt::Key_T, Qt::Key_S, Qt::Key_Slash, Qt::Key_G, Qt::Key_3})
-            key(k);
-        QVERIFY(deskOpen());
-        QCOMPARE(bible->selectionReference(), reference); QCOMPARE(bible->chapter(), chapter);
-        QCOMPARE(desk().size(), 1); QVERIFY(!bible->selectionHighlighted());
-        QVERIFY(!prop("verseMode").toBool()); QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!prop("notesOpen").toBool());
-        QVERIFY(!object("passagePalette")->property("visible").toBool());
-        QCOMPARE(prop("verseCount").toString(), QString());
-        QVERIFY(prop("modalOpen").toBool()); QVERIFY(!prop("readerKeys").toBool());
-        // Its own key does nothing; esc closes.
-        key(Qt::Key_D, Qt::ShiftModifier); QTest::qWait(50); QVERIFY(deskOpen());
-        key(Qt::Key_Escape);
-        QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
-        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
-        key(Qt::Key_J); QVERIFY(bible->selectionReference() != reference);
-    }
-    void keybindingsListed() {
-        QVariantList actions = prop("actions").toList();
-        QStringList ids; for (const auto &a : actions) ids << a.toMap()["id"].toString();
-        for (auto id : {"desk", "toggleDesk", "cleanDesk"}) QVERIFY(ids.contains(id));
-        key(Qt::Key_Question); QTRY_VERIFY(object("helpDialog")->property("opened").toBool());
-        object("keybindingSearch")->setProperty("text", "desk");
-        QVariant rows; QMetaObject::invokeMethod(window, "filteredKeybindings", Q_RETURN_ARG(QVariant, rows));
-        QStringList titles; for (const auto &r : value(rows).toList()) titles << r.toMap()["title"].toString();
-        QVERIFY(titles.contains("Open Desk")); QVERIFY(titles.contains("Add to Desk"));
-        QVERIFY(titles.contains("Clean Desk"));
-        for (const auto &r : value(rows).toList())
-            if (r.toMap()["id"] == "cleanDesk") { QCOMPARE(r.toMap()["sequences"].toStringList(), (QStringList{"Shift+Del", "Shift+Backspace"})); QCOMPARE(r.toMap()["scope"].toString(), QString("desk")); }
-        key(Qt::Key_Escape);
+        // The Desk quotes it without direction marks.
+        call("readerFocus"); navigate("PSA 119:1"); key(Qt::Key_D);
+        QVERIFY(desk().contains(word + " Blessed")); QVERIFY(!desk().contains(QChar(0x200e)));
     }
 };
 

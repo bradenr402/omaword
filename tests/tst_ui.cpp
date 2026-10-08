@@ -1648,8 +1648,7 @@ private slots:
         // Use executable panel rows for the dispatch check; their order/height
         // can change independently of the full-catalog geometry checks above.
         bible->selectVerses(1,1); // See also needs a selection to be executable.
-        // "see also panel", not "panel": the Write/Preview row "(Notes panel)"
-        // is unavailable without an open note.
+        // "see also panel" narrows the list to one executable row.
         type("see also panel");
         key(Qt::Key_Home); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
         key(Qt::Key_PageDown);
@@ -4024,7 +4023,7 @@ private slots:
         QVERIFY(!window->property("modalOpen").toBool());
         QVERIFY(!prop("versionDialog","visible").toBool());
         QVERIFY(!prop("savedDrawer","visible").toBool());
-        QVERIFY(!prop("deskDrawer","visible").toBool());
+        QVERIFY(!window->property("deskOpen").toBool());
         click(item("previewButton"));
         key(Qt::Key_V,Qt::ControlModifier);
         QTRY_VERIFY(prop("versionDialog","opened").toBool());
@@ -4214,7 +4213,7 @@ private slots:
             QVERIFY2(!action.value("group").toString().isEmpty(),qPrintable(id));
             if (action.value("explanation").toBool()) continue;
             const auto scope = action.value("scope").toString();
-            const auto context = scope == "desk" || scope == "list" ? scope : QString("app");
+            const auto context = scope == "list" ? scope : QString("app");
             for (const auto &sequence : sequences + action.value("aliases").toStringList()) {
                 const auto key = context + ":" + QKeySequence(sequence).toString();
                 QVERIFY2(!owners.contains(key),qPrintable(sequence + " bound by " + owners.value(key) + " and " + id));
@@ -4338,13 +4337,16 @@ private slots:
     void sidePanelKeysSwitchPanels() {
         reference("John 3:16");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Switch").isEmpty());
-        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(prop("deskDrawer","opened").toBool());
-        // The same panel's key does nothing.
-        key(Qt::Key_D, Qt::ShiftModifier); QTest::qWait(50);
-        QVERIFY(prop("deskDrawer","visible").toBool()); QVERIFY(prop("deskDrawer","opened").toBool());
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        QVERIFY(window->property("deskOpen").toBool()); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        // From the reader the Desk's own key returns to its page; it never closes it.
+        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        QVERIFY(prop("notesDrawer","opened").toBool()); QVERIFY(window->property("deskOpen").toBool());
+        key(Qt::Key_Escape);
         key(Qt::Key_M, Qt::ShiftModifier);
         QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
+        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QCOMPARE(window->property("sidePanel").toString(),QString("annotations"));
         key(Qt::Key_M, Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","opened").toBool());
         key(Qt::Key_S, Qt::ShiftModifier);
@@ -4357,7 +4359,7 @@ private slots:
         // While typing, panel keys type.
         QTest::sendKeyEvent(QTest::Click,window,Qt::Key_D,QString("D"),Qt::ShiftModifier);
         QCOMPARE(prop("noteEditor","text").toString(),QString("D"));
-        QVERIFY(!prop("deskDrawer","visible").toBool());
+        QVERIFY(!window->property("deskOpen").toBool());
         // Outside the editor, a draft that cannot save cancels the switch.
         auto db = QSqlDatabase::addDatabase("QSQLITE","ui-panel-switch");
         db.setDatabaseName(bible->dataDirectory() + "/personal.sqlite");
@@ -4368,17 +4370,18 @@ private slots:
         type(" more");
         item("notesPanel")->forceActiveFocus();
         key(Qt::Key_D, Qt::ShiftModifier); QTest::qWait(80);
-        QVERIFY(prop("notesDrawer","visible").toBool());
-        QVERIFY(!prop("deskDrawer","visible").toBool());
+        QVERIFY(window->property("notesOpen").toBool());
+        QVERIFY(!window->property("deskOpen").toBool());
         QVERIFY(bible->noteText() != QString("D more"));
         QVERIFY(query.exec("DROP TRIGGER reject_switch_note"));
         QVERIFY(query.exec("DROP TRIGGER reject_switch_insert"));
         db.close();
+        // Saved, the Margin turns to the Desk: it stays open.
         key(Qt::Key_D, Qt::ShiftModifier);
-        QTRY_VERIFY(prop("deskDrawer","opened").toBool());
-        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(window->property("deskOpen").toBool()); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        QVERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(bible->noteText(),QString("D more"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
     }
     void annotationsListKeys() {
         reference("John 3:16");
@@ -4391,8 +4394,11 @@ private slots:
         key(Qt::Key_Y,Qt::ShiftModifier);
         QTRY_VERIFY(!QApplication::clipboard()->text().contains("John 3:16"));
         QVERIFY(!QApplication::clipboard()->text().isEmpty());
-        key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),1);
-        key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),0);
+        // d quotes the row on the Desk (again on every press).
+        key(Qt::Key_D); QTRY_VERIFY(bible->deskPage().contains(QStringLiteral("> \u2014 John 3:16 (")));
+        const auto once = bible->deskPage();
+        key(Qt::Key_D); QTRY_COMPARE(bible->deskPage().count(QStringLiteral("> \u2014 John 3:16 (")),2);
+        QVERIFY(bible->deskPage().startsWith(once.trimmed()));
         // x no longer removes; shift delete has no bulk clear here.
         key(Qt::Key_X); key(Qt::Key_Delete,Qt::ShiftModifier); QTest::qWait(60);
         QCOMPARE(bible->collection().size(),1);
@@ -4461,8 +4467,7 @@ private slots:
         key(Qt::Key_Y); QTRY_VERIFY(QApplication::clipboard()->text().contains("John 3:17"));
         key(Qt::Key_Y,Qt::ShiftModifier);
         QTRY_VERIFY(!QApplication::clipboard()->text().contains("John 3:17"));
-        key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(),1);
-        QCOMPARE(bible->desk().first().toMap().value("reference").toString(),QString("John 3:17"));
+        key(Qt::Key_D); QTRY_VERIFY(bible->deskPage().endsWith(QStringLiteral("> \u2014 John 3:17 (") + bible->versionAbbreviation() + ")\n"));
         key(Qt::Key_J); key(Qt::Key_K); QCOMPARE(prop("studyList","currentIndex").toInt(),tagged);
         QVERIFY(item("studyList")->hasActiveFocus());
         QCOMPARE(bible->selectionReference(),QString("John 3:16"));
@@ -4656,8 +4661,8 @@ private slots:
         click(item("footerMore")); QTRY_VERIFY(prop("contextMenu","visible").toBool());
         QCOMPARE(prop("contextMenu","target").toString(),QString("footer"));
         QVERIFY(QMetaObject::invokeMethod(object("contextMenu"),"triggerId",Q_ARG(QVariant,QString("desk"))));
-        QTRY_VERIFY(prop("deskDrawer","opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("deskDrawer","visible").toBool());
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool()); QVERIFY(window->property("deskOpen").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
     }
     void textPopoverSetsSizeLineAndLayoutWithoutCoveringText() {
         reference("John 3:16");
@@ -5187,10 +5192,10 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(object("backupDialog"),"accepted"));
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
         const auto backup = QJsonDocument::fromJson(file.readAll()).object();
-        // Format 6: every installed version; the Desk, empty here.
-        QCOMPARE(backup.value("version").toInt(),6);
-        QVERIFY(backup.value("desk").isArray());
-        QCOMPARE(backup.value("desk").toArray().size(),0);
+        // Format 7: every installed version; the Desk's page, empty here.
+        QCOMPARE(backup.value("version").toInt(),7);
+        QVERIFY(backup.value("deskPage").isString());
+        QCOMPARE(backup.value("deskPage").toString(),QString());
         const auto versions = backup.value("versions").toArray();
         QCOMPARE(versions.size(),1);
         QCOMPARE(versions.first().toObject().value("versionId").toString(),QString("engnet"));
@@ -5984,7 +5989,7 @@ private slots:
         QCOMPARE(bible->selectionReference(),QString("John 4:1"));
         QCOMPARE(item("markEditor"),editor); // Saving never rebuilds the row under the editor.
         QVERIFY(editor->hasActiveFocus());
-        QVERIFY(bible->desk().isEmpty());
+        QVERIFY(bible->deskPage().isEmpty());
         // esc is done: back to the list on that row.
         key(Qt::Key_Escape);
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());

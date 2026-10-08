@@ -30,13 +30,13 @@ files.
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC |
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (`lastSound`/`playCount` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds) |
-| `qml/Main.qml` | Reader, palettes, Notes, Marks (`savedDrawer`: every version's marks from `marks()`, one row per exact range, filtered, notes written in place), Desk, settings, catalog, About |
+| `qml/Main.qml` | Reader, palettes, the Margin (`notesDrawer`: Notes, or the Desk page in its place), Marks (`savedDrawer`: every version's marks from `marks()`, one row per exact range, filtered, notes written in place), settings, catalog, About |
 | `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Marks and See also drawers, which stay open) and the See also drawer (`relatedDrawer`, the `related` action: one list, in sections: the version's own cross references, its parallel passages, the passages tagged alike (`relatedPassages`, every version), and OpenBible.info's last; filtered by words or `#tag`). See also roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
-| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Marks and See also: the reader's passage `reference · ABBR`, the chapter when nothing is selected; Desk: its count) |
+| `qml/PanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Marks and See also: the reader's passage `reference · ABBR`, the chapter when nothing is selected) |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
 | `qml/ExitGhost.qml` | Exit motion for popups that close at once (menus, modals): a frozen `ShaderEffectSource` picture that fades and shrinks toward the trigger, never taking input |
-| `qml/AppContextMenu.qml`, `qml/AppToolTip.qml`, `qml/RowMenu.js` | Shared context menu (scrolls when taller than the window; also replaces Qt's text-field menu via `ContextMenu.menu: null` → `openTextMenu`) and themed tooltip; `RowMenu.entries` builds every list row's menu (Open · Copy · Copy plain text · Desk, then the row's extras) |
+| `qml/AppContextMenu.qml`, `qml/AppToolTip.qml`, `qml/RowMenu.js` | Shared context menu (scrolls when taller than the window; also replaces Qt's text-field menu via `ContextMenu.menu: null` → `openTextMenu`) and themed tooltip; `RowMenu.entries` builds every list row's menu (Open · Copy · Copy plain text · Add to Desk, then the row's extras) |
 | `qml/PanelTabs.qml` | Shared tab row (palette Passage/Search/Command): sizing, selected accent tint, focus outline |
 | `qml/ChapterFind.qml`, `qml/SearchHighlights.qml` | `/` chapter find; match overlay painting |
 | Passage palette (`Main.qml`) | One input over a list (`paletteResults`: books, candidates, recents, commands, search results) or, while a book is chosen, a five-column chapter grid (`paletteChapters`); `paletteList` is whichever shows, so keys, snapshots, and resume treat them alike |
@@ -128,18 +128,24 @@ files.
 ## Persistence
 
 - Data root: Qt app-data for storage ID `omaword` (`~/.local/share/omaword/`).
-- `personal.sqlite`: `PRAGMA user_version` **9**, WAL, `synchronous=FULL`.
+- `personal.sqlite`: `PRAGMA user_version` **10**, WAL, `synchronous=FULL`.
   Newer versions refuse to open. Migrations run in one transaction in
   `BibleBackend` (2: cross-chapter endpoints; 3: version scoping + library;
   4: MRU; 5: 80 books / 999 limits; 6: Desk; 7: History; 8: ribbon; 9:
-  bookmarks become tags, times). `tags`/`tag_assignments` are created
-  `IF NOT EXISTS` independent of the version number; schema 9 runs after them.
+  bookmarks become tags, times; 10: the Desk becomes a page). `tags`/`tag_assignments` are created
+  `IF NOT EXISTS` independent of the version number; schemas 9 and 10 run after them.
 - Schema 9 (`migrateBookmarks`): every bookmarked range gets the tag
   "Bookmarked" (an existing equivalent name is reused), rows left with no
   highlight or note go, and `annotations` is rebuilt without its `bookmark`
   column. Annotations gain `created`/`updated` and assignments `created` (UTC
   ISO 8601 with ms; `''` = saved before schema 9). Saves stamp them; undo
   restores them with the row, but a step that changes only times is no step.
+- Schema 10 (`migrateDeskPage`): the Desk's passages, in their order, become
+  quotations on one page (`desk_page`, a single row), and `desk` goes. A
+  quotation (`deskQuotation`) is the passage laid out as `copySelection()`
+  lays it out (verse numbers only when it spans verses; poetry lines end in a
+  Markdown hard break) as a blockquote, then `> — John 3:16 (NET)`; a version
+  no longer installed gives just its reference, under its ID.
 - Highlights are paint (`toggleHighlight`): a selection not all highlighted
   is painted, and the highlight rows it overlaps or touches (transitively)
   give way to one row over the union; an all-highlighted selection is erased,
@@ -148,8 +154,8 @@ files.
   overlapping highlight rows elsewhere are left as they are.
 - Tables: `annotations` (highlight + note per exact range), `reading` (per
   `version_id`); `tags(id,name,name_key)`;
-  `tag_assignments` (PK version + both endpoints + tag); `desk` (global ordered
-  list, each item version-scoped); `history` (global, newest first by `seq`,
+  `tag_assignments` (PK version + both endpoints + tag); `desk_page` (the
+  Desk: one Markdown page, global); `history` (global, newest first by `seq`,
   unique per version + endpoints, start/end 0 = a whole chapter, scroll
   position, visit time; capped at 500) and `recent_queries` (last 5 Bible
   searches); `ribbon` (one row: version, endpoints as in `history`, position,
@@ -173,19 +179,28 @@ files.
   pinned at the top right of the column in its chapter, "↩ Mark 5" in the
   footer elsewhere (only where it fits without folding anything), and
   "Continue · …" first among the palette's recents.
-- Removal keeps annotations/tags/Desk by default (hidden until reimport);
-  `removeVersion(id, true)` drops them. Global tag definitions always survive.
-- Backups: JSON `format: "omaword-backup"`, version **6**: `tags` (the
+- Removal keeps annotations/tags by default (hidden until reimport);
+  `removeVersion(id, true)` drops them. Global tag definitions and the Desk's
+  text always survive.
+- The Desk page: `appendToDesk(scope)` flushes every window's drafts, adds the
+  scope's quotation at the end (a blank line apart), and records an undo step
+  (undone only while the page still reads as it left it); `setDeskPage(text,
+  expected)` writes only over the text the editor started from (else "changed
+  in another window"), like a note save it runs while windows flush, and both
+  publish to every window (`deskChanged`). 4 MiB bound.
+- Backups: JSON `format: "omaword-backup"`, version **7**: `tags` (the
   definitions in use), `versions` (each installed version: `versionId`,
   `edition`, `annotations` with highlight, note, and times, `tagAssignments`
-  with times, and its `reading` place when it has one), and `desk` (the Desk
-  in its order, each item with its `versionId`). Restoring checks every key
-  and range against each version's own text (`TagBible`) before writing, and
-  refuses a backup holding a version that is not installed; it then replaces,
-  for each version in the backup, its marks, Desk items, and reading place in
-  one transaction, leaving other versions alone. Every range is checked again
-  on export, so a backup always restores. Formats 3–5 (one version: 3 =
-  annotations, 4 = + tags, 5 = + Desk) still restore, into the version being
+  with times, and its `reading` place when it has one), and `deskPage` (the
+  Desk's text). Restoring checks every key and range against each version's
+  own text (`TagBible`) before writing, and refuses a backup holding a version
+  that is not installed; it then replaces, for each version in the backup, its
+  marks and reading place, and the Desk page, in one transaction, leaving
+  other versions alone. Every range is checked again on export, so a backup
+  always restores. Format 6 (the same, with `desk`: the Desk's passages, each
+  with its `versionId`) restores its passages as the page's quotations, in
+  order. Formats 3–5 (one version: 3 = annotations, 4 = + tags, 5 = + Desk
+  passages, added to the page's end) still restore, into the version being
   read, which must match their `versionId`/edition; their `bookmark: true`
   rows assign the Bookmarked tag, and a format 3 restore replaces only that
   tag's assignments. 32 MiB bound. Tag names reuse existing global
@@ -254,8 +269,9 @@ files.
 ### Undo (`BibleBackend::undo`/`redo`)
 - Per window and in memory only (`UndoLimit` 100 steps). Recorded: flag
   toggles, note saves, tag assignment (`setTags`, `createAndAssignTag`),
-  `deleteAnnotationScope`, `deleteNoteScope`, `changeAnnotationRange`. Not
-  recorded: tag rename/delete/merge, backups, version removal, Desk, History;
+  `deleteAnnotationScope`, `deleteNoteScope`, `changeAnnotationRange`, and
+  Desk additions (the page before and after; no scopes). Not recorded: tag
+  rename/delete/merge, backups, version removal, typing on the Desk, History;
   deleting or merging a tag and restoring a backup clear this window's steps.
 - A step stores, for every exact range it touched, the whole saved state
   before and after (annotation row or none, plus sorted tag IDs), and the tags
@@ -390,18 +406,22 @@ files.
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw
   `paintLayoutGlyph`'s icons.
-- With a drawer side panel open (Marks, Desk, See also), the keys
+- With a drawer side panel open (Marks, See also), the keys
   of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
   keyboard to the reader, close the panel, then act (`runKey`) — so the
   drawer's exit cannot hand focus back over what opened. Notes is not modal:
   they act over it. Dispatch from Keybindings or Commands never closes panels. Catalog shortcuts
   recheck `shortcutEnabled` on activation (a popup's focus change can leave the
   binding stale).
-- Notes (`notesDrawer`) is a non-modal drawer that never dims: it docks
-  beside the text where the window holds the comfortable column and the
+- Notes (`notesDrawer`, the Margin) is a non-modal drawer that never dims: it
+  docks beside the text where the window holds the comfortable column and the
   reader's widest insets beside it (`notesDocked`; the window's content and
   the footer give up `notesDock`, animated with the drawer), and is a sheet
-  over the reader's right side when narrower. The keyboard belongs either
+  over the reader's right side when narrower. It shows the note or, in its
+  place, the Desk page (`marginMode`; `shift D` turns it to the Desk, `w`
+  back), which saves like a note: after a pause and on every `flushNote`,
+  only over the page it loaded (`setDeskPage`), keeping a draft another
+  window's change lands under (`deskConflict`, `ctrl s` / `ctrl shift S`). The keyboard belongs either
   to it or to the reader (`marginKeys`): focus entering Notes sets it, and
   only the reader taking the keyboard (`readerFocus`, a text drag) clears
   it, so menus, dialogs, and Qt's own hand-back as a popup closes leave it
@@ -411,9 +431,9 @@ files.
   outside Notes (`readerBase`), and selection changes resync the note
   (`syncNote`). `w` opens Notes on the
   editor, or moves the keyboard there; `esc` in Notes saves and returns to
-  the reader (`leaveNotes`); the reader's `esc` closes Notes after its own
-  transient layers (Aa, the selection bar, search, text selection, a count)
-  and before touching the selection.
+  the reader (`leaveNotes`); the reader's `esc` closes Notes after Aa, the
+  selection bar, a text selection, and a count, and before search or the
+  selection.
 - Notes in Write mode keeps the keyboard in the editor while it is in Notes
   (`notesWriting` / `keepNoteEditorFocus`): clicks on the panel's chrome and
   closing menus or dialogs hand it back. `tab` types a tab (accepts a `[[`
@@ -422,7 +442,8 @@ files.
 ### LTR forcing
 - All Scripture layouts are LTR even when a paragraph begins in Hebrew:
   `SearchGeometry::forceLeftToRight` pins every block; plain `Text` gets a
-  display-only LRM per line (`leftToRightText` in Main). Never copied.
+  display-only LRM per line (`leftToRightText` in Main). Never copied. The
+  Desk page is the reader's own Markdown, like a note: not pinned.
 
 ## Reader rendering
 

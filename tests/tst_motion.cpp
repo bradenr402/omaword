@@ -112,10 +112,7 @@ class MotionTest : public QObject
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         type(query); QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
     }
-    QVariantList desk() const { return bible->desk(); }
     QString toast() const { return object("toast")->property("text").toString(); }
-    bool deskOpen() const { return object("deskDrawer")->property("opened").toBool(); }
-    void openDesk() { key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(deskOpen()); QTRY_VERIFY(item("deskList")->hasActiveFocus()); }
     QString commandTitle(const QString &query) {
         QVariant entries; window->setProperty("verseCount", "");
         object("referenceInput")->setProperty("text", "> " + query);
@@ -390,10 +387,11 @@ private slots:
         navigate("John 1:1"); type("12"); key(Qt::Key_G);
         QTRY_COMPARE(bible->cursorVerse(), 12);
         expectPulse(12, 12);
-        // Desk item open.
+        // A link followed from the Desk (its quotation's reference).
         navigate("John 1:20"); key(Qt::Key_D); navigate("John 1:1");
-        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        key(Qt::Key_Return);
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        item("deskEditor")->setProperty("cursorPosition", bible->deskPage().lastIndexOf("John 1:20") + 2);
+        key(Qt::Key_Return, Qt::AltModifier);
         QTRY_COMPARE(bible->cursorVerse(), 20);
         expectPulse(20, 20);
     }
@@ -474,15 +472,17 @@ private slots:
             call("readerFocus");
         }
         QTRY_VERIFY_WITH_TIMEOUT(!ghost("modalGhost")->property("running").toBool(), 1000);
-        // Desk: list focus while sliding/fading in (the full slide); reopen during close.
+        // The Desk in the Margin: its page has the keyboard while it slides and
+        // fades in (the full slide); reopen during close.
         navigate("John 1:2"); key(Qt::Key_D);
-        auto desk = object("deskDrawer");
+        auto desk = object("notesDrawer");
         key(Qt::Key_D, Qt::ShiftModifier);
         QVERIFY(desk->property("visible").toBool()); QVERIFY(!desk->property("opened").toBool());
-        QVERIFY(item("deskList")->hasActiveFocus());
+        QVERIFY(item("deskEditor")->hasActiveFocus());
         QVERIFY(desk->property("position").toDouble() < 0.5);
         QTRY_VERIFY(desk->property("opened").toBool());
         // Exit is subtler than entrance: a short slide and a quicker fade.
+        key(Qt::Key_Escape); QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(desk->property("opened").toBool());
         {
             QElapsedTimer timer; timer.start();
             key(Qt::Key_Escape);
@@ -497,16 +497,16 @@ private slots:
         }
         key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(desk->property("position").toDouble() < 0.5);
         QTRY_VERIFY(desk->property("opened").toBool());
-        key(Qt::Key_Escape);
+        key(Qt::Key_Escape); key(Qt::Key_Escape);
         QVERIFY(desk->property("visible").toBool()); QVERIFY(!desk->property("shown").toBool());
         QVERIFY(!prop("modalOpen").toBool());
         key(Qt::Key_D, Qt::ShiftModifier);
         QTRY_VERIFY(desk->property("opened").toBool());
         QVERIFY(desk->property("shown").toBool());
-        QTRY_VERIFY(item("deskList")->hasActiveFocus());
+        QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         QTest::qWait(300);
-        QVERIFY(desk->property("opened").toBool()); QVERIFY(item("deskList")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!desk->property("visible").toBool());
+        QVERIFY(desk->property("opened").toBool()); QVERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!desk->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         // Annotations drawer: immediate list focus.
         key(Qt::Key_M, Qt::ShiftModifier);
@@ -528,11 +528,6 @@ private slots:
         key(Qt::Key_Escape); QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("notesOpen").toBool());
         key(Qt::Key_Escape); QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(!prop("notesOpen").toBool());
         QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
-        call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier);
-        QVERIFY(object("deskDrawer")->property("visible").toBool()); QVERIFY(!object("deskDrawer")->property("opened").toBool());
-        QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
-        key(Qt::Key_Escape); QVERIFY(object("deskDrawer")->property("visible").toBool());
-        QTRY_VERIFY(!object("deskDrawer")->property("visible").toBool());
         call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier);
         QTRY_VERIFY(object("relatedDrawer")->property("visible").toBool());
         QVERIFY(object("relatedDrawer")->property("position").toDouble() < 1.0);
@@ -699,10 +694,10 @@ private slots:
         QCoreApplication::processEvents(); QTest::qWait(20);
         QCOMPARE(item("toastFrame")->opacity(), 1.0);
         // Drawers open without transitions; focus mode dims instantly.
-        key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(object("deskDrawer")->property("visible").toBool());
-        QTRY_VERIFY(object("deskDrawer")->property("opened").toBool());
-        QCOMPARE(object("deskDrawer")->property("opacity").toDouble(), 1.0);
-        key(Qt::Key_Escape); QTRY_VERIFY_WITH_TIMEOUT(!object("deskDrawer")->property("visible").toBool(), 60);
+        key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(object("notesDrawer")->property("visible").toBool());
+        QTRY_VERIFY(object("notesDrawer")->property("opened").toBool());
+        QCOMPARE(object("notesDrawer")->property("opacity").toDouble(), 1.0);
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY_WITH_TIMEOUT(!object("notesDrawer")->property("visible").toBool(), 60);
         call("readerFocus");
         key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
         QTest::qWait(30);

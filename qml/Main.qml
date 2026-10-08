@@ -41,7 +41,12 @@ ApplicationWindow {
     palette.toolTipBase: desktop.surface
     palette.toolTipText: desktop.foreground
 
-    readonly property bool notesOpen: notesDrawer.shown
+    // Notes and the Desk share one drawer beside the text, the Margin
+    // (notesDrawer), showing one at a time (marginMode).
+    property string marginMode: "notes"
+    readonly property bool marginOpen: notesDrawer.shown
+    readonly property bool notesOpen: marginOpen && marginMode === "notes"
+    readonly property bool deskOpen: marginOpen && marginMode === "desk"
     function focusedSavedEntry() {
         let focused = activeFocusItem
         while (focused && focused !== collectionList) {
@@ -519,13 +524,13 @@ ApplicationWindow {
     readonly property real scale: systemScale * fontScale
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
     readonly property bool contextMenuOpen: contextMenu.visible
-    readonly property bool modalOpen: dialogOpen || savedDrawer.shown || deskDrawer.shown || tagsUi.visibleModal
-    // Everything modal except the side panels (Annotations, Desk, Study).
-    readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool modalOpen: dialogOpen || savedDrawer.shown || tagsUi.visibleModal
+    // Everything modal except the side panels (Marks, See also).
+    readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     // One side panel at a time. Its opening key does nothing while it is open;
     // another panel's key switches to that panel.
-    readonly property string sidePanel: notesOpen ? "notes" : savedDrawer.shown ? "annotations"
-        : deskDrawer.shown ? "desk" : tagsUi.relatedShown ? "related" : ""
+    readonly property string sidePanel: notesOpen ? "notes" : deskOpen ? "desk" : savedDrawer.shown ? "annotations"
+        : tagsUi.relatedShown ? "related" : ""
     readonly property var panelActions: ["notes", "annotations", "desk", "related"]
     // With a drawer side panel open (Annotations, Desk, History, Study), these
     // keys close it first and then act: palettes, dialogs, and reading toggles.
@@ -535,20 +540,21 @@ ApplicationWindow {
         "marginNotes", "readingMode", "soundEffects", "reduceMotion"]
     readonly property bool panelSwitchKeys: sidePanel.length > 0 && bible.ready && !bible.busy && !dialogOpen
         && !findPromptOpen && !textInputActive()
-    // Closes the open side panel before another opens. A Notes draft must
-    // save first; when it cannot, Notes stays open with its error.
+    // Closes the open side panel before another opens. A Notes or Desk
+    // draft must save first; when it cannot, the Margin stays open with its
+    // error. Notes and the Desk share the Margin: between them it stays open.
     function leaveSidePanel(target) {
         const current = sidePanel
         if (current === target) return false
         if (!flushNote()) return false
-        if (current === "notes") return closeNotes()
+        const margin = function(panel) { return panel === "notes" || panel === "desk" }
+        if (margin(current)) return margin(target) || closeNotes()
         if (current === "annotations") savedDrawer.close()
-        else if (current === "desk") deskDrawer.close()
         else if (current === "related") tagsUi.close()
         return true
     }
     // The chapter outline, reached by tab, keeps its scroll keys.
-    readonly property bool readerBase: bible.ready && !bible.busy && !modalOpen && !(notesOpen && marginKeys) && !findPromptOpen && !textInputActive()
+    readonly property bool readerBase: bible.ready && !bible.busy && !modalOpen && !(marginOpen && marginKeys) && !findPromptOpen && !textInputActive()
         && !(chapterOutline && chapterOutline.activeFocus)
     // Character selection takes the reader's keys itself (charKey).
     readonly property bool readerKeys: readerBase && !charMode
@@ -559,7 +565,7 @@ ApplicationWindow {
     // make room (notesDock follows it in and out). Narrower, it is a sheet
     // over the reader's right side. Neither dims or blocks the text.
     readonly property bool notesDocked: width >= readerMeasure + verseGutter + 9 + 2 * 48 + notesWidth
-    property real notesDock: notesDocked && notesOpen ? notesWidth : 0
+    property real notesDock: notesDocked && marginOpen ? notesWidth : 0
     Behavior on notesDock { NumberAnimation { duration: app.panelEnterMs; easing.type: Easing.OutCubic } }
     // The window's width beside docked Notes: the footer's.
     readonly property real stageWidth: width - notesDock
@@ -961,7 +967,7 @@ ApplicationWindow {
         const more = selectionBarHints.partItems()[4]
         const p = more ? more.mapToItem(null, 0, more.height) : selectionBar.mapToItem(null, selectionBar.width, selectionBar.height)
         contextMenu.show("selectionBar", [
-            { id: "desk", text: bible.currentInDesk ? "Remove from Desk" : "Add to Desk", shortcut: menuKey("toggleDesk"),
+            { id: "desk", text: "Add to Desk", shortcut: menuKey("toggleDesk"),
                 enabled: actionAvailable("toggleDesk"), run: function() { app.selectionBarRun("toggleDesk") } },
             { id: "compare", text: "Compare versions", shortcut: menuKey("compare"),
                 enabled: actionAvailable("compare"), run: function() { app.selectionBarRun("compare", true) } },
@@ -1436,7 +1442,7 @@ ApplicationWindow {
             menuAction("tags", "Tags…", "tags")
         ].concat(undoMenuEntries()).concat([
             menuDivider,
-            menuAction("desk", bible.currentInDesk ? "Remove from Desk" : "Add to Desk", "toggleDesk"),
+            menuAction("desk", "Add to Desk", "toggleDesk"),
             menuDivider,
             menuAction("related", "See also", "related"),
             menuAction("chapterFind", "Find in chapter", "chapterFind")
@@ -1574,22 +1580,6 @@ ApplicationWindow {
     function sceneRowPoint(item) {
         return item ? item.mapToItem(null, 24 * scale, Math.min(item.height, 28 * scale)) : Qt.point(width / 3, height / 3)
     }
-    function deskRowFor(scope) {
-        return Array.from(bible.desk).find(function(entry) {
-            return entry.versionId === scope.versionId && ["book", "chapter", "start", "endBook", "endChapter", "end"].every(function(key) {
-                return entry[key] === scope[key]
-            })
-        })
-    }
-    function toggleScopeDesk(scope) {
-        if (bible.busy || !scope) { rejected(unavailableReason("toggleDesk")); return }
-        const existing = deskRowFor(scope)
-        if (existing ? bible.removeFromDesk(existing.id) : bible.addToDesk(scope)) {
-            const reference = (existing || {}).reference || scope.reference || "Passage"
-            notify(reference + (existing ? " removed from Desk" : " added to Desk"), true)
-            sounds.play(existing ? "remove" : "chime")
-        } else sounds.play("error")
-    }
     function copyScope(scope, plainText) {
         if (!scope || bible.busy) { rejected(unavailableReason("copy")); return }
         const copied = bible.copyScope(scope, !!plainText)
@@ -1682,21 +1672,10 @@ ApplicationWindow {
             { id: "copyPlain", text: "Copy plain text" + which, enabled: !bible.busy && choices.length > 0,
                 run: function() { app.onMarkerScope(choices, function(scope) { app.copyScope(scope, true) }, sceneX, sceneY) } },
             menuDivider,
-            { id: "desk", text: several ? "Add to Desk or remove…" : choices[0] && deskRowFor(choices[0]) ? "Remove from Desk" : "Add to Desk",
+            { id: "desk", text: several ? "Add to Desk…" : "Add to Desk",
                 enabled: ready && choices.length > 0,
-                run: function() { app.onMarkerScope(choices, function(scope) { app.toggleScopeDesk(scope) }, sceneX, sceneY) } }
+                run: function() { app.onMarkerScope(choices, function(scope) { app.addToDesk(scope) }, sceneX, sceneY) } }
         ], sceneX, sceneY)
-    }
-    function openDeskMenu(row, sceneX, sceneY) {
-        const entry = deskList.model[row]
-        if (!entry) return
-        deskList.currentIndex = row
-        moveDesk(0)
-        const id = entry.id
-        contextMenu.show("desk", RowMenu.entries(app, { busy: bible.busy, scope: entry,
-            open: function() { app.openDeskItem(id) }, canOpen: entry.available, canCopy: entry.available,
-            copy: function() { app.copyDeskItem(id) }, copyPlain: function() { app.copyDeskItem(id, true) },
-            inDesk: true, desk: function() { app.removeDeskItem(id) } }), sceneX, sceneY)
     }
     function openSavedMenu(row, sceneX, sceneY) {
         const entry = collectionList.model[row]
@@ -1764,7 +1743,6 @@ ApplicationWindow {
             if (errorDialog.visible) errorDialog.close()
             else if (peekCard.visible) peekCard.close()
             else if (catalogDetails.visible) catalogDetails.close()
-            else if (cleanDeskConfirmation.visible) cleanDeskConfirmation.close()
             else if (clearHistoryConfirmation.visible) clearHistoryConfirmation.close()
             else if (restoreConfirmation.visible) restoreConfirmation.close()
             else if (verseTagMenu.visible) verseTagMenu.close()
@@ -1963,11 +1941,11 @@ ApplicationWindow {
         return noteLinks.find(function(link) { return at >= link.start && at <= link.start + link.length }) || null
     }
     // A web address (http/https) at the note cursor, without trailing punctuation.
-    readonly property string noteUrlAtCursor: {
-        const at = noteEditor.cursorPosition
+    readonly property string noteUrlAtCursor: urlAt(noteEditor.text, noteEditor.cursorPosition)
+    function urlAt(text, at) {
         const pattern = /https?:\/\/[^\s<>"'\]\[()]+/g
         let match
-        while ((match = pattern.exec(noteEditor.text)) !== null) {
+        while ((match = pattern.exec(text)) !== null) {
             const url = match[0].replace(/[.,;:!?]+$/, "")
             if (at >= match.index && at <= match.index + url.length) return url
         }
@@ -2108,7 +2086,7 @@ ApplicationWindow {
         else if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) action = function() { if (row) app.openLinkedNote(row); else app.rejected() }
         else if (plain && event.key === Qt.Key_Y) action = function() { app.copyScope(row) }
         else if (mods === Qt.ShiftModifier && event.key === Qt.Key_Y) action = function() { app.copyScope(row, true) }
-        else if (plain && event.key === Qt.Key_D) action = function() { app.toggleScopeDesk(row) }
+        else if (plain && event.key === Qt.Key_D) action = function() { app.addToDesk(row) }
         else if ((plain && (event.key === Qt.Key_Escape || event.key === Qt.Key_Tab)) || event.key === Qt.Key_Backtab
                 || (mods === Qt.ShiftModifier && event.key === Qt.Key_Tab) || (mods === Qt.ControlModifier && event.key === Qt.Key_Up))
             action = function() { noteEditor.forceActiveFocus() }
@@ -2209,7 +2187,7 @@ ApplicationWindow {
         if (bible.busy) return "Wait for the import to finish"
         if (["highlight", "tags", "toggleDesk", "notes", "copy", "copyPlain", "compare", "peek"].includes(action.id) && !hasSelection)
             return "Select a verse first"
-        if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen)
+        if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen && !deskOpen)
             return "Open a note first · " + keyText("notes")
         if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
         if (action.id === "compare" && hasSelection && bible.versions.length < 2) return "Add another version to compare"
@@ -2257,9 +2235,10 @@ ApplicationWindow {
         noteConflict = false
         syncingNote = false
     }
+    // Saves every draft in this window: Marks' note in place, the Desk, and Notes'.
     function flushNote() {
         noteSaveTimer.stop()
-        if (!flushMarkNote()) return false
+        if (!flushMarkNote() || !flushDesk()) return false
         if (syncingNote) return true
         syncNote()
         if (noteConflict) return false
@@ -2294,7 +2273,7 @@ ApplicationWindow {
     // my draft) and ctrl shift S (use saved text) resolve it, as the hint
     // row and the buttons' tooltips say.
     onNoteConflictChanged: if (noteConflict) Qt.callLater(function() {
-        if (!app.noteConflict || !notesDrawer.shown || app.dialogOpen || noteEditor.activeFocus) return
+        if (!app.noteConflict || !app.notesOpen || app.dialogOpen || noteEditor.activeFocus) return
         if (noteRetry.enabled) noteRetry.forceActiveFocus(); else noteUseSaved.forceActiveFocus()
     })
     readonly property bool canKeepDraft: noteConflict && noteScopeMatches && hasSelection && !bible.busy
@@ -2311,11 +2290,11 @@ ApplicationWindow {
             if (app.dialogOpen || bible.busy) return
             // A side panel that replaced another keeps the keyboard.
             if (savedDrawer.shown) { if (!app.focusWithin(savedDrawer.contentItem)) savedDrawer.focusContent(); return }
-            if (deskDrawer.shown) { if (!app.focusWithin(deskDrawer.contentItem)) deskDrawer.focusContent(); return }
             if (tagsUi.relatedShown) { if (!tagsUi.focusInBody()) tagsUi.focusResults(); return }
             if (app.modalOpen || bible.busy) return
             if (notesDrawer.shown && app.marginKeys) {
-                if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
+                if (app.deskOpen) { if (app.deskPreview) deskPreviewText.forceActiveFocus(); else deskEditor.forceActiveFocus() }
+                else if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
                 else if (app.hasSelection) notePreviewText.forceActiveFocus()
                 else notesPanel.forceActiveFocus()
             } else app.readerFocus()
@@ -3033,13 +3012,16 @@ ApplicationWindow {
         if (!bible.ready || bible.busy) return
         clearCount()
         if (!notesOpen) openedNoteActionScope = actionScope()
+        // From the Desk, the Margin stays open and turns to the note.
+        const turning = deskOpen
+        marginMode = "notes"
         notesDrawer.focusEditor = focusEditor
         notesDrawer.open()
         if (loadedNoteReference !== bible.selectionReference) syncNote()
         if (focusEditor && hasSelection) {
             notePreview = false
             if (notesDrawer.shown) focusNoteEnd()
-        }
+        } else if (focusEditor && turning) notesPanel.forceActiveFocus()
     }
     function focusNoteEnd() { noteEditor.forceActiveFocus(); noteEditor.cursorPosition = noteEditor.length }
     // Closes the Notes drawer with the keyboard already outside it: a drawer
@@ -3115,94 +3097,128 @@ ApplicationWindow {
         notify(label.charAt(0).toUpperCase() + label.slice(1) + (undo ? " undone" : " redone"), true)
         sounds.play("tick")
     }
-    // Desk: one global study list shared by every window and version.
-    property int deskSelectedId: -1
-    property int deskRow: 0
-    function toggleDeskPassage() {
-        if (!hasSelection || !flushNote()) return
-        const scope = actionScope()
-        const reference = bible.selectionReference
-        if (bible.toggleDesk()) {
-            const added = bible.currentInDesk
-            completeRangeAction(scope, false)
-            notify(reference + (added ? " added to Desk" : " removed from Desk"))
-            sounds.play(added ? "chime" : "remove")
-        } else sounds.play("error")
+    // The Desk: one Markdown page shared by every window (bible.deskPage),
+    // shown in the Margin in place of the note. d adds a passage's
+    // quotation at its end (u takes it off again); the page is written like
+    // a note: it saves after a pause and before anything else happens
+    // (flushNote), only over the text it started from, and a change from
+    // another window under a draft keeps the draft and offers both.
+    property bool deskPreview: false
+    property string loadedDeskText: ""
+    property bool deskConflict: false
+    property bool syncingDesk: false
+    readonly property var deskLinks: deskOpen ? Array.from(bible.passageLinks(deskEditor.text)) : []
+    readonly property var deskLinkAtCursor: {
+        const at = deskEditor.cursorPosition
+        return deskLinks.find(function(link) { return at >= link.start && at <= link.start + link.length }) || null
     }
+    readonly property string deskUrlAtCursor: deskOpen ? urlAt(deskEditor.text, deskEditor.cursorPosition) : ""
+    Timer { id: deskSaveTimer; interval: app.noteSaveDelay; onTriggered: app.flushDesk() }
     function openDesk() {
-        if (deskDrawer.shown) return
-        deskDrawer.open()
+        if (!bible.ready || bible.busy) return
+        clearCount()
+        if (deskEditor.text === loadedDeskText) loadSavedDesk()
+        const shown = notesDrawer.shown
+        marginMode = "desk"
+        notesDrawer.focusEditor = true
+        notesDrawer.open()
+        if (shown) focusDesk()
     }
-    function moveDesk(delta) {
-        if (deskList.count > 0) {
-            deskList.currentIndex = Math.max(0, Math.min(deskList.count - 1, deskList.currentIndex + delta))
-            deskList.positionViewAtIndex(deskList.currentIndex, ListView.Contain)
-            deskRow = deskList.currentIndex
-            deskSelectedId = deskList.model[deskRow].id
-        } else { deskRow = 0; deskSelectedId = -1 }
-        deskList.forceActiveFocus()
+    function focusDesk() {
+        if (deskPreview) deskPreviewText.forceActiveFocus()
+        else { deskEditor.forceActiveFocus(); deskEditor.cursorPosition = deskEditor.length }
     }
-    function restoreDeskRow() {
-        const rows = Array.from(bible.desk)
-        let row = rows.findIndex(function(entry) { return entry.id === deskSelectedId })
-        if (row < 0) row = Math.min(deskRow, rows.length - 1)
-        deskList.currentIndex = row
-        deskRow = Math.max(0, row)
-        deskSelectedId = row >= 0 ? rows[row].id : -1
+    function loadSavedDesk() {
+        syncingDesk = true
+        loadedDeskText = bible.deskPage
+        if (deskEditor.text !== bible.deskPage) deskEditor.text = bible.deskPage
+        deskConflict = false
+        syncingDesk = false
     }
-    function deskEntry(id) { return Array.from(bible.desk).find(function(entry) { return entry.id === id }) }
-    function openDeskItem(id) {
-        if (bible.busy) return
-        const entry = deskEntry(id)
-        if (!entry || !flushNote()) return
-        if (!entry.available) { rejected(entry.versionAbbreviation + " is not installed"); return }
-        const from = beginJump()
-        if (!bible.openDeskItem(id)) return
-        endJump(from)
-        syncNote()
-        deskDrawer.close()
-        readerFocus()
-        Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
-        pulseDestination()
+    // A new page (another window's, or this one's own save) replaces the
+    // editor's text unless it holds a draft; a draft the page changed under
+    // is a conflict.
+    function syncDesk() {
+        if (deskEditor.text === loadedDeskText) loadSavedDesk()
+        else if (deskEditor.text === bible.deskPage) { loadedDeskText = bible.deskPage; deskConflict = false }
+        else if (bible.deskPage !== loadedDeskText) deskConflict = true
     }
-    function copyDeskItem(id, plainText) {
-        if (bible.busy) return
-        const entry = deskEntry(id)
-        if (!entry) return
-        if ((plainText ? bible.copyScope(entry, true) : bible.copyDeskItem(id)).length > 0) {
-            notify(entry.reference + " · " + entry.versionAbbreviation + (plainText ? " copied as plain text" : " copied"), true)
-            sounds.play("chime")
-        } else sounds.play("error")
+    function flushDesk() {
+        deskSaveTimer.stop()
+        if (deskEditor.text === loadedDeskText) return true
+        if (deskConflict) return false
+        if (bible.setDeskPage(deskEditor.text, loadedDeskText)) { loadedDeskText = deskEditor.text; return true }
+        syncDesk()
+        return false
     }
-    function removeDeskItem(id) {
-        if (bible.busy) return
-        const row = Array.from(bible.desk).findIndex(function(entry) { return entry.id === id })
-        if (row < 0) return
-        if (bible.removeFromDesk(id)) {
-            deskSelectedId = -1
-            deskRow = row
-            restoreDeskRow()
-            sounds.play("remove")
+    readonly property bool canKeepDeskDraft: deskConflict && !bible.busy
+    function keepDeskDraft() {
+        if (!canKeepDeskDraft) { rejected(); return }
+        loadedDeskText = bible.deskPage
+        deskConflict = false
+        flushDesk()
+    }
+    function useSavedDesk() { if (deskConflict) loadSavedDesk(); else rejected() }
+    function toggleDeskPreview() {
+        if (!deskOpen) { rejected(); return }
+        if (deskPreview) {
+            deskPreview = false
+            deskEditor.forceActiveFocus()
+        } else if (flushDesk()) {
+            deskPreview = true
+            deskPreviewText.forceActiveFocus()
         }
-        if (deskDrawer.shown) deskList.forceActiveFocus()
     }
-    function removeCurrentDeskItem() {
-        const entry = deskList.model[deskList.currentIndex]
-        if (entry) removeDeskItem(entry.id)
+    // alt enter in the Desk: a passage link opens in the reader, a web address in the browser.
+    function openDeskLinkAtCursor() {
+        if (deskLinkAtCursor) return followPassageLink(deskLinkAtCursor.reference)
+        if (deskUrlAtCursor.length) { desktop.openExternal(deskUrlAtCursor); return true }
+        sounds.play("boundary")
+        return false
     }
-    function requestCleanDesk() {
-        if (bible.busy) return
-        if (!bible.desk.length) { notify("The Desk is already clean", true); return }
-        cleanDeskConfirmation.open()
+    // The Desk editor's own keys: tab types a tab and shift tab takes one
+    // back (the editor keeps the keyboard), alt enter follows the link at the
+    // cursor, ctrl s and ctrl shift S settle another window's change.
+    function deskKey(event) {
+        const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+        if (event.key === Qt.Key_Tab && event.modifiers === Qt.NoModifier) {
+            deskEditor.remove(deskEditor.selectionStart, deskEditor.selectionEnd)
+            deskEditor.insert(deskEditor.cursorPosition, "\t")
+        } else if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && event.modifiers === Qt.ShiftModifier)) {
+            const at = deskEditor.cursorPosition
+            if (at > 0 && deskEditor.getText(at - 1, at) === "\t") deskEditor.remove(at - 1, at)
+        } else if (event.key === Qt.Key_S && (event.modifiers === Qt.ControlModifier || event.modifiers === (Qt.ControlModifier | Qt.ShiftModifier))) {
+            if (event.modifiers & Qt.ShiftModifier) useSavedDesk(); else keepDeskDraft()
+        } else if (enter && event.modifiers === Qt.AltModifier) openDeskLinkAtCursor()
+        else return
+        event.accepted = true
     }
-    function confirmCleanDesk() {
-        if (bible.busy || !flushNote()) return
-        const count = bible.desk.length
-        if (bible.cleanDesk()) {
-            cleanDeskConfirmation.close()
-            sounds.play("remove")
-            notify("Cleaned the Desk · " + count + (count === 1 ? " passage removed" : " passages removed"), true)
-        }
+    // In Write mode, while the keyboard is in the Margin, the page keeps it.
+    function keepDeskEditorFocus() {
+        if (!deskOpen || deskPreview || !marginKeys || dialogOpen || modalOpen || bible.busy || deskEditor.activeFocus) return
+        const item = activeFocusItem
+        if (!item || item === notesDrawer.contentItem.parent || focusWithin(notesDrawer.contentItem)) deskEditor.forceActiveFocus()
+    }
+    // Adds a passage's quotation to the Desk, in every window; an open Desk
+    // shows its end.
+    function addToDesk(scope) {
+        if (bible.busy || !scope) { rejected(unavailableReason("toggleDesk")); return false }
+        if (!flushNote()) return false
+        const reference = bible.appendToDesk(scope)
+        if (!reference.length) { sounds.play("error"); return false }
+        notify(reference + " added to the Desk", true)
+        sounds.play("chime")
+        if (deskOpen) Qt.callLater(function() {
+            if (!deskEditor.activeFocus) deskEditor.cursorPosition = deskEditor.length
+            const view = (app.deskPreview ? deskPreviewScroll : deskEditorScroll).contentItem as Flickable
+            view.contentY = Math.max(0, view.contentHeight - view.height)
+        })
+        return true
+    }
+    function addPassageToDesk() {
+        if (!hasSelection) { rejected(unavailableReason("toggleDesk")); return }
+        const scope = actionScope()
+        if (addToDesk(bible.tagScope())) completeRangeAction(scope, false)
     }
     // History. Each window keeps an in-memory jump stack (never saved): every
     // jump records instantly; verse and chapter steps do not. [ and ] travel it
@@ -3329,12 +3345,12 @@ ApplicationWindow {
         if (!entry || entry.start) return entry
         return entry.available && entry.firstVerse ? Object.assign({}, entry, { start: entry.firstVerse, end: entry.lastVerse }) : null
     }
-    function toggleHistoryDesk(id) {
+    function addHistoryToDesk(id) {
         if (bible.busy) return
         const entry = historyEntry(id)
         const scope = historyScope(entry)
         if (!scope || !entry.available) { rejected(entry.versionAbbreviation + " is not installed"); return }
-        toggleScopeDesk(scope)
+        addToDesk(scope)
     }
     function removeHistoryItem(id) {
         if (bible.busy) return
@@ -3396,7 +3412,7 @@ ApplicationWindow {
         return RowMenu.entries(app, { busy: bible.busy, keys: false, scope: scope,
             open: function() { app.openHistoryItem(id) }, canOpen: entry.available, canCopy: entry.available && !!scope,
             copy: function() { app.copyHistoryItem(id) }, copyPlain: function() { app.copyHistoryItem(id, true) },
-            desk: function() { app.toggleHistoryDesk(id) }, canDesk: entry.available && !!scope,
+            desk: function() { app.addHistoryToDesk(id) }, canDesk: entry.available && !!scope,
             extras: [{ id: "remove", text: "Remove from History", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeHistoryItem(id) } }] })
     }
     function savePosition() {
@@ -3841,8 +3857,6 @@ ApplicationWindow {
     }
     function confirmRemoveVersion() {
         if (!versionDialog.removing || versionDialog.step !== 2 || !versionDialog.chosen || bible.busy || !flushNote()) return
-        const deskRemoved = versionDialog.removeAnnotations ? bible.deskCountForVersion(versionDialog.chosen.id) : 0
-        const abbreviation = versionDialog.chosen.abbreviation
         if (!bible.removeVersion(versionDialog.chosen.id, versionDialog.removeAnnotations)) return
         clearTextSelection()
         selectionAnchor = 0
@@ -3850,8 +3864,6 @@ ApplicationWindow {
         if (bible.ready) restorePosition(hasSelection)
         else dismissNotesDrawer()
         versionDialog.close()
-        if (deskRemoved > 0)
-            notify("Removed " + abbreviation + " · " + deskRemoved + (deskRemoved === 1 ? " Desk item" : " Desk items") + " removed too", true)
     }
     // One action catalog supplies shortcuts, searchable keybindings, and commands.
     // Context-only gestures are explanatory rows, never executable guesses.
@@ -3924,13 +3936,13 @@ ApplicationWindow {
         { id: "manageBack", group: "Annotate", title: "Manage tags: back to the picker (empty filter)", sequences: ["Backspace"], scope: "tags", explanation: true },
         // Bound by the note editor itself.
         { id: "noteLinkSuggest", group: "Annotate", title: "Suggest a passage to link (in a note)", sequences: ["[, ["], scope: "noteEditor" },
-        { id: "openNoteLink", group: "Annotate", title: "Open the passage or web link at the cursor (in a note)", sequences: ["Alt+Return"], scope: "noteEditor" },
-        { id: "noteLinkClick", group: "Annotate", title: "Open the passage or web link clicked (in a note)", sequences: ["Ctrl+Click"], scope: "noteEditor", explanation: true },
-        { id: "notePreview", group: "Annotate", title: "Switch a note between Write and Preview (Notes panel)", sequences: ["Alt+V"], scope: "noteEditor" },
-        { id: "noteKeepDraft", group: "Annotate", title: "Note changed in another window: save my draft (in a note)", sequences: ["Ctrl+S"], scope: "noteEditor" },
-        { id: "noteUseSaved", group: "Annotate", title: "Note changed in another window: use the saved text (in a note)", sequences: ["Ctrl+Shift+S"], scope: "noteEditor" },
+        { id: "openNoteLink", group: "Annotate", title: "Open the passage or web link at the cursor (in a note or the Desk)", sequences: ["Alt+Return"], scope: "noteEditor" },
+        { id: "noteLinkClick", group: "Annotate", title: "Open the passage or web link clicked (in a note or the Desk)", sequences: ["Ctrl+Click"], scope: "noteEditor", explanation: true },
+        { id: "notePreview", group: "Annotate", title: "Switch a note or the Desk between Write and Preview", sequences: ["Alt+V"], scope: "noteEditor" },
+        { id: "noteKeepDraft", group: "Annotate", title: "Note or Desk changed in another window: save my draft", sequences: ["Ctrl+S"], scope: "noteEditor" },
+        { id: "noteUseSaved", group: "Annotate", title: "Note or Desk changed in another window: use the saved text", sequences: ["Ctrl+Shift+S"], scope: "noteEditor" },
         { id: "noteLinkedFrom", group: "Annotate", title: "From a note to its Linked from list (esc returns)", sequences: ["Ctrl+Down"], scope: "noteEditor" },
-        { id: "noteLeave", group: "Annotate", title: "From a note back to reading: Notes stays open and follows the selection (esc again closes it)", sequences: ["Escape"], scope: "noteEditor", explanation: true },
+        { id: "noteLeave", group: "Annotate", title: "From a note or the Desk back to reading: it stays open, a note follows the selection (esc again closes it)", sequences: ["Escape"], scope: "noteEditor", explanation: true },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
@@ -3939,6 +3951,7 @@ ApplicationWindow {
         { id: "contextMenu", group: "Copy", title: "Open context menu", sequences: ["Menu", "Shift+F10"] },
         { id: "clickMenu", group: "Copy", title: "Open context menu", sequences: ["RightClick"], explanation: true },
         { id: "annotations", group: "Panels", title: "Marks panel", sequences: ["Shift+M"], command: true },
+        // The Desk shows in the Margin, in place of the note (w turns back).
         { id: "desk", group: "Panels", title: "Open Desk", sequences: ["Shift+D"], command: true },
         // The See also panel (once Study); id kept for compatibility.
         { id: "related", group: "Panels", title: "See also panel", sequences: ["Shift+S"], command: true },
@@ -3994,13 +4007,11 @@ ApplicationWindow {
         { id: "listOpen", group: "Lists", title: "Open item", sequences: ["Return"], scope: "list", explanation: true },
         { id: "listCopy", group: "Lists", title: "Copy item as quotation", sequences: ["Y"], scope: "list", explanation: true },
         { id: "listCopyPlain", group: "Lists", title: "Copy item as plain text", sequences: ["Shift+Y"], scope: "list", explanation: true },
-        { id: "listDesk", group: "Lists", title: "Add item to Desk, or remove it", sequences: ["D"], scope: "list", explanation: true },
+        { id: "listDesk", group: "Lists", title: "Add item to Desk", sequences: ["D"], scope: "list", explanation: true },
         { id: "listRemove", group: "Lists", title: "Remove item", sequences: ["Delete", "Backspace"], scope: "list", explanation: true },
         { id: "listTag", group: "Lists", title: "Edit the item's tags (Marks, See also)", sequences: ["T"], scope: "list", explanation: true },
         { id: "listNote", group: "Lists", title: "Write the item's note in place (Marks)", sequences: ["W"], scope: "list", explanation: true },
         { id: "listSearch", group: "Lists", title: "Filter the list, #name for a tag (Marks with more than 10 items, See also)", sequences: ["/"], scope: "list", explanation: true },
-        // Desk-only: bound by deskDrawer, never globally.
-        { id: "cleanDesk", group: "Lists", title: "Clean Desk", sequences: ["Shift+Del", "Shift+Backspace"], scope: "desk", command: true },
         // Bound by the History panel; the command itself is Commands-only.
         { id: "historyRemoveKeys", group: "Palettes and windows", title: "History: remove a passage", sequences: ["Del"], scope: "history", explanation: true },
         { id: "historyClearKeys", group: "Palettes and windows", title: "History: clear it", sequences: ["Shift+Del"], scope: "history", explanation: true },
@@ -4014,7 +4025,7 @@ ApplicationWindow {
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
     // Explanations are gestures; desk/list rows are bound by their panels.
-    function globallyBound(action) { return !!action.sequences && !action.explanation && !["desk", "list", "versions", "noteEditor", "characters", "tags", "importGuide"].includes(action.scope) }
+    function globallyBound(action) { return !!action.sequences && !action.explanation && !["list", "versions", "noteEditor", "characters", "tags", "importGuide"].includes(action.scope) }
     function actionById(id) { return actions.find(function(entry) { return entry.id === id }) }
     function actionKeys(action) {
         if (typeof action === "string") action = actionById(action)
@@ -4104,17 +4115,8 @@ ApplicationWindow {
             ["W", "note", function() { app.editMarkNote(app.focusedSavedEntry()) }, ready],
             ["T", "tags", function() { app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry())) }, ready],
             ["Y", "copy", function() { app.copyScope(app.focusedSavedEntry()) }, ready],
-            ["D", "Desk", function() { app.toggleScopeDesk(app.focusedSavedEntry()) }, ready],
+            ["D", "Desk", function() { app.addToDesk(app.focusedSavedEntry()) }, ready],
             ["Delete", "delete", app.deleteSaved, ready], search, ["Escape", "close", app.escapeSaved]]
-    }
-    function deskHintParts() {
-        const entry = deskList.model[deskList.currentIndex]
-        const ready = !!entry && !bible.busy
-        return [[["Up", "Down"], "choose"], ["Return", "open", function() { app.openDeskItem(entry.id) }, ready && entry.available],
-            ["Y", "copy", function() { app.copyDeskItem(entry.id) }, ready && entry.available],
-            ["Delete", "remove", function() { app.removeDeskItem(entry.id) }, ready],
-            [actionKeys("cleanDesk")[0], "clean", app.requestCleanDesk, deskList.count > 0 && !bible.busy],
-            ["Escape", "close", function() { deskDrawer.close() }]]
     }
     // Confirmations: arrows move between Cancel and Confirm; enter presses the focused one.
     function confirmationHintParts(cancel, confirm, dialog) {
@@ -4131,7 +4133,6 @@ ApplicationWindow {
     }
     // Commands whose palette title describes the action it would take now.
     function actionTitle(action) {
-        if (action.id === "toggleDesk") return bible.currentInDesk ? "Remove from Desk" : "Add to Desk"
         if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
         if (action.id === "reduceMotion") return sounds.reduceMotion ? "Enable animations" : "Disable animations"
         if (action.id === "toggleHistory") return bible.historyEnabled ? "Disable History" : "Enable History"
@@ -4189,7 +4190,8 @@ ApplicationWindow {
     // or F-keys (help's ? types; its F1 alias launches). Ctrl v stays paste, so
     // Switch version is not here; ctrl n and the Alt toggles stay the editor's.
     readonly property var noteEditorLaunchActions: ["books", "history", "bibleSearch", "commands", "settings", "help", "manageTags"]
-    function noteEditorTyping() { return notesOpen && !!noteEditor && noteEditor.activeFocus && !noteEditor.readOnly }
+    // Typing in the Margin: a note, or the Desk's page.
+    function noteEditorTyping() { return (notesOpen && !!noteEditor && noteEditor.activeFocus) || (deskOpen && !!deskEditor && deskEditor.activeFocus) }
     function actionAvailable(action) {
         if (typeof action === "string") action = actions.find(function(entry) { return entry.id === action })
         if (!action || action.explanation || bible.busy) return false
@@ -4202,9 +4204,10 @@ ApplicationWindow {
         if (action.id === "redo") return bible.canRedo
         if (action.id === "ribbon") return bible.ready && !!bible.ribbon.versionId
         // Notes editor keys, run from Keybindings: they act in an open Notes panel.
+        if (["openNoteLink", "notePreview"].includes(action.id) && deskOpen) return true
         if (["noteLinkSuggest", "openNoteLink", "notePreview"].includes(action.id)) return notesOpen && hasSelection
-        if (action.id === "noteKeepDraft") return notesOpen && canKeepDraft
-        if (action.id === "noteUseSaved") return notesOpen && noteConflict
+        if (action.id === "noteKeepDraft") return deskOpen ? canKeepDeskDraft : notesOpen && canKeepDraft
+        if (action.id === "noteUseSaved") return deskOpen ? deskConflict : notesOpen && noteConflict
         if (action.id === "noteLinkedFrom") return notesOpen && hasSelection && linkedFrom.length > 0
         return bible.ready || !!action.setting
             || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
@@ -4221,7 +4224,6 @@ ApplicationWindow {
         if (action.scope === "global") return "This window · also with the Notes panel open, but not while typing"
         if (action.scope === "palette") return "This window · passage and command search"
         if (action.scope === "notes") return "Reader or notes preview"
-        if (action.scope === "desk") return "Desk panel only"
         if (action.scope === "noteEditor") return "Notes editor"
         if (action.scope === "characters") return "Character selection · " + keyText("characterVisual")
         if (action.scope === "importGuide") return "Add version guide"
@@ -4538,7 +4540,7 @@ ApplicationWindow {
             if (!actionAvailable(action)) { rejected(unavailableReason(action)); return }
             if (!closeNotes()) { rejected("The note could not be saved"); return }
         }
-        if (sidePanel.length && sidePanel !== "notes" && panelLeavingActions.includes(action) && actionAvailable(action)) {
+        if (sidePanel.length && !marginOpen && panelLeavingActions.includes(action) && actionAvailable(action)) {
             if (!flushNote()) return
             readerFocus()
             if (!leaveSidePanel("")) { restorePanelFocus(); return }
@@ -4585,10 +4587,10 @@ ApplicationWindow {
         case "copyTextPlain": if (freeSelectedText.length) copySelectedText(true); else copyPassage(true); break
         case "characterVisual": beginCharMode(); break
         case "noteLinkSuggest": startNoteLink(); break
-        case "openNoteLink": openNoteLinkAtCursor(); break
-        case "notePreview": toggleNotePreview(); break
-        case "noteKeepDraft": keepNoteDraft(); noteEditor.forceActiveFocus(); break
-        case "noteUseSaved": useSavedNote(); noteEditor.forceActiveFocus(); break
+        case "openNoteLink": if (deskOpen) openDeskLinkAtCursor(); else openNoteLinkAtCursor(); break
+        case "notePreview": if (deskOpen) toggleDeskPreview(); else toggleNotePreview(); break
+        case "noteKeepDraft": if (deskOpen) { keepDeskDraft(); deskEditor.forceActiveFocus() } else { keepNoteDraft(); noteEditor.forceActiveFocus() } break
+        case "noteUseSaved": if (deskOpen) { useSavedDesk(); deskEditor.forceActiveFocus() } else { useSavedNote(); noteEditor.forceActiveFocus() } break
         case "noteLinkedFrom": if (linkedList.activeFocus) noteEditor.forceActiveFocus(); else focusLinkedFrom(); break
         case "larger": bible.setFontSize(readerSize + 1); break
         case "smaller": bible.setFontSize(readerSize - 1); break
@@ -4625,9 +4627,8 @@ ApplicationWindow {
             savedDrawer.open()
             break
         case "notes": if (sidePanel === "notes" || leaveSidePanel("notes")) openNotes(true); break
-        case "desk": if (leaveSidePanel("desk")) openDesk(); break
-        case "toggleDesk": toggleDeskPassage(); break
-        case "cleanDesk": requestCleanDesk(); break
+        case "desk": if (sidePanel === "desk" || leaveSidePanel("desk")) openDesk(); break
+        case "toggleDesk": addPassageToDesk(); break
         case "highlight": highlightPassage(); break
         case "undo": undoChange(true); break
         case "redo": undoChange(false); break
@@ -6279,15 +6280,20 @@ ApplicationWindow {
         // keyboard where it is.
         function focusContent() {
             if (app.modalOpen || !focusEditor) return
-            if (app.hasSelection) app.focusNoteEnd()
+            if (app.marginMode === "desk") app.focusDesk()
+            else if (app.hasSelection) app.focusNoteEnd()
             else notesPanel.forceActiveFocus()
         }
         onVisibleChanged: if (visible && !closing) focusContent()
         background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
         onClosed: { closing = false; position = 0; app.marginKeys = false; app.editingPanelClosed(); app.restorePanelFocus() }
-        contentItem: Rectangle {
+        contentItem: Item {
+            objectName: "marginContent"
+            Rectangle {
                 id: notesPanel
                 objectName: "notesPanel"
+                anchors.fill: parent
+                visible: app.marginMode === "notes"
                 color: desktop.background
                 radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
                 Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
@@ -6593,7 +6599,7 @@ ApplicationWindow {
                             readonly property var row: app.linkedFrom[linkedList.currentIndex] || null
                             parts: [[["Up", "Down"], "choose"], ["Return", "open", function() { app.openLinkedNote(app.linkedFrom[linkedList.currentIndex]) }, !!row],
                                 ["Y", "copy", function() { app.copyScope(app.linkedFrom[linkedList.currentIndex]) }, !!row],
-                                ["D", "Desk", function() { app.toggleScopeDesk(app.linkedFrom[linkedList.currentIndex]) }, !!row],
+                                ["D", "Desk", function() { app.addToDesk(app.linkedFrom[linkedList.currentIndex]) }, !!row],
                                 ["Escape", "back to the note", function() { noteEditor.forceActiveFocus() }]]
                             pixelSize: 11 * app.scale
                             Layout.fillWidth: true
@@ -6666,6 +6672,168 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
+            // The Desk in the Margin: its page, written and previewed like a note.
+            Rectangle {
+                id: deskPanel
+                objectName: "deskPanel"
+                anchors.fill: parent
+                visible: app.marginMode === "desk"
+                color: desktop.background
+                radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
+                // A press on the panel's chrome brings the keyboard to the page (Write mode).
+                PointHandler {
+                    objectName: "deskChromePress"
+                    onActiveChanged: if (!active && app.deskOpen && !app.deskPreview) { app.marginKeys = true; Qt.callLater(app.keepDeskEditorFocus) }
+                }
+                Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 22
+                    spacing: 16
+                    RowLayout {
+                        Layout.fillWidth: true
+                        SectionLabel { text: "DESK"; Layout.fillWidth: true }
+                        QuietButton {
+                            objectName: "deskClose"
+                            text: "×"; compact: true
+                            keys: KeyNotation.format("Escape")
+                            tip: "Close the Desk · " + keys + ", or " + keys + " " + keys + " from the page"
+                            Accessible.name: "Close the Desk"
+                            onClicked: app.closeNotes()
+                        }
+                    }
+                    FineRule { Layout.fillWidth: true }
+                    ColumnLayout {
+                        visible: app.deskConflict
+                        Layout.fillWidth: true
+                        Label {
+                            objectName: "deskConflictMessage"
+                            text: "The Desk changed in another window. Your unsaved draft is preserved. Review the saved page before replacing it."
+                            color: desktop.accent; font.pixelSize: 12 * app.scale
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                            Accessible.role: Accessible.AlertMessage
+                        }
+                        RowLayout {
+                            QuietButton {
+                                objectName: "deskKeepDraft"
+                                text: "Save my draft"; tip: "Replace the saved page with your draft · " + app.keyText("noteKeepDraft") + " on the page"
+                                focusTarget: deskEditor
+                                enabled: app.canKeepDeskDraft
+                                onClicked: app.keepDeskDraft()
+                            }
+                            QuietButton {
+                                objectName: "deskUseSaved"
+                                text: "Use saved text"; tip: "Replace your draft with the saved page · " + app.keyText("noteUseSaved") + " on the page"
+                                focusTarget: deskEditor
+                                onClicked: app.useSavedDesk()
+                            }
+                        }
+                    }
+                    RowLayout {
+                        spacing: 4
+                        QuietButton { objectName: "deskWriteButton"; text: "Write"; compact: true; emphasized: !app.deskPreview; keys: app.keyText("notePreview"); tip: "Write · " + keys; onClicked: { app.deskPreview = false; deskEditor.forceActiveFocus() } }
+                        QuietButton { objectName: "deskPreviewButton"; text: "Preview"; compact: true; emphasized: app.deskPreview; keys: app.keyText("notePreview"); tip: "Preview · " + keys; onClicked: { if (app.flushDesk()) { app.deskPreview = true; deskPreviewText.forceActiveFocus() } } }
+                        Item { Layout.fillWidth: true }
+                        Label { text: "Markdown"; color: desktop.muted; font.pixelSize: 11 * app.scale }
+                    }
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        OverlayScrollView {
+                            id: deskEditorScroll
+                            objectName: "deskEditorScroll"
+                            anchors.fill: parent
+                            visible: !app.deskPreview
+                            clip: true
+                            contentWidth: availableWidth
+                            TextArea {
+                                id: deskEditor
+                                ContextMenu.menu: null
+                                ContextMenu.onRequested: function(position) { app.openTextMenu(deskEditor, position) }
+                                objectName: "deskEditor"
+                                width: parent.width
+                                color: desktop.foreground
+                                selectionColor: desktop.selection
+                                selectedTextColor: desktop.foreground
+                                font.family: desktop.fontFamily
+                                font.pixelSize: 15 * app.scale
+                                wrapMode: TextEdit.Wrap
+                                selectByMouse: true
+                                enabled: !bible.busy
+                                padding: 2
+                                background: Item {}
+                                placeholderText: "Press " + app.keyText("toggleDesk") + " on a passage to quote it here, or write anything."
+                                placeholderTextColor: desktop.muted
+                                onTextChanged: if (!app.syncingDesk) { if (app.noteSaveDelay > 0) deskSaveTimer.restart(); else app.flushDesk() }
+                                Keys.onPressed: function(event) { app.deskKey(event) }
+                                Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
+                                Accessible.name: "The Desk, in Markdown"
+                                // ctrl click: open the passage (or web) link clicked, as alt enter does at the cursor.
+                                TapHandler {
+                                    objectName: "deskEditorLinkClick"
+                                    acceptedButtons: Qt.LeftButton
+                                    acceptedModifiers: Qt.ControlModifier
+                                    onTapped: function(point) {
+                                        deskEditor.cursorPosition = deskEditor.positionAt(point.position.x, point.position.y)
+                                        if (app.deskLinkAtCursor || app.deskUrlAtCursor.length) app.openDeskLinkAtCursor()
+                                    }
+                                }
+                            }
+                        }
+                        OverlayScrollView {
+                            id: deskPreviewScroll
+                            objectName: "deskPreviewScroll"
+                            anchors.fill: parent
+                            visible: app.deskPreview
+                            clip: true
+                            contentWidth: availableWidth
+                            TextArea {
+                                id: deskPreviewText
+                                ContextMenu.menu: null
+                                ContextMenu.onRequested: function(position) { app.openTextMenu(deskPreviewText, position) }
+                                objectName: "deskPreview"
+                                width: parent.width
+                                // Focusable for reading by key: the scroll keys move the preview.
+                                activeFocusOnTab: true
+                                Keys.onPressed: function(event) { app.scrollKey(deskPreviewScroll.contentItem as Flickable, event) }
+                                text: deskEditor.text.length ? app.linkedMarkdown(deskEditor.text) : "*Press " + app.keyText("toggleDesk") + " on a passage to quote it here.*"
+                                textFormat: TextEdit.MarkdownText
+                                readOnly: true
+                                selectByMouse: true
+                                wrapMode: TextEdit.Wrap
+                                color: deskEditor.text.length ? desktop.foreground : desktop.muted
+                                font.pixelSize: 15 * app.scale
+                                padding: 2
+                                background: Item {}
+                                onLinkActivated: function(link) { app.activateNoteLink(link) }
+                                Accessible.name: "Desk preview"
+                            }
+                        }
+                    }
+                    HintRow {
+                        objectName: "deskHints"
+                        visible: deskEditor.activeFocus || deskPreviewText.activeFocus
+                        theme: desktop
+                        parts: deskPreviewText.activeFocus ? [[["J", "K"], "scroll"], [app.actionKeys("notePreview")[0], "write", app.toggleDeskPreview],
+                                ["Escape", "back to reading", app.leaveNotes]]
+                            : app.deskConflict ? [[app.actionKeys("noteKeepDraft")[0], "save my draft", app.keepDeskDraft, app.canKeepDeskDraft],
+                                [app.actionKeys("noteUseSaved")[0], "use saved text", app.useSavedDesk]]
+                            : [app.deskLinkAtCursor || app.deskUrlAtCursor.length ? ["Alt+Return", "open link", app.openDeskLinkAtCursor] : null,
+                                [app.actionKeys("notePreview")[0], "preview", app.toggleDeskPreview],
+                                ["Escape", "back to reading", app.leaveNotes]]
+                        pixelSize: 11 * app.scale
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        objectName: "deskStatus"
+                        text: app.deskConflict ? "Not saved · resolve the other window's change above"
+                            : deskEditor.text === bible.deskPage ? "Saved on this device · the same page in every window" : "Not saved · your draft is still on the page"
+                        color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
+                    }
+                }
+            }
         }
     }
 
@@ -6689,7 +6857,6 @@ ApplicationWindow {
         onWheel: function(wheel) { wheel.accepted = true }
     }
     DrawerOutside { objectName: "savedOutside"; drawer: savedDrawer; shown: savedDrawer.shown; onDismiss: app.dismissMarks() }
-    DrawerOutside { objectName: "deskOutside"; drawer: deskDrawer; shown: deskDrawer.shown && !cleanDeskConfirmation.visible; onDismiss: deskDrawer.close() }
     DrawerOutside { objectName: "studyOutside"; drawer: tagsUi.studyDrawer; shown: tagsUi.relatedShown && !tagsUi.pickerVisible; onDismiss: tagsUi.close() }
 
     // Footer: ? and mode on the left; search, passage, version, and layout in
@@ -6944,7 +7111,7 @@ ApplicationWindow {
             objectName: "deskControl"
             visible: floatingActions.expanded
             glyph: "desk"
-            selected: deskDrawer.visible
+            selected: app.deskOpen
             label: "Desk"
             keys: app.keyText("desk")
             available: bible.ready && !bible.busy && !app.modalOpen
@@ -7187,7 +7354,6 @@ ApplicationWindow {
         property string compareReference: ""
         readonly property bool comparing: !removing && step === 0 && compareReference.length > 0
         property bool removeAnnotations: false
-        readonly property int deskCount: chosen && removeAnnotations && bible.desk.length >= 0 ? bible.deskCountForVersion(chosen.id) : 0
         property bool addPending: false
         readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 240))
         height: Math.min(540 * app.scale, app.height - 48)
@@ -7342,9 +7508,7 @@ ApplicationWindow {
                     objectName: "versionSummary"
                     width: versionSummaryScroll.availableWidth
                     text: versionDialog.chosen ? "Remove " + versionDialog.chosen.name + " (" + versionDialog.chosen.abbreviation + ") from this library?\n\n"
-                        + (versionDialog.removeAnnotations ? "Delete its notes, highlights, and tags"
-                            + (versionDialog.deskCount > 0 ? ", and " + versionDialog.deskCount + (versionDialog.deskCount === 1 ? " Desk item" : " Desk items") : "")
-                            + ". This cannot be undone."
+                        + (versionDialog.removeAnnotations ? "Delete its notes, highlights, and tags. This cannot be undone."
                             : "Keep its notes, highlights, and tags. They will reconnect when the same version is reimported.")
                         + "\n\n" + (bible.versions.length === 1 ? "The library will be empty. You can add a version again at any time." : "Other installed versions remain available.")
                         + " Your settings and source USFM files are kept." : ""
@@ -7848,7 +8012,7 @@ ApplicationWindow {
             // Shared list keys: y quotation, shift Y plain text, d Desk.
             Shortcut { sequence: "Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry()) }
             Shortcut { sequence: "Shift+Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry(), true) }
-            Shortcut { sequence: "D"; enabled: savedDrawer.collectionKeys; onActivated: app.toggleScopeDesk(app.focusedSavedEntry()) }
+            Shortcut { sequence: "D"; enabled: savedDrawer.collectionKeys; onActivated: app.addToDesk(app.focusedSavedEntry()) }
             // In place: w writes the row's note in the row; t edits its tags over the drawer; ctrl t manages tags.
             Shortcut { objectName: "savedNoteKey"; sequence: "W"; enabled: savedDrawer.collectionKeys && !bible.busy && !!app.focusedSavedEntry(); onActivated: app.editMarkNote(app.focusedSavedEntry()) }
             Shortcut {
@@ -8110,220 +8274,6 @@ ApplicationWindow {
                 QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("export") }
                 Item { Layout.fillWidth: true }
                 QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("backup") }
-            }
-        }
-    }
-
-    Drawer {
-        id: deskDrawer
-        objectName: "deskDrawer"
-        width: Math.min(520 * app.scale, app.width - 48)
-        height: app.height
-        edge: Qt.RightEdge
-        // Qt blocks window shortcuts behind any visible modal popup, including
-        // one in its exit transition; a closing drawer stops being modal so the
-        // reader's keys (Escape, t, …) work immediately.
-        modal: !closing
-        dim: true
-        focus: true
-        padding: 16 * app.controlScale
-        topPadding: padding
-        bottomPadding: padding
-        leftPadding: padding
-        rightPadding: padding
-        closePolicy: closing || cleanDeskConfirmation.visible || errorDialog.visible ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        readonly property bool listKeys: shown && !contextMenu.visible && !cleanDeskConfirmation.visible && !errorDialog.visible && !bible.busy && !app.textInputActive()
-        background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
-        Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
-        Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
-        // Slide plus a short fade. A closing drawer no longer counts as open
-        // (`shown`), so reader keys and a reopen work during its exit animation.
-        property bool closing: false
-        readonly property bool shown: visible && !closing
-        // Enter: the full slide and a fade, ease-out; exit, subtler: a short
-        // slide and a quicker fade, ease-in (app.panelEnterMs / panelExitMs).
-        enter: Transition {
-            NumberAnimation { property: "position"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "opacity"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutQuad }
-        }
-        exit: Transition {
-            NumberAnimation { property: "position"; to: app.panelExitPosition; duration: app.panelExitMs; easing.type: Easing.InCubic }
-            NumberAnimation { property: "opacity"; to: 0; duration: app.panelExitMs; easing.type: Easing.InQuad }
-        }
-        // While closing, a drawer must not keep its Escape grab: the next Escape
-        // belongs to the reader (or range editor) immediately.
-        onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
-        onAboutToHide: { closing = true; app.restorePanelFocus() }
-        function focusContent() { app.restoreDeskRow(); app.moveDesk(0) }
-        onVisibleChanged: if (visible && !closing) focusContent()
-        onClosed: { closing = false; position = 0; app.restorePanelFocus() }
-        contentItem: ColumnLayout {
-            objectName: "deskContent"
-            spacing: (deskDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
-            Shortcut { sequences: ["J", "Down"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(1) }
-            Shortcut { sequences: ["K", "Up"]; enabled: deskDrawer.listKeys; onActivated: app.moveDesk(-1) }
-            ListMotionKeys { objectName: "deskMotionKeys"; active: deskDrawer.listKeys; count: deskList.count; onMove: function(delta) { app.moveDesk(delta) } }
-            Shortcut { sequences: ["Return", "Enter"]; enabled: deskDrawer.listKeys && app.activeFocusItem === deskList; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.openDeskItem(entry.id); else sounds.play("error") } }
-            Shortcut { sequence: "Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id); else sounds.play("error") } }
-            Shortcut { sequence: "Shift+Y"; enabled: deskDrawer.listKeys; onActivated: { const entry = deskList.model[deskList.currentIndex]; if (entry) app.copyDeskItem(entry.id, true); else sounds.play("error") } }
-            // d (the Desk toggle) and delete remove one passage; shift delete asks to clean the Desk.
-            Shortcut { sequences: ["D", "Delete", "Backspace"]; enabled: deskDrawer.listKeys; onActivated: { if (deskList.count) app.removeCurrentDeskItem(); else sounds.play("error") } }
-            Shortcut { sequences: app.actionKeys("cleanDesk"); enabled: deskDrawer.listKeys && deskList.count > 0; onActivated: app.requestCleanDesk() }
-            Shortcut {
-                sequences: ["Menu", "Shift+F10"]
-                enabled: deskDrawer.listKeys && deskList.currentIndex >= 0
-                onActivated: { const p = app.sceneRowPoint(deskList.currentItem); app.openDeskMenu(deskList.currentIndex, p.x, p.y) }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                PanelHeader {
-                    Layout.fillWidth: true
-                    theme: desktop
-                    title: "Desk"
-                    subtitle: deskList.count === 1 ? "1 passage" : deskList.count + " passages"
-                    uiScale: app.scale
-                    titleScale: app.controlScale
-                    titleName: "deskTitle"
-                    subtitleName: "deskCount"
-                }
-                QuietButton {
-                    objectName: "deskClean"
-                    Layout.alignment: Qt.AlignTop | Qt.AlignRight
-                    text: "Clean Desk"; compact: true
-                    enabled: deskList.count > 0 && !bible.busy
-                    onClicked: app.requestCleanDesk()
-                }
-            }
-            FineRule { Layout.fillWidth: true }
-            ListView {
-                id: deskList
-                objectName: "deskList"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                spacing: 6 * app.scale
-                model: bible.desk
-                onModelChanged: Qt.callLater(app.restoreDeskRow)
-                ScrollBar.vertical: OverlayScrollbar { objectName: "deskScrollbar" }
-                delegate: ItemDelegate {
-                    id: deskEntry
-                    required property var modelData
-                    required property int index
-                    objectName: "deskEntry" + index
-                    width: deskList.width - app.scrollGutter(deskList)
-                    padding: 12 * app.scale
-                    height: deskEntryContent.implicitHeight + topPadding + bottomPadding
-                    focusPolicy: Qt.NoFocus
-                    highlighted: ListView.isCurrentItem
-                    onClicked: { deskList.currentIndex = index; app.moveDesk(0); app.openDeskItem(modelData.id) }
-                    TapHandler {
-                        acceptedButtons: Qt.RightButton
-                        onTapped: function(eventPoint) { app.openDeskMenu(deskEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
-                    }
-                    contentItem: ColumnLayout {
-                        id: deskEntryContent
-                        spacing: 7 * app.scale
-                        Label {
-                            objectName: "deskHeader" + deskEntry.index
-                            text: deskEntry.modelData.reference + " · " + deskEntry.modelData.versionAbbreviation
-                            textFormat: Text.PlainText
-                            color: deskEntry.modelData.available ? desktop.foreground : desktop.muted
-                            font.pixelSize: 16 * app.scale; font.weight: Font.Medium
-                            Layout.fillWidth: true; wrapMode: Text.Wrap
-                        }
-                        Label {
-                            objectName: "deskText" + deskEntry.index
-                            // LRM: display-only LTR base direction (copy uses the backend).
-                            text: app.leftToRightText(deskEntry.modelData.text)
-                            visible: text.length > 0
-                            textFormat: Text.PlainText
-                            horizontalAlignment: Text.AlignLeft
-                            // Muted, at the panels' passage size and line height.
-                            color: desktop.muted
-                            font.pixelSize: 13 * app.scale
-                            lineHeight: app.panelLineHeight
-                            Layout.fillWidth: true; wrapMode: Text.Wrap
-                        }
-                        Label {
-                            objectName: "deskUnavailable" + deskEntry.index
-                            visible: !deskEntry.modelData.available
-                            text: deskEntry.modelData.versionAbbreviation + " is not installed. Reimport it to open or copy this passage."
-                            color: desktop.muted; font.pixelSize: 12 * app.scale; font.italic: true
-                            Layout.fillWidth: true; wrapMode: Text.Wrap
-                        }
-                    }
-                    background: Rectangle {
-                        color: deskEntry.highlighted ? app.tint(desktop.accent, 0.11) : deskEntry.hovered ? desktop.surface : "transparent"
-                        radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                        // The current row is shown by its tinted fill alone, never an accent border.
-                        border.width: 0
-                    }
-                }
-                Label {
-                    objectName: "deskEmpty"
-                    anchors.centerIn: parent
-                    width: parent.width - 24
-                    text: "The Desk is empty. Press " + app.keyText("toggleDesk") + " on a passage to add it."
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-                    color: desktop.muted
-                    font.pixelSize: 13 * app.scale
-                    visible: deskList.count === 0
-                }
-            }
-            Label { objectName: "deskError"; text: bible.error; visible: text.length > 0; color: desktop.error; font.pixelSize: 12 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            FineRule { Layout.fillWidth: true }
-            // No-break spaces keep each key with its verb when the row wraps.
-            HintRow {
-                objectName: "deskHints"
-                theme: desktop
-                parts: app.deskHintParts()
-                pixelSize: 11 * app.scale
-                Layout.fillWidth: true
-            }
-        }
-    }
-
-    ModalCard {
-        id: cleanDeskConfirmation
-        objectName: "cleanDeskConfirmation"
-        // Outside clicks cancel, like esc; they never reach what is underneath.
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        // Focus at once, while the modal is still fading in.
-        onVisibleChanged: if (visible) { cleanDeskCancel.forceActiveFocus() }
-        onClosed: {
-            if (deskDrawer.shown) Qt.callLater(function() { if (!cleanDeskConfirmation.visible) app.moveDesk(0) })
-            else app.restorePanelFocus()
-        }
-        Shortcut {
-            sequences: ["Left", "Up", "Right", "Down"]
-            enabled: cleanDeskConfirmation.opened && !errorDialog.visible
-            onActivated: {
-                if (cleanDeskCancel.activeFocus) cleanDeskConfirm.forceActiveFocus()
-                else cleanDeskCancel.forceActiveFocus()
-            }
-        }
-        contentItem: ColumnLayout {
-            spacing: 18 * app.scale
-            Label { text: "Clean the Desk?"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label {
-                objectName: "cleanDeskExplanation"
-                text: "Remove all " + bible.desk.length + (bible.desk.length === 1 ? " passage" : " passages") + " from the Desk in every window. Your notes, highlights, and tags are kept."
-                color: desktop.foreground; font.pixelSize: 14 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap
-            }
-            Label { text: bible.error; visible: text.length > 0; color: desktop.error; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            RowLayout {
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                QuietButton { id: cleanDeskCancel; objectName: "cleanDeskCancel"; text: "Cancel"; onClicked: cleanDeskConfirmation.close() }
-                QuietButton { id: cleanDeskConfirm; objectName: "cleanDeskConfirm"; text: "Clean Desk"; emphasized: true; onClicked: app.confirmCleanDesk() }
-            }
-            HintRow {
-                objectName: "cleanDeskHints"
-                theme: desktop
-                parts: app.confirmationHintParts(cleanDeskCancel, cleanDeskConfirm, cleanDeskConfirmation)
-                pixelSize: 11 * app.scale
-                Layout.fillWidth: true
             }
         }
     }
@@ -9284,6 +9234,7 @@ ApplicationWindow {
         }
         // Open Notes follows the selection, however it moves.
         function onSelectionChanged() { if (app.notesOpen && !noteEditor.activeFocus) Qt.callLater(app.syncNote) }
+        function onDeskChanged() { app.syncDesk() }
         function onNavigationChanged() {
             app.selectionBarWanted = false
             app.clearTextSelection()
@@ -9307,7 +9258,7 @@ ApplicationWindow {
     }
     Component.onCompleted: {
         focusLayout = bible.focusMode; marginFocusLevel = focusLayout ? 0 : 1; marginNotesOn = bible.marginNotes
-        readerInitialized = true; syncNote(); restorePosition(); restartDwell(); scheduleMargins()
+        readerInitialized = true; syncNote(); loadSavedDesk(); restorePosition(); restartDwell(); scheduleMargins()
     }
     onClosing: function(close) {
         close.accepted = flushNote()
@@ -9352,15 +9303,16 @@ ApplicationWindow {
             onActivated: app.runCommand(modelData.id)
         }
     }
-    // alt v in the Notes panel (editor, preview, Linked from); the drawer is a
-    // popup, so the application context reaches it in the active window only.
+    // alt v in the Margin (a note's editor, preview, Linked from; the Desk's);
+    // the drawer is a popup, so the application context reaches it in the
+    // active window only.
     Shortcut {
         objectName: "notePreviewShortcut"
         context: Qt.ApplicationShortcut
         sequences: app.actionKeys("notePreview")
         // Without a selection there is no note: the key sounds the error.
-        enabled: app.active && app.notesOpen && app.focusWithin(notesDrawer.contentItem) && !app.modalOpen
-        onActivated: app.toggleNotePreview()
+        enabled: app.active && app.marginOpen && app.focusWithin(notesDrawer.contentItem) && !app.modalOpen
+        onActivated: if (app.deskOpen) app.toggleDeskPreview(); else app.toggleNotePreview()
     }
     Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
     Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
@@ -9370,7 +9322,7 @@ ApplicationWindow {
         onActivated: {
             if (textPopover.visible) { textPopover.close(); return }
             if (app.selectionBarShown) { app.selectionBarWanted = false; return }
-            if (app.notesOpen) {
+            if (app.marginOpen) {
                 // Open Notes closes before the reading state it follows (search,
                 // selection) changes; a text selection or a count goes first.
                 // (The editor's esc only brought the keyboard here.)

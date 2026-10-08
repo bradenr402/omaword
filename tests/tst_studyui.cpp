@@ -455,9 +455,9 @@ private slots:
         QApplication::clipboard()->clear();
         key(Qt::Key_Y);
         QTRY_VERIFY(QApplication::clipboard()->text().contains("John 1:14"));
-        const int desk = bible->desk().size();
-        key(Qt::Key_D); QTRY_COMPARE(bible->desk().size(), desk + 1);
-        QCOMPARE(bible->desk().last().toMap()["reference"].toString(), QString("John 1:14"));
+        // d quotes the row on the Desk.
+        QVERIFY(bible->deskPage().isEmpty());
+        key(Qt::Key_D); QTRY_VERIFY(bible->deskPage().contains(QStringLiteral("> \u2014 John 1:14 (")));
         // Enter opens the row as a History jump and keeps the panel open on its
         // passage (opening from inside never re-roots it while it has focus).
         const int jumps = prop("jumpStack").toList().size();

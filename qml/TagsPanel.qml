@@ -456,7 +456,7 @@ Item {
         return [["Return", "open", function() { panel.openStudyRow(studyList.currentIndex) }, listKeys],
             ["T", "tag", function() { panel.tagCurrentRow() }, relatedMoveKeys && !bible.busy],
             ["Y", "copy", function() { panel.app.copyScope(panel.listScope()) }, listKeys],
-            ["D", "Desk", function() { panel.app.toggleScopeDesk(panel.listScope()) }, listKeys],
+            ["D", "Desk", function() { panel.app.addToDesk(panel.listScope()) }, listKeys],
             ["/", "filter", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", "close", escape]]
     }
     // The picker's enter: create or toggle from the search field, toggle in the list.
@@ -687,7 +687,7 @@ Item {
             // Shared list keys on the current row.
             Shortcut { sequence: "Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope()) }
             Shortcut { sequence: "Shift+Y"; enabled: panel.listKeys; onActivated: panel.app.copyScope(panel.listScope(), true) }
-            Shortcut { sequence: "D"; enabled: panel.listKeys; onActivated: panel.app.toggleScopeDesk(panel.listScope()) }
+            Shortcut { sequence: "D"; enabled: panel.listKeys; onActivated: panel.app.addToDesk(panel.listScope()) }
             // t tags the row (or, with none, the passage); / filters.
             Shortcut { objectName: "studyTagKey"; sequence: "T"; enabled: panel.relatedMoveKeys && !panel.bible.busy; onActivated: panel.tagCurrentRow() }
             Shortcut { sequence: "/"; enabled: panel.relatedMoveKeys; onActivated: panel.showStudySearch() }

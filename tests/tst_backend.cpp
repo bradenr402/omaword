@@ -83,10 +83,39 @@ class BackendTest : public QObject
         }
         return {};
     }
+    // A store as schema 9 left it: the Desk was a list of passages.
+    static bool schemaNine(QSqlQuery &q) {
+        return q.exec("DROP TABLE desk_page")
+            && q.exec("CREATE TABLE desk(id INTEGER PRIMARY KEY AUTOINCREMENT,position INTEGER NOT NULL UNIQUE CHECK(position>=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),created TEXT NOT NULL,UNIQUE(version_id,book,chapter,start,endBook,endChapter,end))")
+            && q.exec("PRAGMA user_version=9");
+    }
+    static bool deskRow(QSqlQuery &q, int position, const QString &versionId, int book, int chapter, int start, int end) {
+        q.prepare("INSERT INTO desk(position,version_id,book,chapter,start,endBook,endChapter,end,created) VALUES(?,?,?,?,?,?,?,?,'2026-01-01T00:00:00.000Z')");
+        for (const QVariant &value : QVariantList{position,versionId,book,chapter,start,book,chapter,end}) q.addBindValue(value);
+        return q.exec();
+    }
+    // The Desk's quotation of a passage in the active version: its text laid
+    // out as copySelection() lays it out (numbered when it spans verses), as
+    // a Markdown blockquote ending with its reference and version.
+    QString deskQuote(const QString &reference) {
+        if (!bible->navigate(reference)) return {};
+        const bool several = bible->selectedStart() != bible->selectedEnd() || bible->crossChapterSelection();
+        QString body = bible->copySelection(!several);
+        if (several) body = body.mid(1, body.lastIndexOf(QStringLiteral("\u201d\n\n\u2014")) - 1);
+        QStringList lines;
+        for (const auto &paragraph : body.split("\n\n")) {
+            if (!lines.isEmpty()) lines << ">";
+            const auto parts = paragraph.split('\n');
+            for (int i = 0; i < parts.size(); ++i) lines << "> " + parts[i] + (i + 1 < parts.size() ? "  " : "");
+        }
+        lines << ">" << QStringLiteral("> \u2014 ") + bible->selectionReference() + " (" + bible->versionAbbreviation() + ")";
+        return lines.join('\n');
+    }
     // A store as schema 8 left it: annotations kept a bookmark flag, and
     // neither they nor tag assignments had times.
     static bool schemaEight(QSqlQuery &q) {
-        return q.exec("ALTER TABLE annotations RENAME TO annotations_v9")
+        return schemaNine(q)
+            && q.exec("ALTER TABLE annotations RENAME TO annotations_v9")
             && q.exec("CREATE TABLE annotations(book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),bookmark INTEGER NOT NULL CHECK(bookmark IN(0,1)),highlight INTEGER NOT NULL CHECK(highlight IN(0,1)),note TEXT NOT NULL,endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),version_id TEXT NOT NULL,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(bookmark OR highlight OR length(note)>0)) WITHOUT ROWID")
             && q.exec("INSERT INTO annotations SELECT book,chapter,start,end,0,highlight,note,endBook,endChapter,version_id FROM annotations_v9")
             && q.exec("DROP TABLE annotations_v9")
@@ -220,7 +249,7 @@ private slots:
         QVERIFY(bible->focusMode()); QCOMPARE(bible->readingMode(),QString("block"));
         QCOMPARE(bible->fontSize(),23); QCOMPARE(bible->lineHeight(),2.3);
         QSqlQuery q(store());
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
         QVERIFY(q.exec("CREATE TRIGGER reject_preferences BEFORE UPDATE ON preferences BEGIN SELECT RAISE(ABORT,'preference failure'); END"));
         bible->setFontSize(19); QCOMPARE(bible->fontSize(),23); QVERIFY(bible->error().contains("preference failure"));
     }
@@ -620,17 +649,19 @@ private slots:
         const auto next = bible->verses().first().toMap()["text"].toString();
         QCOMPARE(bible->copySelection(true),expected+"\n\n"+next);
         QVERIFY(bible->copySelection().endsWith(QStringLiteral("\n\n¹ ")+next+QStringLiteral("”\n\n—")+bible->selectionReference()));
-        const QString spanning = bible->copySelection(true), spanningQuote = bible->copySelection();
-        QVERIFY(bible->addToDesk()); QCOMPARE(bible->desk().first().toMap()["text"].toString(),spanning);
+        // The Desk quotes it laid out the same way, verses numbered.
+        const QString spanning = bible->selectionReference(), spanningQuote = bible->copySelection();
+        QCOMPARE(bible->appendToDesk(),spanning);
+        const QString deskQuotation = deskQuote(spanning);
+        QVERIFY(deskQuotation.startsWith("> " + spanningQuote.mid(1,spanningQuote.indexOf('\n') - 1)));
+        QCOMPARE(bible->deskPage(),deskQuotation + "\n");
         // A fixture with a paragraph before every verse must copy paragraph breaks.
         const QString paragraphs = fixtures.filePath("copy-engnet_usfm.zip");
         QVERIFY(zip(paragraphs,{{"01-GENengnet.usfm","\\id GEN Paragraph Bible\n\\c 1\n\\p\n\\v 1 One.\n\\p\n\\v 2 Two.\n"}}));
         install(paragraphs); QVERIFY(bible->navigate("GEN 1:1-2"));
         QCOMPARE(bible->copySelection(true),QString("One.\n\nTwo."));
-        // Desk text of an inactive version is read from its own generation.
-        const auto item = bible->desk().first().toMap();
-        QCOMPARE(item["versionId"].toString(),QString("engojb")); QCOMPARE(item["text"].toString(),spanning);
-        QCOMPARE(bible->copyDeskItem(item["id"].toInt()),spanningQuote);
+        // The page keeps its text whatever is installed since.
+        QCOMPARE(bible->deskPage(),deskQuotation + "\n");
     }
     void schemaFourMigrationPreservesArchivesAndRollsBack() {
         const QString path = bible->dataDirectory()+"/personal.sqlite";
@@ -638,9 +669,9 @@ private slots:
         const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("migration"); });
         auto db = QSqlDatabase::addDatabase("QSQLITE","migration"); db.setDatabaseName(path); QVERIFY(db.open());
         QSqlQuery q(db);
+        QVERIFY(schemaEight(q)); QVERIFY(q.exec("DROP TABLE annotations"));
         QVERIFY(q.exec("DROP TABLE desk")); // Schema 4 stores predate the Desk, History, and the ribbon.
         QVERIFY(q.exec("DROP TABLE history")); QVERIFY(q.exec("DROP TABLE recent_queries")); QVERIFY(q.exec("DROP TABLE ribbon"));
-        QVERIFY(schemaEight(q)); QVERIFY(q.exec("DROP TABLE annotations"));
         QVERIFY(q.exec("CREATE TABLE annotations(book INTEGER,chapter INTEGER,start INTEGER,end INTEGER,bookmark INTEGER,highlight INTEGER,note TEXT,endBook INTEGER,endChapter INTEGER,version_id TEXT,PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(book BETWEEN 1 AND 66),CHECK(chapter BETWEEN 1 AND 150),CHECK(start BETWEEN 1 AND 176)) WITHOUT ROWID"));
         QVERIFY(q.exec("INSERT INTO annotations VALUES(1,1,1,1,1,0,'Archived note',1,1,'net-2.1')"));
         QVERIFY(q.exec("INSERT OR REPLACE INTO reading VALUES(1,1,1,1,1,0.42,1,1,1,1,'net-2.1')"));
@@ -657,7 +688,7 @@ private slots:
         QVERIFY(q.exec("SELECT note,version_id FROM annotations")); QVERIFY(q.next());
         QCOMPARE(q.value(0).toString(),QString("Archived note")); QCOMPARE(q.value(1).toString(),QString("net-2.1")); q.finish();
         QVERIFY(q.exec("SELECT position FROM reading WHERE version_id='net-2.1'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toDouble(),0.42); q.finish();
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
         // The archived bookmark became the Bookmarked tag, in its own version.
         QVERIFY(q.exec("SELECT t.name,a.version_id FROM tag_assignments a JOIN tags t ON t.id=a.tag_id")); QVERIFY(q.next());
         QCOMPARE(q.value(0).toString(),QString("Bookmarked")); QCOMPARE(q.value(1).toString(),QString("net-2.1"));
@@ -674,24 +705,25 @@ private slots:
         QVERIFY(q.exec("DROP TABLE ribbon")); QVERIFY(q.exec("PRAGMA user_version=5"));
         // A conflicting object makes the schema 6 step fail; nothing may change.
         QVERIFY(q.exec("CREATE VIEW desk AS SELECT 1 AS id"));
-        bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->error().isEmpty()); QVERIFY(bible->desk().isEmpty()); bible.reset();
+        bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->error().isEmpty()); QVERIFY(bible->deskPage().isEmpty()); bible.reset();
         QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),5); q.finish();
         QVERIFY(q.exec("SELECT note FROM annotations")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("Pre-desk note")); q.finish();
         QVERIFY(q.exec("DROP VIEW desk"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
         QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-desk note"));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
-        QVERIFY(bible->desk().isEmpty()); QVERIFY(bible->addToDesk()); QCOMPARE(bible->desk().size(),1);
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(bible->deskPage().isEmpty()); QCOMPARE(bible->appendToDesk(),QString("John 3:16"));
+        QCOMPARE(bible->deskPage(),deskQuote("John 3:16") + "\n");
     }
     void schemaSixHistoryMigrationRollsBack() {
         install(net); QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Pre-history note");
-        QVERIFY(bible->addToDesk());
+        const QString quotation = deskQuote("John 3:16"), version = bible->versionId();
         const QString path = bible->dataDirectory()+"/personal.sqlite";
         bible.reset();
         const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("history-migration"); });
         auto db = QSqlDatabase::addDatabase("QSQLITE","history-migration"); db.setDatabaseName(path); QVERIFY(db.open());
         QSqlQuery q(db);
-        QVERIFY(schemaEight(q));
+        QVERIFY(schemaEight(q)); QVERIFY(deskRow(q,1,version,43,3,16,16));
         QVERIFY(q.exec("DROP TABLE history")); QVERIFY(q.exec("DROP TABLE recent_queries")); QVERIFY(q.exec("DROP TABLE ribbon"));
         QVERIFY(q.exec("PRAGMA user_version=6"));
         // recent_queries is created after history: a conflict there must roll back both.
@@ -702,8 +734,8 @@ private slots:
         QVERIFY(q.exec("SELECT note FROM annotations")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("Pre-history note")); q.finish();
         QVERIFY(q.exec("DROP VIEW recent_queries"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
-        QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-history note")); QCOMPARE(bible->desk().size(),1);
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
+        QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-history note")); QCOMPARE(bible->deskPage(),quotation + "\n");
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
         QVERIFY(bible->historyEnabled()); QVERIFY(bible->history().isEmpty()); QVERIFY(bible->recentQueries().isEmpty());
         QVERIFY(bible->recordHistory()); QCOMPARE(bible->history().size(),1);
     }
@@ -720,7 +752,7 @@ private slots:
         QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),7); q.finish();
         QVERIFY(q.exec("DROP VIEW ribbon"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
         QCOMPARE(bible->history().size(),1); QVERIFY(bible->ribbon().isEmpty()); QVERIFY(bible->ribbonLocation().isEmpty());
         QVERIFY(bible->placeRibbon()); QCOMPARE(bible->ribbon()["reference"].toString(),QString("John 3:16"));
     }
@@ -747,7 +779,7 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*) FROM tag_assignments")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),1); q.finish();
         QVERIFY(q.exec("DROP VIEW annotations_v8"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
         QCOMPARE(bible->tags().size(),1); QCOMPARE(bible->tags().first().toMap()["name"].toString(),QString("bookmarked"));
         auto bookmarkedAt = [&](QVariantMap scope) {
             const auto tags = bible->tagsForScope(scope);
@@ -771,6 +803,31 @@ private slots:
         QVERIFY(bible->setTag(highlighted,id,true));
         q.prepare("SELECT created FROM tag_assignments WHERE start=17"); QVERIFY(q.exec()); QVERIFY(q.next());
         QVERIFY(QDateTime::fromString(q.value(0).toString(),Qt::ISODateWithMs).isValid()); q.finish();
+    }
+    void schemaNineDeskBecomesItsPage() {
+        install(net); const QString version = bible->versionId();
+        const QString john = deskQuote("John 3:16"), genesis = deskQuote("GEN 1:4-6");
+        QVERIFY(bible->navigate("John 3:17")); bible->setNoteText("Kept note");
+        const QString path = bible->dataDirectory()+"/personal.sqlite";
+        bible.reset();
+        const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("desk-page-migration"); });
+        auto db = QSqlDatabase::addDatabase("QSQLITE","desk-page-migration"); db.setDatabaseName(path); QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(schemaNine(q));
+        // In Desk order (positions), not insertion order; a version no longer
+        // installed keeps its passage's reference.
+        QVERIFY(deskRow(q,2,version,1,1,4,6)); QVERIFY(deskRow(q,1,version,43,3,16,16)); QVERIFY(deskRow(q,3,"eng-gone",19,23,1,2));
+        // A failing step leaves schema 9 exactly as it was.
+        QVERIFY(q.exec("CREATE VIEW desk_page AS SELECT 1 AS id"));
+        bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->error().isEmpty()); bible.reset();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),9); q.finish();
+        QVERIFY(q.exec("SELECT COUNT(*) FROM desk")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),3); q.finish();
+        QVERIFY(q.exec("DROP VIEW desk_page"));
+        bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(q.exec("SELECT COUNT(*) FROM sqlite_master WHERE name='desk'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
+        QCOMPARE(bible->deskPage(),john + "\n\n" + genesis + QStringLiteral("\n\n> \u2014 Psalms 23:1–2 (eng-gone)\n"));
+        QVERIFY(bible->navigate("John 3:17")); QCOMPARE(bible->noteText(),QString("Kept note"));
     }
     void ribbonPlacesStaysAndCrossesVersions() {
         // Nothing to place it in before a version is installed.
@@ -888,7 +945,7 @@ private slots:
         QVERIFY(bible->recordHistory()); QCOMPARE(later.history().size(),1);
     }
     void historyIsNotBackedUp() {
-        install(net); QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->addToDesk());
+        install(net); QVERIFY(bible->navigate("John 3:16")); QVERIFY(!bible->appendToDesk().isEmpty());
         const auto before = QUrl::fromLocalFile(session->filePath("before.json")); QVERIFY(bible->exportBackup(before));
         QVERIFY(bible->recordHistory()); QVERIFY(bible->recordQuery("light"));
         const auto after = QUrl::fromLocalFile(session->filePath("after.json")); QVERIFY(bible->exportBackup(after));
@@ -897,45 +954,49 @@ private slots:
         auto withoutStamp = [](const QByteArray &bytes) { auto o = QJsonDocument::fromJson(bytes).object(); o.remove("created"); return o; };
         QVERIFY(!a.isEmpty()); QCOMPARE(withoutStamp(b),withoutStamp(a)); // Only the export time differs.
         const auto root = QJsonDocument::fromJson(b).object();
-        QCOMPARE(root["version"].toInt(),6); QVERIFY(!root.contains("history")); QVERIFY(!b.contains("light"));
+        QCOMPARE(root["version"].toInt(),7); QVERIFY(!root.contains("history")); QVERIFY(!b.contains("light"));
         // Restoring a backup leaves History alone.
         QVERIFY2(bible->importBackup(after),qPrintable(bible->error())); QCOMPARE(bible->history().size(),1);
         QCOMPARE(bible->recentQueries(),QStringList({"light"}));
     }
-    void deskOrderToggleCleanAndPersistence() {
+    void deskPageAppendEditUndoAndPersistence() {
         install(net);
-        QVERIFY(!bible->addToDesk()); QVERIFY(!bible->error().isEmpty()); // No selection yet.
+        QVERIFY(bible->appendToDesk().isEmpty()); QVERIFY(!bible->error().isEmpty()); // No selection yet.
+        QCOMPARE(bible->deskPage(),QString());
         QSignalSpy changed(bible.get(),&BibleBackend::deskChanged);
-        QVERIFY(bible->navigate("John 3:16-18")); QVERIFY(!bible->currentInDesk());
-        const auto john = bible->tagScope(); const QString johnText = bible->copySelection(true), johnQuote = bible->copySelection();
-        QVERIFY(bible->addToDesk()); QCOMPARE(changed.count(),1); QVERIFY(bible->currentInDesk());
-        QVERIFY(bible->addToDesk(john)); QCOMPARE(changed.count(),1); QCOMPARE(bible->desk().size(),1); // Duplicate no-op.
-        QVERIFY(bible->navigate("GEN 1:4-7")); QVERIFY(!bible->currentInDesk());
-        QVERIFY(bible->toggleDesk()); QVERIFY(bible->currentInDesk());
-        QVERIFY(bible->navigate("MAT 1:2")); QVERIFY(bible->addToDesk());
-        auto desk = bible->desk(); QCOMPARE(desk.size(),3);
-        QStringList refs; for (const auto &row : desk) refs << row.toMap()["reference"].toString();
-        QCOMPARE(refs,QStringList({"John 3:16–18","Genesis 1:4–7","Matthew 1:2"}));
-        const auto first = desk.first().toMap();
-        for (const QString key : {"id","versionId","versionAbbreviation","reference","book","chapter","start","endBook","endChapter","end","created","text","available"})
-            QVERIFY2(first.contains(key),qPrintable(key));
-        QCOMPARE(first["versionId"].toString(),QString("engnet")); QVERIFY(first["available"].toBool());
-        QCOMPARE(first["text"].toString(),johnText); QVERIFY(bible->inDesk(john));
-        QCOMPARE(bible->copyDeskItem(first["id"].toInt()),johnQuote);
-        QCOMPARE(QGuiApplication::clipboard()->text(),johnQuote);
-        QVERIFY(bible->navigate("GEN 1:4-7")); QVERIFY(bible->toggleDesk()); QVERIFY(!bible->currentInDesk());
-        QCOMPARE(bible->desk().size(),2);
-        QVERIFY(bible->toggleDesk()); QCOMPARE(bible->desk().last().toMap()["reference"].toString(),QString("Genesis 1:4–7"));
-        QVERIFY(bible->removeFromDesk(first["id"].toInt())); QVERIFY(!bible->inDesk(john));
-        QVERIFY(!bible->removeFromDesk(first["id"].toInt())); QVERIFY(!bible->error().isEmpty());
-        QVERIFY(!bible->openDeskItem(first["id"].toInt())); QVERIFY(bible->copyDeskItem(first["id"].toInt()).isEmpty());
-        const auto before = bible->desk(); QCOMPARE(before.size(),2);
+        // A verse is quoted as its text; a passage of several, verses numbered.
+        QVERIFY(bible->navigate("John 3:16")); const QString john = bible->copySelection(true);
+        QCOMPARE(bible->appendToDesk(),QString("John 3:16")); QCOMPARE(changed.count(),1);
+        const QString first = "> " + john + QStringLiteral("\n>\n> \u2014 John 3:16 (NET)\n");
+        QCOMPARE(bible->deskPage(),first); QCOMPARE(deskQuote("John 3:16") + "\n",first);
+        // Another passage goes at the end, a blank line apart, without navigating.
+        QVERIFY(bible->navigate("GEN 1:4-6")); const auto genesis = bible->tagScope(); QVERIFY(bible->navigate("John 3:1"));
+        QCOMPARE(bible->appendToDesk(genesis),QString("Genesis 1:4–6"));
+        QCOMPARE(bible->selectionReference(),QString("John 3:1"));
+        const QString both = first + "\n" + deskQuote("GEN 1:4-6") + "\n";
+        QCOMPARE(bible->deskPage(),both); QCOMPARE(changed.count(),2);
+        QVERIFY(both.contains(QStringLiteral("> \u2074 ")) && both.contains(QStringLiteral("\n>\n> \u2014 Genesis 1:4–6 (NET)\n")));
+        // u takes the last addition off, and redo puts it back.
+        QCOMPARE(bible->undoLabel(),QString("addition of Genesis 1:4–6 to the Desk"));
+        QVERIFY(bible->undo()); QCOMPARE(bible->deskPage(),first);
+        QVERIFY(bible->redo()); QCOMPARE(bible->deskPage(),both);
+        // The page saves only over the text its editor started from.
+        QVERIFY(!bible->setDeskPage("Mine",first)); QVERIFY(bible->error().contains("changed in another window"));
+        QCOMPARE(bible->deskPage(),both);
+        QVERIFY(bible->setDeskPage("My thoughts",both)); QCOMPARE(bible->deskPage(),QString("My thoughts"));
+        const int saves = changed.count();
+        QVERIFY(bible->setDeskPage("My thoughts","My thoughts")); QCOMPARE(changed.count(),saves); // Unchanged: nothing written.
+        // Written on since, the addition stays: undo says why and moves past it.
+        QVERIFY(!bible->undo()); QVERIFY(bible->error().contains("Desk has changed")); QCOMPARE(bible->deskPage(),QString("My thoughts"));
+        // An addition after the reader's own words starts a new paragraph.
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(!bible->appendToDesk().isEmpty());
+        QCOMPARE(bible->deskPage(),"My thoughts\n\n" + first);
+        // Control characters and pages past 4 MiB are refused.
+        const QString kept = bible->deskPage();
+        QVERIFY(!bible->setDeskPage(QString("Bad\u0001"),kept)); QVERIFY(!bible->setDeskPage(QString(4 * 1024 * 1024 + 1,'x'),kept));
+        QCOMPARE(bible->deskPage(),kept);
         bible.reset(); bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->ready(),qPrintable(bible->error()));
-        QCOMPARE(bible->desk(),before);
-        QVERIFY(bible->openDeskItem(before.first().toMap()["id"].toInt()));
-        QCOMPARE(bible->selectionReference(),QString("Matthew 1:2"));
-        QVERIFY(bible->cleanDesk()); QVERIFY(bible->desk().isEmpty());
-        bible.reset(); bible = std::make_unique<BibleBackend>(); QVERIFY(bible->desk().isEmpty());
+        QCOMPARE(bible->deskPage(),kept);
     }
     void deleteNoteScopeKeepsMarksAndTags() {
         install(net); BibleBackend peer;
@@ -1170,74 +1231,88 @@ private slots:
         }
         bible->clearSelection(); QVERIFY(bible->compareVersions().isEmpty());
     }
-    void deskCrossVersionPeersAndRemoval() {
-        install(net); BibleBackend peer; QVERIFY(peer.desk().isEmpty());
+    void deskPageAcrossVersionsAndWindows() {
+        install(net); BibleBackend peer; QVERIFY(peer.deskPage().isEmpty());
         QSignalSpy peerChanged(&peer,&BibleBackend::deskChanged);
-        QVERIFY(bible->navigate("GEN 1:4-6")); QVERIFY(bible->addToDesk());
-        QCOMPARE(peerChanged.count(),1); QCOMPARE(peer.desk(),bible->desk());
-        install(kjv); QVERIFY(bible->navigate("TOB 1:2-3")); const auto tobit = bible->tagScope();
-        const QString text = bible->copySelection(true), quote = bible->copySelection();
-        QVERIFY(peer.addToDesk(tobit)); QCOMPARE(bible->desk(),peer.desk()); QVERIFY(bible->currentInDesk());
+        const QString genesis = deskQuote("GEN 1:4"); QVERIFY(!bible->appendToDesk().isEmpty());
+        QCOMPARE(peerChanged.count(),1); QCOMPARE(peer.deskPage(),genesis + "\n");
+        // Another version's passage is quoted from it, under its abbreviation.
+        install(kjv); const QString tobit = deskQuote("TOB 1:2-3"), kjvAbbreviation = bible->versionAbbreviation();
+        const auto scope = bible->tagScope();
+        QVERIFY(tobit.endsWith(" (" + kjvAbbreviation + ")"));
         QVERIFY(bible->switchVersion("engnet"));
-        auto item = bible->desk().last().toMap();
-        QCOMPARE(item["versionId"].toString(),QString("eng-kjv")); QVERIFY(item["available"].toBool());
-        QCOMPARE(item["text"].toString(),text); QCOMPARE(bible->copyDeskItem(item["id"].toInt()),quote);
-        QCOMPARE(item["reference"].toString(),tobit["reference"].toString());
-        QVERIFY(bible->openDeskItem(item["id"].toInt())); QCOMPARE(bible->versionId(),QString("eng-kjv"));
-        QCOMPARE(bible->selectionReference(),tobit["reference"].toString()); QVERIFY(bible->currentInDesk());
-        QCOMPARE(bible->deskCountForVersion("eng-kjv"),1); QCOMPARE(bible->deskCountForVersion("engnet"),1);
-        // Keeping annotations keeps Desk items; they are unavailable until reinstalled.
-        QVERIFY(bible->removeVersion("eng-kjv",false));
-        item = peer.desk().last().toMap(); QVERIFY(!item["available"].toBool()); QVERIFY(item["text"].toString().isEmpty());
-        QCOMPARE(item["reference"].toString(),QString("Tobit 1:2–3"));
-        QVERIFY(!bible->openDeskItem(item["id"].toInt())); QCOMPARE(bible->deskCountForVersion("eng-kjv"),1);
-        install(kjv); QVERIFY(peer.desk().last().toMap()["available"].toBool());
-        QVERIFY(bible->removeVersion("eng-kjv",true));
-        QCOMPARE(bible->deskCountForVersion("eng-kjv"),0); QCOMPARE(peer.desk().size(),1);
-        QCOMPARE(peer.desk().first().toMap()["versionId"].toString(),QString("engnet"));
-        QVERIFY(peer.cleanDesk()); QVERIFY(bible->desk().isEmpty());
+        QCOMPARE(peer.appendToDesk(scope),scope["reference"].toString());
+        QCOMPARE(bible->deskPage(),genesis + "\n\n" + tobit + "\n"); QCOMPARE(peer.deskPage(),bible->deskPage());
+        // A window's draft of the page saves before another window adds to it.
+        int flushes = 0;
+        bible->setFlushCallback([&] { ++flushes; return bible->setDeskPage("Draft",bible->deskPage()); });
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(!peer.appendToDesk(bible->tagScope()).isEmpty());
+        QCOMPARE(flushes,1); QVERIFY(peer.deskPage().startsWith("Draft\n\n> "));
+        // A draft that cannot save cancels the addition.
+        const QString page = peer.deskPage();
+        bible->setFlushCallback([] { return false; });
+        QVERIFY(peer.appendToDesk(bible->tagScope()).isEmpty()); QVERIFY(!peer.error().isEmpty()); QCOMPARE(peer.deskPage(),page);
+        bible->setFlushCallback({});
+        // Removing a version leaves the page's words; its passages cannot be added again.
+        QVERIFY(bible->removeVersion("eng-kjv",true)); QCOMPARE(peer.deskPage(),page); QCOMPARE(bible->deskPage(),page);
+        QVERIFY(bible->appendToDesk(scope).isEmpty()); QVERIFY(!bible->error().isEmpty()); QCOMPARE(bible->deskPage(),page);
     }
     void deskBackupRoundTrip() {
         install(net);
-        QVERIFY(bible->navigate("GEN 1:2")); QVERIFY(bible->addToDesk());
-        QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->addToDesk());
-        const auto saved = bible->desk();
+        const QString genesis = deskQuote("GEN 1:2"); QVERIFY(!bible->appendToDesk().isEmpty());
+        QVERIFY(bible->setDeskPage(bible->deskPage() + "\nMy own line.\n",bible->deskPage()));
+        const QString saved = bible->deskPage();
         const auto backup = QUrl::fromLocalFile(session->filePath("desk.json")); QVERIFY(bible->exportBackup(backup));
         QFile file(backup.toLocalFile()); QVERIFY(file.open(QIODevice::ReadOnly));
         const auto root = QJsonDocument::fromJson(file.readAll()).object(); file.close();
-        QCOMPARE(root["version"].toInt(),6); QCOMPARE(root["desk"].toArray().size(),2);
-        QCOMPARE(root["desk"].toArray().first().toObject()["versionId"].toString(),QString("engnet"));
-        QVERIFY(bible->cleanDesk()); QVERIFY(bible->navigate("MAT 1:1")); QVERIFY(bible->addToDesk());
+        QCOMPARE(root["version"].toInt(),7); QCOMPARE(root["deskPage"].toString(),saved); QVERIFY(!root.contains("desk"));
+        // Restoring replaces the page, in every window.
+        QVERIFY(bible->setDeskPage("Something else",saved));
         BibleBackend peer;
         QVERIFY2(bible->importBackup(backup),qPrintable(bible->error()));
-        QCOMPARE(peer.desk(),bible->desk());
-        QStringList refs; for (const auto &row : bible->desk()) refs << row.toMap()["reference"].toString();
-        QCOMPARE(refs,QStringList({"Genesis 1:2","John 3:16"})); // Version-scoped replacement.
-        QCOMPARE(bible->desk().first().toMap()["created"],saved.first().toMap()["created"]);
-        // The Desk keeps its order across versions; versions not in a backup keep theirs.
-        install(kjv); QVERIFY(bible->navigate("John 3:17")); QVERIFY(bible->addToDesk());
-        QVERIFY(bible->switchVersion("engnet")); QVERIFY(bible->navigate("John 3:18")); QVERIFY(bible->addToDesk());
-        QVERIFY(bible->exportBackup(backup)); QVERIFY(file.open(QIODevice::ReadOnly));
-        const auto both = QJsonDocument::fromJson(file.readAll()).object(); file.close();
-        QStringList order; for (const auto &item : both["desk"].toArray()) order << item.toObject()["versionId"].toString();
-        QCOMPARE(order,QStringList({"engnet","engnet","eng-kjv","engnet"}));
-        QVERIFY(bible->cleanDesk()); QVERIFY2(bible->importBackup(backup),qPrintable(bible->error()));
-        refs.clear(); for (const auto &row : bible->desk()) refs << row.toMap()["versionAbbreviation"].toString() + " " + row.toMap()["reference"].toString();
-        QCOMPARE(refs.size(),4); QVERIFY(refs[2].endsWith("John 3:17")); QVERIFY(refs[3].endsWith("John 3:18"));
-        // Older formats restore without touching the Desk.
-        auto legacy = legacyBackup(root,"engnet"); legacy["version"] = 4; legacy.remove("desk");
-        const auto old = QUrl::fromLocalFile(session->filePath("desk-v4.json"));
-        QVERIFY(write(old.toLocalFile(),QJsonDocument(legacy).toJson()));
-        QVERIFY(bible->cleanDesk()); QVERIFY2(bible->importBackup(old),qPrintable(bible->error())); QVERIFY(bible->desk().isEmpty());
-        for (const QString kind : {"duplicate","invalid","missing-created","other-version"}) {
-            auto broken = root; auto items = broken["desk"].toArray(); auto a = items.first().toObject();
-            if (kind == "invalid") a["start"] = 999;
-            if (kind == "missing-created") a.remove("created");
-            if (kind == "other-version") a["versionId"] = "eng-kjv"; // Installed, but not in this backup.
-            items[0] = a; if (kind == "duplicate") items.append(a); broken["desk"] = items;
+        QCOMPARE(bible->deskPage(),saved); QCOMPARE(peer.deskPage(),saved);
+        // Format 6 held the Desk's passages: they come back as the page's quotations, in order.
+        auto item = [](int book, int chapter, int start, int end) {
+            return QJsonObject{{"book",book},{"chapter",chapter},{"start",start},{"endBook",book},{"endChapter",chapter},{"end",end},
+                               {"created","2026-01-01T00:00:00.000Z"}};
+        };
+        auto withVersion = [](QJsonObject object) { object["versionId"] = "engnet"; return object; };
+        const QString john = deskQuote("John 3:16"), genesisRange = deskQuote("GEN 1:1-2");
+        auto six = root; six["version"] = 6; six.remove("deskPage");
+        six["desk"] = QJsonArray{withVersion(item(43,3,16,16)),withVersion(item(1,1,1,2))};
+        const auto sixFile = QUrl::fromLocalFile(session->filePath("desk-v6.json"));
+        QVERIFY(write(sixFile.toLocalFile(),QJsonDocument(six).toJson()));
+        QVERIFY2(bible->importBackup(sixFile),qPrintable(bible->error()));
+        QCOMPARE(bible->deskPage(),john + "\n\n" + genesisRange + "\n"); QCOMPARE(peer.deskPage(),bible->deskPage());
+        // Format 5 held one version's: they join the page's end.
+        QVERIFY(bible->setDeskPage("Kept",bible->deskPage()));
+        auto five = legacyBackup(root,"engnet"); five["desk"] = QJsonArray{item(43,3,16,16)};
+        const auto fiveFile = QUrl::fromLocalFile(session->filePath("desk-v5.json"));
+        QVERIFY(write(fiveFile.toLocalFile(),QJsonDocument(five).toJson()));
+        QVERIFY2(bible->importBackup(fiveFile),qPrintable(bible->error()));
+        QCOMPARE(bible->deskPage(),"Kept\n\n" + john + "\n");
+        // Older formats restore without touching it.
+        auto four = legacyBackup(root,"engnet"); four["version"] = 4; four.remove("desk");
+        const auto fourFile = QUrl::fromLocalFile(session->filePath("desk-v4.json"));
+        QVERIFY(write(fourFile.toLocalFile(),QJsonDocument(four).toJson()));
+        const QString before = bible->deskPage();
+        QVERIFY2(bible->importBackup(fourFile),qPrintable(bible->error())); QCOMPARE(bible->deskPage(),before);
+        // An invalid Desk refuses the whole restore.
+        for (const QString kind : {"page-type","page-control","page-size","duplicate","invalid","missing-created","other-version"}) {
+            auto broken = kind.startsWith("page") ? root : six;
+            if (kind == "page-type") broken["deskPage"] = 3;
+            if (kind == "page-control") broken["deskPage"] = QString("Bad\u0001");
+            if (kind == "page-size") broken["deskPage"] = QString(4 * 1024 * 1024 + 1,'x');
+            if (!kind.startsWith("page")) {
+                auto items = broken["desk"].toArray(); auto a = items.first().toObject();
+                if (kind == "invalid") a["start"] = 999;
+                if (kind == "missing-created") a.remove("created");
+                if (kind == "other-version") a["versionId"] = "eng-kjv"; // Not installed, nor in this backup.
+                items[0] = a; if (kind == "duplicate") items.append(a); broken["desk"] = items;
+            }
             const auto path = QUrl::fromLocalFile(session->filePath("broken-desk.json"));
             QVERIFY(write(path.toLocalFile(),QJsonDocument(broken).toJson()));
-            QVERIFY2(!bible->importBackup(path),qPrintable(kind)); QVERIFY(bible->desk().isEmpty());
+            QVERIFY2(!bible->importBackup(path),qPrintable(kind)); QCOMPARE(bible->deskPage(),before);
         }
     }
     void backupValidationAndTransactionalFailures() {
@@ -1246,7 +1321,7 @@ private slots:
         QFile source(backup.toLocalFile()); QVERIFY(source.open(QIODevice::ReadOnly));
         const auto document = QJsonDocument::fromJson(source.readAll());
         const auto original = bible->collection();
-        QCOMPARE(document.object().value("version").toInt(),6);
+        QCOMPARE(document.object().value("version").toInt(),7);
         // Every check, in this format and in the format earlier versions wrote.
         for (const bool legacy : {false,true})
         for (const QString kind : {"signature","version","fractional","unknown-key","out-of-range","omitted","duplicate","reading","time"}) {
@@ -1255,7 +1330,7 @@ private slots:
             auto entry = legacy ? root : root["versions"].toArray().first().toObject();
             auto rows = entry["annotations"].toArray(); auto a = rows.first().toObject();
             if (kind == "signature") root["format"] = "unknown-backup";
-            if (kind == "version") root["version"] = legacy ? 2 : 7;
+            if (kind == "version") root["version"] = legacy ? 2 : 8;
             if (kind == "fractional") a["start"] = 16.5;
             if (kind == "unknown-key") a["unexpected"] = true;
             if (kind == "out-of-range") a["chapter"] = 1000;

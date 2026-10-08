@@ -383,14 +383,13 @@ private slots:
         key(Qt::Key_Space); QTRY_VERIFY(opened("passagePalette"));
         QCOMPARE(object("referenceInput")->property("text").toString(), QString("/ "));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
-        // A dialog's QuietButton: enter and space both activate it.
-        QVERIFY(bible->navigate("John 3:5")); QVERIFY(bible->addToDesk());
-        run("desk"); QTRY_VERIFY(opened("deskDrawer"));
-        auto clean = item("deskClean"); clean->forceActiveFocus(); key(Qt::Key_Space);
-        QTRY_VERIFY(opened("cleanDeskConfirmation"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
-        clean->forceActiveFocus(); key(Qt::Key_Return); QTRY_VERIFY(opened("cleanDeskConfirmation"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
+        // A panel's QuietButton: enter and space both activate it.
+        run("desk"); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        item("deskPreviewButton")->forceActiveFocus(); key(Qt::Key_Space);
+        QTRY_VERIFY(prop("deskPreview").toBool()); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        item("deskWriteButton")->forceActiveFocus(); key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("deskPreview").toBool()); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        escapeNotes();
     }
     void chromeButtonsTakeFocusOnlyByTab() {
         // Mouse: a click never moves the keyboard off the reader.
@@ -412,44 +411,42 @@ private slots:
         QVERIFY(reached);
     }
     void hintPartsAreClickableOnlyWhenTheyAct() {
-        QVERIFY(bible->navigate("John 3:5")); QVERIFY(bible->addToDesk());
-        QVERIFY(bible->navigate("John 3:7")); QVERIFY(bible->addToDesk());
+        QVERIFY(bible->navigate("John 3:5")); QVERIFY(!bible->appendToDesk().isEmpty());
         navigate("John 3:3");
-        run("desk"); QTRY_VERIFY(opened("deskDrawer")); QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        // The row's parts are rebuilt whenever what they can do changes (the
-        // list taking focus, its current row): look them up by name each time,
-        // once the drawer's layout has settled where the pointer will go.
+        // The Desk's page in Preview: its scroll keys only show; the rest act.
+        run("desk"); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        // The row's parts are rebuilt whenever what they can do changes: look
+        // them up by name each time, once the layout has settled where the
+        // pointer will go.
         QVERIFY(QQuickTest::qWaitForPolish(window));
-        auto choose = [this] { return item("deskHintsPart:choose"); };
-        auto copy = [this] { return item("deskHintsPart:copy"); };
-        auto tint = [this] { return item("deskHintsPart:copy:tint"); };
-        QVERIFY(choose() && copy());
-        QVERIFY(!choose()->property("clickable").toBool()); QVERIFY(copy()->property("clickable").toBool());
+        auto scroll = [this] { return item("deskHintsPart:scroll"); };
+        auto write = [this] { return item("deskHintsPart:write"); };
+        auto tint = [this] { return item("deskHintsPart:write:tint"); };
+        QVERIFY(scroll() && write());
+        QVERIFY(!scroll()->property("clickable").toBool()); QVERIFY(write()->property("clickable").toBool());
         // The row reads as before: the same markup.
-        QVERIFY(object("deskHints")->property("text").toString().contains("shift&nbsp;delete"));
+        QVERIFY(object("deskHints")->property("text").toString().contains("alt&nbsp;v"));
         // Unhovered parts show no tint; hovering a clickable one tints it under a pointing hand.
         QVERIFY(tint()); QVERIFY(!tint()->isVisible());
         shot("hints-desk-unhovered");
-        QTest::mouseMove(window, center(copy())); QTRY_VERIFY(tint()->isVisible());
-        shot("hints-desk-hover-copy");
+        QTest::mouseMove(window, center(write())); QTRY_VERIFY(tint()->isVisible());
+        shot("hints-desk-hover-write");
         QQuickItem *area = nullptr;
-        for (auto child : copy()->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) area = child;
+        for (auto child : write()->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) area = child;
         QVERIFY(area); QCOMPARE(area->cursor().shape(), Qt::PointingHandCursor);
-        QTest::mouseMove(window, center(choose())); QTRY_VERIFY(!tint()->isVisible());
-        QVERIFY(!item("deskHintsPart:choose:tint")->isVisible());
-        // Mouse: a part runs what its key does, and the keyboard stays in the list.
-        const QString current = bible->desk().at(item("deskList")->property("currentIndex").toInt()).toMap()["reference"].toString();
-        QGuiApplication::clipboard()->clear();
-        click(copy()); QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(current));
-        QVERIFY(item("deskList")->hasActiveFocus());
+        QTest::mouseMove(window, center(scroll())); QTRY_VERIFY(!tint()->isVisible());
+        QVERIFY(!item("deskHintsPart:scroll:tint")->isVisible());
+        // Mouse: a part runs what its key does, and the keyboard stays in the Margin.
+        click(write()); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(!prop("deskPreview").toBool());
         // Keyboard: the key itself still works.
-        QGuiApplication::clipboard()->clear(); key(Qt::Key_Y); QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(current));
-        clickHint("deskHintsPart:remove"); QCOMPARE(bible->desk().size(), 1);
-        key(Qt::Key_Delete); QCOMPARE(bible->desk().size(), 0);
-        // Nothing left to open: those parts stop being clickable.
-        QTRY_VERIFY(!item("deskHintsPart:open")->property("clickable").toBool());
-        QVERIFY(!item("deskHintsPart:clean")->property("clickable").toBool());
-        clickHint("deskHintsPart:close"); QTRY_VERIFY(!shown("deskDrawer"));
+        key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        clickHint("deskHintsPart:write"); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        // On a link the page offers alt enter, which follows it.
+        item("deskEditor")->setProperty("cursorPosition", bible->deskPage().lastIndexOf("John 3:5") + 2);
+        clickHint("deskHintsPart:open link"); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5"));
+        clickHint("deskHintsPart:back to reading"); QTRY_VERIFY(readerFocused()); QVERIFY(opened("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
     }
     void everyPanelHintRowIsClickable() {
         // Palette: esc close and enter select.
@@ -488,14 +485,13 @@ private slots:
         clickHint("savedHintsPart:open"); QTRY_VERIFY(!shown("savedDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 3:9"));
         // Confirmations: cancel by the hint, confirm with enter on the focused button.
-        QVERIFY(bible->addToDesk()); run("desk"); QTRY_VERIFY(opened("deskDrawer"));
-        key(Qt::Key_Delete, Qt::ShiftModifier); QTRY_VERIFY(opened("cleanDeskConfirmation"));
-        clickHint("cleanDeskHintsPart:cancel"); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
-        QCOMPARE(bible->desk().size(), 1);
-        key(Qt::Key_Delete, Qt::ShiftModifier); QTRY_VERIFY(opened("cleanDeskConfirmation"));
-        key(Qt::Key_Right); QVERIFY(item("cleanDeskConfirm")->hasActiveFocus());
-        clickHint("cleanDeskHintsPart:select"); QTRY_VERIFY(bible->desk().isEmpty());
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        QVERIFY(bible->recordHistory()); run("clearHistory"); QTRY_VERIFY(opened("clearHistoryConfirmation"));
+        clickHint("clearHistoryHintsPart:cancel"); QTRY_VERIFY(!shown("clearHistoryConfirmation"));
+        QCOMPARE(bible->history().size(), 1);
+        run("clearHistory"); QTRY_VERIFY(opened("clearHistoryConfirmation"));
+        key(Qt::Key_Right); QVERIFY(item("clearHistoryConfirm")->hasActiveFocus());
+        clickHint("clearHistoryHintsPart:select"); QTRY_VERIFY(bible->history().isEmpty());
+        call("readerFocus");
         // See also and the tag picker.
         run("related"); QTRY_VERIFY(opened("relatedDrawer"));
         QTRY_VERIFY(item("studyHintsPart:filter")); QVERIFY(item("studyHintsPart:filter")->property("clickable").toBool());
@@ -508,16 +504,7 @@ private slots:
     }
     void everyListRowSharesOneMenu() {
         const QStringList shared = {"open", "copy", "copyPlain", "desk"};
-        // Desk (mouse): Open · Copy · Copy plain text · Remove from Desk.
-        QVERIFY(bible->navigate("John 3:5")); QVERIFY(bible->addToDesk()); navigate("John 3:3");
-        run("desk"); QTRY_VERIFY(opened("deskDrawer"));
-        click(item("deskEntry0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), shared);
-        QCOMPARE(menuShortcut("copyPlain"), QString("shift Y")); QCOMPARE(menuShortcut("desk"), QString("d"));
-        QGuiApplication::clipboard()->clear(); chooseMenu("copyPlain");
-        QTRY_VERIFY(!QGuiApplication::clipboard()->text().isEmpty());
-        QVERIFY(!QGuiApplication::clipboard()->text().contains("John 3:5"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        navigate("John 3:3");
         // History, in the palette (keyboard): the menu key opens the row menu
         // with Remove after a divider.
         QVERIFY(bible->recordHistory()); run("history"); QTRY_VERIFY(opened("passagePalette")); QVERIFY(prop("paletteHistory").toBool());
@@ -536,6 +523,7 @@ private slots:
         QTRY_VERIFY(item("studyRow:0") && item("studyRow:0")->isVisible());
         click(item("studyRow:0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), (shared + QStringList{"|", "tags"}));
+        QCOMPARE(menuShortcut("copyPlain"), QString("shift Y")); QCOMPARE(menuShortcut("desk"), QString("d"));
         QGuiApplication::clipboard()->clear(); chooseMenu("copy");
         QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("Genesis 1:1"));
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool()); QCOMPARE(menuIds(), (shared + QStringList{"|", "tags"}));
@@ -688,9 +676,9 @@ private slots:
         QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before); QVERIFY(opened("helpDialog"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
         // An empty list: y has no row to copy.
-        run("desk"); QTRY_VERIFY(opened("deskDrawer"));
+        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
         before = playCount(); key(Qt::Key_Y); QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before);
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         // Character selection: a key it does not have says how to leave.
         bible->selectVerses(3, 3); call("readerFocus"); key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
         before = playCount(); key(Qt::Key_Q);
@@ -706,7 +694,7 @@ private slots:
             const int before = playCount();
             clickAt(point); QTRY_VERIFY2(!shown(popup), qPrintable(popup));
             QVERIFY2(bible->selectedStart() == 3 && bible->selectedEnd() == 3, qPrintable(popup + ": " + bible->selectionReference()));
-            QVERIFY2(bible->collection().isEmpty() && bible->desk().isEmpty(), qPrintable(popup));
+            QVERIFY2(bible->collection().isEmpty() && bible->deskPage().isEmpty(), qPrintable(popup));
             QVERIFY(playCount() >= before);
             QTest::qWait(30);
         };
@@ -716,7 +704,6 @@ private slots:
         check("versionDialog", [&] { run("switchVersion"); });
         check("aboutDialog", [&] { run("about"); });
         check("savedDrawer", [&] { run("annotations"); });
-        check("deskDrawer", [&] { run("desk"); });
         check("relatedDrawer", [&] { run("related"); });
         // Notes sits beside the text, never over it: a click on the text
         // reaches the reader (the verse clicked is selected, the keyboard
@@ -733,13 +720,6 @@ private slots:
         window->resize(1200, 1100); QTRY_COMPARE(window->height(), 1100); call("setReaderY", 0);
         check("tagsSurface", [&] { run("tags"); });
         window->resize(1200, 820); QTRY_COMPARE(window->height(), 820);
-        // A confirmation over a drawer: the outside click cancels only the confirmation.
-        QVERIFY(bible->navigate("John 3:30")); QVERIFY(bible->addToDesk()); navigate("John 3:3"); bible->selectVerses(3, 3);
-        run("desk"); QTRY_VERIFY(opened("deskDrawer")); QTRY_VERIFY(item("deskList")->hasActiveFocus());
-        key(Qt::Key_Delete, Qt::ShiftModifier);
-        clickAt(outsidePoint("cleanDeskConfirmation")); QTRY_VERIFY(!shown("cleanDeskConfirmation"));
-        QVERIFY(opened("deskDrawer")); QCOMPARE(bible->desk().size(), 1);
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
         // Context menu: a left click outside only closes it.
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
         clickAt(outsidePoint("contextMenu")); QTRY_VERIFY(!menu()->property("visible").toBool());
@@ -1213,12 +1193,15 @@ private slots:
         clickAt(middle, Qt::BackButton); QCOMPARE(prop("paletteBook").toInt(), 0); QVERIFY(opened("passagePalette"));
         QCOMPARE(bible->selectionReference(), QString("John 2:5"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
-        // A side panel: back closes it (and does not travel).
-        run("desk"); QTRY_VERIFY(opened("deskDrawer"));
-        clickAt(middle, Qt::BackButton); QTRY_VERIFY(!shown("deskDrawer"));
+        // A side panel: back closes it (and does not travel); the Margin too.
+        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+        clickAt(middle, Qt::BackButton); QTRY_VERIFY(!shown("savedDrawer"));
+        QCOMPARE(bible->selectionReference(), QString("John 2:5")); QVERIFY(readerFocused());
+        run("desk"); QTRY_VERIFY(opened("notesDrawer"));
+        clickAt(QPoint(40, window->height() / 2), Qt::BackButton); QTRY_VERIFY(!shown("notesDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 2:5")); QVERIFY(readerFocused());
         // Keyboard equivalent for the panel: esc.
-        run("desk"); QTRY_VERIFY(opened("deskDrawer")); key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
+        run("annotations"); QTRY_VERIFY(opened("savedDrawer")); key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         // The keybindings list explains the buttons.
         QVariant text; QMetaObject::invokeMethod(window, "keyText", Q_RETURN_ARG(QVariant, text), Q_ARG(QVariant, QString("mouseBack")));
         QCOMPARE(text.toString(), QString("mouse back"));
@@ -1704,9 +1687,9 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
     }
     void globalKeysLeaveSidePanels() {
-        QVERIFY(bible->addToDesk()); bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
+        bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
         struct Panel { Qt::Key key; const char *drawer; };
-        const QList<Panel> panels = {{Qt::Key_D, "deskDrawer"}, {Qt::Key_M, "savedDrawer"}, {Qt::Key_S, "relatedDrawer"}};
+        const QList<Panel> panels = {{Qt::Key_M, "savedDrawer"}, {Qt::Key_S, "relatedDrawer"}};
         for (const auto &panel : panels) {
             auto open = [&] { call("readerFocus"); key(panel.key, Qt::ShiftModifier); QTRY_VERIFY2(opened(panel.drawer), panel.drawer); QTest::qWait(30); };
             // Keyboard: the palette, a dialog, and a reading toggle each close the panel first.
@@ -1720,16 +1703,17 @@ private slots:
             bible->setShowVerseNumbers(numbers);
         }
         open: {
-            call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
-            key(Qt::Key_Question); QTRY_VERIFY(opened("helpDialog")); QTRY_VERIFY(!shown("deskDrawer"));
+            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(opened("relatedDrawer")); QTest::qWait(30);
+            key(Qt::Key_Question); QTRY_VERIFY(opened("helpDialog")); QTRY_VERIFY(!shown("relatedDrawer"));
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
-            call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
-            key(Qt::Key_F); QTRY_VERIFY(bible->focusMode()); QTRY_VERIFY(!shown("deskDrawer"));
+            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(opened("relatedDrawer")); QTest::qWait(30);
+            key(Qt::Key_F); QTRY_VERIFY(bible->focusMode()); QTRY_VERIFY(!shown("relatedDrawer"));
             bible->setFocusMode(false);
             // ctrl t opens Manage tags over the panel, which stays.
-            call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
-            key(Qt::Key_T, Qt::ControlModifier); QTRY_VERIFY(opened("tagsSurface")); QVERIFY(shown("deskDrawer"));
+            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(opened("relatedDrawer")); QTest::qWait(30);
+            key(Qt::Key_T, Qt::ControlModifier); QTRY_VERIFY(opened("tagsSurface")); QVERIFY(shown("relatedDrawer"));
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
         }
         // Notes is not modal: from the preview the palette opens over it and
         // returns to it, and a reading toggle acts with it open. (From the
@@ -1741,9 +1725,18 @@ private slots:
         const bool numbers = bible->showVerseNumbers();
         key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), !numbers); QVERIFY(opened("notesDrawer"));
         escapeNotes();
+        // Nor is the Desk: from the reader, toggles and the palette act over it;
+        // from its page, a launcher closes it first, as from a note.
+        run("desk"); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), numbers); QVERIFY(prop("deskOpen").toBool());
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(prop("deskOpen").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QTRY_VERIFY(!shown("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         // Mouse: a click outside an open panel only closes it (the footer button underneath does not act).
-        call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer")); QTest::qWait(30);
-        click("searchControl"); QTRY_VERIFY(!shown("deskDrawer")); QVERIFY(!shown("passagePalette"));
+        call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer")); QTest::qWait(30);
+        click("searchControl"); QTRY_VERIFY(!shown("savedDrawer")); QVERIFY(!shown("passagePalette"));
     }
     // Keyboard: ↓ through the open menu to `id`, then enter.
     void menuKeyTo(const QString &id) {
@@ -1891,7 +1884,7 @@ private slots:
     void listsReserveTheScrollbar() {
         window->resize(1000, 520);
         for (int verse = 1; verse <= 24; ++verse) {
-            bible->selectVerses(verse, verse); QVERIFY(bible->addToDesk()); bible->setNoteText("Long");
+            bible->selectVerses(verse, verse); bible->setNoteText("Long");
             bible->createAndAssignTag(bible->tagScope(), "Long");
         }
         navigate("John 3:3");
@@ -1902,9 +1895,6 @@ private slots:
             QVERIFY2(right <= item(list)->width() - item(bar)->width() + 0.5, qPrintable(list + QString(" %1 / %2").arg(right).arg(item(list)->width())));
         };
         // Keyboard opens each list; rows end where the scrollbar begins.
-        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer"));
-        check("deskList", "deskEntry0", "deskScrollbar"); shot("scrollbar-desk");
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("deskDrawer"));
         key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer"));
         check("collectionList", "savedEntryJohn 3:1", "savedScrollbar");
         // The "here" label stays clear of the scrollbar.
@@ -1912,11 +1902,13 @@ private slots:
         auto here = item("savedHereJohn 3:3");
         QTRY_VERIFY(here->mapToItem(item("collectionList"), QPointF(here->width(), 0)).x() <= item("collectionList")->width() - item("savedScrollbar")->width() + 0.5);
         shot("scrollbar-marks");
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         // Mouse: wheel scrolling still works and the rows keep their width.
-        call("readerFocus"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(opened("deskDrawer"));
-        wheel(item("deskList"), -480); QTRY_VERIFY(contentY("deskList") > 0 || item("deskList")->property("contentY").toReal() > 0);
-        check("deskList", "deskEntry0", "deskScrollbar");
+        wheel(item("collectionList"), -480); QTRY_VERIFY(item("collectionList")->property("contentY").toReal() > 0);
+        QString row;
+        for (int verse = 24; verse >= 1 && row.isEmpty(); --verse)
+            if (auto entry = item(QString("savedEntryJohn 3:%1").arg(verse)); entry && entry->isVisible()) row = entry->objectName();
+        check("collectionList", row, "savedScrollbar");
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
         QVERIFY(warnings.isEmpty());
     }
     // ── Phase 4: low
@@ -2357,7 +2349,7 @@ private slots:
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); QCOMPARE(item("noteEditor")->property("text").toString(), QString("[["));
         // Mouse: the Write/Preview row switches to Preview.
         run("help"); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
-        type("Switch a note"); auto row = item("keybindingSwitch a note between Write and Preview (Notes panel)"); QTRY_VERIFY(row);
+        type("Switch a note"); QQuickItem *row = nullptr; QTRY_VERIFY((row = item("keybindingSwitch a note or the Desk between Write and Preview")));
         QTest::qWait(50); click(row); QTRY_VERIFY(!shown("helpDialog")); QTRY_VERIFY(prop("notePreview").toBool());
         // Without Notes the rows are unavailable: activating sounds the error.
         QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));

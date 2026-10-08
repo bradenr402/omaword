@@ -38,6 +38,7 @@ namespace {
 // All readers and commits live on the GUI thread, under the primary's process lock.
 QList<BibleBackend *> readers;
 constexpr qsizetype MaximumNoteSize = 1024 * 1024;
+constexpr qsizetype MaximumDeskSize = 4 * 1024 * 1024;
 constexpr qint64 MaximumBackupSize = 32 * 1024 * 1024;
 QString connectionName() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 QString timestamp() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs); }
@@ -396,9 +397,6 @@ int BibleBackend::absoluteVerse(int b, int c, int v) const
 BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
 {
     connect(this, &BibleBackend::selectionChanged, this, &BibleBackend::tagsChanged);
-    connect(this, &BibleBackend::selectionChanged, this, &BibleBackend::currentInDeskChanged);
-    connect(this, &BibleBackend::versionChanged, this, &BibleBackend::currentInDeskChanged);
-    connect(this, &BibleBackend::deskChanged, this, &BibleBackend::currentInDeskChanged);
     // The ribbon's references use the active version's book names.
     connect(this, &BibleBackend::versionChanged, this, &BibleBackend::ribbonChanged);
     m_directory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -1137,36 +1135,8 @@ bool BibleBackend::openTaggedPassage(QVariantMap scope)
 
 void BibleBackend::reloadDesk()
 {
-    QVariantList rows;
-    if (m_storeReady) {
-        QSqlQuery q(m_store);
-        QHash<QString,QString> abbreviations;
-        if (q.exec("SELECT version_id,abbreviation FROM installed"))
-            while (q.next()) abbreviations.insert(q.value(0).toString(),q.value(1).toString());
-        if (q.exec("SELECT id,version_id,book,chapter,start,endBook,endChapter,end,created FROM desk ORDER BY position")) {
-            std::map<QString,std::unique_ptr<TagBible>> bibles;
-            while (q.next()) {
-                const QString id = q.value(1).toString();
-                QVariantMap scope{{"versionId",id}};
-                for (int i = 0; i < scopeFields.size(); ++i) scope[scopeFields[i]] = q.value(i + 2).toInt();
-                QVariantMap row = scope, canonical;
-                row["id"] = q.value(0).toInt(); row["created"] = q.value(8).toString();
-                row["versionAbbreviation"] = abbreviations.value(id,id);
-                QString text;
-                bool available = false;
-                if (abbreviations.contains(id)) {
-                    auto &bible = bibles[id];
-                    if (!bible) bible = std::make_unique<TagBible>(installedPath(id),id);
-                    available = bible->scope(scope,&canonical) && passageText(*bible,canonical,false,&text);
-                }
-                row["reference"] = available ? canonical.value("reference").toString() : canonicalReference(scope);
-                row["text"] = available ? text : QString();
-                row["available"] = available;
-                rows.append(row);
-            }
-        }
-    }
-    m_desk = rows;
+    QSqlQuery q(m_store);
+    m_deskPage = m_storeReady && q.exec("SELECT text FROM desk_page WHERE id=1") && q.next() ? q.value(0).toString() : QString();
 }
 
 void BibleBackend::publishDesk()
@@ -1176,112 +1146,96 @@ void BibleBackend::publishDesk()
     for (const auto &peer : snapshot) if (peer) { peer->reloadDesk(); emit peer->deskChanged(); }
 }
 
-bool BibleBackend::commitDeskMutation()
+QString BibleBackend::deskQuotation(const QVariantMap &scope) const
 {
-    if (!m_store.commit()) return setError("Cannot save the Desk: " + m_store.lastError().text());
-    clearError(); publishDesk(); return true;
-}
-
-QVariantMap BibleBackend::deskItem(int id) const
-{
-    for (const auto &row : m_desk) if (row.toMap().value("id").toInt() == id) return row.toMap();
-    return {};
-}
-
-bool BibleBackend::inDesk(QVariantMap scope) const
-{
-    if (scope.value("versionId").toString().isEmpty()) return false;
-    const QString key = rangeKey(scope);
-    for (const auto &row : m_desk) if (rangeKey(row.toMap()) == key) return true;
-    return false;
-}
-
-bool BibleBackend::addToDesk(QVariantMap scope)
-{
-    if (scope.isEmpty()) scope = tagScope();
-    if (scope.isEmpty()) return setError("Select a passage to add to the Desk.");
-    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
-    QVariantMap canonical;
-    if (!validateScope(scope,&canonical)) return setError("That Bible version or passage is no longer available.");
-    m_mutating = true;
-    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
-    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    const QString id = scope.value("versionId").toString();
     QSqlQuery q(m_store);
-    q.prepare("SELECT COUNT(*) FROM desk WHERE " + scopeWhere); bindScope(q,canonical);
-    if (!q.exec() || !q.next()) return setError("Cannot read the Desk: " + q.lastError().text());
-    if (q.value(0).toInt()) { clearError(); return true; } // Identical scope: no-op.
-    q.finish();
-    q.prepare("INSERT INTO desk(position,version_id,book,chapter,start,endBook,endChapter,end,created) "
-              "VALUES((SELECT COALESCE(MAX(position),0)+1 FROM desk),?,?,?,?,?,?,?,?)");
-    bindScope(q,canonical); q.addBindValue(timestamp());
-    if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot add to the Desk: " + q.lastError().text());
-    q.prepare("SELECT COUNT(*) FROM desk WHERE " + scopeWhere); bindScope(q,canonical);
-    if (!q.exec() || !q.next() || q.value(0).toInt() != 1) return setError("Cannot verify the Desk addition.");
-    q.finish();
-    return commitDeskMutation();
-}
-
-bool BibleBackend::removeFromDesk(int id)
-{
-    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
-    m_mutating = true;
-    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
-    if (!m_store.transaction()) return setError(m_store.lastError().text());
-    QSqlQuery q(m_store);
-    q.prepare("DELETE FROM desk WHERE id=?"); q.addBindValue(id);
-    if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot remove the Desk item: " + q.lastError().text());
-    q.prepare("SELECT COUNT(*) FROM desk WHERE id=?"); q.addBindValue(id);
-    if (!q.exec() || !q.next() || q.value(0).toInt()) return setError("Cannot verify the Desk removal.");
-    q.finish();
-    return commitDeskMutation();
-}
-
-bool BibleBackend::toggleDesk()
-{
-    const auto scope = tagScope();
-    if (scope.isEmpty()) return setError("Select a passage to add to the Desk.");
-    const QString key = rangeKey(scope);
-    for (const auto &row : m_desk)
-        if (rangeKey(row.toMap()) == key) return removeFromDesk(row.toMap().value("id").toInt());
-    return addToDesk(scope);
-}
-
-bool BibleBackend::cleanDesk()
-{
-    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
-    m_mutating = true;
-    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
-    if (!m_store.transaction()) return setError(m_store.lastError().text());
-    QSqlQuery q(m_store);
-    if (!q.exec("DELETE FROM desk")) return setError("Cannot clean the Desk: " + q.lastError().text());
-    if (!q.exec("SELECT COUNT(*) FROM desk") || !q.next() || q.value(0).toInt()) return setError("Cannot verify the cleaned Desk.");
-    q.finish();
-    return commitDeskMutation();
-}
-
-bool BibleBackend::openDeskItem(int id)
-{
-    const auto row = deskItem(id);
-    if (row.isEmpty()) return setError("That Desk item no longer exists.");
-    if (!row.value("available").toBool()) return setError("That Desk passage's Bible version is not installed or no longer contains it.");
-    QVariantMap scope{{"versionId",row.value("versionId")}};
-    for (const auto &key : scopeFields) scope[key] = row.value(key);
-    return openTaggedPassage(scope);
-}
-
-QString BibleBackend::copyDeskItem(int id)
-{
-    const auto row = deskItem(id);
-    if (row.isEmpty()) { setError("That Desk item no longer exists."); return {}; }
-    const QString versionId = row.value("versionId").toString();
-    TagBible bible(installedPath(versionId),versionId);
+    q.prepare("SELECT abbreviation FROM installed WHERE version_id=?"); q.addBindValue(id);
+    const QString abbreviation = q.exec() && q.next() ? q.value(0).toString() : id;
+    TagBible bible(installedPath(id),id);
     QVariantMap canonical;
     QString body;
-    if (!bible.scope(row,&canonical) || !passageText(bible,canonical,true,&body)) {
-        setError("That Desk passage's Bible version is not installed or no longer contains it."); return {};
+    QStringList lines;
+    if (bible.scope(scope,&canonical)
+        && passageText(bible,canonical,canonical.value("_order") != canonical.value("_endOrder"),&body)) {
+        // Paragraphs are quote paragraphs; a poetry line ends with a hard break.
+        for (const QString &paragraph : body.split("\n\n")) {
+            if (!lines.isEmpty()) lines << ">";
+            const auto parts = paragraph.split('\n');
+            for (int i = 0; i < parts.size(); ++i) lines << "> " + parts[i] + (i + 1 < parts.size() ? "  " : "");
+        }
+        lines << ">";
     }
-    const QString text = QStringLiteral("“") + body + QStringLiteral("”\n\n—") + canonical.value("reference").toString();
-    copyText(text); clearError(); return text;
+    const QString reference = canonical.isEmpty() ? canonicalReference(scope) : canonical.value("reference").toString();
+    lines << "> \u2014 " + reference + " (" + abbreviation + ")";
+    return lines.join('\n');
+}
+
+QString BibleBackend::withQuotations(QString page, const QVariantList &scopes) const
+{
+    for (const auto &scope : scopes) {
+        while (page.endsWith('\n')) page.chop(1);
+        page += (page.isEmpty() ? QString() : QStringLiteral("\n\n")) + deskQuotation(scope.toMap()) + '\n';
+    }
+    return page;
+}
+
+bool BibleBackend::writeDeskPage(const QString &text)
+{
+    QSqlQuery q(m_store);
+    q.prepare("UPDATE desk_page SET text=?,updated=? WHERE id=1"); q.addBindValue(text.isNull() ? QString("") : text); q.addBindValue(timestamp());
+    if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot save the Desk: " + q.lastError().text());
+    if (!q.exec("SELECT text FROM desk_page WHERE id=1") || !q.next() || q.value(0).toString() != text)
+        return setError("Cannot verify the saved Desk.");
+    return true;
+}
+
+QString BibleBackend::appendToDesk(QVariantMap scope)
+{
+    if (scope.isEmpty()) scope = tagScope();
+    if (scope.isEmpty()) { setError("Select a passage to add to the Desk."); return {}; }
+    if (!m_storeReady || sharedMutationBusy()) { setError("The personal store is unavailable or busy."); return {}; }
+    QVariantMap canonical;
+    if (!validateScope(scope,&canonical)) { setError("That Bible version or passage is no longer available."); return {}; }
+    // A window writing on the page saves its draft first, so nothing is lost.
+    if (!flushDrafts()) return {};
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) { setError(m_store.lastError().text()); return {}; }
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT text FROM desk_page WHERE id=1") || !q.next()) { setError("Cannot read the Desk: " + q.lastError().text()); return {}; }
+    const QString before = q.value(0).toString(), page = withQuotations(before,{canonical});
+    q.finish();
+    if (page.size() > MaximumDeskSize) { setError("The Desk is full. Clear some of it first."); return {}; }
+    if (!writeDeskPage(page)) return {};
+    if (!m_store.commit()) { setError("Cannot save the Desk: " + m_store.lastError().text()); return {}; }
+    const QString reference = canonical.value("reference").toString();
+    UndoStep step("addition of " + reference + " to the Desk",{},{});
+    step.desk = true; step.deskBefore = before; step.deskAfter = page;
+    recordUndo(step);
+    clearError(); publishDesk();
+    return reference;
+}
+
+bool BibleBackend::setDeskPage(QString text, QString expected)
+{
+    // Like a note save, this runs while other windows flush their drafts.
+    if (!m_storeReady) return setError("The personal store is unavailable.");
+    if (text.size() > MaximumDeskSize || !safeString(text)) return setError("The Desk is too large or contains unsupported control characters.");
+    m_mutating = true;
+    const auto guard = qScopeGuard([this] { m_store.rollback(); m_mutating = false; });
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT text FROM desk_page WHERE id=1") || !q.next()) return setError("Cannot read the Desk: " + q.lastError().text());
+    const QString saved = q.value(0).toString();
+    q.finish();
+    // Compare against what the editor started from, inside the write's transaction.
+    if (saved != expected)
+        return setError("The Desk changed in another window. Your draft was not saved. Review the saved text before replacing it.");
+    if (saved == text) { clearError(); return true; }
+    if (!writeDeskPage(text)) return false;
+    if (!m_store.commit()) return setError("Cannot save the Desk: " + m_store.lastError().text());
+    clearError(); publishDesk(); return true;
 }
 
 QString BibleBackend::copyScope(QVariantMap scope, bool plainText)
@@ -1320,14 +1274,6 @@ QVariantList BibleBackend::compareVersions(QVariantMap scope) const
         rows.append(row);
     }
     return rows;
-}
-
-int BibleBackend::deskCountForVersion(QString versionId) const
-{
-    if (!m_storeReady) return 0;
-    QSqlQuery q(m_store);
-    q.prepare("SELECT COUNT(*) FROM desk WHERE version_id=?"); q.addBindValue(versionId);
-    return q.exec() && q.next() ? q.value(0).toInt() : 0;
 }
 
 QVariantMap BibleBackend::currentLocation() const
@@ -1647,7 +1593,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 9) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
+    if (version > 10) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -1724,8 +1670,34 @@ bool BibleBackend::initializeStore()
         if (!q.exec(sql)) { m_store.rollback(); return setError("Cannot initialize notes: " + q.lastError().text()); }
     }
     if (version < 9 && !migrateBookmarks()) { m_store.rollback(); return false; }
+    if (version < 10 && !migrateDeskPage()) { m_store.rollback(); return false; }
     if (!m_store.commit()) { m_store.rollback(); return setError("Cannot save notes database schema: " + m_store.lastError().text()); }
     return loadPreferences();
+}
+
+// Schema 10: the Desk becomes one Markdown page. Its passages become
+// quotations on it, in Desk order (deskQuotation). Runs inside
+// initializeStore's transaction, after schema 9.
+bool BibleBackend::migrateDeskPage()
+{
+    QSqlQuery q(m_store);
+    if (!q.exec("SELECT version_id,book,chapter,start,endBook,endChapter,end FROM desk ORDER BY position"))
+        return setError("Cannot move the Desk to its page: " + q.lastError().text());
+    QVariantList items;
+    while (q.next()) {
+        QVariantMap scope{{"versionId",q.value(0).toString()}};
+        for (int i = 0; i < scopeFields.size(); ++i) scope[scopeFields[i]] = q.value(i + 1).toInt();
+        items << scope;
+    }
+    if (q.lastError().isValid()) return setError("Cannot move the Desk to its page: " + q.lastError().text());
+    q.finish();
+    const QString page = withQuotations({},items);
+    if (!q.exec("CREATE TABLE desk_page(id INTEGER PRIMARY KEY CHECK(id=1),text TEXT NOT NULL,updated TEXT NOT NULL)"))
+        return setError("Cannot move the Desk to its page: " + q.lastError().text());
+    q.prepare("INSERT INTO desk_page(id,text,updated) VALUES(1,?,?)"); q.addBindValue(page.isNull() ? QString("") : page); q.addBindValue(timestamp());
+    if (!q.exec() || !q.exec("DROP TABLE desk") || !q.exec("PRAGMA user_version=10"))
+        return setError("Cannot move the Desk to its page: " + q.lastError().text());
+    return true;
 }
 
 // Schema 9: bookmarks become the tag "Bookmarked" on the same ranges, and
@@ -2135,7 +2107,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         q.prepare("DELETE FROM installed WHERE version_id=?"); q.addBindValue(removedId);
         if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot remove Bible version: " + q.lastError().text());
         if (deleteAnnotations) {
-            for (const QString &table : {QString("annotations"),QString("reading"),QString("tag_assignments"),QString("desk")}) {
+            for (const QString &table : {QString("annotations"),QString("reading"),QString("tag_assignments")}) {
                 q.prepare("DELETE FROM " + table + " WHERE version_id=?"); q.addBindValue(removedId);
                 if (!q.exec()) return setError("Cannot remove version annotations: " + q.lastError().text());
                 q.prepare("SELECT COUNT(*) FROM " + table + " WHERE version_id=?"); q.addBindValue(removedId);
@@ -2232,8 +2204,6 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     // Direct delivery closes/reloads every peer before obsolete files are unlinked.
     if (!peerReload) {
         emit sharedCommitted(obsoleteId, true, false); publishTags();
-        // Installed generations changed: Desk text/availability may differ.
-        if (!importPath.isEmpty() || !removedId.isEmpty()) publishDesk();
     }
     clearError();
     setStatus(fallback ? "The selected endpoint is absent in " + edition() + "; opened " + passage() + " instead."
@@ -3521,7 +3491,7 @@ void BibleBackend::recordUndo(UndoStep step)
         step.before = m_undo.takeLast().before;
     m_undoGroup = step.group;
     // Typing a note back to its saved text changes only its times: no step.
-    bool changed = false;
+    bool changed = step.desk && step.deskBefore != step.deskAfter;
     for (int i = 0; i < step.before.size(); ++i) changed |= !step.before[i].sameMarks(step.after.value(i));
     if (changed) {
         m_redo.clear();
@@ -3550,6 +3520,21 @@ bool BibleBackend::applyUndo(bool undo)
     // A step that no longer applies goes, so the next key reaches the one before it.
     const auto drop = [&](const QString &error) { from.removeLast(); emit undoChanged(); return setError(error); };
     const QString changed = QString("That changed in another window, so it was not ") + (undo ? "undone." : "redone.");
+    if (step.desk) {
+        // The page must still read as the step left it (typing on it counts).
+        QSqlQuery q(m_store);
+        if (!q.exec("SELECT text FROM desk_page WHERE id=1") || !q.next()) return setError("Cannot read the Desk: " + q.lastError().text());
+        const QString current = q.value(0).toString();
+        q.finish();
+        if (current != (undo ? step.deskAfter : step.deskBefore))
+            return drop(QString("The Desk has changed since, so that was not ") + (undo ? "undone." : "redone."));
+        if (!writeDeskPage(undo ? step.deskBefore : step.deskAfter)) return false;
+        if (!m_store.commit()) return setError("Cannot commit " + QString(undo ? "undo: " : "redo: ") + m_store.lastError().text());
+        from.removeLast();
+        (undo ? m_redo : m_undo) << step;
+        emit undoChanged();
+        clearError(); publishDesk(); return true;
+    }
     if (installedPath(step.versionId).isEmpty()) {
         // Every step in a removed version goes at once.
         const auto removed = [&](const UndoStep &other) { return other.versionId == step.versionId; };
@@ -3827,7 +3812,7 @@ bool BibleBackend::exportBackup(QUrl file)
     QVector<QStringList> installed;
     while (q.next()) installed.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString()});
     if (q.lastError().isValid()) return setError("Cannot read installed versions: " + q.lastError().text());
-    QJsonArray versions, desk;
+    QJsonArray versions;
     for (const auto &version : std::as_const(installed)) {
         const QString &id = version[0];
         TagBible bible(installedPath(id),id);
@@ -3872,24 +3857,16 @@ bool BibleBackend::exportBackup(QUrl file)
         q.finish();
         versions.append(entry);
     }
-    // The Desk in its own order, its installed versions' passages only.
-    q.prepare("SELECT d.book,d.chapter,d.start,d.endBook,d.endChapter,d.end,d.version_id,d.created FROM desk d "
-              "JOIN installed i ON i.version_id=d.version_id ORDER BY d.position");
-    if (!q.exec()) return setError("Cannot read backup Desk: " + q.lastError().text());
-    while (q.next()) {
-        auto item = scopeJson(q);
-        item["versionId"] = q.value(6).toString(); item["created"] = q.value(7).toString();
-        desk.append(item);
-    }
-    if (q.lastError().isValid()) return setError("Cannot read the complete backup Desk.");
+    if (!q.exec("SELECT text FROM desk_page WHERE id=1") || !q.next()) return setError("Cannot read backup Desk: " + q.lastError().text());
+    const QString deskPage = q.value(0).toString();
     QJsonArray tags;
     if (!q.exec("SELECT DISTINCT t.id,t.name FROM tags t JOIN tag_assignments a ON a.tag_id=t.id "
                 "JOIN installed i ON i.version_id=a.version_id ORDER BY t.id")) return setError("Cannot read backup tags: " + q.lastError().text());
     while (q.next()) tags.append(QJsonObject{{"id",q.value(0).toString()},{"name",q.value(1).toString()}});
     if (q.lastError().isValid()) return setError("Cannot read complete backup tags.");
     q.finish();
-    const QJsonObject root{{"format","omaword-backup"},{"version",6},{"created",timestamp()},
-        {"tags",tags},{"versions",versions},{"desk",desk}};
+    const QJsonObject root{{"format","omaword-backup"},{"version",7},{"created",timestamp()},
+        {"tags",tags},{"versions",versions},{"deskPage",deskPage}};
     const QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (bytes.size() > MaximumBackupSize) return setError("This backup exceeds the supported 32 MiB size. Export Markdown notes instead.");
     QString error;
@@ -3927,8 +3904,14 @@ bool BibleBackend::restoreTagDefinitions(const QMap<QString,QString> &definition
 bool BibleBackend::restoreEveryVersion(const QJsonObject &root)
 {
     const QString invalid = "Unsupported or invalid " + Brand::name() + " backup format.";
-    if (!exactKeys(root,{"format","version","created","tags","versions","desk"})
-        || !root.value("versions").isArray() || !root.value("desk").isArray() || root.value("versions").toArray().size() > 1000)
+    // Format 7 holds the Desk page; format 6 held the Desk's passages, which
+    // come back as the page's quotations.
+    const bool page = root.value("version").toInt() == 7;
+    if (!exactKeys(root,{"format","version","created","tags","versions",page ? "deskPage" : "desk"})
+        || !root.value("versions").isArray() || root.value("versions").toArray().size() > 1000
+        || (page ? !root.value("deskPage").isString() || root.value("deskPage").toString().size() > MaximumDeskSize
+                       || !safeString(root.value("deskPage").toString())
+                 : !root.value("desk").isArray()))
         return setError(invalid);
     QMap<QString,QString> definitions;
     if (!backupTagDefinitions(root.value("tags"),&definitions)) return setError("The backup contains invalid or duplicate tag definitions.");
@@ -4034,8 +4017,9 @@ bool BibleBackend::restoreEveryVersion(const QJsonObject &root)
         deskKeys.insert(rangeKey(canonical));
         canonical["created"] = object.value("created").toString(); deskItems.append(canonical);
     }
-    // Restore is replacement for each version in the backup, not a merge;
-    // validation precedes all writes, which commit together or not at all.
+    // Restore is replacement for each version in the backup, and of the Desk,
+    // not a merge; validation precedes all writes, which commit together or
+    // not at all.
     m_mutating = true;
     const auto guard = qScopeGuard([this] { m_mutating = false; });
     if (!flushDrafts()) return false;
@@ -4045,7 +4029,7 @@ bool BibleBackend::restoreEveryVersion(const QJsonObject &root)
     const auto rollback = qScopeGuard([this] { m_store.rollback(); });
     QSqlQuery q(m_store);
     for (const auto &version : std::as_const(versions)) {
-        for (const QString table : {"annotations","tag_assignments","desk"}) {
+        for (const QString table : {"annotations","tag_assignments"}) {
             q.prepare("DELETE FROM " + table + " WHERE version_id=?"); q.addBindValue(version.id);
             if (!q.exec()) return setError("Cannot replace backup marks: " + q.lastError().text());
         }
@@ -4090,13 +4074,7 @@ bool BibleBackend::restoreEveryVersion(const QJsonObject &root)
             q.addBindValue(field);
         if (!q.exec()) return setError("Cannot restore a reading location: " + q.lastError().text());
     }
-    for (const auto &value : std::as_const(deskItems)) {
-        const auto item = value.toMap();
-        q.prepare("INSERT INTO desk(position,version_id,book,chapter,start,endBook,endChapter,end,created) "
-                  "VALUES((SELECT COALESCE(MAX(position),0)+1 FROM desk),?,?,?,?,?,?,?,?)");
-        bindScope(q,item); q.addBindValue(item.value("created"));
-        if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot restore Desk item: " + q.lastError().text());
-    }
+    if (!writeDeskPage(page ? root.value("deskPage").toString() : withQuotations({},deskItems))) return false;
     QVector<Annotation> savedRows;
     if (!loadAnnotations(&savedRows)) return false;
     const QVariantList savedCollection = collectionRows(savedRows);
@@ -4141,7 +4119,7 @@ bool BibleBackend::importBackup(QUrl file)
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) return setError("Invalid backup JSON: " + parseError.errorString());
     if (!uniqueJsonKeys(bytes)) return setError("The backup contains duplicate JSON fields.");
     const auto root = document.object();
-    if (root.value("format") == "omaword-backup" && integer(root.value("version"),6,6)) {
+    if (root.value("format") == "omaword-backup" && integer(root.value("version"),6,7)) {
         if (!root.value("created").isString() || !QDateTime::fromString(root.value("created").toString(),Qt::ISODateWithMs).isValid())
             return setError("Unsupported or invalid " + Brand::name() + " backup format.");
         return restoreEveryVersion(root);
@@ -4284,21 +4262,14 @@ bool BibleBackend::importBackup(QUrl file)
         if (id.isEmpty()) return false;
         for (const auto &scope : bookmarked) if (!writeTagAssignment(scope.toMap(),id,true,QString(""))) return false;
     }
-    if (withDesk) {
-        // Replace only this version's items; they rejoin the global order at the end.
+    if (!deskItems.isEmpty()) {
+        // The page has no one version's part to replace: the passages join its end.
         QSqlQuery q(m_store);
-        q.prepare("DELETE FROM desk WHERE version_id=?"); q.addBindValue(restoreVersion);
-        if (!q.exec()) return setError("Cannot replace backup Desk: " + q.lastError().text());
-        for (const auto &value : deskItems) {
-            const auto item = value.toMap();
-            q.prepare("INSERT INTO desk(position,version_id,book,chapter,start,endBook,endChapter,end,created) "
-                      "VALUES((SELECT COALESCE(MAX(position),0)+1 FROM desk),?,?,?,?,?,?,?,?)");
-            bindScope(q,item); q.addBindValue(item.value("created"));
-            if (!q.exec() || q.numRowsAffected() != 1) return setError("Cannot restore Desk item: " + q.lastError().text());
-        }
-        q.prepare("SELECT COUNT(*) FROM desk WHERE version_id=?"); q.addBindValue(restoreVersion);
-        if (!q.exec() || !q.next() || q.value(0).toInt() != deskItems.size()) return setError("Cannot verify restored Desk.");
+        if (!q.exec("SELECT text FROM desk_page WHERE id=1") || !q.next()) return setError("Cannot read the Desk: " + q.lastError().text());
+        const QString page = withQuotations(q.value(0).toString(),deskItems);
         q.finish();
+        if (page.size() > MaximumDeskSize) return setError("The Desk is full. Clear some of it first.");
+        if (!writeDeskPage(page)) return false;
     }
     const double position = reading.value("position").toDouble();
     QVariantList chapterRows;
@@ -4314,7 +4285,7 @@ bool BibleBackend::importBackup(QUrl file)
     m_verses = chapterRows; m_annotations = savedRows; m_collection = savedCollection;
     publishAnnotations();
     publishTags();
-    if (withDesk) publishDesk();
+    if (!deskItems.isEmpty()) publishDesk();
     updateAnnotations(); emit collectionChanged();
     emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
     // A restore replaced what undo steps would write back.
