@@ -3311,6 +3311,8 @@ ApplicationWindow {
             if (at > 0 && deskEditor.getText(at - 1, at) === "\t") deskEditor.remove(at - 1, at)
         } else if (event.key === Qt.Key_S && (event.modifiers === Qt.ControlModifier || event.modifiers === (Qt.ControlModifier | Qt.ShiftModifier))) {
             if (event.modifiers & Qt.ShiftModifier) useSavedDesk(); else keepDeskDraft()
+        } else if (event.key === Qt.Key_D && event.modifiers === (Qt.ControlModifier | Qt.ShiftModifier)) {
+            requestCleanDesk()
         } else if (enter && event.modifiers === Qt.AltModifier) openDeskLinkAtCursor()
         else return
         event.accepted = true
@@ -4061,6 +4063,8 @@ ApplicationWindow {
         { id: "notes", group: "Annotate", title: "Write a note", sequences: ["W"], scope: "notes", command: true },
         { id: "tags", group: "Annotate", title: "Tag passage", sequences: ["T"], command: true },
         { id: "toggleDesk", group: "Annotate", title: "Add to Desk", sequences: ["D"], command: true },
+        // Also on the Desk page while typing (deskKey); it asks first, and u undoes it.
+        { id: "cleanDesk", group: "Annotate", title: "Clean Desk", sequences: ["Ctrl+Shift+D"], scope: "global", command: true },
         // This window's own changes to marks, notes, and tags (bible.undo()).
         { id: "undo", group: "Annotate", title: "Undo a mark, note, or tag change", sequences: ["U", "Ctrl+Z"], command: true },
         { id: "redo", group: "Annotate", title: "Redo the change undone", sequences: ["Ctrl+Shift+Z", "Ctrl+R"], command: true },
@@ -4156,7 +4160,6 @@ ApplicationWindow {
         { id: "export", group: "Commands only", title: "Export your marks as Markdown", command: true },
         { id: "backup", group: "Commands only", title: "Back up your marks", command: true },
         { id: "restore", group: "Commands only", title: "Restore a backup of your marks", command: true },
-        { id: "cleanDesk", group: "Commands only", title: "Clean Desk", command: true },
         { id: "clearHistory", group: "Commands only", title: "Clear History", command: true },
         { id: "toggleHistory", group: "Commands only", title: "Disable / Enable History", command: true },
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }

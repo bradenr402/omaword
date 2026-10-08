@@ -410,6 +410,17 @@ private slots:
         // u brings it back.
         QTRY_VERIFY(readerFocused()); key(Qt::Key_U); QCOMPARE(desk(), page);
         QTRY_COMPARE(item("deskEditor")->property("text").toString(), page);
+        // ctrl shift D asks too: from the reader, and from the Desk page while typing.
+        key(Qt::Key_D, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(object("cleanDeskConfirmation")->property("opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("cleanDeskConfirmation")->property("visible").toBool()); QCOMPARE(desk(), page);
+        openDesk(); type("x"); QCOMPARE(desk(), page + "x");
+        key(Qt::Key_D, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(object("cleanDeskConfirmation")->property("opened").toBool());
+        key(Qt::Key_Right); key(Qt::Key_Return);
+        QTRY_VERIFY(!object("cleanDeskConfirmation")->property("visible").toBool()); QCOMPARE(desk(), QString());
+        QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_Escape); key(Qt::Key_Escape);
         // An empty Desk has nothing to clean.
         QVERIFY(bible->cleanDesk()); call("requestCleanDesk");
         QVERIFY(!object("cleanDeskConfirmation")->property("visible").toBool());
@@ -420,7 +431,7 @@ private slots:
         QStringList ids; for (const auto &a : actions) ids << a.toMap()["id"].toString();
         for (auto id : {"desk", "toggleDesk", "cleanDesk"}) QVERIFY(ids.contains(id));
         for (const auto &a : actions)
-            if (a.toMap()["id"] == "cleanDesk") { QVERIFY(a.toMap()["sequences"].toStringList().isEmpty()); QCOMPARE(a.toMap()["group"].toString(), QString("Commands only")); }
+            if (a.toMap()["id"] == "cleanDesk") QCOMPARE(a.toMap()["sequences"].toStringList(), QStringList{"Ctrl+Shift+D"});
         key(Qt::Key_Question); QTRY_VERIFY(object("helpDialog")->property("opened").toBool());
         object("keybindingSearch")->setProperty("text", "desk");
         QVariant rows; QMetaObject::invokeMethod(window, "filteredKeybindings", Q_RETURN_ARG(QVariant, rows));
