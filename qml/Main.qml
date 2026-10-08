@@ -5290,22 +5290,23 @@ ApplicationWindow {
                         ctx.arc(12, 12, 2.2, 0, 2 * Math.PI)
                         ctx.fill()
                         ctx.beginPath()
-                    } else if (glyph === "characters" || glyph === "visual") {
-                        // Three lines of text under a selection's tint: whole
-                        // lines (verses), or a few characters ending at a text
-                        // caret.
+                    } else if (glyph === "visual") {
+                        // Three lines of text, whole lines (verses) under a selection's tint.
                         ctx.globalAlpha = 0.4
-                        if (glyph === "visual") ctx.fillRect(1.5, 8.5, 21, 14)
-                        else ctx.fillRect(8, 8.5, 8, 7)
+                        ctx.fillRect(1.5, 8.5, 21, 14)
                         ctx.globalAlpha = 1
                         ctx.moveTo(4, 5); ctx.lineTo(20, 5)
                         ctx.moveTo(4, 12); ctx.lineTo(20, 12)
                         ctx.moveTo(4, 19); ctx.lineTo(14, 19)
-                        if (glyph === "characters") {
-                            ctx.moveTo(16, 7); ctx.lineTo(16, 17)
-                            ctx.moveTo(14.5, 7); ctx.lineTo(17.5, 7)
-                            ctx.moveTo(14.5, 17); ctx.lineTo(17.5, 17)
-                        }
+                    } else if (glyph === "characters") {
+                        // A text cursor (I-beam) ending a few selected characters:
+                        // two shapes, so it still reads at the footer's small size.
+                        ctx.globalAlpha = 0.45
+                        ctx.fillRect(3, 8, 9.5, 8)
+                        ctx.globalAlpha = 1
+                        ctx.moveTo(15, 4); ctx.lineTo(15, 20)
+                        ctx.moveTo(12, 4); ctx.lineTo(18, 4)
+                        ctx.moveTo(12, 20); ctx.lineTo(18, 20)
                     } else {
                         ctx.moveTo(12, 6); ctx.lineTo(8, 4); ctx.lineTo(2, 4)
                         ctx.lineTo(2, 19); ctx.lineTo(8, 19); ctx.lineTo(12, 21)
