@@ -303,6 +303,6 @@ QString text(const QList<Verse> &verses, Position start, Position end, bool quot
         body += piece;
     }
     if (!quotation) return body;
-    return QStringLiteral("\u201c") + body + QStringLiteral("\u201d\n\n\u2014") + reference;
+    return QStringLiteral("\u201c") + body + QStringLiteral("\u201d\n\n\u2014 ") + reference;
 }
 }

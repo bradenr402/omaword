@@ -2472,7 +2472,7 @@ private slots:
         QVERIFY(lines[2].startsWith(QString::fromUtf8("¹ ")));
         QVERIFY(lines[2].endsWith(QChar(0x201d)));
         QVERIFY(lines[3].isEmpty());
-        QCOMPARE(lines[4],QString::fromUtf8("—") + span);
+        QCOMPARE(lines[4],QString::fromUtf8("— ") + span);
         // Re-enter Visual for the same complete range before editing the note.
         reference(origin);
         key(direction,Qt::ShiftModifier);
@@ -2867,7 +2867,7 @@ private slots:
         bible->setBlockMode(block);
         chapter("John 3");
         const auto quoted = bible->copySelection();
-        QVERIFY(quoted.endsWith(QString::fromUtf8("”\n\n—John 3")));
+        QVERIFY(quoted.endsWith(QString::fromUtf8("”\n\n— John 3")));
         QApplication::clipboard()->setText("replace chapter");
         key(Qt::Key_C,Qt::ControlModifier);
         QCOMPARE(QApplication::clipboard()->text(),quoted);
@@ -2903,7 +2903,7 @@ private slots:
         // Copies preserve the source line break inside poetic verse 2 (995e30c);
         // verses within one prose paragraph still join with a space.
         QCOMPARE(plain,QString::fromUtf8("Start café — λόγος 🌿 and finish. Poetry sings softly.\nA second line — שלום. Final naïve résumé ends here."));
-        QCOMPARE(quoted,QString::fromUtf8("“¹ Start café — λόγος 🌿 and finish. ² Poetry sings softly.\nA second line — שלום. ³ Final naïve résumé ends here.”\n\n—John 3:1–3"));
+        QCOMPARE(quoted,QString::fromUtf8("“¹ Start café — λόγος 🌿 and finish. ² Poetry sings softly.\nA second line — שלום. ³ Final naïve résumé ends here.”\n\n— John 3:1–3"));
         QTextCursor cursor(blockTextDocument());
         cursor.setPosition(blockOffset(1,6)); cursor.setPosition(blockOffset(3,18),QTextCursor::KeepAnchor);
         const auto documentSelection = cursor.selectedText();
@@ -2938,7 +2938,7 @@ private slots:
         // ctrl c quotes it: ellipses at the cut verses, numbers where a verse starts.
         key(Qt::Key_C,Qt::ControlModifier);
         QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
-        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n—John 3:1–3")));
+        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n— John 3:1–3")));
         key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),quoted);
         key(Qt::Key_Y,Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),plain);
         // With selected text, ctrl shift C copies that text; shift Y the passage.
@@ -3293,7 +3293,7 @@ private slots:
         QApplication::clipboard()->setText("replace again");
         key(Qt::Key_C,Qt::ControlModifier);
         QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
-        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n—John 3:1–3")));
+        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n— John 3:1–3")));
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),expected);
         // Middle clicks must not consume the free selection or alter the

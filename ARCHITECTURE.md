@@ -413,7 +413,9 @@ files.
   punctuation trimmed at the cut; spaced from the words, never from the
   quotation marks: `“… so loved`, `world …”`), superscript numbers only for verses whose
   beginning is selected and never for one verse, reference over the verses
-  touched — `ctrl shift C`/`shift Y` plain text, never with ellipses. Joins
+  touched after an em dash and a space (`— John 3:16`, as every quotation
+  ends: `copySelection`, `copyScope`, `quote`) — `ctrl shift C`/`shift Y`
+  plain text, never with ellipses. Joins
   follow the source as above; headings and decorations never copy.
 - Character selection: positions are source `{verse, offset}` in all layouts;
   each layout maps them to its document and paints its native selection.

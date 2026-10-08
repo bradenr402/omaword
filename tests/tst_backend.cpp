@@ -396,7 +396,7 @@ private slots:
         bible->selectVerses(17,17); bible->toggleHighlight(); QVERIFY(!bible->selectionHighlighted());
         bible->selectVerses(15,15); QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->noteText().isEmpty());
         bible->selectVerses(15,17); QCOMPARE(bible->noteText(),QString("Original range note"));
-        const auto plain = bible->copySelection(true); QVERIFY(!plain.contains("¹⁵")); QVERIFY(!plain.contains("—Mark"));
+        const auto plain = bible->copySelection(true); QVERIFY(!plain.contains("¹⁵")); QVERIFY(!plain.contains("— Mark"));
         QVERIFY(bible->navigate("JHN 3:36")); bible->moveSelection(2,true);
         QCOMPARE(bible->selectionReference(),QString("John 3:36–4:2"));
         bible->moveSelection(-3,true); QCOMPARE(bible->selectionReference(),QString("John 3:35–36"));
@@ -512,24 +512,24 @@ private slots:
         QCOMPARE(text(v, at(0, 4), at(0, 16), false), QString("God so loved"));
         QCOMPARE(text(v, at(0, 17), at(1, 3), false), a.mid(17) + " God");
         // A whole single verse: no ellipsis, no number.
-        QCOMPARE(text(v, at(0, 0), at(0, a.size()), true, "John 3:16"), QStringLiteral("“") + a + QStringLiteral("”\n\n—John 3:16"));
+        QCOMPARE(text(v, at(0, 0), at(0, a.size()), true, "John 3:16"), QStringLiteral("“") + a + QStringLiteral("”\n\n— John 3:16"));
         // Partial single verse: ellipses at both cuts, punctuation trimmed at them.
-        QCOMPARE(text(v, at(0, 4), at(0, 27), true, "John 3:16"), QStringLiteral("“… God so loved the world …”\n\n—John 3:16"));
-        QCOMPARE(text(v, at(0, 0), at(0, 16), true, "R"), QStringLiteral("“For God so loved …”\n\n—R"));
-        QCOMPARE(text(v, at(0, 26), at(0, a.size()), true, "R"), QStringLiteral("“… that he gave his Son.”\n\n—R"));
+        QCOMPARE(text(v, at(0, 4), at(0, 27), true, "John 3:16"), QStringLiteral("“… God so loved the world …”\n\n— John 3:16"));
+        QCOMPARE(text(v, at(0, 0), at(0, 16), true, "R"), QStringLiteral("“For God so loved …”\n\n— R"));
+        QCOMPARE(text(v, at(0, 26), at(0, a.size()), true, "R"), QStringLiteral("“… that he gave his Son.”\n\n— R"));
         // Across verses: the first verse's number only when its beginning is selected.
         QCOMPARE(text(v, at(0, 21), at(1, 7), true, "John 3:16–17"),
-                 QStringLiteral("“… world, that he gave his Son. ¹⁷ God did …”\n\n—John 3:16–17"));
+                 QStringLiteral("“… world, that he gave his Son. ¹⁷ God did …”\n\n— John 3:16–17"));
         QCOMPARE(text(v, at(0, 0), at(1, b.size()), true, "John 3:16–17"),
-                 QStringLiteral("“¹⁶ ") + a + QStringLiteral(" ¹⁷ ") + b + QStringLiteral("”\n\n—John 3:16–17"));
-        QCOMPARE(text(v, at(0, 0), at(1, 3), true, "R"), QStringLiteral("“¹⁶ ") + a + QStringLiteral(" ¹⁷ God …”\n\n—R"));
+                 QStringLiteral("“¹⁶ ") + a + QStringLiteral(" ¹⁷ ") + b + QStringLiteral("”\n\n— John 3:16–17"));
+        QCOMPARE(text(v, at(0, 0), at(1, 3), true, "R"), QStringLiteral("“¹⁶ ") + a + QStringLiteral(" ¹⁷ God …”\n\n— R"));
         // Paragraph and poetry joins follow the source.
         const int he = b.indexOf("He came");
         QCOMPARE(text(v, at(1, he), at(2, 8), false), b.mid(he) + "\n\nWhoever ");
-        QCOMPARE(text(v, at(4, 0), at(5, 8), true, "R"), QStringLiteral("“²⁰ ") + v[4].text + QStringLiteral("\n²¹ Darkness …”\n\n—R"));
+        QCOMPARE(text(v, at(4, 0), at(5, 8), true, "R"), QStringLiteral("“²⁰ ") + v[4].text + QStringLiteral("\n²¹ Darkness …”\n\n— R"));
         // An end at a verse's start or a start at its end touches nothing there.
         QCOMPARE(touched(v, at(0, a.size()), at(2, 0)), qMakePair(1, 1));
-        QCOMPARE(text(v, at(0, a.size()), at(2, 0), true, "R"), QStringLiteral("“") + b + QStringLiteral("”\n\n—R"));
+        QCOMPARE(text(v, at(0, a.size()), at(2, 0), true, "R"), QStringLiteral("“") + b + QStringLiteral("”\n\n— R"));
         QVERIFY(text(v, at(0, 3), at(0, 3), true, "R").isEmpty());
         // Every ellipsis has a space toward the words and none toward the quotation marks.
         for (const auto &range : QList<QPair<TextSelection::Position, TextSelection::Position>>{{at(0, 4), at(0, 27)}, {at(0, 21), at(1, 7)}, {at(0, 9), at(2, 5)}, {at(1, 2), at(1, 9)}}) {
@@ -553,7 +553,7 @@ private slots:
         QVERIFY2(quote.contains(QStringLiteral(" ² ") + two.left(8).trimmed() + QStringLiteral(" …”")), qPrintable(quote));
         QVERIFY2(quote.endsWith(QStringLiteral(" 1:1–2")), qPrintable(quote));
         QCOMPARE(bible->copyCharacters(1, 9, 2, 8, true), one.mid(9) + ' ' + two.left(8));
-        QVERIFY(bible->characterText(1, 0, 1, one.size()).startsWith(QStringLiteral("“") + one + QStringLiteral("”\n\n—")));
+        QVERIFY(bible->characterText(1, 0, 1, one.size()).startsWith(QStringLiteral("“") + one + QStringLiteral("”\n\n— ")));
         QVERIFY(bible->characterText(1, 0, 1, one.size()).endsWith(" 1:1"));
         QCOMPARE(bible->textMotion("w", 1, 0).value("offset").toInt(), one.indexOf(' ') + 1);
         QCOMPARE(bible->textMotion("l", 1, one.size() - 1).value("verse").toInt(), 2);
@@ -572,7 +572,7 @@ private slots:
         }));
         install(path); QVERIFY2(bible->navigate(input),qPrintable(bible->error()));
         const QString quotation = bible->copySelection();
-        QVERIFY2(quotation.endsWith(QStringLiteral("”\n\n—")+label),qPrintable(quotation));
+        QVERIFY2(quotation.endsWith(QStringLiteral("”\n\n— ")+label),qPrintable(quotation));
         QCOMPARE(QGuiApplication::clipboard()->text(),quotation);
         QVERIFY(quotation.contains("-word."));
         const QString plain = bible->copySelection(true);
@@ -641,14 +641,14 @@ private slots:
         const QString quotation = QStringLiteral("“¹ ")+text[0]+QStringLiteral(" ² ")+text[1]
             +QStringLiteral("\n\n³ ")+text[2]+QStringLiteral("\n\n⁴ ")+text[3]
             +QStringLiteral("\n⁵ ")+text[4]+QStringLiteral("\n\n⁶ ")+text[5]
-            +QStringLiteral("”\n\n—")+bible->selectionReference();
+            +QStringLiteral("”\n\n— ")+bible->selectionReference();
         QCOMPARE(bible->copySelection(),quotation);
         bible->setReadingMode("block"); bible->setFocusMode(true); bible->setShowVerseNumbers(false);
         QCOMPARE(bible->copySelection(true),expected); QCOMPARE(bible->copySelection(),quotation);
         bible->moveSelection(1,true);
         const auto next = bible->verses().first().toMap()["text"].toString();
         QCOMPARE(bible->copySelection(true),expected+"\n\n"+next);
-        QVERIFY(bible->copySelection().endsWith(QStringLiteral("\n\n¹ ")+next+QStringLiteral("”\n\n—")+bible->selectionReference()));
+        QVERIFY(bible->copySelection().endsWith(QStringLiteral("\n\n¹ ")+next+QStringLiteral("”\n\n— ")+bible->selectionReference()));
         // The Desk quotes it laid out the same way, verses numbered.
         const QString spanning = bible->selectionReference(), spanningQuote = bible->copySelection();
         QCOMPARE(bible->appendToDesk(),spanning);
@@ -838,7 +838,7 @@ private slots:
         QCOMPARE(bible->quote("jn316"),verse); // Compact, as the palette reads it.
         QCOMPARE(bible->quote("John 3:16",true),plain);
         QCOMPARE(bible->quote("John 3:16-17"),range);
-        QVERIFY(bible->quote("John 3").endsWith(QStringLiteral("\u2014John 3")));
+        QVERIFY(bible->quote("John 3").endsWith(QStringLiteral("\u2014 John 3")));
         QVERIFY(bible->quote("Nowhere at all").isEmpty()); QVERIFY(!bible->error().isEmpty());
         QCOMPARE(navigation.count(),0); QCOMPARE(bible->selectionReference(),place);
         bible.reset(); bible = std::make_unique<BibleBackend>(); QCOMPARE(bible->selectionReference(),place);

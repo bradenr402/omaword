@@ -1270,7 +1270,7 @@ QString BibleBackend::copyScope(QVariantMap scope, bool plainText)
         setError("That passage's Bible version is not installed or no longer contains it."); return {};
     }
     const QString text = plainText ? body
-        : QStringLiteral("\u201c") + body + QStringLiteral("\u201d\n\n\u2014") + canonical.value("reference").toString();
+        : QStringLiteral("\u201c") + body + QStringLiteral("\u201d\n\n\u2014 ") + canonical.value("reference").toString();
     copyText(text); clearError(); return text;
 }
 
@@ -3692,7 +3692,7 @@ QString BibleBackend::copyRange(int first, int last, const QString &label, bool 
             }
         }
     }
-    return plainText ? body : QStringLiteral("“") + body + QStringLiteral("”\n\n—") + label;
+    return plainText ? body : QStringLiteral("“") + body + QStringLiteral("”\n\n— ") + label;
 }
 
 void BibleBackend::copyText(QString text)

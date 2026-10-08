@@ -385,7 +385,7 @@ private slots:
         key(Qt::Key_Down); key(Qt::Key_Y);
         QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(QString::fromUtf8("“")));
         QVERIFY(QGuiApplication::clipboard()->text().contains("In the beginning was the Word."));
-        QVERIFY(QGuiApplication::clipboard()->text().endsWith(QString::fromUtf8("—John 1:1")));
+        QVERIFY(QGuiApplication::clipboard()->text().endsWith(QString::fromUtf8("— John 1:1")));
         key(Qt::Key_Y, Qt::ShiftModifier);
         QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith("In the beginning was the Word."));
         // enter switches to it at the same passage.
