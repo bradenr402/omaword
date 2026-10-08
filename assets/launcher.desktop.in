@@ -3,9 +3,19 @@ Type=Application
 Name=$$BRAND_NAME
 GenericName=Bible Reader
 Comment=Read the Bible offline with highlights, tags, and Markdown notes
-Exec=$$BRAND_ID
+Exec=$$BRAND_ID %u
 Icon=$$BRAND_ID
 Terminal=false
 Categories=Education;Literature;
 Keywords=$$BRAND_KEYWORDS
 StartupNotify=true
+MimeType=x-scheme-handler/$$BRAND_ID;
+Actions=lookup;new-window;
+
+[Desktop Action lookup]
+Name=Look Up a Passage
+Exec=$$BRAND_ID lookup
+
+[Desktop Action new-window]
+Name=New Window
+Exec=$$BRAND_ID

@@ -133,6 +133,26 @@ private slots:
         QTRY_COMPARE(completed, 2);
     }
 
+    // `open --here` and `lookup` reach the primary as such.
+    void forwardsWhereToOpen()
+    {
+        QTemporaryDir dir;
+        SingleInstance primary(dir.path(), "test", dir.path()), secondary(dir.path(), "test", dir.path());
+        QCOMPARE(primary.start(), SingleInstance::Role::Primary);
+        QList<SingleInstance::Request> received;
+        primary.setHandler([&](const auto &request, auto reply) { received << request; reply({true, {}}); });
+        SingleInstance::Request here; here.reference = "John 3:16"; here.newWindow = false;
+        SingleInstance::Request lookup; lookup.newWindow = false; lookup.lookup = true;
+        int done = 0;
+        secondary.forward(here, [&](auto result) { QVERIFY(result.ok); ++done; });
+        QTRY_COMPARE(done, 1);
+        secondary.forward(lookup, [&](auto result) { QVERIFY(result.ok); ++done; });
+        QTRY_COMPARE(done, 2);
+        QCOMPARE(received.size(), 2);
+        QCOMPARE(received[0].reference, QString("John 3:16")); QVERIFY(!received[0].newWindow); QVERIFY(!received[0].lookup);
+        QVERIFY(received[1].lookup); QVERIFY(!received[1].newWindow); QVERIFY(received[1].reference.isEmpty());
+    }
+
     void retriesUntilServerStarts()
     {
         QTemporaryDir dir;
@@ -159,6 +179,7 @@ private slots:
         QTest::newRow("activate") << QByteArray("{\"version\":1,\"activate\":false}\n");
         QTest::newRow("reference-type") << QByteArray("{\"version\":1,\"activate\":true,\"reference\":8}\n");
         QTest::newRow("newWindow-type") << QByteArray("{\"version\":1,\"activate\":true,\"newWindow\":8}\n");
+        QTest::newRow("lookup-type") << QByteArray("{\"version\":1,\"activate\":true,\"lookup\":\"yes\"}\n");
         QTest::newRow("unknown-field") << QByteArray("{\"version\":1,\"activate\":true,\"path\":\"/tmp/x\"}\n");
         QTest::newRow("relative-import") << QByteArray("{\"version\":1,\"activate\":true,\"import\":\"x.zip\"}\n");
         QTest::newRow("long-reference") << QByteArray("{\"version\":1,\"activate\":true,\"reference\":\"") + QByteArray(1025, 'x') + "\"}\n";
@@ -361,6 +382,20 @@ private slots:
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 1); // No Bible installed: cannot claim navigation succeeded.
         QVERIFY(!secondary.readAllStandardError().isEmpty());
+        // open --here and omaword: links navigate where you read; lookup only shows the palette.
+        for (const auto &arguments : QList<QStringList>{{"open", "--here", "John 3:16"}, {"omaword:John%203:16"}}) {
+            secondary.start(executable, arguments);
+            QVERIFY(secondary.waitForFinished(5000));
+            QCOMPARE(secondary.exitCode(), 1); QVERIFY(!secondary.readAllStandardError().isEmpty());
+        }
+        secondary.start(executable, {"lookup"});
+        QVERIFY(secondary.waitForFinished(5000));
+        QCOMPARE(secondary.exitCode(), 0);
+        // quote prints without a window or the running instance.
+        secondary.start(executable, {"quote", "jn316"});
+        QVERIFY(secondary.waitForFinished(5000));
+        QCOMPARE(secondary.exitCode(), 1);
+        QVERIFY(secondary.readAllStandardError().contains("add a Bible version first"));
         QCOMPARE(primary.state(), QProcess::Running);
     }
 

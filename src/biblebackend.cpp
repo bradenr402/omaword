@@ -3622,6 +3622,25 @@ QString BibleBackend::copySelection(bool plainText)
     copyText(text); clearError(); return text;
 }
 
+QString BibleBackend::quote(QString reference, bool plainText)
+{
+    if (!requireReady()) return {};
+    int b = 0, c = 0, start = 0, end = 0;
+    QString error;
+    if (!parseReference(reference,&b,&c,&start,&end,&error)) {
+        // Compact references (jn316) as the passage palette reads them.
+        const auto candidates = referenceCandidates(reference,1);
+        if (candidates.isEmpty() || !parseReference(candidates.first().toMap().value("reference").toString(),&b,&c,&start,&end,&error)) {
+            setError(error); return {};
+        }
+    }
+    const QString label = start ? rangeReference(start,end) : this->reference(b,c);
+    if (!start && !chapterBounds(b,c,&start,&end)) { setError("That chapter is not in " + edition() + "."); return {}; }
+    const QString text = copyRange(start,end,label,plainText);
+    if (!text.isEmpty()) clearError();
+    return text;
+}
+
 QString BibleBackend::copyVerse(int number, bool plainText)
 {
     if (!requireReady()) return {};

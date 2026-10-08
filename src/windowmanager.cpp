@@ -125,6 +125,8 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
             } else if (!bible->navigate(request.reference)) action = {false, bible->error()};
         }
     }
+    // Lookup: the passage palette, ready to type.
+    if (request.lookup && action.ok) QMetaObject::invokeMethod(root, "openPalette", Q_ARG(QVariant, false), Q_ARG(QVariant, false));
     if (!activate) { reply(action); return; }
     SingleInstance::activateWindow(root, request, this, [action, reply](SingleInstance::Result activation) {
         if (!action.ok) reply(action);

@@ -28,7 +28,8 @@ files.
 | `src/textselection.*` | Character selection (`v`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
 | `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing |
-| `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC |
+| `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC (a request: reference, import, activation token, `newWindow`, `lookup`) |
+| `src/main.cpp` | Command line: `quote <reference> [--plain]` runs headless (a `QCoreApplication` and one `BibleBackend`, `quote()`: no window, instance, clipboard, or saved place); `open <reference> [--here]`, `lookup` (the passage palette where you read), an `omaword:` link (percent-decoded, opened where you read), or a bare reference (a new window) go to the running instance |
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (`lastSound`/`playCount` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds) |
 | `qml/Main.qml` | Reader, palettes, the Margin (`notesDrawer`: Notes, or the Desk page in its place), Marks (`savedDrawer`: every version's marks from `marks()`, one row per exact range, filtered, notes written in place), settings, catalog, About |

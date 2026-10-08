@@ -829,6 +829,20 @@ private slots:
         QCOMPARE(bible->deskPage(),john + "\n\n" + genesis + QStringLiteral("\n\n> \u2014 Psalms 23:1–2 (eng-gone)\n"));
         QVERIFY(bible->navigate("John 3:17")); QCOMPARE(bible->noteText(),QString("Kept note"));
     }
+    void quoteLeavesTheReaderAlone() {
+        install(net); QVERIFY(bible->navigate("John 3:16")); const QString verse = bible->copySelection(), plain = bible->copySelection(true);
+        QVERIFY(bible->navigate("John 3:16-17")); const QString range = bible->copySelection();
+        QVERIFY(bible->navigate("GEN 1:2")); const QString place = bible->selectionReference();
+        QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
+        QCOMPARE(bible->quote("John 3:16"),verse);
+        QCOMPARE(bible->quote("jn316"),verse); // Compact, as the palette reads it.
+        QCOMPARE(bible->quote("John 3:16",true),plain);
+        QCOMPARE(bible->quote("John 3:16-17"),range);
+        QVERIFY(bible->quote("John 3").endsWith(QStringLiteral("\u2014John 3")));
+        QVERIFY(bible->quote("Nowhere at all").isEmpty()); QVERIFY(!bible->error().isEmpty());
+        QCOMPARE(navigation.count(),0); QCOMPARE(bible->selectionReference(),place);
+        bible.reset(); bible = std::make_unique<BibleBackend>(); QCOMPARE(bible->selectionReference(),place);
+    }
     void ribbonPlacesStaysAndCrossesVersions() {
         // Nothing to place it in before a version is installed.
         QVERIFY(!bible->placeRibbon()); QVERIFY(!bible->error().isEmpty()); QVERIFY(bible->ribbon().isEmpty());

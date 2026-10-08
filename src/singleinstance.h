@@ -20,6 +20,8 @@ public:
         QString activationToken;
         QString startupId;
         bool newWindow = true;
+        // `omaword lookup`: the passage palette, where you were reading.
+        bool lookup = false;
         static Request fromArguments(const QStringList &references, const QString &importArgument,
                                      bool importProvided);
     };

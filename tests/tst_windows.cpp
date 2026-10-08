@@ -450,6 +450,21 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(child.state(),QProcess::NotRunning,5000);
         QCOMPARE(child.exitCode(),0);
     }
+    // open --here navigates the window you read; lookup opens its palette.
+    void hereAndLookupStayInTheWindowYouRead() {
+        const int count = windows->count();
+        SingleInstance::Request here; here.reference = "Romans 8:2"; here.newWindow = false;
+        bool done = false;
+        windows->openRequest(here,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
+        QTRY_VERIFY(done); QCOMPARE(windows->count(),count);
+        QCOMPARE(windows->backendAt(count - 1)->selectionReference(),QString("Romans 8:2"));
+        SingleInstance::Request lookup; lookup.newWindow = false; lookup.lookup = true;
+        done = false;
+        windows->openRequest(lookup,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
+        QTRY_VERIFY(done); QCOMPARE(windows->count(),count);
+        auto palette = windows->windowAt(count - 1)->findChild<QObject *>("passagePalette"); QVERIFY(palette);
+        QTRY_VERIFY(palette->property("opened").toBool());
+    }
     void realSecondaryCreatesAnotherWindow() {
         const auto directory = windows->backendAt(0)->dataDirectory();
         SingleInstance primary(directory,"windows-test",session->path());

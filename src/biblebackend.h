@@ -376,6 +376,10 @@ public:
     // left with no highlight or note is removed.
     Q_INVOKABLE bool deleteNoteScope(QVariantMap scope);
     Q_INVOKABLE QString copySelection(bool plainText = false);
+    // `omaword quote`: a reference's passage (a whole chapter for "John 3")
+    // laid out as copySelection() lays it out, without navigating, saving,
+    // or touching the clipboard. "" with the error set when it is unknown.
+    Q_INVOKABLE QString quote(QString reference, bool plainText = false);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
     Q_INVOKABLE void copyText(QString text);
     // Character selection over the current chapter's source text (see
