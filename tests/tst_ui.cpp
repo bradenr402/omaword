@@ -414,6 +414,33 @@ private slots:
         QVERIFY2(qmlWarnings.isEmpty(), qPrintable(qmlWarnings.join('\n')));
         session.reset();
     }
+    // The interface follows the live theme (AGENTS.md): no color literals but
+    // transparency, no font families, no rounded radii, in any QML or
+    // JavaScript file. A fallback for a test without a theme says so.
+    void qmlFollowsTheLiveTheme() {
+        const QDir directory = QFileInfo(QFINDTESTDATA("../qml/Main.qml")).absoluteDir();
+        QVERIFY(directory.exists("Main.qml"));
+        const QList<QPair<QRegularExpression,QString>> rules{
+            {QRegularExpression("[\"']#[0-9a-fA-F]{3,8}[\"']"),"a color literal"},
+            {QRegularExpression("\\b(color|ink|fill\\w*|stroke\\w*):\\s*[\"'](?!transparent)[a-z]+[\"']"),"a named color"},
+            {QRegularExpression("font\\.family:\\s*[\"']"),"a font family"},
+            {QRegularExpression("\\bradius:\\s*[1-9][0-9.]*\\s*($|;|\\})"),"a fixed radius"}};
+        QStringList found;
+        int files = 0;
+        for (const auto &name : directory.entryList({"*.qml","*.js"},QDir::Files)) {
+            QFile file(directory.filePath(name)); QVERIFY(file.open(QIODevice::ReadOnly)); ++files;
+            int number = 0;
+            for (const auto &line : QString::fromUtf8(file.readAll()).split('\n')) {
+                ++number;
+                const QString code = line.trimmed().startsWith("//") ? QString() : line;
+                if (code.contains("// fallback:")) continue;
+                for (const auto &[pattern,what] : rules)
+                    if (pattern.match(code).hasMatch()) found << QString("%1:%2 %3: %4").arg(name).arg(number).arg(what,line.trimmed());
+            }
+        }
+        QVERIFY(files > 10);
+        QVERIFY2(found.isEmpty(),qPrintable(found.join('\n')));
+    }
     void firstInstallShowsTheKeysOnce() {
         QVERIFY(!bible->ready()); QVERIFY(!item("keyStrip")->isVisible());
         bible->importUsfm(QUrl::fromLocalFile(syntheticSource)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),120000);

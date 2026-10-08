@@ -4961,11 +4961,7 @@ ApplicationWindow {
         Accessible.name: text
         Accessible.description: keys
     }
-    component FineRule: Rectangle {
-        color: desktop.border
-        implicitHeight: 1
-        opacity: 0.65
-    }
+    component FineRule: Rule { theme: desktop }
     // Lists reserve the scrollbar's width while it shows, so rows (and their
     // right-hand labels, such as "here") never sit under it.
     function scrollGutter(list) {
@@ -5432,12 +5428,7 @@ ApplicationWindow {
         }
         AppToolTip { theme: desktop; uiScale: app.scale; visible: marker.visible && (marker.hovered || marker.activeFocus); text: marker.hint }
     }
-    component SectionLabel: Label {
-        color: desktop.muted
-        font.pixelSize: 11 * app.scale
-        font.weight: Font.DemiBold
-        font.letterSpacing: 1.5
-    }
+    component SectionLabel: SectionTitle { theme: desktop; uiScale: app.scale }
     component ModalCard: Dialog {
         id: modalCard
         modal: true

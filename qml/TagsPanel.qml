@@ -632,12 +632,7 @@ Item {
         }
         background: Item {}
     }
-    component FineRule: Rectangle {
-        Layout.fillWidth: true
-        implicitHeight: 1
-        color: panel.desktop.border
-        opacity: 0.65
-    }
+    component FineRule: Rule { theme: panel.desktop; Layout.fillWidth: true }
     Drawer {
         id: relatedDrawer
         objectName: "relatedDrawer"

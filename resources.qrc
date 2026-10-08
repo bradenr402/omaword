@@ -19,6 +19,8 @@
     <file>qml/HintRow.qml</file>
     <file>qml/PeekCard.qml</file>
     <file>qml/QuoteBars.qml</file>
+    <file>qml/Rule.qml</file>
+    <file>qml/SectionTitle.qml</file>
     <file>qml/KeyNotation.js</file>
     <file>qml/RowMenu.js</file>
     <file>resources/catalog.json</file>

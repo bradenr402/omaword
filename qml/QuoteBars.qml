@@ -7,7 +7,7 @@ import OmaWord.Reader 1.0
 Item {
     id: root
     required property TextEdit target
-    property color color: "gray"
+    required property color color
     property real uiScale: 1
     anchors.fill: parent
     MarkdownQuotes {

@@ -3,7 +3,7 @@ import QtQuick
 Item {
     id: root
     property string kind: "note"
-    property color ink: "white"
+    property color ink: "white" // fallback: a theme without an accent (standalone tests)
     property bool filled: false
     width: 18
     height: 18

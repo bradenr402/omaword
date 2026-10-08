@@ -90,7 +90,7 @@ Item {
         id: paint
         objectName: "searchHighlightsCanvas"
         anchors.fill: parent
-        property color accent: root.theme ? root.theme.accent : "#80aaff"
+        property color accent: root.theme ? root.theme.accent : "#80aaff" // fallback: a test without a theme
         onAccentChanged: root.refresh()
         onPaint: {
             if (root.destroying) return
