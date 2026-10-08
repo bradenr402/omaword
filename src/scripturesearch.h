@@ -23,9 +23,24 @@ Result find(const Chapter &chapter, const QString &query, bool bibleSyntax = fal
 // insensitive, `\C` sensitive (`\c` wins). Empty matches are skipped. An
 // invalid pattern yields the error "invalid pattern" and no matches.
 Result findPattern(const Chapter &chapter, const QString &pattern, const Cancellation &cancel = {});
-// The whole edition, matches in Bible order (book order, chapter, verse).
+// An edition to search: its text database, version ID, and abbreviation.
+struct Edition { QString path, versionId, abbreviation; };
+// Every edition in the given order, each one's matches in Bible order (book
+// order, chapter, verse), tagged with its versionId/versionAbbreviation.
+// The search index at indexPath (an FTS5 trigram index of each chapter's
+// normalized text, built for an edition the first time it is searched and
+// again whenever its file changes) narrows the chapters to scan; matching is
+// the same either way. A non-empty `installed` drops every other edition
+// from the index.
+Result searchEditions(const QVector<Edition> &editions, const QString &query, const QString &indexPath,
+                      const QStringList &installed = {}, const Cancellation &cancel = {});
+// One edition, through the index at defaultIndexPath().
 Result search(const QString &path, const QString &versionId, const QString &abbreviation,
               const QString &query, const Cancellation &cancel = {});
-// Test hook: the versions whose prepared text is cached, most recently searched first.
+// search-index.sqlite in the cache directory.
+QString defaultIndexPath();
+// Test hooks: the versions whose prepared text is cached, most recently
+// searched first; the versions in an index.
 QStringList cachedVersions();
+QStringList indexedEditions(const QString &indexPath);
 }

@@ -1771,6 +1771,7 @@ bool BibleBackend::loadPreferences()
     m_wordsOfJesus = boolean("wordsOfJesus",false);
     m_chapterOutline = boolean("chapterOutline",false);
     m_marginNotes = boolean("marginNotes",false);
+    m_searchAllVersions = boolean("searchAllVersions",false);
     m_historyEnabled = boolean("historyEnabled",true);
     const QString mode = values.value("readingMode").toString();
     m_readingMode = mode == "block" || mode == "verse" ? mode : "paragraph";
@@ -1830,6 +1831,11 @@ void BibleBackend::setMarginNotes(bool value)
 {
     if (value == m_marginNotes || !savePreference("marginNotes",int(value))) return;
     m_marginNotes = value; emit preferencesChanged();
+}
+void BibleBackend::setSearchAllVersions(bool value)
+{
+    if (value == m_searchAllVersions || !savePreference("searchAllVersions",int(value))) return;
+    m_searchAllVersions = value; emit preferencesChanged();
 }
 void BibleBackend::setBlockMode(bool value)
 {
@@ -2261,7 +2267,15 @@ void BibleBackend::searchScripture(QString query)
     if (!m_ready) { m_searchError = "Import a USFM Bible first."; emit searchChanged(); return; }
     const quint64 request = m_searchRequest;
     const QString generation = m_textGeneration, id = m_versionId;
-    const QString path = m_bible.databaseName(), abbreviation = m_abbreviation;
+    QVector<ScriptureSearch::Edition> editions{{m_bible.databaseName(),m_versionId,m_abbreviation}};
+    QStringList installed;
+    for (const auto &value : std::as_const(m_versions)) {
+        const auto version = value.toMap();
+        const QString other = version.value("id").toString();
+        installed << other;
+        if (m_searchAllVersions && other != m_versionId && !installedPath(other).isEmpty())
+            editions.append({installedPath(other),other,version.value("abbreviation").toString()});
+    }
     const auto cancel = std::make_shared<std::atomic_bool>(false);
     m_searchCancellation = cancel; m_searchBusy = true;
     auto *watcher = new QFutureWatcher<ScriptureSearch::Result>(this);
@@ -2271,24 +2285,28 @@ void BibleBackend::searchScripture(QString query)
             if (cancel->load() || request != m_searchRequest || generation != m_textGeneration || id != m_versionId) return;
             m_searchBusy = false; m_searchError = result.error;
             m_allSearchResults = result.matches; m_searchResults = m_allSearchResults.mid(0,100);
-            // Results arrive in Bible order, so each book's are contiguous.
+            // Results arrive version by version, each in Bible order, so each
+            // version's books are contiguous.
             m_searchBooks.clear();
             for (qsizetype i = 0; i < m_allSearchResults.size(); ++i) {
                 const auto row = m_allSearchResults[i].toMap();
                 const int book = row.value("book").toInt();
-                if (!m_searchBooks.isEmpty() && m_searchBooks.last().toMap().value("book").toInt() == book) {
-                    auto last = m_searchBooks.last().toMap(); last["count"] = last.value("count").toInt() + 1;
-                    m_searchBooks.last() = last;
-                    continue;
+                const QString version = row.value("versionId").toString();
+                if (!m_searchBooks.isEmpty()) {
+                    auto last = m_searchBooks.last().toMap();
+                    if (last.value("book").toInt() == book && last.value("versionId").toString() == version) {
+                        last["count"] = last.value("count").toInt() + 1;
+                        m_searchBooks.last() = last;
+                        continue;
+                    }
                 }
-                QString name;
-                for (const auto &entry : std::as_const(m_books)) if (entry.toMap().value("id").toInt() == book) name = entry.toMap().value("name").toString();
-                m_searchBooks.append(QVariantMap{{"book",book},{"name",name},{"count",1},{"index",int(i)}});
+                m_searchBooks.append(QVariantMap{{"book",book},{"name",row.value("bookName")},{"count",1},{"index",int(i)},
+                                                 {"versionId",version},{"versionAbbreviation",row.value("versionAbbreviation")}});
             }
             emit searchChanged();
         });
-    watcher->setFuture(QtConcurrent::run([path,id,abbreviation,query,cancel] {
-        return ScriptureSearch::search(path,id,abbreviation,query,cancel);
+    watcher->setFuture(QtConcurrent::run([editions,installed,query,cancel] {
+        return ScriptureSearch::searchEditions(editions,query,ScriptureSearch::defaultIndexPath(),installed,cancel);
     }));
     emit searchChanged();
 }

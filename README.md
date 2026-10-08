@@ -106,6 +106,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `n`: Next search match
 - `shift N`: Previous search match
 - `ctrl /`: Search Bible
+- `alt a`: Bible search: every version or the one you read
 - `ctrl ↓` · `ctrl ↑`: Bible search: next book, previous book
 
 ### Annotate
@@ -239,7 +240,7 @@ These also work, but stay out of the in-app list:
 
 ### Finding passages
 - The passage palette understands compact references like `jn316`, `1co13`, or `rev 3 14-22`, and lists likely matches, best first. Choosing a book (`enter` or `→`) shows its chapters as a grid of numbers, five to a row: arrows move, typing a number narrows the grid, `3:16` goes to that verse, and `backspace` returns to the books. A chapter opens on its first verse ("Galatians 2" selects 2:1), ready for `j` and `k`.
-- Search Scripture across the current version: results come in Bible order under each book's name and count, and `ctrl ↓` / `ctrl ↑` jump between books. Or find in the current chapter (`/`) with a regular expression, Neovim-style smart case: lowercase ignores case, any capital matches it, `\c` / `\C` force either way.
+- Search Scripture in the version you read, or in every version you installed (`alt a` in the search palette): results come in Bible order under each book's name and count (and its version's, searching them all), and `ctrl ↓` / `ctrl ↑` jump between books. A search index kept in `~/.cache/omaword/` makes searches quick from the second one on. Or find in the current chapter (`/`) with a regular expression, Neovim-style smart case: lowercase ignores case, any capital matches it, `\c` / `\C` force either way.
 - Click the chapter title for the book's chapter grid, the current chapter chosen; the `<` `>` buttons at the window's edges step chapters (`h` `l`), and "John 2 →" after the last verse leads on. The next chapter is read ahead while you read, so turning to it is quick.
 - `ctrl` + mouse wheel and a touchpad pinch change the Text size, like `ctrl =` and `ctrl -`.
 - `[` and `]` (or the mouse's back and forward buttons) step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.

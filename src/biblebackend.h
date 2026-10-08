@@ -55,6 +55,8 @@ class BibleBackend : public QObject
     // Margins (off by default, shared preferences): left chapter outline, right margin notes.
     Q_PROPERTY(bool chapterOutline READ chapterOutline WRITE setChapterOutline NOTIFY preferencesChanged)
     Q_PROPERTY(bool marginNotes READ marginNotes WRITE setMarginNotes NOTIFY preferencesChanged)
+    // Bible search: every installed version (the active one first), or the active one only.
+    Q_PROPERTY(bool searchAllVersions READ searchAllVersions WRITE setSearchAllVersions NOTIFY preferencesChanged)
     Q_PROPERTY(bool blockMode READ blockMode WRITE setBlockMode NOTIFY preferencesChanged)
     Q_PROPERTY(QString readingMode READ readingMode WRITE setReadingMode NOTIFY preferencesChanged)
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
@@ -182,6 +184,7 @@ public:
     bool wordsOfJesus() const { return m_wordsOfJesus; }
     bool chapterOutline() const { return m_chapterOutline; }
     bool marginNotes() const { return m_marginNotes; }
+    bool searchAllVersions() const { return m_searchAllVersions; }
     // Compatibility setter: true -> block, false -> verse. Default paragraph
     // mode also reports false; callers should use readingMode for three states.
     bool blockMode() const { return m_readingMode == "block"; }
@@ -211,6 +214,11 @@ public:
     // Bible syntax: AND substrings in one verse, quoted phrases across adjacent
     // source verses in a chapter. Quotes/backslashes can be backslash-escaped.
     // Queries over 4096 UTF-16 units return an explicit error, never truncation.
+    // With searchAllVersions, every installed version's matches follow the
+    // active one's, each in Bible order; searchBooks then has one entry per
+    // version and book {versionId, versionAbbreviation, book, name, count,
+    // index}. A search index in the cache directory (ScriptureSearch::
+    // searchEditions) finds the chapters to read.
     Q_INVOKABLE void searchScripture(QString query);
     Q_INVOKABLE void cancelScriptureSearch();
     Q_INVOKABLE void loadMoreSearchResults();
@@ -226,6 +234,7 @@ public:
     Q_INVOKABLE void setWordsOfJesus(bool value);
     Q_INVOKABLE void setChapterOutline(bool value);
     Q_INVOKABLE void setMarginNotes(bool value);
+    Q_INVOKABLE void setSearchAllVersions(bool value);
     Q_INVOKABLE void setBlockMode(bool value);
     Q_INVOKABLE void setReadingMode(QString value);
     Q_INVOKABLE void setFontSize(int value);
@@ -582,7 +591,7 @@ private:
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
     bool m_showVerseNumbers = true, m_showHeadings = true, m_focusMode = false, m_wordsOfJesus = false;
-    bool m_chapterOutline = false, m_marginNotes = false;
+    bool m_chapterOutline = false, m_marginNotes = false, m_searchAllVersions = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;
     bool m_hasParagraphs = false, m_hasWordsOfJesus = false, m_hasHeadings = false, m_hasCrossReferences = false;

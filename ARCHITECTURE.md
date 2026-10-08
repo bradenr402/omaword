@@ -337,15 +337,32 @@ files.
   is `copyScope` with that version's ID, and switching keeps the passage.
 
 ### Search
-- Active version only; per-window state. Case-insensitive, whitespace-collapsed,
+- The active version, or every installed version (`searchAllVersions`, a
+  global preference: the active one first, then the others most recently
+  used first); per-window state. Case-insensitive, whitespace-collapsed,
   partial words; punctuation and accents significant. Headings, numbers, notes,
   tags, decorations never searched.
 - Bible search: unquoted terms AND within a verse; quoted phrases may span
   adjacent verses; mixed queries anchor on the minimal phrase range. Never
   crosses chapters. Max 4096 units; unbalanced quotes error. Results come in
   Bible order (the edition's book order, chapter, verse), never ranked;
-  `searchBooks` sums them per book ({book, name, count, index}) for the
-  palette's book headings and `ctrl ↓`/`ctrl ↑` book jumps.
+  `searchBooks` sums them per version and book ({versionId,
+  versionAbbreviation, book, name, count, index}) for the palette's book
+  headings (with the version's abbreviation while searching every version)
+  and `ctrl ↓`/`ctrl ↑` book jumps. A result in another version opens there
+  (`openTaggedPassage`).
+- The search index (`ScriptureSearch::searchEditions`): `search-index.sqlite`
+  in the cache directory, an FTS5 trigram table (case-sensitive: the text is
+  already folded) of each chapter's normalized text, its verses joined as the
+  scan joins them, per edition, with the edition's identity (path, size,
+  mtime) when indexed. Any substring the scan can find in a chapter is a
+  substring of that text, so the chapters a query's terms of three or more
+  characters MATCH are every chapter it can match in; shorter terms narrow
+  nothing (every chapter is scanned). Matching itself is unchanged. An
+  edition is indexed on its first search (while it is scanned in full) and
+  again when its file changes; editions no longer installed are dropped; a
+  file of another format, or one SQLite cannot read, is started over. It is a
+  cache: deleting it costs one slower search per version.
 - Chapter find (`/`) is a regular expression (`ScriptureSearch::findPattern`,
   `QRegularExpression` with Unicode properties) over each verse's source text:
   matches never cross verses (the old literal find could), empty matches are

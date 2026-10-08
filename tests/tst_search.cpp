@@ -320,6 +320,77 @@ private slots:
         QVERIFY(QFile::remove(path));
         QVERIFY(!search(path,"synthetic","SYN","mercy").error.isEmpty()); // Cached generation must not revive an unlinked file.
     }
+    // Search across editions: one FTS5 index (in the cache directory) of every
+    // chapter's normalized text narrows the chapters to scan; matching stays
+    // exactly the scan's.
+    void indexedSearchAcrossEditions() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const QString index = directory.filePath("cache/search-index.sqlite");
+        using Row = std::tuple<int,int,int,QString>;
+        auto edition = [&](const QString &id, const QList<Row> &rows) {
+            const QString path = directory.filePath(id + ".sqlite"), connection = "index-" + id;
+            QFile::remove(path);
+            {
+                auto db = QSqlDatabase::addDatabase("QSQLITE",connection); db.setDatabaseName(path); db.open();
+                QSqlQuery q(db);
+                q.exec("CREATE TABLE metadata(key TEXT,value TEXT)");
+                q.exec("INSERT INTO metadata VALUES('version_id','" + id + "')");
+                q.exec("CREATE TABLE books(id INTEGER,ordinal INTEGER,name TEXT)");
+                q.exec("INSERT INTO books VALUES(1,1,'Genesis'),(2,2,'Exodus')");
+                q.exec("CREATE TABLE verses(book INTEGER,chapter INTEGER,number INTEGER,text TEXT,PRIMARY KEY(book,chapter,number))");
+                q.prepare("INSERT INTO verses VALUES(?,?,?,?)");
+                for (const auto &[book,chapter,verse,text] : rows) {
+                    q.addBindValue(book); q.addBindValue(chapter); q.addBindValue(verse); q.addBindValue(text); q.exec();
+                }
+            }
+            QSqlDatabase::removeDatabase(connection);
+            return path;
+        };
+        const QString a = edition("alpha", {{1,1,1,"In the beginning God created"},{1,1,2,"the heaven and the earth."},
+                                            {1,2,1,"Thus the heavens were finished."},{2,1,1,"A Straße of light, by God."}});
+        const QString b = edition("beta", {{1,1,1,"At first God made"},{1,1,2,"the sky and the land."}});
+        const QVector<Edition> both{{a,"alpha","A"},{b,"beta","B"}};
+        auto references = [](const Result &result) {
+            QStringList list;
+            for (const auto &row : result.matches) list << row.toMap()["versionId"].toString() + " " + row.toMap()["reference"].toString();
+            return list;
+        };
+        // Every edition in the given order, each in Bible order, tagged with its version.
+        auto found = searchEditions(both,"god",index);
+        QVERIFY2(found.error.isEmpty(),qPrintable(found.error));
+        QCOMPARE(references(found),QStringList({"alpha Genesis 1:1","alpha Exodus 1:1","beta Genesis 1:1"}));
+        QCOMPARE(found.matches.first().toMap()["versionAbbreviation"].toString(),QString("A"));
+        QCOMPARE(found.matches.first().toMap()["bookName"].toString(),QString("Genesis"));
+        QCOMPARE(indexedEditions(index),QStringList({"alpha","beta"}));
+        // From the index now: a phrase across verses, full folding, AND within a
+        // verse, and terms too short to index (scanned everywhere).
+        QCOMPARE(references(searchEditions(both,"\"created the heaven\"",index)),QStringList({"alpha Genesis 1:1–2"}));
+        QCOMPARE(references(searchEditions(both,"strasse",index)),QStringList({"alpha Exodus 1:1"}));
+        QCOMPARE(references(searchEditions(both,"heaven earth",index)),QStringList({"alpha Genesis 1:2"}));
+        QCOMPARE(references(searchEditions(both,"sky la",index)),QStringList({"beta Genesis 1:2"}));
+        QCOMPARE(searchEditions(both,"nowhere",index).matches.size(),0);
+        // A third edition evicts one prepared text; the index still serves it.
+        const QString c = edition("gamma", {{1,1,1,"Gamma light"}});
+        QCOMPARE(searchEditions({{c,"gamma","C"}},"light",index).matches.size(),1);
+        QVERIFY(!cachedVersions().contains("alpha"));
+        QCOMPARE(references(searchEditions(both,"heavens",index)),QStringList({"alpha Genesis 2:1"}));
+        // A changed file is indexed again.
+        QTest::qWait(20);
+        edition("beta", {{1,1,1,"At first God made the heavens"}});
+        QCOMPARE(references(searchEditions(both,"heavens",index)),QStringList({"alpha Genesis 2:1","beta Genesis 1:1"}));
+        // Editions no longer installed leave the index.
+        QCOMPARE(searchEditions({{a,"alpha","A"}},"god",index,{"alpha","beta"}).matches.size(),2);
+        QCOMPARE(indexedEditions(index),QStringList({"alpha","beta"}));
+        QCOMPARE(searchEditions({{a,"alpha","A"}},"god",index,{"alpha"}).matches.size(),2);
+        QCOMPARE(indexedEditions(index),QStringList({"alpha"}));
+        // An index file it cannot read is started again.
+        { QFile broken(index); QVERIFY(broken.open(QIODevice::WriteOnly | QIODevice::Truncate)); broken.write("not a database"); }
+        QFile::remove(index + "-wal"); QFile::remove(index + "-shm");
+        QCOMPARE(references(searchEditions(both,"god",index)),QStringList({"alpha Genesis 1:1","alpha Exodus 1:1","beta Genesis 1:1"}));
+        QCOMPARE(indexedEditions(index),QStringList({"alpha","beta"}));
+        // A query error comes back as before.
+        QVERIFY(!searchEditions(both,"\"unfinished",index).error.isEmpty());
+    }
     void twoVersionsStayCached() {
         // Two windows searching different versions keep both prepared texts;
         // a third version evicts the least recently searched.

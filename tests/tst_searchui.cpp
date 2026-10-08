@@ -725,6 +725,45 @@ private slots:
         key(Qt::Key_Escape); QVERIFY(bible->focusMode()); QCOMPARE(bible->selectedStart(), bible->selectedEnd());
         key(Qt::Key_Escape); QVERIFY(!bible->focusMode());
     }
+    // alt a: Bible search in every installed version, the one being read
+    // first, each under its own headings; a result elsewhere opens there.
+    void searchEveryVersion() {
+        install(second); const QString kjv = bible->versionId(), kjvName = bible->versionAbbreviation();
+        QVERIFY(bible->switchVersion("engnet")); navigate("John 1:1");
+        QVERIFY(!bible->searchAllVersions());
+        // "Different words" is only in the other edition.
+        search("different words"); QCOMPARE(bible->searchResultCount(), 0);
+        QTRY_VERIFY(object("paletteHints")->property("plainText").toString().contains("alt a all versions"));
+        key(Qt::Key_A, Qt::AltModifier);
+        QTRY_VERIFY(bible->searchAllVersions());
+        QCOMPARE(object("toast")->property("text").toString(), QString("Searching every version"));
+        QTRY_VERIFY(prop("paletteSearchCurrent").toBool()); QTRY_VERIFY(!bible->searchBusy());
+        QTRY_COMPARE(bible->searchResultCount(), 6);
+        QTRY_VERIFY(object("paletteHints")->property("plainText").toString().contains("alt a " + bible->versionAbbreviation() + " only"));
+        const auto rows = value(object("paletteResults")->property("model")).toList();
+        QCOMPARE(rows.first().toMap()["group"].toString(), kjvName + QStringLiteral(" · John · 6"));
+        QCOMPARE(rows.first().toMap()["versionId"].toString(), kjv);
+        QVERIFY(object("searchResultCount")->property("text").toString().endsWith("1 book"));
+        // Both editions: the one being read comes first, under its own headings.
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        search("common original fixture 1:2."); QTRY_COMPARE(bible->searchResultCount(), 2);
+        QTRY_VERIFY(object("searchResultCount")->property("text").toString().endsWith("2 books in 2 versions"));
+        auto both = value(object("paletteResults")->property("model")).toList();
+        QCOMPARE(both[0].toMap()["versionId"].toString(), QString("engnet")); QCOMPARE(both[1].toMap()["versionId"].toString(), kjv);
+        QVERIFY(both[1].toMap()["firstOfGroup"].toBool());
+        // ctrl ↓ steps to the next version's book.
+        key(Qt::Key_Down, Qt::ControlModifier); QCOMPARE(object("paletteResults")->property("currentIndex").toInt(), 1);
+        // Opening it switches to its version.
+        key(Qt::Key_Return); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        QCOMPARE(bible->versionId(), kjv); QCOMPARE(bible->selectionReference(), QString("John 1:2"));
+        // The choice is kept; alt a again searches the one being read only.
+        { BibleBackend reopened; QVERIFY(reopened.searchAllVersions()); }
+        search("different words"); QTRY_COMPARE(bible->searchResultCount(), 6);
+        key(Qt::Key_A, Qt::AltModifier); QTRY_VERIFY(!bible->searchAllVersions());
+        QTRY_VERIFY(!bible->searchBusy()); QTRY_COMPARE(bible->searchResultCount(), 6);
+        QCOMPARE(object("toast")->property("text").toString(), "Searching " + kjvName + " only");
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+    }
     void focusEscapeAndVersionInvalidation() {
         find("alpha"); key(Qt::Key_Return); bible->setFocusMode(true); call("readerFocus");
         QTRY_VERIFY(item("searchMatchCount")->isVisible());

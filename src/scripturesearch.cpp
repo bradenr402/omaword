@@ -1,9 +1,11 @@
 #include "scripturesearch.h"
 
 #include <QMap>
+#include <QDir>
 #include <QFileInfo>
 #include <QDateTime>
 #include <QMutex>
+#include <QStandardPaths>
 #include <QRegularExpression>
 #include <QScopeGuard>
 #include <QSqlDatabase>
@@ -186,7 +188,14 @@ struct PreparedChapter {
             + (starts.capacity()+ends.capacity())*sizeof(int);
     }
 };
-struct Corpus { QVector<PreparedChapter> chapters; qint64 bytes = 0; };
+struct Corpus {
+    QVector<PreparedChapter> chapters; qint64 bytes = 0;
+    QHash<qint64,int> positions; // book * 1000 + chapter → its index in chapters
+    const PreparedChapter *find(int book, int chapter) const {
+        const auto at = positions.constFind(qint64(book) * 1000 + chapter);
+        return at == positions.cend() ? nullptr : &chapters[*at];
+    }
+};
 // Two immutable generations (two windows reading different versions keep
 // theirs), each at most 64 MiB, the least recently searched evicted. Only
 // worker value data is shared, never SQL handles. In-flight readers own their
@@ -276,7 +285,7 @@ Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, co
         result.matches.append(QVariantMap{{QStringLiteral("book"),chapter.book},{QStringLiteral("chapter"),chapter.number},{QStringLiteral("start"),first},
             {QStringLiteral("endBook"),chapter.book},{QStringLiteral("endChapter"),chapter.number},{QStringLiteral("end"),last},{QStringLiteral("reference"),reference},
             {QStringLiteral("segments"),segments},{QStringLiteral("text"),source.mid(starts[range.start],ends[range.end]-starts[range.start])},
-            {QStringLiteral("displaySegments"),displaySegments}});
+            {QStringLiteral("displaySegments"),displaySegments},{QStringLiteral("bookName"),chapter.name}});
     }
     return result;
 }
@@ -338,86 +347,253 @@ Result findPattern(const Chapter &chapter, const QString &input, const Cancellat
     return result;
 }
 
-Result search(const QString &path, const QString &versionId, const QString &abbreviation,
-              const QString &query, const Cancellation &cancel)
+// The search index: an FTS5 trigram table of every chapter's normalized text
+// (its verses joined as PreparedChapter joins them), per edition, with each
+// edition's identity when indexed. A substring of the normalized chapter is
+// exactly what scan() looks for, so the chapters a query's terms of three or
+// more characters MATCH are all the chapters it can match in. The index is a
+// disposable cache: another format, a file it cannot open, or an edition
+// whose file changed is built again. Searches in every window share it, one
+// at a time.
+namespace {
+constexpr int IndexFormat = 1;
+QMutex indexMutex;
+struct IndexConnection {
+    QString name = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QSqlDatabase db;
+    explicit IndexConnection(const QString &path) {
+        db = QSqlDatabase::addDatabase("QSQLITE",name);
+        db.setDatabaseName(path); db.setConnectOptions("QSQLITE_BUSY_TIMEOUT=5000");
+    }
+    ~IndexConnection() { db.close(); db = {}; QSqlDatabase::removeDatabase(name); }
+};
+QString prepareIndex(QSqlDatabase &db)
+{
+    if (!db.open()) return "Cannot open the search index: " + db.lastError().text();
+    QSqlQuery q(db);
+    if (!q.exec("PRAGMA user_version") || !q.next()) return "Cannot read the search index: " + q.lastError().text();
+    const int format = q.value(0).toInt();
+    q.finish();
+    if (format == IndexFormat) return {};
+    for (const QString &sql : {QStringLiteral("DROP TABLE IF EXISTS chapters"), QStringLiteral("DROP TABLE IF EXISTS editions"),
+            QStringLiteral("CREATE TABLE editions(version_id TEXT PRIMARY KEY,identity TEXT NOT NULL) WITHOUT ROWID"),
+            QStringLiteral("CREATE VIRTUAL TABLE chapters USING fts5(text,version_id UNINDEXED,book UNINDEXED,chapter UNINDEXED,"
+                           "ordinal UNINDEXED,tokenize='trigram case_sensitive 1')"),
+            QStringLiteral("PRAGMA user_version=%1").arg(IndexFormat)})
+        if (!q.exec(sql)) return "Cannot create the search index: " + q.lastError().text();
+    return {};
+}
+// Opens the index at path, starting a new file when the old one cannot be used.
+QString openIndex(IndexConnection &index, const QString &path)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QString error = prepareIndex(index.db);
+    if (error.isEmpty()) return {};
+    index.db.close();
+    for (const QString &file : {path, path + "-wal", path + "-shm"}) QFile::remove(file);
+    return prepareIndex(index.db);
+}
+// The FTS5 query for the terms the index can find (three characters or more),
+// or "" when none can narrow the chapters.
+QString indexQuery(const Query &query)
+{
+    QStringList terms;
+    for (const auto &term : query.terms)
+        if (term.text.toUcs4().size() >= 3) terms << '"' + QString(term.text).replace('"',"\"\"") + '"';
+    return terms.join(" AND ");
+}
+std::shared_ptr<const Corpus> cachedCorpus(const QString &identity)
+{
+    QMutexLocker lock(&corpusMutex);
+    for (qsizetype i = 0; i < cachedCorpora.size(); ++i) {
+        if (cachedCorpora[i].identity != identity) continue;
+        cachedCorpora.move(i,0);
+        return cachedCorpora.first().corpus;
+    }
+    return {};
+}
+void cacheCorpus(const QString &identity, const QString &versionId, std::shared_ptr<Corpus> corpus)
+{
+    QMutexLocker lock(&corpusMutex);
+    cachedCorpora.removeIf([&](const CachedCorpus &entry) { return entry.identity == identity; });
+    cachedCorpora.prepend({identity,versionId,std::move(corpus)});
+    while (cachedCorpora.size() > CachedCorpora) cachedCorpora.removeLast();
+}
+
+// One edition: every match in Bible order (the edition's book order, then
+// chapter and verse).
+Result searchEdition(const Edition &edition, const Query &parsed, const QString &indexPath, const Cancellation &cancel)
+{
+    Result result;
+    const QString connection = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto cleanup = qScopeGuard([&] { QSqlDatabase::removeDatabase(connection); });
+    auto db = QSqlDatabase::addDatabase("QSQLITE",connection);
+    db.setDatabaseName(edition.path); db.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=1000");
+    if (!db.open()) return {"Cannot open Scripture search database: " + db.lastError().text(),{}};
+    QSqlQuery q(db);
+    q.prepare("SELECT value FROM metadata WHERE key='version_id'");
+    if (!q.exec() || !q.next() || q.value(0).toString() != edition.versionId) return {"Scripture search version is no longer available.",{}};
+    q.finish();
+    // Installed paths are immutable generation UUIDs. Opening read-only and
+    // checking identity even on a hit prevents deleted/reimported files from
+    // being served solely from a cache. No connection survives this request.
+    const QFileInfo file(edition.path);
+    const QString identity = file.absoluteFilePath() + '\n' + edition.versionId + '\n'
+        + QString::number(file.size()) + ':' + QString::number(file.lastModified().toMSecsSinceEpoch());
+    const auto corpus = cachedCorpus(identity);
+    QMutexLocker lock(&indexMutex);
+    IndexConnection index(indexPath);
+    if (const QString error = openIndex(index,indexPath); !error.isEmpty()) return {error,{}};
+    QSqlQuery iq(index.db);
+    iq.prepare("SELECT identity FROM editions WHERE version_id=?"); iq.addBindValue(edition.versionId);
+    if (!iq.exec()) return {"Cannot read the search index: " + iq.lastError().text(),{}};
+    const bool indexed = iq.next() && iq.value(0).toString() == identity;
+    iq.finish();
+    if (indexed) {
+        // The index names the chapters to scan, in Bible order.
+        const QString match = indexQuery(parsed);
+        iq.prepare(match.isEmpty() ? QStringLiteral("SELECT book,chapter FROM chapters WHERE version_id=? ORDER BY ordinal")
+                                   : QStringLiteral("SELECT book,chapter FROM chapters WHERE version_id=? AND chapters MATCH ? ORDER BY ordinal"));
+        iq.addBindValue(edition.versionId);
+        if (!match.isEmpty()) iq.addBindValue(match);
+        if (!iq.exec()) return {"Cannot read the search index: " + iq.lastError().text(),{}};
+        QVector<QPair<int,int>> chapters;
+        while (iq.next()) chapters.append({iq.value(0).toInt(),iq.value(1).toInt()});
+        if (iq.lastError().isValid()) return {"Cannot read the search index: " + iq.lastError().text(),{}};
+        iq.finish();
+        lock.unlock();
+        QHash<int,QString> names;
+        if (!corpus) {
+            if (!q.exec("SELECT id,name FROM books")) return {"Cannot read Scripture search text: " + q.lastError().text(),{}};
+            while (q.next()) names.insert(q.value(0).toInt(),q.value(1).toString());
+            q.prepare("SELECT number,text FROM verses WHERE book=? AND chapter=? ORDER BY number");
+        }
+        for (const auto &[book,number] : std::as_const(chapters)) {
+            if (stopped(cancel)) return {};
+            if (const auto *prepared = corpus ? corpus->find(book,number) : nullptr) {
+                result.matches.append(scan(*prepared,parsed,true,cancel).matches);
+                continue;
+            }
+            if (corpus) continue; // Indexed but absent from a complete copy: nothing to find.
+            Chapter chapter{book,number,names.value(book),{}};
+            q.addBindValue(book); q.addBindValue(number);
+            if (!q.exec()) return {"Cannot read Scripture search text: " + q.lastError().text(),{}};
+            while (q.next()) chapter.verses.append({q.value(0).toInt(),q.value(1).toString()});
+            if (q.lastError().isValid()) return {"Cannot read complete Scripture search text: " + q.lastError().text(),{}};
+            result.matches.append(scan(PreparedChapter(std::move(chapter)),parsed,true,cancel).matches);
+        }
+        return result;
+    }
+    // Not indexed yet, or its file changed: read every chapter once, scanning
+    // it, indexing it, and keeping it prepared for the next searches.
+    if (!index.db.transaction()) return {"Cannot update the search index: " + index.db.lastError().text(),{}};
+    const auto rollback = qScopeGuard([&] { index.db.rollback(); });
+    iq.prepare("DELETE FROM chapters WHERE version_id=?"); iq.addBindValue(edition.versionId);
+    if (!iq.exec()) return {"Cannot update the search index: " + iq.lastError().text(),{}};
+    iq.prepare("INSERT INTO chapters(text,version_id,book,chapter,ordinal) VALUES(?,?,?,?,?)");
+    q.setForwardOnly(true);
+    if (!q.exec("SELECT v.book,v.chapter,v.number,v.text,b.name,b.ordinal FROM verses v JOIN books b ON b.id=v.book ORDER BY b.ordinal,v.chapter,v.number"))
+        return {"Cannot read Scripture search text: " + q.lastError().text(),{}};
+    auto building = std::make_shared<Corpus>();
+    bool keep = true;
+    Chapter chapter; int ordinal = 0;
+    QString error;
+    auto flush = [&] {
+        if (chapter.verses.isEmpty() || !error.isEmpty() || stopped(cancel)) return;
+        PreparedChapter prepared(std::move(chapter));
+        result.matches.append(scan(prepared,parsed,true,cancel).matches);
+        iq.addBindValue(prepared.normalized.text); iq.addBindValue(edition.versionId);
+        iq.addBindValue(prepared.chapter.book); iq.addBindValue(prepared.chapter.number);
+        iq.addBindValue(qint64(ordinal) * 1000 + prepared.chapter.number);
+        if (!iq.exec()) { error = "Cannot update the search index: " + iq.lastError().text(); return; }
+        if (keep) {
+            building->bytes += prepared.bytes();
+            if (building->bytes > MaximumCorpusBytes) keep = false;
+            else {
+                building->positions.insert(qint64(prepared.chapter.book) * 1000 + prepared.chapter.number,int(building->chapters.size()));
+                building->chapters.append(std::move(prepared));
+            }
+        }
+    };
+    while (q.next()) {
+        if (stopped(cancel)) return {};
+        const int book = q.value(0).toInt(), number = q.value(1).toInt();
+        if (book != chapter.book || number != chapter.number) {
+            flush(); chapter = {book,number,q.value(4).toString(),{}}; ordinal = q.value(5).toInt();
+        }
+        chapter.verses.append({q.value(2).toInt(),q.value(3).toString()});
+    }
+    if (q.lastError().isValid()) return {"Cannot read complete Scripture search text: " + q.lastError().text(),{}};
+    flush();
+    if (!error.isEmpty()) return {error,{}};
+    if (stopped(cancel)) return {};
+    iq.prepare("INSERT INTO editions(version_id,identity) VALUES(?,?) ON CONFLICT(version_id) DO UPDATE SET identity=excluded.identity");
+    iq.addBindValue(edition.versionId); iq.addBindValue(identity);
+    if (!iq.exec() || !index.db.commit()) return {"Cannot update the search index: " + index.db.lastError().text(),{}};
+    if (keep && QFileInfo::exists(edition.path)) cacheCorpus(identity,edition.versionId,std::move(building));
+    return result;
+}
+}
+
+QString defaultIndexPath()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/search-index.sqlite");
+}
+
+Result searchEditions(const QVector<Edition> &editions, const QString &query, const QString &indexPath,
+                      const QStringList &installed, const Cancellation &cancel)
 {
     const Query parsed = parse(query,true);
     Result result{parsed.error,{}};
     if (!result.error.isEmpty() || parsed.terms.isEmpty() || stopped(cancel)) return result;
-    const QString connection = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const auto cleanup = qScopeGuard([&] { QSqlDatabase::removeDatabase(connection); });
-    auto db = QSqlDatabase::addDatabase("QSQLITE",connection);
-    db.setDatabaseName(path); db.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=1000");
-    if (!db.open()) return {"Cannot open Scripture search database: " + db.lastError().text(),{}};
-    QSqlQuery q(db);
-    q.prepare("SELECT value FROM metadata WHERE key='version_id'");
-    if (!q.exec() || !q.next() || q.value(0).toString() != versionId) return {"Scripture search version is no longer available.",{}};
-    q.finish();
-    // Installed paths are immutable generation UUIDs. Opening read-only and
-    // checking identity even on a hit prevents deleted/reimported files from
-    // being served solely from the cache. No connection survives this request.
-    const QFileInfo file(path);
-    const QString identity = file.absoluteFilePath() + '\n' + versionId + '\n'
-        + QString::number(file.size()) + ':' + QString::number(file.lastModified().toMSecsSinceEpoch());
-    std::shared_ptr<const Corpus> corpus;
-    {
-        QMutexLocker lock(&corpusMutex);
-        for (qsizetype i = 0; i < cachedCorpora.size(); ++i) {
-            if (cachedCorpora[i].identity != identity) continue;
-            corpus = cachedCorpora[i].corpus;
-            cachedCorpora.move(i, 0);
-            break;
+    if (!installed.isEmpty()) {
+        // Editions no longer installed leave the index.
+        QMutexLocker lock(&indexMutex);
+        IndexConnection index(indexPath);
+        if (const QString error = openIndex(index,indexPath); !error.isEmpty()) return {error,{}};
+        QSqlQuery q(index.db);
+        QStringList gone;
+        if (!q.exec("SELECT version_id FROM editions")) return {"Cannot read the search index: " + q.lastError().text(),{}};
+        while (q.next()) if (!installed.contains(q.value(0).toString())) gone << q.value(0).toString();
+        q.finish();
+        for (const auto &id : std::as_const(gone)) {
+            for (const QString table : {"chapters","editions"}) {
+                q.prepare("DELETE FROM " + table + " WHERE version_id=?"); q.addBindValue(id);
+                if (!q.exec()) return {"Cannot update the search index: " + q.lastError().text(),{}};
+            }
         }
     }
-    if (corpus) {
-        for (const auto &chapter : corpus->chapters) {
-            if (stopped(cancel)) return {};
-            result.matches.append(scan(chapter,parsed,true,cancel).matches);
-        }
-    } else {
-        q.setForwardOnly(true);
-        if (!q.exec("SELECT v.book,v.chapter,v.number,v.text,b.name FROM verses v JOIN books b ON b.id=v.book ORDER BY b.ordinal,v.chapter,v.number"))
-            return {"Cannot read Scripture search text: " + q.lastError().text(),{}};
-        auto building = std::make_shared<Corpus>();
-        Chapter chapter;
-        auto flush = [&] {
-            if (chapter.verses.isEmpty() || stopped(cancel)) return;
-            PreparedChapter prepared(std::move(chapter));
-            result.matches.append(scan(prepared,parsed,true,cancel).matches);
-            if (building) {
-                building->bytes += prepared.bytes();
-                if (building->bytes > MaximumCorpusBytes) building.reset();
-                else building->chapters.append(std::move(prepared));
-            }
-        };
-        while (q.next()) {
-            if (stopped(cancel)) return {};
-            const int book = q.value(0).toInt(), number = q.value(1).toInt();
-            if (book != chapter.book || number != chapter.number) {
-                flush(); chapter = {book,number,q.value(4).toString(),{}};
-            }
-            chapter.verses.append({q.value(2).toInt(),q.value(3).toString()});
-        }
-        if (q.lastError().isValid()) return {"Cannot read complete Scripture search text: " + q.lastError().text(),{}};
-        flush();
-        if (building && !stopped(cancel) && QFileInfo::exists(path)) {
-            QMutexLocker lock(&corpusMutex);
-            cachedCorpora.removeIf([&](const CachedCorpus &entry) { return entry.identity == identity; });
-            cachedCorpora.prepend({identity, versionId, std::move(building)});
-            while (cachedCorpora.size() > CachedCorpora) cachedCorpora.removeLast();
-        }
-    }
-    if (stopped(cancel)) return {};
-    // Matches are in Bible order (the edition's book order, then chapter and
-    // verse), as the chapters were scanned.
-    for (auto &row : result.matches) {
+    for (const auto &edition : editions) {
         if (stopped(cancel)) return {};
-        // These are engine-owned QVariantMaps. Mutate the stored map directly;
-        // toMap() would share it and then detach/copy every map node.
-        auto &map = *static_cast<QVariantMap *>(row.data());
-        map.insert(QStringLiteral("versionId"),versionId); map.insert(QStringLiteral("versionAbbreviation"),abbreviation);
+        auto found = searchEdition(edition,parsed,indexPath,cancel);
+        if (!found.error.isEmpty()) return found;
+        if (stopped(cancel)) return {};
+        for (auto &row : found.matches) {
+            // These are engine-owned QVariantMaps. Mutate the stored map directly;
+            // toMap() would share it and then detach/copy every map node.
+            auto &map = *static_cast<QVariantMap *>(row.data());
+            map.insert(QStringLiteral("versionId"),edition.versionId); map.insert(QStringLiteral("versionAbbreviation"),edition.abbreviation);
+        }
+        result.matches.append(found.matches);
     }
     return result;
+}
+
+Result search(const QString &path, const QString &versionId, const QString &abbreviation,
+              const QString &query, const Cancellation &cancel)
+{
+    return searchEditions({{path,versionId,abbreviation}},query,defaultIndexPath(),{},cancel);
+}
+
+QStringList indexedEditions(const QString &indexPath)
+{
+    QMutexLocker lock(&indexMutex);
+    IndexConnection index(indexPath);
+    QStringList editions;
+    if (!openIndex(index,indexPath).isEmpty()) return editions;
+    QSqlQuery q(index.db);
+    if (q.exec("SELECT version_id FROM editions ORDER BY version_id")) while (q.next()) editions << q.value(0).toString();
+    return editions;
 }
 }
 

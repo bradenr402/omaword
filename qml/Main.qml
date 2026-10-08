@@ -440,6 +440,19 @@ ApplicationWindow {
         if (next === 1) openTextSearch()
         else openPalette(next === 2)
     }
+    // How many versions the shown results come from.
+    readonly property int searchedVersions: {
+        const versions = {}
+        for (const entry of Array.from(bible.searchBooks)) versions[entry.versionId] = true
+        return Object.keys(versions).length
+    }
+    // alt a: Bible search in every installed version, or the active one only.
+    function toggleSearchScope() {
+        if (bible.versions.length < 2) { rejected("Add another version to search them all"); return }
+        bible.setSearchAllVersions(!bible.searchAllVersions)
+        notify(bible.searchAllVersions ? "Searching every version" : "Searching " + bible.versionAbbreviation + " only", true)
+        if (paletteTextMode && paletteTextQuery.length) submitBibleSearch()
+    }
     function scheduleBibleSearch() {
         pendingSearchResume = null
         bibleSearchTimer.stop()
@@ -3998,6 +4011,7 @@ ApplicationWindow {
         { id: "nextMatch", group: "Search", title: "Next search match", sequences: ["N"] },
         { id: "previousMatch", group: "Search", title: "Previous search match", sequences: ["Shift+N"] },
         { id: "bibleSearch", group: "Search", title: "Search Bible", sequences: ["Ctrl+/"], scope: "palette", command: true },
+        { id: "searchScope", group: "Search", title: "Bible search: every version or the one you read", sequences: ["Alt+A"], scope: "palette", command: true },
         // Bound by the palette's input itself.
         { id: "searchBookJump", group: "Search", title: "Bible search: next book, previous book", sequences: ["Ctrl+Down", "Ctrl+Up"], scope: "search", explanation: true },
         { id: "highlight", group: "Annotate", title: "Highlight selection", sequences: ["X"], command: true },
@@ -4166,6 +4180,7 @@ ApplicationWindow {
         return [[paletteChapterGrid ? ["Left", "Right", "Up", "Down"] : ["Up", "Down"], "choose"],
             paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
             paletteTextMode && paletteSearchCurrent && bible.searchBooks.length > 1 ? [["Ctrl+Up", "Ctrl+Down"], "books", function() { app.jumpSearchBook(1) }] : null,
+            paletteTextMode && bible.versions.length > 1 ? [actionKeys("searchScope")[0], bible.searchAllVersions ? bible.versionAbbreviation + " only" : "all versions", app.toggleSearchScope] : null,
             ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
             paletteChapterGrid ? ["Backspace", "books", app.backToBooks] : paletteLeftGoesBack ? ["Left", "back", app.backToBooks] : null,
             // tab / shift tab cycle Passage → Search → Command.
@@ -4214,6 +4229,7 @@ ApplicationWindow {
     // Commands whose palette title describes the action it would take now.
     function actionTitle(action) {
         if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
+        if (action.id === "searchScope") return bible.searchAllVersions ? "Search " + bible.versionAbbreviation + " only" : "Search every version"
         if (action.id === "reduceMotion") return sounds.reduceMotion ? "Enable animations" : "Disable animations"
         if (action.id === "toggleHistory") return bible.historyEnabled ? "Disable History" : "Enable History"
         if (action.id === "undo" && bible.canUndo) return "Undo " + bible.undoLabel
@@ -4329,14 +4345,17 @@ ApplicationWindow {
                 return { title: query, hint: "Recent search", recentQuery: query }
             })
             if (!paletteSearchCurrent) return []
-            // Bible order; each book's first result carries its heading and count.
+            // Bible order, version by version; each book's first result
+            // carries its heading and count (and, searching every version,
+            // its version's abbreviation).
             const books = {}
-            for (const entry of Array.from(bible.searchBooks)) books[entry.book] = entry
+            for (const entry of Array.from(bible.searchBooks)) books[entry.versionId + ":" + entry.book] = entry
             const rows = Array.from(bible.searchResults)
             return rows.map(function(row, index) {
-                if (index > 0 && rows[index - 1].book === row.book) return row
-                const book = books[row.book]
-                return Object.assign({ firstOfGroup: true, group: book ? book.name + " · " + book.count : "" }, row)
+                if (index > 0 && rows[index - 1].book === row.book && rows[index - 1].versionId === row.versionId) return row
+                const book = books[row.versionId + ":" + row.book]
+                return Object.assign({ firstOfGroup: true, group: book ? (bible.searchAllVersions && bible.versions.length > 1 ? book.versionAbbreviation + " · " : "")
+                    + book.name + " · " + book.count : "" }, row)
             })
         }
         let query = referenceInput.text.trim().toLowerCase()
@@ -4544,7 +4563,7 @@ ApplicationWindow {
         const books = Array.from(bible.searchBooks)
         if (!paletteTextMode || !paletteSearchCurrent || bible.searchBusy || !books.length) { rejected(); return }
         const current = paletteResults.model[paletteResults.currentIndex]
-        const at = current ? books.findIndex(function(entry) { return entry.book === current.book }) : -1
+        const at = current ? books.findIndex(function(entry) { return entry.book === current.book && entry.versionId === current.versionId }) : -1
         const target = direction > 0 ? at + 1
             : at >= 0 && paletteResults.currentIndex > books[at].index ? at : at - 1
         if (target < 0 || target >= books.length) { sounds.play("boundary"); return }
@@ -4644,6 +4663,7 @@ ApplicationWindow {
         case "newWindow": if (!modalOpen) newWindowRequested(); break
         case "books": showPaletteMode("passage"); break
         case "bibleSearch": showPaletteMode("search"); break
+        case "searchScope": toggleSearchScope(); break
         case "chapterFind": beginChapterFind(); break
         case "centerVerse": alignCurrentVerse("center"); break
         case "topVerse": alignCurrentVerse("top"); break
@@ -8005,6 +8025,7 @@ ApplicationWindow {
                     objectName: "searchResultCount"
                     text: paletteResults.count + " of " + bible.searchResultCount + " results · "
                         + bible.searchBooks.length + (bible.searchBooks.length === 1 ? " book" : " books")
+                        + (app.searchedVersions > 1 ? " in " + app.searchedVersions + " versions" : "")
                     color: desktop.muted; font.pixelSize: 12 * app.scale; Layout.fillWidth: true
                 }
                 QuietButton { objectName: "searchLoadMore"; text: "Show more"; compact: true; visible: paletteResults.count < bible.searchResultCount; onClicked: bible.loadMoreSearchResults() }
