@@ -591,8 +591,21 @@ QVariantList BlockDocument::rectangles(int start, int end) const
             }
             // A logical interval can have several visual runs in bidi text.
             // Endpoint-only rectangles miss the RTL run at a verse boundary.
+            // A run with no right-to-left text is one visual run: its ends
+            // suffice (walking every character costs a layout query each).
+            const QString text = block.text();
+            const bool bidi = std::any_of(text.cbegin() + first, text.cbegin() + last, [](QChar c) {
+                const auto direction = c.direction();
+                return direction == QChar::DirR || direction == QChar::DirAL || direction == QChar::DirRLE
+                    || direction == QChar::DirRLO || direction == QChar::DirRLI || direction == QChar::DirAN;
+            });
             QList<QPair<double,double>> runs;
-            for (int p = first; p < last; p = layout->nextCursorPosition(p)) {
+            if (!bidi) {
+                const double a = line.cursorToX(first,QTextLine::Leading);
+                const double b = line.cursorToX(last,QTextLine::Leading);
+                runs.append({qMin(a,b),qMax(a,b)});
+            }
+            for (int p = first; bidi && p < last; p = layout->nextCursorPosition(p)) {
                 const double a = line.cursorToX(p,QTextLine::Leading);
                 const double b = block.text().at(p) == QChar::ObjectReplacementCharacter
                     ? line.cursorToX(p + 1, QTextLine::Leading) : line.cursorToX(p,QTextLine::Trailing);

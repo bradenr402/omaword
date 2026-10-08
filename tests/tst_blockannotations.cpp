@@ -816,6 +816,15 @@ ApplicationWindow {
                                             qRound(rect["y"].toDouble() + rect["height"].toDouble() / 2)).alpha();
         };
         backend->setProperty("selectedStart",0); backend->setProperty("selectedEnd",0); QTest::qWait(50);
+        // A selection move repaints only the selection's own layer.
+        const int paints = paint->property("paintCount").toInt();
+        QVERIFY(paints > 0);
+        backend->setProperty("selectedStart",2); backend->setProperty("selectedEnd",5);
+        QTRY_VERIFY(item("blockSelectionBackground")->childItems().size() > 1);
+        QTest::qWait(50); QCOMPARE(paint->property("paintCount").toInt(),paints);
+        backend->setProperty("selectedStart",0); backend->setProperty("selectedEnd",0);
+        QTRY_COMPARE(item("blockSelectionBackground")->childItems().size(),1); // Its Repeater alone.
+        QTest::qWait(50); QCOMPARE(paint->property("paintCount").toInt(),paints);
         const int one = alphaAt(1), two = alphaAt(2), three = alphaAt(3), six = alphaAt(6);
         QVERIFY2(one > 0 && two > one && three > two, qPrintable(QString("%1 %2 %3").arg(one).arg(two).arg(three)));
         QCOMPARE(six, one);

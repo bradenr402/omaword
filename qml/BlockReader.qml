@@ -111,6 +111,8 @@ Item {
         if (destroying) return
         if (rebuildTimer.running) { rebuildTimer.stop(); rebuild() }
         if (geometryTimer.running) { geometryTimer.stop(); refreshGeometry() }
+        if (shapesTimer.running) { shapesTimer.stop(); paint.layOut() }
+        if (selectionTimer.running) { selectionTimer.stop(); selectionPaint.refresh() }
     }
     function refreshGeometry() {
         if (!destroying) {
@@ -217,7 +219,10 @@ Item {
     // qmllint enable import
     // Paint logical ranges behind the single text layout. A range joins through
     // spaces and wrapped lines; adjacent independent highlights keep their gap.
-    Canvas {
+    // Annotation marks (AnnotationPaint, painted in C++): tint bands, then a
+    // highlighter stroke per line of each highlight. They repaint only when
+    // their shapes change, never for a selection move (selectionPaint).
+    AnnotationPaint {
         id: paint
         objectName: "blockRangeBackground"
         // Paint outside the first/continuation line without changing body layout
@@ -227,28 +232,33 @@ Item {
         y: body.y
         width: body.width + leftInset
         height: body.height
+        inset: leftInset
+        penScale: root.readerScale > 0 ? root.readerScale : 1
         property var annotations: root.backend.verses
         property int first: root.controller.charMode ? 0 : root.backend.selectedStart
         property int last: root.backend.selectedEnd
         property color accent: root.theme.accent
-        property bool focused: root.backend.focusMode
         property var tintCounts: root.tintCounts
+        ink: root.controller.highlightInk || root.theme.color3 || accent
+        inkAlpha: root.controller.highlightAlpha || (root.theme.dark ? 0.34 : 0.36)
+        tint: root.controller.tint(accent, HandDrawn.tintAlpha())
         FontMetrics { id: bandMetrics; font.family: root.theme.fontFamily; font.pixelSize: (root.controller.readerSize || 18) * root.readerScale }
-        readonly property var highlightLook: [bandMetrics.ascent, bandMetrics.xHeight, root.controller.highlightInk, root.controller.highlightAlpha]
+        readonly property var highlightLook: [bandMetrics.ascent, bandMetrics.xHeight]
         onHighlightLookChanged: requestPaint()
         onTintCountsChanged: requestPaint()
         onAnnotationsChanged: requestPaint()
-        onFirstChanged: if (!root.destroying) geometryTimer.restart()
-        onLastChanged: if (!root.destroying) geometryTimer.restart()
-        onAccentChanged: requestPaint()
-        onFocusedChanged: requestPaint()
+        // A selection move repaints only the selection's own layer.
+        onFirstChanged: if (!root.destroying) selectionTimer.restart()
+        onLastChanged: if (!root.destroying) selectionTimer.restart()
         onWidthChanged: if (!root.destroying) geometryTimer.restart()
         onHeightChanged: if (!root.destroying) geometryTimer.restart()
-        onPaint: {
+        // Lays the marks out again (once per event loop turn, however many
+        // changes asked); they repaint only if they moved or changed.
+        function requestPaint() { if (!root.destroying) shapesTimer.restart() }
+        Timer { id: shapesTimer; interval: 0; onTriggered: paint.layOut() }
+        Timer { id: selectionTimer; interval: 0; onTriggered: selectionPaint.refresh() }
+        function layOut() {
             if (root.destroying) return
-            const ctx = getContext("2d")
-            ctx.reset()
-            ctx.translate(leftInset, 0)
             const spans = document.spans
             const ranges = {}
             for (let i = 0; i < spans.length; ++i) {
@@ -259,41 +269,54 @@ Item {
                     else ranges[range.reference].end = span.end
                 }
             }
-            const k = root.readerScale > 0 ? root.readerScale : 1
             const version = root.backend.versionId || ""
             const band = HandDrawn.highlightBand(bandMetrics.ascent, bandMetrics.descent, bandMetrics.xHeight)
-            const ink = root.controller.highlightInk || root.theme.color3 || accent
-            const inkAlpha = root.controller.highlightAlpha || (root.theme.dark ? 0.34 : 0.36)
-            function draw(start, end, selected, reference) {
-                const rects = document.rectangles(start, end)
-                for (let i = 0; i < rects.length; ++i) {
-                    const r = rects[i]
-                    if (selected) {
-                        // The active selection is not an annotation mark.
-                        ctx.fillStyle = root.controller.tint(accent, 0.22)
-                        ctx.fillRect(r.x - leftInset, r.y, r.width + leftInset, r.height)
-                        continue
-                    }
-                    // A highlighter stroke per line, about the x-height (Main.highlightBand).
-                    HandDrawn.highlighterStroke(ctx, Qt.rect(r.x, r.y + band.top, r.width, Math.min(band.height, r.height - band.top)),
-                        ink, inkAlpha, HandDrawn.seed("highlight", version, reference, i), k)
-                }
-            }
-            // Tints first: each covering range adds a layer; highlights go on top.
-            ctx.fillStyle = root.controller.tint(accent, HandDrawn.tintAlpha())
+            const bandShapes = []
             for (const run of HandDrawn.tintRuns(tintCounts)) {
                 if (!spans[run.first] || !spans[run.last]) continue
                 const rects = document.rectangles(spans[run.first].start, spans[run.last].end)
                 for (let i = 0; i < rects.length; ++i) {
                     const r = rects[i]
-                    HandDrawn.highlighterBand(ctx, Qt.rect(r.x - leftInset, r.y, r.width + leftInset, r.height),
-                        HandDrawn.seed("tint", version, run.layer, spans[run.first].number, i), k,
-                        { top: true, bottom: true, left: i === 0, right: i === rects.length - 1 })
+                    bandShapes.push({ x: r.x - leftInset, y: r.y, width: r.width + leftInset, height: r.height,
+                        seed: HandDrawn.seed("tint", version, run.layer, spans[run.first].number, i),
+                        left: i === 0, right: i === rects.length - 1 })
                 }
             }
-            for (const ref in ranges) draw(ranges[ref].start, ranges[ref].end, false, ref)
-            const selected = Array.from(spans).filter(function(s) { return first > 0 && s.number >= first && s.number <= last })
-            if (selected.length) draw(selected[0].start, selected[selected.length - 1].end, true, "")
+            const strokeShapes = []
+            for (const reference in ranges) {
+                const rects = document.rectangles(ranges[reference].start, ranges[reference].end)
+                // A highlighter stroke per line, about the x-height (Main.highlightBand).
+                for (let i = 0; i < rects.length; ++i) {
+                    const r = rects[i]
+                    strokeShapes.push({ x: r.x, y: r.y + band.top, width: r.width, height: Math.min(band.height, r.height - band.top),
+                        seed: HandDrawn.seed("highlight", version, reference, i) })
+                }
+            }
+            bands = bandShapes
+            strokes = strokeShapes
+            selectionPaint.refresh()
+        }
+    }
+    // The selection's tint, above the marks and below search and the text.
+    Item {
+        id: selectionPaint
+        objectName: "blockSelectionBackground"
+        x: paint.x; y: paint.y
+        width: paint.width; height: paint.height
+        property var rects: []
+        function refresh() {
+            const spans = Array.from(document.spans).filter(function(span) {
+                return paint.first > 0 && span.number >= paint.first && span.number <= paint.last })
+            rects = spans.length ? document.rectangles(spans[0].start, spans[spans.length - 1].end) : []
+        }
+        Repeater {
+            model: selectionPaint.rects
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x; y: modelData.y
+                width: modelData.width + paint.leftInset; height: modelData.height
+                color: root.controller.tint(paint.accent, 0.22)
+            }
         }
     }
     // Search is a separate background above annotations and below native text.
