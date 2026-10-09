@@ -4373,17 +4373,17 @@ ApplicationWindow {
         if (action.scope === "history") return "History in the palette only"
         if (action.scope === "search") return "Bible search results (" + keyText("bibleSearch") + ")"
         if (action.scope === "versions") return "Versions dialog"
-        if (action.explanation) return "Reader gesture"
-        if (textSizeActions.includes(action.id)) return "Anywhere in this window · panels, dialogs, and while typing"
-        if (noteEditorLaunchActions.includes(action.id)) return (action.scope === "palette" ? "This window · passage and command search" : "This window")
-            + " · also while typing a note (" + (action.id === "help" ? KeyNotation.format("F1") + "; it closes Notes)" : "it closes Notes)")
-        if (action.scope === "global") return "This window · also with the Notes panel open, but not while typing"
-        if (action.scope === "palette") return "This window · passage and command search"
         if (action.scope === "notes") return "Reader or notes preview"
-        if (action.scope === "noteEditor") return "Notes editor"
+        if (action.scope === "noteEditor") return "Writing a note or on the Desk"
         if (action.scope === "characters") return "Character selection · " + keyText("characterVisual")
         if (action.scope === "importGuide") return "Add version guide"
         if (action.scope === "tags") return "Tag picker · Manage tags (" + keyText("manageTags") + ")"
+        if (action.explanation) return "Reader gesture"
+        if (textSizeActions.includes(action.id)) return "Anywhere in this window · panels, dialogs, and while typing"
+        if (noteEditorLaunchActions.includes(action.id)) return (action.scope === "palette" ? "This window · passage and command search" : "This window")
+            + " · also while writing a note or on the Desk" + (action.id === "help" ? " (" + KeyNotation.format("F1") + ")" : "")
+        if (action.scope === "global") return "This window · also with a side panel open, but not while typing"
+        if (action.scope === "palette") return "This window · passage and command search"
         if (undoActions.includes(action.id)) return "Reader and side panels · also selecting characters, not while typing"
         return "Reader · outside text editing and dialogs"
     }

@@ -450,6 +450,22 @@ private slots:
         QStringList titles; for (const auto &r : value(rows).toList()) titles << r.toMap()["title"].toString();
         QVERIFY(titles.contains("Open Desk")); QVERIFY(titles.contains("Add to Desk"));
         key(Qt::Key_Escape);
+        // Each key's hover note names where it works: the editors' and
+        // character selection's own gestures are theirs, not the reader's.
+        const auto where = [&](const QString &id) {
+            for (const auto &a : actions) if (a.toMap()["id"] == id) {
+                QVariant title; QMetaObject::invokeMethod(window, "scopeTitle", Q_RETURN_ARG(QVariant, title), Q_ARG(QVariant, a));
+                return title.toString();
+            }
+            return QString();
+        };
+        QCOMPARE(where("noteLeave"), QString("Writing a note or on the Desk"));
+        QCOMPARE(where("noteLinkClick"), QString("Writing a note or on the Desk"));
+        QVERIFY(where("charSwap").startsWith("Character selection · "));
+        QCOMPARE(where("guideInstall"), QString("Add version guide"));
+        QVERIFY(where("manageRename").startsWith("Tag picker"));
+        QCOMPARE(where("clickMenu"), QString("Reader gesture"));
+        QCOMPARE(where("books"), QString("This window · passage and command search · also while writing a note or on the Desk"));
     }
     void hebrewFirstTextStaysLeftToRight_data() {
         QTest::addColumn<QString>("mode");
