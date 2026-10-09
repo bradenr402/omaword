@@ -883,6 +883,22 @@ ApplicationWindow {
     readonly property real highlightAlpha: desktop.dark ? 0.34 : 0.36
     readonly property var highlightBand: highlightBandFor(readerMetrics)
     function highlightBandFor(metrics) { return HandDrawn.highlightBand(metrics.ascent, metrics.descent, metrics.xHeight) }
+    // The Verse layout's rows, one per verse: made again only when the
+    // chapter or its text changes, so marks (which change bible.verses)
+    // update rows in place (each reads bible.verses[index]).
+    property var verseRows: []
+    property string verseRowsKey: ""
+    readonly property var noVerse: ({ number: 0, text: "", html: "", heading: "", footnotes: [], indents: [],
+        highlightRanges: [], tagRanges: [], noteRanges: [], hasNote: false, hasTags: false })
+    function syncVerseRows() {
+        const verses = bible.verses
+        const key = [bible.textGeneration, bible.book, bible.chapter, verses.length,
+            verses.length ? verses[0].number + "-" + verses[verses.length - 1].number : ""].join(":")
+        if (key === verseRowsKey) return
+        verseRowsKey = key
+        verseRows = Array.from(verses).map(function(verse) { return verse.number })
+    }
+    Connections { target: bible; function onVersesChanged() { app.syncVerseRows() } }
     // Repaints every highlight (tests: paint is deterministic).
     signal highlightsRepaint()
     function refreshHighlights() { highlightsRepaint(); const block = blockLoader.item as BlockReader; if (block) block.repaintAnnotations() }
@@ -5401,13 +5417,23 @@ ApplicationWindow {
                         }
                         Repeater {
                             id: verseRepeater
-                            model: app.continuousReader ? [] : bible.verses
+                            model: app.continuousReader ? [] : app.verseRows
                             delegate: VerseItem {
                                 id: verseRow
-                                required property var modelData
                                 required property int index
+                                // Read in place: a change to marks updates the row rather than making it again.
+                                // (A row of a longer chapter reads nothing for the moment before it goes.)
+                                readonly property var modelData: bible.verses[index] || app.noVerse
                                 readonly property bool selected: modelData.number >= bible.selectedStart && modelData.number <= bible.selectedEnd && bible.selectedStart > 0
                                 readonly property real gutter: app.verseGutter
+                                // What a change of marks leaves alone, as values (a string or a
+                                // number changes only when its value does): the text, the number,
+                                // and the lists rows make from.
+                                readonly property int verseNumber: modelData.number || 0
+                                readonly property string bodyHtml: '<div style="line-height:' + (bible.lineHeight * 100) + '%">'
+                                    + (app.footnoteHtml(app.verseHtml(modelData.html), modelData.footnotes) || String(modelData.text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
+                                readonly property string highlightKey: JSON.stringify(modelData.highlightRanges || [])
+                                readonly property string footnoteKey: JSON.stringify(modelData.footnotes || [])
                                 body: verseBody
                                 searchOverlay: verseSearch
                                 textOffset: verseHeading.height
@@ -5518,7 +5544,7 @@ ApplicationWindow {
                                     visible: opacity > 0
                                 }
                                 Repeater {
-                                    model: verseRow.modelData.highlightRanges || []
+                                    model: JSON.parse(verseRow.highlightKey)
                                     delegate: Rectangle {
                                         required property var modelData
                                         objectName: "highlightSegment" + verseRow.modelData.number + ":" + modelData.reference
@@ -5629,7 +5655,7 @@ ApplicationWindow {
                                     }
                                 }
                                 Repeater {
-                                    model: app.focusLayout ? [] : (verseRow.modelData.footnotes || [])
+                                    model: app.focusLayout ? [] : JSON.parse(verseRow.footnoteKey)
                                     delegate: Item {
                                         id: footnoteMarker
                                         required property var modelData
@@ -5687,7 +5713,7 @@ ApplicationWindow {
                                     lineIndents: verseRow.modelData.indents || []
                                     indentUnit: app.readerBodySize * TypeScale.poetryIndent
                                     theme: desktop
-                                    segments: app.searchSegments.filter(function(segment) { return segment.verse === verseRow.modelData.number })
+                                    segments: app.searchSegments.filter(function(segment) { return segment.verse === verseRow.verseNumber })
                                 }
                                 TextEdit {
                                     id: verseBody
@@ -5697,8 +5723,7 @@ ApplicationWindow {
                                     y: verseHeading.height
                                     width: parent.width - x - 9
                                     height: contentHeight
-                                    text: '<div style="line-height:' + (bible.lineHeight * 100) + '%">'
-                                        + (app.footnoteHtml(app.verseHtml(verseRow.modelData.html), verseRow.modelData.footnotes) || verseRow.modelData.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
+                                    text: verseRow.bodyHtml
                                     textFormat: Text.RichText
                                     horizontalAlignment: TextEdit.AlignLeft
                                     font.family: desktop.fontFamily
@@ -9235,6 +9260,7 @@ ApplicationWindow {
         }
     }
     Component.onCompleted: {
+        syncVerseRows()
         focusLayout = bible.focusMode; marginFocusLevel = focusLayout ? 0 : 1; marginNotesOn = bible.marginNotes
         readerInitialized = true; syncNote(); loadSavedDesk(); restorePosition(); restartDwell(); scheduleMargins()
     }

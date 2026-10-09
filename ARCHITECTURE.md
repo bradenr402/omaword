@@ -537,6 +537,15 @@ files.
 - Verse layout: one row per verse; annotation rails packed by
   `packAnnotationLanes` into nearest free gutter lanes by source-row ordinal
   (not verse labels), tie priority tag/note, lane kept for an interval's life.
+  The rows (`verseRows`) are made again only when the chapter or its text
+  changes; a change of marks (which changes `bible.verses`) updates them in
+  place, each row reading `bible.verses[index]` through values that change
+  only with their value (the text's HTML, the number, the highlight and
+  footnote lists as JSON), so only rows whose marks changed repaint. Psalm
+  119 (176 verses, 88 highlighted, 58 noted, 44 tagged; offscreen software
+  rendering): a highlight toggle went from 835 ms to 105–127 ms (a 40-verse
+  chapter: 183 ms to 33 ms), against Block's 488 ms; opening the chapter is
+  still about 2.9 s (Block: 3.3 s), a highlight repaint of every row 1.4 s.
 - Paragraph/Block: one `BlockDocument`. Annotation endpoints are reserved
   transparent inline cells (+ word joiners, no font merging) where QML paints
   brackets and superscript glyphs. Outer starts first, inner ends first;
