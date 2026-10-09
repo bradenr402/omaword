@@ -21,6 +21,15 @@ ApplicationWindow {
     id: app
     objectName: "readerWindow"
     signal newWindowRequested()
+    // Follow ("Open beside", WindowManager): a window reading another
+    // version beside this one, the two keeping the same passage and the
+    // same verse at the top (followMoved here reaches followTo there).
+    signal besideRequested(string versionId)
+    signal unfollowRequested()
+    signal followMoved(var location)
+    // The version the window beside reads; empty when there is none.
+    property string followPartner: ""
+    readonly property bool following: followPartner.length > 0
     width: 1120
     height: 820
     minimumWidth: 640
@@ -2308,6 +2317,7 @@ ApplicationWindow {
         if (action.id === "peek" && hasSelection) return "No footnotes on " + bible.passage + ":" + bible.cursorVerse
         if (action.id === "undo" && !bible.canUndo) return "Nothing to undo"
         if (action.id === "redo" && !bible.canRedo) return "Nothing to redo"
+        if (action.id === "unfollow" && !following) return "No window follows this one · Open beside, from Compare (" + keyText("compare") + ") or Versions"
         if (action.id === "ribbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon yet · " + keyText("placeRibbon") + " places it"
         if (!bible.ready) return "Add a Bible version first"
         return ""
@@ -2823,7 +2833,8 @@ ApplicationWindow {
             const row = compareRows[compareRow]
             const ready = peekCard.opened && !!row && !bible.busy
             return [[["J", "K"], "versions"], ["Return", "switch", app.switchToCompared, ready && row.available && !row.active],
-                ["Y", "copy", function() { app.copyCompared(false) }, ready && row.available], close]
+                ["Y", "copy", function() { app.copyCompared(false) }, ready && row.available],
+                ["O", "beside", app.compareBeside, ready && !row.active], close]
         }
         const ready = peekCard.opened && !!peekNote && !bible.busy
         return [["Return", "see also", app.seeAlsoFromPeek, ready], ["Y", "copy", app.copyPeek, ready],
@@ -2866,6 +2877,13 @@ ApplicationWindow {
         notify(row.reference + " · " + row.abbreviation + (plainText ? " copied as plain text" : " copied"), true)
         sounds.play("chime")
     }
+    // o: the highlighted version in a window beside this one, following it.
+    function compareBeside() {
+        const row = compareRows[compareRow]
+        if (!row || row.active) { rejected(row ? "Already reading " + row.abbreviation + " here" : ""); return }
+        peekCard.close()
+        openBeside(row.versionId)
+    }
     function switchToCompared() {
         const row = compareRows[compareRow]
         if (!row || !row.available) { rejected(row ? "Not in " + row.abbreviation : ""); return }
@@ -2896,6 +2914,7 @@ ApplicationWindow {
         if (peekKind === "compare") {
             if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) switchToCompared()
             else if (event.key === Qt.Key_Y) copyCompared(!!(event.modifiers & Qt.ShiftModifier))
+            else if (plain && event.key === Qt.Key_O) compareBeside()
             else if (plain && (event.key === Qt.Key_Down || event.key === Qt.Key_J)) stepCompared(1)
             else if (plain && (event.key === Qt.Key_Up || event.key === Qt.Key_K)) stepCompared(-1)
             else if (event.key !== Qt.Key_Escape) { rejected("Not a key in Compare · " + KeyNotation.format("Escape") + " closes it") }
@@ -3959,6 +3978,8 @@ ApplicationWindow {
         contextMenu.show("version", [
             { id: "switch", text: entry.active ? "Current version" : "Switch to " + (entry.abbreviation || entry.name), shortcut: KeyNotation.format("Return"),
                 enabled: ready && !entry.active, run: function() { app.switchVersion(entry.id) } },
+            entry.active ? null : { id: "beside", text: "Open beside", enabled: ready && bible.ready,
+                run: function() { versionDialog.close(); app.openBeside(entry.id) } },
             wantsReimport(entry) ? { id: "reimport", text: "Re-import", shortcut: menuKey("reimportVersion"), enabled: ready && !catalog.busy,
                 run: function() { app.reimportVersion(entry) } } : null,
             { id: "details", text: "Details & Attribution", enabled: !!details,
@@ -4195,6 +4216,8 @@ ApplicationWindow {
         // Versions, opened on the selection's text in each version.
         // A peek under the selection (PeekCard); Versions (ctrl v) shows the same rows.
         { id: "compare", group: "Panels", title: "Compare the selection across versions", sequences: ["C"], command: true },
+        // Bound by the Compare card itself (peekKey).
+        { id: "compareBeside", group: "Panels", title: "Compare: open the highlighted version in a window beside, following this one", sequences: ["O"], scope: "compare", explanation: true },
         // Bound by the Versions dialog itself, while it compares.
         { id: "compareCopy", group: "Palettes and windows", title: "Copy the highlighted version's text (Versions, comparing)", sequences: ["Y", "Shift+Y"], scope: "versions", explanation: true },
         { id: "help", group: "Palettes and windows", title: "Keybindings", sequences: ["?"], aliases: ["F1"], aliasReason: "the help key in most desktop apps.", scope: "global", command: true },
@@ -4251,6 +4274,7 @@ ApplicationWindow {
         { id: "backup", group: "Commands only", title: "Back up your marks", command: true },
         { id: "restore", group: "Commands only", title: "Restore a backup of your marks", command: true },
         { id: "clearHistory", group: "Commands only", title: "Clear History", command: true },
+        { id: "unfollow", group: "Commands only", title: "Stop following the window beside", command: true },
         { id: "toggleHistory", group: "Commands only", title: "Disable / Enable History", command: true },
         { id: "about", group: "Commands only", title: "About & Attribution", scope: "global", command: true }
     ]
@@ -4444,6 +4468,7 @@ ApplicationWindow {
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
         if (action.id === "compare") return hasSelection && bible.versions.length > 1
+        if (action.id === "unfollow") return following
         if (action.id === "peek") return hasSelection && Array.from(bible.footnotes).some(function(note) { return note.verse === bible.cursorVerse })
         if (action.id === "undo") return bible.canUndo
         if (action.id === "redo") return bible.canRedo
@@ -4462,6 +4487,7 @@ ApplicationWindow {
         if (action.scope === "history") return "History in the palette only"
         if (action.scope === "search") return "Bible search results (" + keyText("bibleSearch") + ")"
         if (action.scope === "versions") return "Versions dialog"
+        if (action.scope === "compare") return "Compare · " + keyText("compare")
         if (action.scope === "notes") return "Reader or notes preview"
         if (action.scope === "noteEditor") return "Writing a note or on the Desk"
         if (action.scope === "characters") return "Character selection · " + keyText("characterVisual")
@@ -4898,6 +4924,7 @@ ApplicationWindow {
         case "placeRibbon": placeRibbon(); break
         case "ribbon": openRibbon(); break
         case "clearHistory": requestClearHistory(); break
+        case "unfollow": unfollowRequested(); notify("Stopped following the window beside", true); break
         case "toggleHistory": toggleHistoryEnabled(); break
         case "copy": if (bible.ready) copyPassage(); break
         case "copyPlain": if (bible.ready) copyPassage(true); break
@@ -5207,7 +5234,7 @@ ApplicationWindow {
                         if (app.hasSelection)
                             Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
                     }
-                    onContentYChanged: positionSaveTimer.restart()
+                    onContentYChanged: { positionSaveTimer.restart(); if (app.following && !app.followApplying) followTimer.restart() }
                     onMovementStarted: readerSlide.stop()
                     // ctrl + wheel and a pinch change the Text size, as ctrl = and ctrl - do.
                     WheelHandler {
@@ -7109,8 +7136,8 @@ ApplicationWindow {
             id: versionControl
             objectName: "versionControl"
             width: Math.min(implicitWidth, locationControls.availableWidth * 0.4)
-            text: bible.versionAbbreviation
-            label: bible.edition + " · Switch version"
+            text: bible.versionAbbreviation + (app.following ? " ⇄ " + app.followPartner : "")
+            label: bible.edition + " · Switch version" + (app.following ? " · following the window beside, reading " + app.followPartner : "")
             keys: app.keyText("switchVersion")
             visible: bible.ready
             available: !bible.busy && !app.modalOpen
@@ -9059,7 +9086,100 @@ ApplicationWindow {
             if (app.positionJumpToSelection && bible.selectedStart > 0) app.placeVerse(bible.cursorVerse, true, !app.restoreSlides)
             else app.setReaderY(Math.max(0, reading.contentHeight - reading.height) * Math.max(0, Math.min(1, bible.readingPosition)))
             app.restoringPosition = false
+            app.followRestored()
         }
+    }
+    // Follow: what this window reads (the passage, and the verse at the top
+    // with how far into it), sent to the window beside a moment after it
+    // changes; and the window beside's, taken without sending it back.
+    Timer { id: followTimer; interval: 30; onTriggered: app.emitFollow() }
+    Connections {
+        target: bible
+        enabled: app.following
+        function onSelectionChanged() { if (!app.followApplying) followTimer.restart() }
+    }
+    property bool followApplying: false
+    property var pendingFollow: null
+    function verseStartY(number) {
+        const block = blockLoader.item as BlockReader
+        if (block) return blockLoader.mapToItem(readerColumn, 0, block.verseRect(number).y).y
+        const index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
+        const row = index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
+        return row ? row.mapToItem(readerColumn, 0, 0).y + row.textOffset : null
+    }
+    // The verse at the top of the view and how far into it (0 to 1) the view begins.
+    function followTop() {
+        const top = readerTargetY(), verses = Array.from(bible.verses)
+        let previous = null
+        for (const verse of verses) {
+            const y = verseStartY(verse.number)
+            if (y === null) continue
+            if (y > top) {
+                if (!previous) return { verse: verse.number, fraction: 0 }
+                return { verse: previous.verse, fraction: Math.max(0, Math.min(1, (top - previous.y) / Math.max(1, y - previous.y))) }
+            }
+            previous = { verse: verse.number, y: y }
+        }
+        if (!previous) return { verse: 0, fraction: 0 }
+        return { verse: previous.verse, fraction: Math.max(0, Math.min(1, (top - previous.y) / Math.max(1, readerColumn.height - previous.y))) }
+    }
+    function followLocation() {
+        const top = followTop()
+        return { book: bible.book, chapter: bible.chapter, scope: hasSelection ? bible.tagScope() : null,
+                 topVerse: top.verse, topFraction: top.fraction }
+    }
+    function emitFollow() {
+        if (!following || followApplying || restoringPosition || !bible.ready || bible.busy) return
+        followMoved(followLocation())
+    }
+    function followTo(location) {
+        if (!location || !bible.ready || bible.busy) return
+        const scope = location.scope ? Object.assign({}, location.scope, { versionId: bible.versionId })
+            : { versionId: bible.versionId, book: location.book, chapter: location.chapter, start: 0, endBook: location.book, endChapter: location.chapter, end: 0 }
+        const here = hasSelection ? bible.tagScope() : null
+        const same = location.book === bible.book && location.chapter === bible.chapter
+            && (scope.start === 0 ? !here : !!here && ["book", "chapter", "start", "endBook", "endChapter", "end"].every(function(key) { return here[key] === scope[key] }))
+        followApplying = true
+        if (same) {
+            // Mid-restore (a window just opened, or a version just loaded): its restore applies it.
+            if (restoringPosition) { pendingFollow = location; return }
+            applyFollowScroll(location)
+            Qt.callLater(function() { app.followApplying = false })
+            return
+        }
+        if (!flushNote()) { followApplying = false; return }
+        pendingFollow = location
+        // Where this version lacks the verses: their chapter; lacking that, nothing moves.
+        if (!bible.restoreSelection(scope, false, -1)
+                && !bible.restoreSelection({ versionId: bible.versionId, book: location.book, chapter: location.chapter, start: 0, end: 0 }, false, -1)) {
+            pendingFollow = null
+            followApplying = false
+            bible.clearError()
+            notify("Not in " + bible.versionAbbreviation, true)
+            return
+        }
+        syncNote()
+    }
+    // After a followed move's chapter is laid out: its scroll, then the window listens again.
+    function followRestored() {
+        if (!pendingFollow) { if (following && !followApplying) followTimer.restart(); return }
+        applyFollowScroll(pendingFollow)
+        pendingFollow = null
+        Qt.callLater(function() { app.followApplying = false })
+    }
+    function applyFollowScroll(location) {
+        if (!location.topVerse) return
+        const y = verseStartY(location.topVerse)
+        if (y === null) return
+        let next = null
+        for (const verse of Array.from(bible.verses)) if (verse.number > location.topVerse) { next = verseStartY(verse.number); break }
+        const span = next !== null ? next - y : Math.max(0, readerColumn.height - y)
+        const target = clampReaderY(y + location.topFraction * span)
+        if (Math.abs(target - reading.contentY) >= 1) setReaderY(target)
+    }
+    function openBeside(versionId) {
+        if (!bible.ready || bible.busy || !flushNote()) { rejected(); return }
+        besideRequested(versionId)
     }
     Connections {
         target: catalog

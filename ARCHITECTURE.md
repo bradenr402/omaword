@@ -30,7 +30,7 @@ files.
 | `src/textselection.*` | Character selection (`v`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
 | `src/annotationpaint.*` | The flowing layouts' annotation marks (`AnnotationPaint`, a `QQuickPaintedItem`): tint bands and highlighter strokes from HandDrawn.js's shapes ported to C++ (same seeds and arithmetic). BlockReader lays them out (`layOut`, once per event loop turn); a selection move only refreshes `blockSelectionBackground` (plain rectangles), and a changed shape list repaints only the changed shapes' area (Psalm 119 in Block with 88 highlights, 58 noted and 44 tagged verses, offscreen software rendering: a verse move went from 4.3 s to 86 ms, a highlight toggle from 4.3 s to 0.47 s). `BlockDocument::rectangles` walks every character only on lines with right-to-left text |
-| `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing |
+| `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing; Follow (`openBeside`): links two windows, relaying each one's `followMoved` to the other's `followTo` until either closes or unfollows |
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC (a request: reference, translation, import, activation token, `newWindow`, `lookup`) |
 | `src/commandline.*`, `src/main.cpp` | The command line (`omaword help`). `quote`, `search`, `translations`, `link`, `completion`, `help`, and `--version` run headless: a `QCoreApplication` and one `BibleBackend` (`readPassage`; `readVersion` for `--translation`, which records neither the version as the one you read nor a place in it), with no window, instance, clipboard, or saved place. `open [--here]`, `lookup [text]`, `import`, an `omaword:` link (`omaword:John%203:16?translation=KJV`; the scheme is the desktop file's `x-scheme-handler/` + `BRAND_ID`, opened where you read), or a bare passage (a new window) become a request for the running instance, whose window reads the passage as the palette does (compact forms too) and switches to the translation asked for. Exit status 0, 1 (failure), 2 (usage). The completion scripts (`assets/completions/`, in `core.qrc`) and the manual (`assets/omaword.1`) are installed by `bin/install` (bash's) and `packaging/` |
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
@@ -350,6 +350,21 @@ files.
   Versions dialog shows them under each row while a selection exists; copying
   a row is `copyScope` with that version's ID, and switching keeps the
   passage.
+
+### Follow
+- `openBeside(window, versionId)` opens a window reading another version
+  (`readVersion`: the version you read stays as it was) at the first one's
+  place, and links the two: each window's `followMoved(location)` reaches
+  the other's `followTo`. A location is the passage (the selection's scope,
+  or the chapter) and the verse at the top of the view with how far into it
+  the view begins (`followTop`), so versions whose verses differ in length
+  stay aligned verse by verse. A window sends its place a moment after its
+  selection or scroll changes (`followTimer`), never while restoring a
+  position or applying the other's (`followApplying`): a followed move
+  lands through `restoreSelection` (its chapter where the verses are
+  missing), and its scroll once the chapter is laid out (`followRestored`).
+  Each window shows the other's version (`followPartner`, kept current on
+  version changes); closing either, or `unfollow`, unlinks both.
 
 ### Search
 - The active version, or every installed version (`searchAllVersions`, a

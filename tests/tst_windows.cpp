@@ -5,6 +5,7 @@
 #include "windowmanager.h"
 #include <QApplication>
 #include <QDir>
+#include <QJSValue>
 #include <QPointer>
 #include <QProcess>
 #include <QQuickItem>
@@ -489,6 +490,56 @@ private slots:
         here.translation = "nothing"; done = false;
         windows->openRequest(here,[&](auto result) { QVERIFY(!result.ok); QVERIFY(result.error.contains("nothing")); done = true; },false);
         QTRY_VERIFY(done); QCOMPARE(bible->versionId(),first);
+    }
+    // Open beside: a window in another version that follows this one, and
+    // that this one follows, until either closes.
+    void openBesideFollowsBothWays() {
+        {
+            BibleBackend other;
+            other.importUsfm(QUrl::fromLocalFile(structuredUsfm));
+            QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000);
+            QVERIFY2(other.ready(),qPrintable(other.error()));
+        }
+        auto *leader = windows->windowAt(0); auto *bible = windows->backendAt(0);
+        QTRY_VERIFY(!bible->versionIdFor("window-original").isEmpty());
+        const QString version = bible->versionId();
+        { BibleBackend reading; QVERIFY(reading.switchVersion(version)); } // The import made the other the version you read.
+        QVERIFY(bible->navigate("John 3:16"));
+        QTRY_VERIFY(!leader->property("restoringPosition").toBool());
+        QVERIFY(!windows->openBeside(leader,"nothing")); QCOMPARE(windows->count(),2);
+        QVERIFY(windows->openBeside(leader,"window-original")); QCOMPARE(windows->count(),3);
+        auto *follower = windows->windowAt(2); auto *beside = windows->backendAt(2);
+        QCOMPARE(windows->partnerOf(leader),follower); QCOMPARE(windows->partnerOf(follower),leader);
+        // It reads the other version where this one is, without making it the version you read.
+        QCOMPARE(beside->versionId(),QString("window-original"));
+        QTRY_COMPARE(beside->selectionReference(),QString("John 3:16"));
+        { BibleBackend fresh; QCOMPARE(fresh.versionId(),version); }
+        // Each names the other's version.
+        QCOMPARE(leader->property("followPartner").toString(),beside->versionAbbreviation());
+        QCOMPARE(follower->property("followPartner").toString(),bible->versionAbbreviation());
+        // The leader moves: the follower follows; and the other way.
+        QVERIFY(bible->navigate("Romans 8:2"));
+        QTRY_COMPARE(beside->selectionReference(),QString("Romans 8:2"));
+        QTRY_VERIFY(!follower->property("restoringPosition").toBool());
+        QVERIFY(beside->navigate("Genesis 2:3"));
+        QTRY_COMPARE(bible->selectionReference(),QString("Genesis 2:3"));
+        QCOMPARE(bible->versionId(),version); // Each keeps its version.
+        // Scrolling: the follower keeps the leader's top verse at its top.
+        QTRY_VERIFY(!leader->property("restoringPosition").toBool() && !follower->property("restoringPosition").toBool());
+        QTRY_VERIFY(!leader->property("followApplying").toBool() && !follower->property("followApplying").toBool());
+        QVERIFY(QMetaObject::invokeMethod(leader,"setReaderY",Q_ARG(QVariant,600.0)));
+        const auto top = [](QWindow *window) {
+            QVariant location; QMetaObject::invokeMethod(window,"followLocation",Q_RETURN_ARG(QVariant,location));
+            return location.value<QJSValue>().toVariant().toMap().value("topVerse").toInt();
+        };
+        QVERIFY(top(leader) > 1);
+        QTRY_COMPARE(top(follower),top(leader));
+        // Closing either unlinks the other.
+        follower->close();
+        QTRY_COMPARE(windows->count(),2);
+        QCOMPARE(windows->partnerOf(leader),nullptr);
+        QCOMPARE(leader->property("followPartner").toString(),QString());
+        QVERIFY(bible->navigate("John 3:1")); QCOMPARE(bible->selectionReference(),QString("John 3:1"));
     }
     void realSecondaryCreatesAnotherWindow() {
         const auto directory = windows->backendAt(0)->dataDirectory();

@@ -79,6 +79,10 @@ WindowManager::Reader *WindowManager::createWindow()
     bible->setFlushCallback([root] { return flush(root); });
     if (window->metaObject()->indexOfSignal("newWindowRequested()") >= 0)
         connect(window, SIGNAL(newWindowRequested()), this, SLOT(newWindow()));
+    if (window->metaObject()->indexOfSignal("besideRequested(QString)") >= 0) {
+        connect(window, SIGNAL(besideRequested(QString)), this, SLOT(besideRequested(QString)));
+        connect(window, SIGNAL(unfollowRequested()), this, SLOT(unfollowRequested()));
+    }
     m_readers.append({context, bible, window, catalog});
     connect(window, &QWindow::visibleChanged, this, [this, root](bool visible) {
         if (!visible && root) QTimer::singleShot(0, this, [this, root] {
@@ -92,6 +96,7 @@ WindowManager::Reader *WindowManager::createWindow()
 
 void WindowManager::retire(QWindow *window)
 {
+    unfollow(window);
     for (qsizetype i = 0; i < m_readers.size(); ++i) {
         if (m_readers[i].window != window) continue;
         const auto reader = m_readers.takeAt(i);
@@ -108,6 +113,76 @@ void WindowManager::retire(QWindow *window)
 }
 
 QWindow *WindowManager::windowAt(int index) const { return m_readers.value(index).window; }
+
+BibleBackend *WindowManager::backendOf(QWindow *window) const
+{
+    for (const auto &reader : m_readers) if (reader.window == window) return reader.bible;
+    return nullptr;
+}
+
+bool WindowManager::openBeside(QWindow *window, const QString &versionId)
+{
+    auto *bible = backendOf(window);
+    if (!bible || bible->versionIdFor(versionId).isEmpty() || !flush(window)) return false;
+    QVariant location;
+    QMetaObject::invokeMethod(window, "followLocation", Q_RETURN_ARG(QVariant, location));
+    unfollow(window);
+    QPointer<QWindow> leader(window);
+    auto *reader = createWindow();
+    if (!reader) return false;
+    QPointer<QWindow> follower(reader->window);
+    // Read there without making it the version you read (as a peer would).
+    if (!reader->bible->readVersion(bible->versionIdFor(versionId))) { follower->close(); return false; }
+    QMetaObject::invokeMethod(follower, "followTo", Q_ARG(QVariant, location));
+    if (!leader) return true;
+    Link link{leader, follower, {}};
+    for (QWindow *root : {leader.data(), follower.data()})
+        link.connections << connect(root, SIGNAL(followMoved(QVariant)), this, SLOT(relayFollow(QVariant)));
+    // Each names the other's version, which can change.
+    for (const auto &[self, other] : {std::pair{leader, follower}, std::pair{follower, leader}}) {
+        auto *otherBible = backendOf(other);
+        const auto name = [self = self, otherBible] { if (self) self->setProperty("followPartner", otherBible->versionAbbreviation()); };
+        link.connections << connect(otherBible, &BibleBackend::versionChanged, self, name);
+        name();
+    }
+    m_links << link;
+    return true;
+}
+
+void WindowManager::unfollow(QWindow *window)
+{
+    for (qsizetype i = 0; i < m_links.size(); ++i) {
+        if (m_links[i].a != window && m_links[i].b != window) continue;
+        const auto link = m_links.takeAt(i);
+        for (const auto &connection : link.connections) disconnect(connection);
+        for (QWindow *root : {link.a.data(), link.b.data()}) if (root) root->setProperty("followPartner", QString());
+        return;
+    }
+}
+
+QWindow *WindowManager::partnerOf(QWindow *window) const
+{
+    for (const auto &link : m_links) {
+        if (link.a == window) return link.b;
+        if (link.b == window) return link.a;
+    }
+    return nullptr;
+}
+
+void WindowManager::besideRequested(const QString &versionId)
+{
+    auto *window = qobject_cast<QWindow *>(sender());
+    if (!openBeside(window, versionId) && window)
+        QMetaObject::invokeMethod(window, "rejected", Q_ARG(QVariant, QStringLiteral("Could not open a window beside")));
+}
+
+void WindowManager::unfollowRequested() { unfollow(qobject_cast<QWindow *>(sender())); }
+
+void WindowManager::relayFollow(const QVariant &location)
+{
+    if (auto *partner = partnerOf(qobject_cast<QWindow *>(sender())))
+        QMetaObject::invokeMethod(partner, "followTo", Q_ARG(QVariant, location));
+}
 BibleBackend *WindowManager::backendAt(int index) const { return m_readers.value(index).bible; }
 
 void WindowManager::newWindow()

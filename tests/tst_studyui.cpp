@@ -403,6 +403,15 @@ private slots:
         key(Qt::Key_K); QCOMPARE(card->property("currentRow").toInt(), 0);
         key(Qt::Key_J); QCOMPARE(card->property("currentRow").toInt(), 1);
         QVERIFY(object("peekHints")->property("plainText").toString().contains("enter switch"));
+        QVERIFY(object("peekHints")->property("plainText").toString().contains("o beside"));
+        // o opens the highlighted version beside (WindowManager takes the request); not the one read here.
+        {
+            QSignalSpy beside(window, SIGNAL(besideRequested(QString)));
+            key(Qt::Key_K); key(Qt::Key_O); QVERIFY(card->property("opened").toBool()); QCOMPARE(beside.count(), 0);
+            key(Qt::Key_J); key(Qt::Key_O); QTRY_VERIFY(!card->property("visible").toBool());
+            QCOMPARE(beside.count(), 1); QCOMPARE(beside.first().first().toString(), studyId);
+            key(Qt::Key_C); QTRY_VERIFY(card->property("opened").toBool());
+        }
         // y copies its quotation and closes; shift Y the plain text.
         QGuiApplication::clipboard()->clear();
         key(Qt::Key_Y); QTRY_VERIFY(!card->property("visible").toBool());
