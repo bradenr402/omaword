@@ -23,7 +23,7 @@ Launch **OmaWord** from your application launcher or run `omaword`. From a termi
 ```sh
 omaword "John 3:16"                  # a new window at a passage
 omaword open jn316 --here            # the window you were reading, at a passage
-omaword lookup                       # the passage palette, in the window you were reading
+omaword lookup                       # look up a passage in a small window, where you are
 omaword quote jn316                  # print it as a quotation (--plain: the text alone)
 omaword quote ps23 -t KJV | wl-copy  # in another translation
 omaword search "living water"        # search the version you read (--all: every one)
@@ -35,6 +35,20 @@ omaword link jn316                   # an omaword: link to a passage
 `quote`, `search`, `translations`, and `link` print without a window and never move your reading place; `-t` (`--translation`) names a translation by its abbreviation or ID. `omaword help` lists every command, `omaword help <command>` explains one, and `man omaword` has the manual. `bin/install` installs bash completion; `omaword completion zsh` and `omaword completion fish` print the others.
 
 Links like `omaword:John%203:16`, or `omaword:jn316?translation=KJV`, open where you were reading: the launcher registers the `omaword:` scheme, so `xdg-open` and browsers hand them to OmaWord. The launcher's menu has **Look Up a Passage** and **New Window**.
+
+`omaword lookup` opens a small window on the workspace you are on: type a passage (`jn316` works), `enter` shows it, `y` copies it (`shift Y` the plain text), `enter` again opens it in the window you were reading, and `esc` closes it. It suits a key binding; in Omarchy, add one to `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + ALT + B", "Look up a passage", "omaword lookup")
+```
+
+Hyprland floats the window (its size is fixed); to center it as Omarchy's floating windows are, add a rule there too:
+
+```lua
+o.window({ class = "^omaword$", title = "^Look up · OmaWord$" }, { tag = "+floating-window" })
+```
+
+If you copy from it with OmaWord otherwise closed, OmaWord stays running without a window until something else is copied, so what you copied can still be pasted.
 
 To update, `git pull` and run `bin/build` and `bin/install` again. `bin/install` keeps the files it replaces from one previous install in `~/.local/state/omaword/previous-install`.
 

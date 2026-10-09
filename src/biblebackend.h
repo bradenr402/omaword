@@ -401,7 +401,7 @@ public:
     // copySelection() lays them out), verses [{book, chapter, verse, text}]},
     // or {error}. Compact input (jn316) is read as the passage palette reads
     // it, unless strict.
-    QVariantMap readPassage(const QString &text, bool strict = false);
+    Q_INVOKABLE QVariantMap readPassage(const QString &text, bool strict = false);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
     Q_INVOKABLE void copyText(QString text);
     // Character selection over the current chapter's source text (see

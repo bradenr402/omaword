@@ -33,6 +33,7 @@
     <file>qml/RangeMarker.qml</file>
     <file>qml/ModalCard.qml</file>
     <file>qml/SidePanel.qml</file>
+    <file>qml/LookupWindow.qml</file>
     <file>qml/SidePanelHeader.qml</file>
     <file>qml/KeyNotation.js</file>
     <file>qml/RowMenu.js</file>

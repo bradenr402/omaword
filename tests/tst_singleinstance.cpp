@@ -386,15 +386,16 @@ private slots:
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 1); // No Bible installed: cannot claim navigation succeeded.
         QVERIFY(!secondary.readAllStandardError().isEmpty());
-        // open --here and omaword: links navigate where you read; lookup only shows the palette.
+        // open --here and omaword: links navigate where you read.
         for (const auto &arguments : QList<QStringList>{{"open", "--here", "John 3:16"}, {"omaword:John%203:16"}}) {
             secondary.start(executable, arguments);
             QVERIFY(secondary.waitForFinished(5000));
             QCOMPARE(secondary.exitCode(), 1); QVERIFY(!secondary.readAllStandardError().isEmpty());
         }
+        // Nothing to look up in yet: lookup says so.
         secondary.start(executable, {"lookup"});
         QVERIFY(secondary.waitForFinished(5000));
-        QCOMPARE(secondary.exitCode(), 0);
+        QCOMPARE(secondary.exitCode(), 1); QVERIFY(secondary.readAllStandardError().contains("Add a Bible version first"));
         // A translation not installed fails where the passage would open.
         secondary.start(executable, {"open", "jn316", "-t", "KJV"});
         QVERIFY(secondary.waitForFinished(5000));

@@ -26,7 +26,7 @@ _omaword()
     local options
     case ${COMP_WORDS[1]} in
         open) options="--here --translation --help" ;;
-        lookup) options="--help" ;;
+        lookup) options="--translation --help" ;;
         quote) options="--plain --json --translation --help" ;;
         search) options="--all --limit --json --color --translation --help" ;;
         translations | versions) options="--names --json --help" ;;

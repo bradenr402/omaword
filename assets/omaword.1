@@ -13,6 +13,8 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .br
 .B omaword lookup
 .RI [ text ]
+.RB [ \-t
+.IR name ]
 .br
 .B omaword quote
 .IR passage ...
@@ -81,9 +83,19 @@ opens it in the window you were reading. A translation other than that
 window's switches it.
 .TP
 .BI lookup " \fR[\fPtext\fR]\fP"
-Opens the passage palette in the window you were reading, with
+Opens a small window on the workspace you are on, with
 .I text
-typed into it, if given. Suits a key binding.
+typed into it, if given: type a passage,
+.B enter
+shows it,
+.B y
+copies it
+.RB ( "shift Y"
+the plain text),
+.B enter
+opens it in the window you were reading, and
+.B esc
+closes it. Hyprland floats it. Suits a key binding.
 .TP
 .BI quote " passage..."
 Prints each passage as OmaWord copies it: the text in quotation marks, a

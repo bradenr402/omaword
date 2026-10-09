@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QJSValue>
+#include <QClipboard>
 #include <QPointer>
 #include <QProcess>
 #include <QQuickItem>
@@ -452,23 +453,14 @@ private slots:
         QCOMPARE(child.exitCode(),0);
     }
     // open --here navigates the window you read, switching it to a
-    // translation asked for; lookup opens its palette with the text typed.
-    void hereAndLookupStayInTheWindowYouRead() {
+    // translation asked for.
+    void hereStaysInTheWindowYouRead() {
         const int count = windows->count();
         SingleInstance::Request here; here.reference = "Romans 8:2"; here.newWindow = false;
         bool done = false;
         windows->openRequest(here,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
         QTRY_VERIFY(done); QCOMPARE(windows->count(),count);
         QCOMPARE(windows->backendAt(count - 1)->selectionReference(),QString("Romans 8:2"));
-        SingleInstance::Request lookup; lookup.newWindow = false; lookup.lookup = true; lookup.reference = "rom 8";
-        done = false;
-        windows->openRequest(lookup,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
-        QTRY_VERIFY(done); QCOMPARE(windows->count(),count);
-        auto palette = windows->windowAt(count - 1)->findChild<QObject *>("passagePalette"); QVERIFY(palette);
-        QTRY_VERIFY(palette->property("opened").toBool());
-        QCOMPARE(windowObject(windows->windowAt(count - 1),"referenceInput")->property("text").toString(),QString("rom 8"));
-        QCOMPARE(windows->backendAt(count - 1)->selectionReference(),QString("Romans 8:2")); // Typed, not opened.
-        QVERIFY(QMetaObject::invokeMethod(palette,"close"));
         // --translation: by abbreviation or ID, in any case; the passage as
         // the palette reads it (compact).
         {
@@ -540,6 +532,46 @@ private slots:
         QCOMPARE(windows->partnerOf(leader),nullptr);
         QCOMPARE(leader->property("followPartner").toString(),QString());
         QVERIFY(bible->navigate("John 3:1")); QCOMPARE(bible->selectionReference(),QString("John 3:1"));
+    }
+    // omaword lookup: a small window of its own, the text typed; enter shows
+    // the passage, y copies it, enter again opens it in the reader used last.
+    void lookupWindowShowsCopiesAndOpens() {
+        const int count = windows->count();
+        auto *reader = windows->windowAt(0); auto *bible = windows->backendAt(0);
+        QVERIFY(bible->navigate("John 3:2"));
+        SingleInstance::Request request; request.lookup = true; request.newWindow = false; request.reference = "rom 8:2";
+        bool done = false;
+        windows->openRequest(request,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
+        QTRY_VERIFY(done); QCOMPARE(windows->count(),count); // Not a reader window.
+        auto *lookup = windows->lookupWindow(); QVERIFY(lookup);
+        QCOMPARE(lookup->title(),QString("Look up · OmaWord"));
+        QCOMPARE(lookup->minimumSize(),lookup->maximumSize()); // Fixed: Hyprland floats it.
+        QCOMPARE(windowObject(lookup,"lookupQuery")->property("text").toString(),QString("rom 8:2"));
+        QTRY_VERIFY(lookup->property("candidates").value<QJSValue>().property("length").toInt() > 0);
+        QVERIFY(QMetaObject::invokeMethod(lookup,"show",Q_ARG(QVariant,0)));
+        QVERIFY(lookup->property("reading").toBool());
+        QCOMPARE(windowObject(lookup,"lookupTitle")->property("text").toString(),"Romans 8:2 · " + bible->versionAbbreviation());
+        QVERIFY(windowObject(lookup,"lookupText")->property("text").toString().contains("ROM:8:2"));
+        QGuiApplication::clipboard()->clear();
+        QVERIFY(QMetaObject::invokeMethod(lookup,"copy",Q_ARG(QVariant,false)));
+        QVERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("\u2014 Romans 8:2")));
+        QCOMPARE(windowObject(lookup,"lookupStatus")->property("text").toString(),QString("Romans 8:2 copied"));
+        QVERIFY(QMetaObject::invokeMethod(lookup,"copy",Q_ARG(QVariant,true)));
+        QVERIFY(!QGuiApplication::clipboard()->text().contains(QStringLiteral("\u2014")));
+        QCOMPARE(bible->selectionReference(),QString("John 3:2")); // Nothing moved.
+        // A second lookup replaces it, afresh.
+        QPointer<QWindow> first(lookup);
+        QVERIFY(windows->openLookup("jn316"));
+        QTRY_VERIFY(!first); lookup = windows->lookupWindow(); QVERIFY(lookup);
+        QVERIFY(QMetaObject::invokeMethod(lookup,"show",Q_ARG(QVariant,0)));
+        // enter: the passage in the reader used last (here, none was active: the newest), and the lookup closes.
+        QVERIFY(QMetaObject::invokeMethod(lookup,"openInReader"));
+        QTRY_COMPARE(windows->backendAt(count - 1)->selectionReference(),QString("John 3:16"));
+        QTRY_VERIFY(!windows->lookupWindow());
+        QCOMPARE(windows->count(),count);
+        Q_UNUSED(reader);
+        // A translation not installed: nothing opens.
+        QVERIFY(!windows->openLookup("jn316","nothing")); QVERIFY(!windows->lookupWindow());
     }
     void realSecondaryCreatesAnotherWindow() {
         const auto directory = windows->backendAt(0)->dataDirectory();

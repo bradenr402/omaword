@@ -177,7 +177,8 @@ private slots:
         QVERIFY(!CommandLine::request({"qoute", "something"}, &request, &error)); QVERIFY(error.contains(QStringLiteral("Did you mean \u201cquote\u201d")));
         QVERIFY(!CommandLine::request({"--bogus"}, &request, &error)); QVERIFY(error.contains("bogus"));
         QVERIFY(!CommandLine::request({"jn316", "--here"}, &request, &error));
-        QVERIFY(!CommandLine::request({"lookup", "-t", "KJV"}, &request, &error)); QVERIFY(error.contains("--translation goes with a passage"));
+        QVERIFY(CommandLine::request({"lookup", "-t", "KJV"}, &request, &error)); QVERIFY(request.lookup); QCOMPARE(request.translation, QString("KJV"));
+        QVERIFY(!CommandLine::request({"import", "bible.zip", "-t", "KJV"}, &request, &error)); QVERIFY(error.contains("--translation goes with a passage"));
         // Links.
         QString reference, translation;
         QVERIFY(CommandLine::parseLink("omaword://John%203:16/", &reference, &translation)); QCOMPARE(reference, QString("John 3:16")); QVERIFY(translation.isEmpty());

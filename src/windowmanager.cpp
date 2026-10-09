@@ -37,6 +37,10 @@ WindowManager::~WindowManager()
         delete reader.catalog;
         delete reader.bible;
     }
+    if (m_lookup) m_lookup->disconnect(this);
+    delete m_lookup.data();
+    delete m_lookupContext;
+    delete m_lookupBible;
     delete m_component;
     delete m_engine;
 }
@@ -47,7 +51,7 @@ bool WindowManager::flush(QObject *root)
     return root && QMetaObject::invokeMethod(root, "flushNote", Q_RETURN_ARG(QVariant, saved)) && saved.toBool();
 }
 
-WindowManager::Reader *WindowManager::createWindow()
+void WindowManager::ensureEngine()
 {
     if (!m_engine) {
         m_engine = new QQmlEngine(this);
@@ -59,6 +63,11 @@ WindowManager::Reader *WindowManager::createWindow()
         m_engine->rootContext()->setContextProperty(QStringLiteral("windows"), this);
         m_component = new QQmlComponent(m_engine, m_source, QQmlComponent::PreferSynchronous, this);
     }
+}
+
+WindowManager::Reader *WindowManager::createWindow()
+{
+    ensureEngine();
     auto *bible = new BibleBackend(this);
     auto *catalog = new VersionCatalog(this);
     auto *context = new QQmlContext(m_engine->rootContext(), this);
@@ -84,6 +93,8 @@ WindowManager::Reader *WindowManager::createWindow()
         connect(window, SIGNAL(unfollowRequested()), this, SLOT(unfollowRequested()));
     }
     m_readers.append({context, bible, window, catalog});
+    // The reader you used last: where a lookup's passage opens.
+    connect(window, &QWindow::activeChanged, this, [this, root] { if (root && root->isActive()) m_lastActive = root; });
     connect(window, &QWindow::visibleChanged, this, [this, root](bool visible) {
         if (!visible && root) QTimer::singleShot(0, this, [this, root] {
             if (root && !root->isVisible()) retire(root);
@@ -108,8 +119,57 @@ void WindowManager::retire(QWindow *window)
         delete reader.catalog;
         reader.bible->deleteLater();
         emit countChanged();
+        if (!hasWindows()) emit allClosed();
         return;
     }
+}
+
+QWindow *WindowManager::openLookup(const QString &text, const QString &translation)
+{
+    ensureEngine();
+    // Afresh each time: a new window opens on the workspace you are on.
+    if (m_lookup) { m_lookup->disconnect(this); retireLookup(); }
+    auto *bible = new BibleBackend(this);
+    const QString id = translation.isEmpty() ? QString() : bible->versionIdFor(translation);
+    if ((!translation.isEmpty() && (id.isEmpty() || !bible->readVersion(id))) || !bible->ready()) { delete bible; return nullptr; }
+    auto *context = new QQmlContext(m_engine->rootContext(), this);
+    QQmlComponent component(m_engine, QUrl(QStringLiteral("qrc:/qml/LookupWindow.qml")), QQmlComponent::PreferSynchronous);
+    auto *window = qobject_cast<QWindow *>(component.createWithInitialProperties({{QStringLiteral("initialText"), text},
+        {QStringLiteral("theme"), QVariant::fromValue<QObject *>(m_desktop)}, {QStringLiteral("backend"), QVariant::fromValue<QObject *>(bible)},
+        {QStringLiteral("effects"), QVariant::fromValue<QObject *>(m_sounds)}}, context));
+    if (!window) {
+        QTextStream(stderr) << component.errorString() << Qt::endl;
+        delete context; delete bible; return nullptr;
+    }
+    m_lookup = window; m_lookupContext = context; m_lookupBible = bible; m_lookupTranslation = translation;
+    connect(window, SIGNAL(openRequested(QString)), this, SLOT(lookupOpened(QString)));
+    QPointer<QWindow> root(window);
+    connect(window, &QWindow::visibleChanged, this, [this, root](bool visible) {
+        if (!visible && root) QTimer::singleShot(0, this, [this, root] {
+            if (root && !root->isVisible() && root == m_lookup) { retireLookup(); if (!hasWindows()) emit allClosed(); }
+        });
+    });
+    window->show();
+    return window;
+}
+
+void WindowManager::retireLookup()
+{
+    delete m_lookup.data();
+    delete m_lookupContext; m_lookupContext = nullptr;
+    if (m_lookupBible) m_lookupBible->deleteLater();
+    m_lookupBible = nullptr;
+}
+
+void WindowManager::lookupOpened(const QString &reference)
+{
+    SingleInstance::Request request;
+    request.reference = reference;
+    request.translation = m_lookupTranslation;
+    request.newWindow = false;
+    openRequest(request, [](SingleInstance::Result result) {
+        if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << result.error << Qt::endl;
+    });
 }
 
 QWindow *WindowManager::windowAt(int index) const { return m_readers.value(index).window; }
@@ -194,9 +254,19 @@ void WindowManager::newWindow()
 
 void WindowManager::openRequest(const SingleInstance::Request &request, SingleInstance::Reply reply, bool activate)
 {
+    if (request.lookup) {
+        QPointer<QWindow> window(openLookup(request.reference, request.translation));
+        if (!window) { reply({false, request.translation.isEmpty() ? QStringLiteral("Add a Bible version first.")
+                                     : QStringLiteral("No installed translation \u201c%1\u201d.").arg(request.translation)}); return; }
+        if (!activate) { reply({true, {}}); return; }
+        SingleInstance::activateWindow(window, request, this, reply);
+        return;
+    }
     Reader *reader = nullptr;
     if (!request.newWindow && !m_readers.isEmpty()) {
+        // The active reader, else the one you used last, else the newest.
         reader = &m_readers.last();
+        for (auto &candidate : m_readers) if (candidate.window == m_lastActive) reader = &candidate;
         for (auto &candidate : m_readers) if (candidate.window->isActive()) { reader = &candidate; break; }
     } else reader = createWindow();
     if (!reader) { reply({false, QStringLiteral("Cannot create a reader window.")}); return; }
@@ -206,7 +276,7 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
     const QString versionId = request.translation.isEmpty() ? QString() : bible->versionIdFor(request.translation);
     if (!request.translation.isEmpty() && versionId.isEmpty())
         action = {false, QStringLiteral("No installed translation \u201c%1\u201d.").arg(request.translation)};
-    else if (!request.lookup && (!request.importPath.isEmpty() || !request.reference.isEmpty() || !versionId.isEmpty())) {
+    else if (!request.importPath.isEmpty() || !request.reference.isEmpty() || !versionId.isEmpty()) {
         if (!flush(root)) action = {false, QStringLiteral("The unsaved note could not be saved.")};
         else {
             QMetaObject::invokeMethod(root, "savePosition");
@@ -237,8 +307,6 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
             }
         }
     }
-    // Lookup: the passage palette, ready to type, with any text typed into it.
-    if (request.lookup && action.ok) QMetaObject::invokeMethod(root, "lookUp", Q_ARG(QVariant, request.reference));
     if (!activate) { reply(action); return; }
     SingleInstance::activateWindow(root, request, this, [action, reply](SingleInstance::Result activation) {
         if (!action.ok) reply(action);

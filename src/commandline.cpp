@@ -38,10 +38,12 @@ const QList<Command> &commands()
          "the window you were reading instead. A translation other than the window's switches the window to it.",
          {translationOption, {"    --here", "Open in the window you were reading, not a new one."}, helpOption},
          {"omaword open jn316", "omaword open \"Romans 8\" --here", "omaword open ps23 -t KJV"}, false},
-        {"lookup", "[<text>]", "Open the passage palette",
-         "Opens the passage palette in the window you were reading, ready to type, with <text> typed into it if "
-         "given. Suits a key binding, such as Hyprland's:\n  bindd = SUPER ALT, B, Look up a passage, exec, omaword lookup",
-         {helpOption}, {"omaword lookup", "omaword lookup rom 8"}, false},
+        {"lookup", "[<text>] [-t <name>]", "Look up a passage in a small window",
+         "Opens a small window on the workspace you are on, with <text> typed into it if given: type a passage, enter "
+         "shows it, y copies it (shift Y the plain text), enter opens it in the window you were reading, esc closes. "
+         "Hyprland floats it. Suits a key binding; in Omarchy, in ~/.config/hypr/bindings.lua:\n"
+         "  o.bind(\"SUPER + ALT + B\", \"Look up a passage\", \"omaword lookup\")",
+         {translationOption, helpOption}, {"omaword lookup", "omaword lookup rom 8", "omaword lookup -t KJV"}, false},
         {"quote", "<passage>... [--plain] [--json] [-t <name>]", "Print passages as quotations",
          "Prints each passage as OmaWord copies it: the text in quotation marks, a number before each verse, and the "
          "reference after an em dash, with a blank line between passages. Given \"-\" (or no passage while input is "
@@ -494,7 +496,7 @@ bool request(const QStringList &arguments, SingleInstance::Request *request, QSt
     *request = SingleInstance::Request::fromArguments({}, parser.value(importOption), parser.isSet(importOption));
     request->translation = parser.value(translationOption);
     if (parser.isSet(here) && command != QStringLiteral("open")) return fail("--here goes with open: omaword open <passage> --here");
-    if (parser.isSet(translationOption) && (command == QStringLiteral("lookup") || command == QStringLiteral("import")))
+    if (parser.isSet(translationOption) && command == QStringLiteral("import"))
         return fail("--translation goes with a passage: omaword open <passage> -t <name>");
     if (command == QStringLiteral("open")) {
         if (positional.isEmpty()) return fail("name a passage, such as: omaword open jn316");

@@ -4,6 +4,7 @@
 #include "singleinstance.h"
 #include "windowmanager.h"
 #include <QApplication>
+#include <QClipboard>
 #include <QQuickStyle>
 #include <QIcon>
 #include <QDir>
@@ -65,10 +66,22 @@ int main(int argc, char *argv[]) {
     }
     Desktop desktop;
     WindowManager windows(&desktop);
+    // A Wayland clipboard lives in the process that copied: after its last
+    // window closes, OmaWord stays (windowless) while what you copied is
+    // still on the clipboard, so it can be pasted, and quits once something
+    // else is copied (or a window opens and closes again without a copy).
+    app.setQuitOnLastWindowClosed(false);
+    auto *clipboard = QGuiApplication::clipboard();
+    QObject::connect(&windows, &WindowManager::allClosed, &app, [&app, clipboard] {
+        if (!clipboard->ownsClipboard()) app.quit();
+    });
+    QObject::connect(clipboard, &QClipboard::changed, &app, [&app, &windows, clipboard] {
+        if (!windows.hasWindows() && !clipboard->ownsClipboard()) app.quit();
+    });
     QTimer::singleShot(0, &instance, [&] {
         windows.openRequest(initialRequest, [&](SingleInstance::Result result) {
             if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << result.error << Qt::endl;
-            if (!windows.count()) app.exit(1);
+            if (!windows.hasWindows()) app.exit(1);
         }, false);
         instance.setHandler([&](const SingleInstance::Request &request, SingleInstance::Reply reply) {
             windows.openRequest(request, std::move(reply));
