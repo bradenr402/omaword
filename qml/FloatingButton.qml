@@ -111,40 +111,67 @@ Button {
                     ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
                     ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
                 } else if (glyph === "desk") {
-                    // Stacked pages resting in an open tray.
-                    ctx.moveTo(7, 4); ctx.lineTo(17, 4)
-                    ctx.moveTo(5, 8); ctx.lineTo(19, 8)
-                    ctx.moveTo(2, 13); ctx.lineTo(8, 13); ctx.lineTo(9.5, 16)
-                    ctx.lineTo(14.5, 16); ctx.lineTo(16, 13); ctx.lineTo(22, 13)
-                    ctx.lineTo(22, 21); ctx.lineTo(2, 21); ctx.closePath()
+                    // A desk with a drawer and a reading lamp. The legs and the
+                    // drawer end flat under the top's centre line, and the arm
+                    // starts in the lamp's foot and ends in its shade, so no
+                    // stroke shows through another's edge.
+                    ctx.moveTo(2, 13); ctx.lineTo(22, 13)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.lineCap = "butt"
+                    ctx.moveTo(4, 13); ctx.lineTo(4, 21.8)
+                    ctx.moveTo(20, 13); ctx.lineTo(20, 21.8)
+                    ctx.moveTo(4, 17); ctx.lineTo(11, 17); ctx.lineTo(11, 13)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.moveTo(14.6, 13); ctx.lineTo(15.4, 11.4); ctx.lineTo(17.6, 11.4); ctx.lineTo(18.4, 13); ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
+                    ctx.lineJoin = "bevel"
+                    ctx.moveTo(16.8, 12.2); ctx.lineTo(13, 7.6); ctx.lineTo(16.6, 4.1)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.moveTo(15.4, 3); ctx.lineTo(21.4, 5.6); ctx.lineTo(18.2, 9.2); ctx.closePath()
+                    ctx.fill()
+                    ctx.beginPath()
                 } else if (glyph.startsWith("layout-")) {
                     floatingButton.controller.paintLayoutGlyph(ctx, glyph.slice(7))
                 } else if (glyph === "study") {
-                    // An open book under a magnifier: reading closely.
-                    // The lens hides the book's lower-right corner.
-                    ctx.moveTo(18.5, 9.5); ctx.lineTo(18.5, 3.5); ctx.lineTo(13.5, 3.5)
-                    ctx.lineTo(10, 5); ctx.lineTo(6.5, 3.5); ctx.lineTo(1.5, 3.5)
-                    ctx.lineTo(1.5, 16); ctx.lineTo(6.5, 16); ctx.lineTo(10, 17.5); ctx.lineTo(11, 17.1)
-                    ctx.moveTo(10, 5); ctx.lineTo(10, 11.5)
-                    ctx.moveTo(4, 7); ctx.lineTo(7, 7)
-                    ctx.moveTo(4, 10.5); ctx.lineTo(7, 10.5)
-                    ctx.moveTo(22, 22); ctx.lineTo(19.6, 19.6)
+                    // See also: a link, two open loops joined by a bar, on the
+                    // diagonal (scaled to keep its corners inside the box).
+                    ctx.save()
+                    ctx.translate(12, 12); ctx.rotate(-Math.PI / 4); ctx.scale(0.94, 0.94); ctx.translate(-12, -12)
+                    ctx.moveTo(10, 6.5); ctx.lineTo(5, 6.5); ctx.arcTo(1.5, 6.5, 1.5, 10, 3.5); ctx.lineTo(1.5, 14)
+                    ctx.arcTo(1.5, 17.5, 5, 17.5, 3.5); ctx.lineTo(10, 17.5)
+                    ctx.moveTo(14, 6.5); ctx.lineTo(19, 6.5); ctx.arcTo(22.5, 6.5, 22.5, 10, 3.5); ctx.lineTo(22.5, 14)
+                    ctx.arcTo(22.5, 17.5, 19, 17.5, 3.5); ctx.lineTo(14, 17.5)
+                    ctx.moveTo(9, 12); ctx.lineTo(15, 12)
+                    ctx.stroke()
+                    ctx.restore()
+                    ctx.beginPath()
+                } else if (glyph === "text") {
+                    // Aa (text size and layout): a capital and a small letter,
+                    // drawn as tall as the other glyphs.
+                    ctx.lineJoin = "bevel"
+                    ctx.moveTo(1.5, 20); ctx.lineTo(7.5, 4); ctx.lineTo(13.5, 20)
+                    ctx.moveTo(3.6, 14.5); ctx.lineTo(11.4, 14.5)
+                    ctx.moveTo(22, 12.2); ctx.lineTo(22, 20)
                     ctx.stroke()
                     ctx.beginPath()
-                    ctx.arc(16, 16, 5, 0, 2 * Math.PI)
+                    ctx.arc(18.1, 16.2, 3.8, 0, 2 * Math.PI)
                 } else if (glyph === "more") {
                     ctx.fillRect(4, 11, 3, 3); ctx.fillRect(10.5, 11, 3, 3); ctx.fillRect(17, 11, 3, 3)
                 } else if (glyph === "focus") {
-                    // A viewfinder: four corner brackets around a dot.
-                    ctx.moveTo(3, 8); ctx.lineTo(3, 3); ctx.lineTo(8, 3)
-                    ctx.moveTo(16, 3); ctx.lineTo(21, 3); ctx.lineTo(21, 8)
-                    ctx.moveTo(21, 16); ctx.lineTo(21, 21); ctx.lineTo(16, 21)
-                    ctx.moveTo(8, 21); ctx.lineTo(3, 21); ctx.lineTo(3, 16)
+                    // Focus mode in miniature: the line being read in full
+                    // ink, heavier, the lines around it faint.
+                    ctx.globalAlpha = 0.35
+                    ctx.moveTo(4, 6); ctx.lineTo(20, 6)
+                    ctx.moveTo(4, 18); ctx.lineTo(15, 18)
                     ctx.stroke()
                     ctx.beginPath()
-                    ctx.arc(12, 12, 2.2, 0, 2 * Math.PI)
-                    ctx.fill()
-                    ctx.beginPath()
+                    ctx.globalAlpha = 1
+                    ctx.lineWidth = 2.4
+                    ctx.moveTo(3, 12); ctx.lineTo(21, 12)
                 } else if (glyph === "visual") {
                     // Three lines of text, whole lines (verses) under a selection's tint.
                     ctx.globalAlpha = 0.4

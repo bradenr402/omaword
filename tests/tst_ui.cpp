@@ -3576,7 +3576,7 @@ private slots:
             const auto background = qvariant_cast<QQuickItem *>(control->property("background"));
             QVERIFY(background);
             QCOMPARE(background->property("color").value<QColor>().alpha(),0);
-            if (control != passage && control != version && control != item("textControl")) QVERIFY(control->property("text").toString().isEmpty());
+            if (control != passage && control != version) QVERIFY(control->property("text").toString().isEmpty());
             control->forceActiveFocus(Qt::TabFocusReason);
             QVERIFY(control->hasActiveFocus());
         }
@@ -4795,7 +4795,9 @@ private slots:
     void textPopoverSetsSizeLineAndLayoutWithoutCoveringText() {
         reference("John 3:16");
         auto aa = item("textControl"); QVERIFY(aa && aa->isVisible());
-        QCOMPARE(aa->property("text").toString(),QString("Aa"));
+        // Aa is drawn, as tall as its neighbours' glyphs, in a square button like theirs.
+        QCOMPARE(aa->property("glyph").toString(),QString("text"));
+        QCOMPARE(aa->width(),aa->height()); QCOMPARE(aa->width(),item("modeControl")->width());
         QVERIFY(aa->property("tip").toString().contains("alt l"));
         const double fullHeight = item("reading")->height();
         click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
@@ -5715,12 +5717,15 @@ private slots:
             QCOMPARE(scene("savedControl").right(),relatedBounds.left());
             QVERIFY(relatedBounds.right() <= scene("deskControl").left());
         }
-        // See also draws its own book-and-magnifier glyph, not the tag; Marks wears the note.
+        // See also draws its own link glyph, not the tag; Marks wears the note.
         QCOMPARE(related->property("glyph").toString(),QString("study"));
         QVERIFY(!item("relatedControlGlyph")->isVisible());
         QCOMPARE(prop("savedControlGlyph","kind").toString(),QString("note"));
         QVERIFY(item("savedControlGlyph")->isVisible());
+        // It shows as selected while its panel is open, as Marks and the Desk do.
+        QVERIFY(!related->property("selected").toBool());
         click(related); QTRY_VERIFY(panelOpened("related"));
+        QVERIFY(related->property("selected").toBool());
         QVERIFY(!panelShown("marks"));
         const auto inner = item("studyBody")->mapRectToScene(item("studyBody")->boundingRect());
         // Inside the Margin's inset, as every side panel.

@@ -7175,7 +7175,7 @@ ApplicationWindow {
         FloatingButton {
             id: textControl
             objectName: "textControl"
-            text: "Aa"
+            glyph: "text"
             selected: textPopover.visible
             visible: app.footerShowsText
             available: !bible.busy && !app.modalOpen
@@ -7299,6 +7299,7 @@ ApplicationWindow {
         FloatingButton {
             objectName: "relatedControl"
             glyph: "study"
+            selected: app.relatedOpen
             visible: floatingActions.expanded
             available: bible.ready && !bible.busy && !app.modalOpen
             label: "See also"
