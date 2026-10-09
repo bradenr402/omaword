@@ -1,5 +1,6 @@
 #include "testenvironment.h"
 #include <QtTest/QTest>
+#include <QAbstractAnimation>
 #include <QElapsedTimer>
 #include <QThread>
 #include <QApplication>
@@ -41,6 +42,15 @@ class MotionTest : public QObject
     QQuickWindow *window = nullptr;
     QStringList warnings;
     QString first, second;
+    // Animation time under test control: animations advance only by step(),
+    // so what a key sets in motion is seen before any of it has run,
+    // however long the key's own work (and a software frame) takes.
+    struct StepDriver : QAnimationDriver {
+        qint64 now = 0;
+        qint64 elapsed() const override { return now; }
+        void start() override { now = 0; QAnimationDriver::start(); }
+        void step(int ms) { now += ms; advance(); }
+    };
     static bool edition(const QString &path, const QString &id, bool alternate) {
         auto zip = archive_write_new(); archive_write_set_format_zip(zip);
         if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
@@ -476,10 +486,15 @@ private slots:
         // fades in (the full slide); reopen during close.
         navigate("John 1:2"); key(Qt::Key_D);
         auto desk = object("notesDrawer");
-        key(Qt::Key_D, Qt::ShiftModifier);
-        QVERIFY(desk->property("visible").toBool()); QVERIFY(!desk->property("opened").toBool());
-        QVERIFY(item("deskEditor")->hasActiveFocus());
-        QVERIFY(desk->property("position").toDouble() < 0.5);
+        {
+            StepDriver driver; driver.install();
+            key(Qt::Key_D, Qt::ShiftModifier);
+            QVERIFY(desk->property("visible").toBool()); QVERIFY(!desk->property("opened").toBool());
+            QVERIFY(item("deskEditor")->hasActiveFocus());
+            QCOMPARE(desk->property("position").toDouble(), 0.0); // The full slide is still ahead.
+            driver.step(60); QVERIFY(desk->property("position").toDouble() > 0); QVERIFY(item("deskEditor")->hasActiveFocus());
+            driver.uninstall();
+        }
         QTRY_VERIFY(desk->property("opened").toBool());
         // Exit is subtler than entrance: a short slide and a quicker fade; esc
         // from the page closes it, the reader taking the keyboard at once.
@@ -495,7 +510,11 @@ private slots:
             QVERIFY2(lowest >= 0.84, qPrintable(QString::number(lowest)));
             QVERIFY2(timer.elapsed() < 400, qPrintable(QString::number(timer.elapsed())));
         }
-        key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(desk->property("position").toDouble() < 0.5);
+        {
+            StepDriver driver; driver.install();
+            key(Qt::Key_D, Qt::ShiftModifier); QCOMPARE(desk->property("position").toDouble(), 0.0);
+            driver.uninstall();
+        }
         QTRY_VERIFY(desk->property("opened").toBool());
         key(Qt::Key_Escape);
         QVERIFY(desk->property("visible").toBool()); QVERIFY(!desk->property("shown").toBool());
