@@ -2665,7 +2665,6 @@ private slots:
     }
     void lineHeightClearsFreeSelectionCoherently() {
         installDragFixture();
-        const auto selected = bible->selectionReference();
         for (bool backendChange : {false,true}) {
             drag(textPoint(1,6),textPoint(3,18));
             QVERIFY(!window->property("freeSelectedText").toString().isEmpty());
@@ -2678,7 +2677,8 @@ private slots:
             QApplication::clipboard()->setText("No stale selection");
             key(Qt::Key_C,Qt::ControlModifier);
             QCOMPARE(QApplication::clipboard()->text(),bible->copySelection());
-            QCOMPARE(bible->selectionReference(),selected);
+            // The verses the drag selected stay selected.
+            QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:1–3"));
         }
         key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
         type("copy selected text as quotation");
