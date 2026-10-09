@@ -231,34 +231,42 @@ private slots:
         type("Thoughts.");
         QCOMPARE(desk(), quote() + "\nThoughts.");
         QTRY_COMPARE(summary(), QString("1 passage · %1 words").arg(words + 1));
-        QVERIFY(hints().contains("esc back to reading"));
+        QVERIFY(hints().endsWith("ctrl w to the text    esc close"));
+        // The page has the keyboard: an accent edge toward the text.
+        QCOMPARE(item("deskPanelEdge")->property("color").value<QColor>(), desktop->property("accent").value<QColor>());
         // Writing owns the keys: w and j type.
         type(" wj"); QVERIFY(desk().endsWith("Thoughts. wj")); QCOMPARE(bible->selectionReference(), QString("John 1:4"));
-        // esc: back to the reader, the Desk still open; j moves; shift D returns to the page.
-        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused()); QVERIFY(deskOpen());
+        // ctrl w: back to the reader, the Desk still open (its edge a hairline,
+        // its hints how to come back); j moves; ctrl w returns to the page.
+        key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused()); QVERIFY(deskOpen());
+        QCOMPARE(item("deskPanelEdge")->property("color").value<QColor>(), desktop->property("border").value<QColor>());
+        QCOMPARE(hints(), QString("ctrl w keys here"));
         key(Qt::Key_J); QCOMPARE(bible->selectionReference(), QString("John 1:5"));
-        key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(deskOpen());
+        key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(deskOpen());
+        QVERIFY(desk().endsWith("Thoughts. wj")); // ctrl w types nothing.
         // w turns the Margin to the note, and shift D back: it stays open.
-        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused());
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(prop("notesOpen").toBool()); QVERIFY(!prop("deskOpen").toBool());
         QCOMPARE(item("notesTitle")->property("text").toString(), QString("Notes"));
         QVERIFY2(item("notesPassage")->property("text").toString().startsWith("John 1:5 · "), qPrintable(item("notesPassage")->property("text").toString()));
         QVERIFY(item("notesPanel")->isVisible()); QVERIFY(!item("deskPanel")->isVisible());
         QVERIFY(object("notesDrawer")->property("opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused());
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(deskOpen());
-        // The reader's esc closes it; so does its ×; other panels take its place in the Margin.
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        // esc closes it, from the page or from the reader; so does its ×; other
+        // panels take its place in the Margin.
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
+        openDesk(); key(Qt::Key_F6); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         openDesk();
         QTest::mouseClick(window, Qt::LeftButton, {}, item("deskClose")->mapToScene(QPointF(6, 6)).toPoint());
         QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
-        openDesk(); key(Qt::Key_Escape);
+        openDesk(); key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused());
         key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(prop("marksOpen").toBool()); QVERIFY(!deskOpen());
         QVERIFY(item("marksPanel")->isVisible()); QVERIFY(!item("deskPanel")->isVisible());
         QVERIFY(object("notesDrawer")->property("opened").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused()); QVERIFY(prop("marksOpen").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
         QCOMPARE(desk(), bible->deskPage());
     }
     void pageWritesPreviewsAndFollowsLinks() {
@@ -289,7 +297,7 @@ private slots:
         key(Qt::Key_V, Qt::AltModifier); QVERIFY(prop("deskPreview").toBool());
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
         key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(!prop("deskPreview").toBool());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
     void additionsReachAnOpenDeskAndItsDraft() {
         openDesk(); key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
@@ -311,7 +319,7 @@ private slots:
         key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(prop("marksOpen").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         key(Qt::Key_D); QCOMPARE(desk(), six + "\nMine. More.\n\n" + seven + "\n\n" + seven + "\n");
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
     void liveUpdatesAndConflicts() {
         openDesk();
@@ -376,7 +384,7 @@ private slots:
         type("Thought"); key(Qt::Key_Return); type("> quoted");
         key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
         QTRY_VERIFY(item("noteQuoteBars:0")); QVERIFY(!item("noteQuoteBars:1"));
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
     // In Preview a single Enter breaks the line, and paragraphs, lists, and
     // quotes stand a gap apart; the markers telling them apart never show.
@@ -394,7 +402,7 @@ private slots:
         QCOMPARE(tops, (QList<double>{0, 0, gap, gap, 0, gap, 0, gap, gap, gap}));
         // Two quotes in a row keep separate bars; q1–q3 is one quote.
         QTRY_VERIFY(item("deskQuoteBars:1")); QVERIFY(!item("deskQuoteBars:2"));
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
     void cleanDeskAsksFirstAndUndoes() {
         navigate("John 1:4"); key(Qt::Key_D); navigate("John 1:5"); key(Qt::Key_D);
@@ -434,7 +442,7 @@ private slots:
         key(Qt::Key_Right); key(Qt::Key_Return);
         QTRY_VERIFY(!object("cleanDeskConfirmation")->property("visible").toBool()); QCOMPARE(desk(), QString());
         QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         // An empty Desk has nothing to clean.
         QVERIFY(bible->cleanDesk()); call("requestCleanDesk");
         QVERIFY(!object("cleanDeskConfirmation")->property("visible").toBool());

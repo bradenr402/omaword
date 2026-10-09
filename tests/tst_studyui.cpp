@@ -364,11 +364,10 @@ private slots:
     }
 private:
     bool studyOpen() const { return window->property("relatedOpen").toBool(); }
-    // See also in the Margin: esc gives the keyboard back to the reader, and
-    // esc there closes it.
+    // See also in the Margin: esc closes it, the reader taking the keyboard.
     void closeStudy() {
-        key(Qt::Key_Escape); QTRY_VERIFY(window->activeFocusItem() == item("readerSurface")); QVERIFY(studyOpen());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        QTRY_VERIFY(window->activeFocusItem() == item("readerSurface")); QVERIFY(!studyOpen());
         // The text has glided back to its place: what is clicked next is where it was found.
         QTRY_COMPARE(window->property("chromeDock").toDouble(), 0.0);
         QTRY_VERIFY(!object("marginSlide")->property("running").toBool());
@@ -415,6 +414,8 @@ private slots:
         navigate("John 1:1"); const auto anchor = verseScenePoint(1); key(Qt::Key_C);
         auto card = object("peekCard");
         QTRY_VERIFY(card->property("opened").toBool());
+        // Its rows are made as the list lays out, after it opens.
+        QTRY_VERIFY(object("peekRowText:1"));
         QCOMPARE(object("peekTitle")->property("text").toString(), QString("Compare · John 1:1 · 2 versions"));
         QCOMPARE(object("peekRowTitle:0")->property("text").toString(), bible->versionAbbreviation() + " · reading");
         QCOMPARE(object("peekRowText:0")->property("text").toString(), QString("Another edition."));
@@ -466,6 +467,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!object("versionDialog")->property("visible").toBool());
         // In the card, a version without the passage says so and copies nothing.
         call("readerFocus"); key(Qt::Key_C); QTRY_VERIFY(card->property("opened").toBool());
+        QTRY_VERIFY(object("peekRowText:1"));
         int missing = -1;
         for (int i = 0; i < 2; ++i) if (object("peekRowText:" + QString::number(i))->property("text").toString() == "Not in this version") missing = i;
         QVERIFY(missing >= 0);
@@ -656,7 +658,7 @@ private slots:
         QTRY_COMPARE(rows().size(), 1); QCOMPARE(rows()[0].toMap()["reference"].toString(), QString("John 1:29"));
         QTest::keyClick(window, 'x'); QTRY_COMPARE(rows().size(), 0);
         QCOMPARE(object("studyEmpty")->property("text").toString(), QString::fromUtf8("Nothing matches “1:2x”."));
-        // esc leaves the filter, keeping it; esc again gives the keyboard back, and the next open is unfiltered.
+        // esc leaves the filter, keeping it; esc again closes See also, and the next open is unfiltered.
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus()); QVERIFY(item("studySearch")->isVisible());
         closeStudy();
         openStudy(); QCOMPARE(rows().size(), 7); QVERIFY(!item("studySearch")->isVisible());

@@ -481,11 +481,11 @@ private slots:
         QVERIFY(item("deskEditor")->hasActiveFocus());
         QVERIFY(desk->property("position").toDouble() < 0.5);
         QTRY_VERIFY(desk->property("opened").toBool());
-        // Exit is subtler than entrance: a short slide and a quicker fade.
-        key(Qt::Key_Escape); QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(desk->property("opened").toBool());
+        // Exit is subtler than entrance: a short slide and a quicker fade; esc
+        // from the page closes it, the reader taking the keyboard at once.
         {
             QElapsedTimer timer; timer.start();
-            key(Qt::Key_Escape);
+            key(Qt::Key_Escape); QVERIFY(item("readerSurface")->hasActiveFocus());
             double lowest = 1;
             while (desk->property("visible").toBool() && timer.elapsed() < 1000) {
                 lowest = qMin(lowest, desk->property("position").toDouble());
@@ -497,7 +497,7 @@ private slots:
         }
         key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(desk->property("position").toDouble() < 0.5);
         QTRY_VERIFY(desk->property("opened").toBool());
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape);
         QVERIFY(desk->property("visible").toBool()); QVERIFY(!desk->property("shown").toBool());
         QVERIFY(!prop("modalOpen").toBool());
         key(Qt::Key_D, Qt::ShiftModifier);
@@ -506,17 +506,17 @@ private slots:
         QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         QTest::qWait(300);
         QVERIFY(desk->property("opened").toBool()); QVERIFY(item("deskEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!desk->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!desk->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         // Marks, in the Margin: immediate list focus while it slides in.
         key(Qt::Key_M, Qt::ShiftModifier);
         QVERIFY(desk->property("visible").toBool()); QVERIFY(prop("marksOpen").toBool());
         QVERIFY(item("collectionList")->hasActiveFocus());
         QTRY_VERIFY(desk->property("opened").toBool());
-        // esc gives the keyboard back; esc again closes it, and while it slides
-        // out, reader shortcuts already work (no modal blocking).
-        key(Qt::Key_Escape); QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("marksOpen").toBool());
+        // esc closes it, and while it slides out, reader shortcuts already
+        // work (no modal blocking).
         key(Qt::Key_Escape); QVERIFY(desk->property("visible").toBool()); QVERIFY(!prop("marksOpen").toBool());
+        QVERIFY(item("readerSurface")->hasActiveFocus());
         QVERIFY(!desk->property("modal").toBool());
         { const auto verse = bible->cursorVerse(); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), verse + 1); }
         QTRY_VERIFY(!desk->property("visible").toBool());
@@ -525,9 +525,9 @@ private slots:
         QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(prop("notesOpen").toBool());
         QVERIFY(item("noteEditor")->hasActiveFocus());
         QTRY_VERIFY(object("notesDrawer")->property("opened").toBool());
-        // esc in the editor only hands the keyboard back; the reader's esc
-        // closes Notes. Side panels animate out as well as in.
-        key(Qt::Key_Escape); QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("notesOpen").toBool());
+        // ctrl w in the editor only hands the keyboard back; esc (here the
+        // reader's) closes Notes. Side panels animate out as well as in.
+        key(Qt::Key_W, Qt::ControlModifier); QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("notesOpen").toBool());
         key(Qt::Key_Escape); QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(!prop("notesOpen").toBool());
         QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier);
@@ -698,7 +698,7 @@ private slots:
         key(Qt::Key_D, Qt::ShiftModifier); QVERIFY(object("notesDrawer")->property("visible").toBool());
         QTRY_VERIFY(object("notesDrawer")->property("opened").toBool());
         QCOMPARE(object("notesDrawer")->property("opacity").toDouble(), 1.0);
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY_WITH_TIMEOUT(!object("notesDrawer")->property("visible").toBool(), 60);
+        key(Qt::Key_Escape); QTRY_VERIFY_WITH_TIMEOUT(!object("notesDrawer")->property("visible").toBool(), 60);
         call("readerFocus");
         key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
         QTest::qWait(30);

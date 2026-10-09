@@ -636,8 +636,13 @@ private slots:
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); type("nw/s");
         QCOMPARE(object("noteEditor")->property("text").toString(), QString("nw/s"));
         QVERIFY(!prop("findPromptOpen").toBool()); QVERIFY(!object("passagePalette")->property("visible").toBool());
-        // Back in the reader, esc closes Notes before it clears the search.
-        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        // esc in the note closes Notes, keeping the search; from the reader
+        // (ctrl w) too, esc closes Notes before it clears the search.
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        QVERIFY(!prop("acceptedSearchQuery").toString().isEmpty());
+        key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         QVERIFY(!prop("acceptedSearchQuery").toString().isEmpty());
         key(Qt::Key_W); QTRY_VERIFY(object("notesDrawer")->property("visible").toBool());

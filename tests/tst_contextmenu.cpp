@@ -442,7 +442,7 @@ private slots:
         rightClick(versePoint(7)); QTRY_VERIFY(menuOpen());
         clickEntry("note");
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
         call("readerFocus");
         rightClick(versePoint(7)); QTRY_VERIFY(menuOpen());
         clickEntry("chapterFind");
@@ -484,7 +484,7 @@ private slots:
         QTRY_COMPARE(bible->selectionReference(), reference);
         // Open goes to the note, ready to write.
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
         QTRY_VERIFY(item(name) && item(name)->isVisible());
         rightClick(item(name)); QTRY_VERIFY(menuOpen());
         // With the marker's own range selected there is nowhere to move it.
@@ -600,7 +600,7 @@ private slots:
         QTRY_VERIFY(bible->collection().isEmpty());
         key(Qt::Key_U); QTRY_COMPARE(bible->collection().size(), 1);
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         // Bible search result in the palette.
         call("readerFocus");
         search("alpha");

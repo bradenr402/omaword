@@ -412,7 +412,7 @@ private slots:
         QCOMPARE(object("toast")->property("font").value<QFont>().pixelSize(), qRound(13 * 19.0 / 18));
         key(Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.6);
         QVERIFY(prop("deskOpen").toBool()); QVERIFY(item("deskEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         call("readerFocus"); openHistory();
         key(Qt::Key_Minus, Qt::ControlModifier | Qt::AltModifier); QCOMPARE(bible->lineHeight(), 1.5);
         QVERIFY(historyOpen());
@@ -472,15 +472,15 @@ private slots:
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
         key(Qt::Key_A, Qt::ControlModifier); type("jk"); QCOMPARE(item("studySearch")->property("text").toString(), QString("jk"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        // esc gives the keyboard back to the reader; See also stays, and esc there closes it.
-        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(panelOpen("relatedOpen"));
+        // ctrl w gives the keyboard back to the reader, See also staying; esc there closes it.
+        key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(panelOpen("relatedOpen"));
         key(Qt::Key_J); QCOMPARE(bible->selectionReference(), QString("John 1:3")); // The reader's j, not the list's.
         key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
         // A heading's tag, clicked, filters while the list keeps the keyboard.
         navigate("John 1:2"); openRelated(); QTRY_VERIFY(object("notesDrawer")->property("opened").toBool()); QTRY_VERIFY(item("studySectionTag:Alpha") && item("studySectionTag:Alpha")->isVisible());
         QTest::mouseClick(window, Qt::LeftButton, {}, item("studySectionTag:Alpha")->mapToScene(QPointF(4, 4)).toPoint());
         QTRY_COMPARE(list->property("count").toInt(), 5); QVERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
+        key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
     }
     // g, shift G, ctrl d/u (5), ctrl f/b and pgdn/pgup (10) in every list panel;
     // never while typing in a panel's search field.
@@ -525,7 +525,7 @@ private slots:
         QVERIFY(item("savedSearch")->hasActiveFocus());
         object("savedSearch")->setProperty("text", QString()); key(Qt::Key_Escape); QTRY_VERIFY(!item("savedSearch")->hasActiveFocus());
         QTRY_COMPARE(saved->property("count").toInt(), 25);
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
+        key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
         // See also: its rows (the 24 tagged alike after any cross references).
         call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpen("relatedOpen"));
         QTRY_VERIFY(object("studyList")->property("count").toInt() >= 24); QTRY_VERIFY(item("studyList")->hasActiveFocus());
@@ -533,7 +533,7 @@ private slots:
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
         key(Qt::Key_G); QCOMPARE(object("studySearch")->property("text").toString(), QString("g"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
+        key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
         // The reader keeps its own meanings once the panels are closed.
         call("readerFocus"); navigate("John 1:20"); key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(bible->cursorVerse(), 25);
     }
@@ -545,7 +545,7 @@ private slots:
         QTRY_VERIFY(historyOpen()); QVERIFY(panelOpen("marksOpen"));
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
+        key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
         key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen());
         // From the palette's other modes too; ctrl k returns to the books.
         key(Qt::Key_K, Qt::ControlModifier); QVERIFY(!prop("paletteHistory").toBool());
@@ -562,7 +562,7 @@ private slots:
         key(Qt::Key_W); QTRY_VERIFY(prop("notesOpen").toBool()); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen()); QVERIFY(prop("notesOpen").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
     }
     void commandsAndDisabledHistory() {
         // History has no panel or footer button: it is in the palette.

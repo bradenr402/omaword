@@ -450,13 +450,14 @@ Item {
     }
     // Clickable hint rows (HintRow): each part runs what its key would.
     function studyHintParts() {
+        if (!app.marginKeys) return app.panelAwayHints
         const escape = function() { panel.handleStudyEscape() }
         if (studySearch.activeFocus) return [[["Return", "Down"], "passages", function() { panel.leaveStudySearch() }], ["Escape", "leave filter", function() { panel.leaveStudySearch() }]]
         return [["Return", "open", function() { panel.openStudyRow(studyList.currentIndex) }, listKeys],
             ["T", "tag", function() { panel.tagCurrentRow() }, relatedMoveKeys && !bible.busy],
             ["Y", "copy", function() { panel.app.copyScope(panel.listScope()) }, listKeys],
             ["D", "Desk", function() { panel.app.addToDesk(panel.listScope()) }, listKeys],
-            ["/", "filter", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", "back to reading", escape]]
+            ["/", "filter", function() { panel.showStudySearch() }, relatedMoveKeys], app.panelReturnHint, ["Escape", "close", escape]]
     }
     // The picker's enter: create or toggle from the search field, toggle in the list.
     function pickerEnter() {
@@ -525,11 +526,11 @@ Item {
         else search.forceActiveFocus()
     }
     // See also: esc in the filter leaves it, keeping the words; otherwise esc
-    // gives the keyboard back to the reader, as in Marks: See also stays open,
-    // following the reader's passage, and esc there closes it.
+    // closes it, as in Marks (ctrl w gives the keyboard back to the reader
+    // instead, See also staying open and following its passage).
     function handleStudyEscape() {
         if (studySearch.activeFocus) leaveStudySearch()
-        else app.leaveNotes()
+        else app.closePanel()
     }
     Connections {
         target: panel.bible
@@ -680,7 +681,7 @@ Item {
                 title: "See also"
                 subtitle: panel.passageSubtitle
                 titleName: "studyTitle"; subtitleName: "studyPassage"; closeName: "studyClose"
-                closeTip: "Close See also · " + panel.app.escapeText + ", or " + panel.app.escapeText + " " + panel.app.escapeText + " from the list"
+                closeTip: "Close See also · " + panel.app.escapeText
                 onCloseRequested: panel.app.closeNotes()
             }
             FineRule { objectName: "studyHeaderRule" }
@@ -780,14 +781,18 @@ Item {
                         // The list holds the keyboard (j k, enter); rows never take it.
                         focusPolicy: Qt.NoFocus
                         width: parent.width
-                        chosen: studyList.activeFocus && studyList.currentIndex === studyBlock.index
+                        // The current row: the accent while the list has the keyboard,
+                        // grey (inactive) while the reader has it.
+                        readonly property bool away: !panel.app.marginKeys
+                        chosen: (studyList.activeFocus || away) && studyList.currentIndex === studyBlock.index
                         onClicked: panel.openStudyRow(studyBlock.index)
                         TapHandler {
                             acceptedButtons: Qt.RightButton
                             onTapped: function(eventPoint) { panel.openStudyMenu(studyBlock.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
                         }
                         background: Rectangle {
-                            color: studyDelegate.chosen ? Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11)
+                            color: studyDelegate.chosen ? (studyDelegate.away ? panel.app.inactiveRowColor
+                                    : Qt.rgba(panel.desktop.accent.r, panel.desktop.accent.g, panel.desktop.accent.b, 0.11))
                                 : studyDelegate.hovered ? panel.desktop.surface : "transparent"
                             border.width: 0
                             radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)

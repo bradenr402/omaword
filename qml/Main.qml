@@ -2334,6 +2334,7 @@ ApplicationWindow {
         if (action.id === "undo" && !bible.canUndo) return "Nothing to undo"
         if (action.id === "redo" && !bible.canRedo) return "Nothing to redo"
         if (action.id === "openBeside" && bible.ready && bible.versions.length < 2) return "Add another version to read beside"
+        if (action.id === "switchPane" && bible.ready && !sidePanel.length) return "No side panel is open · " + keyText("annotations") + ", " + keyText("related") + ", " + keyText("desk") + ", or " + keyText("notes") + " opens one"
         if (action.id === "unfollow" && !following) return "No window follows this one · " + keyText("openBeside") + " opens a version beside it"
         if (action.id === "ribbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon yet · " + keyText("placeRibbon") + " places it"
         if (action.id === "removeRibbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon to remove"
@@ -3258,13 +3259,28 @@ ApplicationWindow {
         editingPanelClosed()
         return true
     }
-    // esc in Notes: the draft saves and the keyboard returns to the reader.
-    // Notes stays open and follows the selection; esc there closes it.
-    function leaveNotes() {
-        if (!flushNote()) return false
-        readerFocus()
-        return true
+    // esc in a side panel closes it, its drafts saved (leaveSidePanel), and
+    // the keyboard returns to the reader.
+    function closePanel() { if (leaveSidePanel("")) readerFocus() }
+    // ctrl w (F6): the keyboard to the open side panel, or back to the
+    // reader, the panel staying open (Notes follows the selection there).
+    function switchPane() {
+        if (!sidePanel.length) { rejected(unavailableReason("switchPane")); return }
+        if (marginKeys) {
+            if (!flushNote() || (markEditKey.length && !finishMarkNote(false))) return
+            readerFocus()
+        } else {
+            marginKeys = true
+            restorePanelFocus()
+        }
     }
+    // While the reader has the keyboard, a side panel's hints are this one;
+    // while the panel has it, its hints end with the way back and esc.
+    readonly property var panelAwayHints: [[actionKeys("switchPane")[0], "keys here", switchPane]]
+    readonly property var panelReturnHint: [actionKeys("switchPane")[0], "to the text", switchPane]
+    // The current row of a side panel's list while the reader has the
+    // keyboard: grey, as an inactive selection (the accent tint while it has it).
+    readonly property color inactiveRowColor: tint(desktop.muted, 0.16)
     function toggleNotes() {
         if (notesOpen) closeNotes()
         else openNotes(true)
@@ -3824,12 +3840,11 @@ ApplicationWindow {
         moveSaved(0)
     }
     // esc in Marks: a note written in place is done, the filter gives the
-    // keyboard to the list, and the list gives it back to the reader (Marks
-    // stays open, following it; esc there closes it).
+    // keyboard to the list, and the list closes Marks.
     function escapeSaved() {
         if (markEditKey.length) finishMarkNote(true)
         else if (savedSearch.activeFocus) focusSavedList()
-        else leaveNotes()
+        else closePanel()
     }
     // Leaving Marks for a dialog finishes a note written in place; a draft
     // that cannot be saved keeps it.
@@ -4230,7 +4245,7 @@ ApplicationWindow {
         { id: "noteKeepDraft", group: "Annotate", title: "Note or Desk changed in another window: save my draft", sequences: ["Ctrl+S"], scope: "noteEditor" },
         { id: "noteUseSaved", group: "Annotate", title: "Note or Desk changed in another window: use the saved text", sequences: ["Ctrl+Shift+S"], scope: "noteEditor" },
         { id: "noteLinkedFrom", group: "Annotate", title: "From a note to its Linked from list (esc returns)", sequences: ["Ctrl+Down"], scope: "noteEditor" },
-        { id: "noteLeave", group: "Annotate", title: "From a note or the Desk back to reading: it stays open, a note follows the selection (esc again closes it)", sequences: ["Escape"], scope: "noteEditor", explanation: true },
+        { id: "noteLeave", group: "Annotate", title: "Close a note or the Desk, the draft saved (its link suggestions first)", sequences: ["Escape"], scope: "noteEditor", explanation: true },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
@@ -4243,6 +4258,9 @@ ApplicationWindow {
         { id: "desk", group: "Panels", title: "Open Desk", sequences: ["Shift+D"], command: true },
         // The See also panel (once Study); id kept for compatibility.
         { id: "related", group: "Panels", title: "See also panel", sequences: ["Shift+S"], command: true },
+        // The keyboard between the reader and the open side panel, which stays
+        // open (esc in a panel closes it). Works while typing in the panel too.
+        { id: "switchPane", group: "Panels", title: "Keyboard to the open side panel, or back to the text", sequences: ["Ctrl+W"], aliases: ["F6"], aliasReason: "the desktop's key for moving between a window's panes.", command: true },
         // A popover (PeekCard), read in place; its own keys step and act.
         { id: "peek", group: "Panels", title: "Peek at the verse's footnotes", sequences: ["I"], command: true },
         { id: "books", group: "Palettes and windows", title: "Navigate to a passage", sequences: ["Ctrl+K"], scope: "palette", command: true },
@@ -4423,6 +4441,7 @@ ApplicationWindow {
         return [[["Up", "Down"], "choose"], versionSearch.activeFocus ? null : [["Home", "End"], "jump"], select, versionDialog.step > 0 ? back : null, ["Escape", "cancel", function() { versionDialog.close() }]]
     }
     function savedHintParts() {
+        if (!marginKeys) return panelAwayHints
         if (markEditKey.length) return markEditConflict
             ? [[actionKeys("noteKeepDraft")[0], "save my draft", app.keepMarkDraft], [actionKeys("noteUseSaved")[0], "use saved text", app.useSavedMarkNote]]
             : [["Escape", "done", function() { app.finishMarkNote(true) }]]
@@ -4434,7 +4453,7 @@ ApplicationWindow {
             ["T", "tags", function() { app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry())) }, ready],
             ["Y", "copy", function() { app.copyScope(app.focusedSavedEntry()) }, ready],
             ["D", "Desk", function() { app.addToDesk(app.focusedSavedEntry()) }, ready],
-            ["Delete", "delete", app.deleteSaved, ready], search, ["Escape", "back to reading", app.escapeSaved]]
+            ["Delete", "delete", app.deleteSaved, ready], search, panelReturnHint, ["Escape", "close", app.escapeSaved]]
     }
     // Confirmations: arrows move between Cancel and Confirm; enter presses the focused one.
     function confirmationHintParts(cancel, confirm, dialog) {
@@ -4475,6 +4494,9 @@ ApplicationWindow {
         // panels, the palette, modals, find, and text fields included.
         if (textSizeActions.includes(action.id)) return !errorDialog.visible
         if (findPromptOpen) return false
+        // ctrl w (F6) moves the keyboard from wherever it is in the reader or
+        // the side panel, while typing too; never over a modal.
+        if (action.id === "switchPane") return !modalOpen && bible.ready && (sidePanel.length > 0 || readerKeys)
         // Inside the tag picker ctrl t switches between the picker and Manage.
         // (During a confirmation it sounds the error: togglePage rejects it.)
         if (action.id === "manageTags" && tagsUi.pickerVisible) return !errorDialog.visible
@@ -4521,6 +4543,7 @@ ApplicationWindow {
         if (["highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
         if (action.id === "compare") return hasSelection && bible.versions.length > 1
         if (action.id === "openBeside") return bible.ready && bible.versions.length > 1
+        if (action.id === "switchPane") return bible.ready && sidePanel.length > 0
         if (action.id === "unfollow") return following
         if (action.id === "peek") return hasSelection && Array.from(bible.footnotes).some(function(note) { return note.verse === bible.cursorVerse })
         if (action.id === "undo") return bible.canUndo
@@ -4996,6 +5019,7 @@ ApplicationWindow {
         case "historyBack": historyStep(-count); break
         case "historyForward": historyStep(count); break
         case "historySwap": historySwap(); break
+        case "switchPane": switchPane(); break
         case "placeRibbon": placeRibbon(); break
         case "ribbon": openRibbon(); break
         case "removeRibbon": removeRibbon(); break
@@ -6171,7 +6195,7 @@ ApplicationWindow {
                 id: notesPanel
                 objectName: "notesPanel"
                 mode: "notes"
-                Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
+                Keys.onEscapePressed: function(event) { app.closePanel(); event.accepted = true }
                 // A press on the panel's chrome brings the keyboard to the editor (Write mode).
                 PointHandler {
                     objectName: "notesChromePress"
@@ -6203,7 +6227,7 @@ ApplicationWindow {
                         title: "Notes"
                         subtitle: tagsUi.passageSubtitle
                         titleName: "notesTitle"; subtitleName: "notesPassage"; closeName: "notesClose"
-                        closeTip: "Close Notes · " + app.escapeText + ", or " + app.escapeText + " " + app.escapeText + " from the note"
+                        closeTip: "Close Notes · " + app.escapeText
                         onCloseRequested: app.closeNotes()
                     }
                     FineRule { Layout.fillWidth: true }
@@ -6339,7 +6363,7 @@ ApplicationWindow {
                                 // Specific key handlers run before onPressed.
                                 Keys.onEscapePressed: function(event) {
                                     if (app.linkSuggesting) app.dismissLinkSuggestions()
-                                    else app.leaveNotes()
+                                    else app.closePanel()
                                     event.accepted = true
                                 }
                                 Accessible.name: "Markdown note for " + bible.selectionReference
@@ -6398,18 +6422,19 @@ ApplicationWindow {
                     }
                     HintRow {
                         objectName: "notesHints"
-                        visible: noteEditor.activeFocus || notePreviewText.activeFocus
+                        visible: !app.marginKeys || noteEditor.activeFocus || notePreviewText.activeFocus
                         theme: desktop
-                        parts: app.linkSuggesting ? [[["Up", "Down"], "choose"], ["Return", "insert", function() { app.acceptLinkSuggestion() }, app.linkSuggestions.length > 0],
+                        parts: !app.marginKeys ? app.panelAwayHints
+                            : app.linkSuggesting ? [[["Up", "Down"], "choose"], ["Return", "insert", function() { app.acceptLinkSuggestion() }, app.linkSuggestions.length > 0],
                                 ["Escape", "dismiss", app.dismissLinkSuggestions]]
                             : notePreviewText.activeFocus ? [[["J", "K"], "scroll"], [app.actionKeys("notePreview")[0], "write", app.toggleNotePreview],
-                                ["Escape", "back to reading", app.leaveNotes]]
+                                app.panelReturnHint, ["Escape", "close", app.closePanel]]
                             : app.noteConflict ? [[app.actionKeys("noteKeepDraft")[0], "save my draft", app.keepNoteDraft, app.canKeepDraft],
                                 [app.actionKeys("noteUseSaved")[0], "use saved text", app.useSavedNote]]
                             : [app.noteLinkAtCursor || app.noteUrlAtCursor.length ? ["Alt+Return", "open link", app.openNoteLinkAtCursor] : null,
                                 [app.actionKeys("notePreview")[0], "preview", app.toggleNotePreview],
                                 app.linkedFrom.length ? [app.actionKeys("noteLinkedFrom")[0], "linked from", app.focusLinkedFrom] : null,
-                                ["Escape", "back to reading", app.leaveNotes]]
+                                app.panelReturnHint, ["Escape", "close", app.closePanel]]
                         pixelSize: 11 * app.scale
                         Layout.fillWidth: true
                     }
@@ -6541,7 +6566,7 @@ ApplicationWindow {
                 id: deskPanel
                 objectName: "deskPanel"
                 mode: "desk"
-                Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
+                Keys.onEscapePressed: function(event) { app.closePanel(); event.accepted = true }
                 // A press on the panel's chrome brings the keyboard to the page (Write mode).
                 PointHandler {
                     objectName: "deskChromePress"
@@ -6557,7 +6582,7 @@ ApplicationWindow {
                         title: "Desk"
                         subtitle: app.deskSummary(deskEditor.text)
                         titleName: "deskTitle"; subtitleName: "deskSummary"; closeName: "deskClose"
-                        closeTip: "Close the Desk · " + app.escapeText + ", or " + app.escapeText + " " + app.escapeText + " from the page"
+                        closeTip: "Close the Desk · " + app.escapeText
                         onCloseRequested: app.closeNotes()
                         QuietButton {
                             objectName: "deskClean"
@@ -6632,7 +6657,7 @@ ApplicationWindow {
                                 placeholderTextColor: desktop.muted
                                 onTextChanged: if (!app.syncingDesk) { if (app.noteSaveDelay > 0) deskSaveTimer.restart(); else app.flushDesk() }
                                 Keys.onPressed: function(event) { app.deskKey(event) }
-                                Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
+                                Keys.onEscapePressed: function(event) { app.closePanel(); event.accepted = true }
                                 Accessible.name: "The Desk, in Markdown"
                                 // ctrl click: open the passage (or web) link clicked, as alt enter does at the cursor.
                                 TapHandler {
@@ -6679,15 +6704,16 @@ ApplicationWindow {
                     }
                     HintRow {
                         objectName: "deskHints"
-                        visible: deskEditor.activeFocus || deskPreviewText.activeFocus
+                        visible: !app.marginKeys || deskEditor.activeFocus || deskPreviewText.activeFocus
                         theme: desktop
-                        parts: deskPreviewText.activeFocus ? [[["J", "K"], "scroll"], [app.actionKeys("notePreview")[0], "write", app.toggleDeskPreview],
-                                ["Escape", "back to reading", app.leaveNotes]]
+                        parts: !app.marginKeys ? app.panelAwayHints
+                            : deskPreviewText.activeFocus ? [[["J", "K"], "scroll"], [app.actionKeys("notePreview")[0], "write", app.toggleDeskPreview],
+                                app.panelReturnHint, ["Escape", "close", app.closePanel]]
                             : app.deskConflict ? [[app.actionKeys("noteKeepDraft")[0], "save my draft", app.keepDeskDraft, app.canKeepDeskDraft],
                                 [app.actionKeys("noteUseSaved")[0], "use saved text", app.useSavedDesk]]
                             : [app.deskLinkAtCursor || app.deskUrlAtCursor.length ? ["Alt+Return", "open link", app.openDeskLinkAtCursor] : null,
                                 [app.actionKeys("notePreview")[0], "preview", app.toggleDeskPreview],
-                                ["Escape", "back to reading", app.leaveNotes]]
+                                app.panelReturnHint, ["Escape", "close", app.closePanel]]
                         pixelSize: 11 * app.scale
                         Layout.fillWidth: true
                     }
@@ -6763,7 +6789,7 @@ ApplicationWindow {
                         title: "Marks"
                         subtitle: tagsUi.passageSubtitle
                         titleName: "savedTitle"; subtitleName: "savedPassage"; closeName: "savedClose"
-                        closeTip: "Close Marks · " + app.escapeText + ", or " + app.escapeText + " " + app.escapeText + " from the list"
+                        closeTip: "Close Marks · " + app.escapeText
                         onCloseRequested: app.closeNotes()
                     }
                     FineRule { Layout.fillWidth: true }
@@ -6961,7 +6987,8 @@ ApplicationWindow {
                                     }
                                 }
                                 background: Rectangle {
-                                    color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"
+                                    color: savedEntry.highlighted ? (app.marginKeys ? app.tint(desktop.accent, 0.11) : app.inactiveRowColor)
+                                        : savedEntry.hovered ? desktop.surface : "transparent"
                                     radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
                                     // The current row is shown by its tinted fill alone, never an accent border.
                                     border.width: 0

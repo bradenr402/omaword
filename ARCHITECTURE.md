@@ -518,11 +518,16 @@ files.
   Margin only when it had it. The reader's keys work whenever the keyboard is
   outside it (`readerBase`), and a panel's own keys only while it has it
   (`marksKeys`, TagsPanel's `relatedMoveKeys`); selection changes resync the
-  note (`syncNote`) and re-root See also. `esc` in a panel saves and returns
-  to the reader (`leaveNotes`; Marks' and See also's after leaving their
-  filter or an edit in place); the reader's `esc` closes the Margin after
-  Aa, the selection bar, a text selection, and a count, and before search or
-  the selection.
+  note (`syncNote`) and re-root See also. `esc` in a panel saves and closes
+  it (`closePanel`, through `leaveSidePanel("")`; Marks' and See also's after
+  leaving their filter or an edit in place); the reader's `esc` closes the
+  Margin after Aa, the selection bar, a text selection, and a count, and
+  before search or the selection. `ctrl w` (`F6`, `switchPane`) moves the
+  keyboard between the reader and the open panel, which stays; it works while
+  typing in the panel, and saves its drafts first. `SidePanel` draws its edge
+  toward the text in the accent while `marginKeys`; otherwise a panel's
+  current row is `inactiveRowColor` and its hints are `panelAwayHints`
+  ("ctrl w keys here").
 - Notes in Write mode keeps the keyboard in the editor while it is in Notes
   (`notesWriting` / `keepNoteEditorFocus`): clicks on the panel's chrome and
   closing menus or dialogs hand it back. `tab` types a tab (accepts a `[[`

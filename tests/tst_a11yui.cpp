@@ -197,9 +197,9 @@ class A11yUiTest : public QObject
     bool readerFocused() const { return window->activeFocusItem() == item("readerSurface"); }
     // esc in Notes hands the keyboard back to the reader, Notes still open;
     // esc there closes it.
+    // esc in a panel closes the Margin, the reader taking the keyboard.
     void escapeNotes() {
-        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused()); QVERIFY(shown("notesDrawer"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer")); QTRY_VERIFY(readerFocused());
     }
     bool opened(const QString &name) const { auto o = object(name); return o && o->property("opened").toBool(); }
     bool shown(const QString &name) const { auto o = object(name); return o && o->property("visible").toBool(); }
@@ -207,11 +207,7 @@ class A11yUiTest : public QObject
     // in; still showing it (its exit included).
     bool panelOpened(const QString &mode) const { return prop("marginMode").toString() == mode && opened("notesDrawer"); }
     bool panelShown(const QString &mode) const { return prop("marginMode").toString() == mode && shown("notesDrawer"); }
-    // esc from a panel's list gives the keyboard to the reader; esc there closes the Margin.
-    void closeMargin() {
-        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
-    }
+    void closeMargin() { escapeNotes(); }
     QObject *menu() const { return object("contextMenu"); }
     QStringList menuIds() const {
         QStringList ids;
@@ -454,8 +450,12 @@ private slots:
         // On a link the page offers alt enter, which follows it.
         item("deskEditor")->setProperty("cursorPosition", bible->deskPage().lastIndexOf("John 3:5") + 2);
         clickHint("deskHintsPart:open link"); QTRY_COMPARE(bible->selectionReference(), QString("John 3:5"));
-        clickHint("deskHintsPart:back to reading"); QTRY_VERIFY(readerFocused()); QVERIFY(opened("notesDrawer"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        // "to the text" gives the keyboard to the reader, the Desk staying; its
+        // hints are then "keys here" alone, which brings it back; "close" closes.
+        clickHint("deskHintsPart:to the text"); QTRY_VERIFY(readerFocused()); QVERIFY(opened("notesDrawer"));
+        QTRY_COMPARE(item("deskHints")->property("plainText").toString(), QString("ctrl w keys here"));
+        clickHint("deskHintsPart:keys here"); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        clickHint("deskHintsPart:close"); QTRY_VERIFY(!shown("notesDrawer")); QTRY_VERIFY(readerFocused());
     }
     void everyPanelHintRowIsClickable() {
         // Palette: esc close and enter select.
@@ -507,8 +507,9 @@ private slots:
         QTRY_VERIFY(item("studyHintsPart:filter")); QVERIFY(item("studyHintsPart:filter")->property("clickable").toBool());
         clickHint("studyHintsPart:filter"); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        clickHint("studyHintsPart:back to reading"); QTRY_VERIFY(readerFocused()); QVERIFY(panelShown("related"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        clickHint("studyHintsPart:to the text"); QTRY_VERIFY(readerFocused()); QVERIFY(panelShown("related"));
+        clickHint("studyHintsPart:keys here"); QTRY_VERIFY(item("studyList")->hasActiveFocus());
+        clickHint("studyHintsPart:close"); QTRY_VERIFY(!shown("notesDrawer"));
         run("tags"); QTRY_VERIFY(opened("tagsSurface")); type("Grace");
         clickHint("tagsHintsPart:toggle / create"); QTRY_COMPARE(bible->tags().size(), 1);
         clickHint("tagsHintsPart:close"); QTRY_VERIFY(!shown("tagsSurface"));
@@ -1222,7 +1223,7 @@ private slots:
         run("desk"); QTRY_VERIFY(opened("notesDrawer"));
         clickAt(QPoint(40, window->height() / 2), Qt::BackButton); QTRY_VERIFY(!shown("notesDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 2:5")); QVERIFY(readerFocused());
-        // Keyboard equivalent for the panel: esc, and esc again from the reader.
+        // Keyboard equivalent for the panel: esc.
         run("annotations"); QTRY_VERIFY(panelOpened("marks")); closeMargin();
         // The keybindings list explains the buttons.
         QVariant text; QMetaObject::invokeMethod(window, "keyText", Q_RETURN_ARG(QVariant, text), Q_ARG(QVariant, QString("mouseBack")));
@@ -1573,9 +1574,9 @@ private slots:
         clickHint("notesHintsPart:preview"); QTRY_VERIFY(prop("notePreview").toBool());
         clickHint("notesHintsPart:write"); QTRY_VERIFY(!prop("notePreview").toBool());
         QVERIFY(toolTipOf(item("previewButton"))->property("text").toString().contains("alt v"));
-        // Mouse: esc's part hands the keyboard back to the reader, Notes still
+        // Mouse: "to the text" hands the keyboard back to the reader, Notes still
         // open; the panel's Close closes it.
-        clickHint("notesHintsPart:back to reading"); QTRY_VERIFY(readerFocused()); QVERIFY(opened("notesDrawer"));
+        clickHint("notesHintsPart:to the text"); QTRY_VERIFY(readerFocused()); QVERIFY(opened("notesDrawer"));
         QVERIFY(toolTipOf(item("notesClose"))->property("text").toString().contains("esc"));
         click(item("notesClose")); QTRY_VERIFY(!shown("notesDrawer")); QVERIFY(readerFocused());
         QDesktopServices::unsetUrlHandler("https");
@@ -1751,14 +1752,14 @@ private slots:
         escapeNotes();
         // Nor is the Desk: from the reader, toggles and the palette act over it;
         // from its page, a launcher opens beside it and returns to the page.
-        run("desk"); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        run("desk"); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused());
         key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), numbers); QVERIFY(prop("deskOpen").toBool());
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(prop("deskOpen").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(readerFocused());
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(prop("deskOpen").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         // Mouse: the footer stays live beside an open panel.
         call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks")); QTest::qWait(30);
         click("searchControl"); QTRY_VERIFY(opened("passagePalette")); QVERIFY(panelShown("marks"));
@@ -1834,6 +1835,10 @@ private slots:
             QTest::mouseDClick(window, Qt::LeftButton, {}, number);
             QTRY_VERIFY2(opened("notesDrawer"), qPrintable(mode)); QCOMPARE(bible->cursorVerse(), 17);
             QVERIFY(prop("freeSelectedText").toString().isEmpty());
+            // The keyboard stays in the reader: its esc puts the selection bar
+            // away first, then closes Notes.
+            QVERIFY(readerFocused()); QVERIFY(shown("selectionBar"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("selectionBar")); QVERIFY(shown("notesDrawer"));
             escapeNotes();
             // Keyboard: w writes a note; v and iw select a word.
             call("readerFocus"); key(Qt::Key_W); QTRY_VERIFY(opened("notesDrawer"));
@@ -2006,7 +2011,7 @@ private slots:
         QTest::qWait(50); click(item("setupImport")); QTRY_VERIFY(opened("importGuide"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
     }
-    void seeAlsoEscapeGivesTheKeyboardBackLikeMarks() {
+    void seeAlsoEscapeClosesItLikeMarks() {
         bible->selectVerses(7, 7); const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
         bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true));
         navigate("John 3:3");
@@ -2016,20 +2021,21 @@ private slots:
         };
         openTags();
         // Keyboard: / filters; esc leaves the field keeping the filter; the next
-        // esc gives the keyboard back to the reader (See also stays, following
-        // it), and esc there closes it.
+        // esc closes See also, the reader taking the keyboard.
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus()); type("zz");
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
         QCOMPARE(tags->property("studyQuery").toString(), QString("zz"));
-        QVERIFY(object("studyHints")->property("plainText").toString().contains("esc back to reading"));
-        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused()); QVERIFY(panelShown("related"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+        QVERIFY(object("studyHints")->property("plainText").toString().endsWith("ctrl w to the text    esc close"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer")); QTRY_VERIFY(readerFocused());
         // Reopened, the query is gone.
         openTags(); QCOMPARE(tags->property("studyQuery").toString(), QString());
-        // Mouse: the esc hint gives the keyboard back too; the panel's × closes it.
-        key(Qt::Key_Slash); type("zz"); key(Qt::Key_Return);
-        clickHint("studyHintsPart:back to reading"); QTRY_VERIFY(readerFocused()); QVERIFY(panelShown("related"));
-        click(item("studyClose")); QTRY_VERIFY(!shown("notesDrawer"));
+        // ctrl w gives the keyboard to the reader, See also staying (and
+        // following it); ctrl w again (or F6) brings it back.
+        key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused()); QVERIFY(panelShown("related"));
+        key(Qt::Key_F6); QTRY_VERIFY(item("studyList")->hasActiveFocus());
+        // Mouse: the esc hint closes it too, as does its ×.
+        clickHint("studyHintsPart:close"); QTRY_VERIFY(!shown("notesDrawer"));
+        openTags(); click(item("studyClose")); QTRY_VERIFY(!shown("notesDrawer"));
     }
     void versionsSearchHomeAndEndMoveTheCaret() {
         run("removeVersion"); QTRY_VERIFY(opened("versionDialog"));

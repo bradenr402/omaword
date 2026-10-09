@@ -150,10 +150,10 @@ class UiTest : public QObject
     // in; still showing it (its exit included).
     bool panelOpened(const QString &mode) const { return window->property("marginMode").toString() == mode && prop("notesDrawer","opened").toBool(); }
     bool panelShown(const QString &mode) const { return window->property("marginMode").toString() == mode && prop("notesDrawer","visible").toBool(); }
-    // esc from a panel's list gives the keyboard to the reader; esc there closes the Margin.
+    // esc in a panel closes the Margin, the reader taking the keyboard.
     void closeMargin() {
-        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
     }
     QVariant prop(const char *name, const char *property) const {
         const auto obj = object(name);
@@ -487,7 +487,7 @@ private slots:
         key(Qt::Key_Question); QTRY_VERIFY(item("keybindingEssentials")->isVisible());
         click(item("essentialHintsPart:note")); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
         QTRY_VERIFY(prop("notesDrawer","opened").toBool());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         // Which key: z waits for another; after a moment, what can follow.
         key(Qt::Key_Z); QVERIFY(!item("keyStrip")->isVisible());
         QTRY_VERIFY(item("keyStrip")->isVisible());
@@ -1158,9 +1158,9 @@ private slots:
         QCOMPARE(prop("reading","contentY"),position);
         type("A guarded draft");
         capture("phase-b-notes-editor");
-        // esc saves and hands the keyboard to the reader, Notes still open;
+        // ctrl w saves and hands the keyboard to the reader, Notes still open;
         // the reader's esc closes it.
-        key(Qt::Key_Escape);
+        key(Qt::Key_W,Qt::ControlModifier);
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(bible->noteText(),QString("A guarded draft"));
         key(Qt::Key_Escape);
@@ -1237,7 +1237,7 @@ private slots:
         }
         QSqlDatabase::removeDatabase("ui-note-failure");
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QCOMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),18);
     }
     void notesBesideTheText() {
@@ -1264,9 +1264,9 @@ private slots:
         auto floating = item("floatingActions"), location = item("locationControls");
         QVERIFY(floating->mapToScene(QPointF(floating->width(),0)).x() <= stage);
         QVERIFY(qAbs(location->x() + location->width() / 2 - stage / 2) < 1);
-        // esc saves and hands the keyboard to the reader; Notes stays open.
+        // ctrl w saves and hands the keyboard to the reader; Notes stays open.
         type("Sixteen");
-        key(Qt::Key_Escape);
+        key(Qt::Key_W,Qt::ControlModifier);
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(bible->noteText(),QString("Sixteen"));
         // j moves on, and Notes follows the selection.
@@ -1275,16 +1275,16 @@ private slots:
         QVERIFY(item("readerSurface")->hasActiveFocus());
         // w brings the keyboard back to the note; it never closes Notes.
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus()); QVERIFY(prop("notesDrawer","opened").toBool());
-        // esc, esc: back to the reader, then Notes closes and the reader widens.
-        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        // esc: Notes closes, the reader takes the keyboard and widens.
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         QTRY_COMPARE(window->property("notesDock").toDouble(),0.0);
         QCOMPARE(item("reading")->width(),readingWidth);
         // Wider still, it stops at its maximum.
         window->resize(2400,900); QTRY_COMPARE(window->contentItem()->width(),2400.0);
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(prop("notesDrawer","width").toDouble(),620.0);
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QCOMPARE(bible->selectionReference(),QString("John 3:17"));
         // Narrow: a sheet over the text's right side; the text stays clickable.
         window->resize(1000,800); QTRY_COMPARE(window->contentItem()->width(),1000.0);
@@ -1492,7 +1492,7 @@ private slots:
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QVERIFY(bible->focusMode());
         capture("phase-b-focused-notes");
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(bible->focusMode());
         key(Qt::Key_F); QVERIFY(!bible->focusMode());
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
@@ -2225,7 +2225,7 @@ private slots:
             QCOMPARE(bible->selectionReference(),reference);
             QCOMPARE(bible->noteText(),QString("First saved draft extended"));
             QCOMPARE(prop("toast","text"),toast);
-            key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
             QCOMPARE(bible->selectionReference(),QString("John 3:17"));
         }
         QSqlDatabase::removeDatabase("ui-visual-failure");
@@ -2237,7 +2237,7 @@ private slots:
         key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_K);
         const auto canceled = bible->selectionReference();
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(window->property("verseMode").toBool());
         QCOMPARE(bible->selectionReference(),canceled);
     }
@@ -2337,7 +2337,7 @@ private slots:
         QTRY_VERIFY(panelOpened("related"));
         QVERIFY(!prop("tagsUi","visibleModal").toBool()); // Beside the text, not over it.
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(panelShown("related"));
+        key(Qt::Key_W,Qt::ControlModifier); QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(panelShown("related"));
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("manage tags"); key(Qt::Key_Return);
@@ -2491,7 +2491,7 @@ private slots:
         const QString note = "An exact cross-chapter note j k h l x v";
         type(note);
         QCOMPARE(bible->noteText(),note);
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(!window->property("verseMode").toBool());
         QVERIFY(!window->property("notesOpen").toBool());
@@ -2550,8 +2550,8 @@ private slots:
         type("!"); key(Qt::Key_Z, Qt::ControlModifier);
         QVERIFY(!bible->noteText().endsWith('!'));
         key(Qt::Key_A, Qt::ControlModifier); type(first);
-        // esc hands the keyboard back with Notes open: j moves on, and Notes follows.
-        key(Qt::Key_Escape);
+        // ctrl w hands the keyboard back with Notes open: j moves on, and Notes follows.
+        key(Qt::Key_W,Qt::ControlModifier);
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("notesDrawer","opened").toBool());
         key(Qt::Key_J); QCOMPARE(bible->selectedStart(),17);
         QTRY_COMPARE(prop("noteEditor", "text").toString(),QString());
@@ -2650,8 +2650,8 @@ private slots:
             type(" jkhln");
             QCOMPARE(bible->cursorVerse(),16);
             QVERIFY(bible->noteText().endsWith(" jkhln"));
-            key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
             key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+            QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         }
     }
     void lineHeightClearsFreeSelectionCoherently() {
@@ -2980,7 +2980,7 @@ private slots:
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(bible->noteText(),QString("Keep this canonical range note"));
         QVERIFY(!item("notesCopy"));
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_Equal,Qt::ControlModifier | Qt::AltModifier);
         QTRY_VERIFY(window->property("freeSelectedText").toString().isEmpty());
         QCOMPARE(bible->collection(),annotations);
@@ -3005,7 +3005,7 @@ private slots:
         QTRY_VERIFY(blockPoint(1).y() >= 0);
         key(Qt::Key_D,Qt::ControlModifier); QCOMPARE(bible->cursorVerse(),6);
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        type("Block note"); key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        type("Block note"); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QCOMPARE(bible->noteText(),QString("Block note"));
         key(Qt::Key_X);
         QVERIFY(bible->selectionHighlighted());
@@ -3715,7 +3715,7 @@ private slots:
             QCOMPARE(bible->collection(),annotations);
             QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
             QCOMPARE(prop("noteEditor","text").toString(),QString("First range note"));
-            key(Qt::Key_Escape); key(Qt::Key_Escape);
+            key(Qt::Key_Escape);
             QTRY_VERIFY(!window->property("notesOpen").toBool());
             reference("John 3:1-2");
         }
@@ -3843,7 +3843,7 @@ private slots:
         }
         const auto previousToast = prop("toast","text");
         key(Qt::Key_W); QTRY_VERIFY(prop("notesDrawer","opened").toBool()); QCOMPARE(prop("toast","text"),previousToast);
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool()); QCOMPARE(prop("toast","text"),previousToast);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool()); QCOMPARE(prop("toast","text"),previousToast);
         key(Qt::Key_Equal,Qt::ControlModifier | Qt::AltModifier); checkToast("Line height 1.6");
         key(Qt::Key_0,Qt::ControlModifier | Qt::AltModifier); checkToast("Line height 1.5");
         QTRY_VERIFY_WITH_TIMEOUT(!item("toast")->isVisible(),4000);
@@ -3878,8 +3878,8 @@ private slots:
             QCOMPARE(prop("toast","text").toString(),QString("Show verse numbers off"));
             QVERIFY(query.exec("DROP TRIGGER reject_note"));
             QVERIFY(query.exec("DROP TRIGGER reject_note_update"));
-            key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
             key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+            QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
             QCOMPARE(prop("toast","text").toString(),QString("Show verse numbers off"));
             QCOMPARE(bible->noteText(),QString("An unsaved draft"));
         }
@@ -3923,7 +3923,7 @@ private slots:
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(window->property("verseCount").toString().isEmpty());
         type("20g 123"); QCOMPARE(bible->noteText(),QString("20g 123"));
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         type("20"); item("passageControl")->forceActiveFocus(Qt::TabFocusReason);
         QVERIFY(window->property("verseCount").toString().isEmpty());
@@ -4100,7 +4100,7 @@ private slots:
         key(Qt::Key_S);
         QVERIFY(!prop("settingsDialog","visible").toBool());
         QVERIFY(!prop("passagePalette","visible").toBool());
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(!item("toast")->isVisible());
         QCOMPARE(bible->noteText(),QString("notes s ?pasted"));
@@ -4111,7 +4111,7 @@ private slots:
         QCOMPARE(bible->noteText(),QString("notes s ?pasted more"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("settings"); key(Qt::Key_Comma,Qt::ControlModifier);
         QCOMPARE(prop("keybindingSearch","text").toString(),QString("settings"));
@@ -4136,7 +4136,7 @@ private slots:
         QTRY_VERIFY(prop("versionDialog","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
         QTRY_VERIFY(item("notePreview")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_V,Qt::ControlModifier);
         QTRY_VERIFY(prop("versionDialog","opened").toBool());
     }
@@ -4395,10 +4395,11 @@ private slots:
         reference("John 3:16");
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("draft");
-        // Notes is the exception: esc saves and returns to the reader, whose esc closes it.
-        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
-        QCOMPARE(bible->noteText(),QString("draft"));
+        // Notes too: esc saves and closes it, the reader taking the keyboard.
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        QCOMPARE(bible->noteText(),QString("draft"));
+        QCOMPARE(bible->selectionReference(),QString("John 3:16")); // The selection stays.
         key(Qt::Key_Question); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("highlight");
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
@@ -4437,7 +4438,7 @@ private slots:
         QCOMPARE(prop("tagsUi","studyQuery").toString(),QString("zq"));
         QVERIFY(item("studySearch")->isVisible());
         QCOMPARE(prop("studyEmpty","text").toString(),QString::fromUtf8("Nothing matches “zq”."));
-        // The next esc gives the keyboard back, as in Marks; esc there closes it.
+        // The next esc closes it, as in Marks.
         closeMargin();
     }
     void sidePanelKeysSwitchPanels() {
@@ -4446,10 +4447,10 @@ private slots:
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         QVERIFY(window->property("deskOpen").toBool()); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         // From the reader the Desk's own key returns to its page; it never closes it.
-        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        key(Qt::Key_W,Qt::ControlModifier); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         QVERIFY(prop("notesDrawer","opened").toBool()); QVERIFY(window->property("deskOpen").toBool());
-        key(Qt::Key_Escape);
+        key(Qt::Key_W,Qt::ControlModifier); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         // Other panels' keys turn the Margin to them; it stays open.
         key(Qt::Key_M, Qt::ShiftModifier);
         QTRY_VERIFY(panelOpened("marks")); QVERIFY(!window->property("deskOpen").toBool());
@@ -4488,7 +4489,7 @@ private slots:
         QTRY_VERIFY(window->property("deskOpen").toBool()); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         QVERIFY(prop("notesDrawer","opened").toBool());
         QCOMPARE(bible->noteText(),QString("D more"));
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
     }
     void annotationsListKeys() {
         reference("John 3:16");
@@ -4789,7 +4790,7 @@ private slots:
         QCOMPARE(prop("contextMenu","target").toString(),QString("footer"));
         QVERIFY(QMetaObject::invokeMethod(object("contextMenu"),"triggerId",Q_ARG(QVariant,QString("desk"))));
         QTRY_VERIFY(prop("notesDrawer","opened").toBool()); QVERIFY(window->property("deskOpen").toBool());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
     }
     void textPopoverSetsSizeLineAndLayoutWithoutCoveringText() {
         reference("John 3:16");
@@ -5658,7 +5659,7 @@ private slots:
         type("Editable note selection"); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("noteEditor","selectedText").toString(),QString("Editable note selection"));
         QVERIFY(!panelShown("marks"));
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("John"); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("referenceInput","selectedText").toString(),QString("John"));
@@ -6350,7 +6351,7 @@ private slots:
         QVERIFY(item("noteEditor")->width() > 100);
         type("Narrow window note jkhm");
         QCOMPARE(bible->noteText(),QString("Narrow window note jkhm"));
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        key(Qt::Key_Escape);
         QTRY_VERIFY(!panel->isVisible());
         // Desktop's public property uses the same NOTIFY route as a live theme.
         QVERIFY(desktop->setProperty("textScale",1.8));
@@ -6495,10 +6496,10 @@ private slots:
         QTRY_COMPARE(bible->noteText(),QString("See Joel 4 and John 4:2"));
         // On a link, the hint row offers alt enter.
         QTRY_VERIFY(item("notesHints")->isVisible());
-        QCOMPARE(plainHint(prop("notesHints","text").toString()),QString("alt enter open link    alt v preview    esc back to reading"));
-        // Away from a link, alt v and esc remain.
+        QCOMPARE(plainHint(prop("notesHints","text").toString()),QString("alt enter open link    alt v preview    ctrl w to the text    esc close"));
+        // Away from a link, alt v, ctrl w, and esc remain.
         item("noteEditor")->setProperty("cursorPosition",1);
-        QTRY_COMPARE(plainHint(prop("notesHints","text").toString()),QString("alt v preview    esc back to reading"));
+        QTRY_COMPARE(plainHint(prop("notesHints","text").toString()),QString("alt v preview    ctrl w to the text    esc close"));
         item("noteEditor")->setProperty("cursorPosition",20);
         QTRY_VERIFY(plainHint(prop("notesHints","text").toString()).startsWith("alt enter open link"));
         // alt enter follows the link as a History jump; Notes stays open.

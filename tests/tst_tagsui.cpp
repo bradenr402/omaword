@@ -173,7 +173,7 @@ ApplicationWindow {
     function tagActionCompleted(scope) { completed++; completedScope = scope; pinnedAtCompletion = tags.scopePinned }
     function openPassageTags(scope) { tags.open(scope) }
     // The Margin, as Main keeps it: See also is its "related" panel, beside a
-    // reader that takes the keyboard back (leaveNotes).
+    // reader; esc closes it (closePanel), ctrl w moves the keyboard (switchPane).
     property real scale: theme.textScale
     property real controlScale: Math.min(scale, 1.4)
     property string escapeText: "esc"
@@ -186,7 +186,11 @@ ApplicationWindow {
     property bool contextMenuOpen: false
     function openRelatedPanel() { relatedOpen = true; tags.focusResults() }
     function closeNotes() { relatedOpen = false; reader.forceActiveFocus(); marginKeys = false; return true }
-    function leaveNotes() { reader.forceActiveFocus(); marginKeys = false; return true }
+    function closePanel() { closeNotes() }
+    function switchPane() { if (marginKeys) { reader.forceActiveFocus(); marginKeys = false } else { marginKeys = true; tags.focusResults() } }
+    property var panelAwayHints: [["Ctrl+W", "keys here", switchPane]]
+    property var panelReturnHint: ["Ctrl+W", "to the text", switchPane]
+    property color inactiveRowColor: tint(theme.muted, 0.16)
     onActiveFocusItemChanged: {
         for (let at = activeFocusItem; at; at = at.parent) if (at === relatedHost) { marginKeys = true; return }
     }
@@ -587,13 +591,27 @@ private slots:
         QTRY_VERIFY(rows().isEmpty());
         QCOMPARE(item("studyEmpty")->property("text").toString(), QString::fromUtf8("Nothing matches “gracezz”."));
         key(Qt::Key_Down); QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        // esc gives the keyboard back to the reader, as in Marks; See also
-        // stays, and reopening clears the filter.
-        key(Qt::Key_Escape); QTRY_VERIFY(item("reader")->hasActiveFocus()); QVERIFY(seeAlsoOpen());
+        // esc closes See also, as in Marks; the reader takes the keyboard, and
+        // reopening clears the filter.
+        QVERIFY(item("studyHints")->property("plainText").toString().endsWith("ctrl w to the text    esc close"));
+        key(Qt::Key_Escape); QTRY_VERIFY(item("reader")->hasActiveFocus()); QVERIFY(!seeAlsoOpen());
         QVERIFY(!root->property("marginKeys").toBool());
-        key(Qt::Key_Slash); QVERIFY(!item("studySearch")->hasActiveFocus()); // Its keys wait for the keyboard.
         openSeeAlso(); QCOMPARE(prop("studyQuery").toString(), QString());
         QCOMPARE(refs().size(), 2);
+        // ctrl w (switchPane) gives the keyboard to the reader instead, See also
+        // staying: its keys wait, its hints say how to come back, and its
+        // current row is grey, an inactive selection.
+        auto row = item("studyRow:0"); QVERIFY(row);
+        const auto rowColor = [&] { return qvariant_cast<QQuickItem *>(row->property("background"))->property("color").value<QColor>(); };
+        const QColor accent = rowColor();
+        QVERIFY(QMetaObject::invokeMethod(root.get(), "switchPane")); QTRY_VERIFY(item("reader")->hasActiveFocus());
+        QVERIFY(seeAlsoOpen());
+        key(Qt::Key_Slash); QVERIFY(!item("studySearch")->hasActiveFocus());
+        QCOMPARE(item("studyHints")->property("plainText").toString(), QString("ctrl w keys here"));
+        QTRY_VERIFY(rowColor() != accent);
+        QCOMPARE(rowColor(), root->property("inactiveRowColor").value<QColor>());
+        QVERIFY(QMetaObject::invokeMethod(item("studyHints"), "activatePart", Q_ARG(QVariant, 0)));
+        QTRY_VERIFY(item("studyList")->hasActiveFocus()); QVERIFY(root->property("marginKeys").toBool());
         // A tagged passage's row menu: the shared row menu, then Edit tags…, Move here. No delete.
         filter("#alpha"); item("studyList")->setProperty("currentIndex", 0);
         key(Qt::Key_Menu);
@@ -882,10 +900,10 @@ private:
         QTRY_VERIFY(root->findChild<QObject *>("notesDrawer")->property("opened").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
     }
-    // esc from a panel's list gives the keyboard to the reader; esc there closes the Margin.
+    // esc from a panel's list closes the Margin; the reader takes the keyboard.
     void closeMargin() {
-        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("notesDrawer")->property("visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
     }
 private slots:
     // Marks: one row per tagged passage with all its tags, a "here" marker and
