@@ -48,8 +48,8 @@ class WindowsTest : public QObject
         return QMetaObject::invokeMethod(window,"flushNote",Q_RETURN_ARG(QVariant,saved)) && saved.toBool();
     }
     // Small original USFM content covers only references used by these tests.
-    // names: a book's own name in this edition (\h, \toc), by code.
-    static bool writeStructuredUsfm(const QString &path, const QString &id, const QMap<QString,QString> &names = {}) {
+    // names: a book's own name in this edition (\h, \toc), by code; verses: John 3's count.
+    static bool writeStructuredUsfm(const QString &path, const QString &id, const QMap<QString,QString> &names = {}, int verses = 36) {
         QMap<QString,QByteArray> entries;
         const QStringList codes{"GEN","MRK","JHN","ROM"};
         for (int b = 0; b < codes.size(); ++b) {
@@ -58,7 +58,7 @@ class WindowsTest : public QObject
             const QList<int> chapters = b == 0 ? QList<int>{1,2} : b == 1 ? QList<int>{7} : b == 2 ? QList<int>{3,4} : QList<int>{8};
             for (int c : chapters) {
                 body += QString("\\c %1\n\\p\n").arg(c);
-                for (int v = 1; v <= 36; ++v)
+                for (int v = 1; v <= (codes[b] == "JHN" && c == 3 ? verses : 36); ++v)
                     body += QString("\\v %1 Original window fixture words %2:%3:%1.\n").arg(v).arg(codes[b]).arg(c);
             }
             entries[QString("%1-%2%3.usfm").arg(b+1,2,10,QChar('0')).arg(codes[b],id)] = body.toUtf8();
@@ -681,6 +681,94 @@ private slots:
         QCOMPARE(shown()["reference"].toString(), QString("Bereshis 2"));
         QCOMPARE(shown()["scope"].toMap()["start"].toInt(), 0); QCOMPARE(shown()["verses"].toList().size(), 36);
         lookup->close(); QTRY_VERIFY(!windows->lookupWindow());
+    }
+    // Following keeps up frame by frame: each move of one window reaches the
+    // other within the same turn of the event loop, scrolling and selecting
+    // alike, and a selection in the chapter shown moves without navigating
+    // (no reload, no restore), also where the other version lacks the verses.
+    void followTracksEveryFrame_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("paragraph") << "paragraph"; QTest::newRow("block") << "block";
+    }
+    void followTracksEveryFrame() {
+        QFETCH(QString, mode);
+        // The other version ends John 3 at verse 30.
+        {
+            const QString path = fixtures.filePath("shorter_usfm.zip");
+            QVERIFY(writeStructuredUsfm(path, "shorter", {}, 30));
+            BibleBackend other; other.importUsfm(QUrl::fromLocalFile(path));
+            QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000); QVERIFY2(other.ready(),qPrintable(other.error()));
+            QVERIFY(other.switchVersion("engnet"));
+        }
+        auto *leader = windows->windowAt(0); auto *bible = windows->backendAt(0);
+        QTRY_VERIFY(!bible->versionIdFor("shorter").isEmpty());
+        bible->setReadingMode(mode);
+        QVERIFY(bible->navigate("John 3")); QTRY_VERIFY(!leader->property("restoringPosition").toBool());
+        QVERIFY(windows->openBeside(leader, "shorter"));
+        auto *follower = windows->windowAt(2); auto *beside = windows->backendAt(2);
+        QTRY_COMPARE(beside->passage(), bible->passage());
+        QTRY_VERIFY(!follower->property("restoringPosition").toBool() && !follower->property("followApplying").toBool());
+        leader->requestActivate(); QVERIFY(QTest::qWaitForWindowActive(leader));
+        QVERIFY(QMetaObject::invokeMethod(leader, "readerFocus"));
+        // The same place: the same top verse, as far into it (within a pixel or
+        // so: a move under a pixel is not made), or as far above the first.
+        const auto top = [](QWindow *window) {
+            QVariant location; QMetaObject::invokeMethod(window, "followLocation", Q_RETURN_ARG(QVariant, location));
+            return location.value<QJSValue>().toVariant().toMap();
+        };
+        const auto apart = [&](QWindow *a, QWindow *b) {
+            const auto x = top(a), y = top(b);
+            if (x["topVerse"] == y["topVerse"] && std::abs(x["topFraction"].toDouble() - y["topFraction"].toDouble()) < 0.1
+                    && std::abs(x["topAbove"].toDouble() - y["topAbove"].toDouble()) < 1.5) return QString();
+            return QString("%1 %2 %3 / %4 %5 %6").arg(x["topVerse"].toInt()).arg(x["topFraction"].toDouble()).arg(x["topAbove"].toDouble())
+                .arg(y["topVerse"].toInt()).arg(y["topFraction"].toDouble()).arg(y["topAbove"].toDouble());
+        };
+        const auto bottom = [](QWindow *window) {
+            auto reading = windowObject(window, "reading");
+            return reading->property("contentHeight").toDouble() - reading->property("height").toDouble();
+        };
+        QSignalSpy navigations(beside, &BibleBackend::navigationChanged);
+        // Scrolling: each step is matched before the next one, from the
+        // chapter title on; past the end of the other's shorter chapter, it
+        // waits at its end.
+        QVERIFY(bottom(follower) > 100);
+        for (double y = 0; y <= bottom(follower); y += 23) {
+            QVERIFY(QMetaObject::invokeMethod(leader, "setReaderY", Q_ARG(QVariant, y)));
+            QCoreApplication::processEvents();
+            QVERIFY2(apart(leader, follower).isEmpty(), qPrintable(QString("at %1: ").arg(y) + apart(leader, follower)));
+        }
+        QVERIFY(QMetaObject::invokeMethod(leader, "setReaderY", Q_ARG(QVariant, bottom(leader))));
+        QCoreApplication::processEvents();
+        QCOMPARE(windowObject(follower, "reading")->property("contentY").toDouble(), bottom(follower));
+        // Selecting: j moves the other window's selection with it, and its
+        // scroll follows the slide frame by frame; nothing navigates.
+        bible->selectVerses(5, 5); QCoreApplication::processEvents();
+        QCOMPARE(beside->selectionReference(), QString("John 3:5"));
+        for (int step = 6; step <= 9; ++step) {
+            QTest::keyClick(leader, Qt::Key_J);
+            QTRY_COMPARE(beside->selectionReference(), QString("John 3:%1").arg(step));
+            QTRY_VERIFY(!leader->property("restoringPosition").toBool() && !windowObject(leader, "readerSlide")->property("running").toBool());
+            QCoreApplication::processEvents();
+            QVERIFY2(apart(leader, follower).isEmpty(), qPrintable(apart(leader, follower)));
+        }
+        // Verses the other version lacks: no selection there, the scroll still follows.
+        bible->selectVerses(33, 33); QCoreApplication::processEvents();
+        QCOMPARE(beside->selectedStart(), 0);
+        QVERIFY(QMetaObject::invokeMethod(leader, "setReaderY", Q_ARG(QVariant, bottom(follower) / 2)));
+        QCoreApplication::processEvents(); QVERIFY2(apart(leader, follower).isEmpty(), qPrintable(apart(leader, follower)));
+        QCOMPARE(navigations.count(), 0);
+        QVERIFY(!follower->property("restoringPosition").toBool());
+        // Another chapter does navigate there; the other window moving during
+        // that restore takes the lead, and the two stay linked.
+        QVERIFY(bible->navigate("John 4:2"));
+        QTRY_COMPARE(beside->selectionReference(), QString("John 4:2"));
+        follower->requestActivate(); QVERIFY(QTest::qWaitForWindowActive(follower));
+        QVERIFY(QMetaObject::invokeMethod(follower, "readerFocus"));
+        QTest::keyClick(follower, Qt::Key_J);
+        QTRY_COMPARE(bible->selectionReference(), QString("John 4:3"));
+        QTRY_VERIFY(!follower->property("followApplying").toBool() && !leader->property("followApplying").toBool());
+        QTest::keyClick(follower, Qt::Key_J); QTRY_COMPARE(bible->selectionReference(), QString("John 4:4"));
+        follower->close(); QTRY_COMPARE(windows->count(), 2);
     }
     void realSecondaryCreatesAnotherWindow() {
         const auto directory = windows->backendAt(0)->dataDirectory();

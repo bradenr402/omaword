@@ -5441,7 +5441,7 @@ ApplicationWindow {
                         if (app.hasSelection)
                             Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
                     }
-                    onContentYChanged: { positionSaveTimer.restart(); if (app.following && !app.followApplying) followTimer.restart() }
+                    onContentYChanged: { positionSaveTimer.restart(); app.queueFollow() }
                     onMovementStarted: readerSlide.stop()
                     // ctrl + wheel and a pinch change the Text size, as ctrl = and ctrl - do.
                     WheelHandler {
@@ -9472,43 +9472,59 @@ ApplicationWindow {
         }
     }
     // Follow: what this window reads (the passage, and the verse at the top
-    // with how far into it), sent to the window beside a moment after it
-    // changes; and the window beside's, taken without sending it back.
-    Timer { id: followTimer; interval: 30; onTriggered: app.emitFollow() }
+    // with how far into it), sent to the window beside as it changes, at most
+    // once a frame (Qt.callLater gathers a frame's changes), so the window
+    // beside scrolls along with this one; and the window beside's, taken
+    // without sending it back (followApplying).
+    function queueFollow() { if (following && !followApplying) Qt.callLater(app.emitFollow) }
+    // Nothing is sent while this window restores or places a moved selection
+    // (emitFollow): the place it ends at is (a j that scrolls nothing too).
+    onRestoringPositionChanged: if (!restoringPosition) queueFollow()
     Connections {
         target: bible
         enabled: app.following
-        function onSelectionChanged() { if (!app.followApplying) followTimer.restart() }
+        function onSelectionChanged() { app.queueFollow() }
     }
     property bool followApplying: false
+    // A followed move to another chapter waits for this window's restore to
+    // lay it out; this window's own move meanwhile (another selection) drops it.
     property var pendingFollow: null
-    function verseStartY(number) {
+    property string pendingFollowIdentity: ""
+    // Where the verse at index i of verseRows begins (readerColumn's y).
+    // Following reads a few of these every frame: the numbers come from
+    // verseRows, never from converting bible.verses' rows.
+    function verseStartAt(i) {
         const block = blockLoader.item as BlockReader
-        if (block) return blockLoader.mapToItem(readerColumn, 0, block.verseRect(number).y).y
-        const index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
-        const row = index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
-        return row ? row.mapToItem(readerColumn, 0, 0).y + row.textOffset : null
+        if (block) return blockLoader.mapToItem(readerColumn, 0, block.verseRect(verseRows[i]).y).y
+        const row = verseRepeater.itemAt(i) as VerseItem
+        return row ? row.y + row.textOffset : NaN
     }
-    // The verse at the top of the view and how far into it (0 to 1) the view begins.
+    // Its top and the next verse's (the column's end after the last).
+    function verseSpanAt(i) {
+        return { top: verseStartAt(i), bottom: i + 1 < verseRows.length ? verseStartAt(i + 1) : readerColumn.height }
+    }
+    // The verse at the top of the view and how far into it (0 to 1) the view
+    // begins, as it is now (mid-slide too: the window beside slides along);
+    // above the first verse (the chapter title), how far above it.
     function followTop() {
-        const top = readerTargetY(), verses = Array.from(bible.verses)
-        let previous = null
-        for (const verse of verses) {
-            const y = verseStartY(verse.number)
-            if (y === null) continue
-            if (y > top) {
-                if (!previous) return { verse: verse.number, fraction: 0 }
-                return { verse: previous.verse, fraction: Math.max(0, Math.min(1, (top - previous.y) / Math.max(1, y - previous.y))) }
-            }
-            previous = { verse: verse.number, y: y }
+        const top = reading.contentY, count = verseRows.length
+        if (!count) return { verse: 0, fraction: 0, above: 0 }
+        const first = verseStartAt(0)
+        if (!(first <= top)) return { verse: verseRows[0], fraction: 0, above: isNaN(first) ? 0 : first - top }
+        // The last verse that begins at or above the top: verses begin in order.
+        let low = 0, high = count - 1
+        while (low < high) {
+            const middle = Math.ceil((low + high) / 2)
+            if (verseStartAt(middle) <= top) low = middle
+            else high = middle - 1
         }
-        if (!previous) return { verse: 0, fraction: 0 }
-        return { verse: previous.verse, fraction: Math.max(0, Math.min(1, (top - previous.y) / Math.max(1, readerColumn.height - previous.y))) }
+        const span = verseSpanAt(low)
+        return { verse: verseRows[low], fraction: Math.max(0, Math.min(1, (top - span.top) / Math.max(1, span.bottom - span.top))), above: 0 }
     }
     function followLocation() {
         const top = followTop()
         return { book: bible.book, chapter: bible.chapter, scope: hasSelection ? bible.tagScope() : null,
-                 topVerse: top.verse, topFraction: top.fraction }
+                 topVerse: top.verse, topFraction: top.fraction, topAbove: top.above }
     }
     function emitFollow() {
         if (!following || followApplying || restoringPosition || !bible.ready || bible.busy) return
@@ -9519,44 +9535,67 @@ ApplicationWindow {
         const scope = location.scope ? Object.assign({}, location.scope, { versionId: bible.versionId })
             : { versionId: bible.versionId, book: location.book, chapter: location.chapter, start: 0, endBook: location.book, endChapter: location.chapter, end: 0 }
         const here = hasSelection ? bible.tagScope() : null
-        const same = location.book === bible.book && location.chapter === bible.chapter
+        const sameChapter = location.book === bible.book && location.chapter === bible.chapter
+        const same = sameChapter
             && (scope.start === 0 ? !here : !!here && ["book", "chapter", "start", "endBook", "endChapter", "end"].every(function(key) { return here[key] === scope[key] }))
         followApplying = true
+        Qt.callLater(function() { app.followApplying = false })
         if (same) {
             // Mid-restore (a window just opened, or a version just loaded): its restore applies it.
-            if (restoringPosition) { pendingFollow = location; return }
+            if (restoringPosition) { pendingFollow = location; pendingFollowIdentity = selectionIdentity; return }
             applyFollowScroll(location)
-            Qt.callLater(function() { app.followApplying = false })
             return
         }
-        if (!flushNote()) { followApplying = false; return }
-        pendingFollow = location
+        if (!flushNote()) return
+        // Another selection in the chapter shown: only the selection moves,
+        // at once, and the scroll with it; no restore, frame after frame.
+        if (sameChapter && !restoringPosition && followSelect(scope)) {
+            syncNote()
+            applyFollowScroll(location)
+            return
+        }
         // Where this version lacks the verses: their chapter; lacking that, nothing moves.
         if (!bible.restoreSelection(scope, false, -1)
                 && !bible.restoreSelection({ versionId: bible.versionId, book: location.book, chapter: location.chapter, start: 0, end: 0 }, false, -1)) {
-            pendingFollow = null
-            followApplying = false
             bible.clearError()
             notify("Not in " + bible.versionAbbreviation, true)
             return
         }
+        pendingFollow = location
+        pendingFollowIdentity = selectionIdentity
         syncNote()
     }
-    // After a followed move's chapter is laid out: its scroll, then the window listens again.
+    // A followed selection (scope) in the chapter shown: its verses, or none
+    // where this version lacks them. False for one reaching into another
+    // chapter, which restores instead.
+    function followSelect(scope) {
+        if (scope.start !== 0 && (scope.book !== bible.book || scope.chapter !== bible.chapter
+                || scope.endBook !== bible.book || scope.endChapter !== bible.chapter)) return false
+        if (scope.start === 0 || !verseRows.includes(scope.start) || !verseRows.includes(scope.end)) {
+            if (hasSelection) bible.clearSelection()
+            return true
+        }
+        selectionAnchor = scope.start
+        bible.selectVerses(scope.start, scope.end)
+        return true
+    }
+    // After a followed move's chapter is laid out: its scroll, unless this
+    // window has moved on since (then the window beside follows it instead).
     function followRestored() {
-        if (!pendingFollow) { if (following && !followApplying) followTimer.restart(); return }
-        applyFollowScroll(pendingFollow)
+        const location = pendingFollow
         pendingFollow = null
+        if (!location || selectionIdentity !== pendingFollowIdentity) { queueFollow(); return }
+        followApplying = true
+        applyFollowScroll(location)
         Qt.callLater(function() { app.followApplying = false })
     }
     function applyFollowScroll(location) {
-        if (!location.topVerse) return
-        const y = verseStartY(location.topVerse)
-        if (y === null) return
-        let next = null
-        for (const verse of Array.from(bible.verses)) if (verse.number > location.topVerse) { next = verseStartY(verse.number); break }
-        const span = next !== null ? next - y : Math.max(0, readerColumn.height - y)
-        const target = clampReaderY(y + location.topFraction * span)
+        const index = location.topVerse ? verseRows.indexOf(location.topVerse) : -1
+        if (index < 0) return
+        const span = verseSpanAt(index)
+        if (isNaN(span.top)) return
+        const target = clampReaderY(location.topAbove > 0 ? span.top - location.topAbove
+            : span.top + location.topFraction * Math.max(0, span.bottom - span.top))
         if (Math.abs(target - reading.contentY) >= 1) setReaderY(target)
     }
     function openBeside(versionId) {

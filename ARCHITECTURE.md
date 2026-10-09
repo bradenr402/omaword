@@ -368,12 +368,20 @@ files.
   place, and links the two: each window's `followMoved(location)` reaches
   the other's `followTo`. A location is the passage (the selection's scope,
   or the chapter) and the verse at the top of the view with how far into it
-  the view begins (`followTop`), so versions whose verses differ in length
-  stay aligned verse by verse. A window sends its place a moment after its
-  selection or scroll changes (`followTimer`), never while restoring a
-  position or applying the other's (`followApplying`): a followed move
-  lands through `restoreSelection` (its chapter where the verses are
-  missing), and its scroll once the chapter is laid out (`followRestored`).
+  the view begins, or how far above the first verse (`followTop`), so
+  versions whose verses differ in length stay aligned verse by verse. A
+  window sends its place as its selection or scroll changes, at most once a
+  frame (`queueFollow`: `Qt.callLater` gathers a frame's changes), so the
+  other scrolls along with it, mid-slide too; never while restoring a
+  position or placing a moved selection (it sends the place it ends at) or
+  applying the other's (`followApplying`). Every frame counts: `followTop`
+  bisects the verses' starts (`verseStartAt`, numbers from `verseRows`,
+  never converting `bible.verses`' rows). A followed selection in the
+  chapter shown moves alone, at once (`followSelect`: `selectVerses`, or no
+  selection where this version lacks the verses), with no reload or
+  restore; another chapter lands through `restoreSelection` (its chapter
+  where the verses are missing) and its scroll once laid out
+  (`followRestored`), unless this window has moved on since.
   Each window shows the other's version (`followPartner`, kept current on
   version changes); closing either, or `unfollow`, unlinks both.
 - QML asks for it with `besideRequested(versionId)`: `openBeside` (`shift C`,
