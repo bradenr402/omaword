@@ -112,8 +112,10 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     m_document->addResource(QTextDocument::ImageResource, cellUrl, cell);
     const QFontMetricsF bodyMetrics(m_document->defaultFont());
     const double em = decorationSize > 0 ? decorationSize : bodyMetrics.height();
-    // Paragraph layout sets poetry lines as indented blocks; Block stays dense.
+    // Paragraph layout sets poetry lines as indented blocks; Block stays
+    // dense, running a poem's lines on as prose.
     const bool poetry = mode == QStringLiteral("paragraph");
+    const bool dense = mode == QStringLiteral("block");
     const double indentUnit = poetry ? spacing.value("poetryIndent").toDouble() : 0;
     QTextCursor cursor(m_document);
     // One edit: the document (and the TextEdit showing it) lays out once,
@@ -251,10 +253,12 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         // Flatten source paragraph wrappers, preserving internal poetry breaks
         // and inline formats. Source verse-boundary paragraphs are handled above.
         // A line break inside a poetry verse starts the next line's block
-        // (one position, like the separator it replaces).
+        // (one position, like the separator it replaces). In Block it is a
+        // space (one position too): kept as a break, each verse would start
+        // mid-line, after the last line of the one before.
         const auto lineBreak = [&](const QTextCharFormat &format) {
             if (indented) cursor.insertBlock(lineFormat(++line), format);
-            else cursor.insertText(QString(QChar::LineSeparator), format);
+            else cursor.insertText(QString(dense ? QChar(' ') : QChar::LineSeparator), format);
         };
         for (auto block = source.begin(); block.isValid(); block = block.next()) {
             if (block != source.begin()) lineBreak(normal);

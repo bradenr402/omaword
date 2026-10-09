@@ -2727,10 +2727,12 @@ private slots:
             QCOMPARE(verse->lastBlock().blockFormat().textIndent(),-unit);
             QCOMPARE(item("verseBody2")->x(),item("verseBody1")->x());
         }
+        // Block runs a poem's lines on as prose, as one paragraph.
         bible->setReadingMode("block");
         QTRY_VERIFY(object("blockReader") && blockMapping() && blockMapping()->spans().size() == bible->verses().size());
-        QTRY_VERIFY(blockTextDocument() && blockTextDocument()->toRawText().contains(QChar::LineSeparator));
+        QTRY_VERIFY(blockTextDocument() && blockTextDocument()->toPlainText().contains(QString::fromUtf8("softly. A second line")));
         doc = blockTextDocument();
+        QVERIFY(!doc->toRawText().contains(QChar::LineSeparator));
         // Verse 2 begins on verse 1's last visual line, rather than a new row.
         QCOMPARE(blockRect(blockOffset(1)).y(),blockRect(blockOffset(2)).y());
         QVERIFY(blockRect(blockOffset(2)).x() > blockRect(blockOffset(1)).x());
@@ -2741,7 +2743,7 @@ private slots:
         QTRY_VERIFY(!doc->toPlainText().contains("A section title"));
         QVERIFY(doc->blockCount() < paragraphs);
         QCOMPARE(doc->blockCount(),1);
-        QVERIFY(doc->toRawText().contains(QChar::LineSeparator)); // Poetry survives.
+        QVERIFY(doc->toPlainText().contains(QString::fromUtf8("softly. A second line"))); // Poetry still runs on.
         key(Qt::Key_N,Qt::AltModifier);
         QTRY_VERIFY(doc->toPlainText().startsWith("Start café"));
         const auto height = item("blockBody")->height();

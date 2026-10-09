@@ -94,7 +94,7 @@ fontconfig state.
 - **tags**: tag identity, exact/overlap queries, persistence, backups (every version in format 6; format 3–5 backups and their bookmarks, restored as the Bookmarked tag), Markdown export of every version, rollback.
 - **tagsui**: picker, Marks rows and `#tag` filtering, See also's tagged alike (ranking, versions, filter, row menu), management, Main integration.
 - **ranges**: atomic range moves, collisions, stale tokens, rollback, undoing a move.
-- **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, annotation tints (and that a selection move never repaints them).
+- **annotations**: flowing-layout brackets, hand-drawn marks, copy, hit testing, annotation tints (and that a selection move never repaints them), Block running a poem's lines on as prose with its copies and search still mapped.
 - **desktop**: async compositor rounding and `animations:enabled` (re-asked on Hyprland config reloads, never polled), readable secondary text, error and selection colors, Omarchy theme swaps and font changes followed by events, themed tooltips.
 - **sound**: sound effects and settings.
 - **windows**: multiple readers, shared commits, draft conflicts, closing, `open --here` (compact passages, `--translation` by abbreviation or ID) and `lookup` (its text typed) in the window you read, Open beside (another version, following both ways: passages and the verse at the top; unlinked on close), the lookup window (its text typed, the passage shown and copied, opened in the reader used last, replaced afresh, a translation not installed).

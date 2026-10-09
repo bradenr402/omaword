@@ -589,6 +589,33 @@ ApplicationWindow {
         mapping->build(quick,verses,false,false,1.5);
         QCOMPARE(doc->blockCount(),1);
     }
+    // Block runs a poem's lines on as prose (a space where Paragraph starts a
+    // line), one position as before: copies and search still map.
+    void blockRunsPoetryOnAsProse() {
+        populate();
+        auto verses = backend->property("verses").toList();
+        auto poem = verses[3].toMap();
+        poem["text"] = "Poetry sings.\nA second line.";
+        poem["html"] = "Poetry sings.<br>A second line.";
+        poem["indents"] = QVariantList{1,2};
+        verses[3] = poem;
+        backend->setProperty("verses",verses);
+        auto doc = item("blockBody")->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        item("reader")->setProperty("mode","paragraph");
+        QTRY_VERIFY(doc->toPlainText().contains("Poetry sings.\nA second line."));
+        item("reader")->setProperty("mode","block");
+        QTRY_VERIFY(doc->toPlainText().contains("Poetry sings. A second line."));
+        QVERIFY(!doc->toRawText().contains(QChar::LineSeparator));
+        QCOMPARE(doc->findBlock(doc->toPlainText().indexOf("Poetry")),doc->findBlock(doc->toPlainText().indexOf("A second")));
+        const auto span = mapping->spans()[3].toMap();
+        QCOMPARE(mapping->selectionText(span.value("textStart").toInt(),span.value("textEnd").toInt()),QString("Poetry sings. A second line."));
+        const int found = doc->toPlainText().indexOf("second");
+        const auto rendered = mapping->rectangles(found,found + 6), mapped = mapping->searchRectangles({QVariantMap{{"verse",4},
+            {"start",QString("Poetry sings.\nA second line.").indexOf("second")},{"length",6}}});
+        QVERIFY(!rendered.isEmpty()); QVERIFY(!mapped.isEmpty());
+        QCOMPARE(mapped.first().toMap().value("x").toDouble(),rendered.first().toMap().value("x").toDouble());
+        QCOMPARE(mapped.first().toMap().value("y").toDouble(),rendered.first().toMap().value("y").toDouble());
+    }
     void overlappingTagScopes_data() {
         QTest::addColumn<QString>("mode");
         QTest::newRow("block") << QString("block");

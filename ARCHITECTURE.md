@@ -545,7 +545,8 @@ files.
   copy, and search maps are unchanged), `level × unit` in from the left with
   wrapped lines one unit further (`SearchGeometry::poetryFormat`; BlockDocument
   at build, `SearchDocument::indentLines` for Verse rows). Block layout stays
-  dense, with line breaks only.
+  dense, a poem's lines run on as prose: each break is a space there (one
+  position too, and source maps match any whitespace run to any other).
 - Verse layout: one row per verse; annotation rails packed by
   `packAnnotationLanes` into nearest free gutter lanes by source-row ordinal
   (not verse labels), tie priority tag/note, lane kept for an interval's life.
