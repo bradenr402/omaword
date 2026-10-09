@@ -967,17 +967,10 @@ ApplicationWindow {
     function applyTextDrag() {
         let hit = textHit(dragPoint)
         if (hit.row < 0 || dragAnchorRow < 0) return
+        // The anchor is a real row, so omitted verse numbers are harmless.
+        const moved = dragSelectVerses(bible.verses[dragAnchorRow].number, bible.verses[hit.row].number)
         if (gutterDrag) {
-            // The anchor is a real row, so omitted verse numbers are harmless.
-            let start = bible.verses[dragAnchorRow].number
-            let end = bible.verses[hit.row].number
-            if (bible.selectedStart !== Math.min(start, end) || bible.selectedEnd !== Math.max(start, end) || bible.cursorVerse !== end) {
-                if (!flushNote()) return
-                selectionAnchor = start
-                bible.selectVerses(start, end)
-                syncNote()
-                readerFocus()
-            }
+            if (moved) readerFocus()
             return
         }
         let forward = hit.row > dragAnchorRow || (hit.row === dragAnchorRow && hit.position >= dragAnchorPosition)
@@ -995,6 +988,19 @@ ApplicationWindow {
             }
         }
         freeSelectedText = pieces.join("\n")
+    }
+    // A drag, over the numbers or the text, selects the verses it runs over
+    // as it goes: from the one it began in to the one under the pointer. The
+    // selection bar waits for the release (mouseSelected). Whether it moved.
+    function dragSelectVerses(from, to) {
+        if (from <= 0 || to <= 0) return false
+        if (bible.selectedStart === Math.min(from, to) && bible.selectedEnd === Math.max(from, to) && bible.cursorVerse === to) return false
+        if (!flushNote()) return false
+        selectionBarWanted = false
+        selectionAnchor = from
+        bible.selectVerses(from, to)
+        syncNote()
+        return true
     }
     // Double-clicking verse text selects the word under the pointer (the verse
     // number opens Notes). The release that ends the double click keeps it.

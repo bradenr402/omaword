@@ -3287,11 +3287,9 @@ private slots:
         QFETCH(bool,reverse); QFETCH(bool,numbers);
         installDragFixture();
         bible->setShowVerseNumbers(numbers);
-        bible->setNoteText("Canonical note must survive free selection");
+        bible->setNoteText("The verse's note stays on it when a drag moves the selection");
         QCoreApplication::processEvents();
-        const auto canonical = bible->selectionReference();
         const auto note = bible->noteText();
-        QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
         const int start = 6, end = 18;
         const auto expected = bodyText(1).mid(start) + '\n' + bodyText(2) + '\n' + bodyText(3).left(end);
         QVERIFY(expected.contains(QString::fromUtf8("café — λόγος 🌿")));
@@ -3302,9 +3300,11 @@ private slots:
         QCOMPARE(prop("verseBody1","selectedText").toString(),bodyText(1).mid(start));
         QCOMPARE(prop("verseBody2","selectedText").toString(),bodyText(2));
         QCOMPARE(prop("verseBody3","selectedText").toString(),bodyText(3).left(end));
-        QCOMPARE(bible->selectionReference(),canonical);
-        QCOMPARE(bible->noteText(),note);
-        QCOMPARE(selection.count(),0);
+        // The drag selected the verses it ran over, from the one it began in.
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:1–3"));
+        QCOMPARE(bible->cursorVerse(),reverse ? 1 : 3);
+        QCOMPARE(window->property("selectionAnchor").toInt(),reverse ? 3 : 1);
+        QCOMPARE(saved(1).value("note").toString(),note);
         QVERIFY(window->activeFocusItem()->objectName().startsWith("verseBody"));
         QApplication::clipboard()->setText("replace me");
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
@@ -3318,19 +3318,71 @@ private slots:
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),expected);
         // Middle clicks must not consume the free selection or alter the
-        // canonical selection before deciding which passage to copy.
+        // verse selection before deciding which passage to copy: inside it,
+        // the selection; outside, that verse, which it then selects.
+        const auto range = bible->copySelection();
         mouseCopy(2,Qt::MiddleButton);
-        QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(2));
+        QCOMPARE(QApplication::clipboard()->text(),range);
         QCOMPARE(window->property("freeSelectedText").toString(),expected);
-        QCOMPARE(bible->selectionReference(),QString("John 3:2"));
-        QCOMPARE(saved(1).value("note").toString(),note);
-        mouseCopy(3,Qt::MiddleButton);
-        QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(3));
-        QCOMPARE(bible->selectionReference(),QString("John 3:3"));
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:1–3"));
+        mouseCopy(4,Qt::MiddleButton);
+        QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(4));
+        QCOMPARE(bible->selectionReference(),QString("John 3:4"));
+        QCOMPARE(window->property("freeSelectedText").toString(),expected);
         QCOMPARE(saved(1).value("note").toString(),note);
         QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,textPoint(2,4));
         QCOMPARE(bible->cursorVerse(),2);
         QVERIFY(window->property("freeSelectedText").toString().isEmpty());
+    }
+    void textDragSelectsVersesAsItGoes_data() {
+        QTest::addColumn<bool>("block");
+        QTest::addColumn<bool>("reverse");
+        QTest::newRow("rows") << false << false;
+        QTest::newRow("rows-reverse") << false << true;
+        QTest::newRow("block") << true << false;
+        QTest::newRow("block-reverse") << true << true;
+    }
+    void textDragSelectsVersesAsItGoes() {
+        QFETCH(bool,block); QFETCH(bool,reverse);
+        installDragFixture();
+        bible->setBlockMode(block);
+        if (block) QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() > 3);
+        else QTRY_VERIFY(item("verseBody4"));
+        QCOMPARE(bible->selectionReference(),QString("John 3:1"));
+        const auto point = [&](int verse, int offset) { return block ? blockPoint(verse,offset) : textPoint(verse,offset); };
+        // The new layout restores the reading position after a frame or two:
+        // drag only once the text holds still.
+        QSignalSpy frames(window,&QQuickWindow::frameSwapped);
+        const auto settled = [&] {
+            const auto first = point(2,6), last = point(4,6);
+            const auto y = prop("reading","contentY");
+            const int before = frames.count();
+            window->update();
+            if (!QTest::qWaitFor([&] { return frames.count() > before; },1000)) return false;
+            return !window->property("restoringPosition").toBool() && y == prop("reading","contentY")
+                && first == point(2,6) && last == point(4,6);
+        };
+        QTRY_VERIFY(settled());
+        // From inside verse 2 over verse 3 into verse 4 (or back), the verse
+        // selection follows the pointer before the button comes up; the
+        // selection bar waits for the release.
+        const int from = reverse ? 4 : 2, to = reverse ? 2 : 4;
+        const QPoint start = point(from,6), middle = point(3,6), end = point(to,6);
+        QTest::mousePress(window,Qt::LeftButton,Qt::NoModifier,start);
+        for (int step = 1; step <= 6; ++step) QTest::mouseMove(window,start + (middle - start) * step / 6,10);
+        QTRY_COMPARE(bible->cursorVerse(),3);
+        QCOMPARE(bible->selectedStart(),reverse ? 3 : 2); QCOMPARE(bible->selectedEnd(),reverse ? 4 : 3);
+        QVERIFY(!window->property("freeSelectedText").toString().isEmpty());
+        QVERIFY(!prop("selectionBar","visible").toBool());
+        for (int step = 1; step <= 6; ++step) QTest::mouseMove(window,middle + (end - middle) * step / 6,10);
+        QTRY_COMPARE(bible->cursorVerse(),to);
+        QCOMPARE(bible->selectedStart(),2); QCOMPARE(bible->selectedEnd(),4);
+        QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,end);
+        QCOMPARE(window->property("selectionAnchor").toInt(),from);
+        QTRY_VERIFY(prop("selectionBar","visible").toBool());
+        // The text stays selected for copying; the bar's actions take the verses.
+        QVERIFY(window->property("freeSelectedText").toString().contains(QString::fromUtf8("Final naïve résumé ends here.")));
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:2–4"));
     }
     void mouseCopySingleAndCanonicalRange() {
         installDragFixture();
@@ -3409,7 +3461,12 @@ private slots:
         QTRY_VERIFY(prop("reading","contentY").toDouble() < down - 100);
         QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,top);
         QVERIFY(!window->property("draggingText").toBool());
-        QCOMPARE(bible->cursorVerse(),10);
+        // The selection runs from verse 10, where it began, to the verse under the release.
+        QVariant hit;
+        QVERIFY(QMetaObject::invokeMethod(window,"textHit",Q_RETURN_ARG(QVariant,hit),Q_ARG(QVariant,QVariant::fromValue(item("reading")->mapFromScene(QPointF(top))))));
+        const int row = hit.value<QJSValue>().toVariant().toMap().value("row").toInt();
+        QCOMPARE(window->property("selectionAnchor").toInt(),10);
+        QCOMPARE(bible->cursorVerse(),bible->verses().at(row).toMap().value("number").toInt());
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),window->property("freeSelectedText").toString());
     }

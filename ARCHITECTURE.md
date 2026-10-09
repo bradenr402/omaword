@@ -469,6 +469,10 @@ files.
 
 - A finished mouse selection (drag end, double-clicked word) is offered as the
   PRIMARY selection (`bible.setPrimarySelection`, plain text).
+- A drag over the text or the verse numbers, in every layout, selects the
+  verses it runs over as it goes (`dragSelectVerses`: from the verse it began
+  in to the one under the pointer, persisted like any selection); the
+  selection bar waits for the release.
 
 ### Keys
 - Panel- and mode-local keys are catalog rows with a non-global `scope`

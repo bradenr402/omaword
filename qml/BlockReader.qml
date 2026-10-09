@@ -210,6 +210,8 @@ Item {
         const p = body.mapFromItem(viewport, pointer.x, pointer.y)
         body.select(anchor, body.positionAt(p.x, p.y))
         controller.freeSelectedText = document.selectionText(body.selectionStart, body.selectionEnd)
+        // The verses it runs over become the selection (controllers without it: tests).
+        if (typeof controller.dragSelectVerses === "function") controller.dragSelectVerses(pressedVerse, hit(p.x, p.y))
     }
     // qmllint disable import
     BlockDocument {
