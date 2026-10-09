@@ -2497,7 +2497,10 @@ ApplicationWindow {
         }
         return list
     }
-    readonly property var outlineHeadings: !marginsAllowed || !bible.chapterOutline ? []
+    // bible.chapterOutline as the margin shows it: toggling off lags by the
+    // outline's exit (applyOutline), so it leaves before its room goes.
+    property bool outlineOn: false // set from bible.chapterOutline on completion, then by applyOutline
+    readonly property var outlineHeadings: !marginsAllowed || !outlineOn ? []
         : Array.from(bible.verses).filter(function(row) { return (row.heading || "").length > 0 })
             .map(function(row) { return { verse: row.number, text: row.heading } })
     // Connector: "}" (braceWidth) after the text's right edge, an arrow, and a
@@ -2547,7 +2550,7 @@ ApplicationWindow {
         rightInset: Math.max(28 * readerScale, footerRightInset, marginRightInset),
         wantNotes: marginsAllowed && marginNotesOn && !(marginOpen && notesDocked), connectorWidth: marginConnectorWidth,
         notesMin: 170 * readerScale, notesPreferred: marginNotesPreferred, notesMax: 330 * readerScale,
-        wantOutline: marginsAllowed && bible.chapterOutline, outlineGap: 12 * readerScale,
+        wantOutline: marginsAllowed && outlineOn, outlineGap: 12 * readerScale,
         outlineMin: 120 * readerScale, outlineMax: 220 * readerScale
     })
     readonly property real marginConnectorWidth: 3 * readerScale + 2 * marginBraceWidth + 34 * readerScale
@@ -2579,6 +2582,8 @@ ApplicationWindow {
     // An actual toggle only: every preference shares one notify signal.
     readonly property bool observedMarginNotes: bible.marginNotes
     onObservedMarginNotesChanged: applyMarginNotes(observedMarginNotes)
+    readonly property bool observedOutline: bible.chapterOutline
+    onObservedOutlineChanged: applyOutline(observedOutline)
     // Toggling margin notes slides the reader to make or return room, and fades
     // the notes in/out; resizes, chapter changes, range editing, and Disable
     // animations jump (settleMargins).
@@ -2597,6 +2602,11 @@ ApplicationWindow {
     // Margin opacity: the notes' own toggle times focus mode's fade of both margins.
     property real marginNotesLevel: 1
     property real marginFocusLevel: 1
+    // The outline's own toggle: it slides in from the left as it fades in,
+    // and leaves the same way, quicker (as a side panel does).
+    property real outlineLevel: 1
+    NumberAnimation { id: outlineFade; objectName: "outlineFade"; target: app; property: "outlineLevel"
+        onFinished: if (app.outlineLevel === 0) app.slideMarginsTo(app.marginNotesOn, false) }
     NumberAnimation { id: marginSlide; objectName: "marginSlide"; target: app; property: "marginSlideOffset"; to: 0; duration: app.marginSlideMs; easing.type: Easing.OutCubic
         onFinished: if (!app.marginsLeaving) app.marginsAttached = false }
     NumberAnimation { id: marginFade; target: app; property: "marginNotesLevel"; duration: app.marginSlideMs; easing.type: Easing.OutCubic
@@ -2609,9 +2619,12 @@ ApplicationWindow {
     // they glide there with the column.
     property real chapterNavShift: 0
     NumberAnimation { id: chapterNavGlide; objectName: "chapterNavGlide"; target: app; property: "chapterNavShift"; to: 0; duration: app.marginSlideMs; easing.type: Easing.OutCubic }
-    function slideMarginsTo(on) {
+    // Margin notes (and the outline, when given) on or off, the column gliding
+    // from where it was to its new place.
+    function slideMarginsTo(on, outline) {
         const before = readerColumn.x
         marginNotesOn = on
+        if (outline !== undefined) outlineOn = outline
         marginSlide.stop()
         marginSlideOffset = reduceMotion ? 0 : before - columnTargetX
         if (marginSlideOffset !== 0) marginSlide.start()
@@ -2628,9 +2641,22 @@ ApplicationWindow {
             marginFade.to = 1; marginFade.start()
         } else { marginFade.to = 0; marginFade.start() }
     }
+    function applyOutline(on) {
+        outlineFade.stop()
+        if (on === outlineOn && !(on && outlineLevel < 1)) return
+        if (reduceMotion || !marginSpace.outline.visible && !on) {
+            outlineLevel = 1; slideMarginsTo(marginNotesOn, on); return
+        }
+        if (on && !outlineOn) { outlineLevel = 0; slideMarginsTo(marginNotesOn, true) }
+        outlineFade.to = on ? 1 : 0
+        outlineFade.duration = on ? panelEnterMs : panelExitMs
+        outlineFade.easing.type = on ? Easing.OutCubic : Easing.InCubic
+        outlineFade.start()
+    }
     // Margin motion ends at once: resizes, chapter changes, range editing.
     function settleMargins() {
         if (marginFade.running) { marginFade.stop(); marginNotesLevel = marginFade.to; if (!marginNotesLevel) marginNotesOn = false }
+        if (outlineFade.running) { outlineFade.stop(); outlineLevel = outlineFade.to; if (!outlineLevel) outlineOn = false }
         if (marginExit.running) { marginExit.stop(); marginFocusLevel = 0; marginsLeaving = false }
         if (marginEnter.running) { marginEnter.stop(); marginFocusLevel = 1 }
         marginSlide.stop(); marginSlideOffset = 0; marginsAttached = false
@@ -6092,8 +6118,8 @@ ApplicationWindow {
                     id: chapterOutline
                     objectName: "chapterOutline"
                     visible: app.outlineShown
-                    x: app.marginSpace.outline.x + app.marginDrift
-                    opacity: app.marginFocusLevel
+                    x: app.marginSpace.outline.x + app.marginDrift - (1 - app.outlineLevel) * 24 * app.readerScale
+                    opacity: app.marginFocusLevel * app.outlineLevel
                     y: 48 * app.readerScale
                     width: app.marginSpace.outline.width
                     height: Math.max(0, reading.height - app.floatingSafety - y - 12 * app.readerScale)
@@ -9544,7 +9570,7 @@ ApplicationWindow {
     }
     Component.onCompleted: {
         syncVerseRows()
-        focusLayout = bible.focusMode; marginFocusLevel = focusLayout ? 0 : 1; marginNotesOn = bible.marginNotes
+        focusLayout = bible.focusMode; marginFocusLevel = focusLayout ? 0 : 1; marginNotesOn = bible.marginNotes; outlineOn = bible.chapterOutline
         readerInitialized = true; syncNote(); loadSavedDesk(); restorePosition(); restartDwell(); scheduleMargins()
     }
     onClosing: function(close) {

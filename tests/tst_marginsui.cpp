@@ -689,6 +689,54 @@ private slots:
         QVERIFY(bible->switchVersion(plainId)); settle(); QTRY_VERIFY(!outlineShown());
         key(Qt::Key_O, Qt::AltModifier); QTRY_VERIFY(!bible->chapterOutline());
     }
+    void outlineSlidesInAndOut() {
+        // alt o: the outline slides in from the left as it fades in (a
+        // panel's 125 ms, easing out) and leaves the same way, quicker (85 ms,
+        // easing in); the column stays put. Disable animations: at once.
+        sounds->setProperty("reduceMotion", false);
+        navigate("John 3:3");
+        QVERIFY(!bible->chapterOutline()); QVERIFY(!outlineShown());
+        const double x = columnX();
+        const auto check = [&](const QList<Frame> &frames, bool entering) {
+            const auto &last = frames.last();
+            QCOMPARE(last.outline, entering);
+            int between = 0;
+            for (int i = 1; i < frames.size(); ++i) {
+                const auto &f = frames[i], &previous = frames[i - 1];
+                QVERIFY2(std::abs(f.columnX - x) < 0.5, qPrintable(describe(f)));
+                if (!f.outline || i == 1) continue;
+                // One motion: opacity and place change together, one way.
+                QVERIFY2(entering ? f.outlineOpacity >= previous.outlineOpacity : f.outlineOpacity <= previous.outlineOpacity, qPrintable(describe(f)));
+                QVERIFY2(entering ? f.outlineX >= previous.outlineX : f.outlineX <= previous.outlineX, qPrintable(describe(f)));
+                between += f.outlineOpacity > 0.05 && f.outlineOpacity < 0.95;
+            }
+            QVERIFY2(between > 1, "the outline popped rather than slid");
+        };
+        // The first frame at or after `t` ms of animation.
+        const auto at = [](const QList<Frame> &frames, double t) {
+            for (const auto &f : frames) if (f.t >= t) return f;
+            return frames.last();
+        };
+        const auto in = stepped("outline-in", [&] { key(Qt::Key_O, Qt::AltModifier); }, 20);
+        QVERIFY(bible->chapterOutline());
+        const double rest = in.last().outlineX;
+        QCOMPARE(in.last().outlineOpacity, 1.0);
+        QVERIFY(in[1].outline); QVERIFY(in[1].outlineOpacity < 0.05); QVERIFY(in[1].outlineX < rest - 10);
+        check(in, true);
+        // In place after 125 ms.
+        QCOMPARE(at(in, 125).outlineOpacity, 1.0); QCOMPARE(at(in, 125).outlineX, rest);
+        QVERIFY(at(in, 120).outlineOpacity < 1);
+        const auto out = stepped("outline-out", [&] { key(Qt::Key_O, Qt::AltModifier); }, 20);
+        QVERIFY(!bible->chapterOutline());
+        QVERIFY(out[1].outline); QCOMPARE(out[1].outlineX, rest);
+        check(out, false);
+        QVERIFY(at(out, 80).outline); QVERIFY(!at(out, 85).outline); // Gone after 85 ms.
+        sounds->setProperty("reduceMotion", true);
+        const auto on = stepped("outline-on-instant", [&] { key(Qt::Key_O, Qt::AltModifier); }, 2);
+        QVERIFY(on[1].outline); QCOMPARE(on[1].outlineOpacity, 1.0); QCOMPARE(on[1].outlineX, rest);
+        const auto off = stepped("outline-off-instant", [&] { key(Qt::Key_O, Qt::AltModifier); }, 2);
+        QVERIFY(!off[1].outline);
+    }
     void outlineStickyCurrentAndJump() {
         bible->setChapterOutline(true);
         for (const QString mode : {"verse", "paragraph", "block"}) {

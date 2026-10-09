@@ -698,12 +698,16 @@ files.
   chapter top (`Margins.headingStep`'s `top`), even without headings. Toggling notes (`applyMarginNotes`, driven
   by an actual `bible.marginNotes` change) fades them in while the column slides left,
   or fades them out before it slides back (`marginSlideOffset`, 100 ms
-  ease-out). Entering focus mode, shown margins keep their split
+  ease-out). Toggling the outline (`applyOutline`, from an actual
+  `bible.chapterOutline` change; `outlineOn` lags it as `marginNotesOn` does)
+  slides it in from the left as it fades in (`outlineLevel`, a panel's 125 ms,
+  ease-out) and out the same way (85 ms, ease-in) before its room goes; the
+  column moves only where notes yield it room (`slideMarginsTo`). Entering focus mode, shown margins keep their split
   (`leavingSpace`, `marginsLeaving`) and fade out (`marginExit`, 85 ms
   ease-in) while moving with the gliding column (`marginDrift`); leaving it,
   they are placed before they show and fade in where they settle
-  (`marginEnter`, 100 ms). Opacity is the notes' toggle level times that focus
-  level. A connector is clipped where the column's text, still gliding into
+  (`marginEnter`, 100 ms). Opacity is each margin's toggle level times that
+  focus level. A connector is clipped where the column's text, still gliding into
   place beside waiting margins, would cover it (`marginCover`). Resizes,
   chapter changes, and Disable animations end margin motion at
   once (`settleMargins`).
