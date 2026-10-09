@@ -111,9 +111,10 @@ public:
     // ("" for none): the command line's --translation.
     QString versionIdFor(const QString &name) const;
     // Reads another installed version in this backend alone (the command
-    // line's --translation): unlike switchVersion, it records neither the
-    // version as the one you read nor a place in it.
-    bool readVersion(const QString &id);
+    // line's --translation, the lookup window's version choice): unlike
+    // switchVersion, it records neither the version as the one you read nor
+    // a place in it.
+    Q_INVOKABLE bool readVersion(const QString &id);
     int book() const { return m_book; }
     int chapter() const { return m_chapter; }
     int selectedStart() const { return m_start; }

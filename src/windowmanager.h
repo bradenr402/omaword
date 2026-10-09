@@ -52,8 +52,9 @@ private slots:
     void besideRequested(const QString &versionId);
     void unfollowRequested();
     void relayFollow(const QVariant &location);
-    // The lookup window's enter: the passage in the reader you used last.
-    void lookupOpened(const QString &reference);
+    // The lookup window's enter: the passage in the reader you used last, in
+    // the version chosen there (versionId) if any.
+    void lookupOpened(const QString &reference, const QString &versionId);
 signals:
     void countChanged();
     // The last window, reader or lookup, closed.

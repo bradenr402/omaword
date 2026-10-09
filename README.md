@@ -36,7 +36,7 @@ omaword link jn316                   # an omaword: link to a passage
 
 Links like `omaword:John%203:16`, or `omaword:jn316?translation=KJV`, open where you were reading: the launcher registers the `omaword:` scheme, so `xdg-open` and browsers hand them to OmaWord. The launcher's menu has **Look Up a Passage** and **New Window**.
 
-`omaword lookup` opens a small window on the workspace you are on: type a passage (`jn316` works), `enter` shows it, `y` copies it (`shift Y` the plain text), `enter` again opens it in the window you were reading, and `esc` closes it. It suits a key binding; in Omarchy, add one to `~/.config/hypr/bindings.lua`:
+`omaword lookup` opens a small window on the workspace you are on: type a passage (`jn316` works), `enter` shows it, `y` copies it (`shift Y` the plain text), `enter` again opens it in the window you were reading, and `esc` closes it. With more than one version installed, `tab` and `shift tab` (or a click on the version's name) read the passage in another, and `enter` opens it in that version. It suits a key binding; in Omarchy, add one to `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + ALT + B", "Look up a passage", "omaword lookup")

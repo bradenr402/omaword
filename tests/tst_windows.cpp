@@ -548,9 +548,16 @@ private slots:
         QCOMPARE(lookup->minimumSize(),lookup->maximumSize()); // Fixed: Hyprland floats it.
         QCOMPARE(windowObject(lookup,"lookupQuery")->property("text").toString(),QString("rom 8:2"));
         QTRY_VERIFY(lookup->property("candidates").value<QJSValue>().property("length").toInt() > 0);
+        // One version: its name, nothing to choose (tab changes nothing).
+        auto *version = windowObject(lookup,"lookupVersion");
+        QCOMPARE(version->property("text").toString(),bible->versionAbbreviation());
+        QVERIFY(!version->property("choosable").toBool());
+        QVERIFY(!windowObject(lookup,"lookupHints")->property("plainText").toString().contains("tab"));
+        lookup->requestActivate(); QVERIFY(QTest::qWaitForWindowActive(lookup));
         QVERIFY(QMetaObject::invokeMethod(lookup,"show",Q_ARG(QVariant,0)));
         QVERIFY(lookup->property("reading").toBool());
-        QCOMPARE(windowObject(lookup,"lookupTitle")->property("text").toString(),"Romans 8:2 · " + bible->versionAbbreviation());
+        QTest::keyClick(lookup,Qt::Key_Tab); QCOMPARE(version->property("text").toString(),bible->versionAbbreviation());
+        QCOMPARE(windowObject(lookup,"lookupTitle")->property("text").toString(),QString("Romans 8:2"));
         QVERIFY(windowObject(lookup,"lookupText")->property("text").toString().contains("ROM:8:2"));
         QGuiApplication::clipboard()->clear();
         QVERIFY(QMetaObject::invokeMethod(lookup,"copy",Q_ARG(QVariant,false)));
@@ -569,7 +576,52 @@ private slots:
         QTRY_COMPARE(windows->backendAt(count - 1)->selectionReference(),QString("John 3:16"));
         QTRY_VERIFY(!windows->lookupWindow());
         QCOMPARE(windows->count(),count);
+        QCOMPARE(windows->backendAt(count - 1)->versionId(),QString("engnet"));
         Q_UNUSED(reader);
+        // With another version installed the version is a choice: tab and
+        // shift tab step through them, as its menu chooses, the passage shown
+        // following at once; enter opens it in the reader in that version.
+        {
+            BibleBackend other; other.importUsfm(QUrl::fromLocalFile(structuredUsfm));
+            QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000); QVERIFY2(other.ready(),qPrintable(other.error()));
+            QVERIFY(other.switchVersion("engnet")); // The import made it the version you read.
+        }
+        QVERIFY(windows->openLookup("rom 8:2")); lookup = windows->lookupWindow(); QVERIFY(lookup);
+        version = windowObject(lookup,"lookupVersion");
+        QCOMPARE(version->property("text").toString(),QString("NET")); QVERIFY(version->property("choosable").toBool());
+        QVERIFY(windowObject(lookup,"lookupHints")->property("plainText").toString().contains("tab version"));
+        const auto shownVersion = [&] {
+            const auto shown = lookup->property("shown");
+            return (shown.canConvert<QJSValue>() ? shown.value<QJSValue>().toVariant().toMap() : shown.toMap()).value("versionId").toString();
+        };
+        lookup->requestActivate(); QVERIFY(QTest::qWaitForWindowActive(lookup)); // Hyprland focuses it.
+        QVERIFY(QMetaObject::invokeMethod(lookup,"show",Q_ARG(QVariant,0)));
+        QTest::keyClick(lookup,Qt::Key_Tab);
+        QCOMPARE(version->property("text").toString(),QString("OWB")); QCOMPARE(shownVersion(),QString("window-original"));
+        QCOMPARE(windowObject(lookup,"lookupTitle")->property("text").toString(),QString("Romans 8:2"));
+        QVERIFY(windowObject(lookup,"lookupText")->property("text").toString().contains("ROM:8:2"));
+        QTest::keyClick(lookup,Qt::Key_Backtab,Qt::ShiftModifier);
+        QCOMPARE(version->property("text").toString(),QString("NET")); QCOMPARE(shownVersion(),QString("engnet"));
+        QCOMPARE(lookup->property("chosenVersion").toString(),QString()); // Back where it began.
+        // The menu lists them in the same order, the one read marked; choosing reads it.
+        auto *menu = windowObject(lookup,"lookupVersionMenu");
+        QVERIFY(QMetaObject::invokeMethod(lookup,"openVersionMenu")); QTRY_VERIFY(menu->property("visible").toBool());
+        const auto entries = menu->property("layout").value<QJSValue>().toVariant().toList();
+        QCOMPARE(entries.size(),2);
+        QCOMPARE(entries[0].toMap()["id"].toString(),QString("engnet")); QCOMPARE(entries[0].toMap()["shortcut"].toString(),QString("reading"));
+        QCOMPARE(entries[1].toMap()["id"].toString(),QString("window-original")); QCOMPARE(entries[1].toMap()["shortcut"].toString(),QString());
+        QVERIFY(QMetaObject::invokeMethod(menu,"triggerId",Q_ARG(QVariant,QString("window-original"))));
+        QTRY_COMPARE(shownVersion(),QString("window-original"));
+        // The list follows too, while choosing.
+        QVERIFY(QMetaObject::invokeMethod(lookup,"back"));
+        QTest::keyClick(lookup,Qt::Key_Tab); QCOMPARE(version->property("text").toString(),QString("NET"));
+        QTest::keyClick(lookup,Qt::Key_Tab); QCOMPARE(version->property("text").toString(),QString("OWB"));
+        QCOMPARE(windowObject(lookup,"lookupQuery")->property("text").toString(),QString("rom 8:2"));
+        QVERIFY(QMetaObject::invokeMethod(lookup,"show",Q_ARG(QVariant,0))); QCOMPARE(shownVersion(),QString("window-original"));
+        QVERIFY(QMetaObject::invokeMethod(lookup,"openInReader"));
+        QTRY_COMPARE(windows->backendAt(count - 1)->versionId(),QString("window-original"));
+        QTRY_COMPARE(windows->backendAt(count - 1)->selectionReference(),QString("Romans 8:2"));
+        QTRY_VERIFY(!windows->lookupWindow());
         // A translation not installed: nothing opens.
         QVERIFY(!windows->openLookup("jn316","nothing")); QVERIFY(!windows->lookupWindow());
     }

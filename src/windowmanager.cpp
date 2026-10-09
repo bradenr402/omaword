@@ -142,7 +142,7 @@ QWindow *WindowManager::openLookup(const QString &text, const QString &translati
         delete context; delete bible; return nullptr;
     }
     m_lookup = window; m_lookupContext = context; m_lookupBible = bible; m_lookupTranslation = translation;
-    connect(window, SIGNAL(openRequested(QString)), this, SLOT(lookupOpened(QString)));
+    connect(window, SIGNAL(openRequested(QString,QString)), this, SLOT(lookupOpened(QString,QString)));
     QPointer<QWindow> root(window);
     connect(window, &QWindow::visibleChanged, this, [this, root](bool visible) {
         if (!visible && root) QTimer::singleShot(0, this, [this, root] {
@@ -161,11 +161,12 @@ void WindowManager::retireLookup()
     m_lookupBible = nullptr;
 }
 
-void WindowManager::lookupOpened(const QString &reference)
+void WindowManager::lookupOpened(const QString &reference, const QString &versionId)
 {
     SingleInstance::Request request;
     request.reference = reference;
-    request.translation = m_lookupTranslation;
+    // The version chosen in the lookup, else the one it was asked to read.
+    request.translation = versionId.isEmpty() ? m_lookupTranslation : versionId;
     request.newWindow = false;
     openRequest(request, [](SingleInstance::Result result) {
         if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << result.error << Qt::endl;
