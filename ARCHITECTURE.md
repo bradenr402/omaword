@@ -637,7 +637,9 @@ files.
   and the reading position (the cursor verse while on screen, else the top
   verse) keeps its place on screen through the reflow, even past the content's
   ends for a moment; entering then slides it to the typewriter line, and a
-  reader at the chapter top slides back to it. Paint-only effects (dimming,
+  reader at the chapter top slides back to it. The chapter title is held as
+  far as that hold would move it (`titleHold`), let go with the reader's slide
+  (`titleSettle`), so it moves only as the text scrolls. Paint-only effects (dimming,
   the quiet footer) follow `bible.focusMode`. The column and the chapter
   buttons (re-centred without the footer's room) glide (`marginSlide`,
   `chapterNavGlide`) from wherever they are, so toggles retarget.
@@ -660,7 +662,9 @@ files.
   disabled at the Bible's first/last chapter; steps are not History jumps. The
   margins reserve their width (`chapterNavReserve` in `Margins.space` insets) and
   they hide when the column would reach them; in focus mode they appear only
-  under the pointer (300 ms click guard).
+  under the pointer (300 ms click guard). The next one keeps the scrollbar's
+  width whether it shows or not (`chapterNavScrollbar`), so it never moves as
+  the scrollbar comes and goes.
 - Keyboard focus hand-off: a `QuietButton`/`FloatingButton` pressed by key that
   hides itself passes the keyboard to its `focusTarget` (else `restorePanelFocus`).
   Modal outside clicks: the tag picker's confirmation watches

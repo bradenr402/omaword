@@ -186,7 +186,8 @@ class MarginsUiTest : public QObject
     // margins on screen matched the text they point at.
     struct Frame {
         double t = 0; bool focus = false;
-        double columnX = 0, slide = 0, navY = 0; // navY: the chapter buttons' zone
+        double columnX = 0, slide = 0, navY = 0, navX = 0; // navX/navY: the next-chapter button's zone
+        double titleY = 0; // the chapter title as drawn (reading coordinates)
         bool notes = false; double notesOpacity = 0;
         bool outline = false; double outlineOpacity = 0, outlineX = 0;
         // Painted notes: how many, the first one's x (reading coordinates),
@@ -220,7 +221,8 @@ class MarginsUiTest : public QObject
     Frame frame(double t) const {
         Frame f; f.t = t; f.focus = bible->focusMode();
         f.columnX = columnX(); f.slide = prop("marginSlideOffset").toDouble();
-        f.navY = item("chapterNextButtonZone")->y();
+        f.navY = item("chapterNextButtonZone")->y(); f.navX = item("chapterNextButtonZone")->x();
+        f.titleY = item("chapterTitle")->mapToItem(item("reading"), QPointF(0, 0)).y();
         auto layer = item("marginLayer"), outline = item("chapterOutline"), reading = item("reading");
         f.notes = layer->isVisible(); f.notesOpacity = layer->opacity();
         f.outline = outline->isVisible(); f.outlineOpacity = outline->opacity(); f.outlineX = outline->x();
@@ -270,12 +272,12 @@ class MarginsUiTest : public QObject
         return frames;
     }
     static QString describe(const Frame &f) {
-        return QString("t=%1 focus=%2 x=%3 off=%4 navY=%19 notes=%5/%6 outline=%7/%8 shown=%9 noteX=%10 stale=%11 gap=%12 dimStale=%13 cursorY=%14 contentY=%15 height=%16 rebuilds=%17 slide=%18")
+        return QString("t=%1 focus=%2 x=%3 off=%4 navY=%19 title=%20 notes=%5/%6 outline=%7/%8 shown=%9 noteX=%10 stale=%11 gap=%12 dimStale=%13 cursorY=%14 contentY=%15 height=%16 rebuilds=%17 slide=%18")
             .arg(f.t, 6, 'f', 1).arg(int(f.focus)).arg(f.columnX, 6, 'f', 1).arg(f.slide, 6, 'f', 1)
             .arg(int(f.notes)).arg(f.notesOpacity, 4, 'f', 2).arg(int(f.outline)).arg(f.outlineOpacity, 4, 'f', 2)
             .arg(f.shownNotes).arg(f.noteX, 6, 'f', 1).arg(f.stale, 5, 'f', 1).arg(f.shownNotes ? f.connectorGap : 0, 5, 'f', 1)
             .arg(int(f.dimStale)).arg(f.cursorY, 6, 'f', 1)
-            .arg(f.contentY, 7, 'f', 1).arg(f.contentHeight, 6, 'f', 0).arg(f.rebuilds).arg(int(f.sliding)).arg(f.navY, 5, 'f', 1) + (f.sync ? " (sync)" : "");
+            .arg(f.contentY, 7, 'f', 1).arg(f.contentHeight, 6, 'f', 0).arg(f.rebuilds).arg(int(f.sliding)).arg(f.navY, 5, 'f', 1).arg(f.titleY, 7, 'f', 1) + (f.sync ? " (sync)" : "");
     }
     // OMAWORD_FOCUS_TIMELINE=<dir>: focus-timeline-<name>.txt per transition.
     static void dump(const QString &name, const QList<Frame> &frames) {
@@ -351,6 +353,9 @@ class MarginsUiTest : public QObject
         QVERIFY2(std::abs(first.columnX - before.columnX) < 0.5, qPrintable("column jumped: " + where));
         QVERIFY2(std::abs(first.cursorY - before.cursorY) <= 1, qPrintable("cursor verse jumped: " + where));
         QVERIFY2(std::abs(first.navY - before.navY) < 0.5, qPrintable("chapter buttons jumped: " + where));
+        // The chapter title neither jumps nor turns back: it moves only as the text scrolls.
+        QVERIFY2(std::abs(first.titleY - before.titleY) <= 1, qPrintable(QString("chapter title jumped from %1: ").arg(before.titleY) + where));
+        const double titleDirection = last.titleY >= before.titleY ? 1 : -1;
         const double navDistance = std::abs(last.navY - before.navY), navDirection = last.navY > before.navY ? 1 : -1;
         QVERIFY(navDistance > 10);
         QCOMPARE(last.columnX, targetX);
@@ -363,6 +368,9 @@ class MarginsUiTest : public QObject
             QVERIFY2((f.columnX - p.columnX) * direction >= -0.01, qPrintable("column turned back: " + at));
             QVERIFY2(std::abs(f.columnX - p.columnX) <= 0.25 * distance + 0.5, qPrintable("column jumped: " + at));
             QVERIFY2((f.navY - p.navY) * navDirection >= -0.01 && std::abs(f.navY - p.navY) <= 0.25 * navDistance + 0.5, qPrintable("chapter buttons jumped: " + at));
+            // Across, they stay put (the scrollbar's room is kept as it hides).
+            QVERIFY2(std::abs(f.navX - before.navX) < 0.5, qPrintable(QString("next-chapter button moved across from %1: ").arg(before.navX) + at));
+            QVERIFY2((f.titleY - p.titleY) * titleDirection >= -0.5, qPrintable("chapter title turned back: " + at));
             if (i > 1) QVERIFY2(std::abs(f.cursorY + f.contentY - p.cursorY - p.contentY) <= 1, qPrintable("text reflowed under the cursor verse: " + at));
             if (entering && typewriterY >= 0) QVERIFY2((f.cursorY - p.cursorY) * (typewriterY - before.cursorY) >= -1, qPrintable("cursor verse turned back: " + at));
             if (!entering) QVERIFY2(std::abs(f.cursorY - before.cursorY) <= 1, qPrintable("cursor verse moved: " + at));
@@ -397,7 +405,7 @@ class MarginsUiTest : public QObject
             QVERIFY(first.notesOpacity == 0 || !first.notes);
         }
         if (rebuilds >= 0) QCOMPARE(last.rebuilds - before.rebuilds, rebuilds);
-        for (const char *name : {"marginSlide", "marginExit", "marginEnter", "chapterNavGlide", "readerSlide"})
+        for (const char *name : {"marginSlide", "marginExit", "marginEnter", "chapterNavGlide", "readerSlide", "titleSettle"})
             QVERIFY2(!object(name)->property("running").toBool(), name);
         QVERIFY(!prop("marginsLeaving").toBool());
     }
@@ -1210,6 +1218,8 @@ private slots:
             QVERIFY2(std::abs(top[1].cursorY - top[0].cursorY) <= 1, qPrintable(describe(top[1])));
             for (int i = 2; i < top.size(); ++i)
                 QVERIFY2(std::abs(top[i].cursorY + top[i].contentY - top[i - 1].cursorY - top[i - 1].contentY) <= 1, qPrintable(describe(top[i])));
+            // The chapter title stays where it is throughout.
+            for (const auto &f : top) QVERIFY2(std::abs(f.titleY - top[0].titleY) <= 1, qPrintable(QString("chapter title moved from %1: ").arg(top[0].titleY) + describe(f)));
             QCOMPARE(top.last().contentY, 0.0);
         }
         navigate("John 3:16"); QTRY_COMPARE(columnX(), shifted);

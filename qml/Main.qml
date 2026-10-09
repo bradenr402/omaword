@@ -748,6 +748,7 @@ ApplicationWindow {
         const anchor = readingAnchor()
         const atTop = reading.contentY <= 1
         const fromX = readerColumn.x
+        const titleFrom = chapterTitle.mapToItem(reading, 0, 0).y
         // The chapter buttons' centre, less the part the layout moves.
         const navFrom = chapterNavShift - floatingSafety / 2
         const marginsShown = marginFocusLevel > 0 && (marginSpace.notes.visible || outlineShown)
@@ -756,6 +757,10 @@ ApplicationWindow {
         else { focusLayout = false; marginsLeaving = false }
         settleReaderLayout()
         if (anchor) holdReadingAnchor(anchor)
+        // The chapter title stays where it was through the hold, then moves
+        // only as the reader's slide below scrolls it.
+        titleSettle.stop(); titleHold = 0
+        if (motion) { titleHold = titleFrom - chapterTitle.mapToItem(reading, 0, 0).y; if (titleHold) titleSettle.start() }
         // Shown margins move with the column; hidden ones appear where they settle.
         marginsAttached = motion && marginsShown
         marginSlide.stop()
@@ -2515,7 +2520,10 @@ ApplicationWindow {
     readonly property real chapterNavSize: 40 * controlScale
     readonly property real chapterNavEdge: 6 * controlScale
     readonly property real chapterNavReserve: chapterNavEdge + chapterNavSize + 6 * controlScale
-    readonly property real chapterNavScrollbar: readerScrollbar.visible ? readerScrollbar.width : 0
+    // The scrollbar's width is kept whether it shows or not (as the margins
+    // keep it), so the next-chapter button stays put as it comes and goes:
+    // in focus mode, or in a chapter short enough not to scroll.
+    readonly property real chapterNavScrollbar: readerScrollbar.width
     readonly property bool chapterNavFits: bible.ready && marginSpace.columnX >= chapterNavReserve
         && marginSpace.columnX + readerColumnWidth <= reading.width - chapterNavReserve - chapterNavScrollbar
     readonly property var chapterBounds: {
@@ -2615,6 +2623,12 @@ ApplicationWindow {
     NumberAnimation { id: marginExit; objectName: "marginExit"; target: app; property: "marginFocusLevel"; to: 0; duration: app.panelExitMs; easing.type: Easing.InQuad
         onFinished: { app.marginsLeaving = false; app.marginsAttached = false } }
     NumberAnimation { id: marginEnter; objectName: "marginEnter"; target: app; property: "marginFocusLevel"; to: 1; duration: app.marginSlideMs; easing.type: Easing.OutCubic }
+    // Focus mode's reflow holds the reading verse in place, which would move
+    // the chapter title above it by what changed between them (headings going
+    // or coming): it is held by as much (titleHold), let go with the reader's
+    // slide (its duration and easing), so it moves only as the text scrolls.
+    property real titleHold: 0
+    NumberAnimation { id: titleSettle; objectName: "titleSettle"; target: app; property: "titleHold"; to: 0; duration: app.slideMs; easing.type: Easing.OutCubic }
     // Focus mode drops the footer's room, re-centring the chapter buttons:
     // they glide there with the column.
     property real chapterNavShift: 0
@@ -2661,6 +2675,7 @@ ApplicationWindow {
         if (marginEnter.running) { marginEnter.stop(); marginFocusLevel = 1 }
         marginSlide.stop(); marginSlideOffset = 0; marginsAttached = false
         chapterNavGlide.stop(); chapterNavShift = 0
+        titleSettle.stop(); titleHold = 0
     }
     Connections {
         target: reading
@@ -5562,7 +5577,9 @@ ApplicationWindow {
                         spacing: 0
 
                         Label {
+                            id: chapterTitle
                             objectName: "chapterTitle"
+                            transform: Translate { y: app.titleHold }
                             opacity: app.focusDimmedOpacity
                             text: bible.passage
                             // Hover: the accent, as a link (a click opens the chapter list).
