@@ -373,6 +373,29 @@ private:
         QTRY_COMPARE(window->property("chromeDock").toDouble(), 0.0);
         QTRY_VERIFY(!object("marginSlide")->property("running").toBool());
     }
+    // An open peek lies inside the window, its hints across the card's whole
+    // width, each hint on one line at its own width (never squeezed).
+    void verifyPeekFits() {
+        auto card = object("peekCard"); QVERIFY(card);
+        QTRY_VERIFY(card->property("opened").toBool());
+        QCoreApplication::processEvents();
+        const double x = card->property("x").toDouble(), y = card->property("y").toDouble();
+        const double width = card->property("width").toDouble(), height = card->property("height").toDouble();
+        QVERIFY2(y >= 0 && y + height <= window->height(), qPrintable(QString("card %1 + %2 in %3").arg(y).arg(height).arg(window->height())));
+        QVERIFY(x >= 0 && x + width <= window->width());
+        auto hints = item("peekHints"); QVERIFY(hints);
+        QVERIFY2(hints->width() >= width - 2.5, qPrintable(QString("hints %1 wide in a card %2 wide").arg(hints->width()).arg(width)));
+        int parts = 0;
+        for (auto part : hints->childItems()) {
+            if (!part->objectName().startsWith("peekHintsPart:")) continue;
+            ++parts;
+            QVERIFY2(qAbs(part->width() - part->implicitWidth()) < 0.5, qPrintable(part->objectName()));
+            QVERIFY(part->y() + part->height() <= hints->height() + 0.5);
+            for (auto label : part->childItems())
+                if (label->metaObject()->indexOfProperty("lineCount") >= 0) QCOMPARE(label->property("lineCount").toInt(), 1);
+        }
+        QVERIFY(parts >= 3);
+    }
     QObject *panel() const {
         for (auto *obj : window->findChildren<QObject *>()) if (obj->property("studyRows").isValid()) return obj;
         return nullptr;
@@ -397,6 +420,7 @@ private slots:
         QCOMPARE(object("peekRowText:0")->property("text").toString(), QString("Another edition."));
         QVERIFY(object("peekRowText:1")->property("text").toString().startsWith("In the beginning was the Word."));
         QVERIFY(card->property("y").toDouble() > anchor.y()); // Under the passage, not over it.
+        verifyPeekFits();
         // It starts on the other version; k and j step, never past the ends.
         QCOMPARE(card->property("currentRow").toInt(), 1);
         key(Qt::Key_K); QCOMPARE(card->property("currentRow").toInt(), 0);
@@ -447,6 +471,19 @@ private slots:
         QVERIFY(missing >= 0);
         card->setProperty("currentRow", missing); window->setProperty("compareRow", missing);
         key(Qt::Key_Y); QVERIFY(card->property("opened").toBool()); QVERIFY(object("toast")->property("text").toString().startsWith("Not in "));
+        key(Qt::Key_Escape); QTRY_VERIFY(!card->property("visible").toBool());
+        // A selection below the view: the card opens over the bottom of the
+        // passage instead, all of it in the window once its rows are laid out.
+        bible->selectVerses(36, 36); call("readerFocus"); key(Qt::Key_C);
+        verifyPeekFits();
+        QVERIFY(card->property("y").toDouble() + card->property("height").toDouble() < window->height() - 24);
+        key(Qt::Key_Escape); QTRY_VERIFY(!card->property("visible").toBool());
+        // Hints squeezed to nothing once (as a reader's screenshot showed them,
+        // a column of single letters) take the card's width again.
+        call("readerFocus"); key(Qt::Key_C); QTRY_VERIFY(card->property("opened").toBool());
+        item("peekHints")->setWidth(1);
+        QTRY_VERIFY(item("peekHints")->width() > 400);
+        verifyPeekFits();
         key(Qt::Key_Escape); QTRY_VERIFY(!card->property("visible").toBool());
         // Without a selection there is nothing to compare: c says why.
         bible->clearSelection(); call("readerFocus"); key(Qt::Key_C);
@@ -619,6 +656,7 @@ private slots:
             QCOMPARE(object("peekBody")->property("text").toString(), QString("Or only begotten"));
             QCOMPARE(object("peekTitle")->property("text").toString(), QString("Footnote b · John 3:16 · 3 of 3"));
             QVERIFY(peek->property("y").toDouble() > mark.y());
+            verifyPeekFits();
             QCOMPARE(bible->selectedStart(), 0); // A peek moves nothing.
             QVERIFY(!studyOpen());
             // ↑ steps to the previous note; y copies it and closes.

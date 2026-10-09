@@ -36,16 +36,25 @@ Popup {
     padding: 0
     width: Math.min((rows.length ? 520 : 420) * uiScale, (parent ? parent.width : 420) - 16)
 
-    // Below the anchor's scene point, or above it, kept inside the window.
+    // The anchor's line height: the card opens under that line.
+    property real anchorLine: 0
     function show(sceneX, sceneY, lineHeight) {
         origin = Qt.point(sceneX, sceneY)
+        anchorLine = lineHeight || 0
         open()
+        place()
+    }
+    // Below the anchor's scene point, or above it, kept inside the window;
+    // placed again as its size settles (Compare's rows lay out after it opens).
+    function place() {
         const area = parent as Item
         const gap = 6 * uiScale
-        const below = sceneY + (lineHeight || 0) + gap
-        x = Math.round(Math.max(8, Math.min(sceneX - 12 * uiScale, area.width - width - 8)))
-        y = Math.round(below + height <= area.height - 8 ? below : Math.max(8, sceneY - height - gap))
+        const below = origin.y + anchorLine + gap
+        x = Math.round(Math.max(8, Math.min(origin.x - 12 * uiScale, area.width - width - 8)))
+        y = Math.round(below + height <= area.height - 8 ? below : Math.max(8, origin.y - height - gap))
     }
+    onWidthChanged: if (visible) place()
+    onHeightChanged: if (visible) place()
 
     background: Rectangle {
         color: card.theme.background
@@ -160,6 +169,9 @@ Popup {
             pixelSize: 12 * card.uiScale
             partHeight: 30 * card.uiScale
             partPadding: 10 * card.uiScale
+            // Its width comes from the card: a Flow sized to its own implicit
+            // width keeps any narrower width it was once given.
+            Layout.fillWidth: true
             Layout.margins: 1
         }
     }
