@@ -176,8 +176,6 @@ Button {
                     ctx.moveTo(15.4, 3); ctx.lineTo(21.4, 5.6); ctx.lineTo(18.2, 9.2); ctx.closePath()
                     ctx.fill()
                     ctx.beginPath()
-                } else if (glyph.startsWith("layout-")) {
-                    floatingButton.controller.paintLayoutGlyph(ctx, glyph.slice(7))
                 } else if (glyph === "study") {
                     // See also: a link, two open loops joined by a bar, on the
                     // diagonal (scaled to keep its corners inside the box).

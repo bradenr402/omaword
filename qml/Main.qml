@@ -5275,13 +5275,6 @@ ApplicationWindow {
     component SettingSwitch: Shared.SettingSwitch { controller: app; theme: desktop; backend: bible }
     component SquareSlider: Shared.SquareSlider { controller: app; theme: desktop }
     component FloatingButton: Shared.FloatingButton { controller: app; theme: desktop }
-    component NoteGlyph: AnnotationGlyph {
-        kind: "note"
-        implicitWidth: 14 * app.scale
-        implicitHeight: 16 * app.scale
-        width: implicitWidth; height: implicitHeight
-        ink: desktop.accent
-    }
     component RangeMarker: Shared.RangeMarker { controller: app; theme: desktop; backend: bible; rangeMenu: verseTagMenu }
     component SectionLabel: SectionTitle { theme: desktop; uiScale: app.scale }
     component SidePanelHeader: Shared.SidePanelHeader { controller: app; theme: desktop }
