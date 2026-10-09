@@ -1691,6 +1691,37 @@ private slots:
         for (int i = 1; i <= 6; ++i) QTest::mouseMove(window, from + (to - from) * i / 6);
         QTest::mouseRelease(window, Qt::LeftButton, {}, to);
         QTRY_VERIFY(bible->fontSize() > 30);
+        key(Qt::Key_0, Qt::ControlModifier); QCOMPARE(bible->fontSize(), 18);
+        // Mouse: − left of each slider and + right of it step it, with their
+        // keys in the tooltip; at an end, that end's button is disabled. They
+        // are not tab stops (the slider's arrows and ctrl - / = do the same).
+        struct Step { const char *slider, *decrease, *increase, *less, *more; };
+        for (const Step &step : {Step{"fontSizeSlider", "fontSizeDecrease", "fontSizeIncrease", "ctrl -", "ctrl ="},
+                 Step{"lineHeightSlider", "lineHeightDecrease", "lineHeightIncrease", "ctrl alt -", "ctrl alt ="}}) {
+            auto slider = item(step.slider), less = item(step.decrease), more = item(step.increase);
+            QVERIFY2(less && more && less->isVisible() && more->isVisible(), step.slider);
+            const auto box = [](QQuickItem *target) { return target->mapRectToScene(QRectF(0, 0, target->width(), target->height())); };
+            QVERIFY(box(less).right() <= box(slider).left()); QVERIFY(box(more).left() >= box(slider).right());
+            QVERIFY(qAbs(box(less).center().y() - box(slider).center().y()) <= 1);
+            QCOMPARE(less->property("tip").toString(), QString("Decrease · ") + step.less);
+            QCOMPARE(more->property("tip").toString(), QString("Increase · ") + step.more);
+            QCOMPARE(less->property("focusPolicy").toInt(), int(Qt::NoFocus));
+            const double before = slider->property("value").toDouble();
+            // In view (the dialog scrolls): the slider, in the same row, focused and revealed.
+            slider->forceActiveFocus();
+            QVERIFY(QMetaObject::invokeMethod(window, "revealFocus", Q_ARG(QVariant, QVariant::fromValue<QObject *>(item("settingsScroll")->property("contentItem").value<QObject *>()))));
+            QVERIFY(QQuickTest::qWaitForPolish(window));
+            QTRY_VERIFY(QRectF(QPointF(), QSizeF(window->size())).contains(box(more)));
+            click(more); QTRY_VERIFY(slider->property("value").toDouble() > before);
+            click(less); QTRY_COMPARE(slider->property("value").toDouble(), before);
+            QTRY_VERIFY(opened("settingsDialog"));
+            slider->setProperty("value", slider->property("to")); QMetaObject::invokeMethod(slider, "moved");
+            QTRY_VERIFY(!more->isEnabled()); QVERIFY(less->isEnabled());
+            slider->setProperty("value", slider->property("from")); QMetaObject::invokeMethod(slider, "moved");
+            QTRY_VERIFY(!less->isEnabled()); QVERIFY(more->isEnabled());
+            key(Qt::Key_0, Qt::ControlModifier); key(Qt::Key_0, Qt::ControlModifier | Qt::AltModifier);
+            QCOMPARE(bible->fontSize(), 18); QCOMPARE(bible->lineHeight(), 1.5);
+        }
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
     }
     void versionsBackspaceStepsBack() {

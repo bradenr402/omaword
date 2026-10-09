@@ -5274,6 +5274,18 @@ ApplicationWindow {
     component KeyScrollView: Shared.KeyScrollView { controller: app; theme: desktop }
     component SettingSwitch: Shared.SettingSwitch { controller: app; theme: desktop; backend: bible }
     component SquareSlider: Shared.SquareSlider { controller: app; theme: desktop }
+    // A step beside a Reading settings slider: − or + runs its action. Not a
+    // tab stop: the slider's arrows and the actions' keys do the same by key.
+    component SliderStep: QuietButton {
+        property string command
+        property string name
+        compact: true
+        focusPolicy: Qt.NoFocus
+        keys: app.keyText(command)
+        tip: (glyph === "minus" ? "Decrease" : "Increase") + " · " + keys
+        Accessible.name: (glyph === "minus" ? "Decrease " : "Increase ") + name
+        onClicked: app.runCommand(command)
+    }
     component FloatingButton: Shared.FloatingButton { controller: app; theme: desktop }
     component RangeMarker: Shared.RangeMarker { controller: app; theme: desktop; backend: bible; rangeMenu: verseTagMenu }
     component SectionLabel: SectionTitle { theme: desktop; uiScale: app.scale }
@@ -8705,15 +8717,29 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 Label { objectName: "fontSizeValue"; text: bible.fontSize; color: desktop.accent; font.pixelSize: 14 * app.scale }
             }
-            SquareSlider {
-                id: fontSizeSliderItem
-                objectName: "fontSizeSlider"
+            RowLayout {
                 Layout.fillWidth: true
-                from: 8; to: 40; stepSize: 1
-                snapMode: Slider.SnapAlways
-                value: bible.fontSize
-                onMoved: bible.setFontSize(Math.round(value))
-                Accessible.name: "Text size"
+                spacing: 4 * app.scale
+                SliderStep {
+                    objectName: "fontSizeDecrease"
+                    glyph: "minus"; command: "smaller"; name: "text size"
+                    enabled: app.actionAvailable(command) && bible.fontSize > fontSizeSliderItem.from
+                }
+                SquareSlider {
+                    id: fontSizeSliderItem
+                    objectName: "fontSizeSlider"
+                    Layout.fillWidth: true
+                    from: 8; to: 40; stepSize: 1
+                    snapMode: Slider.SnapAlways
+                    value: bible.fontSize
+                    onMoved: bible.setFontSize(Math.round(value))
+                    Accessible.name: "Text size"
+                }
+                SliderStep {
+                    objectName: "fontSizeIncrease"
+                    glyph: "plus"; command: "larger"; name: "text size"
+                    enabled: app.actionAvailable(command) && bible.fontSize < fontSizeSliderItem.to
+                }
             }
             HintRow {
                 objectName: "fontSizeHints"
@@ -8732,15 +8758,29 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 Label { objectName: "lineHeightValue"; text: bible.lineHeight.toFixed(1); color: desktop.accent; font.pixelSize: 14 * app.scale }
             }
-            SquareSlider {
-                id: lineHeightSlider
-                objectName: "lineHeightSlider"
+            RowLayout {
                 Layout.fillWidth: true
-                from: 1; to: 3; stepSize: 0.1
-                snapMode: Slider.SnapAlways
-                value: bible.lineHeight
-                onMoved: bible.setLineHeight(Math.round(value * 10) / 10)
-                Accessible.name: "Line height"
+                spacing: 4 * app.scale
+                SliderStep {
+                    objectName: "lineHeightDecrease"
+                    glyph: "minus"; command: "lineLess"; name: "line height"
+                    enabled: app.actionAvailable(command) && bible.lineHeight > lineHeightSlider.from
+                }
+                SquareSlider {
+                    id: lineHeightSlider
+                    objectName: "lineHeightSlider"
+                    Layout.fillWidth: true
+                    from: 1; to: 3; stepSize: 0.1
+                    snapMode: Slider.SnapAlways
+                    value: bible.lineHeight
+                    onMoved: bible.setLineHeight(Math.round(value * 10) / 10)
+                    Accessible.name: "Line height"
+                }
+                SliderStep {
+                    objectName: "lineHeightIncrease"
+                    glyph: "plus"; command: "lineMore"; name: "line height"
+                    enabled: app.actionAvailable(command) && bible.lineHeight < lineHeightSlider.to
+                }
             }
             HintRow {
                 objectName: "lineHeightHints"
