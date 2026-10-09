@@ -542,16 +542,21 @@ private slots:
         QVERIFY(bar.y() + item("selectionBar")->height() <= versePoint(3).y() + 2);
         QCOMPARE(object("selectionBarHints")->property("plainText").toString(),
                  QString::fromUtf8("x highlight    w note    t tag    y copy    ⋯"));
-        // Its actions are buttons the bar's full height, edge to edge.
+        // Its actions are buttons the bar's full height, edge to edge (once
+        // its row has laid them out: a new selection makes them afresh).
         const QStringList labels{"highlight", "note", "tag", "copy", QString::fromUtf8("⋯")};
         const double inner = item("selectionBar")->height() - 2;
-        for (int i = 0; i < labels.size(); ++i) {
-            auto button = item("selectionBarHintsPart:" + labels[i]); QVERIFY(button);
-            QCOMPARE(button->height(), inner);
-            if (i) {
-                auto previous = item("selectionBarHintsPart:" + labels[i - 1]);
-                QCOMPARE(button->x(), previous->x() + previous->width());
+        const auto edgeToEdge = [&] {
+            for (int i = 1; i < labels.size(); ++i) {
+                auto button = item("selectionBarHintsPart:" + labels[i]), previous = item("selectionBarHintsPart:" + labels[i - 1]);
+                if (!button || !previous || qAbs(button->x() - (previous->x() + previous->width())) > 0.01) return false;
             }
+            return true;
+        };
+        QTRY_VERIFY(edgeToEdge());
+        for (const auto &label : labels) {
+            auto button = item("selectionBarHintsPart:" + label); QVERIFY(button);
+            QCOMPARE(button->height(), inner);
         }
         // Its parts act on the selection and stay up.
         QQuickItem *part = item("selectionBarHintsPart:highlight");
