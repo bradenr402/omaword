@@ -12,6 +12,7 @@
 #include <QQuickStyle>
 #include <QQuickTextDocument>
 #include <QQuickWindow>
+#include <QRegularExpression>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -216,6 +217,8 @@ private slots:
         archive_entry_free(entry); QVERIFY(archive_write_close(zip) == ARCHIVE_OK); archive_write_free(zip);
     }
     void init() {
+        // A position past a verse's text (a stale footnote marker) is a bug, not noise.
+        QTest::failOnWarning(QRegularExpression("QTextCursor::setPosition"));
         session = std::make_unique<QTemporaryDir>(); qputenv("XDG_DATA_HOME", session->path().toUtf8());
         bible = std::make_unique<BibleBackend>(); install(source); bible->setReadingMode("verse");
         if (QByteArray(QTest::currentTestFunction()).startsWith("reimport") || QByteArray(QTest::currentTestFunction()) == "wordsOfJesusUnsupported") {

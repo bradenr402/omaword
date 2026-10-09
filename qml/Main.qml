@@ -5756,8 +5756,12 @@ ApplicationWindow {
                                         id: footnoteMarker
                                         required property var modelData
                                         objectName: "verseFootnoteMark:" + verseRow.modelData.number + "." + modelData.seq
-                                        readonly property rect cell: verseBody.width > 0 && verseBody.contentHeight > 0
-                                            ? verseBody.positionToRectangle(app.footnoteCellPosition(verseRow.modelData.footnotes, modelData)) : Qt.rect(0, 0, 0, 0)
+                                        // When the chapter or version changes, a row reads its new
+                                        // verse a moment before its old markers go: their cells
+                                        // may lie past the new text, so they take no place.
+                                        readonly property int at: app.footnoteCellPosition(verseRow.modelData.footnotes, modelData)
+                                        readonly property rect cell: verseBody.width > 0 && verseBody.contentHeight > 0 && at <= verseBody.length
+                                            ? verseBody.positionToRectangle(at) : Qt.rect(0, 0, 0, 0)
                                         x: verseBody.x + cell.x
                                         y: verseBody.y + cell.y
                                         width: app.footnoteCellWidth
