@@ -536,7 +536,8 @@ files.
 ### LTR forcing
 - All Scripture layouts are LTR even when a paragraph begins in Hebrew:
   `SearchGeometry::forceLeftToRight` pins every block; plain `Text` gets a
-  display-only LRM per line (`leftToRightText` in Main). Never copied. The
+  display-only LRM per line (`leftToRightText` in Main; the chapter outline's
+  entries alike). Never copied. The
   Desk page is the reader's own Markdown, like a note: not pinned.
 
 ## Reader rendering

@@ -506,6 +506,27 @@ private slots:
             expectLeftToRight(body, word, "Blessed");
             expectLeftToRight(body, QString::fromUtf8("\u05d1 Beth begins"), "Beth begins");
         }
+        // The chapter outline lists it left to right too: the letter first, at
+        // the entry's left edge, as the reader shows the heading.
+        const QSize size = window->size();
+        window->resize(1600, size.height()); bible->setChapterOutline(true);
+        QTRY_VERIFY(item("outlineEntryText:1") && item("outlineEntryText:1")->isVisible());
+        {
+            auto entry = item("outlineEntryText:1");
+            const auto shown = entry->property("text").toString();
+            QVERIFY(!shown.isRightToLeft()); QCOMPARE(QString(shown).remove(QChar(0x200e)), aleph + " Aleph");
+            QCOMPARE(entry->property("effectiveHorizontalAlignment").toInt(), int(Qt::AlignLeft));
+            QTest::qWait(50);
+            auto grab = entry->grabToImage(); QVERIFY(grab);
+            QTRY_VERIFY(!grab->image().isNull());
+            const auto image = grab->image();
+            int left = image.width(), right = -1;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    if (image.pixelColor(x, y).alpha() > 60) { left = qMin(left, x); right = qMax(right, x); }
+            QVERIFY2(left < 4 && right < image.width() * 0.75, qPrintable(QString("ink %1..%2 of %3").arg(left).arg(right).arg(image.width())));
+        }
+        bible->setChapterOutline(false); window->resize(size);
         // Copy output is unchanged: no direction marks.
         QGuiApplication::clipboard()->clear(); key(Qt::Key_Y);
         QTRY_VERIFY(QGuiApplication::clipboard()->text().contains(word + " Blessed"));

@@ -181,10 +181,14 @@ Item {
                     }
                     Text {
                         id: label
+                        objectName: "outlineEntryText:" + entry.verse
                         x: 10 * root.uiScale
                         y: 5 * root.uiScale
                         width: parent.width - x
-                        text: entry.modelData.text
+                        // An LRM keeps a Hebrew-first heading ("א Aleph") in an
+                        // LTR paragraph, as the reader shows it; display only.
+                        text: entry.modelData.text.split("\n").map(function(line) { return "\u200E" + line }).join("\n")
+                        horizontalAlignment: Text.AlignLeft
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
                         font.family: root.theme.fontFamily
