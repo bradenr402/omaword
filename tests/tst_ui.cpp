@@ -2196,6 +2196,43 @@ private slots:
             for (const auto action : {Qt::Key_X,Qt::Key_Y})
                 QTest::newRow(qPrintable(mode + QString::number(action))) << mode << action;
     }
+    // m selects the whole mark the selection sits in: the smallest one
+    // holding it and more (highlight, note, or tag range), again the next
+    // larger; it says why where there is none.
+    void selectMarkAroundTheSelection() {
+        reference("John 3:1");
+        bible->selectVerses(1, 5); QVERIFY(bible->toggleHighlight());
+        bible->selectVerses(2, 3); bible->setNoteText("A note on two verses");
+        bible->selectVerses(1, 10); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Ten").isEmpty());
+        bible->selectVerses(3, 3); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        QCoreApplication::processEvents();
+        key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:2–3"));
+        QCOMPARE(prop("toast","text").toString(), QString::fromUtf8("Selected John 3:2–3"));
+        QCOMPARE(bible->noteText(), QString("A note on two verses"));
+        key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:1–5"));
+        QVERIFY(bible->selectionHighlighted());
+        key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:1–10"));
+        QCOMPARE(bible->cursorVerse(), 10);
+        // j goes on from its end.
+        key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:1–10"));
+        QCOMPARE(prop("toast","text").toString(), QString("The selection is the whole mark"));
+        key(Qt::Key_J); QCOMPARE(bible->selectionReference(), QString("John 3:11"));
+        key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString("John 3:11"));
+        QCOMPARE(prop("toast","text").toString(), QString("No mark around the selection"));
+        // A selection reaching past a mark's edge is not inside it.
+        bible->selectVerses(4, 7); key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:1–10"));
+        // Commands has it too; with nothing selected it says what to do.
+        bible->clearSelection(); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        key(Qt::Key_M); QCOMPARE(prop("toast","text").toString(), QString("Select a verse in a mark first"));
+        bible->selectVerses(2, 2);
+        QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QString("selectMark"))));
+        QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:2–3"));
+        // A mark across chapters is selected whole, from either one.
+        reference("John 3:36-4:2"); bible->setNoteText("Across the chapters");
+        reference("John 4:1"); QCOMPARE(bible->selectionReference(), QString("John 4:1"));
+        key(Qt::Key_M); QTRY_COMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
+        QCOMPARE(bible->chapter(), 4); QCOMPARE(bible->noteText(), QString("Across the chapters"));
+    }
     void visualActionsCompleteFullRange() {
         QFETCH(QString,mode); QFETCH(Qt::Key,action);
         bible->setReadingMode(mode);

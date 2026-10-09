@@ -2338,6 +2338,7 @@ ApplicationWindow {
         if (bible.busy) return "Wait for the import to finish"
         if (["highlight", "tags", "toggleDesk", "notes", "copy", "copyPlain", "compare", "peek"].includes(action.id) && !hasSelection)
             return "Select a verse first"
+        if (action.id === "selectMark" && !hasSelection) return "Select a verse in a mark first"
         if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen && !deskOpen)
             return "Open a note first · " + keyText("notes")
         if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
@@ -3141,6 +3142,23 @@ ApplicationWindow {
             app.restoringPosition = false
             app.savePosition()
         })
+    }
+    // m: the whole mark the selection sits in (bible.markAround), so its
+    // passage can be copied, noted, or tagged at once; again, the next larger.
+    function selectMarkAround() {
+        const mark = bible.markAround()
+        if (!mark.reference) { rejected(mark.reason); return }
+        if (!flushNote()) return
+        pendingActionCollapse = null
+        clearTextSelection()
+        const here = [mark.book, mark.endBook].every(function(book) { return book === bible.book })
+            && [mark.chapter, mark.endChapter].every(function(chapter) { return chapter === bible.chapter })
+        if (here) {
+            selectionAnchor = mark.start
+            bible.selectVerses(mark.start, mark.end)
+        } else if (!bible.restoreSelection(mark, false, -1)) { rejected(); return }
+        syncNote()
+        notify("Selected " + mark.reference, true)
     }
     function setVisualMode(enabled) {
         clearCount()
@@ -4303,6 +4321,8 @@ ApplicationWindow {
         { id: "charExit", group: "Select", title: "Characters: leave", sequences: ["Escape"], scope: "characters", explanation: true },
         { id: "extendNext", group: "Select", title: "Extend to next verse", sequences: ["Shift+J", "Shift+Down"] },
         { id: "extendPrevious", group: "Select", title: "Extend to previous verse", sequences: ["Shift+K", "Shift+Up"] },
+        // The smallest highlight, note, or tag range around the selection; again, the next larger.
+        { id: "selectMark", group: "Select", title: "Select the whole mark around the selection", sequences: ["M"], command: true },
         { id: "chapterFind", group: "Search", title: "Find in chapter", sequences: ["/"], command: true },
         { id: "nextMatch", group: "Search", title: "Next search match", sequences: ["N"] },
         { id: "previousMatch", group: "Search", title: "Previous search match", sequences: ["Shift+N"] },
@@ -4635,7 +4655,7 @@ ApplicationWindow {
         if (!action || action.explanation || bible.busy) return false
         if (action.id === "copyText" || action.id === "copyTextPlain") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
-        if (["highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
+        if (["highlight", "tags", "toggleDesk", "selectMark"].includes(action.id)) return hasSelection
         if (action.id === "compare") return hasSelection && bible.versions.length > 1
         if (action.id === "openBeside") return bible.ready && bible.versions.length > 1
         if (action.id === "switchPane") return bible.ready && sidePanel.length > 0
@@ -5124,6 +5144,7 @@ ApplicationWindow {
         case "placeRibbon": placeRibbon(); break
         case "ribbon": openRibbon(); break
         case "removeRibbon": removeRibbon(); break
+        case "selectMark": selectMarkAround(); break
         case "clearHistory": requestClearHistory(); break
         case "unfollow": unfollowRequested(); notify("Stopped following the window beside", true); break
         case "toggleHistory": toggleHistoryEnabled(); break

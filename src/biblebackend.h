@@ -374,6 +374,11 @@ public:
     // available is false where a version lacks an endpoint (its numbering
     // differs, or it has no such book).
     Q_INVOKABLE QVariantList compareVersions(QVariantMap scope = QVariantMap()) const;
+    // The smallest mark (highlight, note, or tag range) in this version that
+    // holds the whole selection and more: its scope {versionId, reference,
+    // book, chapter, start, endBook, endChapter, end}, or {reason} why there
+    // is none (no selection, no mark around it, or it is the whole mark).
+    Q_INVOKABLE QVariantMap markAround() const;
     Q_INVOKABLE QVariantList chapterVerses(int book, int chapter) const;
     // Chapter reads from the text database (tests: the next one is read ahead).
     Q_INVOKABLE int chapterReads() const { return m_chapterReads; }

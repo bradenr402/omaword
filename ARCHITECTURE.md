@@ -161,6 +161,11 @@ files.
   leaving the parts of those rows outside it. Notes keep their own exact
   ranges: a shared row only gains or loses its highlight flag. Older
   overlapping highlight rows elsewhere are left as they are.
+- `m` (`markAround`): the smallest mark of this version (an annotation row
+  with a highlight or note, or a tag assignment's range) that holds the whole
+  selection and more; so pressed again, the next larger. Selected in place
+  (`selectVerses`) within the chapter, through `restoreSelection` across
+  chapters; otherwise its `reason` (none around it, or the selection is it).
 - Tables: `annotations` (highlight + note per exact range), `reading` (per
   `version_id`); `tags(id,name,name_key)`;
   `tag_assignments` (PK version + both endpoints + tag); `desk_page` (the

@@ -1303,6 +1303,31 @@ QVariantList BibleBackend::compareVersions(QVariantMap scope) const
     return rows;
 }
 
+QVariantMap BibleBackend::markAround() const
+{
+    if (!m_ready || !m_anchor || !m_cursor) return {{"reason","Select a verse in a mark first"}};
+    const int low = std::min(m_anchor,m_cursor), high = std::max(m_anchor,m_cursor);
+    QVector<QPair<int,int>> marks;
+    for (const auto &a : m_annotations) if (a.highlight || !a.note.isEmpty()) marks.append({a.start,a.end});
+    for (const auto &value : tagRangeRows(m_versionId,false)) {
+        const auto range = value.toMap();
+        const int a = absoluteVerse(range.value("book").toInt(),range.value("chapter").toInt(),range.value("start").toInt());
+        const int z = absoluteVerse(range.value("endBook").toInt(),range.value("endChapter").toInt(),range.value("end").toInt());
+        if (a && z >= a) marks.append({a,z});
+    }
+    bool around = false;
+    int first = 0, last = 0;
+    for (const auto &[a, z] : marks) {
+        if (a > low || z < high) continue;
+        around = true;
+        if (z - a > high - low && (!first || z - a < last - first)) { first = a; last = z; }
+    }
+    if (!first) return {{"reason",around ? "The selection is the whole mark" : "No mark around the selection"}};
+    const auto a = endpoint(first), z = endpoint(last);
+    return {{"versionId",m_versionId},{"reference",rangeReference(first,last)},{"book",a.book},{"chapter",a.chapter},
+            {"start",a.verse},{"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse}};
+}
+
 QVariantMap BibleBackend::currentLocation() const
 {
     if (!m_ready) return {};
