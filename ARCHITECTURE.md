@@ -374,6 +374,10 @@ files.
   missing), and its scroll once the chapter is laid out (`followRestored`).
   Each window shows the other's version (`followPartner`, kept current on
   version changes); closing either, or `unfollow`, unlinks both.
+- QML asks for it with `besideRequested(versionId)`: from Versions opened to
+  choose (`openBeside`, `shift C`, `versionDialog.beside`, where `enter`
+  opens beside), `ctrl enter` on a Versions row, `o` in the Compare card,
+  and the version button's right-click menu (with Stop following).
 
 ### Search
 - The active version, or every installed version (`searchAllVersions`, a

@@ -490,6 +490,66 @@ private slots:
         QVERIFY(!card->property("visible").toBool());
         QCOMPARE(object("toast")->property("text").toString(), QString("Select a verse first"));
     }
+    // Open beside: shift C (Commands, the version button's menu) opens Versions
+    // to choose a version for a window beside this one; enter opens it there.
+    // In Versions itself, ctrl enter opens the highlighted one beside.
+    void openBesideFromVersions() {
+        // With one version there is nothing to read beside: shift C says so.
+        call("readerFocus"); key(Qt::Key_C, Qt::ShiftModifier);
+        QVERIFY(!object("versionDialog")->property("visible").toBool());
+        QCOMPARE(object("toast")->property("text").toString(), QString("Add another version to read beside"));
+        install(other);
+        const QString here = bible->versionAbbreviation();
+        QSignalSpy beside(window, SIGNAL(besideRequested(QString)));
+        navigate("John 1:1"); key(Qt::Key_C, Qt::ShiftModifier);
+        auto dialog = object("versionDialog"); auto list = object("versionResults");
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(object("versionTitle")->property("text").toString(), QString("Open beside · John 1:1"));
+        QVERIFY(object("versionHints")->property("plainText").toString().contains("enter open beside"));
+        const auto rows = value(list->property("model")).toList();
+        int active = -1, inactive = -1;
+        for (int i = 0; i < rows.size(); ++i) (rows[i].toMap()["active"].toBool() ? active : inactive) = i;
+        QVERIFY(active >= 0 && inactive >= 0);
+        const QString besideId = rows[inactive].toMap()["id"].toString();
+        // It starts on a version not read here; the one read here says so.
+        QCOMPARE(list->property("currentIndex").toInt(), inactive);
+        list->setProperty("currentIndex", active); key(Qt::Key_Return);
+        QCOMPARE(object("toast")->property("text").toString(), "Already reading " + here + " here");
+        QVERIFY(dialog->property("visible").toBool()); QCOMPARE(beside.count(), 0);
+        list->setProperty("currentIndex", inactive); key(Qt::Key_Return);
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(beside.count(), 1); QCOMPARE(beside.last().first().toString(), besideId);
+        // Versions (ctrl v): enter switches, ctrl enter opens beside.
+        key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(object("versionTitle")->property("text").toString(), QString("Versions · John 1:1"));
+        list->setProperty("currentIndex", inactive);
+        QVERIFY(object("versionHints")->property("plainText").toString().contains("ctrl enter beside"));
+        key(Qt::Key_Return, Qt::ControlModifier); QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(beside.count(), 2); QCOMPARE(bible->versionAbbreviation(), here);
+        // The version button's menu: switch, open beside, and stop following while following.
+        call("readerFocus");
+        auto button = item("versionControl"); auto menu = object("contextMenu");
+        const auto rightClick = [&] {
+            QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+            QTRY_VERIFY(menu->property("visible").toBool());
+        };
+        const auto ids = [&] {
+            QStringList list;
+            for (const auto &entry : value(menu->property("layout")).toList()) list << entry.toMap()["id"].toString();
+            return list;
+        };
+        rightClick(); QCOMPARE(ids(), QStringList({"switch", "beside"}));
+        QVERIFY(QMetaObject::invokeMethod(menu, "triggerId", Q_ARG(QVariant, QString("beside"))));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(object("versionTitle")->property("text").toString(), QString("Open beside · John 1:1"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!dialog->property("visible").toBool());
+        window->setProperty("followPartner", "KJV"); call("readerFocus");
+        rightClick(); QCOMPARE(ids(), QStringList({"switch", "beside", "unfollow"}));
+        QCOMPARE(value(menu->property("layout")).toList().last().toMap()["text"].toString(), QString("Stop following KJV"));
+        QSignalSpy unfollow(window, SIGNAL(unfollowRequested()));
+        QVERIFY(QMetaObject::invokeMethod(menu, "triggerId", Q_ARG(QVariant, QString("unfollow"))));
+        QTRY_COMPARE(unfollow.count(), 1);
+    }
     void studyOpensWithoutSelection() {
         // A freshly opened chapter has no selection; Study studies its first verse.
         for (int via = 0; via < 2; ++via) {

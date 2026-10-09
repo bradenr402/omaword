@@ -2333,7 +2333,8 @@ ApplicationWindow {
         if (action.id === "peek" && hasSelection) return "No footnotes on " + bible.passage + ":" + bible.cursorVerse
         if (action.id === "undo" && !bible.canUndo) return "Nothing to undo"
         if (action.id === "redo" && !bible.canRedo) return "Nothing to redo"
-        if (action.id === "unfollow" && !following) return "No window follows this one · Open beside, from Compare (" + keyText("compare") + ") or Versions"
+        if (action.id === "openBeside" && bible.ready && bible.versions.length < 2) return "Add another version to read beside"
+        if (action.id === "unfollow" && !following) return "No window follows this one · " + keyText("openBeside") + " opens a version beside it"
         if (action.id === "ribbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon yet · " + keyText("placeRibbon") + " places it"
         if (!bible.ready) return "Add a Bible version first"
         return ""
@@ -3956,6 +3957,7 @@ ApplicationWindow {
         if (bible.busy || !flushNote()) return false
         clearCount()
         versionDialog.removing = !!removing
+        versionDialog.beside = false
         versionDialog.step = 0
         versionDialog.chosen = null
         versionDialog.removeAnnotations = false
@@ -3968,6 +3970,19 @@ ApplicationWindow {
         versionResults.currentIndex = 0
         versionDialog.open()
         return true
+    }
+    // Versions to choose one to read beside this window (shift C), on the
+    // first version not read here; enter opens it in a window beside.
+    function openBesideVersions() {
+        if (!openVersions(false)) return
+        versionDialog.beside = true
+        versionResults.currentIndex = Math.max(0, versionEntries().findIndex(function(entry) { return !entry.active }))
+    }
+    // The version in a window beside this one, the two following each other.
+    function openVersionBeside(entry) {
+        if (!entry || entry.active) { rejected(entry ? "Already reading " + (entry.abbreviation || entry.name) + " here" : ""); return }
+        versionDialog.close()
+        openBeside(entry.id)
     }
     function copyComparedVersion(plainText) {
         const entry = versionResults.model[versionResults.currentIndex]
@@ -3989,8 +4004,8 @@ ApplicationWindow {
         contextMenu.show("version", [
             { id: "switch", text: entry.active ? "Current version" : "Switch to " + (entry.abbreviation || entry.name), shortcut: KeyNotation.format("Return"),
                 enabled: ready && !entry.active, run: function() { app.switchVersion(entry.id) } },
-            entry.active ? null : { id: "beside", text: "Open beside", enabled: ready && bible.ready,
-                run: function() { versionDialog.close(); app.openBeside(entry.id) } },
+            entry.active ? null : { id: "beside", text: "Open beside", shortcut: menuKey("versionBeside"), enabled: ready && bible.ready,
+                run: function() { app.openVersionBeside(entry) } },
             wantsReimport(entry) ? { id: "reimport", text: "Re-import", shortcut: menuKey("reimportVersion"), enabled: ready && !catalog.busy,
                 run: function() { app.reimportVersion(entry) } } : null,
             { id: "details", text: "Details & Attribution", enabled: !!details,
@@ -3999,6 +4014,13 @@ ApplicationWindow {
             { id: "removeVersion", text: "Remove…", enabled: ready, run: function() {
                 versionDialog.removing = true; versionDialog.chosen = entry; versionDialog.removeAnnotations = false
                 versionDialog.step = 1; versionResults.currentIndex = 0; versionResults.forceActiveFocus() } }
+        ].filter(function(item) { return !!item }), sceneX, sceneY)
+    }
+    // The footer's version button: Switch version… · Open beside… · Stop following.
+    function openVersionButtonMenu(sceneX, sceneY) {
+        contextMenu.show("versionButton", [menuAction("switch", "Switch version…", "switchVersion"),
+            menuAction("beside", "Open beside…", "openBeside"),
+            following ? menuAction("unfollow", "Stop following " + followPartner, "unfollow") : null
         ].filter(function(item) { return !!item }), sceneX, sceneY)
     }
     function versionEntries() {
@@ -4036,6 +4058,8 @@ ApplicationWindow {
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             event.accepted = true
             if (event.modifiers === Qt.NoModifier) acceptVersion()
+            else if (event.modifiers === Qt.ControlModifier && !versionDialog.removing && versionDialog.step === 0)
+                openVersionBeside(versionResults.model[versionResults.currentIndex])
             return
         }
         if (event.key === Qt.Key_Y && versionDialog.comparing && !textInputActive()
@@ -4078,7 +4102,7 @@ ApplicationWindow {
         if (versionDialog.step === 2) { confirmRemoveVersion(); return }
         const entry = versionResults.model[versionResults.currentIndex]
         if (!entry) { sounds.play("error"); return }
-        if (!versionDialog.removing) { switchVersion(entry.id); return }
+        if (!versionDialog.removing) { if (versionDialog.beside) openVersionBeside(entry); else switchVersion(entry.id); return }
         if (versionDialog.step === 0) versionDialog.chosen = entry
         else versionDialog.removeAnnotations = !!entry.remove
         versionDialog.step++
@@ -4224,6 +4248,9 @@ ApplicationWindow {
         { id: "resume", group: "Palettes and windows", title: "Resume last palette", sequences: ["Space"] },
         { id: "settings", group: "Palettes and windows", title: "Reading settings", sequences: ["Ctrl+,"], scope: "global", command: true },
         { id: "switchVersion", group: "Palettes and windows", title: "Switch version", sequences: ["Ctrl+V"], scope: "global", command: true },
+        // Versions, choosing a version for a window beside this one (WindowManager
+        // links the two); o in Compare and ctrl enter in Versions skip the choice.
+        { id: "openBeside", group: "Palettes and windows", title: "Open a version beside this window", sequences: ["Shift+C"], command: true },
         // Versions, opened on the selection's text in each version.
         // A peek under the selection (PeekCard); Versions (ctrl v) shows the same rows.
         { id: "compare", group: "Panels", title: "Compare the selection across versions", sequences: ["C"], command: true },
@@ -4235,6 +4262,7 @@ ApplicationWindow {
         { id: "newWindow", group: "Palettes and windows", title: "New window", sequences: ["Ctrl+N"], scope: "global", command: true },
         // Bound by the Versions dialog itself.
         { id: "addVersion", group: "Palettes and windows", title: "Add version from Versions", sequences: ["Ctrl+I"], scope: "versions", explanation: true },
+        { id: "versionBeside", group: "Palettes and windows", title: "Open the highlighted version beside this window (Versions)", sequences: ["Ctrl+Return"], scope: "versions", explanation: true },
         // Bound by the Add version guide itself.
         { id: "guideInstall", group: "Palettes and windows", title: "Add version: install the highlighted version", sequences: ["Return"], scope: "importGuide", explanation: true },
         { id: "guideDetails", group: "Palettes and windows", title: "Add version: its Details & Attribution", sequences: ["Shift+Return"], scope: "importGuide", explanation: true },
@@ -4375,11 +4403,17 @@ ApplicationWindow {
         if (versionDialog.step === 2) return [[["Left", "Right"], "choose"], ["Return", "select", app.acceptVersion, ready], back, ["Escape", "cancel", function() { versionDialog.close() }]]
         const select = ["Return", "select", app.acceptVersion, ready && versionResults.currentIndex >= 0 && versionResults.count > 0]
         const reimport = reimportableVersion()
+        const entry = versionResults.model[versionResults.currentIndex]
+        const besideReady = ready && bible.ready && !!entry && !entry.active
         if (!versionDialog.removing) return [[["Up", "Down"], "choose"],
             versionDialog.comparing ? ["Y", "copy", function() { app.copyComparedVersion(false) }, ready] : null,
             [actionKeys("addVersion")[0], "add", app.addVersionFromPicker, ready],
             reimport ? [actionKeys("reimportVersion")[0], "re-import", function() { app.reimportVersion(app.reimportableVersion()) }, ready && !catalog.busy] : null,
-            select, ["Escape", "cancel", function() { versionDialog.close() }]]
+            // Opened to read one beside (shift C), enter does it.
+            versionDialog.beside ? ["Return", "open beside", app.acceptVersion, besideReady] : select,
+            !versionDialog.beside && bible.versions.length > 1 ? [actionKeys("versionBeside")[0], "beside",
+                function() { app.openVersionBeside(versionResults.model[versionResults.currentIndex]) }, besideReady] : null,
+            ["Escape", "cancel", function() { versionDialog.close() }]]
         return [[["Up", "Down"], "choose"], versionSearch.activeFocus ? null : [["Home", "End"], "jump"], select, versionDialog.step > 0 ? back : null, ["Escape", "cancel", function() { versionDialog.close() }]]
     }
     function savedHintParts() {
@@ -4479,6 +4513,7 @@ ApplicationWindow {
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["highlight", "tags", "toggleDesk"].includes(action.id)) return hasSelection
         if (action.id === "compare") return hasSelection && bible.versions.length > 1
+        if (action.id === "openBeside") return bible.ready && bible.versions.length > 1
         if (action.id === "unfollow") return following
         if (action.id === "peek") return hasSelection && Array.from(bible.footnotes).some(function(note) { return note.verse === bible.cursorVerse })
         if (action.id === "undo") return bible.canUndo
@@ -4944,6 +4979,7 @@ ApplicationWindow {
         case "restore": restoreDialog.open(); break
         case "import": importGuide.open(); break
         case "switchVersion": openVersions(false); break
+        case "openBeside": openBesideVersions(); break
         case "compare": openCompareCard(); break
         case "peek": peekVerseFootnotes(); break
         case "removeVersion": openVersions(true); break
@@ -7159,9 +7195,15 @@ ApplicationWindow {
             text: bible.versionAbbreviation + (app.following ? " ⇄ " + app.followPartner : "")
             label: bible.edition + " · Switch version" + (app.following ? " · following the window beside, reading " + app.followPartner : "")
             keys: app.keyText("switchVersion")
+            tip: label + " · " + keys + "\nOpen a version beside · " + app.keyText("openBeside") + ", or right-click"
             visible: bible.ready
             available: !bible.busy && !app.modalOpen
             onClicked: app.openVersions(false)
+            // A right click: the version, a version beside, or no longer following.
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: function(eventPoint) { app.openVersionButtonMenu(eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+            }
         }
     }
     Grid {
@@ -7435,6 +7477,8 @@ ApplicationWindow {
         id: versionDialog
         objectName: "versionDialog"
         property bool removing: false
+        // Choosing a version to read beside this window (shift C).
+        property bool beside: false
         property int step: 0
         property var chosen: null
         // The selection's text in each version (versionId → compareVersions row).
@@ -7459,7 +7503,8 @@ ApplicationWindow {
             Keys.onPressed: function(event) { app.versionKey(event) }
             Label {
                 objectName: "versionTitle"
-                text: !versionDialog.removing ? (versionDialog.comparing ? "Versions · " + versionDialog.compareReference : "Versions")
+                text: !versionDialog.removing ? (versionDialog.beside ? "Open beside" : "Versions")
+                        + (versionDialog.comparing ? " · " + versionDialog.compareReference : "")
                     : versionDialog.step === 0 ? "Remove version"
                     : versionDialog.step === 1 ? "Remove annotations too?" : "Confirm removal"
                 color: desktop.foreground; font.pixelSize: 22 * versionDialog.uiScale
