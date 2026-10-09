@@ -559,9 +559,30 @@ private slots:
         QSignalSpy downloads(catalog.get(),&MockVersionCatalog::requested);
         QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"import")));
         QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
-        QCOMPARE(prop("catalogResults","count").toInt(),7);
-        QVERIFY(item("catalogInstalled:engnet")->isVisible());
-        QVERIFY(!item("catalogInstalled:engojb")->isVisible());
+        // The installed NET is not offered; the others are.
+        QCOMPARE(prop("catalogResults","count").toInt(),6);
+        QVERIFY(!item("catalogRow:engnet"));
+        QVERIFY(item("catalogRow:engojb") && !item("catalogInstalled:engojb")->isVisible());
+        type("net"); QCOMPARE(prop("catalogResults","count").toInt(),0);
+        QCOMPARE(prop("catalogEmpty","text").toString(),QString("No matching versions"));
+        key(Qt::Key_A,Qt::ControlModifier); key(Qt::Key_Backspace);
+        // Each card keeps its text off its edges.
+        {
+            auto row = item("catalogRow:engojb"), tint = item("catalogRowTint:engojb");
+            QQuickItem *content = nullptr;
+            for (auto child : row->childItems()) if (QByteArray(child->metaObject()->className()).contains("ColumnLayout")) content = child;
+            QVERIFY(content); QCOMPARE(tint->width(), row->width()); QCOMPARE(tint->height(), row->height());
+            const double pad = 12 * window->property("scale").toDouble();
+            QCOMPARE(content->x(), pad); QCOMPARE(content->y(), pad);
+            QCOMPARE(content->width(), row->width() - 2 * pad); QVERIFY(qAbs(row->height() - content->height() - 2 * pad) < 1);
+        }
+        // Downloading it again (Versions' Re-import) shows it, with its progress.
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engnet")));
+        QTRY_VERIFY(item("catalogRow:engnet")); QVERIFY(item("catalogInstalled:engnet")->isVisible());
+        QVERIFY(item("catalogProgress:engnet")->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(window,"cancelDownload"));
+        QTRY_VERIFY(!item("catalogRow:engnet")); QCOMPARE(prop("catalogResults","count").toInt(),6);
+        downloads.clear();
         type("oRtHoDoX");
         QCOMPARE(prop("catalogResults","count").toInt(),1);
         QTest::qWait(100);
@@ -5463,7 +5484,7 @@ private slots:
         QVERIFY(item("importReplacement")->isVisible());
         QVERIFY(prop("importReplacement","text").toString().contains("preserves your notes, highlights, tags, and settings"));
         QVERIFY(prop("importSupported","text").toString().contains("USFM ZIP directly from eBible.org"));
-        QCOMPARE(prop("catalogResults","count").toInt(),7);
+        QCOMPARE(prop("catalogResults","count").toInt(),6); // Not the NET, installed.
         QCOMPARE(prop("importChoose","text").toString(),QString::fromUtf8("Import USFM ZIP…"));
         QCOMPARE(prop("importDataPath","text").toString(),bible->dataDirectory());
         QVERIFY(prop("importOffline","text").toString().contains("move or delete the source USFM ZIP"));

@@ -8956,23 +8956,30 @@ ApplicationWindow {
                     Repeater {
                         id: catalogResults
                         objectName: "catalogResults"
-                        model: Array.from(catalog.entries).filter(function(entry) {
+                        // Versions already installed are not offered (Versions re-imports
+                        // them), save one downloading again, which shows its progress.
+                        model: {
                             const query = catalogSearch.text.trim().toLowerCase()
-                            return !query || (entry.name + " " + entry.abbreviation).toLowerCase().includes(query)
-                        })
+                            const installed = Array.from(bible.versions).map(function(version) { return version.id })
+                            return Array.from(catalog.entries).filter(function(entry) {
+                                return (!installed.includes(entry.id) || entry.id === app.downloadId)
+                                    && (!query || (entry.name + " " + entry.abbreviation).toLowerCase().includes(query))
+                            })
+                        }
                         delegate: Item {
                             id: catalogRow
                             required property var modelData
                             required property int index
                             readonly property bool current: index === importGuide.catalogIndex
+                            // The card's room around its text, inside its tint.
+                            readonly property real padding: 12 * app.scale
                             objectName: "catalogRow:" + modelData.id
                             Layout.fillWidth: true
-                            implicitWidth: catalogRowContent.implicitWidth
-                            implicitHeight: catalogRowContent.implicitHeight
+                            implicitWidth: catalogRowContent.implicitWidth + 2 * padding
+                            implicitHeight: catalogRowContent.implicitHeight + 2 * padding
                             Rectangle {
                                 objectName: "catalogRowTint:" + catalogRow.modelData.id
                                 anchors.fill: parent
-                                anchors.margins: -4 * app.scale
                                 // Current: the accent tint; hovered: the surface tint.
                                 visible: catalogRow.current || catalogRowMouse.containsMouse
                                 color: catalogRow.current ? app.tint(desktop.accent, 0.11) : desktop.surface
@@ -8989,7 +8996,8 @@ ApplicationWindow {
                             }
                         ColumnLayout {
                             id: catalogRowContent
-                            width: parent.width
+                            x: catalogRow.padding; y: catalogRow.padding
+                            width: parent.width - 2 * catalogRow.padding
                             spacing: 6 * app.scale
                             readonly property bool downloading: catalog.busy && app.downloadId === catalogRow.modelData.id
                             Label { text: catalogRow.modelData.abbreviation + " · " + catalogRow.modelData.name; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
@@ -9017,11 +9025,15 @@ ApplicationWindow {
                                     onClicked: { importGuide.catalogIndex = catalogRow.index; app.installVersion(catalogRow.modelData.id) }
                                 }
                             }
-                            FineRule { Layout.fillWidth: true }
                         }
                         }
                     }
-                    Label { visible: catalogResults.count === 0; text: "No matching versions"; color: desktop.muted; Layout.fillWidth: true }
+                    Label {
+                        objectName: "catalogEmpty"
+                        visible: catalogResults.count === 0
+                        text: catalogSearch.text.trim().length || !catalog.entries.length ? "No matching versions" : "Every version in the catalog is installed"
+                        color: desktop.muted; Layout.fillWidth: true; wrapMode: Text.Wrap
+                    }
                     Label {
                         objectName: "importReplacement"
                         visible: bible.ready
