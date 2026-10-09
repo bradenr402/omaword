@@ -292,15 +292,15 @@ private slots:
         const auto point = preview->mapToScene(caret(preview, found.selectionStart() + 2).center()).toPoint();
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point);
         QTRY_COMPARE(bible->selectionReference(), QString("John 1:4")); QVERIFY(deskOpen());
-        // Its esc returns to the reader too; alt v there leaves the Desk alone.
-        preview->forceActiveFocus(); key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        // ctrl w returns to the reader from the preview too; alt v there leaves the Desk alone.
+        preview->forceActiveFocus(); key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused());
         key(Qt::Key_V, Qt::AltModifier); QVERIFY(prop("deskPreview").toBool());
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
         key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(!prop("deskPreview").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
     void additionsReachAnOpenDeskAndItsDraft() {
-        openDesk(); key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        openDesk(); key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused());
         // From the reader, d adds to the open page.
         navigate("John 1:6"); const auto six = quote(); key(Qt::Key_D);
         QTRY_COMPARE(item("deskEditor")->property("text").toString(), six + "\n");
@@ -308,7 +308,7 @@ private slots:
         window->setProperty("noteSaveDelay", 400);
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         type("Mine."); QCOMPARE(desk(), six + "\n");
-        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused());
         QCOMPARE(desk(), six + "\nMine.");
         item("deskEditor")->forceActiveFocus(); type(" More."); QCOMPARE(desk(), six + "\nMine.");
         navigate("John 1:7"); const auto seven = quote(); key(Qt::Key_D);
