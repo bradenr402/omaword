@@ -572,7 +572,7 @@ private slots:
             QQuickItem *content = nullptr;
             for (auto child : row->childItems()) if (QByteArray(child->metaObject()->className()).contains("ColumnLayout")) content = child;
             QVERIFY(content); QCOMPARE(tint->width(), row->width()); QCOMPARE(tint->height(), row->height());
-            const double pad = 12 * window->property("scale").toDouble();
+            const double pad = qRound(12 * window->property("scale").toDouble());
             QCOMPARE(content->x(), pad); QCOMPARE(content->y(), pad);
             QCOMPARE(content->width(), row->width() - 2 * pad); QVERIFY(qAbs(row->height() - content->height() - 2 * pad) < 1);
         }

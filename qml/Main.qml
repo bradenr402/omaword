@@ -8992,8 +8992,9 @@ ApplicationWindow {
                             required property var modelData
                             required property int index
                             readonly property bool current: index === importGuide.catalogIndex
-                            // The card's room around its text, inside its tint.
-                            readonly property real padding: 12 * app.scale
+                            // The card's room around its text, inside its tint, in whole
+                            // pixels so the text stays on them (the guide scrolls by pixels).
+                            readonly property real padding: Math.round(12 * app.scale)
                             objectName: "catalogRow:" + modelData.id
                             Layout.fillWidth: true
                             implicitWidth: catalogRowContent.implicitWidth + 2 * padding
