@@ -5893,33 +5893,6 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                             padding: 24
                         }
-                        // The way on, after the last verse: "John 2 →" (l).
-                        Label {
-                            id: nextChapterLink
-                            objectName: "nextChapterLink"
-                            readonly property var destination: app.chapterNeighbors.next
-                            visible: !!destination && bible.verses.length > 0 && !app.focusLayout
-                            x: app.verseGutter
-                            topPadding: 2 * app.readerLineHeight
-                            text: destination ? destination.title + " →" : ""
-                            textFormat: Text.PlainText
-                            color: nextChapterMouse.containsMouse ? desktop.accent : desktop.muted
-                            font.pixelSize: app.readerBodySize
-                            Accessible.role: Accessible.Link
-                            Accessible.name: destination ? "Next chapter, " + destination.title : ""
-                            Accessible.description: app.keyText("nextChapter")
-                            Accessible.onPressAction: app.runCommand("nextChapter")
-                            MouseArea {
-                                id: nextChapterMouse
-                                objectName: "nextChapterMouse"
-                                anchors.fill: parent
-                                anchors.topMargin: parent.topPadding
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: { app.runCommand("nextChapter"); app.readerFocus() }
-                            }
-                            AppToolTip { theme: desktop; uiScale: app.scale; visible: nextChapterMouse.containsMouse; text: "Next chapter · " + app.keyText("nextChapter") }
-                        }
                     }
                     // Margin notes scroll with the text, beside their passages.
                     Item {

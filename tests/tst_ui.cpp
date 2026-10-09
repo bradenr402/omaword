@@ -3404,18 +3404,10 @@ private slots:
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
         QCOMPARE(QApplication::clipboard()->text(),window->property("freeSelectedText").toString());
     }
-    void nextChapterLinkAndCtrlWheelZoom() {
+    void ctrlWheelZoom() {
         reference("John 3:16");
-        auto link = item("nextChapterLink"); QVERIFY(link);
-        QTRY_VERIFY(link->isVisible());
-        QCOMPARE(link->property("text").toString(),QString::fromUtf8("John 4 →"));
-        // It sits after the last verse.
-        const auto last = item("verseBody" + QString::number(bible->verses().last().toMap()["number"].toInt()).toUtf8());
-        QVERIFY(last); QVERIFY(link->mapToItem(nullptr,QPointF(0,0)).y() > last->mapToItem(nullptr,QPointF(0,0)).y());
-        QVERIFY(QMetaObject::invokeMethod(window,"setReaderY",Q_ARG(QVariant,1e9)));
-        QTRY_VERIFY(link->mapToScene(QPointF(0,0)).y() < window->height());
-        click(item("nextChapterMouse"));
-        QTRY_COMPARE(bible->chapter(),4);
+        // No link to the next chapter after the last verse: the < > buttons and l lead on.
+        QVERIFY(!item("nextChapterLink"));
         // ctrl + wheel changes the Text size, a step per notch.
         const int size = bible->fontSize();
         const QPoint at = item("reading")->mapToScene(QPointF(200,200)).toPoint();
