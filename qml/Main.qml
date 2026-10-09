@@ -6083,6 +6083,19 @@ ApplicationWindow {
                         GradientStop { position: 1; color: desktop.background }
                     }
                 }
+                // While a side panel has the keyboard the text recedes to 90%,
+                // as the panel does while the text has it (SidePanel): a veil
+                // of the background rather than the surface's own opacity,
+                // which would let the text show through the bottom fade.
+                Rectangle {
+                    objectName: "readerDim"
+                    anchors.fill: parent
+                    z: 6 // Over the chapter arrows.
+                    color: desktop.background
+                    opacity: app.marginOpen && app.marginKeys ? 0.1 : 0
+                    visible: opacity > 0
+                    Behavior on opacity { NumberAnimation { duration: app.fadeMs } }
+                }
             }
 
             OverlayScrollView {

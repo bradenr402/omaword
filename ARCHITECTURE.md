@@ -526,8 +526,10 @@ files.
   keyboard between the reader and the open panel, which stays; it works while
   typing in the panel, and saves its drafts first. `SidePanel` draws its edge
   toward the text in the accent while `marginKeys`; otherwise a panel's
-  current row is `inactiveRowColor` and its hints are `panelAwayHints`
-  ("ctrl w keys here").
+  current row is `inactiveRowColor`, its hints are `panelAwayHints`
+  ("ctrl w keys here"), and it recedes to 90% opacity. The text recedes as
+  much while the panel has the keyboard, under `readerDim` (a 10% veil of the
+  background, so the bottom fade stays opaque over the text); the footer never.
 - Notes in Write mode keeps the keyboard in the editor while it is in Notes
   (`notesWriting` / `keepNoteEditorFocus`): clicks on the panel's chrome and
   closing menus or dialogs hand it back. `tab` types a tab (accepts a `[[`

@@ -232,8 +232,14 @@ private slots:
         QCOMPARE(desk(), quote() + "\nThoughts.");
         QTRY_COMPARE(summary(), QString("1 passage · %1 words").arg(words + 1));
         QVERIFY(hints().endsWith("ctrl w to the text    esc close"));
-        // The page has the keyboard: an accent edge toward the text.
+        // The page has the keyboard: an accent edge toward the text, the
+        // text a little behind it (a 10% veil of the background), the footer not.
         QCOMPARE(item("deskPanelEdge")->property("color").value<QColor>(), desktop->property("accent").value<QColor>());
+        QTRY_COMPARE(item("readerDim")->opacity(), 0.1); QVERIFY(item("readerDim")->isVisible());
+        QCOMPARE(item("readerDim")->property("color").value<QColor>(), desktop->property("background").value<QColor>());
+        QVERIFY(item("readerDim")->parentItem()->isAncestorOf(item("reading")));
+        QVERIFY(!item("readerDim")->parentItem()->isAncestorOf(item("footerZone")));
+        QCOMPARE(item("deskPanel")->opacity(), 1.0);
         // Writing owns the keys: w and j type.
         type(" wj"); QVERIFY(desk().endsWith("Thoughts. wj")); QCOMPARE(bible->selectionReference(), QString("John 1:4"));
         // ctrl w: back to the reader, the Desk still open (its edge a hairline,
@@ -241,6 +247,9 @@ private slots:
         key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused()); QVERIFY(deskOpen());
         QCOMPARE(item("deskPanelEdge")->property("color").value<QColor>(), desktop->property("border").value<QColor>());
         QCOMPARE(hints(), QString("ctrl w keys here"));
+        // Now the page recedes to 90% instead, and the text is clear.
+        QTRY_COMPARE(item("deskPanel")->opacity(), 0.9);
+        QTRY_VERIFY(!item("readerDim")->isVisible()); QCOMPARE(item("readerDim")->opacity(), 0.0);
         key(Qt::Key_J); QCOMPARE(bible->selectionReference(), QString("John 1:5"));
         key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(deskOpen());
         QVERIFY(desk().endsWith("Thoughts. wj")); // ctrl w types nothing.
@@ -254,9 +263,11 @@ private slots:
         QVERIFY(object("notesDrawer")->property("opened").toBool());
         key(Qt::Key_W, Qt::ControlModifier); QTRY_VERIFY(readerFocused());
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(deskOpen());
+        QTRY_VERIFY(item("readerDim")->isVisible());
         // esc closes it, from the page or from the reader; so does its ×; other
-        // panels take its place in the Margin.
+        // panels take its place in the Margin. The text is clear again.
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
+        QTRY_VERIFY(!item("readerDim")->isVisible());
         openDesk(); key(Qt::Key_F6); QTRY_VERIFY(readerFocused());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         openDesk();

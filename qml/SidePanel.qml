@@ -3,7 +3,8 @@ import QtQuick
 // A panel of the Margin (Notes, the Desk, Marks, See also), the same frame
 // for each: the theme's background with an edge toward the text, an accent
 // while the panel has the keyboard (the Margin's keys, controller.marginKeys)
-// and a hairline while the reader has it, shown while the Margin is on its
+// and a hairline while the reader has it, when the panel also recedes to 90%
+// (as the text does while the panel has it), shown while the Margin is on its
 // mode. Its content keeps `inset` from the edges and `gap` between its
 // sections, its header first (SidePanelHeader).
 Rectangle {
@@ -18,6 +19,8 @@ Rectangle {
     readonly property bool keys: !!controller.marginKeys
     anchors.fill: parent
     visible: controller.marginMode === mode
+    opacity: keys ? 1 : 0.9
+    Behavior on opacity { NumberAnimation { duration: shell.controller.fadeMs } }
     color: theme.background
     radius: Math.min(theme.cornerRadius, width / 2, height / 2)
     Rectangle {
