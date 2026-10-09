@@ -3690,8 +3690,28 @@ QVariantMap BibleBackend::readPassage(const QString &text, bool strict)
         if (candidates.isEmpty() || !parseReference(candidates.first().toMap().value("reference").toString(),&b,&c,&start,&end,&error))
             return {{"error",error}};
     }
-    const QString label = start ? rangeReference(start,end) : reference(b,c);
-    if (!start && !chapterBounds(b,c,&start,&end)) return {{"error","That chapter is not in " + edition() + "."}};
+    if (start) return passageAt(start,end,rangeReference(start,end));
+    if (!chapterBounds(b,c,&start,&end)) return {{"error","That chapter is not in " + edition() + "."}};
+    return passageAt(start,end,reference(b,c),true);
+}
+
+QVariantMap BibleBackend::readScope(const QVariantMap &scope)
+{
+    if (!m_ready) return {{"error","Import a USFM Bible first."}};
+    const int b = scope.value("book").toInt(), c = scope.value("chapter").toInt();
+    int start = 0, end = 0;
+    if (!scope.value("start").toInt()) {
+        if (!chapterBounds(b,c,&start,&end)) return {{"error","That chapter is not in " + edition() + "."}};
+        return passageAt(start,end,reference(b,c),true);
+    }
+    start = absoluteVerse(b,c,scope.value("start").toInt());
+    end = absoluteVerse(scope.value("endBook").toInt(),scope.value("endChapter").toInt(),scope.value("end").toInt());
+    if (!start || !end || end < start) return {{"error","That passage is not in " + edition() + "."}};
+    return passageAt(start,end,rangeReference(start,end));
+}
+
+QVariantMap BibleBackend::passageAt(int start, int end, const QString &label, bool chapter)
+{
     QVariantList verses, rows;
     QString name;
     for (int i = start, atBook = 0, atChapter = 0; i <= end; ++i) {
@@ -3710,8 +3730,13 @@ QVariantMap BibleBackend::readPassage(const QString &text, bool strict)
     }
     const QString plain = copyRange(start,end,label,true);
     if (plain.isEmpty()) return {{"error","Cannot read " + label + "."}};
+    // The same passage by book, chapter, and verse, which any version reads (readScope).
+    const auto a = endpoint(start), z = endpoint(end);
+    const QVariantMap scope = chapter
+        ? QVariantMap{{"book",a.book},{"chapter",a.chapter},{"start",0},{"endBook",a.book},{"endChapter",a.chapter},{"end",0}}
+        : QVariantMap{{"book",a.book},{"chapter",a.chapter},{"start",a.verse},{"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse}};
     return {{"reference",label},{"versionId",m_versionId},{"abbreviation",m_abbreviation},{"name",m_edition},
-            {"plain",plain},{"quotation",copyRange(start,end,label,false)},{"verses",verses}};
+            {"plain",plain},{"quotation",copyRange(start,end,label,false)},{"verses",verses},{"scope",scope}};
 }
 
 QString BibleBackend::copyVerse(int number, bool plainText)

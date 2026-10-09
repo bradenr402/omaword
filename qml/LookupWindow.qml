@@ -77,20 +77,24 @@ Window {
         openRequested(shown.reference, chosenVersion)
         close()
     }
-    // Another version: the list and the passage shown follow at once.
+    // Another version: the list and the passage shown follow at once, the
+    // same passages by book, chapter, and verse (another version may name
+    // the book otherwise: Genesis, Bereshis).
     function readVersion(id) {
         if (id === lookup.backend.versionId) return
+        const highlighted = candidates[current] || null
         if (!lookup.backend.readVersion(id)) { status = lookup.backend.error; lookup.effects.play("error"); return }
         chosenVersion = id === initialVersion ? "" : id
         const index = current
         refresh()
-        current = Math.max(0, Math.min(index, candidates.length - 1))
+        const same = highlighted ? candidates.findIndex(function(row) {
+            return row.book === highlighted.book && row.chapter === highlighted.chapter && row.start === highlighted.start && row.end === highlighted.end
+        }) : -1
+        current = same >= 0 ? same : Math.max(0, Math.min(index, candidates.length - 1))
         if (!shown) return
-        const passage = lookup.backend.readPassage(shown.reference)
+        const passage = lookup.backend.readScope(shown.scope)
         if (!passage.error) { shown = passage; status = ""; return }
-        // Its name for the book may not be this version's: the typed text's best match.
-        if (candidates.length) show(0)
-        else { back(); status = passage.error }
+        back(); status = passage.error
     }
     function cycleVersion(delta) {
         if (!choosable) { lookup.effects.play("error"); return }
@@ -119,7 +123,11 @@ Window {
     }
 
     Component.onCompleted: {
-        versionOrder = Array.from(lookup.backend.versions)
+        // Copies of the rows: the list's own rows would read the backend's
+        // list as it is later, which puts the version read first.
+        versionOrder = Array.from(lookup.backend.versions).map(function(row) {
+            return { id: String(row.id), abbreviation: String(row.abbreviation || ""), name: String(row.name || "") }
+        })
         initialVersion = lookup.backend.versionId
         query.text = initialText
         refresh()

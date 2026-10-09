@@ -48,11 +48,13 @@ class WindowsTest : public QObject
         return QMetaObject::invokeMethod(window,"flushNote",Q_RETURN_ARG(QVariant,saved)) && saved.toBool();
     }
     // Small original USFM content covers only references used by these tests.
-    static bool writeStructuredUsfm(const QString &path, const QString &id) {
+    // names: a book's own name in this edition (\h, \toc), by code.
+    static bool writeStructuredUsfm(const QString &path, const QString &id, const QMap<QString,QString> &names = {}) {
         QMap<QString,QByteArray> entries;
         const QStringList codes{"GEN","MRK","JHN","ROM"};
         for (int b = 0; b < codes.size(); ++b) {
             QString body = "\\id " + codes[b] + " Original Window Bible\n";
+            if (names.contains(codes[b])) body += QString("\\h %1\n\\toc1 %1\n\\toc2 %1\n").arg(names[codes[b]]);
             const QList<int> chapters = b == 0 ? QList<int>{1,2} : b == 1 ? QList<int>{7} : b == 2 ? QList<int>{3,4} : QList<int>{8};
             for (int c : chapters) {
                 body += QString("\\c %1\n\\p\n").arg(c);
@@ -624,6 +626,61 @@ private slots:
         QTRY_VERIFY(!windows->lookupWindow());
         // A translation not installed: nothing opens.
         QVERIFY(!windows->openLookup("jn316","nothing")); QVERIFY(!windows->lookupWindow());
+    }
+    // The lookup window steps through every installed version in turn, and
+    // keeps the passage shown by book, chapter, and verse, whatever a
+    // version calls the book (OJB: Bereshis, Romiyim) and whatever was typed.
+    void lookupCyclesEveryVersionKeepingThePassage() {
+        for (const auto &[id, names] : {std::pair{QString("window-original"), QMap<QString,QString>{}},
+                 std::pair{QString("renamed"), QMap<QString,QString>{{"GEN", "Bereshis"}, {"ROM", "Romiyim"}}},
+                 std::pair{QString("fourth"), QMap<QString,QString>{}}}) {
+            const QString path = fixtures.filePath(id + "_usfm.zip");
+            QVERIFY(writeStructuredUsfm(path, id, names));
+            BibleBackend other; other.importUsfm(QUrl::fromLocalFile(path));
+            QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000); QVERIFY2(other.ready(),qPrintable(other.error()));
+        }
+        { BibleBackend reading; QVERIFY(reading.switchVersion("engnet")); }
+        QVERIFY(windows->openLookup("rom 8:2")); auto *lookup = windows->lookupWindow(); QVERIFY(lookup);
+        lookup->requestActivate(); QVERIFY(QTest::qWaitForWindowActive(lookup));
+        auto *backend = qobject_cast<BibleBackend *>(lookup->property("backend").value<QObject *>()); QVERIFY(backend);
+        QStringList order;
+        for (const auto &row : lookup->property("versionOrder").value<QJSValue>().toVariant().toList()) order << row.toMap()["id"].toString();
+        QCOMPARE(order.size(), 4); QCOMPARE(order.first(), QString("engnet"));
+        // tab: each version in turn, back to the first; shift tab the other way.
+        QStringList seen;
+        for (int i = 0; i < 4; ++i) { QTest::keyClick(lookup, Qt::Key_Tab); seen << backend->versionId(); }
+        QCOMPARE(seen, order.mid(1) << order.first());
+        seen.clear();
+        for (int i = 0; i < 4; ++i) { QTest::keyClick(lookup, Qt::Key_Backtab, Qt::ShiftModifier); seen << backend->versionId(); }
+        QCOMPARE(seen, QStringList({order[3], order[2], order[1], order[0]}));
+        // The passage shown, by its scope.
+        QVERIFY(QMetaObject::invokeMethod(lookup, "show", Q_ARG(QVariant, 0)));
+        const auto shown = [&] {
+            const auto value = lookup->property("shown");
+            return value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
+        };
+        QCOMPARE(shown()["reference"].toString(), QString("Romans 8:2"));
+        const auto scope = shown()["scope"].toMap();
+        QCOMPARE(scope["book"].toInt(), 45); QCOMPARE(scope["chapter"].toInt(), 8); QCOMPARE(scope["start"].toInt(), 2);
+        while (backend->versionId() != "renamed") QTest::keyClick(lookup, Qt::Key_Tab);
+        QCOMPARE(shown()["reference"].toString(), QString("Romiyim 8:2")); QCOMPARE(shown()["scope"].toMap(), scope);
+        QCOMPARE(windowObject(lookup, "lookupTitle")->property("text").toString(), QString("Romiyim 8:2"));
+        // Whatever the typed text would match now, the passage stays (the
+        // reader typed g11 and chose Genesis 1:1; Genesis 11 matched first).
+        lookup->setProperty("candidates", QVariantList());
+        windowObject(lookup, "lookupQuery")->setProperty("text", "jo");
+        while (backend->versionId() != "engnet") QTest::keyClick(lookup, Qt::Key_Tab);
+        QCOMPARE(shown()["reference"].toString(), QString("Romans 8:2")); QCOMPARE(shown()["scope"].toMap(), scope);
+        QVERIFY(windowObject(lookup, "lookupStatus")->property("text").toString().isEmpty());
+        // A whole chapter keeps its scope too.
+        QVERIFY(QMetaObject::invokeMethod(lookup, "back"));
+        windowObject(lookup, "lookupQuery")->setProperty("text", "gen 2"); QVERIFY(QMetaObject::invokeMethod(lookup, "refresh"));
+        QVERIFY(QMetaObject::invokeMethod(lookup, "show", Q_ARG(QVariant, 0)));
+        QCOMPARE(shown()["reference"].toString(), QString("Genesis 2"));
+        while (backend->versionId() != "renamed") QTest::keyClick(lookup, Qt::Key_Tab);
+        QCOMPARE(shown()["reference"].toString(), QString("Bereshis 2"));
+        QCOMPARE(shown()["scope"].toMap()["start"].toInt(), 0); QCOMPARE(shown()["verses"].toList().size(), 36);
+        lookup->close(); QTRY_VERIFY(!windows->lookupWindow());
     }
     void realSecondaryCreatesAnotherWindow() {
         const auto directory = windows->backendAt(0)->dataDirectory();

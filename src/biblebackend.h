@@ -401,10 +401,15 @@ public:
     // passage in the version being read (a whole chapter for "John 3"),
     // without navigating, saving, or touching the clipboard: {reference,
     // versionId, abbreviation, name, plain, quotation (both laid out as
-    // copySelection() lays them out), verses [{book, chapter, verse, text}]},
-    // or {error}. Compact input (jn316) is read as the passage palette reads
-    // it, unless strict.
+    // copySelection() lays them out), verses [{book, chapter, verse, text}],
+    // scope {book, chapter, start, endBook, endChapter, end}, start and end 0
+    // for a whole chapter}, or {error}. Compact input (jn316) is read as the
+    // passage palette reads it, unless strict.
     Q_INVOKABLE QVariantMap readPassage(const QString &text, bool strict = false);
+    // The same passage by its scope (readPassage's), in the version being
+    // read now, whatever another version calls its book: the lookup window
+    // switching versions.
+    Q_INVOKABLE QVariantMap readScope(const QVariantMap &scope);
     Q_INVOKABLE QString copyVerse(int number, bool plainText = false);
     Q_INVOKABLE void copyText(QString text);
     // Character selection over the current chapter's source text (see
@@ -521,6 +526,8 @@ private:
     bool commitAnnotations(const QVector<Annotation> &annotations, const QVector<Annotation> &before, const QString &label);
     bool highlightCovered(const QVector<Annotation> &annotations) const;
     QString rangeReference(int start, int end) const;
+    // readPassage's result for absolute verses start..end; chapter: a whole chapter's scope.
+    QVariantMap passageAt(int start, int end, const QString &label, bool chapter = false);
     bool validRange(int book, int chapter, int start, int end) const;
     bool verseExists(int book, int chapter, int verse) const;
     bool persistState(int book, int chapter, int start, int end, double position);

@@ -66,6 +66,7 @@ All actions live in the `actions` catalog in `qml/Main.qml` (`id`, `group`, `tit
 
 - C++17, Qt idioms: `QStringLiteral`, `auto` for obvious types, `m_` members, early returns, braces on their own line for functions. Match the surrounding file.
 - QML: 4-space indent, logic in small functions or `.js` libraries (pure JS like `Margins.js` stays testable).
+- A list or map property from C++ (`bible.versions`) is a live reference in QML: rows kept from it (`Array.from(...)`) read the property again later, as it is then. Copy the values you keep.
 - Comments explain why, never what. Fail loudly at boundaries (import, catalog, backup validation); don't swallow errors.
 - Keep temporary scripts, notes, and screenshots out of the repo. `screenshots/` holds only README images.
 
