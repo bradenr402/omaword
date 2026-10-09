@@ -774,6 +774,24 @@ private slots:
     void searchWithARegularExpression() {
         navigate("John 1:1");
         QVERIFY(!bible->searchRegex());
+        // alt r and alt a act only on a Bible search in the palette: not in
+        // the reader, nor in the palette's other modes.
+        install(second); QVERIFY(bible->switchVersion("engnet")); navigate("John 1:1");
+        const QString before = object("toast")->property("text").toString();
+        call("readerFocus");
+        key(Qt::Key_R, Qt::AltModifier); key(Qt::Key_A, Qt::AltModifier);
+        QVERIFY(!bible->searchRegex()); QVERIFY(!bible->searchAllVersions());
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        key(Qt::Key_R, Qt::AltModifier); key(Qt::Key_A, Qt::AltModifier);
+        QVERIFY(!bible->searchRegex()); QVERIFY(!bible->searchAllVersions());
+        QCOMPARE(object("toast")->property("text").toString(), before);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        // Commands still runs them from anywhere.
+        key(Qt::Key_Space, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("regular expression"); QTRY_VERIFY(!value(object("paletteResults")->property("model")).toList().isEmpty());
+        key(Qt::Key_Return); QTRY_VERIFY(bible->searchRegex());
+        QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QString("searchRegex")))); QVERIFY(!bible->searchRegex());
         const auto segments = [&](int row) { return bible->searchResults()[row].toMap()["segments"].toList().size(); };
         // "alpha" as a word: ALPHA in 1:2 (not alphabet), both alphas in 1:8.
         search("/alpha\\b/"); QTRY_COMPARE(bible->searchResultCount(), 8);

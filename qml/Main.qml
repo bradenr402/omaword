@@ -4307,9 +4307,9 @@ ApplicationWindow {
         { id: "nextMatch", group: "Search", title: "Next search match", sequences: ["N"] },
         { id: "previousMatch", group: "Search", title: "Previous search match", sequences: ["Shift+N"] },
         { id: "bibleSearch", group: "Search", title: "Search Bible", sequences: ["Ctrl+/"], scope: "palette", command: true },
-        { id: "searchScope", group: "Search", title: "Bible search: every version or the one you read", sequences: ["Alt+A"], scope: "palette", command: true },
+        { id: "searchScope", group: "Search", title: "Bible search: every version or the one you read", sequences: ["Alt+A"], scope: "search", command: true },
         // A query in slashes, /…/, is a regular expression either way.
-        { id: "searchRegex", group: "Search", title: "Bible search: words or a regular expression", sequences: ["Alt+R"], scope: "palette", command: true },
+        { id: "searchRegex", group: "Search", title: "Bible search: words or a regular expression", sequences: ["Alt+R"], scope: "search", command: true },
         // Bound by the palette's input itself.
         { id: "searchBookJump", group: "Search", title: "Bible search: next book, previous book", sequences: ["Ctrl+Down", "Ctrl+Up"], scope: "search", explanation: true },
         { id: "highlight", group: "Annotate", title: "Highlight selection", sequences: ["X"], command: true },
@@ -4595,6 +4595,9 @@ ApplicationWindow {
         // Character selection owns the reader's keys (charKey); window keys
         // (palettes, dialogs) still work and end it as they take the keyboard.
         if (charMode && readerBase && action.scope !== "global" && action.scope !== "palette") return false
+        // Bible search's own toggles (alt a, alt r) act only on a search in the
+        // palette; Commands runs them anywhere.
+        if (action.scope === "search") return passagePalette.visible && paletteTextMode && !contextMenu.visible
         if (zPending && action.sequences.some(function(sequence) { return ["Z", "T", "B"].includes(sequence) })) return false
         // In the Notes editor, the palette and dialog launchers (Ctrl, F-keys)
         // still work, saving the note first (runKey); its plain keys type.
@@ -4653,7 +4656,7 @@ ApplicationWindow {
     function scopeTitle(action) {
         if (action.scope === "list") return "List panels · Marks, Desk, History, See also"
         if (action.scope === "history") return "History in the palette only"
-        if (action.scope === "search") return "Bible search results (" + keyText("bibleSearch") + ")"
+        if (action.scope === "search") return "Bible search in the palette (" + keyText("bibleSearch") + ")"
         if (action.scope === "versions") return "Versions dialog"
         if (action.scope === "compare") return "Compare · " + keyText("compare")
         if (action.scope === "notes") return "Reader or notes preview"

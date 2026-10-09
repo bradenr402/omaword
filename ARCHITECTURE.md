@@ -386,7 +386,9 @@ files.
 ### Search
 - The active version, or every installed version (`searchAllVersions`, a
   global preference: the active one first, then the others most recently
-  used first); per-window state. Case-insensitive, whitespace-collapsed,
+  used first); per-window state. Its keys, `alt a` and `searchRegex`'s `alt r`,
+  are catalog scope `search`: live only while the palette holds a Bible search
+  (`shortcutContext`); Commands runs them anywhere. Case-insensitive, whitespace-collapsed,
   partial words; punctuation and accents significant. Headings, numbers, notes,
   tags, decorations never searched.
 - Bible search: unquoted terms AND within a verse; quoted phrases may span
