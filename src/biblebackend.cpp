@@ -225,7 +225,9 @@ struct TagBible {
         q.prepare("SELECT value FROM metadata WHERE key='version_id'");
         if (!q.exec() || !q.next() || q.value(0).toString() != id) db.close();
     }
-    ~TagBible() { db.close(); db = {}; QSqlDatabase::removeDatabase(connection); }
+    ~TagBible() { endpointQuery = QSqlQuery(); db.close(); db = {}; QSqlDatabase::removeDatabase(connection); }
+    // Prepared once: callers read hundreds of ranges through one TagBible.
+    mutable QSqlQuery endpointQuery;
     bool scope(const QVariantMap &input, QVariantMap *result) const {
         if (!db.isOpen() || input.value("versionId").metaType().id() != QMetaType::QString
             || input.value("versionId").toString().isEmpty()) return false;
@@ -236,14 +238,18 @@ struct TagBible {
         QVariantMap out{{"versionId",input.value("versionId")}};
         for (const auto &key : scopeFields) out[key] = input.value(key).toInt();
         QStringList names;
+        if (endpointQuery.lastQuery().isEmpty()) {
+            endpointQuery = QSqlQuery(db);
+            endpointQuery.prepare("SELECT b.ordinal,b.name FROM verses v JOIN books b ON b.id=v.book WHERE v.book=? AND v.chapter=? AND v.number=?");
+        }
         for (int side = 0; side < 2; ++side) {
-            QSqlQuery q(db);
-            q.prepare("SELECT b.ordinal,b.name FROM verses v JOIN books b ON b.id=v.book WHERE v.book=? AND v.chapter=? AND v.number=?");
-            for (int i = 0; i < 3; ++i) q.addBindValue(out.value(scopeFields[side*3+i]));
+            QSqlQuery &q = endpointQuery;
+            for (int i = 0; i < 3; ++i) q.bindValue(i, out.value(scopeFields[side*3+i]));
             if (!q.exec() || !q.next()) return false;
             const qint64 order = q.value(0).toLongLong()*1000000 + out.value(scopeFields[side*3+1]).toInt()*1000 + out.value(scopeFields[side*3+2]).toInt();
             out[side ? "_endOrder" : "_order"] = order;
             names << q.value(1).toString();
+            q.finish();
         }
         if (out.value("_order").toLongLong() > out.value("_endOrder").toLongLong()) return false;
         QString ref = QString("%1 %2:%3").arg(names[0]).arg(out["chapter"].toInt()).arg(out["start"].toInt());
@@ -3096,22 +3102,26 @@ QVariantList BibleBackend::collectionRows(const QVector<Annotation> &rows) const
             {"versionAbbreviation",m_abbreviation},{"tags",QVariantList()},
             {"highlight",a.highlight},{"note",a.note}});
     }
+    // A tagged range joins its annotation's row, found by key (not by
+    // searching: Marks can hold thousands, and every window rereads them).
+    QHash<QString,qsizetype> positions;
+    for (qsizetype i = 0; i < collection.size(); ++i) positions.insert(rangeKey(collection[i].toMap()),i);
     for (const auto &value : tagRangeRows(m_versionId,false)) {
         const auto tagged = publicRange(value.toMap());
-        auto found = std::find_if(collection.begin(),collection.end(),[&](const QVariant &row) {
-            return rangeKey(row.toMap()) == rangeKey(tagged);
-        });
-        if (found == collection.end()) collection.append(tagged);
-        else { auto row = found->toMap(); row["tags"] = tagged.value("tags"); *found = row; }
+        const auto found = positions.constFind(rangeKey(tagged));
+        if (found == positions.cend()) { positions.insert(rangeKey(tagged),collection.size()); collection.append(tagged); }
+        else { auto row = collection[*found].toMap(); row["tags"] = tagged.value("tags"); collection[*found] = row; }
     }
-    std::sort(collection.begin(),collection.end(),[this](const QVariant &a, const QVariant &b) {
-        auto order = [this](const QVariant &v) {
-            const auto r = v.toMap();
-            return std::make_pair(absoluteVerse(r.value("book").toInt(),r.value("chapter").toInt(),r.value("start").toInt()),
-                absoluteVerse(r.value("endBook").toInt(),r.value("endChapter").toInt(),r.value("end").toInt()));
-        };
-        return order(a) < order(b);
-    });
+    QList<std::pair<std::pair<int,int>,QVariant>> ordered;
+    ordered.reserve(collection.size());
+    for (const auto &value : std::as_const(collection)) {
+        const auto r = value.toMap();
+        ordered.append({{absoluteVerse(r.value("book").toInt(),r.value("chapter").toInt(),r.value("start").toInt()),
+            absoluteVerse(r.value("endBook").toInt(),r.value("endChapter").toInt(),r.value("end").toInt())},value});
+    }
+    std::stable_sort(ordered.begin(),ordered.end(),[](const auto &a, const auto &b) { return a.first < b.first; });
+    collection.clear();
+    for (const auto &entry : std::as_const(ordered)) collection.append(entry.second);
     return collection;
 }
 

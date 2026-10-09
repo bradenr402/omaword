@@ -232,7 +232,15 @@ files.
   deleted before its context.
 - Peer sync: readers in one process share committed annotations, tags, Desk, History,
   prefs, and library; each keeps its own version, passage, selection, scroll.
-  Commits publish to peers without navigating them. Imports use a shared busy
+  Commits publish to peers without navigating them; each peer rereads its
+  version's marks (`refreshShared`: about 90–110 ms for 756 marks, offscreen,
+  of which reading tag ranges, `tagRangeRows`, is about 30 ms a call, twice).
+  Measured before a shared store (one process-wide copy announcing single-row
+  changes): a highlight took 1.1 s with one window and 4.6 s with four, almost
+  all in `collectionRows`, which merged tag ranges into the marks by a linear
+  search; with a keyed merge and one prepared endpoint query per `TagBible`
+  it takes 0.31 s with one window and 1.3 s with four, so the shared store
+  waits. Each extra window costs about 100 MiB. Imports use a shared busy
   guard; replace/remove/restore flush affected note drafts, and a failed flush
   vetoes. Note saves compare-and-set against the observed baseline; conflicts
   offer **Save my draft** / **Use saved text**.
