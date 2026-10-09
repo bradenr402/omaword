@@ -459,6 +459,15 @@ private slots:
         QVariant rows; QMetaObject::invokeMethod(window, "filteredKeybindings", Q_RETURN_ARG(QVariant, rows));
         QStringList titles; for (const auto &r : value(rows).toList()) titles << r.toMap()["title"].toString();
         QVERIFY(titles.contains("Open Desk")); QVERIFY(titles.contains("Add to Desk"));
+        // Grouped as README lists them, in the catalog's order within each group.
+        object("keybindingSearch")->setProperty("text", "");
+        QMetaObject::invokeMethod(window, "filteredKeybindings", Q_RETURN_ARG(QVariant, rows));
+        QStringList groups, expected, listed;
+        for (const auto &a : actions) if (!groups.contains(a.toMap()["group"].toString())) groups << a.toMap()["group"].toString();
+        for (const auto &group : groups) for (const auto &a : actions)
+            if (a.toMap()["group"] == group && a.toMap().contains("sequences")) expected << a.toMap()["id"].toString();
+        for (const auto &r : value(rows).toList()) listed << r.toMap()["id"].toString();
+        QCOMPARE(listed, expected);
         key(Qt::Key_Escape);
         // Each key's hover note names where it works: the editors' and
         // character selection's own gestures are theirs, not the reader's.

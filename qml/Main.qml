@@ -4587,7 +4587,8 @@ ApplicationWindow {
     }
     function filteredKeybindings() {
         let query = keybindingSearch.text.trim().toLowerCase()
-        return actions.slice().sort(function(a, b) { return keybindingGroups.indexOf(a.group) - keybindingGroups.indexOf(b.group) })
+        // The engine's sort is not stable: keep the catalog's order within a group.
+        return actions.slice().sort(function(a, b) { return keybindingGroups.indexOf(a.group) - keybindingGroups.indexOf(b.group) || actions.indexOf(a) - actions.indexOf(b) })
             .filter(function(binding) {
             if (!binding.sequences) return false
             // Single-letter searches match a key, rather than every action containing it.
