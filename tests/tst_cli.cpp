@@ -131,6 +131,19 @@ private slots:
         QCOMPARE(limited.out.count("\n  "), 1); QVERIFY(limited.err.contains("Showing 1 of"));
         auto none = run({"search", "nowhere"});
         QCOMPARE(none.status, 1); QVERIFY(none.err.contains("no match"));
+        // Words in slashes are a regular expression, smart case, within one verse.
+        QCOMPARE(run({"search", "/lov(e|ed) the/"}).out, QString("John 3:16 (NET)\n  For God so loved the world.\n"));
+        QVERIFY(run({"search", "/loved?/", "--color", "always"}).out.contains("\x1b[1;4mloved\x1b[0m"));
+        auto beginning = run({"search", "/^In the/", "--all"});
+        QCOMPARE(beginning.status, 0);
+        QCOMPARE(beginning.out.count("Genesis 1:1"), 2);
+        QCOMPARE(run({"search", "/^IN the/"}).status, 1);
+        QCOMPARE(run({"search", "/^IN the\\c/"}).status, 0);
+        auto badPattern = run({"search", "/(god/"});
+        QCOMPARE(badPattern.status, 2); QVERIFY2(badPattern.err.contains("Invalid regular expression"), qPrintable(badPattern.err));
+        const auto regexJson = QJsonDocument::fromJson(run({"search", "/wor\\w+/", "--json"}).out.toUtf8()).array();
+        QCOMPARE(regexJson.size(), 2); // world, in John 3:16 and 3:17
+        QCOMPARE(regexJson.first().toObject()["matches"].toArray().first().toObject()["length"].toInt(), 5);
         QCOMPARE(run({"search", "x", "--all", "-t", "KJV"}).status, 2);
         QCOMPARE(run({"search", "x", "--limit", "many"}).status, 2);
         const auto matches = QJsonDocument::fromJson(run({"search", "loved", "--json", "-t", "kjv"}).out.toUtf8()).array();

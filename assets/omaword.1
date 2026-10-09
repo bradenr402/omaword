@@ -99,8 +99,14 @@ one per line.
 .TP
 .BI search " words..."
 Searches as OmaWord does: every word in one verse, partial words included,
-case ignored; a "quoted phrase" may run across verses. Matches print in Bible
-order.
+case ignored; a "quoted phrase" may run across verses. Words in slashes, such as
+.BR '/lov(e|ed)/' ,
+are a regular expression matched within one verse, case ignored unless it has a
+capital letter
+.RB ( \ec
+ignores case,
+.B \eC
+keeps it). Matches print in Bible order.
 .B \-\-all
 searches every installed translation, the one you read first;
 .BI \-\-limit " n"
@@ -176,6 +182,7 @@ nothing installed); 2 for a usage error.
 omaword quote jn316
 omaword quote ps23 \-t KJV \-\-plain | wl\-copy
 omaword search '"living water"' \-\-all
+omaword search '/lov(e|ed) the world/'
 omaword open "Romans 8" \-\-here
 xdg\-open "$(omaword link jn316)"
 .fi

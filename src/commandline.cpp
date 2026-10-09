@@ -53,13 +53,15 @@ const QList<Command> &commands()
           "printf 'jn316\\nrom 8:28\\n' | omaword quote"}, true},
         {"search", "<words>... [--all | -t <name>] [--limit <n>] [--json]", "Search the Bible",
          "Searches as OmaWord's search does: every word in one verse, partial words included, case ignored; a \"quoted "
-         "phrase\" may run across verses. Matches print in Bible order, the matched words emphasized on a terminal. The "
-         "exit status is 1 when nothing matches.",
+         "phrase\" may run across verses. Words in slashes are a regular expression, as in chapter find: matched within "
+         "one verse, case ignored unless it has a capital letter (\\c ignores case, \\C keeps it). Matches print in "
+         "Bible order, the matched words emphasized on a terminal. The exit status is 1 when nothing matches.",
          {translationOption, {"    --all", "Search every installed translation, the one you read first."},
           {"    --limit <n>", "Print at most n matches (0: all). Default: 20 on a terminal, all otherwise."},
           {"    --color <when>", "Emphasize matches: auto (on a terminal, unless NO_COLOR is set), always, or never."},
           {"    --json", "Print a JSON array: each match's reference, translation, text, and matched spans."}, helpOption},
-         {"omaword search living water", "omaword search '\"the word became flesh\"' --all", "omaword search grace --limit 0 | wc -l"}, true},
+         {"omaword search living water", "omaword search '\"the word became flesh\"' --all", "omaword search '/lov(e|ed) the world/'",
+          "omaword search grace --limit 0 | wc -l"}, true},
         {"translations", "[--names] [--json]", "List the installed translations",
          "Lists the installed translations with their abbreviations and IDs; * marks the one you read. "
          "(omaword versions is the same.)",

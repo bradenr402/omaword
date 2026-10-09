@@ -764,6 +764,33 @@ private slots:
         QCOMPARE(object("toast")->property("text").toString(), "Searching " + kjvName + " only");
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
     }
+    // A query in slashes is a regular expression, matched within each verse;
+    // alt r makes every query one, and the choice is kept.
+    void searchWithARegularExpression() {
+        navigate("John 1:1");
+        QVERIFY(!bible->searchRegex());
+        const auto segments = [&](int row) { return bible->searchResults()[row].toMap()["segments"].toList().size(); };
+        // "alpha" as a word: ALPHA in 1:2 (not alphabet), both alphas in 1:8.
+        search("/alpha\\b/"); QTRY_COMPARE(bible->searchResultCount(), 8);
+        QCOMPARE(bible->searchResults().first().toMap()["reference"].toString(), QString("John 1:2"));
+        QCOMPARE(segments(0), 1); QCOMPARE(segments(1), 2);
+        QTRY_VERIFY(object("paletteHints")->property("plainText").toString().contains("alt r regex"));
+        // alt r: every query is one, slashes or not.
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        search("alpha\\b"); QCOMPARE(bible->searchResultCount(), 0);
+        key(Qt::Key_R, Qt::AltModifier); QTRY_VERIFY(bible->searchRegex());
+        QCOMPARE(object("toast")->property("text").toString(), QString("Searching with a regular expression"));
+        QTRY_VERIFY(!bible->searchBusy()); QTRY_COMPARE(bible->searchResultCount(), 8);
+        QTRY_VERIFY(object("paletteHints")->property("plainText").toString().contains("alt r words"));
+        { BibleBackend reopened; QVERIFY(reopened.searchRegex()); }
+        // A broken pattern says why.
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        search("alpha("); QVERIFY2(bible->searchError().startsWith("Invalid regular expression"), qPrintable(bible->searchError()));
+        // alt r again: words.
+        key(Qt::Key_R, Qt::AltModifier); QTRY_VERIFY(!bible->searchRegex());
+        QCOMPARE(object("toast")->property("text").toString(), QString("Searching for words"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+    }
     void focusEscapeAndVersionInvalidation() {
         find("alpha"); key(Qt::Key_Return); bible->setFocusMode(true); call("readerFocus");
         QTRY_VERIFY(item("searchMatchCount")->isVisible());

@@ -123,7 +123,8 @@ Normalized normalize(const QString &source)
     return out;
 }
 struct Term { QString text; bool phrase = false; };
-struct Query { QString error; QVector<Term> terms; };
+// Words and phrases, or (regex) a pattern matched within each verse.
+struct Query { QString error; QVector<Term> terms; bool regex = false; QRegularExpression pattern; };
 Query parse(const QString &input, bool syntax)
 {
     Query query;
@@ -206,8 +207,38 @@ QList<CachedCorpus> cachedCorpora; // Most recently searched first.
 constexpr int CachedCorpora = 2;
 constexpr qint64 MaximumCorpusBytes = 64 * 1024 * 1024;
 
+// A regular expression's matches, verse by verse: a row for each verse with
+// one, every match in it highlighted. Empty matches are skipped.
+Result scanPattern(const PreparedChapter &prepared, const QRegularExpression &pattern, const Cancellation &cancel)
+{
+    Result result;
+    const auto &chapter = prepared.chapter;
+    for (qsizetype v = 0; v < chapter.verses.size(); ++v) {
+        if (stopped(cancel)) return {};
+        const QStringView text = QStringView(prepared.source).mid(prepared.starts[v], prepared.ends[v] - prepared.starts[v]);
+        const int number = chapter.verses[v].number;
+        QVariantList segments, displaySegments;
+        auto it = pattern.globalMatchView(text);
+        while (it.hasNext()) {
+            const auto match = it.next();
+            if (match.capturedLength() <= 0) continue;
+            const int start = int(match.capturedStart()), length = int(match.capturedLength());
+            segments.append(QVariantMap{{QStringLiteral("verse"),number},{QStringLiteral("start"),start},{QStringLiteral("length"),length}});
+            displaySegments.append(QVariantMap{{QStringLiteral("start"),start},{QStringLiteral("length"),length}});
+        }
+        if (segments.isEmpty()) continue;
+        result.matches.append(QVariantMap{{QStringLiteral("book"),chapter.book},{QStringLiteral("chapter"),chapter.number},{QStringLiteral("start"),number},
+            {QStringLiteral("endBook"),chapter.book},{QStringLiteral("endChapter"),chapter.number},{QStringLiteral("end"),number},
+            {QStringLiteral("reference"),chapter.name + ' ' + QString::number(chapter.number) + ':' + QString::number(number)},
+            {QStringLiteral("segments"),segments},{QStringLiteral("text"),text.toString()},
+            {QStringLiteral("displaySegments"),displaySegments},{QStringLiteral("bookName"),chapter.name}});
+    }
+    return result;
+}
+
 Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, const Cancellation &cancel)
 {
+    if (query.regex) return query.error.isEmpty() ? scanPattern(prepared,query.pattern,cancel) : Result{query.error,{}};
     Result result{query.error,{}};
     const auto &chapter = prepared.chapter;
     if (!result.error.isEmpty() || query.terms.isEmpty() || chapter.verses.isEmpty() || stopped(cancel)) return result;
@@ -298,9 +329,12 @@ Result find(const Chapter &chapter, const QString &query, bool bibleSyntax, cons
     return scan(PreparedChapter(chapter),parsed,bibleSyntax,cancel);
 }
 
-Result findPattern(const Chapter &chapter, const QString &input, const Cancellation &cancel)
+namespace {
+// Chapter find's patterns (findPattern), and Bible search's: \c / \C stripped
+// (an escaped backslash kept), case ignored unless the pattern has an
+// unescaped uppercase letter. An empty pattern stays empty.
+QRegularExpression compilePattern(const QString &input)
 {
-    if (input.size() > MaximumQuerySize) return {QStringLiteral("Search queries may contain at most 4096 UTF-16 units."),{}};
     // Strip \c / \C (keeping an escaped backslash), and look for an
     // unescaped uppercase letter for smart-case.
     QString pattern; pattern.reserve(input.size());
@@ -322,10 +356,17 @@ Result findPattern(const Chapter &chapter, const QString &input, const Cancellat
         if (c.isUpper()) upper = true;
         pattern += c;
     }
-    if (pattern.isEmpty() || stopped(cancel)) return {};
     const bool insensitive = forceInsensitive || (!forceSensitive && !upper);
-    QRegularExpression expression(pattern, QRegularExpression::UseUnicodePropertiesOption
+    return QRegularExpression(pattern, QRegularExpression::UseUnicodePropertiesOption
         | (insensitive ? QRegularExpression::CaseInsensitiveOption : QRegularExpression::NoPatternOption));
+}
+}
+
+Result findPattern(const Chapter &chapter, const QString &input, const Cancellation &cancel)
+{
+    if (input.size() > MaximumQuerySize) return {QStringLiteral("Search queries may contain at most 4096 UTF-16 units."),{}};
+    const QRegularExpression expression = compilePattern(input);
+    if (expression.pattern().isEmpty() || stopped(cancel)) return {};
     if (!expression.isValid()) return {QStringLiteral("invalid pattern"),{}};
     Result result;
     for (const auto &verse : chapter.verses) {
@@ -541,11 +582,23 @@ QString defaultIndexPath()
 }
 
 Result searchEditions(const QVector<Edition> &editions, const QString &query, const QString &indexPath,
-                      const QStringList &installed, const Cancellation &cancel)
+                      const QStringList &installed, const Cancellation &cancel, Syntax syntax)
 {
-    const Query parsed = parse(query,true);
+    Query parsed;
+    const QString trimmed = query.trimmed();
+    const bool slashed = trimmed.size() > 2 && trimmed.startsWith('/') && trimmed.endsWith('/');
+    if (syntax == Syntax::Pattern || slashed) {
+        parsed.regex = true;
+        if (query.size() > MaximumQuerySize) parsed.error = "Search queries may contain at most 4096 UTF-16 units.";
+        else {
+            parsed.pattern = compilePattern(slashed ? trimmed.mid(1,trimmed.size()-2) : query);
+            if (!parsed.pattern.isValid()) parsed.error = "Invalid regular expression: " + parsed.pattern.errorString() + '.';
+            else parsed.pattern.optimize();
+        }
+    } else parsed = parse(query,true);
     Result result{parsed.error,{}};
-    if (!result.error.isEmpty() || parsed.terms.isEmpty() || stopped(cancel)) return result;
+    const bool empty = parsed.regex ? parsed.pattern.pattern().isEmpty() : parsed.terms.isEmpty();
+    if (!result.error.isEmpty() || empty || stopped(cancel)) return result;
     if (!installed.isEmpty()) {
         // Editions no longer installed leave the index.
         QMutexLocker lock(&indexMutex);

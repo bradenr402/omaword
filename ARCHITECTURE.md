@@ -353,7 +353,12 @@ files.
   tags, decorations never searched.
 - Bible search: unquoted terms AND within a verse; quoted phrases may span
   adjacent verses; mixed queries anchor on the minimal phrase range. Never
-  crosses chapters. Max 4096 units; unbalanced quotes error. Results come in
+  crosses chapters. Max 4096 units; unbalanced quotes error. A query in
+  slashes (`/lov(e|ed)/`), or any query with the `searchRegex` preference
+  (`alt r`), is a regular expression (`ScriptureSearch::Syntax::Pattern`,
+  chapter find's `compilePattern`: smart case, `\c`/`\C`) matched within each
+  verse, a row per verse with all its matches; the index cannot narrow it, so
+  every chapter is read. Results come in
   Bible order (the edition's book order, chapter, verse), never ranked;
   `searchBooks` sums them per version and book ({versionId,
   versionAbbreviation, book, name, count, index}) for the palette's book

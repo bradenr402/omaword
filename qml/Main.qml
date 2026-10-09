@@ -480,6 +480,11 @@ ApplicationWindow {
         notify(bible.searchAllVersions ? "Searching every version" : "Searching " + bible.versionAbbreviation + " only", true)
         if (paletteTextMode && paletteTextQuery.length) submitBibleSearch()
     }
+    function toggleSearchRegex() {
+        bible.setSearchRegex(!bible.searchRegex)
+        notify(bible.searchRegex ? "Searching with a regular expression" : "Searching for words", true)
+        if (paletteTextMode && paletteTextQuery.length) submitBibleSearch()
+    }
     function scheduleBibleSearch() {
         pendingSearchResume = null
         bibleSearchTimer.stop()
@@ -4051,6 +4056,8 @@ ApplicationWindow {
         { id: "previousMatch", group: "Search", title: "Previous search match", sequences: ["Shift+N"] },
         { id: "bibleSearch", group: "Search", title: "Search Bible", sequences: ["Ctrl+/"], scope: "palette", command: true },
         { id: "searchScope", group: "Search", title: "Bible search: every version or the one you read", sequences: ["Alt+A"], scope: "palette", command: true },
+        // A query in slashes, /…/, is a regular expression either way.
+        { id: "searchRegex", group: "Search", title: "Bible search: words or a regular expression", sequences: ["Alt+R"], scope: "palette", command: true },
         // Bound by the palette's input itself.
         { id: "searchBookJump", group: "Search", title: "Bible search: next book, previous book", sequences: ["Ctrl+Down", "Ctrl+Up"], scope: "search", explanation: true },
         { id: "highlight", group: "Annotate", title: "Highlight selection", sequences: ["X"], command: true },
@@ -4232,6 +4239,7 @@ ApplicationWindow {
             paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
             paletteTextMode && paletteSearchCurrent && bible.searchBooks.length > 1 ? [["Ctrl+Up", "Ctrl+Down"], "books", function() { app.jumpSearchBook(1) }] : null,
             paletteTextMode && bible.versions.length > 1 ? [actionKeys("searchScope")[0], bible.searchAllVersions ? bible.versionAbbreviation + " only" : "all versions", app.toggleSearchScope] : null,
+            paletteTextMode ? [actionKeys("searchRegex")[0], bible.searchRegex ? "words" : "regex", app.toggleSearchRegex] : null,
             ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
             paletteChapterGrid ? ["Backspace", "books", app.backToBooks] : paletteLeftGoesBack ? ["Left", "back", app.backToBooks] : null,
             // tab / shift tab cycle Passage → Search → Command.
@@ -4281,6 +4289,7 @@ ApplicationWindow {
     function actionTitle(action) {
         if (action.id === "soundEffects") return sounds.enabled ? "Disable sound effects" : "Enable sound effects"
         if (action.id === "searchScope") return bible.searchAllVersions ? "Search " + bible.versionAbbreviation + " only" : "Search every version"
+        if (action.id === "searchRegex") return bible.searchRegex ? "Search for words" : "Search with a regular expression"
         if (action.id === "reduceMotion") return sounds.reduceMotion ? "Enable animations" : "Disable animations"
         if (action.id === "toggleHistory") return bible.historyEnabled ? "Disable History" : "Enable History"
         if (action.id === "undo" && bible.canUndo) return "Undo " + bible.undoLabel
@@ -4723,6 +4732,7 @@ ApplicationWindow {
         case "books": showPaletteMode("passage"); break
         case "bibleSearch": showPaletteMode("search"); break
         case "searchScope": toggleSearchScope(); break
+        case "searchRegex": toggleSearchRegex(); break
         case "chapterFind": beginChapterFind(); break
         case "centerVerse": alignCurrentVerse("center"); break
         case "topVerse": alignCurrentVerse("top"); break
@@ -7544,7 +7554,8 @@ ApplicationWindow {
                     width: parent.width - 32
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
-                    text: app.paletteTextMode ? (!app.paletteTextQuery.length ? 'Search words or "an exact phrase"'
+                    text: app.paletteTextMode ? (!app.paletteTextQuery.length ? (bible.searchRegex ? "Search with a regular expression, as in chapter find"
+                            : 'Search words, "an exact phrase", or /a regular expression/')
                         : !app.paletteSearchCurrent || bible.searchBusy ? "Searching…"
                         : bible.searchError || "No matching verses")
                         : referenceInput.text.startsWith(">") ? "No matching commands" : "Add version to browse passages."

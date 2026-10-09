@@ -390,6 +390,38 @@ private slots:
         QCOMPARE(indexedEditions(index),QStringList({"alpha","beta"}));
         // A query error comes back as before.
         QVERIFY(!searchEditions(both,"\"unfinished",index).error.isEmpty());
+        // A regular expression, in slashes or as the syntax asked for: matched
+        // within each verse, a row per verse with every match, smart case as in
+        // chapter find; indexed or not, every chapter is read.
+        auto spans = [](const Result &result, int row) {
+            QStringList list;
+            const auto map = result.matches[row].toMap();
+            for (const auto &segment : map["displaySegments"].toList())
+                list << map["text"].toString().mid(segment.toMap()["start"].toInt(),segment.toMap()["length"].toInt());
+            return list;
+        };
+        const auto heavens = searchEditions(both,"/heavens?\\b/",index);
+        QVERIFY2(heavens.error.isEmpty(),qPrintable(heavens.error));
+        QCOMPARE(references(heavens),QStringList({"alpha Genesis 1:2","alpha Genesis 2:1","beta Genesis 1:1"}));
+        QCOMPARE(spans(heavens,0),QStringList({"heaven"}));
+        QCOMPARE(heavens.matches.first().toMap()["segments"].toList().first().toMap()["verse"].toInt(),2);
+        QCOMPARE(references(searchEditions(both,"th(e|us)\\b",index,{},{},Syntax::Pattern)).size(),4);
+        const auto every = searchEditions(both," /the/ ",index);
+        QCOMPARE(spans(every,0),QStringList({"the"})); // Genesis 1:1: "In the beginning"
+        QCOMPARE(spans(every,1),QStringList({"the","the"}));
+        // Smart case: an uppercase letter makes it exact; \c ignores case again.
+        QCOMPARE(references(searchEditions(both,"/God/",index)).size(),3);
+        QCOMPARE(references(searchEditions(both,"/^In/",index)),QStringList({"alpha Genesis 1:1"}));
+        QCOMPARE(references(searchEditions(both,"/^in/",index)),QStringList({"alpha Genesis 1:1"}));
+        QCOMPARE(references(searchEditions(both,"/^IN/",index)).size(),0);
+        QCOMPARE(references(searchEditions(both,"/^IN\\c/",index)),QStringList({"alpha Genesis 1:1"}));
+        // Never across verses: "created the" ends one verse and starts the next.
+        QCOMPARE(searchEditions(both,"/created the/",index).matches.size(),0);
+        // Empty matches are skipped; a bad pattern says why; bare slashes are words.
+        QCOMPARE(searchEditions(both,"/x*/",index).matches.size(),0);
+        const auto broken = searchEditions(both,"/(god/",index);
+        QVERIFY(broken.error.startsWith("Invalid regular expression: "));
+        QCOMPARE(searchEditions(both,"//",index).error,QString());
     }
     void twoVersionsStayCached() {
         // Two windows searching different versions keep both prepared texts;
