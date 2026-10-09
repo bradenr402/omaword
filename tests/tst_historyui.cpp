@@ -708,6 +708,60 @@ private slots:
         navigate("John 1:1"); key(Qt::Key_R);
         QCOMPARE(bible->versionId(), QString("eng-kjv")); QCOMPARE(here(), QString("John 2"));
     }
+    // Removing the ribbon: ctrl shift R, the tab's or the footer's right-click
+    // menu, or delete on Continue in the palette. Every window loses it, and
+    // nothing places it again until shift R.
+    void ribbonRemovedByKeyMenuOrPalette() {
+        key(Qt::Key_R, Qt::ControlModifier | Qt::ShiftModifier); QCOMPARE(toast(), QString("No ribbon to remove"));
+        const auto removed = [&](const QString &where) {
+            QTRY_VERIFY(bible->ribbon().isEmpty());
+            QCOMPARE(toast(), "Ribbon removed from " + where + " · shift R places it again");
+            QTRY_VERIFY(!item("ribbonTab")->isVisible()); QVERIFY(!item("ribbonControl")->isVisible());
+        };
+        const auto menuIds = [&] {
+            QStringList ids;
+            for (const auto &entry : value(object("contextMenu")->property("layout")).toList())
+                if (!entry.toMap()["separator"].toBool()) ids << entry.toMap()["id"].toString();
+            return ids;
+        };
+        const auto rightClick = [&](QQuickItem *target) {
+            QTest::mouseClick(window, Qt::RightButton, {}, target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+            QTRY_VERIFY(object("contextMenu")->property("visible").toBool());
+        };
+        // ctrl shift R, in its chapter; it stays gone as the reader moves on.
+        navigate("John 1:5"); key(Qt::Key_R, Qt::ShiftModifier); QTRY_VERIFY(item("ribbonTab")->isVisible());
+        QCOMPARE(commandTitle("remove the ribbon"), QString("Remove the ribbon from John 1:5"));
+        object("referenceInput")->setProperty("text", "");
+        key(Qt::Key_R, Qt::ControlModifier | Qt::ShiftModifier); removed("John 1:5");
+        key(Qt::Key_L); key(Qt::Key_H); QVERIFY(bible->ribbon().isEmpty());
+        // The tab's menu.
+        navigate("John 1:5"); key(Qt::Key_R, Qt::ShiftModifier);
+        QTRY_VERIFY(item("ribbonTab")->isVisible()); QTRY_VERIFY(!object("ribbonDrop")->property("running").toBool());
+        rightClick(item("ribbonTab"));
+        QCOMPARE(menuIds(), QStringList({"ribbon", "placeRibbon", "removeRibbon"}));
+        QVERIFY(QMetaObject::invokeMethod(object("contextMenu"), "triggerId", Q_ARG(QVariant, QString("removeRibbon"))));
+        removed("John 1:5");
+        // The footer's ↩ menu, away from it.
+        key(Qt::Key_R, Qt::ShiftModifier); jumpTo("John 2:3"); QTRY_VERIFY(item("ribbonControl")->isVisible());
+        rightClick(item("ribbonControl"));
+        QCOMPARE(menuIds(), QStringList({"ribbon", "placeRibbon", "removeRibbon"}));
+        QVERIFY(QMetaObject::invokeMethod(object("contextMenu"), "triggerId", Q_ARG(QVariant, QString("removeRibbon"))));
+        removed("John 1:5");
+        // delete on Continue, as its hints and row menu say; then on a recent
+        // passage, which leaves History.
+        record("John 1:9"); navigate("John 1:5"); key(Qt::Key_R, Qt::ShiftModifier); jumpTo("John 2:3");
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
+        QCOMPARE(paletteRows().first().toMap()["title"].toString(), QString("Continue · John 1:5"));
+        QCOMPARE(paletteRow(), 0);
+        QVERIFY(object("paletteHints")->property("plainText").toString().contains("delete remove"));
+        QVariant menu; QMetaObject::invokeMethod(window, "paletteRowMenu", Q_RETURN_ARG(QVariant, menu), Q_ARG(QVariant, paletteRows().first()));
+        QVERIFY(value(menu).toList().last().toMap()["text"].toString() == "Remove the ribbon");
+        key(Qt::Key_Delete); removed("John 1:5");
+        QTRY_COMPARE(paletteRows().first().toMap()["title"].toString(), QString("John 1:9"));
+        QVERIFY(object("passagePalette")->property("visible").toBool());
+        key(Qt::Key_Delete); QTRY_VERIFY(!historyRefs().contains("John 1:9"));
+        key(Qt::Key_Escape);
+    }
     void twoWindowsShareHistoryButNotStacks() {
         BibleBackend peer; QVERIFY(peer.ready());
         SoundEffects peerSounds(nullptr, session->filePath("sound2.ini"), false);

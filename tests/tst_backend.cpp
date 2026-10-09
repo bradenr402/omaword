@@ -902,6 +902,15 @@ private slots:
         QCOMPARE(location["chapter"].toInt(),7); QVERIFY(bible->openLocation(location));
         // History and backups leave it alone.
         QVERIFY(bible->clearHistory()); QVERIFY(!bible->ribbon().isEmpty());
+        // Removed, it is gone for every window and stays gone, until placed again.
+        BibleBackend other; QSignalSpy otherChanged(&other,&BibleBackend::ribbonChanged);
+        QVERIFY(bible->removeRibbon()); QVERIFY(bible->error().isEmpty());
+        QVERIFY(bible->ribbon().isEmpty()); QVERIFY(bible->ribbonLocation().isEmpty());
+        QCOMPARE(otherChanged.count(),1); QVERIFY(other.ribbon().isEmpty());
+        bible->nextChapter(); QVERIFY(bible->ribbon().isEmpty());
+        bible.reset(); bible = std::make_unique<BibleBackend>(); QVERIFY(bible->ribbon().isEmpty());
+        QVERIFY(bible->removeRibbon()); QVERIFY(bible->ribbon().isEmpty()); // Nothing to remove is no error.
+        QVERIFY(bible->placeRibbon()); QVERIFY(!other.ribbon().isEmpty());
     }
     void historyUpsertOrderCapAndRemoval() {
         install(net);

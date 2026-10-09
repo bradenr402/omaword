@@ -1516,10 +1516,25 @@ bool BibleBackend::placeRibbon()
     q.addBindValue(timestamp());
     if (!q.exec()) return setError("Cannot place the ribbon: " + q.lastError().text());
     if (!m_store.commit()) return setError("Cannot place the ribbon: " + m_store.lastError().text());
+    clearError(); publishRibbon(); return true;
+}
+
+bool BibleBackend::removeRibbon()
+{
+    if (!m_storeReady || sharedMutationBusy()) return setError("The personal store is unavailable or busy.");
+    if (!m_store.transaction()) return setError(m_store.lastError().text());
+    const auto guard = qScopeGuard([this] { m_store.rollback(); });
+    QSqlQuery q(m_store);
+    if (!q.exec("DELETE FROM ribbon")) return setError("Cannot remove the ribbon: " + q.lastError().text());
+    if (!m_store.commit()) return setError("Cannot remove the ribbon: " + m_store.lastError().text());
+    clearError(); publishRibbon(); return true;
+}
+
+void BibleBackend::publishRibbon()
+{
     QList<QPointer<BibleBackend>> snapshot;
     for (auto *peer : readers) if (peer->m_directory == m_directory) snapshot.append(peer);
     for (const auto &peer : snapshot) if (peer) { peer->reloadRibbon(); emit peer->ribbonChanged(); }
-    clearError(); return true;
 }
 
 QVariantMap BibleBackend::ribbonLocation() const

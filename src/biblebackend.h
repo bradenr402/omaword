@@ -308,13 +308,15 @@ public:
     // shared live by every window, kept across restarts, never backed up.
     // placeRibbon() puts it at this window's currentLocation() (the selection,
     // else the chapter and its reading position); it stays there until placed
-    // again. ribbon: {} or {versionId, book, chapter, start, endBook,
+    // again or removed (removeRibbon(), for every window; nothing places it
+    // again by itself). ribbon: {} or {versionId, book, chapter, start, endBook,
     // endChapter, end, position, placedAt, reference, chapterReference}, the
     // references in the active version's book names. ribbonLocation() is where
     // it opens: in the active version when that has the passage, else in the
     // version it was placed in, else its chapter here; {} when none has it.
     QVariantMap ribbon() const;
     Q_INVOKABLE bool placeRibbon();
+    Q_INVOKABLE bool removeRibbon();
     Q_INVOKABLE QVariantMap ribbonLocation() const;
 
     // Undo: this window's own annotation changes (highlight, note, tag
@@ -592,6 +594,7 @@ private:
     void reloadHistory();
     void publishHistory();
     void reloadRibbon();
+    void publishRibbon();
     bool validLocation(const QVariantMap &location) const;
     bool requireReady();
     bool setError(const QString &error);

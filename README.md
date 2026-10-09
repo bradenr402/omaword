@@ -109,6 +109,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `-`: Swap with the previous jump
 - `shift R`: Place the ribbon here
 - `r`: Back to the ribbon
+- `ctrl shift R`: Remove the ribbon
 - `mouse back`: Back a jump, back to the palette's books, or close the open panel
 
 ### Select
@@ -281,7 +282,7 @@ These also work, but stay out of the in-app list:
 - Click the chapter title for the book's chapter grid, the current chapter chosen; the `<` `>` buttons at the window's edges step chapters (`h` `l`), and "John 2 →" after the last verse leads on. The next chapter is read ahead while you read, so turning to it is quick.
 - `ctrl` + mouse wheel and a touchpad pinch change the Text size, like `ctrl =` and `ctrl -`.
 - `[` and `]` (or the mouse's back and forward buttons) step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.
-- One ribbon keeps your reading place: `shift R` places it at the selected verses (or the chapter, scrolled as it is) and it stays there until you place it again; `r` returns to it from any window, in the version you are reading. Its chapter shows an accent ribbon at the top right of the text, which drops in as you place it; elsewhere the footer offers "↩ Mark 5" and the passage palette starts with **Continue**.
+- One ribbon keeps your reading place: `shift R` places it at the selected verses (or the chapter, scrolled as it is) and it stays there until you place it again; `r` returns to it from any window, in the version you are reading. Its chapter shows an accent ribbon at the top right of the text, which drops in as you place it; elsewhere the footer offers "↩ Mark 5" and the passage palette starts with **Continue**. `ctrl shift R` removes it (so do the ribbon's and "↩"'s right-click menus, and `delete` on **Continue**), and none comes back until you place one.
 - History keeps the passages you stayed on for a few seconds, shared by every window. The passage palette lists the latest five above the books, then **All History**; `ctrl h` opens it directly: newest first under Today, Yesterday, and Earlier, typing narrows it, `delete` removes a passage and `shift delete` clears it. It never goes into backups, and Commands can clear or disable it.
 
 ### Studying

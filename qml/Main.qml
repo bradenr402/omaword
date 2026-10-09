@@ -2336,6 +2336,7 @@ ApplicationWindow {
         if (action.id === "openBeside" && bible.ready && bible.versions.length < 2) return "Add another version to read beside"
         if (action.id === "unfollow" && !following) return "No window follows this one · " + keyText("openBeside") + " opens a version beside it"
         if (action.id === "ribbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon yet · " + keyText("placeRibbon") + " places it"
+        if (action.id === "removeRibbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon to remove"
         if (!bible.ready) return "Add a Bible version first"
         return ""
     }
@@ -4171,9 +4172,11 @@ ApplicationWindow {
         { id: "historyBack", group: "History", title: "Back to the previous jump", sequences: ["["] },
         { id: "historyForward", group: "History", title: "Forward to the next jump", sequences: ["]"] },
         { id: "historySwap", group: "History", title: "Swap with the previous jump", sequences: ["-"] },
-        // One ribbon for every window and version; it stays until placed again.
+        // One ribbon for every window and version; it stays until placed again,
+        // or removed (then nothing places it until shift R).
         { id: "placeRibbon", group: "History", title: "Place the ribbon here", sequences: ["Shift+R"], command: true },
         { id: "ribbon", group: "History", title: "Back to the ribbon", sequences: ["R"], command: true },
+        { id: "removeRibbon", group: "History", title: "Remove the ribbon", sequences: ["Ctrl+Shift+R"], command: true },
         { id: "mouseBack", group: "History", title: "Back a jump, back to the palette's books, or close the open panel", sequences: ["BackClick"], explanation: true },
         { id: "mouseForward", group: "History", title: "Forward to the next jump", sequences: ["ForwardClick"], explanation: true },
         { id: "selectVerse", group: "Select", title: "Select verse", sequences: ["Click"], explanation: true },
@@ -4387,12 +4390,15 @@ ApplicationWindow {
                 [actionKeys("historyClearKeys")[0], "clear", app.requestClearHistory, bible.history.length > 0 && !bible.busy],
                 ["Backspace", "back", app.backToBooks], ["Escape", "close", app.escapePalette]]
         }
+        const current = paletteResults.model[paletteResults.currentIndex]
         return [[paletteChapterGrid ? ["Left", "Right", "Up", "Down"] : ["Up", "Down"], "choose"],
             paletteMoreResults ? ["Down", "more", function() { app.loadMorePalette() }] : null,
             paletteTextMode && paletteSearchCurrent && bible.searchBooks.length > 1 ? [["Ctrl+Up", "Ctrl+Down"], "books", function() { app.jumpSearchBook(1) }] : null,
             paletteTextMode && bible.versions.length > 1 ? [actionKeys("searchScope")[0], bible.searchAllVersions ? bible.versionAbbreviation + " only" : "all versions", app.toggleSearchScope] : null,
             paletteTextMode ? [actionKeys("searchRegex")[0], bible.searchRegex ? "words" : "regex", app.toggleSearchRegex] : null,
             ["Return", "select", app.acceptPalette, !!paletteDestination.entry || paletteResolution.valid],
+            !paletteTextMode && !referenceInput.text.length && paletteRemovable(current)
+                ? ["Delete", "remove", function() { app.removePaletteEntry(current) }, !bible.busy] : null,
             paletteChapterGrid ? ["Backspace", "books", app.backToBooks] : paletteLeftGoesBack ? ["Left", "back", app.backToBooks] : null,
             // tab / shift tab cycle Passage → Search → Command.
             bible.ready ? ["Tab", "mode", function() { app.cyclePaletteMode(1) }] : null, ["Escape", "close", app.escapePalette]]
@@ -4454,6 +4460,7 @@ ApplicationWindow {
         if (action.id === "redo" && bible.canRedo) return "Redo " + bible.redoLabel
         if (action.id === "placeRibbon" && bible.ribbon.versionId) return "Move the ribbon here"
         if (action.id === "ribbon" && bible.ribbon.versionId) return "Back to the ribbon · " + bible.ribbon.reference
+        if (action.id === "removeRibbon" && bible.ribbon.versionId) return "Remove the ribbon from " + bible.ribbon.reference
         return action.title
     }
     function readingModeName(mode) { return mode.charAt(0).toUpperCase() + mode.slice(1) }
@@ -4518,7 +4525,7 @@ ApplicationWindow {
         if (action.id === "peek") return hasSelection && Array.from(bible.footnotes).some(function(note) { return note.verse === bible.cursorVerse })
         if (action.id === "undo") return bible.canUndo
         if (action.id === "redo") return bible.canRedo
-        if (action.id === "ribbon") return bible.ready && !!bible.ribbon.versionId
+        if (action.id === "ribbon" || action.id === "removeRibbon") return bible.ready && !!bible.ribbon.versionId
         // Notes editor keys, run from Keybindings: they act in an open Notes panel.
         if (["openNoteLink", "notePreview"].includes(action.id) && deskOpen) return true
         if (["noteLinkSuggest", "openNoteLink", "notePreview"].includes(action.id)) return notesOpen && hasSelection
@@ -4701,6 +4708,19 @@ ApplicationWindow {
         NumberAnimation { id: ribbonLift; target: ribbonTab; property: "drop"; to: -ribbonTab.height - 2; easing.type: Easing.InQuad }
         NumberAnimation { target: ribbonTab; property: "drop"; to: 0; duration: 260; easing.type: Easing.OutBack; easing.overshoot: 2 }
     }
+    // Every window loses it at once; shift R places it again.
+    function removeRibbon() {
+        const reference = bible.ribbon.reference
+        if (!bible.removeRibbon()) { sounds.play("error"); return }
+        notify("Ribbon removed from " + reference + " · " + keyText("placeRibbon") + " places it again", true)
+        sounds.play("remove")
+    }
+    // The ribbon tab's and the footer's ↩ menu.
+    function openRibbonMenu(sceneX, sceneY) {
+        contextMenu.show("ribbon", [menuAction("ribbon", "Back to the ribbon", "ribbon"),
+            menuAction("placeRibbon", "Move the ribbon here", "placeRibbon"), menuDivider,
+            menuAction("removeRibbon", "Remove the ribbon", "removeRibbon")], sceneX, sceneY)
+    }
     function openRibbon() {
         if (!flushNote()) return false
         const location = bible.ribbonLocation()
@@ -4714,7 +4734,16 @@ ApplicationWindow {
         const location = bible.ribbonLocation()
         const scope = location.start ? location : null
         return RowMenu.entries(app, { busy: bible.busy, keys: false, scope: scope, canCopy: !!scope, canDesk: !!scope,
-            open: function() { app.activatePaletteEntry({ ribbon: true }) } })
+            open: function() { app.activatePaletteEntry({ ribbon: true }) },
+            extras: [{ id: "remove", text: "Remove the ribbon", shortcut: KeyNotation.format("Delete"), enabled: !bible.busy, run: app.removeRibbon }] })
+    }
+    // delete in the palette: Continue takes the ribbon away, a recent or
+    // History passage leaves History.
+    function paletteRemovable(entry) { return !!entry && (!!entry.ribbon || !!entry.recent) }
+    function removePaletteEntry(entry) {
+        if (entry && entry.ribbon) runCommand("removeRibbon")
+        else if (entry && entry.recent) removeHistoryItem(entry.recent.id)
+        else rejected()
     }
     function activatePaletteEntry(entry) {
         if (!entry) return
@@ -4969,6 +4998,7 @@ ApplicationWindow {
         case "historySwap": historySwap(); break
         case "placeRibbon": placeRibbon(); break
         case "ribbon": openRibbon(); break
+        case "removeRibbon": removeRibbon(); break
         case "clearHistory": requestClearHistory(); break
         case "unfollow": unfollowRequested(); notify("Stopped following the window beside", true); break
         case "toggleHistory": toggleHistoryEnabled(); break
@@ -5395,14 +5425,20 @@ ApplicationWindow {
                             anchors.margins: -6 * app.readerScale
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: app.runCommand("ribbon")
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.RightButton) {
+                                    const p = ribbonTabMouse.mapToItem(null, mouse.x, mouse.y)
+                                    app.openRibbonMenu(p.x, p.y)
+                                } else app.runCommand("ribbon")
+                            }
                         }
                         AppToolTip {
                             theme: desktop
                             uiScale: app.scale
                             visible: ribbonTabMouse.containsMouse
                             text: "Ribbon · " + (bible.ribbon.reference || "") + " · " + app.keyText("ribbon") + " returns here, "
-                                + app.keyText("placeRibbon") + " moves it"
+                                + app.keyText("placeRibbon") + " moves it, " + app.keyText("removeRibbon") + " removes it"
                         }
                     }
                     Column {
@@ -7187,6 +7223,11 @@ ApplicationWindow {
             visible: app.footerShowsRibbon
             available: !bible.busy && !app.modalOpen
             onClicked: app.runCommand("ribbon")
+            // A right click: back, move it here, or remove it.
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: function(eventPoint) { app.openRibbonMenu(eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+            }
         }
         FloatingButton {
             id: versionControl
@@ -7778,6 +7819,11 @@ ApplicationWindow {
                                 && !text.length && (app.paletteBook > 0 || app.paletteHistory)) {
                             // Backspace with nothing typed steps back from a book's chapters or History.
                             app.backToBooks(); event.accepted = true
+                        } else if (event.key === Qt.Key_Delete && event.modifiers === Qt.NoModifier && !app.paletteHistory
+                                && !app.paletteTextMode && !text.length && app.paletteRemovable(paletteResults.model[paletteResults.currentIndex])) {
+                            // On Continue or a recent passage, with nothing typed.
+                            event.accepted = true
+                            app.removePaletteEntry(paletteResults.model[paletteResults.currentIndex])
                         } else if (event.key === Qt.Key_Delete && app.paletteHistory && !app.paletteTextMode
                                 && (event.modifiers === Qt.ShiftModifier || (event.modifiers === Qt.NoModifier
                                     && cursorPosition === text.length && !selectedText.length))) {
@@ -7786,8 +7832,7 @@ ApplicationWindow {
                             event.accepted = true
                             const entry = paletteResults.model[paletteResults.currentIndex]
                             if (event.modifiers === Qt.ShiftModifier) app.requestClearHistory()
-                            else if (entry && entry.recent) app.removeHistoryItem(entry.recent.id)
-                            else app.rejected()
+                            else app.removePaletteEntry(entry)
                         }
                     }
                     // Dim only the recognized prefix, retaining native input,

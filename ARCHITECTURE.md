@@ -178,8 +178,10 @@ files.
   row) lists every row grouped by local day, filtered by the typed query, with
   `delete` / `shift delete` to remove one or clear all (the latter confirms).
 - Ribbon: one global reading place, placed only by `placeRibbon()` (`shift R`,
-  at `currentLocation()`) and never moved otherwise; shared live by every
-  window, excluded from backups and untouched by Clear History. It is
+  at `currentLocation()`) and never moved otherwise, removed only by
+  `removeRibbon()` (`ctrl shift R`, the tab's and footer's menus, `delete`
+  on Continue); shared live by every window (`publishRibbon`), excluded from
+  backups and untouched by Clear History. It is
   version-independent: `ribbonLocation()` opens it in the active version when
   that has the passage, else in the version it was placed in, else its chapter
   here. `r` opens it as a jump (`beginJump`/`endJump`). QML shows an accent tab
