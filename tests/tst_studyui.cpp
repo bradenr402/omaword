@@ -488,7 +488,11 @@ private slots:
         QCOMPARE(sections, QStringList({"own", "own", "own", "own", "own", "own", "parallel", "parallel"}));
         QTRY_VERIFY(item("studySection:own") && item("studySection:own")->isVisible());
         QCOMPARE(object("studySectionTitle:own")->property("text").toString(), "Cross-references in " + bible->versionAbbreviation());
+        // The parallel section's heading may lie past the panel's end: rows are made as they come into view.
+        QVERIFY(QMetaObject::invokeMethod(object("studyList"), "positionViewAtIndex", Q_ARG(int, 6), Q_ARG(int, 0)));
+        QTRY_VERIFY(object("studySectionTitle:parallel"));
         QCOMPARE(object("studySectionTitle:parallel")->property("text").toString(), QString("Parallel passages"));
+        QVERIFY(QMetaObject::invokeMethod(object("studyList"), "positionViewAtBeginning"));
         QVERIFY(!item("studySearch")->isVisible()); QVERIFY(!item("studyTabs"));
         // Shared list keys and motions, across sections (headings are never stops).
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
