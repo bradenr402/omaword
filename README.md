@@ -42,10 +42,10 @@ Links like `omaword:John%203:16`, or `omaword:jn316?translation=KJV`, open where
 o.bind("SUPER + ALT + B", "Look up a passage", "omaword lookup")
 ```
 
-Hyprland floats the window (its size is fixed); to center it as Omarchy's floating windows are, add a rule there too:
+Hyprland floats the window (its size is fixed). To center it and show and hide it at once, as Omarchy's menus do, add a rule there too:
 
 ```lua
-o.window({ class = "^omaword$", title = "^Look up · OmaWord$" }, { tag = "+floating-window" })
+o.window({ class = "^omaword$", title = "^Look up · OmaWord$" }, { float = true, center = true, no_anim = true })
 ```
 
 If you copy from it with OmaWord otherwise closed, OmaWord stays running without a window until something else is copied, so what you copied can still be pasted.

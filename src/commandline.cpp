@@ -41,8 +41,10 @@ const QList<Command> &commands()
         {"lookup", "[<text>] [-t <name>]", "Look up a passage in a small window",
          "Opens a small window on the workspace you are on, with <text> typed into it if given: type a passage, enter "
          "shows it, y copies it (shift Y the plain text), enter opens it in the window you were reading, esc closes. "
-         "Hyprland floats it. Suits a key binding; in Omarchy, in ~/.config/hypr/bindings.lua:\n"
-         "  o.bind(\"SUPER + ALT + B\", \"Look up a passage\", \"omaword lookup\")",
+         "Hyprland floats it. Suits a key binding; in Omarchy, in ~/.config/hypr/bindings.lua, with a rule that centers "
+         "it and shows and hides it at once, as Omarchy's menus do:\n"
+         "  o.bind(\"SUPER + ALT + B\", \"Look up a passage\", \"omaword lookup\")\n"
+         "  o.window({ class = \"^omaword$\", title = \"^Look up · OmaWord$\" }, { float = true, center = true, no_anim = true })",
          {translationOption, helpOption}, {"omaword lookup", "omaword lookup rom 8", "omaword lookup -t KJV"}, false},
         {"quote", "<passage>... [--plain] [--json] [-t <name>]", "Print passages as quotations",
          "Prints each passage as OmaWord copies it: the text in quotation marks, a number before each verse, and the "
