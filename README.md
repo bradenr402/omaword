@@ -215,6 +215,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt w`: Show notes in margin
 - `alt j`: Highlight words of Jesus
 - `alt l`: Layout
+- `alt shift L`: Default layout (Paragraph)
 - `alt s`: Sound effects
 - `alt m`: Animations
 - `ctrl =`: Larger text
@@ -271,7 +272,7 @@ These also work, but stay out of the in-app list:
 ## Features
 
 ### Reading
-- Paragraph, Verse, and Block layouts (`alt l`, or Reading settings → Layout), with optional verse numbers and headings.
+- Paragraph, Verse, and Block layouts (`alt l`, or Reading settings → Layout; `alt shift L` returns to Paragraph, the default), with optional verse numbers and headings.
 - **Aa** in the footer sets text size, line height, and layout at hand. It sits above the footer and the text makes room for it, so it never covers what you are reading; its changes show as you make them.
 - A comfortable page: the column is about 66 characters wide and grows with the Text size; the title, headings, verse numbers, and notes are steps of one type scale; poetry lines are indented by level (`\q1`, `\q2`, …) with hanging wrapped lines in the Paragraph and Verse layouts, and run on as prose in Block.
 - Focus mode (`f`) dims everything but the current verse and keeps it 40% down the window, like a typewriter. The footer then shows only the focus button; rest the pointer on it (or tab to it) to reveal the rest in place.

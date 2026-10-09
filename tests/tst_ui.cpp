@@ -784,7 +784,14 @@ private slots:
         QTRY_VERIFY(item("verseBody1"));
         key(Qt::Key_L,Qt::AltModifier); QCOMPARE(bible->readingMode(),QString("block"));
         QTRY_VERIFY(blockTextDocument());
-        key(Qt::Key_L,Qt::AltModifier); QCOMPARE(bible->readingMode(),QString("paragraph"));
+        // alt shift L: back to the default, Paragraph, from any layout.
+        key(Qt::Key_L,Qt::AltModifier | Qt::ShiftModifier); QCOMPARE(bible->readingMode(),QString("paragraph"));
+        QCOMPARE(prop("toast","text").toString(),QString("Layout Paragraph, the default"));
+        if (bible->hasParagraphs()) QTRY_VERIFY(blockTextDocument());
+        else QTRY_VERIFY(item("verseBody1"));
+        key(Qt::Key_L,Qt::AltModifier); QCOMPARE(bible->readingMode(),QString("verse"));
+        QTRY_VERIFY(item("verseBody1"));
+        key(Qt::Key_L,Qt::AltModifier | Qt::ShiftModifier); QCOMPARE(bible->readingMode(),QString("paragraph"));
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("layout");
@@ -796,6 +803,8 @@ private slots:
         key(Qt::Key_Return); QTRY_COMPARE(bible->readingMode(),QString("block"));
         key(Qt::Key_Comma,Qt::ControlModifier); QTRY_VERIFY(prop("settingsDialog","opened").toBool());
         QTest::qWait(100);
+        // Reading settings names the default and its key.
+        QCOMPARE(plainHint(prop("readingModeDefault","text").toString()),QString("Paragraph is the default · alt shift L returns to it"));
         click(item("readingMode:paragraph"));
         QCOMPARE(bible->readingMode(),QString("paragraph"));
         QVERIFY(prop("readingMode:paragraph","checked").toBool());

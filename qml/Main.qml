@@ -4299,6 +4299,8 @@ ApplicationWindow {
         // Last of the switches: right above Reading settings' "not marked" hint.
         { id: "wordsOfJesus", group: "Reading", title: "Highlight words of Jesus", sequences: ["Alt+J"], setting: "wordsOfJesus", command: true },
         { id: "readingMode", group: "Reading", title: "Layout", sequences: ["Alt+L"], command: true },
+        // Paragraph, where a version marks no paragraphs read as Verse.
+        { id: "defaultLayout", group: "Reading", title: "Default layout (Paragraph)", sequences: ["Alt+Shift+L"], command: true },
         { id: "soundEffects", group: "Reading", title: "Sound effects", sequences: ["Alt+S"], scope: "global", command: true },
         { id: "reduceMotion", group: "Reading", title: "Animations", sequences: ["Alt+M"], scope: "global", command: true },
         { id: "larger", group: "Reading", title: "Larger text", sequences: ["Ctrl+="], aliases: ["Ctrl++"], aliasReason: "the zoom-in key in most apps (shift = on many layouts)." },
@@ -4520,7 +4522,7 @@ ApplicationWindow {
         // ctrl t opens Manage tags over a side panel (Marks binds it itself).
         if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && !(marksOpen && marginKeys)
         if (settingsDialog.opened && !errorDialog.visible
-                && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
+                && (action.setting || ["readingMode", "defaultLayout", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         // visible, not opened: the palette accepts keys during its fade-in.
         if (action.scope === "palette") return !modalOpen || passagePalette.visible
         if (action.scope === "global") return !modalOpen && (bible.ready || ["newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings"].includes(action.id))
@@ -4556,7 +4558,7 @@ ApplicationWindow {
         if (action.id === "noteUseSaved") return deskOpen ? deskConflict : notesOpen && noteConflict
         if (action.id === "noteLinkedFrom") return notesOpen && hasSelection && linkedFrom.length > 0
         return bible.ready || !!action.setting
-            || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
+            || ["books", "commands", "newWindow", "help", "about", "soundEffects", "reduceMotion", "import", "switchVersion", "removeVersion", "settings", "readingMode", "defaultLayout", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id)
     }
     function scopeTitle(action) {
         if (action.scope === "list") return "List panels · Marks, Desk, History, See also"
@@ -4993,6 +4995,10 @@ ApplicationWindow {
             if (bible.readingMode !== previousMode) notify("Layout " + readingModeName(bible.readingMode), true)
             break
         }
+        case "defaultLayout":
+            bible.setReadingMode("paragraph")
+            notify("Layout Paragraph, the default", true)
+            break
         case "focus": bible.setFocusMode(!bible.focusMode); break
         case "lineLess": bible.setLineHeight(Math.round((bible.lineHeight - 0.1) * 10) / 10); break
         case "lineMore": bible.setLineHeight(Math.round((bible.lineHeight + 0.1) * 10) / 10); break
@@ -8476,6 +8482,13 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
+            Label {
+                objectName: "readingModeDefault"
+                text: "Paragraph is the default · " + app.keyRich("defaultLayout") + " returns to it"
+                textFormat: Text.StyledText
+                color: desktop.muted; font.pixelSize: 12 * app.scale
+                Layout.fillWidth: true; wrapMode: Text.Wrap
             }
             FineRule { objectName: "settingsTextSizeRule"; Layout.fillWidth: true }
             RowLayout {
