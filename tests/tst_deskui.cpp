@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QFile>
+#include <QFontMetricsF>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -377,7 +378,9 @@ private slots:
         QStringList texts; QList<double> tops;
         for (auto block = document->begin(); block.isValid(); block = block.next()) { texts << block.text(); tops << block.blockFormat().topMargin(); }
         QCOMPARE(texts, (QStringList{"Line one", "Line two", "Next paragraph", "a", "b", "q1", "q2", "q3", "r1", "After"}));
-        const double gap = 9;
+        // A gap is one line of the preview's text, as a blank line reads.
+        const double gap = qRound(QFontMetricsF(item("deskPreview")->property("font").value<QFont>()).lineSpacing());
+        QVERIFY(gap >= 15);
         QCOMPARE(tops, (QList<double>{0, 0, gap, gap, 0, gap, 0, gap, gap, gap}));
         // Two quotes in a row keep separate bars; q1–q3 is one quote.
         QTRY_VERIFY(item("deskQuoteBars:1")); QVERIFY(!item("deskQuoteBars:2"));

@@ -11,7 +11,7 @@ class QTextDocument;
 // A Markdown TextEdit's preview layout (TextEdit.MarkdownText). Qt indents
 // block quotes 40 px on both sides and draws nothing else, and puts no space
 // between paragraphs. This narrows quotes to `indent` per level on the left
-// only, puts `gap` above each paragraph, list, quote, heading, and code
+// only, puts `gap` (QuoteBars: a line of the text) above each paragraph, list, quote, heading, and code
 // block (not between a paragraph's lines, a list's items, or a code block's
 // lines), and reports where each quote level's bar goes ({x, y, height,
 // level} in document coordinates) for QuoteBars.qml. Qt keeps no trace of
