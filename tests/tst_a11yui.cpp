@@ -885,8 +885,9 @@ private slots:
         QTest::qWait(50); click(item("linkedFromRow0")); QTRY_COMPARE(bible->selectionReference(), QString("John 1:5"));
     }
     // While typing a note, the palette and dialog launchers (Ctrl, F1) work
-    // again: each saves the draft and closes Notes, then opens. Plain keys
-    // (? included) still type. A draft that cannot save keeps Notes open.
+    // again: each saves the draft and opens beside Notes, which stays; closing
+    // it returns to the note. Plain keys (? included) still type. A draft that
+    // cannot save keeps Notes as it is, and nothing opens.
     void notesEditorLaunchers() {
         struct Launcher { Qt::Key key; Qt::KeyboardModifiers modifiers; const char *surface; };
         const QList<Launcher> launchers = {
@@ -903,10 +904,12 @@ private slots:
             type(draft.toLower());
             key(launcher.key, launcher.modifiers);
             QTRY_VERIFY2(shown(launcher.surface), qPrintable(tag));
-            QTRY_VERIFY2(!shown("notesDrawer"), qPrintable(tag));
+            QVERIFY2(shown("notesDrawer"), qPrintable(tag));
             QCOMPARE(bible->noteText(), draft.toLower());
             key(Qt::Key_Escape); QTRY_VERIFY2(!shown(launcher.surface), qPrintable(tag));
             if (shown("tagsSurface")) { key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface")); }
+            QTRY_VERIFY2(item("noteEditor")->hasActiveFocus(), qPrintable(tag));
+            key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
         }
         // Plain keys type: ? stays in the note; no Keybindings.
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
@@ -1716,8 +1719,8 @@ private slots:
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
         }
         // Notes is not modal: from the preview the palette opens over it and
-        // returns to it, and a reading toggle acts with it open. (From the
-        // editor, ctrl k closes Notes first: notesEditorLaunchers.)
+        // returns to it, and a reading toggle acts with it open (from the
+        // editor too: notesEditorLaunchers).
         call("readerFocus"); key(Qt::Key_Escape); run("notes"); QTRY_VERIFY(opened("notesDrawer")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("notePreview")->hasActiveFocus());
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(shown("notesDrawer"));
@@ -1726,14 +1729,15 @@ private slots:
         key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), !numbers); QVERIFY(opened("notesDrawer"));
         escapeNotes();
         // Nor is the Desk: from the reader, toggles and the palette act over it;
-        // from its page, a launcher closes it first, as from a note.
+        // from its page, a launcher opens beside it and returns to the page.
         run("desk"); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
         key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), numbers); QVERIFY(prop("deskOpen").toBool());
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(prop("deskOpen").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(readerFocused());
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
-        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QTRY_VERIFY(!shown("notesDrawer"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(prop("deskOpen").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         // Mouse: a click outside an open panel only closes it (the footer button underneath does not act).
         call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer")); QTest::qWait(30);
         click("searchControl"); QTRY_VERIFY(!shown("savedDrawer")); QVERIFY(!shown("passagePalette"));

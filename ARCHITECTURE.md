@@ -454,7 +454,10 @@ files.
   of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
   keyboard to the reader, close the panel, then act (`runKey`) — so the
   drawer's exit cannot hand focus back over what opened. Notes is not modal:
-  they act over it. Dispatch from Keybindings or Commands never closes panels. Catalog shortcuts
+  they act over it, and while you write in a note or on the Desk page, the
+  launchers among them (`noteEditorLaunchActions`: palettes and dialogs on
+  `ctrl` or `F1`) save the draft and open over it too, the keyboard returning
+  to the page when they close. Dispatch from Keybindings or Commands never closes panels. Catalog shortcuts
   recheck `shortcutEnabled` on activation (a popup's focus change can leave the
   binding stale).
 - Notes (`notesDrawer`, the Margin) is a non-modal drawer that never dims: it

@@ -4318,7 +4318,7 @@ ApplicationWindow {
         if (charMode && readerBase && action.scope !== "global" && action.scope !== "palette") return false
         if (zPending && action.sequences.some(function(sequence) { return ["Z", "T", "B"].includes(sequence) })) return false
         // In the Notes editor, the palette and dialog launchers (Ctrl, F-keys)
-        // still work and close Notes first (runKey); its plain keys type.
+        // still work, saving the note first (runKey); its plain keys type.
         if (noteEditorTyping() && noteEditorLaunchActions.includes(action.id))
             return bible.ready && !modalOpen && !linkSuggesting
         // Typing owns every key, Ctrl and Alt included (ctrl v pastes); only the
@@ -4701,11 +4701,12 @@ ApplicationWindow {
     // and the reading toggles act with it open.
     function runKey(action) {
         selectionBarWanted = false
-        // From the Notes editor a launcher closes Notes first: its draft saves,
-        // and when it cannot, Notes stays open with its error and nothing opens.
+        // From a note or the Desk page a launcher saves the draft first and
+        // opens beside the Margin, which stays; closing it returns to the
+        // page. A draft that cannot be saved keeps its error, and nothing opens.
         if (noteEditorTyping() && noteEditorLaunchActions.includes(action)) {
             if (!actionAvailable(action)) { rejected(unavailableReason(action)); return }
-            if (!closeNotes()) { rejected("The note could not be saved"); return }
+            if (!flushNote()) { rejected("The note could not be saved"); return }
         }
         if (sidePanel.length && !marginOpen && panelLeavingActions.includes(action) && actionAvailable(action)) {
             if (!flushNote()) return

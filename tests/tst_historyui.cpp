@@ -548,10 +548,11 @@ private slots:
         // One esc closes it.
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
-        // From the Notes editor, ctrl h closes Notes (saving the note) first.
+        // From the Notes editor, ctrl h saves the note and opens beside Notes; esc returns to the note.
         key(Qt::Key_W); QTRY_VERIFY(prop("notesOpen").toBool()); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
-        key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen()); QTRY_VERIFY(!prop("notesOpen").toBool());
-        key(Qt::Key_Escape);
+        key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen()); QVERIFY(prop("notesOpen").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesOpen").toBool());
     }
     void commandsAndDisabledHistory() {
         // History has no panel or footer button: it is in the palette.
