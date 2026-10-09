@@ -223,8 +223,14 @@ private slots:
         QCOMPARE(prop("sidePanel").toString(), QString("desk"));
         QCOMPARE(item("deskEditor")->property("text").toString(), desk());
         QCOMPARE(item("deskEditor")->property("cursorPosition").toInt(), desk().size());
+        // Its header, as Marks': the title, then its passages and words.
+        QCOMPARE(item("deskTitle")->property("text").toString(), QString("Desk"));
+        const auto summary = [&] { return item("deskSummary")->property("text").toString(); };
+        QVERIFY2(summary().startsWith("1 passage · ") && summary().endsWith(" words"), qPrintable(summary()));
+        const int words = summary().section(" · ", 1).section(' ', 0, 0).toInt();
         type("Thoughts.");
         QCOMPARE(desk(), quote() + "\nThoughts.");
+        QTRY_COMPARE(summary(), QString("1 passage · %1 words").arg(words + 1));
         QVERIFY(hints().contains("esc back to reading"));
         // Writing owns the keys: w and j type.
         type(" wj"); QVERIFY(desk().endsWith("Thoughts. wj")); QCOMPARE(bible->selectionReference(), QString("John 1:4"));
@@ -236,6 +242,8 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(prop("notesOpen").toBool()); QVERIFY(!prop("deskOpen").toBool());
+        QCOMPARE(item("notesTitle")->property("text").toString(), QString("Notes"));
+        QVERIFY2(item("notesPassage")->property("text").toString().startsWith("John 1:5 · "), qPrintable(item("notesPassage")->property("text").toString()));
         QVERIFY(item("notesPanel")->isVisible()); QVERIFY(!item("deskPanel")->isVisible());
         QVERIFY(object("notesDrawer")->property("opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
@@ -410,6 +418,7 @@ private slots:
         QCOMPARE(desk(), QString()); QCOMPARE(peer.deskPage(), QString());
         QVERIFY(toast().startsWith("Cleaned the Desk"));
         QTRY_COMPARE(item("deskEditor")->property("text").toString(), QString());
+        QCOMPARE(item("deskSummary")->property("text").toString(), QString("Empty · d adds the passage you read"));
         // u brings it back.
         QTRY_VERIFY(readerFocused()); key(Qt::Key_U); QCOMPARE(desk(), page);
         QTRY_COMPARE(item("deskEditor")->property("text").toString(), page);

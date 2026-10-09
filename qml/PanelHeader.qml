@@ -1,9 +1,9 @@
 import QtQuick
 import QtQuick.Layouts
 
-// A side panel's title with a quiet subtitle under it, shared by Annotations,
-// Study, Desk, and History: Annotations and Study name the passage they
-// follow ("John 3:16–17 · NET"), Desk and History their count. Display only:
+// A side panel's title with a quiet subtitle under it, shared by Marks, See
+// also, Notes, and the Desk: the first three name the passage they follow
+// ("John 3:16–17 · NET"), the Desk its passages and words. Display only:
 // never focusable or clickable.
 ColumnLayout {
     id: header

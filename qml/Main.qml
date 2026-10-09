@@ -4167,6 +4167,17 @@ ApplicationWindow {
     }
     // Generated key notation (KeyNotation.js): plain for tooltips and menus, rich for lists.
     function keyText(action) { return KeyNotation.formatList(actionKeys(action)) }
+    readonly property string escapeText: KeyNotation.format("Escape")
+    // The Desk header's quiet line: how many passages its page quotes (the
+    // lines d writes after each quotation, "> — John 3:16 (NET)") and how many words it has.
+    function deskSummary(text) {
+        if (!text.trim().length) return "Empty · " + keyText("toggleDesk") + " adds the passage you read"
+        const passages = (text.match(/^> \u2014 .+ \(.+\)[ \t]*$/gm) || []).length
+        const words = text.split(/\s+/).filter(function(word) { return /[0-9A-Za-z\u00C0-\u1FFF\u2070-\uFFFF]/.test(word) }).length
+        const parts = passages ? [passages + (passages === 1 ? " passage" : " passages")] : []
+        parts.push(words + (words === 1 ? " word" : " words"))
+        return parts.join(" · ")
+    }
     function keyRich(action) { return KeyNotation.richList(actionKeys(action), desktop.foreground, desktop.muted) }
     function formatKeys(sequences) { return KeyNotation.formatList(sequences) }
     // A focused button owns enter and space: they activate it, never a window
@@ -4959,6 +4970,7 @@ ApplicationWindow {
     }
     component RangeMarker: Shared.RangeMarker { controller: app; theme: desktop; backend: bible; rangeMenu: verseTagMenu }
     component SectionLabel: SectionTitle { theme: desktop; uiScale: app.scale }
+    component SidePanelHeader: Shared.SidePanelHeader { controller: app; theme: desktop }
     component ModalCard: Shared.ModalCard { controller: app; theme: desktop }
 
     ColumnLayout {
@@ -5978,26 +5990,14 @@ ApplicationWindow {
                     // Grows past the panel (and scrolls) when a long Linked from list needs it.
                     height: Math.max(notesPanel.height - 44, (app.noteConflict ? 700 : 440) * app.scale, implicitHeight)
                     spacing: 16
-                    RowLayout {
+                    SidePanelHeader {
+                        objectName: "notesHeader"
                         Layout.fillWidth: true
-                        SectionLabel { text: "PASSAGE NOTES"; Layout.fillWidth: true }
-                        // Clicks outside reach the text, so Notes closes here by mouse.
-                        QuietButton {
-                            objectName: "notesClose"
-                            text: "×"; compact: true
-                            keys: KeyNotation.format("Escape")
-                            tip: "Close Notes · " + keys + ", or " + keys + " " + keys + " from the note"
-                            Accessible.name: "Close Notes"
-                            onClicked: app.closeNotes()
-                        }
-                    }
-                    Label {
-                        text: app.hasSelection ? bible.selectionReference : "A thought worth keeping"
-                        color: desktop.foreground
-                        font.pixelSize: 21 * app.scale
-                        font.weight: Font.Medium
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
+                        title: "Notes"
+                        subtitle: tagsUi.passageSubtitle
+                        titleName: "notesTitle"; subtitleName: "notesPassage"; closeName: "notesClose"
+                        closeTip: "Close Notes · " + app.escapeText + ", or " + app.escapeText + " " + app.escapeText + " from the note"
+                        onCloseRequested: app.closeNotes()
                     }
                     FineRule { Layout.fillWidth: true }
                     ColumnLayout {
@@ -6348,23 +6348,21 @@ ApplicationWindow {
                     anchors.fill: parent
                     anchors.margins: 22
                     spacing: 16
-                    RowLayout {
+                    SidePanelHeader {
+                        objectName: "deskHeader"
                         Layout.fillWidth: true
-                        SectionLabel { text: "DESK"; Layout.fillWidth: true }
+                        title: "Desk"
+                        subtitle: app.deskSummary(deskEditor.text)
+                        titleName: "deskTitle"; subtitleName: "deskSummary"; closeName: "deskClose"
+                        closeTip: "Close the Desk · " + app.escapeText + ", or " + app.escapeText + " " + app.escapeText + " from the page"
+                        onCloseRequested: app.closeNotes()
                         QuietButton {
                             objectName: "deskClean"
                             text: "Clean…"; compact: true
                             enabled: bible.deskPage.length > 0 && !bible.busy
-                            tip: "Clean Desk: empty the page in every window (asks first; " + app.keyText("undo") + " brings it back)"
+                            keys: app.keyText("cleanDesk")
+                            tip: "Clean Desk · " + keys + ": empty the page in every window (asks first; " + app.keyText("undo") + " brings it back)"
                             onClicked: app.requestCleanDesk()
-                        }
-                        QuietButton {
-                            objectName: "deskClose"
-                            text: "×"; compact: true
-                            keys: KeyNotation.format("Escape")
-                            tip: "Close the Desk · " + keys + ", or " + keys + " " + keys + " from the page"
-                            Accessible.name: "Close the Desk"
-                            onClicked: app.closeNotes()
                         }
                     }
                     FineRule { Layout.fillWidth: true }
