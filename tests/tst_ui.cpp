@@ -3334,6 +3334,34 @@ private slots:
         QCOMPARE(bible->cursorVerse(),2);
         QVERIFY(window->property("freeSelectedText").toString().isEmpty());
     }
+    void firstHeadingSitsUnderTheTitleAlike() {
+        // A heading on verse 1 sits right under the chapter title (the
+        // title's own space) in every layout; a later one keeps its space above.
+        installDragFixture();
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE","ui-later-heading");
+            db.setDatabaseName(installedPath());
+            QVERIFY(db.open());
+            QSqlQuery q(db);
+            QVERIFY(q.exec("UPDATE verses SET heading='A later heading' WHERE book=43 AND chapter=3 AND number=3"));
+        }
+        QSqlDatabase::removeDatabase("ui-later-heading");
+        reference("John 4:1"); reference("John 3:1");
+        for (const QString mode : {"verse","paragraph","block"}) {
+            bible->setReadingMode(mode);
+            const auto gap = [&]() -> double {
+                auto title = item("chapterTitle");
+                auto heading = mode == "verse" ? item("headingText1") : item("blockBody");
+                if (!title || !heading || (mode != "verse" && !blockMapping())) return -1;
+                const double below = title->mapToScene(QPointF(0,title->height())).y();
+                return (mode == "verse" ? heading->mapToScene(QPointF()) : heading->mapToScene(QPointF(0,blockRect(0).y()))).y() - below;
+            };
+            QTRY_COMPARE(gap(),0.0);
+        }
+        bible->setReadingMode("verse"); QTRY_VERIFY(item("headingText3"));
+        QTRY_COMPARE(item("headingText3")->y(),double(qMax(1,qRound(window->property("readerBodySize").toDouble()))));
+        QCOMPARE(item("headingText1")->y(),0.0);
+    }
     void textDragSelectsVersesAsItGoes_data() {
         QTest::addColumn<bool>("block");
         QTest::addColumn<bool>("reverse");

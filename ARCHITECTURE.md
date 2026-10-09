@@ -553,7 +553,9 @@ files.
 - The page: one type scale (`qml/TypeScale.js`) in steps of the body text
   (Text size × system scale) sets the title, headings (body size, semi-bold, no
   marker), verse numbers, margin notes, footnote marks, heading spacing, and
-  the poetry indent, in every layout. The column's measure is 66 zeros of the
+  the poetry indent, in every layout. A heading right under the chapter title
+  takes no space above (a document's first block takes no top margin; the
+  Verse layout's first row matches). The column's measure is 66 zeros of the
   reader font (CSS `66ch`, `readerMeasure`) plus the verse-number gutter, so it
   follows the Text size, narrowed only by the window.
 - Poetry: Paragraph and Verse layouts set each line of a poetry verse as its

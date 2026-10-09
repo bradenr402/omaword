@@ -5612,7 +5612,10 @@ ApplicationWindow {
                                         id: headingText
                                         objectName: "headingText" + verseRow.modelData.number
                                         width: parent.width
-                                        y: TypeScale.size(app.readerBodySize, TypeScale.headingAbove)
+                                        // Under the chapter title, its own space suffices,
+                                        // as in the other layouts (a document's first block
+                                        // takes no top margin).
+                                        y: verseRow.index === 0 ? 0 : TypeScale.size(app.readerBodySize, TypeScale.headingAbove)
                                         // An LRM keeps a Hebrew-first heading ("א Aleph")
                                         // in an LTR paragraph; display only.
                                         text: app.leftToRightText(verseRow.modelData.heading)
