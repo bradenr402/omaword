@@ -4671,6 +4671,26 @@ private slots:
         QVERIFY(!plainHint(prop("versionHints","text").toString()).contains("ctrl i"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("versionDialog","visible").toBool());
     }
+    // The footer folds by the window, not by the passage shown: a long
+    // reference and a short one fold it alike, and the column stays put.
+    void footerFoldsIgnoreThePassagesLength() {
+        window->setMinimumWidth(320);
+        for (const double scale : {1.0, 1.5}) {
+            QVERIFY(desktop->setProperty("textScale",scale));
+            for (int width = 560; width <= 1200; width += 40) {
+                window->resize(width,820); QTRY_COMPARE(window->width(),width);
+                const auto tag = QString("%1@%2").arg(width).arg(scale);
+                QList<QVariantList> states;
+                for (const auto &passage : {"1 Thessalonians 5:16-18","John 3:16"}) {
+                    reference(passage); QTest::qWait(60);
+                    states.append({window->property("footerStacked"),window->property("footerCollapsed"),window->property("footerShowsHelp"),
+                                   window->property("footerShowsFocus"),window->property("footerRightInset"),item("readerColumn")->mapToScene(QPointF()).x()});
+                }
+                QVERIFY2(states[0] == states[1],qPrintable(tag));
+            }
+        }
+        QVERIFY(desktop->setProperty("textScale",1.0));
+    }
     void footerOrderAndResponsiveLayout() {
         reference("1 Thessalonians 5:16-18");
         const QStringList names = {"focusControl","textControl","modeControl","helpControl","searchControl","passageControl","versionControl",

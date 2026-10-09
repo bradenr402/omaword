@@ -6571,7 +6571,12 @@ ApplicationWindow {
     readonly property bool footerShowsFocus: bible.ready && (footerFocusFits || focusLayout)
     readonly property real footerLeftFull: footerLeftBase + (bible.ready && footerShowsHelp ? footerButton : 0) + (footerShowsFocus ? footerButton : 0)
     readonly property real footerRightFull: footerRightCount * footerButton
-    readonly property real footerCenterFull: searchControl.implicitWidth + passageControl.implicitWidth
+    // The folds read a long reference's width, not the passage shown, so
+    // nothing in the footer or the reader moves as the passage's name
+    // changes length (a longer one elides).
+    TextMetrics { id: footerPassageMeasure; font: passageControl.font; text: "2 Thessalonians 3:16–18" }
+    readonly property real footerCenterFull: searchControl.implicitWidth
+        + Math.ceil(footerPassageMeasure.advanceWidth + passageControl.leftPadding + passageControl.rightPadding) + 1
         + (bible.ready ? versionControl.implicitWidth : 0)
     readonly property real footerAvailable: stageWidth - 2 * footerMargin
     readonly property bool footerStacked: footerCenterFull + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap > footerAvailable
