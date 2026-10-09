@@ -271,10 +271,12 @@ class A11yUiTest : public QObject
         for (int verse = 1; verse <= 36; ++verse) {
             if (verse == avoidVerse) continue;
             auto body = item("verseBody" + QString::number(verse)); if (!body) continue;
-            for (const QPointF local : {QPointF(30, 8), QPointF(body->width() / 2, 8), QPointF(body->width() - 30, 8)}) {
-                const QPoint point = body->mapToScene(local).toPoint();
-                if (point.y() > 60 && point.y() < window->height() - 100 && !area.adjusted(-8, -8, 8, 8).contains(point)) return point;
-            }
+            // Any line of the verse: a popup may leave only part of one clear.
+            for (const qreal y : {qreal(8), body->height() - 8})
+                for (const QPointF local : {QPointF(30, y), QPointF(body->width() / 2, y), QPointF(body->width() - 30, y)}) {
+                    const QPoint point = body->mapToScene(local).toPoint();
+                    if (point.y() > 60 && point.y() < window->height() - 100 && !area.adjusted(-8, -8, 8, 8).contains(point)) return point;
+                }
         }
         return {};
     }
