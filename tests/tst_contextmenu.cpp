@@ -585,7 +585,8 @@ private slots:
     void annotationAndSearchMenus() {
         // Marks panel row.
         navigate("John 1:2"); key(Qt::Key_X);
-        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(window->property("marksOpen").toBool());
+        QTRY_VERIFY(object("notesDrawer")->property("opened").toBool()); // Its slide in is over.
         const auto saved = "savedEntry" + bible->collection().first().toMap().value("reference").toString();
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
         rightClick(item(saved)); QTRY_VERIFY(menuOpen());
@@ -599,7 +600,7 @@ private slots:
         QTRY_VERIFY(bible->collection().isEmpty());
         key(Qt::Key_U); QTRY_COMPARE(bible->collection().size(), 1);
         QTRY_VERIFY(item(saved) && item(saved)->isVisible());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         // Bible search result in the palette.
         call("readerFocus");
         search("alpha");

@@ -174,6 +174,9 @@ class HistoryUiTest : public QObject
     }
     // History lives in the passage palette (ctrl h).
     bool historyOpen() const { return object("passagePalette")->property("opened").toBool() && prop("paletteHistory").toBool(); }
+    // A side panel, in the Margin; the Margin gone (its exit finished).
+    bool panelOpen(const char *mode) const { return prop(mode).toBool(); }
+    bool marginGone() const { return !object("notesDrawer")->property("visible").toBool(); }
     void openHistory() { key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen()); QTRY_VERIFY(item("referenceInput")->hasActiveFocus()); }
     int paletteRow() const { return object("paletteResults")->property("currentIndex").toInt(); }
     QString rowHint(int row) const { return paletteRowsConst().value(row).toMap()["hint"].toString(); }
@@ -446,7 +449,7 @@ private slots:
         navigate("John 1:2");
         auto list = object("studyList");
         const auto openRelated = [&]() {
-            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpen("relatedOpen"));
             QTRY_VERIFY(item("studyList")->hasActiveFocus());
         };
         openRelated();
@@ -469,12 +472,15 @@ private slots:
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
         key(Qt::Key_A, Qt::ControlModifier); type("jk"); QCOMPARE(item("studySearch")->property("text").toString(), QString("jk"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        // esc gives the keyboard back to the reader; See also stays, and esc there closes it.
+        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(panelOpen("relatedOpen"));
+        key(Qt::Key_J); QCOMPARE(bible->selectionReference(), QString("John 1:3")); // The reader's j, not the list's.
+        key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
         // A heading's tag, clicked, filters while the list keeps the keyboard.
-        openRelated(); QTRY_VERIFY(item("studySectionTag:Alpha") && item("studySectionTag:Alpha")->isVisible());
+        navigate("John 1:2"); openRelated(); QTRY_VERIFY(object("notesDrawer")->property("opened").toBool()); QTRY_VERIFY(item("studySectionTag:Alpha") && item("studySectionTag:Alpha")->isVisible());
         QTest::mouseClick(window, Qt::LeftButton, {}, item("studySectionTag:Alpha")->mapToScene(QPointF(4, 4)).toPoint());
         QTRY_COMPARE(list->property("count").toInt(), 5); QVERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
     }
     // g, shift G, ctrl d/u (5), ctrl f/b and pgdn/pgup (10) in every list panel;
     // never while typing in a panel's search field.
@@ -510,7 +516,7 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         // Marks (25: each highlighted and tagged passage once, and a tagged one),
         // then not while typing in its filter field.
-        call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(panelOpen("marksOpen"));
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         auto saved = object("collectionList"); expectMotions(saved, "annotations");
         key(Qt::Key_G); key(Qt::Key_Slash); QTRY_VERIFY(item("savedSearch")->hasActiveFocus());
@@ -519,24 +525,28 @@ private slots:
         QVERIFY(item("savedSearch")->hasActiveFocus());
         object("savedSearch")->setProperty("text", QString()); key(Qt::Key_Escape); QTRY_VERIFY(!item("savedSearch")->hasActiveFocus());
         QTRY_COMPARE(saved->property("count").toInt(), 25);
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
         // See also: its rows (the 24 tagged alike after any cross references).
-        call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
+        call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpen("relatedOpen"));
         QTRY_VERIFY(object("studyList")->property("count").toInt() >= 24); QTRY_VERIFY(item("studyList")->hasActiveFocus());
         expectMotions(object("studyList"), "see also");
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
         key(Qt::Key_G); QCOMPARE(object("studySearch")->property("text").toString(), QString("g"));
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
         // The reader keeps its own meanings once the panels are closed.
         call("readerFocus"); navigate("John 1:20"); key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(bible->cursorVerse(), 25);
     }
     void historyKeyLeavesPanels() {
         record("John 1:3"); navigate("John 1:1");
-        // ctrl h from a side panel closes it and opens History in the palette.
-        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        // ctrl h from a side panel opens History in the palette over it; esc returns to the panel.
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(panelOpen("marksOpen")); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         key(Qt::Key_H, Qt::ControlModifier);
-        QTRY_VERIFY(historyOpen()); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        QTRY_VERIFY(historyOpen()); QVERIFY(panelOpen("marksOpen"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(marginGone());
+        key(Qt::Key_H, Qt::ControlModifier); QTRY_VERIFY(historyOpen());
         // From the palette's other modes too; ctrl k returns to the books.
         key(Qt::Key_K, Qt::ControlModifier); QVERIFY(!prop("paletteHistory").toBool());
         key(Qt::Key_H, Qt::ControlModifier); QVERIFY(historyOpen());

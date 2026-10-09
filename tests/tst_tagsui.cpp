@@ -172,6 +172,35 @@ ApplicationWindow {
     function editingPanelClosed() { closed++ }
     function tagActionCompleted(scope) { completed++; completedScope = scope; pinnedAtCompletion = tags.scopePinned }
     function openPassageTags(scope) { tags.open(scope) }
+    // The Margin, as Main keeps it: See also is its "related" panel, beside a
+    // reader that takes the keyboard back (leaveNotes).
+    property real scale: theme.textScale
+    property real controlScale: Math.min(scale, 1.4)
+    property string escapeText: "esc"
+    function tint(color, alpha) { return Qt.rgba(color.r, color.g, color.b, alpha) }
+    function buttonShortcutOverride(event) {}
+    function buttonEnter(button, event) {}
+    function buttonClicked(button) {}
+    property bool relatedOpen: false
+    property bool marginKeys: false
+    property bool contextMenuOpen: false
+    function openRelatedPanel() { relatedOpen = true; tags.focusResults() }
+    function closeNotes() { relatedOpen = false; reader.forceActiveFocus(); marginKeys = false; return true }
+    function leaveNotes() { reader.forceActiveFocus(); marginKeys = false; return true }
+    onActiveFocusItemChanged: {
+        for (let at = activeFocusItem; at; at = at.parent) if (at === relatedHost) { marginKeys = true; return }
+    }
+    Item { id: reader; objectName: "reader"; focus: true }
+    Rectangle {
+        id: relatedHost
+        objectName: "relatedPanel"
+        property real inset: 24
+        property real gap: 8
+        anchors.right: parent.right
+        width: 520; height: parent.height
+        visible: app.relatedOpen
+        color: theme.background
+    }
     QtObject {
         id: theme
         objectName: "testTheme"
@@ -185,7 +214,7 @@ ApplicationWindow {
         property real textScale: 1
         property real cornerRadius: 0
     }
-    TagsPanel { id: tags; objectName: "testTags"; app: app; bible: testBible; desktop: theme }
+    TagsPanel { id: tags; objectName: "testTags"; app: app; bible: testBible; desktop: theme; relatedHost: relatedHost }
 }
 )QML", QUrl::fromLocalFile(QStringLiteral(TAGS_QML_DIR) + "/TagsUiHarness.qml"));
 #endif
@@ -455,9 +484,10 @@ private:
         for (const auto &tag : prop("rootTags").toList()) result << tag.toMap().value("id").toString();
         return result;
     }
+    bool seeAlsoOpen() const { return root->property("relatedOpen").toBool(); }
     void openSeeAlso() {
         QVERIFY(invoke("openRelated").toBool());
-        QTRY_VERIFY(panel->findChild<QObject *>("relatedDrawer")->property("opened").toBool());
+        QTRY_VERIFY(seeAlsoOpen());
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
     }
     // Keeps only the rows the filter's words match (as typing them in it does).
@@ -481,7 +511,6 @@ private slots:
         install(kjv); const auto remote = scope(2, 3); QVERIFY(bible->setTag(remote, b, true));
         QVERIFY(bible->openTaggedPassage(source));
         openSeeAlso();
-        auto drawer = panel->findChild<QObject *>("relatedDrawer");
         // Header: title and the reader's passage.
         QCOMPARE(item("studyTitle")->property("text").toString(), QString("See also"));
         QCOMPARE(item("studyPassage")->property("text").toString(), source["reference"].toString() + " · NET");
@@ -502,7 +531,7 @@ private slots:
         QVERIFY(remoteRow >= 0);
         QTRY_VERIFY(item("studyRowTitle:" + QString::number(remoteRow)));
         QCOMPARE(item("studyRowTitle:" + QString::number(remoteRow))->property("text").toString(), remote["reference"].toString() + " · from " + remoteAbbreviation);
-        // The body sits inside the drawer's padding.
+        // The body sits inside its panel's inset.
         const auto bounds = item("studyBody")->mapRectToScene(item("studyBody")->boundingRect());
         QCOMPARE(bounds.right(), window->width() - 24);
         QCOMPARE(bounds.top(), 24);
@@ -520,17 +549,17 @@ private slots:
         item("studyList")->setProperty("currentIndex", bothRow);
         key(Qt::Key_Return);
         QCOMPARE(bible->tagScope(), both);
-        QVERIFY(drawer->property("opened").toBool());
+        QVERIFY(seeAlsoOpen());
         invoke("followSelection");
         QCOMPARE(prop("relatedSource").toMap(), source);
         QCOMPARE(item("studyPassage")->property("text").toString(), both["reference"].toString() + " · NET"); // The header is live.
         // Reopened, See also follows the reader again.
-        invoke("closeForFocusMode"); QTRY_VERIFY(!drawer->property("visible").toBool());
+        invoke("close"); QTRY_VERIFY(!seeAlsoOpen());
         openSeeAlso();
         QCOMPARE(prop("relatedSource").toMap(), both);
         QCOMPARE(rootIds(), (QStringList{a, b}));
         QVERIFY(!refs().contains(both["reference"].toString()));
-        invoke("closeForFocusMode"); QTRY_VERIFY(!drawer->property("visible").toBool());
+        invoke("close"); QTRY_VERIFY(!seeAlsoOpen());
         QVERIFY(bible->openTaggedPassage(alphaOnly));
         openSeeAlso();
         QCOMPARE(prop("relatedSource").toMap(), alphaOnly);
@@ -558,8 +587,11 @@ private slots:
         QTRY_VERIFY(rows().isEmpty());
         QCOMPARE(item("studyEmpty")->property("text").toString(), QString::fromUtf8("Nothing matches “gracezz”."));
         key(Qt::Key_Down); QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        // esc closes, as in Marks; reopening clears the filter.
-        key(Qt::Key_Escape); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
+        // esc gives the keyboard back to the reader, as in Marks; See also
+        // stays, and reopening clears the filter.
+        key(Qt::Key_Escape); QTRY_VERIFY(item("reader")->hasActiveFocus()); QVERIFY(seeAlsoOpen());
+        QVERIFY(!root->property("marginKeys").toBool());
+        key(Qt::Key_Slash); QVERIFY(!item("studySearch")->hasActiveFocus()); // Its keys wait for the keyboard.
         openSeeAlso(); QCOMPARE(prop("studyQuery").toString(), QString());
         QCOMPARE(refs().size(), 2);
         // A tagged passage's row menu: the shared row menu, then Edit tags…, Move here. No delete.
@@ -573,16 +605,16 @@ private slots:
         // t opens the picker on the row's range; See also stays open beneath it.
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), first);
-        QVERIFY(panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
+        QVERIFY(seeAlsoOpen());
         key(Qt::Key_Escape); QTRY_VERIFY(!panel->findChild<QObject *>("tagsSurface")->property("visible").toBool());
-        QVERIFY(panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
-        invoke("closeForFocusMode");
-        QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
+        QVERIFY(seeAlsoOpen());
+        invoke("close");
+        QTRY_VERIFY(!seeAlsoOpen());
         // Tags, but no other passages: no tagged-alike rows.
         const auto lonely = scope(6, 6); bible->createAndAssignTag(lonely, "Lonely");
         openSeeAlso();
         QVERIFY(refs().isEmpty());
-        invoke("closeForFocusMode"); QTRY_VERIFY(!panel->findChild<QObject *>("relatedDrawer")->property("visible").toBool());
+        invoke("close"); QTRY_VERIFY(!seeAlsoOpen());
         // With no row to tag, t tags the passage itself.
         const auto bare = scope(12, 12);
         openSeeAlso(); filter("no such words");
@@ -590,7 +622,7 @@ private slots:
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), bare);
         key(Qt::Key_Escape); QTRY_VERIFY(!panel->findChild<QObject *>("tagsSurface")->property("visible").toBool());
-        invoke("closeForFocusMode");
+        invoke("close");
     }
     // A tag clicked elsewhere opens See also filtered to that tag's passages.
     void relatedForTagFilters() {
@@ -602,7 +634,7 @@ private slots:
         QVariant opened;
         QVERIFY(QMetaObject::invokeMethod(panel, "openRelatedForTag", Q_RETURN_ARG(QVariant, opened), Q_ARG(QVariant, QString("Beta")), Q_ARG(QVariant, source)));
         QVERIFY(variant(opened).toBool());
-        QTRY_VERIFY(panel->findChild<QObject *>("relatedDrawer")->property("opened").toBool());
+        QTRY_VERIFY(seeAlsoOpen());
         QCOMPARE(prop("relatedSource").toMap(), source);
         QCOMPARE(prop("studyQuery").toString(), QString("#Beta"));
         QCOMPARE(refs(), QStringList{target["reference"].toString()});
@@ -613,7 +645,7 @@ private slots:
     void studyHeaderFollowsReader() {
         scope(2, 3);
         QVERIFY(invoke("openRelated").toBool());
-        QTRY_VERIFY(panel->findChild<QObject *>("relatedDrawer")->property("opened").toBool());
+        QTRY_VERIFY(seeAlsoOpen());
         QVERIFY(item("studyPassage")->isVisible());
         QCOMPARE(item("studyPassage")->property("text").toString(), QString::fromUtf8("John 3:2–3 · NET"));
         bible->selectVerses(7, 7);
@@ -703,12 +735,11 @@ private slots:
         root->setProperty("verseMode", true);
         QVERIFY(QMetaObject::invokeMethod(root.get(), "openPassageTags", Q_ARG(QVariant, original)));
         auto picker = panel->findChild<QObject *>("tagsSurface"); QVERIFY(picker);
-        auto annotations = root->findChild<QObject *>("savedDrawer"); QVERIFY(annotations);
         QTRY_VERIFY(picker->property("opened").toBool());
         QVERIFY(picker->property("modal").toBool());
         QCOMPARE(prop("hostKind").toString(), QString("picker"));
         QVERIFY(prop("scopePinned").toBool());
-        QVERIFY(!annotations->property("visible").toBool());
+        QVERIFY(!root->property("marksOpen").toBool());
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         invoke("toggleTag", first);
         QVERIFY(!root->property("verseMode").toBool());
@@ -725,7 +756,7 @@ private slots:
         invoke("close");
         QTRY_VERIFY(!picker->property("visible").toBool());
         QVERIFY(!prop("scopePinned").toBool());
-        QVERIFY(!annotations->property("visible").toBool());
+        QVERIFY(!root->property("marksOpen").toBool());
         QCOMPARE(bible->tagScope(), changed); // Closing cannot collapse the new range.
 
         QVERIFY(QMetaObject::invokeMethod(root.get(), "openPassageTags", Q_ARG(QVariant, QVariant())));
@@ -736,7 +767,7 @@ private slots:
         QCOMPARE(prop("editingScope").toMap(), changed);
         QTRY_VERIFY(picker->property("opened").toBool()); // After its fade-in.
         QVERIFY(prop("scopePinned").toBool());
-        QVERIFY(!annotations->property("visible").toBool());
+        QVERIFY(!root->property("marksOpen").toBool());
         QVERIFY(prop("scopeValid").toBool());
         invoke("toggleTag", first);
         QCOMPARE(ids(bible->tagsForScope(changed)), QStringList{first});
@@ -754,7 +785,7 @@ private slots:
         invoke("close");
         QTRY_VERIFY(!picker->property("visible").toBool());
         QVERIFY(!prop("scopePinned").toBool());
-        QVERIFY(!annotations->property("visible").toBool());
+        QVERIFY(!root->property("marksOpen").toBool());
         QCOMPARE(bible->tagScope(), otherVersion);
         QVERIFY(QMetaObject::invokeMethod(root.get(), "openPassageTags", Q_ARG(QVariant, QVariant())));
         QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
@@ -847,8 +878,14 @@ private:
     }
     void openMarks() {
         QVERIFY(QMetaObject::invokeMethod(root.get(), "runCommand", Q_ARG(QVariant, QString("annotations"))));
-        QTRY_VERIFY(root->findChild<QObject *>("savedDrawer")->property("opened").toBool());
+        QTRY_VERIFY(root->property("marksOpen").toBool());
+        QTRY_VERIFY(root->findChild<QObject *>("notesDrawer")->property("opened").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+    }
+    // esc from a panel's list gives the keyboard to the reader; esc there closes the Margin.
+    void closeMargin() {
+        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("notesDrawer")->property("visible").toBool());
     }
 private slots:
     // Marks: one row per tagged passage with all its tags, a "here" marker and
@@ -896,10 +933,10 @@ private slots:
         // t: the picker on the row's range, over the drawer, which stays.
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QCOMPARE(prop("editingScope").toMap(), here);
-        QVERIFY(root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
+        QVERIFY(root->property("marksOpen").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("visibleModal").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
-        QVERIFY(root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
+        QVERIFY(root->property("marksOpen").toBool());
         // delete removes the row's whole mark, at once; u puts it back, ctrl r removes it again.
         QCOMPARE(list->property("currentIndex").toInt(), 2);
         key(Qt::Key_Delete);
@@ -919,7 +956,7 @@ private slots:
         QCOMPARE(item("savedPassage")->property("text").toString(), QString("John 3:8 · NET"));
         bible->clearSelection();
         QCOMPARE(item("savedPassage")->property("text").toString(), QString("John 3 · NET"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
+        closeMargin();
         // Reading another version: its marks are labelled with theirs.
         const QString net = bible->versionAbbreviation();
         install(kjv);
@@ -929,7 +966,7 @@ private slots:
         QVERIFY(!savedRow(0)["active"].toBool());
         QCOMPARE(item("savedVersionJohn 3:5")->property("text").toString(), "from " + net);
         QVERIFY(item("savedVersionJohn 3:5")->isVisible());
-        key(Qt::Key_Escape); QTRY_VERIFY(!root->findChild<QObject *>("savedDrawer")->property("visible").toBool());
+        closeMargin();
     }
     // See also in the app: on the reader's passage, one list, no tabs.
     void mainSeeAlsoOnThePassage() {
@@ -938,13 +975,12 @@ private slots:
         QTRY_VERIFY(!root->property("restoringPosition").toBool());
         scope(2, 2);
         QVERIFY(QMetaObject::invokeMethod(root.get(), "runCommand", Q_ARG(QVariant, QString("related"))));
-        auto drawer = root->findChild<QObject *>("relatedDrawer");
-        QTRY_VERIFY(drawer->property("opened").toBool());
+        QTRY_VERIFY(root->property("relatedOpen").toBool());
         QCOMPARE(item("studyPassage")->property("text").toString(), QString("John 3:2 · NET"));
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
         QVERIFY(!item("studyTabs"));
-        key(Qt::Key_H); QVERIFY(item("studyList")->hasActiveFocus()); QVERIFY(drawer->property("visible").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!drawer->property("visible").toBool());
+        key(Qt::Key_H); QVERIFY(item("studyList")->hasActiveFocus()); QVERIFY(root->property("relatedOpen").toBool());
+        closeMargin();
     }
 };
 

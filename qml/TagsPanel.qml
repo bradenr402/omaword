@@ -7,21 +7,22 @@ import "KeyNotation.js" as KeyNotation
 import "RowMenu.js" as RowMenu
 
 // Two surfaces share the tag state: the modal tag picker (with Manage tags)
-// and the See also drawer (cross references, parallels, tagged alike). The picker may
-// open over the Study and Annotations drawers; they stay open beneath it.
+// and See also (cross references, parallels, tagged alike), a panel of the
+// Margin. The picker opens over the Margin, which stays open beneath it.
 Item {
     id: panel
     required property var app
     required property var bible
     required property var desktop
 
-    readonly property string hostKind: surface.visible ? "picker" : relatedDrawer.visible ? "related" : "none"
-    readonly property bool visibleModal: surface.visible || relatedDrawer.visible
+    // The Margin's See also panel (Main), where See also lays out its list.
+    property Item relatedHost: null
+    readonly property string hostKind: surface.visible ? "picker" : relatedShown ? "related" : "none"
+    readonly property bool visibleModal: surface.visible
     readonly property bool pickerVisible: surface.visible
-    readonly property bool relatedShown: relatedDrawer.visible && !relatedDrawer.closing
-    // The Study drawer itself, for the reader's outside-click catcher.
-    readonly property Drawer studyDrawer: relatedDrawer
-    readonly property bool contentVisible: visibleModal
+    readonly property bool relatedShown: !!app.relatedOpen
+    onRelatedShownChanged: if (!relatedShown) studySearchOpen = false
+    readonly property bool contentVisible: surface.visible || relatedShown
     readonly property bool scopePinned: surface.visible && editingScope !== null
     property var editingScope: null
     // Study's root passage: the reader's passage when Study opened. It follows
@@ -234,9 +235,8 @@ Item {
         releaseEditing()
         surface.close()
         rootAt(captured)
-        relatedDrawer.open()
-        // The list, not the search field, takes focus: / searches.
-        Qt.callLater(function() { panel.focusResults() })
+        // The list, not the search field, takes the keyboard (/ filters).
+        app.openRelatedPanel()
         return true
     }
     // (Re)roots See also on a passage, without a filter.
@@ -260,11 +260,10 @@ Item {
     }
     function close() {
         if (surface.visible) surface.close()
-        else if (relatedDrawer.visible) relatedDrawer.close()
+        else if (relatedShown) app.closeNotes()
     }
     function closeForFocusMode() {
         surface.close()
-        relatedDrawer.close()
     }
     function textInputActive() {
         let focused = app.activeFocusItem
@@ -307,7 +306,7 @@ Item {
         overlaps = scopeValid ? Array.from(bible.tagsForScope(editingScope, true)).filter(function(range) {
             return !panel.sameRange(range, panel.editingScope)
         }) : []
-        if (relatedDrawer.visible) {
+        if (relatedShown) {
             resetRootTags()
             refreshStudy()
         }
@@ -457,7 +456,7 @@ Item {
             ["T", "tag", function() { panel.tagCurrentRow() }, relatedMoveKeys && !bible.busy],
             ["Y", "copy", function() { panel.app.copyScope(panel.listScope()) }, listKeys],
             ["D", "Desk", function() { panel.app.addToDesk(panel.listScope()) }, listKeys],
-            ["/", "filter", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", "close", escape]]
+            ["/", "filter", function() { panel.showStudySearch() }, relatedMoveKeys], ["Escape", "back to reading", escape]]
     }
     // The picker's enter: create or toggle from the search field, toggle in the list.
     function pickerEnter() {
@@ -489,8 +488,9 @@ Item {
         return [["Space", "toggle", function() { panel.pickerEnter() }, inList && scopeValid && !bible.busy],
             ["Return", "toggle / create", function() { panel.pickerEnter() }, enter && scopeValid && !bible.busy], pageKey, escape]
     }
-    // See also keys: off while typing, behind the picker or a menu, and while closing.
-    readonly property bool relatedMoveKeys: relatedShown && !pickerVisible && !app.contextMenuOpen
+    // See also keys: the keyboard in See also, not typing, behind the picker or
+    // a menu, or while closing.
+    readonly property bool relatedMoveKeys: relatedShown && app.marginKeys && !pickerVisible && !app.contextMenuOpen
         && !textInputActive()
     readonly property bool relatedKeys: relatedMoveKeys
     readonly property bool listKeys: !bible.busy && relatedKeys && studyList.currentIndex >= 0 && studyList.count > 0
@@ -525,10 +525,11 @@ Item {
         else search.forceActiveFocus()
     }
     // See also: esc in the filter leaves it, keeping the words; otherwise esc
-    // closes the panel, as in Marks (reopening roots it afresh, unfiltered).
+    // gives the keyboard back to the reader, as in Marks: See also stays open,
+    // following the reader's passage, and esc there closes it.
     function handleStudyEscape() {
         if (studySearch.activeFocus) leaveStudySearch()
-        else relatedDrawer.close()
+        else app.leaveNotes()
     }
     Connections {
         target: panel.bible
@@ -633,49 +634,19 @@ Item {
         background: Item {}
     }
     component FineRule: Rule { theme: panel.desktop; Layout.fillWidth: true }
-    Drawer {
-        id: relatedDrawer
-        objectName: "relatedDrawer"
-        parent: Overlay.overlay
-        width: Math.min(520 * panel.uiScale, panel.app.width - 48)
-        height: panel.app.height
-        edge: Qt.RightEdge
-        modal: true
-        focus: true
-        padding: 24 * panel.uiScale
-        topPadding: padding
-        bottomPadding: padding
-        leftPadding: padding
-        rightPadding: padding
-        closePolicy: Popup.CloseOnPressOutside
-        property bool closing: false
-        onAboutToShow: closing = false
-        onAboutToHide: closing = true
-        // A side panel, like the app's: enter slides fully and fades in;
-        // exit is subtler (a short slide, a quicker fade). Instant without animations.
-        enter: Transition {
-            NumberAnimation { property: "position"; to: 1; duration: panel.app.panelEnterMs || 0; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "opacity"; to: 1; duration: panel.app.panelEnterMs || 0; easing.type: Easing.OutQuad }
-        }
-        exit: Transition {
-            NumberAnimation { property: "position"; to: panel.app.panelExitPosition || 0; duration: panel.app.panelExitMs || 0; easing.type: Easing.InCubic }
-            NumberAnimation { property: "opacity"; to: 0; duration: panel.app.panelExitMs || 0; easing.type: Easing.InQuad }
-        }
-        background: Rectangle {
-            color: panel.desktop.background
-            border.color: panel.desktop.border
-            radius: Math.min(panel.desktop.cornerRadius, width / 2, height / 2)
-        }
-        Overlay.modal: Rectangle { color: Qt.rgba(panel.desktop.background.r, panel.desktop.background.g, panel.desktop.background.b, 0.65) }
-        onClosed: {
-            position = 0
-            panel.studySearchOpen = false
-            panel.app.restorePanelFocus()
-        }
-        contentItem: ColumnLayout {
+    // See also's list, laid out in the Margin's See also panel (relatedHost).
+    Item {
+        id: relatedContent
+        objectName: "relatedContent"
+        parent: panel.relatedHost
+        anchors.fill: parent
+        anchors.margins: panel.relatedHost ? panel.relatedHost.inset : 0
+        visible: !!panel.relatedHost
+        ColumnLayout {
             id: studyBody
             objectName: "studyBody"
-            spacing: 8 * panel.studyScale
+            anchors.fill: parent
+            spacing: panel.relatedHost ? panel.relatedHost.gap : 8 * panel.studyScale
             Keys.onEscapePressed: panel.handleStudyEscape()
             Shortcut { sequences: ["J", "Down"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveStudy(1) }
             Shortcut { sequences: ["K", "Up"]; enabled: panel.relatedMoveKeys; onActivated: panel.moveStudy(-1) }
@@ -701,15 +672,16 @@ Item {
                 count: studyList.count
                 onMove: function(delta) { if (studyList.currentIndex < 0) studyList.currentIndex = 0; panel.moveStudy(delta) }
             }
-            PanelHeader {
+            SidePanelHeader {
                 objectName: "studyHeader"
                 Layout.fillWidth: true
+                controller: panel.app
                 theme: panel.desktop
                 title: "See also"
                 subtitle: panel.passageSubtitle
-                uiScale: panel.studyScale
-                titleName: "studyTitle"
-                subtitleName: "studyPassage"
+                titleName: "studyTitle"; subtitleName: "studyPassage"; closeName: "studyClose"
+                closeTip: "Close See also · " + panel.app.escapeText + ", or " + panel.app.escapeText + " " + panel.app.escapeText + " from the list"
+                onCloseRequested: panel.app.closeNotes()
             }
             FineRule { objectName: "studyHeaderRule" }
             TagText {

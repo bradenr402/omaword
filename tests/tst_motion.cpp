@@ -508,16 +508,18 @@ private slots:
         QVERIFY(desk->property("opened").toBool()); QVERIFY(item("deskEditor")->hasActiveFocus());
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!desk->property("visible").toBool());
         QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
-        // Annotations drawer: immediate list focus.
+        // Marks, in the Margin: immediate list focus while it slides in.
         key(Qt::Key_M, Qt::ShiftModifier);
-        QVERIFY(object("savedDrawer")->property("visible").toBool());
+        QVERIFY(desk->property("visible").toBool()); QVERIFY(prop("marksOpen").toBool());
         QVERIFY(item("collectionList")->hasActiveFocus());
-        QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
-        // While it slides out, reader shortcuts already work (no modal blocking).
-        key(Qt::Key_Escape); QVERIFY(object("savedDrawer")->property("visible").toBool());
-        QVERIFY(!object("savedDrawer")->property("modal").toBool());
+        QTRY_VERIFY(desk->property("opened").toBool());
+        // esc gives the keyboard back; esc again closes it, and while it slides
+        // out, reader shortcuts already work (no modal blocking).
+        key(Qt::Key_Escape); QVERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(prop("marksOpen").toBool());
+        key(Qt::Key_Escape); QVERIFY(desk->property("visible").toBool()); QVERIFY(!prop("marksOpen").toBool());
+        QVERIFY(!desk->property("modal").toBool());
         { const auto verse = bible->cursorVerse(); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), verse + 1); }
-        QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        QTRY_VERIFY(!desk->property("visible").toBool());
         // Notes: the editor is focused while the drawer fades in.
         key(Qt::Key_W);
         QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(prop("notesOpen").toBool());
@@ -529,12 +531,12 @@ private slots:
         key(Qt::Key_Escape); QVERIFY(object("notesDrawer")->property("visible").toBool()); QVERIFY(!prop("notesOpen").toBool());
         QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier);
-        QTRY_VERIFY(object("relatedDrawer")->property("visible").toBool());
-        QVERIFY(object("relatedDrawer")->property("position").toDouble() < 1.0);
-        QTRY_VERIFY(object("relatedDrawer")->property("opened").toBool());
-        QVERIFY(QMetaObject::invokeMethod(object("relatedDrawer"), "close"));
-        QVERIFY(object("relatedDrawer")->property("visible").toBool());
-        QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        QTRY_VERIFY(prop("relatedOpen").toBool());
+        QVERIFY(desk->property("position").toDouble() < 1.0);
+        QTRY_VERIFY(desk->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window, "closeNotes"));
+        QVERIFY(desk->property("visible").toBool());
+        QTRY_VERIFY(!desk->property("visible").toBool());
         call("readerFocus");
         // Chapter find opens at once and fades out quickly; closing releases keys.
         key(Qt::Key_Slash);

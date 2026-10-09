@@ -248,15 +248,17 @@ private slots:
         QVERIFY(object("notesDrawer")->property("opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(deskOpen());
-        // Other panels close it; the reader's esc closes it; so does its ×.
+        // The reader's esc closes it; so does its ×; other panels take its place in the Margin.
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         openDesk();
         QTest::mouseClick(window, Qt::LeftButton, {}, item("deskClose")->mapToScene(QPointF(6, 6)).toPoint());
         QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
         openDesk(); key(Qt::Key_Escape);
-        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
-        QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(prop("marksOpen").toBool()); QVERIFY(!deskOpen());
+        QVERIFY(item("marksPanel")->isVisible()); QVERIFY(!item("deskPanel")->isVisible());
+        QVERIFY(object("notesDrawer")->property("opened").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused()); QVERIFY(prop("marksOpen").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
         QCOMPARE(desk(), bible->deskPage());
     }
     void pageWritesPreviewsAndFollowsLinks() {
@@ -306,10 +308,10 @@ private slots:
         QTRY_COMPARE(item("deskEditor")->property("text").toString(), desk());
         // Marks adds its row with d too.
         bible->setNoteText("Noted"); call("readerFocus");
-        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(object("savedDrawer")->property("opened").toBool());
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(prop("marksOpen").toBool());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         key(Qt::Key_D); QCOMPARE(desk(), six + "\nMine. More.\n\n" + seven + "\n\n" + seven + "\n");
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("savedDrawer")->property("visible").toBool());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
     }
     void liveUpdatesAndConflicts() {
         openDesk();

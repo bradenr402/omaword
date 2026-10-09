@@ -146,6 +146,15 @@ class UiTest : public QObject
         QMetaObject::invokeMethod(window,"formatKeys",Q_RETURN_ARG(QVariant,result),Q_ARG(QVariant,QVariant(sequences)));
         return result.toString();
     }
+    // A side panel in the Margin (marginMode): on its mode and done sliding
+    // in; still showing it (its exit included).
+    bool panelOpened(const QString &mode) const { return window->property("marginMode").toString() == mode && prop("notesDrawer","opened").toBool(); }
+    bool panelShown(const QString &mode) const { return window->property("marginMode").toString() == mode && prop("notesDrawer","visible").toBool(); }
+    // esc from a panel's list gives the keyboard to the reader; esc there closes the Margin.
+    void closeMargin() {
+        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+    }
     QVariant prop(const char *name, const char *property) const {
         const auto obj = object(name);
         return obj ? obj->property(property) : QVariant();
@@ -1749,14 +1758,14 @@ private slots:
         QVERIFY(current()->property("available").toBool());
         const auto selectedAction = current()->property("modelData").toMap().value("id").toString();
         // The paged row is also the executable choice when focus stays in search.
-        const QHash<QString,const char *> panels = {{"annotations","savedDrawer"},{"toggleNotes","notesDrawer"},{"related","relatedDrawer"}};
+        // Each opens in the Margin.
+        const QStringList panels = {"annotations","toggleNotes","related"};
         QVERIFY(panels.contains(selectedAction));
         key(Qt::Key_Return);
         QTRY_VERIFY(!prop("helpDialog","visible").toBool());
-        QTRY_VERIFY(prop(panels.value(selectedAction),"opened").toBool());
-        key(Qt::Key_Escape);
-        QTRY_VERIFY(!window->property("modalOpen").toBool());
-        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(prop("notesDrawer","opened").toBool());
+        QVERIFY(!window->property("modalOpen").toBool());
+        closeMargin();
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("chapter outline");
         key(Qt::Key_PageDown); key(Qt::Key_PageUp);
@@ -1773,7 +1782,7 @@ private slots:
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("marks panel"); key(Qt::Key_Return);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         QTest::qWait(100);
         // One row per passage shows everything on it: the highlight under the
         // reference and the note; the verse text only where there is no note.
@@ -1803,7 +1812,7 @@ private slots:
         QCOMPARE(prop("toast","text").toString(),QString("Deletion of John 3:16 undone"));
         QCOMPARE(bible->noteText(),QString("Delete this exact note"));
         QCOMPARE(prop("noteEditor","text").toString(),QString("Delete this exact note"));
-        QVERIFY(prop("savedDrawer","opened").toBool());
+        QVERIFY(panelOpened("marks"));
         key(Qt::Key_Z,Qt::ControlModifier | Qt::ShiftModifier); QTRY_COMPARE(bible->collection().size(),1);
         QCOMPARE(prop("toast","text").toString(),QString("Deletion of John 3:16 redone"));
         key(Qt::Key_Z,Qt::ControlModifier); QTRY_COMPARE(bible->collection(),before);
@@ -1853,11 +1862,11 @@ private slots:
         QVERIFY(bible->navigate("John 3:1-2"));
         QCOMPARE(bible->book(),43);
         item("readerSurface")->forceActiveFocus();
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         if (tagsOnly) {
             // Tag-only ranges are marks too, each in its own book.
             QTRY_COMPARE(prop("collectionList","count").toInt(),2);
-            key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+            closeMargin();
             key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
             QVERIFY(QMetaObject::invokeMethod(object("tagsUi"),"toggleTag",Q_ARG(QVariant,tag)));
             QVERIFY(bible->tagsForScope(john).isEmpty());
@@ -1871,15 +1880,13 @@ private slots:
         }
         object("collectionList")->setProperty("currentIndex",0);
         item("collectionList")->forceActiveFocus();
-        key(Qt::Key_Return); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        QCOMPARE(bible->book(),1);
+        // enter opens the row's passage; Marks stays beside it.
+        key(Qt::Key_Return); QTRY_COMPARE(bible->book(),1);
+        QVERIFY(panelShown("marks"));
         QCOMPARE(bible->tagScope(),genesis);
         QCOMPARE(bible->noteText(),tagsOnly ? QString() : QString("GEN note"));
-        if (!tagsOnly) {
-            QTRY_VERIFY(prop("notesDrawer","opened").toBool());
-            key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
-        }
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        closeMargin();
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         object("collectionList")->setProperty("currentIndex",0);
         item("collectionList")->forceActiveFocus();
         // Delete takes the row's exact range, never its namesake in another book.
@@ -1899,7 +1906,7 @@ private slots:
             reference(QString("John 3:%1").arg(verse));
             bible->setNoteText(QString("Note %1").arg(verse));
         }
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         // Marks opens on the row here (John 3:3).
         QCOMPARE(prop("collectionList","currentIndex").toInt(),2);
         key(Qt::Key_J); key(Qt::Key_J);
@@ -1924,9 +1931,9 @@ private slots:
         QTRY_COMPARE(prop("collectionList","currentIndex").toInt(),1);
         QCOMPARE(bible->collection().size(),2);
         QCOMPARE(bible->noteText(),QString());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        closeMargin();
         // Nothing is here now: Marks reopens on its first row.
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
     }
     void referencePreviewIsPure() {
@@ -2314,8 +2321,8 @@ private slots:
         const auto opened = value.canConvert<QJSValue>() ? value.value<QJSValue>().toVariant().toMap() : value.toMap();
         QCOMPARE(opened["start"],second["start"]); QCOMPARE(opened["end"],second["end"]);
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","scopePinned").toBool());
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(!panelShown("marks"));
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         // Marks lists both tagged ranges, each once, with its tag.
         QTRY_COMPARE(prop("collectionList","count").toInt(),2);
         QCOMPARE(bible->collection().size(),2);
@@ -2324,18 +2331,18 @@ private slots:
         QVERIFY(item("savedTagsJohn 3:1–3")->isVisible());
         QVERIFY(!prop("tagsUi","scopePinned").toBool());
         QVERIFY(!item("tagSearch")->isVisible());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        closeMargin();
         key(Qt::Key_H,Qt::AltModifier); QVERIFY(!bible->showHeadings());
         key(Qt::Key_S, Qt::ShiftModifier);
-        QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
-        QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("related"));
+        QVERIFY(!prop("tagsUi","visibleModal").toBool()); // Beside the text, not over it.
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("tagsUi","visibleModal").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(item("readerSurface")->hasActiveFocus()); QVERIFY(panelShown("related"));
         key(Qt::Key_Space,Qt::ControlModifier);
         QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("manage tags"); key(Qt::Key_Return);
         QTRY_VERIFY(prop("tagsUi","visibleModal").toBool());
-        QVERIFY(!prop("savedDrawer","visible").toBool());
+        QVERIFY(!panelShown("marks"));
         QCOMPARE(prop("tagsUi","page").toString(),QString("manage"));
     }
     void palettePreviewMatchesAcceptance() {
@@ -2498,17 +2505,16 @@ private slots:
         QCOMPARE(bible->collection().size(),1);
         QCOMPARE(bible->collection().first().toMap().value("reference").toString(),span);
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         const QByteArray name = ("savedEntry" + span).toUtf8();
         QTRY_VERIFY(item(name.constData()));
         click(item(name.constData()));
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        QCOMPARE(bible->selectionReference(),span);
+        QTRY_COMPARE(bible->selectionReference(),span);
+        QVERIFY(panelShown("marks")); // Marks stays beside the passage it opened.
         QVERIFY(bible->crossChapterSelection());
         QVERIFY(bible->selectionHighlighted());
         QCOMPARE(prop("noteEditor","text").toString(),note);
-        key(Qt::Key_Escape);
-        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        closeMargin();
         key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),copied);
         reference("John 3:36"); QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->noteText().isEmpty());
         reference("John 4:1"); QVERIFY(bible->selectionHighlighted()); QVERIFY(bible->noteText().isEmpty());
@@ -2589,13 +2595,14 @@ private slots:
         QCOMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),17);
         key(Qt::Key_X); QVERIFY(bible->selectionHighlighted());
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer", "opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         QTRY_COMPARE(prop("collectionList", "count").toInt(),1);
         const QByteArray entryName = ("savedEntry" + bible->selectionReference()).toUtf8();
         QTRY_VERIFY(item(entryName.constData()));
         click(item(entryName.constData()));
-        QTRY_VERIFY(!prop("savedDrawer", "visible").toBool());
-        QCOMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),17);
+        QTRY_COMPARE(bible->selectedStart(),16); QCOMPARE(bible->selectedEnd(),17);
+        QVERIFY(panelShown("marks"));
+        closeMargin();
     }
     void freeTextAcrossVerses_data() {
         QTest::addColumn<bool>("reverse");
@@ -3591,11 +3598,10 @@ private slots:
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         click(item("savedControl"));
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        QVERIFY(!item("relatedControl")->isEnabled());
+        QTRY_VERIFY(panelOpened("marks"));
+        QVERIFY(item("relatedControl")->isEnabled()); // The footer stays live beside it.
         capture("omaword-refined-saved-" + QString::fromLatin1(QTest::currentDataTag()));
-        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(panelShown("marks")); closeMargin();
         // No footer Notes button: w opens Notes.
         QVERIFY(!item("notesControl"));
         key(Qt::Key_W);
@@ -3908,9 +3914,9 @@ private slots:
         QTRY_VERIFY(prop("passagePalette","visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         type("20"); key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         type("12g"); QVERIFY(window->property("verseCount").toString().isEmpty());
-        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(panelShown("marks")); closeMargin();
         type("20"); key(Qt::Key_W);
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(window->property("verseCount").toString().isEmpty());
@@ -4121,7 +4127,7 @@ private slots:
         QVERIFY(item("noteEditor")->hasActiveFocus());
         QVERIFY(!window->property("modalOpen").toBool());
         QVERIFY(!prop("versionDialog","visible").toBool());
-        QVERIFY(!prop("savedDrawer","visible").toBool());
+        QVERIFY(!panelShown("marks"));
         QVERIFY(!window->property("deskOpen").toBool());
         click(item("previewButton"));
         key(Qt::Key_V,Qt::ControlModifier);
@@ -4416,7 +4422,7 @@ private slots:
         reference("John 3:17");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Love").isEmpty());
         reference("John 3:16");
-        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("related"));
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
         QVERIFY(!item("studySearch")->isVisible());
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
@@ -4425,13 +4431,12 @@ private slots:
         key(Qt::Key_Escape);
         QTRY_VERIFY(!item("studySearch")->hasActiveFocus());
         QVERIFY(item("studyList")->hasActiveFocus());
-        QVERIFY(prop("relatedDrawer","visible").toBool());
+        QVERIFY(panelShown("related"));
         QCOMPARE(prop("tagsUi","studyQuery").toString(),QString("zq"));
         QVERIFY(item("studySearch")->isVisible());
         QCOMPARE(prop("studyEmpty","text").toString(),QString::fromUtf8("Nothing matches “zq”."));
-        // The next esc closes, as in Marks.
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
-        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
+        // The next esc gives the keyboard back, as in Marks; esc there closes it.
+        closeMargin();
     }
     void sidePanelKeysSwitchPanels() {
         reference("John 3:16");
@@ -4443,17 +4448,18 @@ private slots:
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         QVERIFY(prop("notesDrawer","opened").toBool()); QVERIFY(window->property("deskOpen").toBool());
         key(Qt::Key_Escape);
+        // Other panels' keys turn the Margin to them; it stays open.
         key(Qt::Key_M, Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(panelOpened("marks")); QVERIFY(!window->property("deskOpen").toBool());
+        QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         QCOMPARE(window->property("sidePanel").toString(),QString("annotations"));
-        key(Qt::Key_M, Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M, Qt::ShiftModifier); QTest::qWait(50); QVERIFY(panelOpened("marks"));
         key(Qt::Key_S, Qt::ShiftModifier);
-        QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QTRY_VERIFY(panelOpened("related"));
+        QTRY_VERIFY(!panelShown("marks"));
         key(Qt::Key_W);
         QTRY_VERIFY(prop("notesDrawer","opened").toBool());
-        QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
+        QTRY_VERIFY(!panelShown("related"));
         QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         // While typing, panel keys type.
         QTest::sendKeyEvent(QTest::Click,window,Qt::Key_D,QString("D"),Qt::ShiftModifier);
@@ -4485,7 +4491,7 @@ private slots:
     void annotationsListKeys() {
         reference("John 3:16");
         QVERIFY(bible->toggleHighlight());
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         QApplication::clipboard()->clear();
         key(Qt::Key_Y); QTRY_VERIFY(QApplication::clipboard()->text().contains("John 3:16"));
@@ -4503,11 +4509,11 @@ private slots:
         QCOMPARE(bible->collection().size(),1);
         // Delete and backspace remove at once; u and ctrl z undo, here in the panel.
         key(Qt::Key_Delete); QTRY_VERIFY(bible->collection().isEmpty());
-        QVERIFY(prop("savedDrawer","visible").toBool());
+        QVERIFY(panelShown("marks"));
         key(Qt::Key_U); QTRY_COMPARE(bible->collection().size(),1);
         key(Qt::Key_J); key(Qt::Key_Backspace); QTRY_VERIFY(bible->collection().isEmpty());
         key(Qt::Key_Z,Qt::ControlModifier); QTRY_COMPARE(bible->collection().size(),1);
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        closeMargin();
     }
     void undoKeysToastsAndCommands() {
         reference("John 3:16");
@@ -4549,7 +4555,7 @@ private slots:
         QVERIFY(!bible->createAndAssignTag(other,"Sent").isEmpty());
         reference("John 3:16");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Sent").isEmpty());
-        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("related"));
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
         // The tagged-alike passage comes before OpenBible.info's, which are last.
         QVariantList rows;
@@ -4574,17 +4580,17 @@ private slots:
         key(Qt::Key_Delete); QTest::qWait(50);
         QCOMPARE(bible->tagsForScope(other).size(),1);
         QCOMPARE(prop("studyList","count").toInt(),rows.size());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
+        closeMargin();
     }
     void annotationsSearchVisibilityAndEscapes() {
         for (int verse = 1; verse <= 10; ++verse) { reference(QString("John 3:%1").arg(verse)); bible->setNoteText("Noted"); }
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         QCOMPARE(prop("collectionList","count").toInt(),10);
         QVERIFY(!item("savedSearch")->isVisible());
         key(Qt::Key_Slash); QTest::qWait(50); QVERIFY(!item("savedSearch")->hasActiveFocus());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        closeMargin();
         reference("John 3:11"); bible->setNoteText("Noted");
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         // Visible past ten items, but never focused on open.
         QTRY_VERIFY(item("savedSearch")->isVisible());
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
@@ -4594,7 +4600,7 @@ private slots:
         // First esc leaves the field and keeps the query; the next closes.
         key(Qt::Key_Escape);
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
-        QVERIFY(prop("savedDrawer","visible").toBool());
+        QVERIFY(panelShown("marks"));
         QCOMPARE(prop("savedSearch","text").toString(),QString("3:11"));
         // A query keeps the field even when Marks drops to ten rows.
         bible->setNoteText("");
@@ -4605,14 +4611,14 @@ private slots:
         key(Qt::Key_A,Qt::ControlModifier); key(Qt::Key_Backspace);
         QTRY_VERIFY(!item("savedSearch")->isVisible());
         QTRY_COMPARE(prop("collectionList","count").toInt(),10);
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        closeMargin();
         // Tagged passages are marks too: "#wat" keeps a tag's, words narrow them.
         for (int verse = 1; verse <= 12; ++verse) {
             reference(QString("John 4:%1").arg(verse));
             QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Water").isEmpty());
         }
         reference("John 4:1");
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         QTRY_VERIFY(item("savedSearch")->isVisible());
         QVERIFY(!item("savedSearch")->hasActiveFocus());
         QTRY_COMPARE(prop("collectionList","count").toInt(),22);
@@ -4648,11 +4654,11 @@ private slots:
         key(Qt::Key_A,Qt::ControlModifier); type("4:12");
         QTRY_COMPARE(prop("collectionList","count").toInt(),1);
         key(Qt::Key_Escape); QTRY_VERIFY(!item("savedSearch")->hasActiveFocus());
-        QVERIFY(prop("savedDrawer","visible").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QVERIFY(panelShown("marks"));
+        closeMargin();
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         QCOMPARE(prop("savedSearch","text").toString(),QString());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        closeMargin();
     }
     void versionsCtrlIAddsVersion() {
         reference("John 3:16");
@@ -5643,24 +5649,23 @@ private slots:
             auto body = qstrcmp(mode,"verse") == 0 ? item("verseBody1") : item("blockBody");
             QVERIFY(body); body->forceActiveFocus();
             key(Qt::Key_M,Qt::ShiftModifier);
-            QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-            key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
-            QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+            QTRY_VERIFY(panelOpened("marks"));
+            key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(panelShown("marks")); closeMargin();
         }
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("Editable note selection"); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("noteEditor","selectedText").toString(),QString("Editable note selection"));
-        QVERIFY(!prop("savedDrawer","visible").toBool());
+        QVERIFY(!panelShown("marks"));
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
         type("John"); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("referenceInput","selectedText").toString(),QString("John"));
-        QVERIFY(!prop("savedDrawer","visible").toBool());
+        QVERIFY(!panelShown("marks"));
         key(Qt::Key_Escape);
         QTRY_VERIFY(!prop("passagePalette","visible").toBool());
         window->resize(640,640);
         desktop->setProperty("textScale",1.8);
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         // The tagged passage and its note, one row.
         QTRY_VERIFY(item("savedEntryJohn 3:1"));
         QCOMPARE(prop("collectionList","count").toInt(),1);
@@ -5670,11 +5675,11 @@ private slots:
         QVERIFY(!prop("tagsUi","scopePinned").toBool());
         for (const auto name : {"studyList", "tagSearch", "createPassageTag"})
             QVERIFY(!item(name)->isVisible());
-        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(panelShown("marks")); closeMargin();
         key(Qt::Key_T); QTRY_VERIFY(item("tagSearch")->hasActiveFocus());
         QVERIFY(prop("tagsUi","visibleModal").toBool());
         QVERIFY(prop("tagsUi","scopePinned").toBool());
-        QVERIFY(!prop("savedDrawer","visible").toBool());
+        QVERIFY(!panelShown("marks"));
         type("Context"); key(Qt::Key_A,Qt::ControlModifier);
         QCOMPARE(prop("tagSearch","selectedText").toString(),QString("Context"));
         QVERIFY(prop("tagsUi","visibleModal").toBool());
@@ -5712,11 +5717,15 @@ private slots:
         QVERIFY(!item("relatedControlGlyph")->isVisible());
         QCOMPARE(prop("savedControlGlyph","kind").toString(),QString("note"));
         QVERIFY(item("savedControlGlyph")->isVisible());
-        click(related); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
-        QVERIFY(!prop("savedDrawer","visible").toBool());
+        click(related); QTRY_VERIFY(panelOpened("related"));
+        QVERIFY(!panelShown("marks"));
         const auto inner = item("studyBody")->mapRectToScene(item("studyBody")->boundingRect());
-        const qreal padding = 24 * 1.8;
-        QVERIFY(qAbs(inner.left() - (window->width() - prop("relatedDrawer","width").toReal() + padding)) < 0.1);
+        // Inside the Margin's inset, as every side panel.
+        const qreal padding = prop("relatedPanel","inset").toReal();
+        QCOMPARE(padding, qreal(qRound(22 * 1.4)));
+        const auto panel = item("relatedPanel")->mapRectToScene(item("relatedPanel")->boundingRect());
+        QVERIFY(qAbs(panel.right() - window->width()) < 1); QVERIFY(qAbs(panel.width() - prop("notesDrawer","width").toReal()) <= 1); // Less the drawer's 1 px edge.
+        QVERIFY(qAbs(inner.left() - (panel.left() + padding)) < 0.1);
         QVERIFY(qAbs(inner.right() - (window->width() - padding)) < 0.1);
         QVERIFY(qAbs(inner.top() - padding) < 0.1);
         QVERIFY(qAbs(inner.bottom() - (window->height() - padding)) < 0.1);
@@ -5728,8 +5737,8 @@ private slots:
         }
         QVERIFY(!item("manageTags")->isVisible());
         QVERIFY(!item("createPassageTag")->isVisible());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("relatedDrawer","visible").toBool());
-        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(prop("relatedDrawer","opened").toBool());
+        closeMargin();
+        key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("related"));
     }
     void rowAnnotationLanePacking() {
         reference("John 3:1-5");
@@ -5909,14 +5918,15 @@ private slots:
             return false;
         };
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
-        QVERIFY(!item("savedClose"));
-        key(Qt::Key_Escape);
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
+        // Its ×, as every side panel's, closes it by mouse.
+        QVERIFY(item("savedClose") && item("savedClose")->isVisible());
+        click(item("savedClose")); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         QCOMPARE(navigation.count(),0);
 
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         QCOMPARE(prop("collectionList","count").toInt(),3);
         QVERIFY(!item("savedTabs"));
 
@@ -5936,12 +5946,12 @@ private slots:
             QCOMPARE(navigation.count(),0);
             QVERIFY(QMetaObject::invokeMethod(dialog,"reject"));
             QTRY_VERIFY(!dialog->property("visible").toBool());
-            QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+            QVERIFY(panelShown("marks")); // The dialog opened over it.
             window->requestActivate();
             QTRY_VERIFY(window->isActive());
             item("readerSurface")->forceActiveFocus();
             key(Qt::Key_M,Qt::ShiftModifier);
-            QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+            QTRY_VERIFY(panelOpened("marks"));
         }
         for (auto activation : {Qt::Key_Return,Qt::Key_Enter}) {
             // Rows never take the keyboard (like Desk and History): the list's
@@ -5950,18 +5960,19 @@ private slots:
             object("collectionList")->setProperty("currentIndex",1);
             item("collectionList")->forceActiveFocus();
             key(activation);
-            QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-            QCOMPARE(bible->selectionReference(),QString("John 3:3"));
+            QTRY_COMPARE(bible->selectionReference(),QString("John 3:3"));
+            QVERIFY(panelShown("marks")); // It stays beside the passage it opened.
             key(Qt::Key_M,Qt::ShiftModifier);
-            QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+            QTRY_VERIFY(panelOpened("marks"));
         }
         object("collectionList")->setProperty("currentIndex",0);
         // j from a focused button returns to the list.
         QVERIFY(tabTo("savedExport")); key(Qt::Key_J);
         QCOMPARE(window->activeFocusItem(),item("collectionList"));
+        reference("John 3:5"); item("collectionList")->forceActiveFocus();
         key(Qt::Key_Return);
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        QCOMPARE(bible->selectionReference(),QString("John 3:3"));
+        QTRY_COMPARE(bible->selectionReference(),QString("John 3:3"));
+        QVERIFY(panelShown("marks"));
     }
     void savedDeleteUsesTabFocusedEntry_data() {
         QTest::addColumn<int>("deleteKey");
@@ -5974,7 +5985,7 @@ private slots:
         reference("John 3:3"); bible->toggleHighlight();
         reference("John 3:5"); bible->toggleHighlight();
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         // Rows never take the keyboard: delete acts on the list's current row.
         object("collectionList")->setProperty("currentIndex",1);
         item("collectionList")->forceActiveFocus();
@@ -6003,10 +6014,10 @@ private slots:
         QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
         QApplication::clipboard()->setText("Saved isolation");
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         QVERIFY(item("collectionList")->hasActiveFocus());
         QCOMPARE(prop("savedTitle","text").toString(),QString("Marks"));
-        QCOMPARE(prop("savedDrawer","edge").toInt(),int(Qt::RightEdge));
+        QCOMPARE(prop("notesDrawer","edge").toInt(),int(Qt::RightEdge));
         QCOMPARE(prop("collectionList","count").toInt(),14);
         key(Qt::Key_J); QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
         key(Qt::Key_Down); QCOMPARE(prop("collectionList","currentIndex").toInt(),2);
@@ -6036,7 +6047,7 @@ private slots:
         key(Qt::Key_Right,Qt::AltModifier);
         key(Qt::Key_D,Qt::ControlModifier);
         key(Qt::Key_N,Qt::ControlModifier);
-        // (ctrl k and ctrl h now close the panel and open the palette: a11yui globalKeysLeaveSidePanels.)
+        // (ctrl k and ctrl h open the palette over the panel: a11yui globalKeysActOverSidePanels.)
         QCOMPARE(navigation.count(),0); QCOMPARE(selection.count(),0);
         QCOMPARE(bible->collection(),collection);
         QCOMPARE(prop("reading","contentY").toDouble(),position);
@@ -6044,30 +6055,30 @@ private slots:
         QVERIFY(!window->property("verseMode").toBool());
         QVERIFY(!window->property("notesOpen").toBool());
         QVERIFY(!prop("passagePalette","visible").toBool());
-        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(panelShown("marks")); closeMargin();
         QVERIFY(item("readerSurface")->hasActiveFocus());
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
         key(Qt::Key_J); key(Qt::Key_Return);
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        QCOMPARE(bible->selectionReference(),QString("John 3:2"));
+        QTRY_COMPARE(bible->selectionReference(),QString("John 3:2"));
+        QVERIFY(panelShown("marks")); QVERIFY(item("collectionList")->hasActiveFocus());
         // Reopened, it starts on the row here.
+        closeMargin();
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         QCOMPARE(prop("collectionList","currentIndex").toInt(),1);
+        // A noted row opens its passage; its note shows in the row, Notes stays shut.
         key(Qt::Key_J); key(Qt::Key_J); key(Qt::Key_Enter);
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
-        QCOMPARE(bible->selectionReference(),QString("John 3:4"));
+        QTRY_COMPARE(bible->selectionReference(),QString("John 3:4"));
         QCOMPARE(bible->noteText(),QString("Saved keyboard note"));
-        QVERIFY(window->property("notesOpen").toBool());
+        QVERIFY(panelShown("marks")); QVERIFY(!window->property("notesOpen").toBool());
     }
     void savedEmptyStates() {
         window->resize(640,480);
         QVERIFY(desktop->setProperty("textScale",1.8));
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         QTest::qWait(100);
         QCOMPARE(prop("collectionList","count").toInt(),0);
         QVERIFY(item("savedEmpty")->isVisible());
@@ -6077,16 +6088,15 @@ private slots:
         QVERIFY(item("collectionList")->boundingRect().contains(bounds));
         // Keys on an empty list do nothing and keep Marks open.
         for (const auto k : {Qt::Key_J,Qt::Key_K,Qt::Key_Return,Qt::Key_W,Qt::Key_T,Qt::Key_Delete,Qt::Key_Left,Qt::Key_Right}) key(k);
-        QVERIFY(prop("savedDrawer","opened").toBool());
+        QVERIFY(panelOpened("marks"));
         QVERIFY(!prop("tagsUi","visibleModal").toBool());
         QVERIFY(!item("tagSearch")->isVisible());
         QCOMPARE(window->property("markEditKey").toString(),QString());
-        key(Qt::Key_Escape); QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        closeMargin();
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         item("collectionList")->forceActiveFocus();
-        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(prop("savedDrawer","visible").toBool()); key(Qt::Key_Escape);
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTest::qWait(50); QVERIFY(panelShown("marks")); closeMargin();
     }
     void marksNoteInPlace() {
         reference("John 3:16"); bible->setNoteText("First"); QVERIFY(bible->toggleHighlight());
@@ -6094,7 +6104,7 @@ private slots:
         reference("John 3:17"); const auto tagged = bible->tagScope();
         QVERIFY(!bible->createAndAssignTag(tagged,"Kept").isEmpty());
         reference("John 4:1");
-        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        key(Qt::Key_M,Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         QTRY_COMPARE(prop("collectionList","count").toInt(),2);
         QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
         // w: the note opens in its row, the reader stays where it is.
@@ -6112,7 +6122,7 @@ private slots:
         // esc is done: back to the list on that row.
         key(Qt::Key_Escape);
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
-        QVERIFY(prop("savedDrawer","visible").toBool());
+        QVERIFY(panelShown("marks"));
         QCOMPARE(window->property("markEditKey").toString(),QString());
         QCOMPARE(prop("collectionList","currentIndex").toInt(),0);
         QTRY_COMPARE(item("savedNoteTextJohn 3:16")->property("text").toString(),QString("First thought j k d y"));
@@ -6158,10 +6168,53 @@ private slots:
         QCOMPARE(item("markEditor")->property("text").toString(),QString("First thought j k d y"));
         // Closing Marks finishes it.
         type(".");
-        key(Qt::Key_Escape); key(Qt::Key_Escape);
-        QTRY_VERIFY(!prop("savedDrawer","visible").toBool());
+        click(item("savedClose"));
+        QTRY_VERIFY(!panelShown("marks"));
         QCOMPARE(bible->savedNote(noted),QString("First thought j k d y."));
         QCOMPARE(window->property("markEditKey").toString(),QString());
+    }
+    // Every side panel is the Margin's shell (SidePanel), headed by the shared
+    // header (SidePanelHeader, at the shell's inset), with its keys in a
+    // HintRow; every modal is a ModalCard with a HintRow.
+    void panelsAndModalsShareTheirShells() {
+        reference("John 3:16"); bible->setNoteText("Shell"); QVERIFY(bible->toggleHighlight());
+        const auto is = [](QObject *object, const QString &type) {
+            for (auto meta = object->metaObject(); meta; meta = meta->superClass())
+                if (QString::fromLatin1(meta->className()).startsWith(type + "_QML")) return true;
+            return false;
+        };
+        struct Panel { const char *command, *panel, *header, *hints; };
+        const QList<Panel> panels = {{"notes","notesPanel","notesHeader","notesHints"},{"desk","deskPanel","deskHeader","deskHints"},
+            {"annotations","marksPanel","savedHeader","savedHints"},{"related","relatedPanel","studyHeader","studyHints"}};
+        double inset = -1;
+        for (const auto &entry : panels) {
+            QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,QString(entry.command))));
+            QTRY_VERIFY2(prop("notesDrawer","opened").toBool() && item(entry.panel) && item(entry.panel)->isVisible(),entry.panel);
+            QTest::qWait(50);
+            auto panel = item(entry.panel), header = item(entry.header), hints = item(entry.hints);
+            QVERIFY2(is(panel,"SidePanel"),qPrintable(QString(entry.panel) + " " + panel->metaObject()->className()));
+            QVERIFY2(header && panel->isAncestorOf(header) && is(header,"SidePanelHeader"),entry.header);
+            QVERIFY2(hints && panel->isAncestorOf(hints) && is(hints,"HintRow"),entry.hints);
+            const double shellInset = panel->property("inset").toDouble();
+            if (inset < 0) inset = shellInset;
+            QCOMPARE(shellInset,inset);
+            const auto at = header->mapToItem(panel,QPointF(0,0));
+            QVERIFY2(qAbs(at.x() - inset) < 0.5 && qAbs(at.y() - inset) < 0.5,qPrintable(QString("%1 at %2,%3").arg(entry.header).arg(at.x()).arg(at.y())));
+        }
+        QVERIFY(QMetaObject::invokeMethod(window,"closeNotes")); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        const std::function<bool(QQuickItem *)> hasHints = [&](QQuickItem *at) {
+            if (!at) return false;
+            if (is(at,"HintRow")) return true;
+            for (auto child : at->childItems()) if (hasHints(child)) return true;
+            return false;
+        };
+        int modals = 0;
+        for (auto object : window->findChildren<QObject *>()) {
+            if (!is(object,"ModalCard")) continue;
+            ++modals;
+            QVERIFY2(hasHints(object->property("contentItem").value<QQuickItem *>()),qPrintable(object->objectName()));
+        }
+        QVERIFY(modals >= 12);
     }
     void savedPanelGeometry_data() {
         QTest::addColumn<QSize>("size");
@@ -6183,18 +6236,21 @@ private slots:
         window->resize(size);
         QVERIFY(desktop->setProperty("textScale",scale));
         key(Qt::Key_M,Qt::ShiftModifier);
-        QTRY_VERIFY(prop("savedDrawer","opened").toBool());
+        QTRY_VERIFY(panelOpened("marks"));
         QTest::qWait(150);
         auto content = item("savedContent");
         QVERIFY(content);
-        const double padding = 16 * qMin(scale,1.4);
-        QCOMPARE(prop("savedDrawer","padding").toDouble(),padding);
+        // The Margin's inset, as every side panel.
+        const double padding = prop("marksPanel","inset").toDouble();
+        QCOMPARE(padding,double(qRound(22 * qMin(scale,1.4))));
         const auto bounds = content->mapRectToScene(content->boundingRect());
-        QCOMPARE(prop("savedDrawer","edge").toInt(),int(Qt::RightEdge));
+        QCOMPARE(prop("notesDrawer","edge").toInt(),int(Qt::RightEdge));
         QCOMPARE(prop("savedTitle","text").toString(),QString("Marks"));
-        QCOMPARE(bounds.left(),size.width() - prop("savedDrawer","width").toDouble() + padding);
+        const auto panel = item("marksPanel")->mapRectToScene(item("marksPanel")->boundingRect());
+        QVERIFY(qAbs(panel.right() - size.width()) < 1); QVERIFY(qAbs(panel.width() - prop("notesDrawer","width").toDouble()) <= 1); // Less the drawer's 1 px edge.
+        QVERIFY(qAbs(bounds.left() - panel.left() - padding) < 0.1);
         QVERIFY(qAbs(bounds.top() - padding) < 0.1);
-        QVERIFY(qAbs(size.width() - bounds.right() - padding) < 0.1);
+        QVERIFY(qAbs(panel.right() - bounds.right() - padding) < 0.1);
         QVERIFY(qAbs(size.height() - bounds.bottom() - padding) < 0.1);
         // Past ten rows the filter field fits the panel's width.
         auto search = item("savedSearch");

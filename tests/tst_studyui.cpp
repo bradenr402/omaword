@@ -358,7 +358,16 @@ private slots:
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
     }
 private:
-    bool studyOpen() const { return object("relatedDrawer")->property("opened").toBool(); }
+    bool studyOpen() const { return window->property("relatedOpen").toBool(); }
+    // See also in the Margin: esc gives the keyboard back to the reader, and
+    // esc there closes it.
+    void closeStudy() {
+        key(Qt::Key_Escape); QTRY_VERIFY(window->activeFocusItem() == item("readerSurface")); QVERIFY(studyOpen());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+        // The text has glided back to its place: what is clicked next is where it was found.
+        QTRY_COMPARE(window->property("chromeDock").toDouble(), 0.0);
+        QTRY_VERIFY(!object("marginSlide")->property("running").toBool());
+    }
     QObject *panel() const {
         for (auto *obj : window->findChildren<QObject *>()) if (obj->property("studyRows").isValid()) return obj;
         return nullptr;
@@ -420,7 +429,7 @@ private slots:
                 const auto t = header->mapToScene(QPointF(0, header->height())), r = rule->mapToScene(QPointF());
                 QVERIFY(r.y() >= t.y()); QVERIFY(r.y() - t.y() < 20); QCOMPARE(rule->width(), header->width());
             }
-            key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+            closeStudy();
         }
     }
     void seeAlsoSectionsAndKeys() {
@@ -465,13 +474,13 @@ private slots:
         QTRY_COMPARE(bible->selectionReference(), QString("John 1:14"));
         QVERIFY(prop("jumpStack").toList().size() > jumps);
         QVERIFY(studyOpen()); QCOMPARE(rows().size(), 8);
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        closeStudy();
         // Nothing for a passage: it says so, and how tagging gathers passages.
         navigate("Genesis 1:2");
         openStudy();
         QVERIFY(rows().isEmpty());
         QCOMPARE(object("studyEmpty")->property("text").toString(), QString("Nothing goes with Genesis 1:2 yet. Tag it (t) to gather the passages you tag alike."));
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        closeStudy();
         // No \\x of its own: the passages tagged alike, in every version; then,
         // last, OpenBible.info's, by votes, under their heading.
         navigate("John 1:14"); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Word made flesh").isEmpty());
@@ -504,16 +513,16 @@ private slots:
         QTRY_COMPARE(rows().size(), 1); QCOMPARE(rows()[0].toMap()["reference"].toString(), QString("John 1:29"));
         QTest::keyClick(window, 'x'); QTRY_COMPARE(rows().size(), 0);
         QCOMPARE(object("studyEmpty")->property("text").toString(), QString::fromUtf8("Nothing matches “1:2x”."));
-        // esc leaves the filter, keeping it; esc again closes, and the next open is unfiltered.
+        // esc leaves the filter, keeping it; esc again gives the keyboard back, and the next open is unfiltered.
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus()); QVERIFY(item("studySearch")->isVisible());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        closeStudy();
         openStudy(); QCOMPARE(rows().size(), 7); QVERIFY(!item("studySearch")->isVisible());
         // t edits the current row's tags over the panel.
         key(Qt::Key_G); key(Qt::Key_J); key(Qt::Key_T);
         QTRY_VERIFY(object("tagsUi")->property("pickerVisible").toBool());
         QCOMPARE(value(object("tagsUi")->property("editingScope")).toMap()["start"].toInt(), 3);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsUi")->property("pickerVisible").toBool());
-        key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+        closeStudy();
         // shift L no longer opens the panel.
         call("readerFocus"); key(Qt::Key_L, Qt::ShiftModifier); QTest::qWait(100); QVERIFY(!studyOpen());
     }
@@ -577,7 +586,7 @@ private slots:
             QTRY_VERIFY2(studyOpen(), qPrintable(mode));
             QCOMPARE(bible->selectionReference(), QString("John 3:16"));
             QCOMPARE(rows().first().toMap()["reference"].toString(), QString("John 3:15"));
-            key(Qt::Key_Escape); QTRY_VERIFY(!object("relatedDrawer")->property("visible").toBool());
+            closeStudy();
             // i peeks at the cursor verse's first note; without one it says so.
             call("readerFocus"); key(Qt::Key_I);
             QTRY_VERIFY(peek->property("opened").toBool());

@@ -203,6 +203,15 @@ class A11yUiTest : public QObject
     }
     bool opened(const QString &name) const { auto o = object(name); return o && o->property("opened").toBool(); }
     bool shown(const QString &name) const { auto o = object(name); return o && o->property("visible").toBool(); }
+    // A side panel in the Margin (marginMode): on its mode and done sliding
+    // in; still showing it (its exit included).
+    bool panelOpened(const QString &mode) const { return prop("marginMode").toString() == mode && opened("notesDrawer"); }
+    bool panelShown(const QString &mode) const { return prop("marginMode").toString() == mode && shown("notesDrawer"); }
+    // esc from a panel's list gives the keyboard to the reader; esc there closes the Margin.
+    void closeMargin() {
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused());
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+    }
     QObject *menu() const { return object("contextMenu"); }
     QStringList menuIds() const {
         QStringList ids;
@@ -480,10 +489,11 @@ private slots:
         // Annotations: open the current row by its hint.
         QVERIFY(bible->navigate("John 3:9")); bible->selectVerses(9, 9); QVERIFY(bible->toggleHighlight());
         navigate("John 1:1");
-        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+        run("annotations"); QTRY_VERIFY(panelOpened("marks"));
         QTRY_VERIFY(item("savedHintsPart:open")->property("clickable").toBool());
-        clickHint("savedHintsPart:open"); QTRY_VERIFY(!shown("savedDrawer"));
-        QCOMPARE(bible->selectionReference(), QString("John 3:9"));
+        clickHint("savedHintsPart:open"); QTRY_COMPARE(bible->selectionReference(), QString("John 3:9"));
+        QVERIFY(panelShown("marks")); // Marks stays beside the passage it opened.
+        closeMargin();
         // Confirmations: cancel by the hint, confirm with enter on the focused button.
         QVERIFY(bible->recordHistory()); run("clearHistory"); QTRY_VERIFY(opened("clearHistoryConfirmation"));
         clickHint("clearHistoryHintsPart:cancel"); QTRY_VERIFY(!shown("clearHistoryConfirmation"));
@@ -493,11 +503,12 @@ private slots:
         clickHint("clearHistoryHintsPart:select"); QTRY_VERIFY(bible->history().isEmpty());
         call("readerFocus");
         // See also and the tag picker.
-        run("related"); QTRY_VERIFY(opened("relatedDrawer"));
+        run("related"); QTRY_VERIFY(panelOpened("related"));
         QTRY_VERIFY(item("studyHintsPart:filter")); QVERIFY(item("studyHintsPart:filter")->property("clickable").toBool());
         clickHint("studyHintsPart:filter"); QTRY_VERIFY(item("studySearch")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
-        clickHint("studyHintsPart:close"); QTRY_VERIFY(!shown("relatedDrawer"));
+        clickHint("studyHintsPart:back to reading"); QTRY_VERIFY(readerFocused()); QVERIFY(panelShown("related"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         run("tags"); QTRY_VERIFY(opened("tagsSurface")); type("Grace");
         clickHint("tagsHintsPart:toggle / create"); QTRY_COMPARE(bible->tags().size(), 1);
         clickHint("tagsHintsPart:close"); QTRY_VERIFY(!shown("tagsSurface"));
@@ -514,12 +525,12 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         // Marks rows: the shared four, then Write note, Edit tags, Move here, Delete, and the undo it offers.
         bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
-        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+        run("annotations"); QTRY_VERIFY(panelOpened("marks"));
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), (shared + QStringList{"|", "note", "tags", "moveHere", "delete", "undo"}));
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool()); closeMargin();
         // See also rows: mouse and keyboard (Edit tags follows the shared four).
-        navigate("John 1:1"); run("related"); QTRY_VERIFY(opened("relatedDrawer"));
+        navigate("John 1:1"); run("related"); QTRY_VERIFY(panelOpened("related"));
         QTRY_VERIFY(item("studyRow:0") && item("studyRow:0")->isVisible());
         click(item("studyRow:0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menuIds(), (shared + QStringList{"|", "tags"}));
@@ -527,7 +538,7 @@ private slots:
         QGuiApplication::clipboard()->clear(); chooseMenu("copy");
         QTRY_VERIFY(QGuiApplication::clipboard()->text().contains("Genesis 1:1"));
         key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool()); QCOMPARE(menuIds(), (shared + QStringList{"|", "tags"}));
-        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool()); closeMargin();
     }
     void paletteRecentsAndLinkedNotesHaveRowMenus() {
         // Recent searches: Search again · Copy · Copy plain text (no Desk; no list keys shown).
@@ -676,9 +687,9 @@ private slots:
         QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before); QVERIFY(opened("helpDialog"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
         // An empty list: y has no row to copy.
-        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+        run("annotations"); QTRY_VERIFY(panelOpened("marks"));
         before = playCount(); key(Qt::Key_Y); QCOMPARE(lastSound(), QString("error")); QVERIFY(playCount() > before);
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        closeMargin();
         // Character selection: a key it does not have says how to leave.
         bible->selectVerses(3, 3); call("readerFocus"); key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
         before = playCount(); key(Qt::Key_Q);
@@ -703,8 +714,16 @@ private slots:
         check("settingsDialog", [&] { run("settings"); });
         check("versionDialog", [&] { run("switchVersion"); });
         check("aboutDialog", [&] { run("about"); });
-        check("savedDrawer", [&] { run("annotations"); });
-        check("relatedDrawer", [&] { run("related"); });
+        // Marks and See also sit beside the text, as Notes does: a click on the
+        // text reaches the reader, and the panel stays.
+        for (const auto &[command, mode] : {std::pair{"annotations", "marks"}, std::pair{"related", "related"}}) {
+            run(command); QTRY_VERIFY2(panelOpened(mode), mode);
+            clickAt(outsidePoint("notesDrawer"));
+            QTRY_VERIFY2(readerFocused(), mode); QVERIFY2(panelOpened(mode), mode); QVERIFY(bible->selectedStart() != 3);
+            key(Qt::Key_Escape); QTRY_VERIFY(!prop("selectionBarShown").toBool());
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
+            bible->selectVerses(3, 3); call("readerFocus");
+        }
         // Notes sits beside the text, never over it: a click on the text
         // reaches the reader (the verse clicked is selected, the keyboard
         // comes back) and Notes stays open, following the selection.
@@ -1070,7 +1089,7 @@ private slots:
                 }
             }
             setMode("verse");
-            run("annotations"); QTRY_VERIFY(opened("savedDrawer")); QTest::qWait(200);
+            run("annotations"); QTRY_VERIFY(panelOpened("marks")); QTest::qWait(200);
             shot("highlight-" + theme.first + "-panel");
             if (!qEnvironmentVariableIsSet("OMAWORD_HIGHLIGHT_BEFORE")) {
                 auto mark = item("savedHighlightJohn 3:16"); QVERIFY(mark && mark->isVisible());
@@ -1079,7 +1098,7 @@ private slots:
                 const auto m = mark->mapRectToScene(QRectF(0, 0, mark->width(), mark->height())), l = label->mapRectToScene(QRectF(0, 0, label->width(), label->height()));
                 QVERIFY(m.intersects(l)); QVERIFY(m.width() > 20);
             }
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+            closeMargin();
         }
         QVERIFY(!TestEnvironment::reachesRealUserState(themeDir));
         QFile::remove(themeDir + "/colors.toml"); QVERIFY(QMetaObject::invokeMethod(desktop.get(), "refresh"));
@@ -1197,14 +1216,14 @@ private slots:
         QCOMPARE(bible->selectionReference(), QString("John 2:5"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
         // A side panel: back closes it (and does not travel); the Margin too.
-        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
-        clickAt(middle, Qt::BackButton); QTRY_VERIFY(!shown("savedDrawer"));
+        run("annotations"); QTRY_VERIFY(panelOpened("marks"));
+        clickAt(middle, Qt::BackButton); QTRY_VERIFY(!shown("notesDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 2:5")); QVERIFY(readerFocused());
         run("desk"); QTRY_VERIFY(opened("notesDrawer"));
         clickAt(QPoint(40, window->height() / 2), Qt::BackButton); QTRY_VERIFY(!shown("notesDrawer"));
         QCOMPARE(bible->selectionReference(), QString("John 2:5")); QVERIFY(readerFocused());
-        // Keyboard equivalent for the panel: esc.
-        run("annotations"); QTRY_VERIFY(opened("savedDrawer")); key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        // Keyboard equivalent for the panel: esc, and esc again from the reader.
+        run("annotations"); QTRY_VERIFY(panelOpened("marks")); closeMargin();
         // The keybindings list explains the buttons.
         QVariant text; QMetaObject::invokeMethod(window, "keyText", Q_RETURN_ARG(QVariant, text), Q_ARG(QVariant, QString("mouseBack")));
         QCOMPARE(text.toString(), QString("mouse back"));
@@ -1514,7 +1533,7 @@ private slots:
     void annotationRowsTakeNoFocus() {
         for (const int verse : {5, 7}) { bible->selectVerses(verse, verse); QVERIFY(bible->toggleHighlight()); }
         navigate("John 3:3");
-        run("annotations"); QTRY_VERIFY(opened("savedDrawer")); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        run("annotations"); QTRY_VERIFY(panelOpened("marks")); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         auto row = item("savedEntryJohn 3:5"); QVERIFY(row);
         QCOMPARE(row->property("focusPolicy").toInt(), int(Qt::NoFocus));
         // Keyboard: j/k and tab never put a row in focus.
@@ -1618,8 +1637,8 @@ private slots:
                 QVERIFY2(!focusName().startsWith("verseFootnoteMark") && !focusName().startsWith("blockInlineMarker:footnote"), qPrintable(focusName()));
             }
             call("readerFocus");
-            key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(opened("relatedDrawer"));
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+            key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("related"));
+            closeMargin();
         }
     }
     void markersHaveLargerHitAreas() {
@@ -1689,34 +1708,36 @@ private slots:
         clickHint("versionHintsPart:back"); QCOMPARE(dialog->property("step").toInt(), 0);
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("versionDialog"));
     }
-    void globalKeysLeaveSidePanels() {
+    void globalKeysActOverSidePanels() {
         bible->selectVerses(3, 3); QVERIFY(bible->toggleHighlight());
-        struct Panel { Qt::Key key; const char *drawer; };
-        const QList<Panel> panels = {{Qt::Key_M, "savedDrawer"}, {Qt::Key_S, "relatedDrawer"}};
+        struct Panel { Qt::Key key; const char *mode; const char *list; };
+        const QList<Panel> panels = {{Qt::Key_M, "marks", "collectionList"}, {Qt::Key_S, "related", "studyList"}};
         for (const auto &panel : panels) {
-            auto open = [&] { call("readerFocus"); key(panel.key, Qt::ShiftModifier); QTRY_VERIFY2(opened(panel.drawer), panel.drawer); QTest::qWait(30); };
-            // Keyboard: the palette, a dialog, and a reading toggle each close the panel first.
-            open(); key(Qt::Key_K, Qt::ControlModifier);
-            QTRY_VERIFY2(opened("passagePalette"), panel.drawer); QTRY_VERIFY(!shown(panel.drawer));
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
-            open(); key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(opened("settingsDialog")); QTRY_VERIFY(!shown(panel.drawer));
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
-            open(); const bool numbers = bible->showVerseNumbers();
-            key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), !numbers); QTRY_VERIFY(!shown(panel.drawer));
+            call("readerFocus"); key(panel.key, Qt::ShiftModifier); QTRY_VERIFY2(panelOpened(panel.mode), panel.mode);
+            QTRY_VERIFY2(item(panel.list)->hasActiveFocus(), panel.mode);
+            // Keyboard: the palette and a dialog open over the panel and give
+            // the keyboard back to it; a reading toggle acts with it open.
+            key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY2(opened("passagePalette"), panel.mode); QVERIFY2(panelShown(panel.mode), panel.mode);
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY2(item(panel.list)->hasActiveFocus(), panel.mode);
+            key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(opened("settingsDialog")); QVERIFY2(panelShown(panel.mode), panel.mode);
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog")); QTRY_VERIFY2(item(panel.list)->hasActiveFocus(), panel.mode);
+            const bool numbers = bible->showVerseNumbers();
+            key(Qt::Key_N, Qt::AltModifier); QCOMPARE(bible->showVerseNumbers(), !numbers); QVERIFY2(panelOpened(panel.mode), panel.mode);
             bible->setShowVerseNumbers(numbers);
+            closeMargin();
         }
-        open: {
-            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(opened("relatedDrawer")); QTest::qWait(30);
-            key(Qt::Key_Question); QTRY_VERIFY(opened("helpDialog")); QTRY_VERIFY(!shown("relatedDrawer"));
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
-            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(opened("relatedDrawer")); QTest::qWait(30);
-            key(Qt::Key_F); QTRY_VERIFY(bible->focusMode()); QTRY_VERIFY(!shown("relatedDrawer"));
+        {
+            // ? opens Keybindings over See also; focus mode (f) closes it.
+            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("related")); QTRY_VERIFY(item("studyList")->hasActiveFocus());
+            key(Qt::Key_Question); QTRY_VERIFY(opened("helpDialog")); QVERIFY(panelShown("related"));
+            key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog")); QTRY_VERIFY(item("studyList")->hasActiveFocus());
+            key(Qt::Key_F); QTRY_VERIFY(bible->focusMode()); QTRY_VERIFY(!panelShown("related"));
             bible->setFocusMode(false);
             // ctrl t opens Manage tags over the panel, which stays.
-            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(opened("relatedDrawer")); QTest::qWait(30);
-            key(Qt::Key_T, Qt::ControlModifier); QTRY_VERIFY(opened("tagsSurface")); QVERIFY(shown("relatedDrawer"));
+            call("readerFocus"); key(Qt::Key_S, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("related")); QTest::qWait(30);
+            key(Qt::Key_T, Qt::ControlModifier); QTRY_VERIFY(opened("tagsSurface")); QVERIFY(panelShown("related"));
             key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
-            key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+            closeMargin();
         }
         // Notes is not modal: from the preview the palette opens over it and
         // returns to it, and a reading toggle acts with it open (from the
@@ -1738,9 +1759,11 @@ private slots:
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(opened("passagePalette")); QVERIFY(prop("deskOpen").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette")); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
-        // Mouse: a click outside an open panel only closes it (the footer button underneath does not act).
-        call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer")); QTest::qWait(30);
-        click("searchControl"); QTRY_VERIFY(!shown("savedDrawer")); QVERIFY(!shown("passagePalette"));
+        // Mouse: the footer stays live beside an open panel.
+        call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks")); QTest::qWait(30);
+        click("searchControl"); QTRY_VERIFY(opened("passagePalette")); QVERIFY(panelShown("marks"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
+        QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));
     }
     // Keyboard: ↓ through the open menu to `id`, then enter.
     void menuKeyTo(const QString &id) {
@@ -1823,7 +1846,7 @@ private slots:
         bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true)); QVERIFY(bible->setTag(bible->tagScope(), beta, true));
         navigate("John 3:3");
         auto tags = object("tagsUi");
-        run("related"); QTRY_VERIFY(opened("relatedDrawer"));
+        run("related"); QTRY_VERIFY(panelOpened("related"));
         // Mouse: the heading's tags are links (a hand, a tooltip); one keeps only its passages.
         QTRY_VERIFY(item("studySectionTag:Alpha") && item("studySectionTag:Alpha")->isVisible());
         auto link = item("studySectionTag:Alpha");
@@ -1899,7 +1922,7 @@ private slots:
             QVERIFY2(right <= item(list)->width() - item(bar)->width() + 0.5, qPrintable(list + QString(" %1 / %2").arg(right).arg(item(list)->width())));
         };
         // Keyboard opens each list; rows end where the scrollbar begins.
-        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(opened("savedDrawer"));
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(panelOpened("marks"));
         check("collectionList", "savedEntryJohn 3:1", "savedScrollbar");
         // The "here" label stays clear of the scrollbar.
         QTRY_VERIFY(item("savedHereJohn 3:3"));
@@ -1912,7 +1935,7 @@ private slots:
         for (int verse = 24; verse >= 1 && row.isEmpty(); --verse)
             if (auto entry = item(QString("savedEntryJohn 3:%1").arg(verse)); entry && entry->isVisible()) row = entry->objectName();
         check("collectionList", row, "savedScrollbar");
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));
         QVERIFY(warnings.isEmpty());
     }
     // ── Phase 4: low
@@ -1955,12 +1978,12 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(object("restoreDialog"), "reject"));
         QTRY_VERIFY(!object("restoreDialog")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
         // From an open panel, the panel gets it back.
-        run("annotations"); QTRY_VERIFY(opened("savedDrawer"));
+        run("annotations"); QTRY_VERIFY(panelOpened("marks"));
         QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, "restore")));
         QTRY_VERIFY(object("restoreDialog")->property("visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(object("restoreDialog"), "reject"));
         QTRY_VERIFY(!readerFocused() && window->activeFocusItem() && (focusWithin("collectionList") || focusWithin("savedSearch") || focusName() == "collectionList"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("savedDrawer"));
+        closeMargin();
         // A note conflict puts the keyboard on its choices, unless the editor has it.
         navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         item("notesPanel")->forceActiveFocus();
@@ -1983,26 +2006,30 @@ private slots:
         QTest::qWait(50); click(item("setupImport")); QTRY_VERIFY(opened("importGuide"));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("importGuide"));
     }
-    void seeAlsoEscapeClosesLikeMarks() {
+    void seeAlsoEscapeGivesTheKeyboardBackLikeMarks() {
         bible->selectVerses(7, 7); const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
         bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true));
         navigate("John 3:3");
         auto tags = object("tagsUi");
         auto openTags = [&] {
-            run("related"); QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyList")->hasActiveFocus());
+            run("related"); QTRY_VERIFY(panelOpened("related")); QTRY_VERIFY(item("studyList")->hasActiveFocus());
         };
         openTags();
-        // Keyboard: / filters; esc leaves the field keeping the filter; the next esc closes.
+        // Keyboard: / filters; esc leaves the field keeping the filter; the next
+        // esc gives the keyboard back to the reader (See also stays, following
+        // it), and esc there closes it.
         key(Qt::Key_Slash); QTRY_VERIFY(item("studySearch")->hasActiveFocus()); type("zz");
         key(Qt::Key_Escape); QTRY_VERIFY(item("studyList")->hasActiveFocus());
         QCOMPARE(tags->property("studyQuery").toString(), QString("zz"));
-        QVERIFY(object("studyHints")->property("plainText").toString().contains("esc close"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer")); QTRY_VERIFY(readerFocused());
+        QVERIFY(object("studyHints")->property("plainText").toString().contains("esc back to reading"));
+        key(Qt::Key_Escape); QTRY_VERIFY(readerFocused()); QVERIFY(panelShown("related"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("notesDrawer"));
         // Reopened, the query is gone.
         openTags(); QCOMPARE(tags->property("studyQuery").toString(), QString());
-        // Mouse: the esc hint closes too.
+        // Mouse: the esc hint gives the keyboard back too; the panel's × closes it.
         key(Qt::Key_Slash); type("zz"); key(Qt::Key_Return);
-        clickHint("studyHintsPart:close"); QTRY_VERIFY(!shown("relatedDrawer"));
+        clickHint("studyHintsPart:back to reading"); QTRY_VERIFY(readerFocused()); QVERIFY(panelShown("related"));
+        click(item("studyClose")); QTRY_VERIFY(!shown("notesDrawer"));
     }
     void versionsSearchHomeAndEndMoveTheCaret() {
         run("removeVersion"); QTRY_VERIFY(opened("versionDialog"));
@@ -2077,9 +2104,9 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
         const QString alpha = bible->createAndAssignTag(bible->tagScope(), "Alpha");
         bible->selectVerses(9, 9); QVERIFY(bible->setTag(bible->tagScope(), alpha, true)); bible->selectVerses(3, 3);
-        run("related"); QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studySectionTag:Alpha"));
+        run("related"); QTRY_VERIFY(panelOpened("related")); QTRY_VERIFY(item("studySectionTag:Alpha"));
         QCOMPARE(mouseAreaOf(item("studySectionTag:Alpha"))->cursor().shape(), Qt::PointingHandCursor);
-        QVERIFY(QMetaObject::invokeMethod(object("relatedDrawer"), "close")); QTRY_VERIFY(!shown("relatedDrawer"));
+        QVERIFY(QMetaObject::invokeMethod(window, "closeNotes")); QTRY_VERIFY(!shown("notesDrawer"));
         // [[ suggestions: hovering one chooses it (tint); a click inserts it.
         navigate("John 3:16"); key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         type("[[jn 3:1"); QTRY_VERIFY(prop("linkSuggesting").toBool());
@@ -2459,7 +2486,7 @@ private slots:
         bible->selectVerses(3, 3); QVERIFY(bible->setTag(bible->tagScope(), alpha, true));
         navigate("John 3:3");
         auto tags = object("tagsUi");
-        run("related"); QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studySectionTag:Alpha"));
+        run("related"); QTRY_VERIFY(panelOpened("related")); QTRY_VERIFY(item("studySectionTag:Alpha"));
         // Mouse: leaving a heading's tag hides its tooltip.
         auto link = item("studySectionTag:Alpha"); auto tip = toolTipOf(link);
         QTest::mouseMove(window, center(link) + QPoint(1, 1)); QTest::mouseMove(window, center(link)); QTRY_VERIFY(tip->property("visible").toBool());
@@ -2472,26 +2499,25 @@ private slots:
         // Tag rows never take tab.
         auto tagRow = item("tag:" + alpha); QVERIFY(tagRow); QCOMPARE(tagRow->property("focusPolicy").toInt(), int(Qt::NoFocus));
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("tagsSurface"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+        closeMargin();
         // See also's rows never take tab either; home and end move the list.
         navigate("John 1:1");
-        run("related"); QTRY_VERIFY(opened("relatedDrawer")); QTRY_VERIFY(item("studyRow:0"));
+        run("related"); QTRY_VERIFY(panelOpened("related")); QTRY_VERIFY(item("studyRow:0"));
         QCOMPARE(item("studyRow:0")->property("focusPolicy").toInt(), int(Qt::NoFocus));
         QTRY_VERIFY(item("studyList")->hasActiveFocus());
         key(Qt::Key_End); QCOMPARE(item("studyList")->property("currentIndex").toInt(), item("studyList")->property("count").toInt() - 1);
         key(Qt::Key_Home); QCOMPARE(item("studyList")->property("currentIndex").toInt(), 0);
-        key(Qt::Key_Escape); QTRY_VERIFY(!shown("relatedDrawer"));
+        closeMargin();
     }
     void reauditListsTakeHomeEndAndEnterAnywhere() {
         for (const int verse : {5, 7, 9}) { bible->selectVerses(verse, verse); QVERIFY(bible->toggleHighlight()); }
         navigate("John 3:3");
-        run("annotations"); QTRY_VERIFY(opened("savedDrawer")); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
+        run("annotations"); QTRY_VERIFY(panelOpened("marks")); QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         key(Qt::Key_End); QCOMPARE(item("collectionList")->property("currentIndex").toInt(), 2);
         key(Qt::Key_Home); QCOMPARE(item("collectionList")->property("currentIndex").toInt(), 0);
         key(Qt::Key_End);
-        // enter opens the current row with the keyboard elsewhere in the drawer.
-        auto drawer = object("savedDrawer"); auto content = drawer->property("contentItem").value<QQuickItem *>();
-        content->forceActiveFocus(); QVERIFY(!item("collectionList")->hasActiveFocus());
+        // enter opens the current row with the keyboard elsewhere in the panel.
+        item("savedContent")->forceActiveFocus(); QVERIFY(!item("collectionList")->hasActiveFocus());
         key(Qt::Key_Return); QTRY_COMPARE(bible->selectionReference(), QString("John 3:9"));
     }
     void reauditPaletteAndKeybindingKeys() {

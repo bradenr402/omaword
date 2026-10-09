@@ -25,7 +25,7 @@ files.
 | `src/scripturesearch.*` | Normalized, cancellable Bible-wide search on a worker pool |
 | `src/searchdocument.*` | Offset mapping into rich text (both directions); LTR forcing helpers |
 | `qml/Rule.qml`, `qml/SectionTitle.qml` | Shared looks: the hairline rule between sections and a section's small title (Main's `FineRule`/`SectionLabel` and TagsPanel's `FineRule` wrap them with their theme and scale) |
-| `qml/QuietButton.qml`, `qml/FloatingButton.qml`, `qml/ModalCard.qml`, `qml/SettingSwitch.qml`, `qml/SquareSlider.qml`, `qml/OverlayScrollbar.qml`, `qml/OverlayScrollView.qml`, `qml/KeyScrollView.qml`, `qml/DrawerOutside.qml`, `qml/RangeMarker.qml`, `qml/VerseItem.qml`, `qml/SavedEntry.qml` | Main's controls, each in its own file: panel and footer buttons, modal cards, Reading settings' switches and sliders, overlay scrollbars and key-scrolled panes, the press catcher beside an open side panel, the Verse layout's range rails, and the Verse and Marks row types. Those that need the window take `controller` (Main) and `theme` (Desktop), and `backend` where they read the Bible; Main binds them once in a same-named inline component (`component QuietButton: Shared.QuietButton { controller: app; theme: desktop }`, `Shared` being `import "."`), so its uses set neither |
+| `qml/QuietButton.qml`, `qml/FloatingButton.qml`, `qml/ModalCard.qml`, `qml/SettingSwitch.qml`, `qml/SquareSlider.qml`, `qml/OverlayScrollbar.qml`, `qml/OverlayScrollView.qml`, `qml/KeyScrollView.qml`, `qml/RangeMarker.qml`, `qml/VerseItem.qml`, `qml/SavedEntry.qml` | Main's controls, each in its own file: panel and footer buttons, modal cards, Reading settings' switches and sliders, overlay scrollbars and key-scrolled panes, the Verse layout's range rails, and the Verse and Marks row types. Those that need the window take `controller` (Main) and `theme` (Desktop), and `backend` where they read the Bible; Main binds them once in a same-named inline component (`component QuietButton: Shared.QuietButton { controller: app; theme: desktop }`, `Shared` being `import "."`), so its uses set neither |
 | `src/markdownquotes.*`, `qml/QuoteBars.qml` | The Markdown previews' layout (Notes, the Desk): a single Enter breaks the line (`previewMarkdown` turns soft breaks into hard ones, except in lists, tables, and code, where Qt would make a break a new item), a gap of one line of the preview's text (its font's line spacing) above each paragraph, list, quote, heading, and code block (none between a paragraph's lines, a list's items, or a code block's lines; Qt sets none in a TextEdit), and block quotes narrowed from Qt's 40 px on both sides to 14 px on the left with a muted bar per level. Qt keeps no trace of where a quote starts or which blocks a line break split, so zero-width spaces mark them; `MarkdownQuotes` reads them into each block's user state and deletes them, once Qt has finished importing the text |
 | `src/textselection.*` | Character selection (`v`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
@@ -35,8 +35,9 @@ files.
 | `src/commandline.*`, `src/main.cpp` | The command line (`omaword help`). `quote`, `search`, `translations`, `link`, `completion`, `help`, and `--version` run headless: a `QCoreApplication` and one `BibleBackend` (`readPassage`; `readVersion` for `--translation`, which records neither the version as the one you read nor a place in it), with no window, instance, clipboard, or saved place. `open [--here]`, `lookup [text]`, `import`, an `omaword:` link (`omaword:John%203:16?translation=KJV`; the scheme is the desktop file's `x-scheme-handler/` + `BRAND_ID`, opened where you read), or a bare passage (a new window) become a request for the running instance, whose window reads the passage as the palette does (compact forms too) and switches to the translation asked for. Exit status 0, 1 (failure), 2 (usage). The completion scripts (`assets/completions/`, in `core.qrc`) and the manual (`assets/omaword.1`) are installed by `bin/install` (bash's) and `packaging/` |
 | `src/desktop.*` | Fonts/scaling, live Omarchy theme, async Hyprland corner radius |
 | `src/soundeffects.*`, `src/keyhold.*` | Synthesized UI sounds (`lastSound`/`playCount` test hook) + reduce-motion setting; key-repeat handling (j/k/h/l holds) |
-| `qml/Main.qml` | Reader, palettes, the Margin (`notesDrawer`: Notes, or the Desk page in its place), Marks (`savedDrawer`: every version's marks from `marks()`, one row per exact range, filtered, notes written in place), settings, catalog, About |
-| `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Marks and See also drawers, which stay open) and the See also drawer (`relatedDrawer`, the `related` action: one list, in sections: the version's own cross references, its parallel passages, the passages tagged alike (`relatedPassages`, every version), and OpenBible.info's last; filtered by words or `#tag`). See also roots at the reader's passage on open and follows it, except while the panel has focus after opening one of its own rows |
+| `qml/Main.qml` | Reader, palettes, the Margin (`notesDrawer`, one side panel at a time, `marginMode`: Notes, the Desk page, Marks (`marksPanel`: every version's marks from `marks()`, one row per exact range, filtered, notes written in place), or See also (`relatedPanel`, laid out by TagsPanel)), settings, catalog, About |
+| `qml/SidePanel.qml` | The Margin's panel shell: background, the hairline toward the text, and the `inset` and `gap` its content keeps, shown while the Margin is on its `mode`. Every side panel is one, headed by `SidePanelHeader`, with its keys in a `HintRow`; every modal is a `ModalCard` with a `HintRow` (`tst_ui`'s `panelsAndModalsShareTheirShells` checks both) |
+| `qml/TagsPanel.qml` | Tag picker/management (modal; opens over the Margin, which stays open) and See also's list (the `related` action, laid out in the Margin's `relatedPanel`, `relatedHost`: one list, in sections: the version's own cross references, its parallel passages, the passages tagged alike (`relatedPassages`, every version), and OpenBible.info's last; filtered by words or `#tag`). See also roots at the reader's passage on open and follows it, except while the panel has the keyboard after opening one of its own rows |
 | `qml/PanelHeader.qml`, `qml/SidePanelHeader.qml` | Shared side-panel header: title plus a muted one-line subtitle (Marks, See also, and Notes: the reader's passage `reference · ABBR`, the chapter when nothing is selected; the Desk: its passages and words, `deskSummary`); `SidePanelHeader` adds the panel's buttons and its × |
 | `qml/AnnotationGlyph.qml`, `qml/HandDrawn.js` | Shared tag/note glyphs; seeded hand-drawn paths (incl. margin braces/arrows) |
 | `qml/Margins.js`, `qml/ChapterOutline.qml` | Pure margin geometry (space split, note placement, connector tips, heading steps); sticky outline |
@@ -450,17 +451,15 @@ files.
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw
   `paintLayoutGlyph`'s icons.
-- With a drawer side panel open (Marks, See also), the keys
-  of `panelLeavingActions` (palettes, dialogs, reading toggles) move the
-  keyboard to the reader, close the panel, then act (`runKey`) — so the
-  drawer's exit cannot hand focus back over what opened. Notes is not modal:
-  they act over it, and while you write in a note or on the Desk page, the
+- The side panels are not modal: with one open, the keys of
+  `panelLeavingActions` (palettes, dialogs, reading toggles) act over it,
+  from its list too, and while you write in a note or on the Desk page, the
   launchers among them (`noteEditorLaunchActions`: palettes and dialogs on
-  `ctrl` or `F1`) save the draft and open over it too, the keyboard returning
-  to the page when they close. Dispatch from Keybindings or Commands never closes panels. Catalog shortcuts
+  `ctrl` or `F1`) save the draft and open over it, the keyboard returning
+  to the page when they close. Focus mode closes the Margin. Dispatch from Keybindings or Commands never closes panels. Catalog shortcuts
   recheck `shortcutEnabled` on activation (a popup's focus change can leave the
   binding stale).
-- Notes (`notesDrawer`, the Margin) is a non-modal drawer that never dims: it
+- The Margin (`notesDrawer`) is a non-modal drawer that never dims: it
   docks beside the text where the window holds the comfortable column and the
   reader's widest insets beside it (`notesDocked`), and is a sheet over the
   reader's right side when narrower. Docked, it is 390 px (× scale) or wider:
@@ -469,23 +468,26 @@ files.
   `notesDock` at once and the reader lays out once at its new width, then
   glides there from where it was (`dockMargin`/`glideFromDock`, the margins
   moving with it); the footer and bottom chrome follow `chromeDock`, which
-  glides alongside. Resizes jump. It shows the note or, in its
-  place, the Desk page (`marginMode`; `shift D` turns it to the Desk, `w`
-  back), which saves like a note: after a pause and on every `flushNote`,
+  glides alongside. Resizes jump. It shows one side panel (`marginMode`):
+  the note (`w`), the Desk page (`shift D`), Marks (`shift M`), or See also
+  (`shift S`); each panel's key turns it there, and from the reader brings
+  the keyboard back to an open one. Marks and See also open a row's passage
+  in the reader and stay. The Desk page saves like a note: after a pause and on every `flushNote`,
   only over the page it loaded (`setDeskPage`), keeping a draft another
   window's change lands under (`deskConflict`, `ctrl s` / `ctrl shift S`). The keyboard belongs either
-  to it or to the reader (`marginKeys`): focus entering Notes sets it, and
+  to the Margin or to the reader (`marginKeys`): focus entering it sets it, and
   only the reader taking the keyboard (`readerFocus`, a text drag) clears
   it, so menus, dialogs, and Qt's own hand-back as a popup closes leave it
   as it was and `restorePanelFocus` returns the keyboard where it came from.
-  The drawer's `focus` follows it, so Qt hands the keyboard back to Notes
-  only when Notes had it. The reader's keys work whenever the keyboard is
-  outside Notes (`readerBase`), and selection changes resync the note
-  (`syncNote`). `w` opens Notes on the
-  editor, or moves the keyboard there; `esc` in Notes saves and returns to
-  the reader (`leaveNotes`); the reader's `esc` closes Notes after Aa, the
-  selection bar, a text selection, and a count, and before search or the
-  selection.
+  The drawer's `focus` follows it, so Qt hands the keyboard back to the
+  Margin only when it had it. The reader's keys work whenever the keyboard is
+  outside it (`readerBase`), and a panel's own keys only while it has it
+  (`marksKeys`, TagsPanel's `relatedMoveKeys`); selection changes resync the
+  note (`syncNote`) and re-root See also. `esc` in a panel saves and returns
+  to the reader (`leaveNotes`; Marks' and See also's after leaving their
+  filter or an edit in place); the reader's `esc` closes the Margin after
+  Aa, the selection bar, a text selection, and a count, and before search or
+  the selection.
 - Notes in Write mode keeps the keyboard in the editor while it is in Notes
   (`notesWriting` / `keepNoteEditorFocus`): clicks on the panel's chrome and
   closing menus or dialogs hand it back. `tab` types a tab (accepts a `[[`

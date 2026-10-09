@@ -430,7 +430,7 @@ private slots:
             QCOMPARE(bible->tagScope(), scope); QCOMPARE(bible->cursorVerse(), 35);
             QCOMPARE(bible->readingMode(), mode);
             QVERIFY(!object("tagsUi")->property("visibleModal").toBool());
-            QVERIFY(!object("relatedDrawer")->property("visible").toBool());
+            QVERIFY(!window->property("relatedOpen").toBool());
         }
         // Single-key actions remain available after the chord has completed.
         key(Qt::Key_L, Qt::AltModifier); QVERIFY(bible->readingMode() != mode);

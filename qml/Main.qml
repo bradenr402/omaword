@@ -44,12 +44,17 @@ ApplicationWindow {
     palette.toolTipBase: desktop.surface
     palette.toolTipText: desktop.foreground
 
-    // Notes and the Desk share one drawer beside the text, the Margin
-    // (notesDrawer), showing one at a time (marginMode).
+    // The side panels share one drawer beside the text, the Margin
+    // (notesDrawer), showing one at a time (marginMode): Notes ("notes"), the
+    // Desk ("desk"), Marks ("marks"), and See also ("related").
     property string marginMode: "notes"
     readonly property bool marginOpen: notesDrawer.shown
     readonly property bool notesOpen: marginOpen && marginMode === "notes"
     readonly property bool deskOpen: marginOpen && marginMode === "desk"
+    readonly property bool marksOpen: marginOpen && marginMode === "marks"
+    readonly property bool relatedOpen: marginOpen && marginMode === "related"
+    // Marks' own keys: the keyboard in Marks, no menu, picker, or field in the way.
+    readonly property bool marksKeys: marksOpen && marginKeys && !contextMenu.visible && !tagsUi.visibleModal && !textInputActive()
     function focusedSavedEntry() {
         let focused = activeFocusItem
         while (focused && focused !== collectionList) {
@@ -216,6 +221,7 @@ ApplicationWindow {
         id: tagsUi
         objectName: "tagsUi"
         app: app; bible: app.tagBackend; desktop: app.tagDesktop
+        relatedHost: relatedPanel
     }
     onVerseModeChanged: clearCount()
     property string verseCount: ""
@@ -569,34 +575,31 @@ ApplicationWindow {
     readonly property real scale: systemScale * fontScale
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
     readonly property bool contextMenuOpen: contextMenu.visible
-    readonly property bool modalOpen: dialogOpen || savedDrawer.shown || tagsUi.visibleModal
-    // Everything modal except the side panels (Marks, See also).
+    readonly property bool modalOpen: dialogOpen || tagsUi.visibleModal
+    // Everything modal: menus, cards, palettes, pickers, and dialogs.
     readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
-    // One side panel at a time. Its opening key does nothing while it is open;
-    // another panel's key switches to that panel.
-    readonly property string sidePanel: notesOpen ? "notes" : deskOpen ? "desk" : savedDrawer.shown ? "annotations"
-        : tagsUi.relatedShown ? "related" : ""
+    // One side panel at a time, in the Margin. Its opening key brings the
+    // keyboard to it; another panel's key turns the Margin to that panel.
+    readonly property string sidePanel: notesOpen ? "notes" : deskOpen ? "desk" : marksOpen ? "annotations"
+        : relatedOpen ? "related" : ""
     readonly property var panelActions: ["notes", "annotations", "desk", "related"]
-    // With a drawer side panel open (Annotations, Desk, History, Study), these
-    // keys close it first and then act: palettes, dialogs, and reading toggles.
-    // With Notes open (outside the editor) they act over it.
+    // With the keyboard in a side panel, these keys still act, over it:
+    // palettes, dialogs, and reading toggles.
     readonly property var panelLeavingActions: ["books", "history", "bibleSearch", "commands", "help", "settings", "switchVersion",
         "about", "import", "removeVersion", "focus", "numbers", "headings", "wordsOfJesus", "chapterOutline",
         "marginNotes", "readingMode", "soundEffects", "reduceMotion"]
     readonly property bool panelSwitchKeys: sidePanel.length > 0 && bible.ready && !bible.busy && !dialogOpen
         && !findPromptOpen && !textInputActive()
-    // Closes the open side panel before another opens. A Notes or Desk
-    // draft must save first; when it cannot, the Margin stays open with its
-    // error. Notes and the Desk share the Margin: between them it stays open.
+    // Leaves the open side panel for another (the Margin stays open and
+    // turns to it) or for none (target "": the Margin closes). Its drafts
+    // save first (a note, the Desk page, a mark's note written in place);
+    // when one cannot, the panel stays with its error.
     function leaveSidePanel(target) {
         const current = sidePanel
         if (current === target) return false
         if (!flushNote()) return false
-        const margin = function(panel) { return panel === "notes" || panel === "desk" }
-        if (margin(current)) return margin(target) || closeNotes()
-        if (current === "annotations") savedDrawer.close()
-        else if (current === "related") tagsUi.close()
-        return true
+        if (current === "annotations" && markEditKey.length && !finishMarkNote(false)) return false
+        return target.length > 0 || closeNotes()
     }
     // The chapter outline, reached by tab, keeps its scroll keys.
     readonly property bool readerBase: bible.ready && !bible.busy && !modalOpen && !(marginOpen && marginKeys) && !findPromptOpen && !textInputActive()
@@ -711,7 +714,7 @@ ApplicationWindow {
             if (!closeNotes()) { bible.setFocusMode(false); return }
             tagsUi.closeForFocusMode()
             verseTagMenu.close()
-            passagePalette.close(); savedDrawer.close(); helpDialog.close(); aboutDialog.close()
+            passagePalette.close(); helpDialog.close(); aboutDialog.close()
             if (!settingsDialog.visible) readerFocus()
         }
     }
@@ -2398,12 +2401,11 @@ ApplicationWindow {
         // new modal already. Never steal its focus from a delayed close signal.
         Qt.callLater(function() {
             if (app.dialogOpen || bible.busy) return
-            // A side panel that replaced another keeps the keyboard.
-            if (savedDrawer.shown) { if (!app.focusWithin(savedDrawer.contentItem)) savedDrawer.focusContent(); return }
-            if (tagsUi.relatedShown) { if (!tagsUi.focusInBody()) tagsUi.focusResults(); return }
             if (app.modalOpen || bible.busy) return
             if (notesDrawer.shown && app.marginKeys) {
                 if (app.deskOpen) { if (app.deskPreview) deskPreviewText.forceActiveFocus(); else deskEditor.forceActiveFocus() }
+                else if (app.marksOpen) { if (!app.focusWithin(marksPanel)) app.focusSavedList() }
+                else if (app.relatedOpen) { if (!tagsUi.focusInBody()) tagsUi.focusResults() }
                 else if (app.hasSelection && !app.notePreview) noteEditor.forceActiveFocus()
                 else if (app.hasSelection) notePreviewText.forceActiveFocus()
                 else notesPanel.forceActiveFocus()
@@ -3133,8 +3135,8 @@ ApplicationWindow {
         if (!bible.ready || bible.busy) return
         clearCount()
         if (!notesOpen) openedNoteActionScope = actionScope()
-        // From the Desk, the Margin stays open and turns to the note.
-        const turning = deskOpen
+        // From another panel, the Margin stays open and turns to the note.
+        const turning = marginOpen && !notesOpen
         marginMode = "notes"
         notesDrawer.focusEditor = focusEditor
         notesDrawer.open()
@@ -3244,6 +3246,30 @@ ApplicationWindow {
         notesDrawer.focusEditor = true
         notesDrawer.open()
         if (shown) focusDesk()
+    }
+    // Marks in the Margin: opened afresh (not turned to from itself), it
+    // starts unfiltered at the first row here.
+    function openMarks() {
+        if (!bible.ready) return
+        clearCount()
+        const shown = notesDrawer.shown, fresh = !marksOpen
+        marginMode = "marks"
+        notesDrawer.focusEditor = true
+        if (fresh) {
+            clearSavedQuery()
+            refreshMarks()
+            collectionList.currentIndex = initialSavedRow()
+        }
+        notesDrawer.open()
+        if (shown) focusSavedList()
+    }
+    // See also in the Margin (TagsPanel roots it first).
+    function openRelatedPanel() {
+        const shown = notesDrawer.shown
+        marginMode = "related"
+        notesDrawer.focusEditor = true
+        notesDrawer.open()
+        if (shown) tagsUi.focusResults()
     }
     function focusDesk() {
         if (deskPreview) deskPreviewText.forceActiveFocus()
@@ -3699,18 +3725,17 @@ ApplicationWindow {
     function focusSavedList() {
         moveSaved(0)
     }
+    // esc in Marks: a note written in place is done, the filter gives the
+    // keyboard to the list, and the list gives it back to the reader (Marks
+    // stays open, following it; esc there closes it).
     function escapeSaved() {
         if (markEditKey.length) finishMarkNote(true)
         else if (savedSearch.activeFocus) focusSavedList()
-        else savedDrawer.close()
+        else leaveNotes()
     }
-    // Closing Marks finishes a note written in place; a draft that cannot be
-    // saved keeps Marks open with it.
-    function dismissMarks() {
-        if (markEditKey.length && !finishMarkNote(false)) return false
-        savedDrawer.close()
-        return true
-    }
+    // Leaving Marks for a dialog finishes a note written in place; a draft
+    // that cannot be saved keeps it.
+    function dismissMarks() { return !markEditKey.length || finishMarkNote(false) }
     function moveSaved(delta) {
         if (collectionList.count > 0) {
             collectionList.currentIndex = Math.max(0, Math.min(collectionList.count - 1, collectionList.currentIndex + delta))
@@ -3719,6 +3744,7 @@ ApplicationWindow {
         if (collectionList.currentItem) collectionList.currentItem.focus = false
         collectionList.forceActiveFocus()
     }
+    // A row opens its passage in the reader; Marks stays open beside it.
     function openSaved(entry) {
         if (!entry) { sounds.play("error"); return }
         if (!flushNote()) return
@@ -3726,8 +3752,6 @@ ApplicationWindow {
         if (!bible.openTaggedPassage(entry)) return
         endJump(from)
         syncNote()
-        savedDrawer.close()
-        if (entry.note.length > 0) openNotes(false)
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
@@ -4270,7 +4294,7 @@ ApplicationWindow {
             ["T", "tags", function() { app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry())) }, ready],
             ["Y", "copy", function() { app.copyScope(app.focusedSavedEntry()) }, ready],
             ["D", "Desk", function() { app.addToDesk(app.focusedSavedEntry()) }, ready],
-            ["Delete", "delete", app.deleteSaved, ready], search, ["Escape", "close", app.escapeSaved]]
+            ["Delete", "delete", app.deleteSaved, ready], search, ["Escape", "back to reading", app.escapeSaved]]
     }
     // Confirmations: arrows move between Cancel and Confirm; enter presses the focused one.
     function confirmationHintParts(cancel, confirm, dialog) {
@@ -4324,14 +4348,14 @@ ApplicationWindow {
         // Typing owns every key, Ctrl and Alt included (ctrl v pastes); only the
         // palette's own mode keys still switch modes from its input.
         if (textInputActive() && !(action.scope === "palette" && passagePalette.visible)) return false
-        // In Marks, w writes the current row's note in place (Marks binds it).
-        if (sidePanel === "annotations" && action.id === "notes") return false
+        // With the keyboard in Marks, w writes the current row's note in place (Marks binds it).
+        if (marksOpen && marginKeys && action.id === "notes") return false
         if (sidePanel.length && panelActions.includes(action.id)) return panelSwitchKeys
         if (sidePanel.length && panelLeavingActions.includes(action.id)) return panelSwitchKeys
         // Undo works where changes are made: the reader and its side panels.
         if (sidePanel.length && undoActions.includes(action.id)) return panelSwitchKeys
         // ctrl t opens Manage tags over a side panel (Marks binds it itself).
-        if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && sidePanel !== "annotations"
+        if (sidePanel.length && action.id === "manageTags") return panelSwitchKeys && !(marksOpen && marginKeys)
         if (settingsDialog.opened && !errorDialog.visible
                 && (action.setting || ["readingMode", "larger", "smaller", "resetText", "lineLess", "lineMore", "lineReset"].includes(action.id))) return true
         // visible, not opened: the palette accepts keys during its fade-in.
@@ -4693,12 +4717,8 @@ ApplicationWindow {
         view.positionViewAtIndex(view.currentIndex, ListView.Contain)
         referenceInput.forceActiveFocus()
     }
-    // A catalog key: with a side panel open, palette, dialog, and reading
-    // toggle keys close the panel first. The keyboard leaves the panel before
-    // it closes, so its exit cannot hand focus back over what opens next.
-    // (Dispatch from Keybindings or Commands keeps the panel, as before.)
-    // Notes is not modal: palettes and dialogs open over it and return to it,
-    // and the reading toggles act with it open.
+    // A catalog key. The Margin is not modal: palettes and dialogs open over
+    // its panels and return to them, and the reading toggles act with it open.
     function runKey(action) {
         selectionBarWanted = false
         // From a note or the Desk page a launcher saves the draft first and
@@ -4707,11 +4727,6 @@ ApplicationWindow {
         if (noteEditorTyping() && noteEditorLaunchActions.includes(action)) {
             if (!actionAvailable(action)) { rejected(unavailableReason(action)); return }
             if (!flushNote()) { rejected("The note could not be saved"); return }
-        }
-        if (sidePanel.length && !marginOpen && panelLeavingActions.includes(action) && actionAvailable(action)) {
-            if (!flushNote()) return
-            readerFocus()
-            if (!leaveSidePanel("")) { restorePanelFocus(); return }
         }
         runCommand(action)
     }
@@ -4792,10 +4807,7 @@ ApplicationWindow {
         case "lineMore": bible.setLineHeight(Math.round((bible.lineHeight + 0.1) * 10) / 10); break
         case "lineReset": bible.setLineHeight(1.5); break
         case "settings": settingsDialog.open(); break
-        case "annotations":
-            if (!leaveSidePanel("annotations")) break
-            savedDrawer.open()
-            break
+        case "annotations": if (sidePanel === "annotations" || leaveSidePanel("annotations")) openMarks(); break
         case "notes": if (sidePanel === "notes" || leaveSidePanel("notes")) openNotes(true); break
         case "desk": if (sidePanel === "desk" || leaveSidePanel("desk")) openDesk(); break
         case "toggleDesk": addPassageToDesk(); break
@@ -4812,7 +4824,7 @@ ApplicationWindow {
                 bible.selectVerses(bible.verses[0].number, bible.verses[0].number)
                 selectionAnchor = bible.cursorVerse
             }
-            if (leaveSidePanel("related")) tagsUi.openRelated()
+            if (sidePanel === "related" || leaveSidePanel("related")) tagsUi.openRelated()
             break
         case "history": openHistoryPalette(); break
         case "historyBack": historyStep(-count); break
@@ -4982,6 +4994,7 @@ ApplicationWindow {
     component RangeMarker: Shared.RangeMarker { controller: app; theme: desktop; backend: bible; rangeMenu: verseTagMenu }
     component SectionLabel: SectionTitle { theme: desktop; uiScale: app.scale }
     component SidePanelHeader: Shared.SidePanelHeader { controller: app; theme: desktop }
+    component SidePanel: Shared.SidePanel { controller: app; theme: desktop }
     component ModalCard: Shared.ModalCard { controller: app; theme: desktop }
 
     ColumnLayout {
@@ -5951,14 +5964,17 @@ ApplicationWindow {
         // While closing, a drawer must not keep its Escape grab: the next Escape
         // belongs to the reader (or range editor) immediately.
         onAboutToShow: { const reopening = visible; closing = false; if (reopening) focusContent() }
-        // Its note's saves since opening are one undo step; the next session starts another.
-        onAboutToHide: { closing = true; bible.closeUndoGroup(); app.restorePanelFocus() }
+        // Its note's saves since opening are one undo step; the next session
+        // starts another. A mark's note written in place is done.
+        onAboutToHide: { closing = true; bible.closeUndoGroup(); if (app.markEditKey.length) app.finishMarkNote(false); app.restorePanelFocus() }
         // Keyboard focus is available as soon as the drawer starts fading in.
         // Opened only to show a note (focusEditor false), it leaves the
         // keyboard where it is.
         function focusContent() {
             if (app.modalOpen || !focusEditor) return
             if (app.marginMode === "desk") app.focusDesk()
+            else if (app.marginMode === "marks") app.focusSavedList()
+            else if (app.marginMode === "related") tagsUi.focusResults()
             else if (app.hasSelection) app.focusNoteEnd()
             else notesPanel.forceActiveFocus()
         }
@@ -5967,20 +5983,16 @@ ApplicationWindow {
         onClosed: { closing = false; position = 0; app.marginKeys = false; app.editingPanelClosed(); app.restorePanelFocus() }
         contentItem: Item {
             objectName: "marginContent"
-            Rectangle {
+            SidePanel {
                 id: notesPanel
                 objectName: "notesPanel"
-                anchors.fill: parent
-                visible: app.marginMode === "notes"
-                color: desktop.background
-                radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                mode: "notes"
                 Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
                 // A press on the panel's chrome brings the keyboard to the editor (Write mode).
                 PointHandler {
                     objectName: "notesChromePress"
                     onActiveChanged: if (!active && app.notesWriting) { app.marginKeys = true; noteRefocusTimer.restart() }
                 }
-                Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
                 OverlayScrollView {
                     id: notesScroll
                     objectName: "notesScroll"
@@ -5991,16 +6003,16 @@ ApplicationWindow {
                         function onActiveFocusItemChanged() { app.revealFocus(notesScroll.contentItem as Flickable) }
                     }
                     contentWidth: availableWidth
-                    contentHeight: notesContent.height + 44
+                    contentHeight: notesContent.height + 2 * notesPanel.inset
                     clip: true
                 ColumnLayout {
                     id: notesContent
-                    x: 22
-                    y: 22
-                    width: notesScroll.availableWidth - 44
+                    x: notesPanel.inset
+                    y: notesPanel.inset
+                    width: notesScroll.availableWidth - 2 * notesPanel.inset
                     // Grows past the panel (and scrolls) when a long Linked from list needs it.
-                    height: Math.max(notesPanel.height - 44, (app.noteConflict ? 700 : 440) * app.scale, implicitHeight)
-                    spacing: 16
+                    height: Math.max(notesPanel.height - 2 * notesPanel.inset, (app.noteConflict ? 700 : 440) * app.scale, implicitHeight)
+                    spacing: notesPanel.gap
                     SidePanelHeader {
                         objectName: "notesHeader"
                         Layout.fillWidth: true
@@ -6341,24 +6353,20 @@ ApplicationWindow {
                 }
             }
             // The Desk in the Margin: its page, written and previewed like a note.
-            Rectangle {
+            SidePanel {
                 id: deskPanel
                 objectName: "deskPanel"
-                anchors.fill: parent
-                visible: app.marginMode === "desk"
-                color: desktop.background
-                radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                mode: "desk"
                 Keys.onEscapePressed: function(event) { app.leaveNotes(); event.accepted = true }
                 // A press on the panel's chrome brings the keyboard to the page (Write mode).
                 PointHandler {
                     objectName: "deskChromePress"
                     onActiveChanged: if (!active && app.deskOpen && !app.deskPreview) { app.marginKeys = true; Qt.callLater(app.keepDeskEditorFocus) }
                 }
-                Rectangle { anchors.left: parent.left; width: 1; height: parent.height; color: desktop.border }
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 22
-                    spacing: 16
+                    anchors.margins: deskPanel.inset
+                    spacing: deskPanel.gap
                     SidePanelHeader {
                         objectName: "deskHeader"
                         Layout.fillWidth: true
@@ -6507,12 +6515,320 @@ ApplicationWindow {
                     }
                 }
             }
+            // Marks in the Margin: every mark, one row per passage, filtered by words or #tag.
+            SidePanel {
+                id: marksPanel
+                objectName: "marksPanel"
+                mode: "marks"
+                // A press on the panel brings the keyboard to its list (or its field).
+                PointHandler {
+                    objectName: "marksChromePress"
+                    onActiveChanged: if (!active && app.marksOpen && !app.marginKeys) { app.marginKeys = true; Qt.callLater(app.restorePanelFocus) }
+                }
+                // Changes anywhere (this window, another, any version) reread the marks once.
+                Connections {
+                    target: bible
+                    enabled: app.marksOpen
+                    function onMarksChanged() { Qt.callLater(app.refreshMarks) }
+                    function onCollectionChanged() { Qt.callLater(app.refreshMarks) }
+                    function onTagsChanged() { Qt.callLater(app.refreshMarks) }
+                    function onVersionsChanged() { Qt.callLater(app.refreshMarks) }
+                    function onVersionChanged() { Qt.callLater(app.refreshMarks) }
+                }
+                ColumnLayout {
+                    objectName: "savedContent"
+                    anchors.fill: parent
+                    anchors.margins: marksPanel.inset
+                    Shortcut {
+                        sequence: "Escape"
+                        enabled: app.marksOpen && app.marginKeys && !contextMenu.visible && !tagsUi.visibleModal
+                        onActivated: app.escapeSaved()
+                    }
+                    Shortcut { sequence: "/"; enabled: app.marksKeys && app.savedSearchVisible; onActivated: app.focusSavedSearch() }
+                    Shortcut { sequences: ["J", "Down"]; enabled: app.marksKeys; onActivated: app.moveSaved(1) }
+                    Shortcut { sequences: ["K", "Up"]; enabled: app.marksKeys; onActivated: app.moveSaved(-1) }
+                    ListMotionKeys { objectName: "savedMotionKeys"; active: app.marksKeys; count: collectionList.count; onMove: function(delta) { app.moveSaved(delta) } }
+                    // enter opens the current row from anywhere in the drawer (a focused button takes its own enter).
+                    Shortcut { sequences: ["Return", "Enter"]; enabled: app.marksKeys && collectionList.currentIndex >= 0; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
+                    Shortcut { sequences: ["Delete", "Backspace"]; enabled: app.marksKeys && !bible.busy; onActivated: app.deleteSaved() }
+                    // Shared list keys: y quotation, shift Y plain text, d Desk.
+                    Shortcut { sequence: "Y"; enabled: app.marksKeys; onActivated: app.copyScope(app.focusedSavedEntry()) }
+                    Shortcut { sequence: "Shift+Y"; enabled: app.marksKeys; onActivated: app.copyScope(app.focusedSavedEntry(), true) }
+                    Shortcut { sequence: "D"; enabled: app.marksKeys; onActivated: app.addToDesk(app.focusedSavedEntry()) }
+                    // In place: w writes the row's note in the row; t edits its tags over the drawer; ctrl t manages tags.
+                    Shortcut { objectName: "savedNoteKey"; sequence: "W"; enabled: app.marksKeys && !bible.busy && !!app.focusedSavedEntry(); onActivated: app.editMarkNote(app.focusedSavedEntry()) }
+                    Shortcut {
+                        objectName: "savedTagKey"
+                        sequence: "T"
+                        enabled: app.marksKeys && !bible.busy && !!app.focusedSavedEntry()
+                        onActivated: app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry()))
+                    }
+                    Shortcut { sequences: app.actionKeys("manageTags"); enabled: app.marksKeys && !bible.busy; onActivated: tagsUi.openManage() }
+                    // A note changed in another window while written here: keep the draft or take the saved text.
+                    Shortcut { sequences: app.actionKeys("noteKeepDraft"); enabled: app.marksOpen && app.markEditConflict; onActivated: app.keepMarkDraft() }
+                    Shortcut { sequences: app.actionKeys("noteUseSaved"); enabled: app.marksOpen && app.markEditConflict; onActivated: app.useSavedMarkNote() }
+                    Shortcut {
+                        sequences: ["Menu", "Shift+F10"]
+                        enabled: app.marksKeys && collectionList.currentIndex >= 0
+                        onActivated: { const p = app.sceneRowPoint(collectionList.currentItem); app.openSavedMenu(collectionList.currentIndex, p.x, p.y) }
+                    }
+                    spacing: marksPanel.height < 350 * app.scale ? Math.round(6 * app.scale) : marksPanel.gap
+                    SidePanelHeader {
+                        objectName: "savedHeader"
+                        Layout.fillWidth: true
+                        title: "Marks"
+                        subtitle: tagsUi.passageSubtitle
+                        titleName: "savedTitle"; subtitleName: "savedPassage"; closeName: "savedClose"
+                        closeTip: "Close Marks · " + app.escapeText + ", or " + app.escapeText + " " + app.escapeText + " from the list"
+                        onCloseRequested: app.closeNotes()
+                    }
+                    FineRule { Layout.fillWidth: true }
+                    TextField {
+                        id: savedSearch
+                        ContextMenu.menu: null
+                        ContextMenu.onRequested: function(position) { app.openTextMenu(savedSearch, position) }
+                        objectName: "savedSearch"
+                        Layout.fillWidth: true
+                        visible: app.savedSearchVisible
+                        implicitHeight: 36 * app.controlScale
+                        font.pixelSize: 14 * app.controlScale
+                        color: desktop.foreground
+                        placeholderText: "Filter marks… #name for a tag"
+                        placeholderTextColor: desktop.muted
+                        selectByMouse: true
+                        leftPadding: 10 * app.controlScale; rightPadding: 10 * app.controlScale
+                        text: app.savedQuery
+                        onTextEdited: {
+                            app.savedQuery = text
+                            collectionList.currentIndex = collectionList.count ? 0 : -1
+                            // Clearing a short list's query hides the field: keep the keyboard in the list.
+                            if (!app.savedSearchVisible) Qt.callLater(app.focusSavedList)
+                        }
+                        background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: savedSearch.activeFocus ? desktop.accent : desktop.border }
+                        Keys.onDownPressed: app.focusSavedList()
+                        Keys.onReturnPressed: app.focusSavedList()
+                        Keys.onEnterPressed: app.focusSavedList()
+                        Accessible.name: "Filter marks"
+                    }
+                    ListView {
+                        id: collectionList
+                        objectName: "collectionList"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        spacing: 6 * app.scale
+                        model: app.filteredMarks()
+                        onModelChanged: currentIndex = count > 0 ? Math.max(0, Math.min(currentIndex, count - 1)) : -1
+                        ScrollBar.vertical: OverlayScrollbar { id: savedScrollbar; objectName: "savedScrollbar" }
+                        // The row sits in a plain item: the list's current item takes the
+                        // list's focus, and rows themselves never do (like Desk and History).
+                        delegate: Item {
+                            id: savedBlock
+                            required property var modelData
+                            required property int index
+                            readonly property bool editing: savedEntry.editing
+                            readonly property var editor: savedEntry.editor
+                            width: collectionList.width - app.scrollGutter(collectionList)
+                            height: savedEntry.height
+                            SavedEntry {
+                                id: savedEntry
+                                modelData: savedBlock.modelData
+                                index: savedBlock.index
+                                objectName: "savedEntry" + (modelData.active ? "" : modelData.versionAbbreviation + ":") + modelData.reference
+                                // Like Desk and History rows: the list keeps the keyboard (tab
+                                // never stops on a row); the current row is the list's.
+                                focusPolicy: Qt.NoFocus
+                                width: collectionList.width - app.scrollGutter(collectionList)
+                                padding: 12 * app.scale
+                                height: savedContent.implicitHeight + topPadding + bottomPadding
+                                clip: true
+                                highlighted: collectionList.currentIndex === index
+                                onClicked: { collectionList.currentIndex = index; app.openSaved(modelData) }
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: function(eventPoint) { app.openSavedMenu(savedEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
+                                }
+                                readonly property bool editing: app.markEditKey.length > 0 && app.markEditKey === app.rangeKey(modelData)
+                                property alias editor: markEditor
+                                // The reader's range (equal or overlapping) is "here".
+                                readonly property bool here: { app.savedHereKey; return app.savedHere(modelData) }
+                                contentItem: ColumnLayout {
+                                    id: savedContent
+                                    objectName: "savedEntryContent" + savedEntry.modelData.reference
+                                    spacing: 7 * app.scale
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8 * app.scale
+                                        Label {
+                                            id: savedReference
+                                            objectName: "savedReference" + savedEntry.modelData.reference
+                                            text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground
+                                            font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap
+                                            FontMetrics { id: savedReferenceMetrics; font: savedReference.font }
+                                            // A highlighted mark: the reader's highlighter stroke (same ink and seed) under the reference.
+                                            Canvas {
+                                                id: savedHighlight
+                                                objectName: "savedHighlight" + savedEntry.modelData.reference
+                                                z: -1
+                                                visible: !!savedEntry.modelData.highlight
+                                                x: -4 * app.scale
+                                                width: Math.min(savedReference.width, savedReference.contentWidth) + 8 * app.scale
+                                                height: savedReference.height
+                                                property color ink: app.highlightInk
+                                                readonly property var paintKey: [visible, app.scale, width, height, app.highlightAlpha,
+                                                    savedEntry.modelData.reference, savedEntry.modelData.versionId, bible.versionId]
+                                                onPaintKeyChanged: requestPaint()
+                                                onInkChanged: requestPaint()
+                                                Connections { target: app; function onHighlightsRepaint() { savedHighlight.requestPaint() } }
+                                                onPaint: {
+                                                    const ctx = getContext("2d")
+                                                    ctx.reset()
+                                                    if (!visible) return
+                                                    const s = HandDrawn.seed("highlight", savedEntry.modelData.versionId || bible.versionId, savedEntry.modelData.reference)
+                                                    const band = app.highlightBandFor(savedReferenceMetrics)
+                                                    const lineHeight = savedReferenceMetrics.height
+                                                    const lines = Math.max(1, savedReference.lineCount)
+                                                    for (let i = 0; i < lines; ++i)
+                                                        HandDrawn.highlighterStroke(ctx, Qt.rect(0, i * lineHeight + band.top, width, band.height),
+                                                            ink, app.highlightAlpha, HandDrawn.seed(s, "row", i), app.scale)
+                                                }
+                                            }
+                                        }
+                                        // Marks kept in another version say which.
+                                        Label {
+                                            objectName: "savedVersion" + savedEntry.modelData.reference
+                                            visible: !savedEntry.modelData.active
+                                            text: "from " + savedEntry.modelData.versionAbbreviation
+                                            textFormat: Text.PlainText
+                                            color: desktop.muted
+                                            font.pixelSize: 11 * app.scale
+                                            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                        }
+                                        Label {
+                                            objectName: "savedHere" + savedEntry.modelData.reference
+                                            visible: savedEntry.here
+                                            text: "here"
+                                            color: desktop.accent
+                                            font.pixelSize: 11 * app.scale
+                                            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                        }
+                                    }
+                                    // Tags: click one to show only its marks.
+                                    Flow {
+                                        objectName: "savedTags" + savedEntry.modelData.reference
+                                        Layout.fillWidth: true
+                                        visible: Array.from(savedEntry.modelData.tags || []).length > 0
+                                        spacing: 8 * app.scale
+                                        Repeater {
+                                            model: Array.from(savedEntry.modelData.tags || [])
+                                            delegate: Label {
+                                                required property var modelData
+                                                objectName: "savedTag:" + modelData.name
+                                                text: "#" + modelData.name
+                                                textFormat: Text.PlainText
+                                                color: desktop.accent
+                                                font.pixelSize: 12 * app.scale
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: app.filterMarksByTag(parent.modelData.name)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Label { objectName: "savedNoteText" + savedEntry.modelData.reference; text: savedEntry.editing ? "" : savedEntry.modelData.note.replace(/\s+/g, " "); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                                    Label { objectName: "savedExcerpt" + savedEntry.modelData.reference; text: savedEntry.editing || savedEntry.modelData.note.length ? "" : app.leftToRightText(savedEntry.modelData.excerpt || ""); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 13 * app.scale; maximumLineCount: 1; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                                    // The note, written in place (w); saves as you type, esc is done.
+                                    TextArea {
+                                        id: markEditor
+                                        objectName: savedEntry.editing ? "markEditor" : ""
+                                        visible: savedEntry.editing
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: visible ? Math.max(96 * app.scale, contentHeight + topPadding + bottomPadding) : 0
+                                        wrapMode: TextEdit.Wrap
+                                        textFormat: TextEdit.PlainText
+                                        font.pixelSize: 14 * app.scale
+                                        color: desktop.foreground
+                                        placeholderText: "Write a note…"
+                                        placeholderTextColor: desktop.muted
+                                        selectByMouse: true
+                                        ContextMenu.menu: null
+                                        ContextMenu.onRequested: function(position) { app.openTextMenu(markEditor, position) }
+                                        onVisibleChanged: if (visible) text = app.markEditText
+                                        onTextChanged: if (savedEntry.editing && text !== app.markEditText) {
+                                            app.markEditText = text
+                                            if (app.noteSaveDelay > 0) markSaveTimer.restart(); else app.flushMarkNote()
+                                        }
+                                        background: Rectangle {
+                                            radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                                            color: desktop.surface
+                                            border.color: app.markEditConflict ? desktop.error : markEditor.activeFocus ? desktop.accent : desktop.border
+                                        }
+                                        Accessible.name: "Note on " + savedEntry.modelData.reference
+                                    }
+                                    Label {
+                                        objectName: savedEntry.editing ? "markEditConflict" : ""
+                                        visible: savedEntry.editing && app.markEditConflict
+                                        text: "This note changed in another window. " + KeyNotation.format("Ctrl+S") + " saves your draft over it, " + KeyNotation.format("Ctrl+Shift+S") + " takes the saved text."
+                                        color: desktop.error
+                                        font.pixelSize: 12 * app.scale
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                                background: Rectangle {
+                                    color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"
+                                    radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
+                                    // The current row is shown by its tinted fill alone, never an accent border.
+                                    border.width: 0
+                                }
+                            }
+                        }
+                        Label {
+                            objectName: "savedEmpty"
+                            anchors.centerIn: parent
+                            width: parent.width - 24
+                            text: app.marksRows.length ? "No matching marks."
+                                : "No marks yet. Highlight with " + app.keyText("highlight") + ", write a note with " + app.keyText("notes")
+                                    + ", or tag with " + app.keyText("tags") + "."
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            color: desktop.muted
+                            font.pixelSize: 13 * app.scale
+                            lineHeight: 1.2
+                            visible: collectionList.count === 0
+                        }
+                    }
+                    // Marks' keys, above the footer (dropped when the drawer is too short for its list).
+                    HintRow {
+                        objectName: "savedHints"
+                        visible: marksPanel.height >= 420 * app.scale
+                        theme: desktop
+                        parts: app.savedHintParts()
+                        pixelSize: 11 * app.scale
+                        Layout.fillWidth: true
+                    }
+                    FineRule { Layout.fillWidth: true }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("export") }
+                        Item { Layout.fillWidth: true }
+                        QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("backup") }
+                    }
+                }
+            }
+            // See also in the Margin: TagsPanel lays its list out here (relatedHost).
+            SidePanel {
+                id: relatedPanel
+                objectName: "relatedPanel"
+                mode: "related"
+                PointHandler {
+                    objectName: "relatedChromePress"
+                    onActiveChanged: if (!active && app.relatedOpen && !app.marginKeys) { app.marginKeys = true; Qt.callLater(app.restorePanelFocus) }
+                }
+            }
         }
     }
-
-    component DrawerOutside: Shared.DrawerOutside { controller: app }
-    DrawerOutside { objectName: "savedOutside"; drawer: savedDrawer; shown: savedDrawer.shown; onDismiss: app.dismissMarks() }
-    DrawerOutside { objectName: "studyOutside"; drawer: tagsUi.studyDrawer; shown: tagsUi.relatedShown && !tagsUi.pickerVisible; onDismiss: tagsUi.close() }
 
     // Footer: ? and mode on the left; search, passage, version, and layout in
     // the center; Annotations, Study, History (while enabled), and Desk on the right
@@ -6752,7 +7068,7 @@ ApplicationWindow {
             objectName: "savedControl"
             visible: floatingActions.expanded
             glyph: "saved"
-            selected: savedDrawer.visible
+            selected: app.marksOpen
             label: "Marks"
             keys: app.keyText("annotations")
             available: bible.ready && !bible.busy && !app.modalOpen
@@ -7596,350 +7912,6 @@ ApplicationWindow {
         }
     }
 
-    Drawer {
-        id: savedDrawer
-        objectName: "savedDrawer"
-        width: Math.min(520 * app.scale, app.width - 48)
-        height: app.height
-        edge: Qt.RightEdge
-        // Qt blocks window shortcuts behind any visible modal popup, including
-        // one in its exit transition; a closing drawer stops being modal so the
-        // reader's keys (Escape, t, …) work immediately.
-        modal: !closing
-        dim: true
-        focus: true
-        padding: 16 * app.controlScale
-        topPadding: padding
-        bottomPadding: padding
-        leftPadding: padding
-        rightPadding: padding
-        // Esc is handled below: it first leaves the search field. Outside
-        // presses close it through dismissMarks (a note written in place saves first).
-        closePolicy: closing || tagsUi.visibleModal || app.markEditKey.length ? Popup.NoAutoClose : Popup.CloseOnPressOutside
-        readonly property bool tabKeys: shown && !contextMenu.visible && !tagsUi.visibleModal && !app.textInputActive()
-        readonly property bool collectionKeys: tabKeys
-        background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.background; border.color: desktop.border }
-        Overlay.modal: Rectangle { color: app.tint(desktop.background, 0.65) }
-        Overlay.modeless: Rectangle { color: app.tint(desktop.background, 0.65) }
-        // Slide plus a short fade. A closing drawer no longer counts as open
-        // (`shown`), so reader keys and a reopen work during its exit animation.
-        property bool closing: false
-        readonly property bool shown: visible && !closing
-        // Enter: the full slide and a fade, ease-out; exit, subtler: a short
-        // slide and a quicker fade, ease-in (app.panelEnterMs / panelExitMs).
-        enter: Transition {
-            NumberAnimation { property: "position"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "opacity"; to: 1; duration: app.panelEnterMs; easing.type: Easing.OutQuad }
-        }
-        exit: Transition {
-            NumberAnimation { property: "position"; to: app.panelExitPosition; duration: app.panelExitMs; easing.type: Easing.InCubic }
-            NumberAnimation { property: "opacity"; to: 0; duration: app.panelExitMs; easing.type: Easing.InQuad }
-        }
-        // While closing, a drawer must not keep its Escape grab: the next Escape
-        // belongs to the reader (or range editor) immediately.
-        // A fresh open (not one interrupting the exit animation) starts without a query.
-        onAboutToShow: { const reopening = visible; if (!closing) app.clearSavedQuery(); closing = false; if (reopening) focusContent() }
-        onAboutToHide: { closing = true; if (app.markEditKey.length) app.finishMarkNote(false); app.restorePanelFocus() }
-        function focusContent() { app.focusSavedList() }
-        onVisibleChanged: if (visible && !closing) {
-            app.refreshMarks()
-            collectionList.currentIndex = app.initialSavedRow()
-            focusContent()
-        }
-        onClosed: { closing = false; position = 0; app.restorePanelFocus() }
-        // Changes anywhere (this window, another, any version) reread the marks once.
-        Connections {
-            target: bible
-            enabled: savedDrawer.visible
-            function onMarksChanged() { Qt.callLater(app.refreshMarks) }
-            function onCollectionChanged() { Qt.callLater(app.refreshMarks) }
-            function onTagsChanged() { Qt.callLater(app.refreshMarks) }
-            function onVersionsChanged() { Qt.callLater(app.refreshMarks) }
-            function onVersionChanged() { Qt.callLater(app.refreshMarks) }
-        }
-        contentItem: ColumnLayout {
-            objectName: "savedContent"
-            Shortcut {
-                sequence: "Escape"
-                enabled: savedDrawer.shown && !contextMenu.visible && !tagsUi.visibleModal
-                onActivated: app.escapeSaved()
-            }
-            Shortcut { sequence: "/"; enabled: savedDrawer.tabKeys && app.savedSearchVisible; onActivated: app.focusSavedSearch() }
-            Shortcut { sequences: ["J", "Down"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(1) }
-            Shortcut { sequences: ["K", "Up"]; enabled: savedDrawer.collectionKeys; onActivated: app.moveSaved(-1) }
-            ListMotionKeys { objectName: "savedMotionKeys"; active: savedDrawer.collectionKeys; count: collectionList.count; onMove: function(delta) { app.moveSaved(delta) } }
-            // enter opens the current row from anywhere in the drawer (a focused button takes its own enter).
-            Shortcut { sequences: ["Return", "Enter"]; enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0; onActivated: app.openSaved(collectionList.model[collectionList.currentIndex]) }
-            Shortcut { sequences: ["Delete", "Backspace"]; enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: app.deleteSaved() }
-            // Shared list keys: y quotation, shift Y plain text, d Desk.
-            Shortcut { sequence: "Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry()) }
-            Shortcut { sequence: "Shift+Y"; enabled: savedDrawer.collectionKeys; onActivated: app.copyScope(app.focusedSavedEntry(), true) }
-            Shortcut { sequence: "D"; enabled: savedDrawer.collectionKeys; onActivated: app.addToDesk(app.focusedSavedEntry()) }
-            // In place: w writes the row's note in the row; t edits its tags over the drawer; ctrl t manages tags.
-            Shortcut { objectName: "savedNoteKey"; sequence: "W"; enabled: savedDrawer.collectionKeys && !bible.busy && !!app.focusedSavedEntry(); onActivated: app.editMarkNote(app.focusedSavedEntry()) }
-            Shortcut {
-                objectName: "savedTagKey"
-                sequence: "T"
-                enabled: savedDrawer.collectionKeys && !bible.busy && !!app.focusedSavedEntry()
-                onActivated: app.openPassageTags(tagsUi.snapshot(app.focusedSavedEntry()))
-            }
-            Shortcut { sequences: app.actionKeys("manageTags"); enabled: savedDrawer.collectionKeys && !bible.busy; onActivated: tagsUi.openManage() }
-            // A note changed in another window while written here: keep the draft or take the saved text.
-            Shortcut { sequences: app.actionKeys("noteKeepDraft"); enabled: savedDrawer.shown && app.markEditConflict; onActivated: app.keepMarkDraft() }
-            Shortcut { sequences: app.actionKeys("noteUseSaved"); enabled: savedDrawer.shown && app.markEditConflict; onActivated: app.useSavedMarkNote() }
-            Shortcut {
-                sequences: ["Menu", "Shift+F10"]
-                enabled: savedDrawer.collectionKeys && collectionList.currentIndex >= 0
-                onActivated: { const p = app.sceneRowPoint(collectionList.currentItem); app.openSavedMenu(collectionList.currentIndex, p.x, p.y) }
-            }
-            spacing: (savedDrawer.height < 350 * app.scale ? 6 : 12) * app.scale
-            PanelHeader {
-                objectName: "savedHeader"
-                Layout.fillWidth: true
-                theme: desktop
-                title: "Marks"
-                subtitle: tagsUi.passageSubtitle
-                uiScale: app.scale
-                titleScale: app.controlScale
-                titleName: "savedTitle"
-                subtitleName: "savedPassage"
-            }
-            FineRule { Layout.fillWidth: true }
-            TextField {
-                id: savedSearch
-                ContextMenu.menu: null
-                ContextMenu.onRequested: function(position) { app.openTextMenu(savedSearch, position) }
-                objectName: "savedSearch"
-                Layout.fillWidth: true
-                visible: app.savedSearchVisible
-                implicitHeight: 36 * app.controlScale
-                font.pixelSize: 14 * app.controlScale
-                color: desktop.foreground
-                placeholderText: "Filter marks… #name for a tag"
-                placeholderTextColor: desktop.muted
-                selectByMouse: true
-                leftPadding: 10 * app.controlScale; rightPadding: 10 * app.controlScale
-                text: app.savedQuery
-                onTextEdited: {
-                    app.savedQuery = text
-                    collectionList.currentIndex = collectionList.count ? 0 : -1
-                    // Clearing a short list's query hides the field: keep the keyboard in the list.
-                    if (!app.savedSearchVisible) Qt.callLater(app.focusSavedList)
-                }
-                background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: savedSearch.activeFocus ? desktop.accent : desktop.border }
-                Keys.onDownPressed: app.focusSavedList()
-                Keys.onReturnPressed: app.focusSavedList()
-                Keys.onEnterPressed: app.focusSavedList()
-                Accessible.name: "Filter marks"
-            }
-            ListView {
-                id: collectionList
-                objectName: "collectionList"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                spacing: 6 * app.scale
-                model: app.filteredMarks()
-                onModelChanged: currentIndex = count > 0 ? Math.max(0, Math.min(currentIndex, count - 1)) : -1
-                ScrollBar.vertical: OverlayScrollbar { id: savedScrollbar; objectName: "savedScrollbar" }
-                // The row sits in a plain item: the list's current item takes the
-                // list's focus, and rows themselves never do (like Desk and History).
-                delegate: Item {
-                    id: savedBlock
-                    required property var modelData
-                    required property int index
-                    readonly property bool editing: savedEntry.editing
-                    readonly property var editor: savedEntry.editor
-                    width: collectionList.width - app.scrollGutter(collectionList)
-                    height: savedEntry.height
-                    SavedEntry {
-                        id: savedEntry
-                        modelData: savedBlock.modelData
-                        index: savedBlock.index
-                        objectName: "savedEntry" + (modelData.active ? "" : modelData.versionAbbreviation + ":") + modelData.reference
-                        // Like Desk and History rows: the list keeps the keyboard (tab
-                        // never stops on a row); the current row is the list's.
-                        focusPolicy: Qt.NoFocus
-                        width: collectionList.width - app.scrollGutter(collectionList)
-                        padding: 12 * app.scale
-                        height: savedContent.implicitHeight + topPadding + bottomPadding
-                        clip: true
-                        highlighted: collectionList.currentIndex === index
-                        onClicked: { collectionList.currentIndex = index; app.openSaved(modelData) }
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: function(eventPoint) { app.openSavedMenu(savedEntry.index, eventPoint.scenePosition.x, eventPoint.scenePosition.y) }
-                        }
-                        readonly property bool editing: app.markEditKey.length > 0 && app.markEditKey === app.rangeKey(modelData)
-                        property alias editor: markEditor
-                        // The reader's range (equal or overlapping) is "here".
-                        readonly property bool here: { app.savedHereKey; return app.savedHere(modelData) }
-                        contentItem: ColumnLayout {
-                            id: savedContent
-                            objectName: "savedEntryContent" + savedEntry.modelData.reference
-                            spacing: 7 * app.scale
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8 * app.scale
-                                Label {
-                                    id: savedReference
-                                    objectName: "savedReference" + savedEntry.modelData.reference
-                                    text: savedEntry.modelData.reference; textFormat: Text.PlainText; color: desktop.foreground
-                                    font.pixelSize: 16 * app.scale; font.weight: Font.Medium; Layout.fillWidth: true; wrapMode: Text.Wrap
-                                    FontMetrics { id: savedReferenceMetrics; font: savedReference.font }
-                                    // A highlighted mark: the reader's highlighter stroke (same ink and seed) under the reference.
-                                    Canvas {
-                                        id: savedHighlight
-                                        objectName: "savedHighlight" + savedEntry.modelData.reference
-                                        z: -1
-                                        visible: !!savedEntry.modelData.highlight
-                                        x: -4 * app.scale
-                                        width: Math.min(savedReference.width, savedReference.contentWidth) + 8 * app.scale
-                                        height: savedReference.height
-                                        property color ink: app.highlightInk
-                                        readonly property var paintKey: [visible, app.scale, width, height, app.highlightAlpha,
-                                            savedEntry.modelData.reference, savedEntry.modelData.versionId, bible.versionId]
-                                        onPaintKeyChanged: requestPaint()
-                                        onInkChanged: requestPaint()
-                                        Connections { target: app; function onHighlightsRepaint() { savedHighlight.requestPaint() } }
-                                        onPaint: {
-                                            const ctx = getContext("2d")
-                                            ctx.reset()
-                                            if (!visible) return
-                                            const s = HandDrawn.seed("highlight", savedEntry.modelData.versionId || bible.versionId, savedEntry.modelData.reference)
-                                            const band = app.highlightBandFor(savedReferenceMetrics)
-                                            const lineHeight = savedReferenceMetrics.height
-                                            const lines = Math.max(1, savedReference.lineCount)
-                                            for (let i = 0; i < lines; ++i)
-                                                HandDrawn.highlighterStroke(ctx, Qt.rect(0, i * lineHeight + band.top, width, band.height),
-                                                    ink, app.highlightAlpha, HandDrawn.seed(s, "row", i), app.scale)
-                                        }
-                                    }
-                                }
-                                // Marks kept in another version say which.
-                                Label {
-                                    objectName: "savedVersion" + savedEntry.modelData.reference
-                                    visible: !savedEntry.modelData.active
-                                    text: "from " + savedEntry.modelData.versionAbbreviation
-                                    textFormat: Text.PlainText
-                                    color: desktop.muted
-                                    font.pixelSize: 11 * app.scale
-                                    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                }
-                                Label {
-                                    objectName: "savedHere" + savedEntry.modelData.reference
-                                    visible: savedEntry.here
-                                    text: "here"
-                                    color: desktop.accent
-                                    font.pixelSize: 11 * app.scale
-                                    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                }
-                            }
-                            // Tags: click one to show only its marks.
-                            Flow {
-                                objectName: "savedTags" + savedEntry.modelData.reference
-                                Layout.fillWidth: true
-                                visible: Array.from(savedEntry.modelData.tags || []).length > 0
-                                spacing: 8 * app.scale
-                                Repeater {
-                                    model: Array.from(savedEntry.modelData.tags || [])
-                                    delegate: Label {
-                                        required property var modelData
-                                        objectName: "savedTag:" + modelData.name
-                                        text: "#" + modelData.name
-                                        textFormat: Text.PlainText
-                                        color: desktop.accent
-                                        font.pixelSize: 12 * app.scale
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: app.filterMarksByTag(parent.modelData.name)
-                                        }
-                                    }
-                                }
-                            }
-                            Label { objectName: "savedNoteText" + savedEntry.modelData.reference; text: savedEntry.editing ? "" : savedEntry.modelData.note.replace(/\s+/g, " "); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 12 * app.scale; maximumLineCount: 3; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                            Label { objectName: "savedExcerpt" + savedEntry.modelData.reference; text: savedEntry.editing || savedEntry.modelData.note.length ? "" : app.leftToRightText(savedEntry.modelData.excerpt || ""); textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; font.pixelSize: 13 * app.scale; maximumLineCount: 1; elide: Text.ElideRight; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                            // The note, written in place (w); saves as you type, esc is done.
-                            TextArea {
-                                id: markEditor
-                                objectName: savedEntry.editing ? "markEditor" : ""
-                                visible: savedEntry.editing
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: visible ? Math.max(96 * app.scale, contentHeight + topPadding + bottomPadding) : 0
-                                wrapMode: TextEdit.Wrap
-                                textFormat: TextEdit.PlainText
-                                font.pixelSize: 14 * app.scale
-                                color: desktop.foreground
-                                placeholderText: "Write a note…"
-                                placeholderTextColor: desktop.muted
-                                selectByMouse: true
-                                ContextMenu.menu: null
-                                ContextMenu.onRequested: function(position) { app.openTextMenu(markEditor, position) }
-                                onVisibleChanged: if (visible) text = app.markEditText
-                                onTextChanged: if (savedEntry.editing && text !== app.markEditText) {
-                                    app.markEditText = text
-                                    if (app.noteSaveDelay > 0) markSaveTimer.restart(); else app.flushMarkNote()
-                                }
-                                background: Rectangle {
-                                    radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                                    color: desktop.surface
-                                    border.color: app.markEditConflict ? desktop.error : markEditor.activeFocus ? desktop.accent : desktop.border
-                                }
-                                Accessible.name: "Note on " + savedEntry.modelData.reference
-                            }
-                            Label {
-                                objectName: savedEntry.editing ? "markEditConflict" : ""
-                                visible: savedEntry.editing && app.markEditConflict
-                                text: "This note changed in another window. " + KeyNotation.format("Ctrl+S") + " saves your draft over it, " + KeyNotation.format("Ctrl+Shift+S") + " takes the saved text."
-                                color: desktop.error
-                                font.pixelSize: 12 * app.scale
-                                wrapMode: Text.Wrap
-                                Layout.fillWidth: true
-                            }
-                        }
-                        background: Rectangle {
-                            color: savedEntry.highlighted ? app.tint(desktop.accent, 0.11) : savedEntry.hovered ? desktop.surface : "transparent"
-                            radius: Math.min(desktop.cornerRadius, width / 2, height / 2)
-                            // The current row is shown by its tinted fill alone, never an accent border.
-                            border.width: 0
-                        }
-                    }
-                }
-                Label {
-                    objectName: "savedEmpty"
-                    anchors.centerIn: parent
-                    width: parent.width - 24
-                    text: app.marksRows.length ? "No matching marks."
-                        : "No marks yet. Highlight with " + app.keyText("highlight") + ", write a note with " + app.keyText("notes")
-                            + ", or tag with " + app.keyText("tags") + "."
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-                    color: desktop.muted
-                    font.pixelSize: 13 * app.scale
-                    lineHeight: 1.2
-                    visible: collectionList.count === 0
-                }
-            }
-            // Marks' keys, above the footer (dropped when the drawer is too short for its list).
-            HintRow {
-                objectName: "savedHints"
-                visible: savedDrawer.height >= 420 * app.scale
-                theme: desktop
-                parts: app.savedHintParts()
-                pixelSize: 11 * app.scale
-                Layout.fillWidth: true
-            }
-            FineRule { Layout.fillWidth: true }
-            RowLayout {
-                Layout.fillWidth: true
-                QuietButton { objectName: "savedExport"; text: "Export notes…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("export") }
-                Item { Layout.fillWidth: true }
-                QuietButton { objectName: "savedBackup"; text: "Backup…"; compact: true; Layout.fillWidth: true; Layout.minimumWidth: 0; onClicked: if (app.dismissMarks()) app.runCommand("backup") }
-            }
-        }
-    }
-
     ModalCard {
         id: cleanDeskConfirmation
         objectName: "cleanDeskConfirmation"
@@ -8358,34 +8330,45 @@ ApplicationWindow {
         objectName: "aboutDialog"
         onClosed: app.restorePanelFocus()
         onVisibleChanged: if (visible) { aboutScroll.contentItem.contentY = 0; aboutScroll.forceActiveFocus() }
-        contentItem: KeyScrollView {
-            id: aboutScroll
-            objectName: "aboutScroll"
-            implicitHeight: Math.min(aboutContent.implicitHeight, app.height - 110)
-            contentWidth: availableWidth
-            clip: true
-        ColumnLayout {
-            id: aboutContent
-            width: aboutScroll.availableWidth
-            spacing: 16
-            RowLayout {
-                Label { text: desktop.appName; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
+        contentItem: ColumnLayout {
+            spacing: 12 * app.scale
+            KeyScrollView {
+                id: aboutScroll
+                objectName: "aboutScroll"
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(aboutContent.implicitHeight, app.height - 150)
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    id: aboutContent
+                    width: aboutScroll.availableWidth
+                    spacing: 16
+                    RowLayout {
+                        Label { text: desktop.appName; color: desktop.foreground; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -1; Layout.fillWidth: true }
+                    }
+                    Label { text: "About & Attribution"; color: desktop.foreground; font.pixelSize: 18 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                    Label { text: "An offline Bible reader with local highlights, tags, and Markdown notes."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
+                    FineRule { Layout.fillWidth: true }
+                    Label { objectName: "aboutEdition"; text: bible.ready ? bible.edition : "No version installed"; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale }
+                    Label { objectName: "aboutCopyright"; text: bible.versionCopyright; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
+                    Label { objectName: "aboutSources"; text: "Install versions directly from eBible.org or import your own local USFM ZIP. Bible text is stored in this app's local library. No connection is needed to read, highlight, tag, or write notes after import."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
+                    QuietButton {
+                        readonly property var entry: Array.from(catalog.entries).find(function(version) { return version.id === bible.versionId })
+                        text: "Version details & permissions ↗"; visible: !!entry; compact: true
+                        onClicked: desktop.openExternal(entry.detailsUrl)
+                    }
+                    Label { objectName: "aboutCrossReferences"; text: "Cross-references beyond a version's own: OpenBible.info (openbible.info/labs/cross-references), licensed CC BY. Community-ranked; they follow the version's own in See also."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
+                    Label { text: desktop.appName + " " + desktop.version + " · Application code licensed under MIT\nNo account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    QuietButton { text: "Open local data folder ↗"; compact: true; onClicked: desktop.openExternal("file://" + bible.dataDirectory()) }
+                }
             }
-            Label { text: "About & Attribution"; color: desktop.foreground; font.pixelSize: 18 * app.scale; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Label { text: "An offline Bible reader with local highlights, tags, and Markdown notes."; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale; lineHeight: 1.4 }
-            FineRule { Layout.fillWidth: true }
-            Label { objectName: "aboutEdition"; text: bible.ready ? bible.edition : "No version installed"; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale }
-            Label { objectName: "aboutCopyright"; text: bible.versionCopyright; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
-            Label { objectName: "aboutSources"; text: "Install versions directly from eBible.org or import your own local USFM ZIP. Bible text is stored in this app's local library. No connection is needed to read, highlight, tag, or write notes after import."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
-            QuietButton {
-                readonly property var entry: Array.from(catalog.entries).find(function(version) { return version.id === bible.versionId })
-                text: "Version details & permissions ↗"; visible: !!entry; compact: true
-                onClicked: desktop.openExternal(entry.detailsUrl)
+            HintRow {
+                objectName: "aboutHints"
+                Layout.fillWidth: true
+                theme: desktop
+                pixelSize: 11 * app.scale
+                parts: [[["J", "K"], "scroll"], ["Escape", "close", function() { aboutDialog.close() }]]
             }
-            Label { objectName: "aboutCrossReferences"; text: "Cross-references beyond a version's own: OpenBible.info (openbible.info/labs/cross-references), licensed CC BY. Community-ranked; they follow the version's own in See also."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
-            Label { text: desktop.appName + " " + desktop.version + " · Application code licensed under MIT\nNo account required"; color: desktop.muted; font.pixelSize: 11 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
-            QuietButton { text: "Open local data folder ↗"; compact: true; onClicked: desktop.openExternal("file://" + bible.dataDirectory()) }
-        }
         }
     }
 
@@ -8622,21 +8605,32 @@ ApplicationWindow {
         property var entry: null
         onClosed: { if (importGuide.visible) catalogSearch.forceActiveFocus(); else if (versionDialog.visible) versionResults.forceActiveFocus(); else app.restorePanelFocus() }
         onVisibleChanged: if (visible) { detailsScroll.contentItem.contentY = 0; detailsScroll.forceActiveFocus() }
-        contentItem: KeyScrollView {
-            id: detailsScroll
-            objectName: "detailsScroll"
-            implicitHeight: Math.min(detailsContent.implicitHeight, app.height - 110)
-            contentWidth: availableWidth
-            clip: true
-            ColumnLayout {
-                id: detailsContent
-                width: detailsScroll.availableWidth
-                spacing: 16 * app.scale
-                Label { text: "Details & Attribution"; color: desktop.foreground; font.pixelSize: 22 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                Label { text: catalogDetails.entry ? catalogDetails.entry.name : ""; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                Label { objectName: "catalogCopyright"; text: catalogDetails.entry ? catalogDetails.entry.copyright : ""; textFormat: Text.PlainText; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                QuietButton { objectName: "catalogProvider"; text: "eBible.org version & permissions ↗"; compact: true; onClicked: desktop.openExternal(catalogDetails.entry.detailsUrl) }
-                QuietButton { text: "Close"; Layout.alignment: Qt.AlignRight; onClicked: catalogDetails.close() }
+        contentItem: ColumnLayout {
+            spacing: 12 * app.scale
+            KeyScrollView {
+                id: detailsScroll
+                objectName: "detailsScroll"
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(detailsContent.implicitHeight, app.height - 150)
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    id: detailsContent
+                    width: detailsScroll.availableWidth
+                    spacing: 16 * app.scale
+                    Label { text: "Details & Attribution"; color: desktop.foreground; font.pixelSize: 22 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { text: catalogDetails.entry ? catalogDetails.entry.name : ""; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    Label { objectName: "catalogCopyright"; text: catalogDetails.entry ? catalogDetails.entry.copyright : ""; textFormat: Text.PlainText; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    QuietButton { objectName: "catalogProvider"; text: "eBible.org version & permissions ↗"; compact: true; onClicked: desktop.openExternal(catalogDetails.entry.detailsUrl) }
+                    QuietButton { text: "Close"; Layout.alignment: Qt.AlignRight; onClicked: catalogDetails.close() }
+                }
+            }
+            HintRow {
+                objectName: "detailsHints"
+                Layout.fillWidth: true
+                theme: desktop
+                pixelSize: 11 * app.scale
+                parts: [[["J", "K"], "scroll"], ["Escape", "close", function() { catalogDetails.close() }]]
             }
         }
     }
@@ -8989,7 +8983,7 @@ ApplicationWindow {
         id: deleteFocusTimer
         interval: 0
         onTriggered: {
-            if (savedDrawer.shown) app.moveSaved(0)
+            if (app.marksOpen && app.marginKeys) app.moveSaved(0)
             else app.restorePanelFocus()
         }
     }
