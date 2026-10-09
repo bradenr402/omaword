@@ -376,10 +376,12 @@ files.
   missing), and its scroll once the chapter is laid out (`followRestored`).
   Each window shows the other's version (`followPartner`, kept current on
   version changes); closing either, or `unfollow`, unlinks both.
-- QML asks for it with `besideRequested(versionId)`: from Versions opened to
-  choose (`openBeside`, `shift C`, `versionDialog.beside`, where `enter`
-  opens beside), `ctrl enter` on a Versions row, `o` in the Compare card,
-  and the version button's right-click menu (with Stop following).
+- QML asks for it with `besideRequested(versionId)`: `openBeside` (`shift C`,
+  Commands, the version button's right-click menu, with Stop following)
+  opens the one other version at once, or with more asks which in
+  `besideDialog` (the selection's text in each, `enter` opens it); `ctrl
+  enter` on a Versions row and `o` in the Compare card open the highlighted
+  version.
 
 ### Search
 - The active version, or every installed version (`searchAllVersions`, a

@@ -66,7 +66,7 @@ class StudyUiTest : public QObject
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
     QStringList warnings;
-    QString source, other;
+    QString source, other, third;
     QString installedFile() const {
         QString path;
         {
@@ -206,15 +206,20 @@ class StudyUiTest : public QObject
 private slots:
     void initTestCase() {
         source = fixtures.filePath("study_usfm.zip"); QVERIFY(edition(source));
-        // Another edition (different internal ID) for the wrong-file check.
+        // Other editions of John 1:1 (different internal IDs): one for the
+        // wrong-file check, and a third version for Open beside's choice.
+        const auto oneVerse = [](const QString &path, const char *file, const QByteArray &data) {
+            auto zip = archive_write_new(); archive_write_set_format_zip(zip);
+            QVERIFY(archive_write_open_filename(zip, QFile::encodeName(path).constData()) == ARCHIVE_OK);
+            auto entry = archive_entry_new(); archive_entry_set_pathname(entry, file); archive_entry_set_filetype(entry, AE_IFREG);
+            archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, data.size());
+            QVERIFY(archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, data.constData(), data.size()) == data.size());
+            archive_entry_free(entry); QVERIFY(archive_write_close(zip) == ARCHIVE_OK); archive_write_free(zip);
+        };
         other = fixtures.filePath("other_usfm.zip");
-        auto zip = archive_write_new(); archive_write_set_format_zip(zip);
-        QVERIFY(archive_write_open_filename(zip, QFile::encodeName(other).constData()) == ARCHIVE_OK);
-        const QByteArray data = "\\id JHN Another fixture\n\\c 1\n\\p\n\\v 1 Another edition.\n";
-        auto entry = archive_entry_new(); archive_entry_set_pathname(entry, "43-JHNother.usfm"); archive_entry_set_filetype(entry, AE_IFREG);
-        archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, data.size());
-        QVERIFY(archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, data.constData(), data.size()) == data.size());
-        archive_entry_free(entry); QVERIFY(archive_write_close(zip) == ARCHIVE_OK); archive_write_free(zip);
+        oneVerse(other, "43-JHNother.usfm", "\\id JHN Another fixture\n\\c 1\n\\p\n\\v 1 Another edition.\n");
+        third = fixtures.filePath("third_usfm.zip");
+        oneVerse(third, "43-JHNthird.usfm", "\\id JHN Third fixture\n\\c 1\n\\p\n\\v 1 A third edition.\n");
     }
     void init() {
         // A position past a verse's text (a stale footnote marker) is a bug, not noise.
@@ -501,56 +506,89 @@ private slots:
     void openBesideFromVersions() {
         // With one version there is nothing to read beside: shift C says so.
         call("readerFocus"); key(Qt::Key_C, Qt::ShiftModifier);
-        QVERIFY(!object("versionDialog")->property("visible").toBool());
+        QVERIFY(!object("besideDialog")->property("visible").toBool());
         QCOMPARE(object("toast")->property("text").toString(), QString("Add another version to read beside"));
         install(other);
-        const QString here = bible->versionAbbreviation();
+        const QString here = bible->versionAbbreviation(), hereId = bible->versionId();
+        const auto otherVersion = [&] {
+            for (const auto &row : bible->versions()) if (!row.toMap()["active"].toBool()) return row.toMap();
+            return QVariantMap();
+        };
+        const QString besideId = otherVersion()["id"].toString();
         QSignalSpy beside(window, SIGNAL(besideRequested(QString)));
+        // With two, shift C opens the other at once: nothing to choose.
         navigate("John 1:1"); key(Qt::Key_C, Qt::ShiftModifier);
-        auto dialog = object("versionDialog"); auto list = object("versionResults");
-        QTRY_VERIFY(dialog->property("opened").toBool());
-        QCOMPARE(object("versionTitle")->property("text").toString(), QString("Open beside · John 1:1"));
-        QVERIFY(object("versionHints")->property("plainText").toString().contains("enter open beside"));
-        const auto rows = value(list->property("model")).toList();
-        int active = -1, inactive = -1;
-        for (int i = 0; i < rows.size(); ++i) (rows[i].toMap()["active"].toBool() ? active : inactive) = i;
-        QVERIFY(active >= 0 && inactive >= 0);
-        const QString besideId = rows[inactive].toMap()["id"].toString();
-        // It starts on a version not read here; the one read here says so.
-        QCOMPARE(list->property("currentIndex").toInt(), inactive);
-        list->setProperty("currentIndex", active); key(Qt::Key_Return);
-        QCOMPARE(object("toast")->property("text").toString(), "Already reading " + here + " here");
-        QVERIFY(dialog->property("visible").toBool()); QCOMPARE(beside.count(), 0);
-        list->setProperty("currentIndex", inactive); key(Qt::Key_Return);
-        QTRY_VERIFY(!dialog->property("visible").toBool());
         QCOMPARE(beside.count(), 1); QCOMPARE(beside.last().first().toString(), besideId);
+        QVERIFY(!object("besideDialog")->property("visible").toBool()); QVERIFY(!object("versionDialog")->property("visible").toBool());
         // Versions (ctrl v): enter switches, ctrl enter opens beside.
+        auto dialog = object("versionDialog"); auto list = object("versionResults");
         key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(dialog->property("opened").toBool());
         QCOMPARE(object("versionTitle")->property("text").toString(), QString("Versions · John 1:1"));
-        list->setProperty("currentIndex", inactive);
+        const auto rows = value(list->property("model")).toList();
+        for (int i = 0; i < rows.size(); ++i) if (!rows[i].toMap()["active"].toBool()) list->setProperty("currentIndex", i);
         QVERIFY(object("versionHints")->property("plainText").toString().contains("ctrl enter beside"));
         key(Qt::Key_Return, Qt::ControlModifier); QTRY_VERIFY(!dialog->property("visible").toBool());
         QCOMPARE(beside.count(), 2); QCOMPARE(bible->versionAbbreviation(), here);
-        // The version button's menu: switch, open beside, and stop following while following.
+        // The version button's menu: switch, the other version beside (by
+        // name, at once), and stop following while following.
         call("readerFocus");
         auto button = item("versionControl"); auto menu = object("contextMenu");
         const auto rightClick = [&] {
             QTest::mouseClick(window, Qt::RightButton, Qt::NoModifier, button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
             QTRY_VERIFY(menu->property("visible").toBool());
         };
+        const auto entries = [&] { return value(menu->property("layout")).toList(); };
         const auto ids = [&] {
             QStringList list;
-            for (const auto &entry : value(menu->property("layout")).toList()) list << entry.toMap()["id"].toString();
+            for (const auto &entry : entries()) list << entry.toMap()["id"].toString();
             return list;
         };
         rightClick(); QCOMPARE(ids(), QStringList({"switch", "beside"}));
+        QCOMPARE(entries()[1].toMap()["text"].toString(), "Open " + otherVersion()["abbreviation"].toString() + " beside");
         QVERIFY(QMetaObject::invokeMethod(menu, "triggerId", Q_ARG(QVariant, QString("beside"))));
-        QTRY_VERIFY(dialog->property("opened").toBool());
-        QCOMPARE(object("versionTitle")->property("text").toString(), QString("Open beside · John 1:1"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!dialog->property("visible").toBool());
+        QTRY_COMPARE(beside.count(), 3); QVERIFY(!object("besideDialog")->property("visible").toBool());
+        // With more, shift C asks which in a card of its own: the versions
+        // not read here, with the selection's text in each.
+        install(third); navigate("John 1:1");
+        const QString thirdHere = bible->versionId();
+        key(Qt::Key_C, Qt::ShiftModifier);
+        auto card = object("besideDialog"); auto choices = object("besideResults");
+        QTRY_VERIFY(card->property("opened").toBool()); QVERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(object("besideTitle")->property("text").toString(), QString("Open beside · John 1:1"));
+        QTRY_VERIFY(item("besideSearch")->hasActiveFocus());
+        QCOMPARE(object("besideHints")->property("plainText").toString(), QString("↑ ↓ choose    enter open beside    esc cancel"));
+        auto shown = value(choices->property("model")).toList();
+        QCOMPARE(shown.size(), 2);
+        for (const auto &row : shown) QVERIFY(row.toMap()["id"].toString() != thirdHere);
+        QCOMPARE(object("besideText:" + hereId)->property("text").toString(), QString("Another edition."));
+        // Typing filters; arrows choose; enter opens the chosen one beside.
+        for (const QChar c : QString("another")) QTest::keyClick(window, c.toLatin1());
+        QCoreApplication::processEvents();
+        QCOMPARE(item("besideSearch")->property("text").toString(), QString("another"));
+        const double cardHeight = card->property("height").toDouble();
+        QTRY_COMPARE(value(choices->property("model")).toList().size(), 1);
+        // The card keeps its height (and the field its place) as rows filter away.
+        QTest::qWait(50); QCOMPARE(card->property("height").toDouble(), cardHeight);
+        key(Qt::Key_Down); QCOMPARE(choices->property("currentIndex").toInt(), 0);
+        key(Qt::Key_Return); QTRY_VERIFY(!card->property("visible").toBool());
+        QCOMPARE(beside.count(), 4); QCOMPARE(beside.last().first().toString(), hereId);
+        // The menu's entry asks too; a click on a row opens it; esc cancels.
+        call("readerFocus");
+        rightClick(); QCOMPARE(entries()[1].toMap()["text"].toString(), QString("Open beside…"));
+        QVERIFY(QMetaObject::invokeMethod(menu, "triggerId", Q_ARG(QVariant, QString("beside"))));
+        QTRY_VERIFY(card->property("opened").toBool());
+        QCOMPARE(value(choices->property("model")).toList().size(), 2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!card->property("visible").toBool()); QCOMPARE(beside.count(), 4);
+        key(Qt::Key_C, Qt::ShiftModifier); QTRY_VERIFY(card->property("opened").toBool());
+        QTRY_VERIFY(item("besideEntry1"));
+        auto row = item("besideEntry1");
+        const QString clicked = value(choices->property("model")).toList()[1].toMap()["id"].toString();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+        QTRY_VERIFY(!card->property("visible").toBool());
+        QCOMPARE(beside.count(), 5); QCOMPARE(beside.last().first().toString(), clicked);
         window->setProperty("followPartner", "KJV"); call("readerFocus");
         rightClick(); QCOMPARE(ids(), QStringList({"switch", "beside", "unfollow"}));
-        QCOMPARE(value(menu->property("layout")).toList().last().toMap()["text"].toString(), QString("Stop following KJV"));
+        QCOMPARE(entries().last().toMap()["text"].toString(), QString("Stop following KJV"));
         QSignalSpy unfollow(window, SIGNAL(unfollowRequested()));
         QVERIFY(QMetaObject::invokeMethod(menu, "triggerId", Q_ARG(QVariant, QString("unfollow"))));
         QTRY_COMPARE(unfollow.count(), 1);

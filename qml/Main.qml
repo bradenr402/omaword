@@ -586,7 +586,7 @@ ApplicationWindow {
     readonly property bool contextMenuOpen: contextMenu.visible
     readonly property bool modalOpen: dialogOpen || tagsUi.visibleModal
     // Everything modal: menus, cards, palettes, pickers, and dialogs.
-    readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
+    readonly property bool dialogOpen: contextMenu.visible || peekCard.visible || tagsUi.pickerVisible || verseTagMenu.visible || backupScope.visible || versionDialog.visible || besideDialog.visible || passagePalette.visible || cleanDeskConfirmation.visible || clearHistoryConfirmation.visible || helpDialog.visible || settingsDialog.visible || aboutDialog.visible || importGuide.visible || catalogDetails.visible || errorDialog.visible || restoreConfirmation.visible || importDialog.visible || exportDialog.visible || backupDialog.visible || restoreDialog.visible
     // One side panel at a time, in the Margin. Its opening key brings the
     // keyboard to it; another panel's key turns the Margin to that panel.
     readonly property string sidePanel: notesOpen ? "notes" : deskOpen ? "desk" : marksOpen ? "annotations"
@@ -1855,6 +1855,7 @@ ApplicationWindow {
             else if (backupScope.visible) backupScope.close()
             else if (importGuide.visible) importGuide.close()
             else if (versionDialog.visible) { if (versionDialog.step > 0) backVersion(); else versionDialog.close() }
+            else if (besideDialog.visible) besideDialog.close()
             else if (helpDialog.visible) helpDialog.close()
             else if (settingsDialog.visible) settingsDialog.close()
             else if (aboutDialog.visible) aboutDialog.close()
@@ -3979,7 +3980,6 @@ ApplicationWindow {
         if (bible.busy || !flushNote()) return false
         clearCount()
         versionDialog.removing = !!removing
-        versionDialog.beside = false
         versionDialog.step = 0
         versionDialog.chosen = null
         versionDialog.removeAnnotations = false
@@ -3993,12 +3993,53 @@ ApplicationWindow {
         versionDialog.open()
         return true
     }
-    // Versions to choose one to read beside this window (shift C), on the
-    // first version not read here; enter opens it in a window beside.
+    // The installed versions this window does not read.
+    function besideCandidates() { return Array.from(bible.versions).filter(function(entry) { return !entry.active }) }
+    // shift C: the one other version opens beside this window at once; with
+    // more, besideDialog asks which (showing the selection's text in each).
     function openBesideVersions() {
-        if (!openVersions(false)) return
-        versionDialog.beside = true
-        versionResults.currentIndex = Math.max(0, versionEntries().findIndex(function(entry) { return !entry.active }))
+        const others = besideCandidates()
+        if (others.length === 1) { openBeside(others[0].id); return }
+        if (bible.busy || !flushNote()) return
+        clearCount()
+        const rows = hasSelection ? Array.from(bible.compareVersions(bible.tagScope())) : []
+        const compared = {}
+        for (const row of rows) compared[row.versionId] = row
+        besideDialog.compared = compared
+        besideDialog.compareReference = rows.length ? bible.selectionReference : ""
+        besideSearch.text = ""
+        besideResults.currentIndex = 0
+        besideDialog.open()
+    }
+    function besideEntries() {
+        const query = besideSearch.text.trim().toLowerCase()
+        return besideCandidates().filter(function(entry) {
+            return !query || (entry.abbreviation + " " + entry.name).toLowerCase().includes(query)
+        })
+    }
+    function acceptBeside() {
+        const entry = besideResults.model[besideResults.currentIndex]
+        if (!entry || !bible.ready || bible.busy) { rejected(); return }
+        besideDialog.close()
+        openBeside(entry.id)
+    }
+    function besideKey(event) {
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            event.accepted = true
+            if (event.modifiers === Qt.NoModifier) acceptBeside()
+            return
+        }
+        if (event.modifiers !== Qt.NoModifier) return
+        // In the search field, home and end move the caret, not the list.
+        if (besideSearch.activeFocus && (event.key === Qt.Key_Home || event.key === Qt.Key_End)) return
+        if (![Qt.Key_Up, Qt.Key_Down, Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)) return
+        event.accepted = true
+        const count = besideResults.count
+        const page = Math.max(1, Math.floor(besideResults.height / (64 * scale)))
+        const delta = event.key === Qt.Key_Home ? -count : event.key === Qt.Key_End ? count
+            : event.key === Qt.Key_PageUp ? -page : event.key === Qt.Key_PageDown ? page : event.key === Qt.Key_Up ? -1 : 1
+        besideResults.currentIndex = count ? Math.max(0, Math.min(count - 1, besideResults.currentIndex + delta)) : -1
+        if (count) besideResults.positionViewAtIndex(besideResults.currentIndex, ListView.Contain)
     }
     // The version in a window beside this one, the two following each other.
     function openVersionBeside(entry) {
@@ -4038,10 +4079,12 @@ ApplicationWindow {
                 versionDialog.step = 1; versionResults.currentIndex = 0; versionResults.forceActiveFocus() } }
         ].filter(function(item) { return !!item }), sceneX, sceneY)
     }
-    // The footer's version button: Switch version… · Open beside… · Stop following.
+    // The footer's version button: Switch version… · Open beside (the one
+    // other version by name, or … to choose) · Stop following.
     function openVersionButtonMenu(sceneX, sceneY) {
+        const others = besideCandidates()
         contextMenu.show("versionButton", [menuAction("switch", "Switch version…", "switchVersion"),
-            menuAction("beside", "Open beside…", "openBeside"),
+            menuAction("beside", others.length === 1 ? "Open " + (others[0].abbreviation || others[0].name) + " beside" : "Open beside…", "openBeside"),
             following ? menuAction("unfollow", "Stop following " + followPartner, "unfollow") : null
         ].filter(function(item) { return !!item }), sceneX, sceneY)
     }
@@ -4124,7 +4167,7 @@ ApplicationWindow {
         if (versionDialog.step === 2) { confirmRemoveVersion(); return }
         const entry = versionResults.model[versionResults.currentIndex]
         if (!entry) { sounds.play("error"); return }
-        if (!versionDialog.removing) { if (versionDialog.beside) openVersionBeside(entry); else switchVersion(entry.id); return }
+        if (!versionDialog.removing) { switchVersion(entry.id); return }
         if (versionDialog.step === 0) versionDialog.chosen = entry
         else versionDialog.removeAnnotations = !!entry.remove
         versionDialog.step++
@@ -4275,8 +4318,9 @@ ApplicationWindow {
         { id: "resume", group: "Palettes and windows", title: "Resume last palette", sequences: ["Space"] },
         { id: "settings", group: "Palettes and windows", title: "Reading settings", sequences: ["Ctrl+,"], scope: "global", command: true },
         { id: "switchVersion", group: "Palettes and windows", title: "Switch version", sequences: ["Ctrl+V"], scope: "global", command: true },
-        // Versions, choosing a version for a window beside this one (WindowManager
-        // links the two); o in Compare and ctrl enter in Versions skip the choice.
+        // A window beside this one reading another version (WindowManager links
+        // the two): the one other version at once, else a card to choose (besideDialog);
+        // o in Compare and ctrl enter in Versions open the highlighted one.
         { id: "openBeside", group: "Palettes and windows", title: "Open a version beside this window", sequences: ["Shift+C"], command: true },
         // Versions, opened on the selection's text in each version.
         // A peek under the selection (PeekCard); Versions (ctrl v) shows the same rows.
@@ -4441,9 +4485,8 @@ ApplicationWindow {
             versionDialog.comparing ? ["Y", "copy", function() { app.copyComparedVersion(false) }, ready] : null,
             [actionKeys("addVersion")[0], "add", app.addVersionFromPicker, ready],
             reimport ? [actionKeys("reimportVersion")[0], "re-import", function() { app.reimportVersion(app.reimportableVersion()) }, ready && !catalog.busy] : null,
-            // Opened to read one beside (shift C), enter does it.
-            versionDialog.beside ? ["Return", "open beside", app.acceptVersion, besideReady] : select,
-            !versionDialog.beside && bible.versions.length > 1 ? [actionKeys("versionBeside")[0], "beside",
+            select,
+            bible.versions.length > 1 ? [actionKeys("versionBeside")[0], "beside",
                 function() { app.openVersionBeside(versionResults.model[versionResults.currentIndex]) }, besideReady] : null,
             ["Escape", "cancel", function() { versionDialog.close() }]]
         return [[["Up", "Down"], "choose"], versionSearch.activeFocus ? null : [["Home", "End"], "jump"], select, versionDialog.step > 0 ? back : null, ["Escape", "cancel", function() { versionDialog.close() }]]
@@ -7551,8 +7594,6 @@ ApplicationWindow {
         id: versionDialog
         objectName: "versionDialog"
         property bool removing: false
-        // Choosing a version to read beside this window (shift C).
-        property bool beside: false
         property int step: 0
         property var chosen: null
         // The selection's text in each version (versionId → compareVersions row).
@@ -7577,8 +7618,7 @@ ApplicationWindow {
             Keys.onPressed: function(event) { app.versionKey(event) }
             Label {
                 objectName: "versionTitle"
-                text: !versionDialog.removing ? (versionDialog.beside ? "Open beside" : "Versions")
-                        + (versionDialog.comparing ? " · " + versionDialog.compareReference : "")
+                text: !versionDialog.removing ? "Versions" + (versionDialog.comparing ? " · " + versionDialog.compareReference : "")
                     : versionDialog.step === 0 ? "Remove version"
                     : versionDialog.step === 1 ? "Remove annotations too?" : "Confirm removal"
                 color: desktop.foreground; font.pixelSize: 22 * versionDialog.uiScale
@@ -7773,6 +7813,116 @@ ApplicationWindow {
                     onClicked: { versionNext.forceActiveFocus(); app.acceptVersion() }
                     Keys.onPressed: function(event) { app.versionKey(event) }
                 }
+            }
+        }
+    }
+
+    // Open beside (shift C) with more than one other version: which one to
+    // read in a window beside this one, with the selection's text in each.
+    ModalCard {
+        id: besideDialog
+        objectName: "besideDialog"
+        // The selection's text in each version (versionId → compareVersions row).
+        property var compared: ({})
+        property string compareReference: ""
+        readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 240))
+        // As tall as all its versions need, at most as tall as Versions; a
+        // search keeps that height, so the field never moves as you type.
+        property real fitHeight: 0
+        onImplicitHeightChanged: if (!besideSearch.text.length) fitHeight = implicitHeight
+        height: Math.min(fitHeight, 540 * app.scale, app.height - 48)
+        // Focus at once, while the modal is still fading in.
+        onVisibleChanged: if (visible) besideSearch.forceActiveFocus()
+        onClosed: app.restorePanelFocus()
+        contentItem: ColumnLayout {
+            spacing: 12 * besideDialog.uiScale
+            Keys.onPressed: function(event) { app.besideKey(event) }
+            Label {
+                objectName: "besideTitle"
+                text: "Open beside" + (besideDialog.compareReference.length ? " · " + besideDialog.compareReference : "")
+                color: desktop.foreground; font.pixelSize: 22 * besideDialog.uiScale
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+            }
+            TextField {
+                id: besideSearch
+                ContextMenu.menu: null
+                ContextMenu.onRequested: function(position) { app.openTextMenu(besideSearch, position) }
+                objectName: "besideSearch"
+                Layout.fillWidth: true
+                implicitHeight: Math.round(42 * besideDialog.uiScale)
+                placeholderText: "Search versions…"
+                font.pixelSize: 15 * besideDialog.uiScale
+                selectByMouse: true
+                padding: 10 * besideDialog.uiScale
+                background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: desktop.surface; border.color: besideSearch.activeFocus ? desktop.accent : desktop.border }
+                onTextChanged: { besideResults.currentIndex = 0; besideResults.positionViewAtBeginning() }
+                Keys.onPressed: function(event) { app.besideKey(event) }
+                KeyNavigation.tab: besideResults
+                Accessible.name: "Search versions to open beside"
+            }
+            ListView {
+                id: besideResults
+                objectName: "besideResults"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.preferredHeight: Math.max(contentHeight, 64 * besideDialog.uiScale)
+                clip: true
+                spacing: 3 * besideDialog.uiScale
+                model: app.besideEntries()
+                onModelChanged: currentIndex = count ? Math.max(0, Math.min(currentIndex, count - 1)) : -1
+                Keys.onPressed: function(event) { app.besideKey(event) }
+                ScrollBar.vertical: OverlayScrollbar { objectName: "besideScrollbar" }
+                delegate: ItemDelegate {
+                    id: besideEntry
+                    required property var modelData
+                    required property int index
+                    objectName: "besideEntry" + index
+                    width: besideResults.width - app.scrollGutter(besideResults)
+                    height: besideEntryContent.implicitHeight + 20 * besideDialog.uiScale
+                    highlighted: ListView.isCurrentItem
+                    onClicked: { besideResults.currentIndex = index; app.acceptBeside() }
+                    Keys.onPressed: function(event) { app.besideKey(event) }
+                    background: Rectangle { radius: Math.min(desktop.cornerRadius, width / 2, height / 2); color: besideEntry.highlighted ? app.tint(desktop.accent, 0.11) : besideEntry.hovered ? desktop.surface : "transparent" }
+                    contentItem: ColumnLayout {
+                        id: besideEntryContent
+                        spacing: 4 * besideDialog.uiScale
+                        Label {
+                            text: (besideEntry.modelData.abbreviation ? besideEntry.modelData.abbreviation + " · " : "") + besideEntry.modelData.name
+                            color: desktop.foreground; font.pixelSize: 14 * besideDialog.uiScale
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                        }
+                        // With a selection: this version's text for it.
+                        Label {
+                            readonly property var compared: besideDialog.compared[besideEntry.modelData.id] || null
+                            objectName: "besideText:" + besideEntry.modelData.id
+                            visible: !!compared
+                            text: !compared ? "" : compared.available ? compared.text : "Not in this version"
+                            textFormat: Text.PlainText
+                            color: compared && compared.available ? desktop.foreground : desktop.muted
+                            font.pixelSize: 13 * besideDialog.uiScale
+                            maximumLineCount: 4; elide: Text.ElideRight
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                        }
+                    }
+                }
+                Label {
+                    objectName: "besideEmpty"
+                    anchors.centerIn: parent
+                    width: parent.width
+                    text: "No matching versions"
+                    visible: besideResults.count === 0
+                    color: desktop.muted; font.pixelSize: 13 * besideDialog.uiScale
+                    horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                }
+            }
+            FineRule { Layout.fillWidth: true }
+            HintRow {
+                objectName: "besideHints"
+                theme: desktop
+                parts: [[["Up", "Down"], "choose"], ["Return", "open beside", app.acceptBeside, bible.ready && !bible.busy && besideResults.count > 0],
+                    ["Escape", "cancel", function() { besideDialog.close() }]]
+                pixelSize: 11 * besideDialog.uiScale
+                Layout.fillWidth: true
             }
         }
     }
