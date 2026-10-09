@@ -112,7 +112,6 @@ ToolButton {
         AnnotationGlyph {
             objectName: marker.kind + "Glyph" + marker.number
             kind: marker.kind; ink: marker.theme.accent
-            filled: true
             y: marker.headingHeight + 5 * marker.controller.readerScale
             width: 14 * marker.controller.readerScale; height: 16 * marker.controller.readerScale
             visible: marker.starts || (marker.rowIndex === 0 && marker.continuesBefore)

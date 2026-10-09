@@ -37,13 +37,14 @@ RowLayout {
         Layout.alignment: Qt.AlignTop
         spacing: 4 * header.controller.scale
     }
-    // Clicks beside a docked panel reach the text, so it closes here by mouse.
+    // Clicks beside a docked panel reach the text, so it closes here by mouse:
+    // a chevron into the right edge, where the panel goes.
     QuietButton {
         objectName: header.closeName
         Layout.alignment: Qt.AlignTop
         controller: header.controller
         theme: header.theme
-        text: "×"
+        glyph: "close"
         compact: true
         keys: KeyNotation.format("Escape")
         tip: header.closeTip

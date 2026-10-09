@@ -7124,7 +7124,7 @@ ApplicationWindow {
     // Room the reader text leaves at the right edge for the stacked column.
     readonly property real footerRightInset: footerStacked && !footerCollapsed && footerRightCount && !focusLayout
         ? footerButton + footerMargin + 2 * footerGap : 0
-    // "↩ Mark 5" after the passage, away from the ribbon, only where it fits
+    // The ribbon and its chapter ("Mark 5") after the passage, away from it, only where it fits
     // without folding anything else (r and the palette still reach it).
     readonly property bool footerShowsRibbon: bible.ready && !!bible.ribbon.versionId && !ribbonHere && !footerStacked
         && footerCenterFull + ribbonControl.implicitWidth + 2 * Math.max(footerLeftFull, footerRightFull) + 2 * footerGroupGap <= footerAvailable
@@ -7248,7 +7248,8 @@ ApplicationWindow {
         FloatingButton {
             id: ribbonControl
             objectName: "ribbonControl"
-            text: "↩ " + (bible.ribbon.chapterReference || "")
+            text: bible.ribbon.chapterReference || ""
+            leading: "ribbon"
             label: "Back to the ribbon · " + (bible.ribbon.reference || "")
             keys: app.keyText("ribbon")
             visible: app.footerShowsRibbon
@@ -7293,7 +7294,7 @@ ApplicationWindow {
         FloatingButton {
             objectName: "savedControl"
             visible: floatingActions.expanded
-            glyph: "saved"
+            glyph: "marks"
             selected: app.marksOpen
             label: "Marks"
             keys: app.keyText("annotations")
@@ -7382,7 +7383,7 @@ ApplicationWindow {
                     Label { text: stepRow.modelData[0]; color: desktop.foreground; font.pixelSize: 13 * app.scale; Layout.fillWidth: true; Layout.minimumWidth: 96 * app.scale }
                     QuietButton {
                         objectName: "textPopover:" + stepRow.modelData[1]
-                        text: "−"; compact: true
+                        glyph: "minus"; compact: true
                         keys: app.keyText(stepRow.modelData[1]); tip: "Decrease · " + keys
                         Accessible.name: "Decrease " + stepRow.modelData[0].toLowerCase()
                         enabled: app.actionAvailable(stepRow.modelData[1])
@@ -7397,7 +7398,7 @@ ApplicationWindow {
                     }
                     QuietButton {
                         objectName: "textPopover:" + stepRow.modelData[2]
-                        text: "+"; compact: true
+                        glyph: "plus"; compact: true
                         keys: app.keyText(stepRow.modelData[2]); tip: "Increase · " + keys
                         Accessible.name: "Increase " + stepRow.modelData[0].toLowerCase()
                         enabled: app.actionAvailable(stepRow.modelData[2])
@@ -7608,13 +7609,13 @@ ApplicationWindow {
                 QuietButton {
                     id: versionAdd
                     objectName: "versionAdd"
-                    text: "+"
+                    glyph: "plus"
+                    glyphSize: 18 * versionDialog.uiScale
                     keys: app.keyText("addVersion")
                     tip: "Add version · " + keys
                     Accessible.name: "Add version"
                     visible: !versionDialog.removing
                     enabled: !bible.busy
-                    font.pixelSize: 24 * versionDialog.uiScale
                     Layout.preferredWidth: versionSearch.implicitHeight
                     Layout.preferredHeight: versionSearch.implicitHeight
                     onClicked: app.addVersionFromPicker()
@@ -9106,7 +9107,7 @@ ApplicationWindow {
             QuietButton {
                 objectName: "keyStripClose"
                 visible: !keyStrip.whichKey
-                text: "×"; compact: true
+                glyph: "close-down"; compact: true
                 keys: KeyNotation.format("Escape"); tip: "Close · " + keys
                 Accessible.name: "Close the key strip"
                 onClicked: app.dismissKeyStrip()

@@ -675,11 +675,15 @@ private slots:
         sounds->setReduceMotion(false);
         QCOMPARE(item("ribbonTab")->property("fill").value<QColor>(), desktop->property("accent").value<QColor>());
         QVERIFY(!item("ribbonControl")->isVisible());
-        // Away from it: no tab, "↩ John 1" in the footer, Continue first in the palette.
+        // Away from it: no tab, the ribbon and "John 1" in the footer, Continue first in the palette.
         jumpTo("John 2:3");
         QTRY_VERIFY(!item("ribbonTab")->isVisible());
         QTRY_VERIFY(item("ribbonControl")->isVisible());
-        QCOMPARE(item("ribbonControl")->property("text").toString(), QString::fromUtf8("↩ John 1"));
+        QCOMPARE(item("ribbonControl")->property("text").toString(), QString("John 1"));
+        QCOMPARE(item("ribbonControl")->property("leading").toString(), QString("ribbon"));
+        QVERIFY(item("ribbonControlLeading")->isVisible());
+        QVERIFY(item("ribbonControlLeading")->mapToScene(QPointF(item("ribbonControlLeading")->width(), 0)).x()
+            <= item("ribbonControlLabel")->mapToScene(QPointF((item("ribbonControlLabel")->width() - item("ribbonControlLabel")->property("contentWidth").toDouble() + item("ribbonControlLabel")->property("leftPadding").toDouble()) / 2, 0)).x());
         key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(object("passagePalette")->property("opened").toBool());
         auto rows = paletteRows();
         QCOMPARE(rows.first().toMap()["title"].toString(), QString("Continue · John 1:5"));

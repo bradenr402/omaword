@@ -219,31 +219,6 @@ ApplicationWindow {
     }
     Reader.AppContextMenu { id: contextMenu; objectName: "contextMenu"; theme: theme }
     Reader.AnnotationGlyph { id: sharedGlyph; objectName: "sharedGlyph"; x: 600; y: 500 }
-    Canvas {
-        objectName: "footerNoteReference"; x: 650; y: 500
-        width: sharedGlyph.width; height: sharedGlyph.height
-        property color ink: sharedGlyph.ink
-        onInkChanged: requestPaint()
-        onWidthChanged: requestPaint()
-        onHeightChanged: requestPaint()
-        onPaint: {
-            const ctx = getContext("2d")
-            ctx.reset()
-            ctx.scale(width / 24, height / 24)
-            ctx.strokeStyle = ink
-            ctx.lineWidth = 1.6
-            ctx.lineCap = "square"
-            ctx.lineJoin = "miter"
-            ctx.beginPath()
-            // Snapshot of the original footer path, independent of the component.
-            ctx.moveTo(11, 4); ctx.lineTo(3, 4); ctx.lineTo(3, 21)
-            ctx.lineTo(20, 21); ctx.lineTo(20, 13)
-            ctx.moveTo(10, 11); ctx.lineTo(18, 3); ctx.lineTo(21, 6)
-            ctx.lineTo(13, 14); ctx.lineTo(9, 15); ctx.closePath()
-            ctx.moveTo(16, 5); ctx.lineTo(19, 8)
-            ctx.stroke()
-        }
-    }
 })",QUrl::fromLocalFile(QFileInfo(reader).absolutePath() + "/AnnotationHarness.qml"));
 #endif
         root.reset(component.create());
@@ -883,7 +858,6 @@ ApplicationWindow {
             auto glyph = item("blockInlineGlyph:" + QString(kind) + ":A");
             QVERIFY(glyph && glyph->isVisible());
             QCOMPARE(glyph->property("kind").toString(),QString(kind));
-            QVERIFY(glyph->property("filled").toBool());
         }
         QTest::qWait(120);
         const auto image = window->grabWindow();
@@ -912,7 +886,7 @@ ApplicationWindow {
         QCOMPARE(mapping->verseAtPoint(final["x"].toDouble()+final["width"].toDouble()+8,
                                       final["y"].toDouble()+final["height"].toDouble()/2),2);
     }
-    void sharedNoteGlyphOutlineAndFilled_data() {
+    void sharedNoteGlyphMatchesTheInlineOne_data() {
         QTest::addColumn<QString>("mode");
         QTest::addColumn<double>("scale");
         QTest::newRow("block") << QString("block") << 1.0;
@@ -1033,7 +1007,7 @@ ApplicationWindow {
             if (kind == "note") QCOMPARE(controller->property("calls").toString(),QString("flush;scope;clear;sync;edit;"));
         }
     }
-    void sharedNoteGlyphOutlineAndFilled() {
+    void sharedNoteGlyphMatchesTheInlineOne() {
         QFETCH(QString,mode); QFETCH(double,scale);
         auto shared = item("sharedGlyph");
         QCOMPARE(shared->width(),18.0); QCOMPARE(shared->height(),18.0);
@@ -1046,45 +1020,30 @@ ApplicationWindow {
         auto glyph = item("blockInlineGlyph:note:Genesis 1:1–3");
         QVERIFY(glyph && glyph->isVisible());
         QCOMPARE(glyph->property("kind").toString(),QString("note"));
-        QVERIFY(glyph->property("filled").toBool());
-        QVERIFY(!shared->property("filled").toBool());
         shared->setWidth(glyph->width()); shared->setHeight(glyph->height());
         shared->setProperty("ink",glyph->property("ink"));
         QTest::qWait(80);
         auto actual = glyph->grabToImage();
         auto common = shared->grabToImage();
-        auto footer = item("footerNoteReference")->grabToImage();
-        QVERIFY(actual && common && footer);
-        QTRY_VERIFY(!actual->image().isNull() && !common->image().isNull() && !footer->image().isNull());
-        QCOMPARE(common->image(),footer->image());
-        const auto ink = [](const QImage &image) {
-            qint64 amount = 0;
-            for (int y = 0; y < image.height(); ++y)
-                for (int x = 0; x < image.width(); ++x) amount += image.pixelColor(x,y).alpha();
-            return amount;
-        };
-        QVERIFY(ink(actual->image()) > ink(footer->image()) * 1.2);
-        shared->setProperty("filled",true);
-        QTest::qWait(80);
-        common = shared->grabToImage(); QVERIFY(common);
-        QTRY_VERIFY(!common->image().isNull());
+        QVERIFY(actual && common);
+        QTRY_VERIFY(!actual->image().isNull() && !common->image().isNull());
         QCOMPARE(actual->image(),common->image());
         backend->setProperty("focusMode",true);
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
         QVERIFY(!item("blockInlineGlyph:note:Genesis 1:1–3"));
     }
-    void filledNoteSquareAndTransparentHalo_data() {
+    void noteGlyphIsAPencil_data() {
         QTest::addColumn<int>("size");
         QTest::addColumn<QColor>("color");
         for (int size : {14,24,96})
             for (const QColor &color : {QColor("#8db5d4"),QColor("#813245")})
                 QTest::newRow(qPrintable(QString::number(size)+color.name())) << size << color;
     }
-    void filledNoteSquareAndTransparentHalo() {
+    void noteGlyphIsAPencil() {
         QFETCH(int,size); QFETCH(QColor,color);
         auto shared = item("sharedGlyph");
         shared->setWidth(size); shared->setHeight(size);
-        shared->setProperty("filled",true); shared->setProperty("ink",color);
+        shared->setProperty("ink",color);
         QTest::qWait(80);
         auto grab = shared->grabToImage(); QVERIFY(grab);
         QTRY_VERIFY(!grab->image().isNull());
@@ -1096,69 +1055,54 @@ ApplicationWindow {
                 QVERIFY(onBackground(image,background).scaled(288,288,Qt::IgnoreAspectRatio,Qt::FastTransformation)
                     .save(path+background.name()+".zoom.png"));
         }
-        // Independent path-boolean oracle: a full square minus an expanded
-        // pencil, then the original solid pencil (including its exposed cap).
-        QPainterPath square; square.addRect(3,4,17,17);
-        QPainterPath pencil;
-        pencil.moveTo(10,11); pencil.lineTo(18,3); pencil.lineTo(21,6);
-        pencil.lineTo(13,14); pencil.lineTo(9,15); pencil.closeSubpath();
-        QPainterPathStroker stroker; stroker.setWidth(3); stroker.setJoinStyle(Qt::MiterJoin);
-        QTransform enlargement;
-        enlargement.translate(12,12); enlargement.scale(1.1,1.1); enlargement.translate(-12,-12);
-        const auto silhouette = enlargement.map(square.subtracted(pencil.united(stroker.createStroke(pencil))).united(pencil));
-        square = enlargement.map(square);
-        pencil = enlargement.map(pencil);
+        // Independent path oracle: a pencil on the diagonal, point down-left,
+        // less two 1.6-unit cuts across it (the point's wood, the ferrule).
+        QTransform diagonal; diagonal.translate(12,12); diagonal.rotate(45);
+        QPainterPath body;
+        body.moveTo(-3.6,-11); body.lineTo(3.6,-11); body.lineTo(3.6,5); body.lineTo(0,11); body.lineTo(-3.6,5); body.closeSubpath();
+        QPainterPath cuts; cuts.addRect(-4,3.8,8,1.6); cuts.addRect(-4,-7.8,8,1.6);
+        const auto pencil = diagonal.map(body.subtracted(cuts));
+        const auto cutBands = diagonal.map(body.intersected(cuts));
         QImage expected(image.size()*3,QImage::Format_ARGB32_Premultiplied);
         expected.fill(Qt::transparent);
         {
             QPainter painter(&expected);
             painter.setRenderHint(QPainter::Antialiasing);
             painter.scale(expected.width()/24.0,expected.height()/24.0);
-            painter.fillPath(silhouette,color);
+            painter.fillPath(pencil,color);
         }
         expected = expected.scaled(image.size(),Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
         qint64 error = 0;
-        int haloPixels = 0, pencilPixels = 0, squarePixels = 0, exposedPixels = 0;
+        int inked = 0, cut = 0;
         for (int y = 0; y < image.height(); ++y)
             for (int x = 0; x < image.width(); ++x) {
                 const auto actual = image.pixelColor(x,y);
                 const auto reference = expected.pixelColor(x,y);
                 error += qAbs(actual.alpha()-reference.alpha());
-                const QPointF p((x+0.5)*24/image.width(),(y+0.5)*24/image.height());
-                if (square.contains(p) && reference.alpha() < 30) {
-                    QVERIFY2(actual.alpha() < 100,"Pencil halo must cut through to transparency");
-                }
-                // At 14px a 1.5-unit band is subpixel: count low-alpha samples
-                // within the geometric halo, rather than require opaque-grid holes.
-                if (square.contains(p) && !silhouette.contains(p) && actual.alpha() < 100) ++haloPixels;
                 if (reference.alpha() > 240) {
                     QVERIFY(actual.alpha() > 180);
                     QVERIFY(qAbs(actual.red()-color.red()) < 5);
                     QVERIFY(qAbs(actual.green()-color.green()) < 5);
                     QVERIFY(qAbs(actual.blue()-color.blue()) < 5);
-                    if (pencil.contains(p)) ++pencilPixels;
-                    else if (square.contains(p)) ++squarePixels;
+                    ++inked;
                 }
-                if (!square.contains(p) && pencil.contains(p) && actual.alpha() > 80) ++exposedPixels;
+                const QPointF p((x+0.5)*24/image.width(),(y+0.5)*24/image.height());
+                if (cutBands.contains(p) && actual.alpha() < 100) ++cut;
             }
-        QVERIFY2(error/double(image.width()*image.height()) < 20,"Filled note differs from square-and-pencil silhouette");
-        QVERIFY(haloPixels >= 2); QVERIFY(pencilPixels >= 2); QVERIFY(squarePixels >= 10);
-        // The one-unit overhang is subpixel at 14px; resolve it at 24px and up.
-        if (size >= 24) QVERIFY(exposedPixels > 0);
+        QVERIFY2(error/double(image.width()*image.height()) < 20,"The note mark differs from the pencil");
+        QVERIFY(inked >= 4);
+        // The cuts are subpixel at 14px; resolve them at 24px and up.
+        if (size >= 24) QVERIFY(cut > 0);
         if (size == 96) {
-            // Both diagonal sides retain a ~1.5-unit band before solid square
-            // resumes; the original pencil interior must be filled, not hollow.
             const auto alpha = [&](double x, double y) {
-                const auto p = enlargement.map(QPointF(x,y));
+                const auto p = diagonal.map(QPointF(x,y));
                 return image.pixelColor(qFloor(p.x()*size/24),qFloor(p.y()*size/24)).alpha();
             };
-            QVERIFY(alpha(14,9) > 240);
-            QVERIFY(alpha(13.5,6.5) < 30);
-            QVERIFY(alpha(15.5,12.5) < 30);
-            QVERIFY(alpha(12.5,5.5) > 240);
-            QVERIFY(alpha(17,13) > 240);
-            QVERIFY(alpha(18.2,3.7) > 180); // Pencil above the square's top.
-            QVERIFY(alpha(20.2,6) > 180); // Pencil beyond its right edge.
+            QVERIFY(alpha(0,-2) > 240); // The pencil's body is solid.
+            QVERIFY(alpha(0,4.6) < 30); // Cut through to transparency before its point.
+            QVERIFY(alpha(0,-7) < 30); // And at the ferrule.
+            QVERIFY(alpha(0,8) > 240); // The point itself.
+            QVERIFY(alpha(-5,0) < 30); // Nothing beside it.
         }
     }
     void handDrawnHelper_data() {
@@ -1350,7 +1294,6 @@ QtObject {
         const auto path = qEnvironmentVariable("OMAWORD_ANNOTATION_SCREENSHOT");
         QVERIFY(image.save(path));
         auto shared = item("sharedGlyph");
-        shared->setProperty("filled",true);
         shared->setWidth(14); shared->setHeight(14);
         QTest::qWait(100);
         auto glyph = shared->grabToImage(); QVERIFY(glyph);

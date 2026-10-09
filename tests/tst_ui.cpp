@@ -5717,11 +5717,9 @@ private slots:
             QCOMPARE(scene("savedControl").right(),relatedBounds.left());
             QVERIFY(relatedBounds.right() <= scene("deskControl").left());
         }
-        // See also draws its own link glyph, not the tag; Marks wears the note.
+        // See also draws its link, Marks its highlighter: neither wears a reader mark.
         QCOMPARE(related->property("glyph").toString(),QString("study"));
-        QVERIFY(!item("relatedControlGlyph")->isVisible());
-        QCOMPARE(prop("savedControlGlyph","kind").toString(),QString("note"));
-        QVERIFY(item("savedControlGlyph")->isVisible());
+        QCOMPARE(prop("savedControl","glyph").toString(),QString("marks"));
         // It shows as selected while its panel is open, as Marks and the Desk do.
         QVERIFY(!related->property("selected").toBool());
         click(related); QTRY_VERIFY(panelOpened("related"));
@@ -5852,26 +5850,10 @@ private slots:
         QVERIFY(note->x() + note->width() <= tag->x());
         QVERIFY(tag->x() + tag->width() <= item("verseNumber1")->x());
         QCOMPARE(prop("verseNoteMarker1","hint").toString(), scope["reference"].toString());
-        // Equal-size captures distinguish the actual filled/outline renderings.
-        const auto ink = [](const QImage &image) {
-            qint64 amount = 0;
-            for (int y = 0; y < image.height(); ++y)
-                for (int x = 0; x < image.width(); ++x) amount += image.pixelColor(x,y).alpha();
-            return amount;
-        };
-        for (const auto kind : {"note"}) {
-            auto footer = item("savedControlGlyph");
-            auto row = item(qPrintable(QString(kind) + "Glyph1"));
-            QVERIFY(footer && row);
-            QVERIFY(!footer->property("filled").toBool());
-            QVERIFY(row->property("filled").toBool());
-            row->setWidth(footer->width()); row->setHeight(footer->height());
-            row->setProperty("ink",footer->property("ink"));
-            QTest::qWait(50);
-            auto footerGrab = footer->grabToImage(), rowGrab = row->grabToImage();
-            QVERIFY(footerGrab && rowGrab);
-            QTRY_VERIFY(!footerGrab->image().isNull() && !rowGrab->image().isNull());
-            QVERIFY2(ink(rowGrab->image()) > ink(footerGrab->image()) * 1.2,kind);
+        // Each rail starts with its mark: the pencil of a note, the hash of tags.
+        for (const auto kind : {"note", "tag"}) {
+            auto glyph = item(qPrintable(QString(kind) + "Glyph1"));
+            QVERIFY2(glyph && glyph->isVisible(),kind); QCOMPARE(glyph->property("kind").toString(),QString(kind));
         }
         // A rejected draft save must leave both navigation and note scope intact.
         window->setProperty("syncingNote", true);
@@ -5887,18 +5869,17 @@ private slots:
         QCOMPARE(bible->tagScope(),scope);
         QCOMPARE(bible->noteText(),QString("Exact range note"));
     }
-    void tagGlyphPointsLeft() {
+    void tagGlyphIsAHash() {
         reference("John 3:1");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Glyph").isEmpty());
         // Annotations rows no longer show tag glyphs; check the reader rail's.
         auto glyph = item("tagGlyph1"); QTRY_VERIFY(glyph && glyph->isVisible());
         QTest::qWait(100);
-        auto grab = glyph->grabToImage(QSize(120,140)); QVERIFY(grab);
-        QSignalSpy ready(grab.data(),&QQuickItemGrabResult::ready);
+        auto grab = glyph->grabToImage(QSize(120,120)); QVERIFY(grab);
         QTRY_VERIFY(!grab->image().isNull());
         const auto image = grab->image();
-        // The hole and vertical shoulder are on the right, with the point on
-        // the left. Check rendered ink at fixed landmarks, not a mirrored copy.
+        // A hash, as tags are written: ink on its two crossbars and two
+        // slanted uprights, none in the square they enclose or its corners.
         const auto ink = [&image](QRect region) {
             int amount = 0;
             for (int y = region.top(); y <= region.bottom(); ++y)
@@ -5906,8 +5887,12 @@ private slots:
                     amount += image.pixelColor(x,y).alpha();
             return amount;
         };
-        QVERIFY(ink(QRect(70,20,30,35)) > 1000);
-        QVERIFY(ink(QRect(104,20,12,28)) > ink(QRect(4,20,12,28)) + 1000);
+        const auto unit = [](double v) { return int(v * 5); }; // 120 px over the 24-unit grid
+        QVERIFY(ink(QRect(unit(19), unit(7.5), unit(1.5), unit(1))) > 2000); // A crossbar, beyond the uprights.
+        QVERIFY(ink(QRect(unit(3), unit(15.5), unit(1.5), unit(1))) > 2000);
+        QVERIFY(ink(QRect(unit(8.1), unit(4), unit(1), unit(2))) > 1000); // An upright, above the bars.
+        QCOMPARE(ink(QRect(unit(11), unit(10.5), unit(3), unit(3))), 0); // The middle square is empty.
+        QCOMPARE(ink(QRect(0, 0, unit(2), unit(2))), 0);
     }
     void savedFocusActivation() {
         reference("John 3:1"); bible->toggleHighlight();

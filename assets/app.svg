@@ -1,8 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <title>Open book</title>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#253e3b"/>
-  <path d="M27 32c14-4 26-1 37 6 11-7 23-10 37-6v61c-14-4-26-1-37 6-11-7-23-10-37-6z" fill="#f3ead8"/>
-  <path d="M64 38v61" fill="none" stroke="#b7ac94" stroke-width="3"/>
-  <path d="M37 46c6-1 12 1 18 4m-18 9c6-1 12 1 18 4m-18 9c6-1 12 1 18 4m18-26c6-3 12-5 18-4m-18 17c6-3 12-5 18-4m-18 17c6-3 12-5 18-4" fill="none" stroke="#9f947e" stroke-width="3" stroke-linecap="round"/>
-  <path d="M82 30v24l6-4 6 4V29z" fill="#c67e50"/>
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#232a4d"/><stop offset="1" stop-color="#0b1024"/></linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.55" r="0.5"><stop offset="0" stop-color="#ffcead" stop-opacity="0.22"/><stop offset="1" stop-color="#ffcead" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#ground)"/>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#glow)"/>
+  <path d="M27 32C40.28 28.21 51.76 30.71 62.3 36.96V97.96C51.76 91.71 40.28 89.21 27 93z" fill="#ffcead"/>
+  <path d="M65.7 36.96C76.24 30.71 87.72 28.21 101 32V93C87.72 89.21 76.24 91.71 65.7 97.96z" fill="#ffcead"/>
+  <path d="M82 30.77C85.84 30.12 89.83 30.02 94 30.55V54L88 50 82 54z" fill="#7d82d9"/>
 </svg>

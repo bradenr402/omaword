@@ -9,6 +9,9 @@ Button {
     required property var controller
     required property var theme
     property string glyph: ""
+    // A small glyph before a text button's label, in the accent (the ribbon's
+    // way back: its ribbon before its chapter).
+    property string leading: ""
     // What it does (its accessible name) and the keys that do the same
     // (its accessible description); the tooltip shows both.
     property string label: ""
@@ -78,13 +81,40 @@ Button {
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
+            leftPadding: floatingButton.leading.length ? leadingIcon.width + 5 * floatingButton.controller.controlScale : 0
+        }
+        // Just left of the centred label (its left padding makes the room).
+        Canvas {
+            id: leadingIcon
+            objectName: floatingButton.objectName + "Leading"
+            visible: floatingButton.leading.length > 0 && !floatingButton.glyph.length
+            width: 12 * floatingButton.controller.controlScale
+            height: width
+            x: floatingText.x + Math.max(0, (floatingText.width - floatingText.leftPadding - floatingText.contentWidth) / 2)
+            anchors.verticalCenter: parent.verticalCenter
+            property color ink: floatingButton.enabled ? floatingButton.theme.accent : floatingButton.theme.muted
+            property string glyph: floatingButton.leading
+            onInkChanged: requestPaint()
+            onGlyphChanged: requestPaint()
+            onPaint: {
+                const ctx = getContext("2d")
+                ctx.reset()
+                ctx.scale(width / 24, height / 24)
+                ctx.fillStyle = ink
+                ctx.beginPath()
+                if (glyph === "ribbon") {
+                    // The ribbon as it hangs in its chapter, notched.
+                    ctx.moveTo(6, 2); ctx.lineTo(18, 2); ctx.lineTo(18, 22); ctx.lineTo(12, 15.5); ctx.lineTo(6, 22); ctx.closePath()
+                    ctx.fill()
+                }
+            }
         }
         Canvas {
             id: floatingIcon
             anchors.centerIn: parent
             width: 22 * floatingButton.controller.controlScale
             height: width
-            visible: floatingButton.glyph.length > 0 && floatingButton.glyph !== "saved"
+            visible: floatingButton.glyph.length > 0
             property color ink: !floatingButton.enabled ? floatingButton.theme.muted : floatingButton.selected ? floatingButton.theme.accent : floatingButton.theme.foreground
             property string glyph: floatingButton.glyph
             onInkChanged: requestPaint()
@@ -100,16 +130,28 @@ Button {
                 ctx.lineJoin = "miter"
                 ctx.beginPath()
                 if (glyph === "chevron-left") {
-                    ctx.moveTo(15, 5); ctx.lineTo(8, 12); ctx.lineTo(15, 19)
+                    // Tall and fine, quiet beside the text.
+                    ctx.lineWidth = 1.3
+                    ctx.moveTo(14.5, 2); ctx.lineTo(9, 12); ctx.lineTo(14.5, 22)
                 } else if (glyph === "chevron-right") {
-                    ctx.moveTo(9, 5); ctx.lineTo(16, 12); ctx.lineTo(9, 19)
+                    ctx.lineWidth = 1.3
+                    ctx.moveTo(9.5, 2); ctx.lineTo(15, 12); ctx.lineTo(9.5, 22)
                 } else if (glyph === "search") {
                     ctx.arc(10.5, 10.5, 7, 0, 2 * Math.PI)
                     ctx.moveTo(15.45, 15.45); ctx.lineTo(20, 20)
                 } else if (glyph === "help") {
-                    ctx.moveTo(8, 7); ctx.bezierCurveTo(8, 1, 19, 2, 16, 9)
-                    ctx.bezierCurveTo(15, 11, 12, 11, 12, 15)
-                    ctx.moveTo(12, 19); ctx.lineTo(12, 19.3)
+                    // A question mark in a circle: an arc, a short drop, a round dot.
+                    ctx.arc(12, 12, 10, 0, 2 * Math.PI)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.lineJoin = "round"
+                    ctx.arc(12, 9.4, 3.2, Math.PI, Math.PI * 2.3)
+                    ctx.lineTo(12, 13.1); ctx.lineTo(12, 14.4)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.arc(12, 17.5, 1.15, 0, 2 * Math.PI)
+                    ctx.fill()
+                    ctx.beginPath()
                 } else if (glyph === "desk") {
                     // A desk with a drawer and a reading lamp. The legs and the
                     // drawer end flat under the top's centre line, and the arm
@@ -160,7 +202,22 @@ Button {
                     ctx.beginPath()
                     ctx.arc(18.1, 16.2, 3.8, 0, 2 * Math.PI)
                 } else if (glyph === "more") {
-                    ctx.fillRect(4, 11, 3, 3); ctx.fillRect(10.5, 11, 3, 3); ctx.fillRect(17, 11, 3, 3)
+                    for (const x of [4.5, 12, 19.5]) { ctx.moveTo(x + 2.1, 12); ctx.arc(x, 12, 2.1, 0, 2 * Math.PI) }
+                    ctx.fill()
+                    ctx.beginPath()
+                } else if (glyph === "marks") {
+                    // Marks: a highlighter (its cap's seam across it), turned so
+                    // its chisel tip points down-left, and the stroke it left.
+                    ctx.save()
+                    ctx.translate(12.3, 11.4); ctx.rotate(Math.PI / 4)
+                    ctx.moveTo(-3.4, -10.5); ctx.lineTo(3.4, -10.5); ctx.lineTo(3.4, 2.5); ctx.lineTo(-3.4, 2.5); ctx.closePath()
+                    ctx.moveTo(-2, 2.5); ctx.lineTo(-2, 6.2); ctx.lineTo(2, 4.6); ctx.lineTo(2, 2.5)
+                    ctx.moveTo(-3.4, -6.8); ctx.lineTo(3.4, -6.8)
+                    ctx.stroke()
+                    ctx.restore()
+                    ctx.beginPath()
+                    ctx.lineWidth = 2.2; ctx.lineCap = "butt"
+                    ctx.moveTo(2, 21); ctx.lineTo(14, 21)
                 } else if (glyph === "focus") {
                     // Focus mode in miniature: the line being read in full
                     // ink, heavier, the lines around it faint.
@@ -173,7 +230,7 @@ Button {
                     ctx.lineWidth = 2.4
                     ctx.moveTo(3, 12); ctx.lineTo(21, 12)
                 } else if (glyph === "visual") {
-                    // Three lines of text, whole lines (verses) under a selection's tint.
+                    // Visual: several verses under the selection's tint.
                     ctx.globalAlpha = 0.4
                     ctx.fillRect(1.5, 8.5, 21, 14)
                     ctx.globalAlpha = 1
@@ -189,26 +246,17 @@ Button {
                     ctx.moveTo(15, 4); ctx.lineTo(15, 20)
                     ctx.moveTo(12, 4); ctx.lineTo(18, 4)
                     ctx.moveTo(12, 20); ctx.lineTo(18, 20)
-                } else {
-                    ctx.moveTo(12, 6); ctx.lineTo(8, 4); ctx.lineTo(2, 4)
-                    ctx.lineTo(2, 19); ctx.lineTo(8, 19); ctx.lineTo(12, 21)
-                    ctx.lineTo(16, 19); ctx.lineTo(22, 19); ctx.lineTo(22, 4)
-                    ctx.lineTo(16, 4); ctx.closePath()
-                    ctx.moveTo(12, 6); ctx.lineTo(12, 21)
-                    ctx.moveTo(5, 8); ctx.lineTo(8, 8)
-                    ctx.moveTo(16, 8); ctx.lineTo(19, 8)
+                } else if (glyph === "normal") {
+                    // Normal: one verse under the selection's tint, as the reader shows it.
+                    ctx.globalAlpha = 0.4
+                    ctx.fillRect(1.5, 8.5, 21, 7)
+                    ctx.globalAlpha = 1
+                    ctx.moveTo(4, 5); ctx.lineTo(20, 5)
+                    ctx.moveTo(4, 12); ctx.lineTo(20, 12)
+                    ctx.moveTo(4, 19); ctx.lineTo(14, 19)
                 }
                 ctx.stroke()
             }
-        }
-        AnnotationGlyph {
-            objectName: floatingButton.objectName + "Glyph"
-            anchors.centerIn: parent
-            width: 22 * floatingButton.controller.controlScale; height: width
-            // Annotations wears the note glyph.
-            visible: floatingButton.glyph === "saved"
-            kind: "note"
-            ink: floatingIcon.ink
         }
     }
 }

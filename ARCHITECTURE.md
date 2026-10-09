@@ -185,8 +185,8 @@ files.
   version-independent: `ribbonLocation()` opens it in the active version when
   that has the passage, else in the version it was placed in, else its chapter
   here. `r` opens it as a jump (`beginJump`/`endJump`). QML shows an accent tab
-  pinned at the top right of the column in its chapter, "↩ Mark 5" in the
-  footer elsewhere (only where it fits without folding anything), and
+  pinned at the top right of the column in its chapter, its ribbon and "Mark
+  5" in the footer elsewhere (only where it fits without folding anything), and
   "Continue · …" first among the palette's recents.
 - Removal keeps annotations/tags by default (hidden until reimport);
   `removeVersion(id, true)` drops them. Global tag definitions and the Desk's
@@ -571,8 +571,9 @@ files.
   brackets and superscript glyphs. Outer starts first, inner ends first;
   continuation chevron for ranges entering the chapter. Bracket height follows
   endpoint font ink, not line height.
-- `AnnotationGlyph`: `filled` for reader marks, outline for controls; tag icon
-  is mirrored to point left.
+- `AnnotationGlyph`: the reader's filled marks, supersampled: a pencil for a
+  note, a hash for tags. Controls draw their own glyphs (`FloatingButton`,
+  `QuietButton`'s `glyph`: close, plus, minus).
 - Paint-only overlays (never alter text formats, layout, selection, or copy):
   - Hand-drawn marks (`HandDrawn.js`): deterministic seeded paths (seed from
     kind/version/reference/segment, no `Math.random`) so repaint/scroll is stable.

@@ -619,7 +619,6 @@ Item {
                 objectName: "blockInlineGlyph:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.reference
                 visible: inlineMarker.opening && !inlineMarker.footnote
                 kind: inlineMarker.modelData.kind
-                filled: true
                 ink: root.theme.accent
                 x: inlineMarker.modelData.rtl ? parent.width - inlineMarker.modelData.paintWidth * 0.05 - width
                                              : inlineMarker.modelData.paintWidth * 0.05
