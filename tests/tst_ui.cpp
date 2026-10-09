@@ -4096,12 +4096,14 @@ private slots:
         QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         QVERIFY(!item("toast")->isVisible());
         QCOMPARE(bible->noteText(),QString("notes s ?pasted"));
-        // From the editor, ctrl , saves the draft, closes Notes, and opens Settings.
+        // From the editor, ctrl , saves the draft and opens Settings over Notes, which stays.
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_End); type(" more"); key(Qt::Key_Comma,Qt::ControlModifier);
-        QTRY_VERIFY(prop("settingsDialog","opened").toBool()); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
+        QTRY_VERIFY(prop("settingsDialog","opened").toBool()); QVERIFY(prop("notesDrawer","visible").toBool());
         QCOMPARE(bible->noteText(),QString("notes s ?pasted more"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("settingsDialog","visible").toBool());
+        QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        key(Qt::Key_Escape); key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
         key(Qt::Key_F1); QTRY_VERIFY(item("keybindingSearch")->hasActiveFocus());
         type("settings"); key(Qt::Key_Comma,Qt::ControlModifier);
         QCOMPARE(prop("keybindingSearch","text").toString(),QString("settings"));
