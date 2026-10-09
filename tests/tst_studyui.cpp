@@ -196,6 +196,11 @@ class StudyUiTest : public QObject
     QObject *renderedBody(int verse) const {
         return prop("continuousReader").toBool() ? object("blockBody") : object("verseBody" + QString::number(verse));
     }
+    // The top left of a verse's text in the Verse layout, in the window.
+    QPointF verseScenePoint(int verse) const {
+        auto body = qobject_cast<QQuickItem *>(object("verseBody" + QString::number(verse)));
+        return body ? body->mapToScene(QPointF(0, 0)) : QPointF();
+    }
 
 private slots:
     void initTestCase() {
@@ -383,32 +388,60 @@ private slots:
         // A second edition with only John 1:1: John 3:16 is not in it.
         install(other); QCOMPARE(bible->versions().size(), 2);
         const QString otherId = bible->versionId(), studyId = bible->versions()[1].toMap()["id"].toString();
-        navigate("John 1:1"); key(Qt::Key_C);
-        QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
-        QCOMPARE(object("versionTitle")->property("text").toString(), QString("Versions · John 1:1"));
-        QTRY_VERIFY(item("versionResults")->hasActiveFocus());
-        QCOMPARE(object("versionText:" + otherId)->property("text").toString(), QString("Another edition."));
-        QVERIFY(object("versionText:" + studyId)->property("text").toString().startsWith("In the beginning was the Word."));
-        // y copies the highlighted version's quotation; shift Y its plain text.
+        // c: a card under the selection with each version's text, the one read first.
+        navigate("John 1:1"); const auto anchor = verseScenePoint(1); key(Qt::Key_C);
+        auto card = object("peekCard");
+        QTRY_VERIFY(card->property("opened").toBool());
+        QCOMPARE(object("peekTitle")->property("text").toString(), QString("Compare · John 1:1 · 2 versions"));
+        QCOMPARE(object("peekRowTitle:0")->property("text").toString(), bible->versionAbbreviation() + " · reading");
+        QCOMPARE(object("peekRowText:0")->property("text").toString(), QString("Another edition."));
+        QVERIFY(object("peekRowText:1")->property("text").toString().startsWith("In the beginning was the Word."));
+        QVERIFY(card->property("y").toDouble() > anchor.y()); // Under the passage, not over it.
+        // It starts on the other version; k and j step, never past the ends.
+        QCOMPARE(card->property("currentRow").toInt(), 1);
+        key(Qt::Key_K); QCOMPARE(card->property("currentRow").toInt(), 0);
+        key(Qt::Key_K); QCOMPARE(card->property("currentRow").toInt(), 0);
+        key(Qt::Key_J); QCOMPARE(card->property("currentRow").toInt(), 1);
+        QVERIFY(object("peekHints")->property("plainText").toString().contains("enter switch"));
+        // y copies its quotation and closes; shift Y the plain text.
         QGuiApplication::clipboard()->clear();
-        key(Qt::Key_Down); key(Qt::Key_Y);
-        QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(QString::fromUtf8("“")));
+        key(Qt::Key_Y); QTRY_VERIFY(!card->property("visible").toBool());
+        QVERIFY(QGuiApplication::clipboard()->text().startsWith(QString::fromUtf8("“")));
         QVERIFY(QGuiApplication::clipboard()->text().contains("In the beginning was the Word."));
         QVERIFY(QGuiApplication::clipboard()->text().endsWith(QString::fromUtf8("— John 1:1")));
-        key(Qt::Key_Y, Qt::ShiftModifier);
-        QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith("In the beginning was the Word."));
-        // enter switches to it at the same passage.
-        key(Qt::Key_Return); QTRY_VERIFY(!object("versionDialog")->property("visible").toBool());
+        key(Qt::Key_C); QTRY_VERIFY(card->property("opened").toBool());
+        key(Qt::Key_Y, Qt::ShiftModifier); QTRY_VERIFY(!card->property("visible").toBool());
+        QVERIFY(QGuiApplication::clipboard()->text().startsWith("In the beginning was the Word."));
+        // A click chooses a row; enter switches to it at the same passage.
+        key(Qt::Key_C); QTRY_VERIFY(card->property("opened").toBool());
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, item("peekRow:0")->mapToScene(QPointF(20, 8)).toPoint());
+        QCOMPARE(card->property("currentRow").toInt(), 0);
+        key(Qt::Key_Return); QVERIFY(card->property("opened").toBool()); // Already reading it.
+        key(Qt::Key_J); key(Qt::Key_Return); QTRY_VERIFY(!card->property("visible").toBool());
         QCOMPARE(bible->versionId(), studyId); QCOMPARE(bible->selectionReference(), QString("John 1:1"));
+        // Versions (ctrl v) shows the same text beside each version.
+        key(Qt::Key_V, Qt::ControlModifier);
+        QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
+        QCOMPARE(object("versionTitle")->property("text").toString(), QString("Versions · John 1:1"));
+        QCOMPARE(object("versionText:" + otherId)->property("text").toString(), QString("Another edition."));
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("versionDialog")->property("visible").toBool());
         // Where a version lacks the passage, it says so; ctrl v compares too.
         navigate("John 3:16"); key(Qt::Key_V, Qt::ControlModifier);
         QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
         QCOMPARE(object("versionText:" + otherId)->property("text").toString(), QString("Not in this version"));
         QCOMPARE(object("versionText:" + otherId)->property("color").value<QColor>(), desktop->property("muted").value<QColor>());
         key(Qt::Key_Escape); QTRY_VERIFY(!object("versionDialog")->property("visible").toBool());
+        // In the card, a version without the passage says so and copies nothing.
+        call("readerFocus"); key(Qt::Key_C); QTRY_VERIFY(card->property("opened").toBool());
+        int missing = -1;
+        for (int i = 0; i < 2; ++i) if (object("peekRowText:" + QString::number(i))->property("text").toString() == "Not in this version") missing = i;
+        QVERIFY(missing >= 0);
+        card->setProperty("currentRow", missing); window->setProperty("compareRow", missing);
+        key(Qt::Key_Y); QVERIFY(card->property("opened").toBool()); QVERIFY(object("toast")->property("text").toString().startsWith("Not in "));
+        key(Qt::Key_Escape); QTRY_VERIFY(!card->property("visible").toBool());
         // Without a selection there is nothing to compare: c says why.
         bible->clearSelection(); call("readerFocus"); key(Qt::Key_C);
-        QVERIFY(!object("versionDialog")->property("visible").toBool());
+        QVERIFY(!card->property("visible").toBool());
         QCOMPARE(object("toast")->property("text").toString(), QString("Select a verse first"));
     }
     void studyOpensWithoutSelection() {

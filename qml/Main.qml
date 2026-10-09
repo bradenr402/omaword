@@ -1854,6 +1854,7 @@ ApplicationWindow {
         uiScale: app.scale
         parts: app.peekParts()
         onKeyPressed: function(event) { app.peekKey(event) }
+        onRowClicked: function(index) { app.compareRow = index }
         onAboutToHide: menuGhost.release(peekCard, peekCard.origin)
         onClosed: app.restorePanelFocus()
     }
@@ -2788,7 +2789,9 @@ ApplicationWindow {
         if (sidePanel === "related" || leaveSidePanel("related")) tagsUi.openRelated()
     }
     // Peek (PeekCard): a footnote read where it is (a marker's click, or i on
-    // the cursor verse); ↑ ↓ step through the chapter's notes in the card.
+    // the cursor verse; ↑ ↓ step through the chapter's notes in the card),
+    // or the selection in every version (c, Compare).
+    property string peekKind: "footnote"
     property int peekIndex: -1
     readonly property var peekNote: peekIndex >= 0 ? bible.footnotes[peekIndex] || null : null
     function peekFootnote(verse, seq, sceneX, sceneY, lineHeight) {
@@ -2796,6 +2799,8 @@ ApplicationWindow {
         const index = Array.from(bible.footnotes).findIndex(function(note) { return note.verse === verse && note.seq === seq })
         if (index < 0) { rejected(); return }
         const point = sceneX === undefined ? verseMenuPoint(verse) : Qt.point(sceneX, sceneY)
+        peekKind = "footnote"
+        peekCard.rows = []
         showPeekNote(index)
         peekCard.show(point.x, point.y, lineHeight || 0)
     }
@@ -2813,9 +2818,60 @@ ApplicationWindow {
         peekCard.body = note.text
     }
     function peekParts() {
+        const close = ["Escape", "close", function() { peekCard.close() }]
+        if (peekKind === "compare") {
+            const row = compareRows[compareRow]
+            const ready = peekCard.opened && !!row && !bible.busy
+            return [[["J", "K"], "versions"], ["Return", "switch", app.switchToCompared, ready && row.available && !row.active],
+                ["Y", "copy", function() { app.copyCompared(false) }, ready && row.available], close]
+        }
         const ready = peekCard.opened && !!peekNote && !bible.busy
         return [["Return", "see also", app.seeAlsoFromPeek, ready], ["Y", "copy", app.copyPeek, ready],
-            bible.footnotes.length > 1 ? [["Up", "Down"], "notes"] : null, ["Escape", "close", function() { peekCard.close() }]]
+            bible.footnotes.length > 1 ? [["Up", "Down"], "notes"] : null, close]
+    }
+    // Compare (c): the selection's text in every installed version, in a peek
+    // under it; j k choose a version, y copies it (shift Y plain), enter
+    // switches to it at the same passage.
+    property var compareRows: []
+    property int compareRow: 0
+    onCompareRowChanged: peekCard.currentRow = compareRow
+    function openCompareCard() {
+        if (!actionAvailable("compare")) { rejected(unavailableReason("compare")); return }
+        compareRows = Array.from(bible.compareVersions(bible.tagScope()))
+        if (compareRows.length < 2) { rejected(unavailableReason("compare")); return }
+        const first = compareRows.findIndex(function(row) { return !row.active && row.available })
+        compareRow = first >= 0 ? first : 0
+        peekKind = "compare"
+        peekCard.title = "Compare · " + bible.selectionReference + " · " + compareRows.length + " versions"
+        peekCard.body = ""
+        peekCard.rows = compareRows.map(function(row) {
+            return { title: row.abbreviation + (row.active ? " · reading" : "") + (row.available && row.reference !== bible.selectionReference ? " · " + row.reference : ""),
+                text: row.available ? row.text : "Not in this version", muted: !row.available }
+        })
+        peekCard.currentRow = compareRow
+        const point = verseMenuPoint(bible.selectedEnd || bible.cursorVerse)
+        peekCard.show(point.x, point.y, 0)
+    }
+    function stepCompared(delta) {
+        const next = compareRow + delta
+        if (next < 0 || next >= compareRows.length) { sounds.play("boundary"); return }
+        compareRow = next
+    }
+    function copyCompared(plainText) {
+        const row = compareRows[compareRow]
+        if (!row || !row.available) { rejected(row ? "Not in " + row.abbreviation : ""); return }
+        const scope = Object.assign({}, bible.tagScope(), { versionId: row.versionId })
+        if (!bible.copyScope(scope, !!plainText).length) { rejected(); return }
+        peekCard.close()
+        notify(row.reference + " · " + row.abbreviation + (plainText ? " copied as plain text" : " copied"), true)
+        sounds.play("chime")
+    }
+    function switchToCompared() {
+        const row = compareRows[compareRow]
+        if (!row || !row.available) { rejected(row ? "Not in " + row.abbreviation : ""); return }
+        if (row.active) { rejected("Already reading " + row.abbreviation); return }
+        peekCard.close()
+        switchVersion(row.versionId)
     }
     function stepPeek(delta) {
         const next = peekIndex + delta
@@ -2837,6 +2893,16 @@ ApplicationWindow {
     function peekKey(event) {
         if ((event.modifiers & ~Qt.KeypadModifier) & ~Qt.ShiftModifier) return
         const plain = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
+        if (peekKind === "compare") {
+            if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) switchToCompared()
+            else if (event.key === Qt.Key_Y) copyCompared(!!(event.modifiers & Qt.ShiftModifier))
+            else if (plain && (event.key === Qt.Key_Down || event.key === Qt.Key_J)) stepCompared(1)
+            else if (plain && (event.key === Qt.Key_Up || event.key === Qt.Key_K)) stepCompared(-1)
+            else if (event.key !== Qt.Key_Escape) { rejected("Not a key in Compare · " + KeyNotation.format("Escape") + " closes it") }
+            else return
+            event.accepted = true
+            return
+        }
         if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) seeAlsoFromPeek()
         else if (event.key === Qt.Key_Y) copyPeek()
         else if (plain && (event.key === Qt.Key_Down || event.key === Qt.Key_J)) stepPeek(1)
@@ -3855,9 +3921,7 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
-    // With a selection, Versions shows its text in each version; Compare (c)
-    // starts on the list rather than the search.
-    function openCompare() { if (openVersions(false)) versionResults.forceActiveFocus() }
+    // With a selection, Versions shows its text in each version too.
     function openVersions(removing) {
         if (bible.busy || !flushNote()) return false
         clearCount()
@@ -4129,7 +4193,8 @@ ApplicationWindow {
         { id: "settings", group: "Palettes and windows", title: "Reading settings", sequences: ["Ctrl+,"], scope: "global", command: true },
         { id: "switchVersion", group: "Palettes and windows", title: "Switch version", sequences: ["Ctrl+V"], scope: "global", command: true },
         // Versions, opened on the selection's text in each version.
-        { id: "compare", group: "Palettes and windows", title: "Compare the selection across versions", sequences: ["C"], command: true },
+        // A peek under the selection (PeekCard); Versions (ctrl v) shows the same rows.
+        { id: "compare", group: "Panels", title: "Compare the selection across versions", sequences: ["C"], command: true },
         // Bound by the Versions dialog itself, while it compares.
         { id: "compareCopy", group: "Palettes and windows", title: "Copy the highlighted version's text (Versions, comparing)", sequences: ["Y", "Shift+Y"], scope: "versions", explanation: true },
         { id: "help", group: "Palettes and windows", title: "Keybindings", sequences: ["?"], aliases: ["F1"], aliasReason: "the help key in most desktop apps.", scope: "global", command: true },
@@ -4841,7 +4906,7 @@ ApplicationWindow {
         case "restore": restoreDialog.open(); break
         case "import": importGuide.open(); break
         case "switchVersion": openVersions(false); break
-        case "compare": openCompare(); break
+        case "compare": openCompareCard(); break
         case "peek": peekVerseFootnotes(); break
         case "removeVersion": openVersions(true); break
         case "help": helpDialog.open(); break

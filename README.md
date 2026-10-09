@@ -165,6 +165,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `shift D`: Open Desk
 - `shift S`: See also panel
 - `i`: Peek at the verse's footnotes
+- `c`: Compare the selection across versions
 
 ### Palettes and windows
 
@@ -174,7 +175,6 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `space`: Resume last palette
 - `ctrl ,`: Reading settings
 - `ctrl v`: Switch version
-- `c`: Compare the selection across versions
 - `y` · `shift Y`: Copy the highlighted version's text (Versions, comparing)
 - `?`: Keybindings
 - `ctrl n`: New window
@@ -272,7 +272,7 @@ These also work, but stay out of the in-app list:
 - Previews keep your line breaks (a single Enter is a new line, as in GitHub comments and Obsidian), set paragraphs, lists, and quotes a blank line apart, and draw block quotes (`>`) with a small indent and a muted bar beside them. In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
 - Quote part of a passage: `v` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.
 - **See also** (`shift S`) follows the passage you are reading with one list, in sections: the version's own cross-references, its parallel passages (where its source lists them under headings, as the BSB does), the passages you tagged alike, in every version, most shared tags first, and last OpenBible.info's community-ranked cross-references. Click a tag in that section's heading, or type `#grace` in the filter (`/`), to keep only its passages; `t` edits a row's tags. Footnotes appear as small marks in the text: click one (or press `i` on its verse) to peek at it in place, where `↑` `↓` step through the chapter's notes, `y` copies one, and `enter` opens See also for its verse.
-- Compare a passage across your versions (two or more): `c` (or Versions, `ctrl v`, with verses selected) shows each version's text for the selection, "Not in this version" where its numbering differs; `y` copies the highlighted version's quotation (`shift Y` plain text) and `enter` switches to it at the same passage.
+- Compare a passage across your versions (two or more): `c` shows each version's text for the selection in a card under it, "Not in this version" where its numbering differs; `j` and `k` choose a version, `y` copies its quotation (`shift Y` plain text), and `enter` switches to it at the same passage. Versions (`ctrl v`) shows the same text beside each version while verses are selected.
 - The Desk is one Markdown page for study, shared by every window: `d` quotes the selected passage at its end (the text as a blockquote, then "— John 3:16 (NET)", a link back), `u` takes it off again, and `shift D` shows the page in the Notes margin, where you write around the quotations as in a note (`alt v` previews it, links and all). `w` turns the margin back to the note, `shift D` to the Desk. **Clean Desk** (`ctrl shift D`, its header's **Clean…**, or Commands) empties it after asking; `u` brings it back.
 - **Marks** (`shift M`) lists everything you have marked, one row per passage: its highlight, tags, and note (or the verse, where there is no note), in Bible order, starting at the passage you are reading (`here`). `enter` opens a row's passage, Marks staying beside it. Marks kept in another version say "from KJV". Edit a row where it is: `w` writes its note right in the row (`esc` is done), `t` edits its tags, `delete` removes the mark (`u` undoes). Past ten marks a filter appears (`/`): words match the reference, note, and verse, and `#grace` keeps a tag's marks; clicking a row's tag does the same. **Manage tags** (`ctrl t`) renames, deletes, or merges tags; names are shared across versions, assignments belong to one version.
 

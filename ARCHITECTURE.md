@@ -327,7 +327,9 @@ files.
   it does not take go to the owner (`keyPressed`). Footnotes use it: a
   marker's click or `i` on the cursor verse shows the note, `↑`/`↓` step
   through the chapter's notes (`bible.footnotes`) without moving the reader,
-  `y` copies, `enter` opens See also on the note's verse.
+  `y` copies, `enter` opens See also on the note's verse. Compare uses it as
+  a list (`rows`, `currentRow`; `peekKind` "compare"): each version's text
+  for the selection, opened under its last verse.
 
 ### Selection bar
 - A verse selection made with the mouse (`mouseSelected`, from Verse rows and
@@ -342,9 +344,12 @@ files.
 ### Compare
 - `compareVersions(scope)` reads the scope's endpoints in every installed
   generation (`TagBible`, read-only), in library order; a version missing
-  either endpoint is `available: false`. The Versions dialog shows them under
-  each row while a selection exists (`c` opens it on the list); copying a row
-  is `copyScope` with that version's ID, and switching keeps the passage.
+  either endpoint is `available: false`. `c` shows them in a peek under the
+  selection (`openCompareCard`: `j`/`k` choose, starting on the first other
+  version that has the passage; `y`/`shift Y` copy, `enter` switches), and the
+  Versions dialog shows them under each row while a selection exists; copying
+  a row is `copyScope` with that version's ID, and switching keeps the
+  passage.
 
 ### Search
 - The active version, or every installed version (`searchAllVersions`, a

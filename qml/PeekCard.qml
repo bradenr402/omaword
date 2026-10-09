@@ -4,12 +4,13 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// A peek: what the text points to (a footnote), read where it is, without
-// leaving the passage or opening a panel. It opens at once below its anchor
-// (above when there is no room), keeps the keyboard while open, and closes
-// on esc or a click outside, which acts on nothing else; the owner plays its
-// exit (menuGhost, toward `origin`). Its actions are a HintRow in buttons
-// mode, as on the selection bar; other keys go to the owner (keyPressed).
+// A peek: what the text points to (a footnote) or how other versions read it
+// (Compare), read where it is, without leaving the passage or opening a
+// panel. It opens at once below its anchor (above when there is no room),
+// keeps the keyboard while open, and closes on esc or a click outside, which
+// acts on nothing else; the owner plays its exit (menuGhost, toward
+// `origin`). Its actions are a HintRow in buttons mode, as on the selection
+// bar; other keys go to the owner (keyPressed).
 Popup {
     id: card
     required property var theme
@@ -17,8 +18,13 @@ Popup {
     property string title: ""
     property string body: ""
     property var parts: []
+    // A list in place of the body (Compare): rows {title, text, muted}, the
+    // current one tinted; a click on a row makes it current (rowClicked).
+    property var rows: []
+    property int currentRow: 0
     property point origin: Qt.point(0, 0)
     signal keyPressed(var event)
+    signal rowClicked(int index)
 
     parent: Overlay.overlay
     modal: true
@@ -28,7 +34,7 @@ Popup {
     enter: null
     exit: null
     padding: 0
-    width: Math.min(420 * uiScale, (parent ? parent.width : 420) - 16)
+    width: Math.min((rows.length ? 520 : 420) * uiScale, (parent ? parent.width : 420) - 16)
 
     // Below the anchor's scene point, or above it, kept inside the window.
     function show(sceneX, sceneY, lineHeight) {
@@ -64,11 +70,70 @@ Popup {
             topPadding: 12 * card.uiScale; leftPadding: 14 * card.uiScale; rightPadding: 14 * card.uiScale
             Layout.fillWidth: true
         }
+        ListView {
+            id: rowList
+            objectName: "peekRows"
+            visible: card.rows.length > 0
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? Math.min(contentHeight, 0.5 * ((card.parent as Item)?.height ?? 600)) : 0
+            Layout.topMargin: visible ? 6 * card.uiScale : 0
+            Layout.bottomMargin: visible ? 6 * card.uiScale : 0
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            model: card.rows
+            currentIndex: card.currentRow
+            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+            delegate: Rectangle {
+                id: row
+                required property var modelData
+                required property int index
+                readonly property bool current: index === card.currentRow
+                objectName: "peekRow:" + index
+                width: rowList.width
+                implicitHeight: rowColumn.implicitHeight + 12 * card.uiScale
+                color: current ? Qt.rgba(card.theme.accent.r, card.theme.accent.g, card.theme.accent.b, 0.11) : "transparent"
+                Column {
+                    id: rowColumn
+                    x: 14 * card.uiScale
+                    y: 6 * card.uiScale
+                    width: parent.width - 28 * card.uiScale
+                    spacing: 2 * card.uiScale
+                    Text {
+                        objectName: "peekRowTitle:" + row.index
+                        width: parent.width
+                        text: row.modelData.title
+                        textFormat: Text.PlainText
+                        color: row.current ? card.theme.accent : card.theme.muted
+                        font.family: card.theme.fontFamily
+                        font.pixelSize: 12 * card.uiScale
+                        font.weight: Font.Medium
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        objectName: "peekRowText:" + row.index
+                        width: parent.width
+                        text: row.modelData.text
+                        textFormat: Text.PlainText
+                        wrapMode: Text.Wrap
+                        color: row.modelData.muted ? card.theme.muted : card.theme.foreground
+                        font.family: card.theme.fontFamily
+                        font.pixelSize: 14 * card.uiScale
+                        lineHeight: 1.25
+                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: card.rowClicked(row.index)
+                }
+            }
+        }
         Flickable {
             id: bodyView
             objectName: "peekBodyView"
+            visible: card.rows.length === 0
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(bodyText.implicitHeight, 0.4 * ((card.parent as Item)?.height ?? 600))
+            Layout.preferredHeight: visible ? Math.min(bodyText.implicitHeight, 0.4 * ((card.parent as Item)?.height ?? 600)) : 0
             contentHeight: bodyText.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
