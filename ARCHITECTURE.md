@@ -127,7 +127,9 @@ files.
   `size` in bytes, and `features` (`footnotes`, `headings`, `wordsOfJesus`,
   `apocrypha`), measured from the source when the entry was written (the
   Add version cards show the size as approximate); `VersionCatalog` rejects
-  the catalog when any is missing or unknown.
+  the catalog when any is missing or unknown. Add version lists only the
+  entries not installed, and an installed one while it downloads again
+  (`downloadId`: Versions' Re-import), showing its progress.
 - The reader and About show the imported `copr.htm` title/rights (site footer
   stripped), not the catalog summary. OJB is CC BY 4.0 (attribution required).
 - Personal data keys on source ID: same-ID reimport reconnects it.
