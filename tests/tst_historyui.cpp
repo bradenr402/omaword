@@ -741,8 +741,9 @@ private slots:
         // The tab's menu.
         navigate("John 1:5"); key(Qt::Key_R, Qt::ShiftModifier);
         QTRY_VERIFY(item("ribbonTab")->isVisible()); QTRY_VERIFY(!object("ribbonDrop")->property("running").toBool());
+        // At the ribbon, neither going back to it nor moving it here applies.
         rightClick(item("ribbonTab"));
-        QCOMPARE(menuIds(), QStringList({"ribbon", "placeRibbon", "removeRibbon"}));
+        QCOMPARE(menuIds(), QStringList({"removeRibbon"}));
         QVERIFY(QMetaObject::invokeMethod(object("contextMenu"), "triggerId", Q_ARG(QVariant, QString("removeRibbon"))));
         removed("John 1:5");
         // The footer's ↩ menu, away from it.

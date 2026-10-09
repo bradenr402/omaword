@@ -4738,11 +4738,12 @@ ApplicationWindow {
         notify("Ribbon removed from " + reference + " · " + keyText("placeRibbon") + " places it again", true)
         sounds.play("remove")
     }
-    // The ribbon tab's and the footer's ↩ menu.
-    function openRibbonMenu(sceneX, sceneY) {
-        contextMenu.show("ribbon", [menuAction("ribbon", "Back to the ribbon", "ribbon"),
-            menuAction("placeRibbon", "Move the ribbon here", "placeRibbon"), menuDivider,
-            menuAction("removeRibbon", "Remove the ribbon", "removeRibbon")], sceneX, sceneY)
+    // The footer's way back to the ribbon: back, move it here, or remove it.
+    // On the ribbon itself (its tab, in its chapter) only removing it applies.
+    function openRibbonMenu(sceneX, sceneY, onRibbon) {
+        const remove = menuAction("removeRibbon", "Remove the ribbon", "removeRibbon")
+        contextMenu.show("ribbon", onRibbon ? [remove] : [menuAction("ribbon", "Back to the ribbon", "ribbon"),
+            menuAction("placeRibbon", "Move the ribbon here", "placeRibbon"), menuDivider, remove], sceneX, sceneY)
     }
     function openRibbon() {
         if (!flushNote()) return false
@@ -5453,7 +5454,7 @@ ApplicationWindow {
                             onClicked: function(mouse) {
                                 if (mouse.button === Qt.RightButton) {
                                     const p = ribbonTabMouse.mapToItem(null, mouse.x, mouse.y)
-                                    app.openRibbonMenu(p.x, p.y)
+                                    app.openRibbonMenu(p.x, p.y, true)
                                 } else app.runCommand("ribbon")
                             }
                         }
