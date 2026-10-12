@@ -1,6 +1,6 @@
 import QtQuick
 
-// Shared list motions for the side panels, mirroring the reader: g (home)
+// Shared list motions for the side panels, mirroring the reader: gg (home)
 // first, shift G (end) last, ctrl d/u half a page (5 items), ctrl f/b and pgdn/pgup a page
 // (10 items). `move` receives a clamped-by-the-list delta. Invisible, so
 // layouts skip it; its shortcuts still follow `active`.
@@ -12,7 +12,7 @@ Item {
     visible: false
     width: 0
     height: 0
-    Shortcut { sequences: ["G", "Home"]; enabled: motion.active; onActivated: motion.move(-Math.max(1, motion.count)) }
+    Shortcut { sequences: ["G, G", "Home"]; enabled: motion.active; onActivated: motion.move(-Math.max(1, motion.count)) }
     Shortcut { sequences: ["Shift+G", "End"]; enabled: motion.active; onActivated: motion.move(Math.max(1, motion.count)) }
     Shortcut { sequence: "Ctrl+D"; enabled: motion.active; onActivated: motion.move(5) }
     Shortcut { sequence: "Ctrl+U"; enabled: motion.active; onActivated: motion.move(-5) }

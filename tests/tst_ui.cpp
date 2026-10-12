@@ -3063,12 +3063,12 @@ private slots:
         QTRY_COMPARE(item("readerScrollbarThumb")->width(),10.0);
         key(Qt::Key_J); QCOMPARE(bible->cursorVerse(),22);
         key(Qt::Key_K,Qt::ShiftModifier); QCOMPARE(bible->selectedStart(),20); QCOMPARE(bible->selectedEnd(),22);
-        key(Qt::Key_Escape); key(Qt::Key_2); key(Qt::Key_7); key(Qt::Key_G);
+        key(Qt::Key_Escape); key(Qt::Key_2); key(Qt::Key_7); key(Qt::Key_G); key(Qt::Key_G);
         QCOMPARE(bible->cursorVerse(),27);
         QTRY_VERIFY(blockPoint(27).y() < window->height());
         key(Qt::Key_J); QCOMPARE(bible->chapter(),18); QCOMPARE(bible->cursorVerse(),1);
         key(Qt::Key_K); QCOMPARE(bible->chapter(),17); QCOMPARE(bible->cursorVerse(),27);
-        key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
+        key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
         QTRY_VERIFY(blockPoint(1).y() >= 0);
         key(Qt::Key_D,Qt::ControlModifier); QCOMPARE(bible->cursorVerse(),6);
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
@@ -3095,7 +3095,7 @@ private slots:
         QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,bottom);
         const auto selected = window->property("freeSelectedText").toString();
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),selected);
-        key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
+        key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
         QVERIFY(window->property("freeSelectedText").toString().isEmpty());
         const auto quoted = bible->copySelection(), plain = bible->copySelection(true);
         for (bool plainText : {false,true}) {
@@ -4031,17 +4031,19 @@ private slots:
     }
     void countedVerseAndCancellation() {
         reference("John 3:16");
-        type("20g"); QCOMPARE(bible->cursorVerse(),20);
-        type("12G"); QCOMPARE(bible->cursorVerse(),12);
+        // A count and gg (as in Vim), or G: that verse; a lone g waits for its second.
+        type("20g"); QCOMPARE(bible->cursorVerse(),16);
+        type("g"); QCOMPARE(bible->cursorVerse(),20);
+        type("12"); key(Qt::Key_G,Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(),12);
         QSignalSpy selection(bible.get(),&BibleBackend::selectionChanged);
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
         const auto before = bible->selectionReference();
-        type("999g"); QCOMPARE(bible->selectionReference(),before);
-        type("0g"); QCOMPARE(bible->selectionReference(),before);
+        type("999gg"); QCOMPARE(bible->selectionReference(),before);
+        type("0gg"); QCOMPARE(bible->selectionReference(),before);
         QCOMPARE(selection.count(),0); QCOMPARE(navigation.count(),0);
         QVERIFY(bible->error().isEmpty());
         reference("Matthew 17:20");
-        type("21g"); QCOMPARE(bible->cursorVerse(),20);
+        type("21gg"); QCOMPARE(bible->cursorVerse(),20);
         QVERIFY(bible->error().isEmpty());
         reference("John 3:16");
         for (const auto action : {Qt::Key_J,Qt::Key_V,Qt::Key_X,Qt::Key_Space,Qt::Key_Z}) {
@@ -4074,7 +4076,7 @@ private slots:
         item("readerSurface")->forceActiveFocus();
         type("20"); QTest::qWait(2100);
         QVERIFY(window->property("verseCount").toString().isEmpty());
-        key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
+        key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
     }
     void fiveAndTenVerseMovement() {
         for (bool visual : {false,true}) {
@@ -4165,7 +4167,7 @@ private slots:
         QTRY_COMPARE(bible->chapter(),3);
         key(Qt::Key_L); QCOMPARE(bible->chapter(),4);
         key(Qt::Key_H); QCOMPARE(bible->chapter(),3);
-        key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
+        key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
         key(Qt::Key_G,Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(),36);
         QCOMPARE(bible->selectedStart(),36); QCOMPARE(bible->selectedEnd(),36);
     }
@@ -4712,7 +4714,7 @@ private slots:
         QVERIFY(tagged >= 0);
         QCOMPARE(rows[tagged].toMap().value("reference").toString(),QString("John 3:17"));
         for (int i = tagged + 1; i < rows.size(); ++i) QCOMPARE(rows[i].toMap().value("section").toString(),QString("openBible"));
-        key(Qt::Key_G);
+        key(Qt::Key_G); key(Qt::Key_G);
         for (int i = 0; i < tagged; ++i) key(Qt::Key_J);
         QCOMPARE(prop("studyList","currentIndex").toInt(),tagged);
         QApplication::clipboard()->clear();

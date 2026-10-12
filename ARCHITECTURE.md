@@ -177,7 +177,7 @@ files.
   placed time); `preferences` (global, incl. `historyEnabled`); `installed`, `library`.
 - History: each window keeps an in-memory jump stack in QML (`[`/`]` browser
   semantics, `-` swaps with the previous location; never saved). Jumps
-  (palette, search, panel opens, `g`/`G`/counts, version switches) push it; verse
+  (palette, search, panel opens, `gg`/`G`/counts, version switches) push it; verse
   and chapter steps do not. A location enters the shared `history` list only
   after the window stays on that chapter for `historyDwellMs` (5 s). Disabling
   History clears both tables and stops recording; it is excluded from backups.
@@ -507,6 +507,10 @@ files.
   first keys (`introParts`) once, when the library goes from empty to ready,
   remembered in `discovery.ini` (`AppConfigLocation`). `modePill` names Visual
   or Characters above the footer's mode button.
+- `gg` (`first`; a count first: `20gg`) and the lists' `gg` (`ListMotionKeys`)
+  are two-key Qt sequences, so a key after a lone `g` is spent, as in Vim;
+  Notes' Linked from list, which handles its keys itself, does the same
+  (`linkedFirstPending`).
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw
   `paintLayoutGlyph`'s icons.

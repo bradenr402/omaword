@@ -248,7 +248,7 @@ ApplicationWindow {
         if (charMode && charPending === "g") return [["G", "chapter start"], ["E", "previous word end"]]
         if (charMode && (charPending === "i" || charPending === "a")) return [["W", charPending === "i" ? "word" : "word and space"], ["S", "sentence"]]
         if (zPending) return [["Z", "center"], ["T", "to top"], ["B", "to bottom"]]
-        if (verseCount.length) return [[["J", "K"], verseCount + " verses"], ["G", "verse " + verseCount], [["H", "L"], verseCount + " chapters"],
+        if (verseCount.length) return [[["J", "K"], verseCount + " verses"], ["G, G", "verse " + verseCount], [["H", "L"], verseCount + " chapters"],
             ["Escape", "cancel", function() { app.clearCount() }]]
         return []
     }
@@ -2223,15 +2223,28 @@ ApplicationWindow {
         linkedList.currentIndex = Math.max(0, Math.min(linkedFrom.length - 1, linkedList.currentIndex))
         linkedList.forceActiveFocus()
     }
+    property bool linkedFirstPending: false
     // Linked from list keys; `run` false only claims them (ShortcutOverride).
     function linkedKey(event, run) {
         const mods = event.modifiers & ~Qt.KeypadModifier
         const row = linkedFrom[linkedList.currentIndex]
         const plain = mods === Qt.NoModifier
+        // After a lone g, any key but g completes nothing and is spent, as a
+        // key after a waiting g is everywhere (gg is a two-key sequence).
+        const modifierKey = [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta].includes(event.key)
+        if (linkedFirstPending && !modifierKey && !(plain && event.key === Qt.Key_G)) {
+            if (run) { linkedFirstPending = false; event.accepted = true }
+            return true
+        }
         let action = null
         if (plain && (event.key === Qt.Key_J || event.key === Qt.Key_Down)) action = function() { app.moveLinked(1) }
         else if (plain && (event.key === Qt.Key_K || event.key === Qt.Key_Up)) action = function() { app.moveLinked(-1) }
-        else if (plain && (event.key === Qt.Key_G || event.key === Qt.Key_Home)) action = function() { app.moveLinked(-linkedList.currentIndex) }
+        // gg (as in every list) or home: the first; a lone g waits for its second.
+        else if (plain && event.key === Qt.Key_G) action = function() {
+            if (app.linkedFirstPending) { app.linkedFirstPending = false; app.moveLinked(-linkedList.currentIndex) }
+            else app.linkedFirstPending = true
+        }
+        else if (plain && event.key === Qt.Key_Home) action = function() { app.moveLinked(-linkedList.currentIndex) }
         else if ((mods === Qt.ShiftModifier && event.key === Qt.Key_G) || (plain && event.key === Qt.Key_End))
             action = function() { app.moveLinked(app.linkedFrom.length - 1 - linkedList.currentIndex) }
         else if (plain && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) action = function() { if (row) app.openLinkedNote(row); else app.rejected() }
@@ -4278,8 +4291,8 @@ ApplicationWindow {
         { id: "previousVerse", group: "Navigate", title: "Previous verse", sequences: ["K", "Up"] },
         { id: "nextVerse", group: "Navigate", title: "Next verse", sequences: ["J", "Down"] },
         { id: "countMotion", group: "Navigate", title: "Repeat a verse motion by a count", sequences: ["4, J"], explanation: true },
-        { id: "goToVerse", group: "Navigate", title: "Go to verse number", sequences: ["2, 0, G"], aliases: ["2, 0, Shift+G"], aliasReason: "Vim's go-to-line.", explanation: true },
-        { id: "first", group: "Navigate", title: "Select chapter beginning", sequences: ["G", "Home"] },
+        { id: "goToVerse", group: "Navigate", title: "Go to verse number", sequences: ["2, 0, G, G"], aliases: ["2, 0, Shift+G"], aliasReason: "Vim's go-to-line.", explanation: true },
+        { id: "first", group: "Navigate", title: "Select chapter beginning", sequences: ["G, G", "Home"] },
         { id: "last", group: "Navigate", title: "Select chapter end", sequences: ["Shift+G", "End"] },
         { id: "previousFive", group: "Navigate", title: "Previous 5 verses", sequences: ["Ctrl+U"] },
         { id: "nextFive", group: "Navigate", title: "Next 5 verses", sequences: ["Ctrl+D"] },
@@ -4424,7 +4437,7 @@ ApplicationWindow {
         // List panels (Annotations, Desk, History, Study) bind these themselves.
         { id: "listNext", group: "Lists", title: "Next item", sequences: ["J", "Down"], scope: "list", explanation: true },
         { id: "listPrevious", group: "Lists", title: "Previous item", sequences: ["K", "Up"], scope: "list", explanation: true },
-        { id: "listFirst", group: "Lists", title: "First item", sequences: ["G", "Home"], scope: "list", explanation: true },
+        { id: "listFirst", group: "Lists", title: "First item", sequences: ["G, G", "Home"], scope: "list", explanation: true },
         { id: "listLast", group: "Lists", title: "Last item", sequences: ["Shift+G", "End"], scope: "list", explanation: true },
         { id: "listHalfDown", group: "Lists", title: "Down 5 items", sequences: ["Ctrl+D"], scope: "list", explanation: true },
         { id: "listHalfUp", group: "Lists", title: "Up 5 items", sequences: ["Ctrl+U"], scope: "list", explanation: true },
@@ -6567,6 +6580,7 @@ ApplicationWindow {
                         // y / shift Y copy, d Desk, esc (or ctrl ↑, tab) returns to the note.
                         property int currentIndex: 0
                         visible: app.linkedFrom.length > 0
+                        onActiveFocusChanged: app.linkedFirstPending = false
                         Layout.fillWidth: true
                         spacing: 2
                         Keys.onShortcutOverride: function(event) { if (app.linkedKey(event, false)) event.accepted = true }
@@ -9712,8 +9726,8 @@ ApplicationWindow {
             // Application context reaches the notes drawer's popup focus scope;
             // only the active reader window may register its catalog shortcuts.
             context: Qt.ApplicationShortcut
-            // Home/End stay plain chapter edges; g/G also accept a count.
-            sequences: modelData.id === "first" ? ["G"] : modelData.id === "last" ? ["Shift+G"]
+            // Home/End stay plain chapter edges; gg/G also accept a count (20gg).
+            sequences: modelData.id === "first" ? ["G, G"] : modelData.id === "last" ? ["Shift+G"]
                 : modelData.sequences.concat(modelData.aliases || [])
             enabled: app.active && app.shortcutEnabled(modelData)
             // Verse motions repeat on our own timer, without the platform delay.

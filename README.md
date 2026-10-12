@@ -87,8 +87,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `k` · `↑`: Previous verse
 - `j` · `↓`: Next verse
 - `4j`: Repeat a verse motion by a count
-- `20g`: Go to verse number
-- `g` · `home`: Select chapter beginning
+- `20gg`: Go to verse number
+- `gg` · `home`: Select chapter beginning
 - `shift G` · `end`: Select chapter end
 - `ctrl u`: Previous 5 verses
 - `ctrl d`: Next 5 verses
@@ -231,7 +231,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 - `j` · `↓`: Next item
 - `k` · `↑`: Previous item
-- `g` · `home`: First item
+- `gg` · `home`: First item
 - `shift G` · `end`: Last item
 - `ctrl d`: Down 5 items
 - `ctrl u`: Up 5 items

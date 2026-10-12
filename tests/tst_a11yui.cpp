@@ -2467,7 +2467,13 @@ private slots:
         key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 13);
         auto last = item("linkedFromRow13"); auto view = item("notesScroll");
         QTRY_VERIFY(last->mapRectToItem(view, last->boundingRect()).bottom() <= view->height() + 1);
+        // A lone g waits for its second: gg is the first.
+        key(Qt::Key_G); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 13);
         key(Qt::Key_G); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 0);
+        // A key after a lone g is spent (as in Vim): j moves on only next time.
+        key(Qt::Key_J); key(Qt::Key_G); key(Qt::Key_J); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 1);
+        key(Qt::Key_J); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 2);
+        key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(item("linkedFrom")->property("currentIndex").toInt(), 0);
         auto first = item("linkedFromRow0"); QTRY_VERIFY(first->mapRectToItem(view, first->boundingRect()).top() >= -1);
         // Mouse: right-click a row from the editor: the list takes the keyboard its menu names.
         item("noteEditor")->forceActiveFocus(); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());

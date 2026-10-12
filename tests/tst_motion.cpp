@@ -394,7 +394,7 @@ private slots:
         key(Qt::Key_N);
         expectPulse(bible->selectedStart(), bible->selectedEnd());
         // Counted g.
-        navigate("John 1:1"); type("12"); key(Qt::Key_G);
+        navigate("John 1:1"); type("12"); key(Qt::Key_G); key(Qt::Key_G);
         QTRY_COMPARE(bible->cursorVerse(), 12);
         expectPulse(12, 12);
         // A link followed from the Desk (its quotation's reference).

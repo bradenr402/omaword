@@ -285,9 +285,9 @@ private slots:
         key(Qt::Key_J); key(Qt::Key_K); key(Qt::Key_J); key(Qt::Key_L); key(Qt::Key_H); key(Qt::Key_Down);
         QVERIFY(stack().isEmpty());
         key(Qt::Key_BracketLeft); QVERIFY(toast().contains("No earlier jump"));
-        type("20"); key(Qt::Key_G); QCOMPARE(here(), QString("John 1:20")); QCOMPARE(stack().size(), 2);
+        type("20"); key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(here(), QString("John 1:20")); QCOMPARE(stack().size(), 2);
         key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(here(), QString("John 1:65")); QCOMPARE(stack().size(), 3);
-        key(Qt::Key_G); QCOMPARE(here(), QString("John 1:1")); QCOMPARE(stack().size(), 4);
+        key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(here(), QString("John 1:1")); QCOMPARE(stack().size(), 4);
         install(second); QVERIFY(bible->switchVersion(secondId())); navigate("John 1:7");
         const auto net = bible->versionId(), kjv = secondId();
         const int before = stack().size();
@@ -490,12 +490,12 @@ private slots:
             const int last = list->property("count").toInt() - 1;
             QVERIFY2(last >= 20, qPrintable(panel));
             key(Qt::Key_G, Qt::ShiftModifier); QVERIFY2(at() == last, qPrintable(panel));
-            key(Qt::Key_G); QVERIFY2(at() == 0, qPrintable(panel));
+            key(Qt::Key_G); key(Qt::Key_G); QVERIFY2(at() == 0, qPrintable(panel));
             key(Qt::Key_D, Qt::ControlModifier); QVERIFY2(at() == 5, qPrintable(panel));
             key(Qt::Key_F, Qt::ControlModifier); QVERIFY2(at() == 15, qPrintable(panel));
             key(Qt::Key_PageDown); QVERIFY2(at() == qMin(25, last), qPrintable(panel));
             key(Qt::Key_PageDown); key(Qt::Key_PageDown); QVERIFY2(at() == last, qPrintable(panel));
-            key(Qt::Key_G); key(Qt::Key_PageDown); QVERIFY2(at() == 10, qPrintable(panel));
+            key(Qt::Key_G); key(Qt::Key_G); key(Qt::Key_PageDown); QVERIFY2(at() == 10, qPrintable(panel));
             key(Qt::Key_U, Qt::ControlModifier); QVERIFY2(at() == 5, qPrintable(panel));
             key(Qt::Key_B, Qt::ControlModifier); QVERIFY2(at() == 0, qPrintable(panel));
             key(Qt::Key_D, Qt::ControlModifier); key(Qt::Key_D, Qt::ControlModifier); key(Qt::Key_PageUp); QVERIFY2(at() == 0, qPrintable(panel));
@@ -519,7 +519,7 @@ private slots:
         call("readerFocus"); key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(panelOpen("marksOpen"));
         QTRY_VERIFY(item("collectionList")->hasActiveFocus());
         auto saved = object("collectionList"); expectMotions(saved, "annotations");
-        key(Qt::Key_G); key(Qt::Key_Slash); QTRY_VERIFY(item("savedSearch")->hasActiveFocus());
+        key(Qt::Key_G); key(Qt::Key_G); key(Qt::Key_Slash); QTRY_VERIFY(item("savedSearch")->hasActiveFocus());
         key(Qt::Key_G, Qt::ShiftModifier); key(Qt::Key_PageDown); key(Qt::Key_D, Qt::ControlModifier);
         QCOMPARE(object("savedSearch")->property("text").toString().toLower(), QString("g")); // Typed, not a motion.
         QVERIFY(item("savedSearch")->hasActiveFocus());

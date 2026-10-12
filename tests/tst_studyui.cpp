@@ -641,7 +641,7 @@ private slots:
         key(Qt::Key_Down); QCOMPARE(studyIndex(), 2);
         key(Qt::Key_K); QCOMPARE(studyIndex(), 1);
         key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(studyIndex(), 7);
-        key(Qt::Key_G); QCOMPARE(studyIndex(), 0);
+        key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(studyIndex(), 0);
         key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(studyIndex(), 5);
         key(Qt::Key_U, Qt::ControlModifier); QCOMPARE(studyIndex(), 0);
         // h and l step nothing: there are no tabs.
@@ -704,7 +704,7 @@ private slots:
         closeStudy();
         openStudy(); QCOMPARE(rows().size(), 7); QVERIFY(!item("studySearch")->isVisible());
         // t edits the current row's tags over the panel.
-        key(Qt::Key_G); key(Qt::Key_J); key(Qt::Key_T);
+        key(Qt::Key_G); key(Qt::Key_G); key(Qt::Key_J); key(Qt::Key_T);
         QTRY_VERIFY(object("tagsUi")->property("pickerVisible").toBool());
         QCOMPARE(value(object("tagsUi")->property("editingScope")).toMap()["start"].toInt(), 3);
         key(Qt::Key_Escape); QTRY_VERIFY(!object("tagsUi")->property("pickerVisible").toBool());
