@@ -120,3 +120,10 @@ printf 'Installed %s to %s/.local/bin/%s\nEnsure %s/.local/bin is on PATH for th
 if [[ -d $data_home/$BRAND_ID/install-backups ]]; then
     printf 'Older installs kept backups in %s; nothing uses them now, so you can delete it.\n' "$data_home/$BRAND_ID/install-backups"
 fi
+# A running OmaWord keeps the build it started with, and every launch opens
+# its window in that process: say so, or the new build looks missing.
+for pid in $(pgrep -x -- "$BRAND_ID" 2>/dev/null); do
+    if [[ $(readlink -- "/proc/$pid/exe" 2>/dev/null) == "${destinations[0]} (deleted)" ]]; then
+        printf '%s is still running the previous build (PID %s): close every %s window to run this one.\n' "$BRAND_NAME" "$pid" "$BRAND_NAME"
+    fi
+done

@@ -50,7 +50,7 @@ o.window({ class = "^omaword$", title = "^Look up · OmaWord$" }, { float = true
 
 If you copy from it with OmaWord otherwise closed, OmaWord stays running without a window until something else is copied, so what you copied can still be pasted.
 
-To update, `git pull` and run `bin/build` and `bin/install` again. `bin/install` keeps the files it replaces from one previous install in `~/.local/state/omaword/previous-install`.
+To update, `git pull` and run `bin/build` and `bin/install` again, then close every OmaWord window: a running OmaWord keeps its build until it quits, and opens new windows itself (`bin/install` says when it is still running). `bin/install` keeps the files it replaces from one previous install in `~/.local/state/omaword/previous-install`.
 
 To install it as an Arch package instead (to `/usr`, managed by pacman), build the recipe in `packaging/`; it builds the latest commit on GitHub:
 
