@@ -594,6 +594,13 @@ files.
   rendering): a highlight toggle went from 835 ms to 105–127 ms (a 40-verse
   chapter: 183 ms to 33 ms), against Block's 488 ms; opening the chapter is
   still about 2.9 s (Block: 3.3 s), a highlight repaint of every row 1.4 s.
+- A verse step (`j`, `k`, `5j`; `moveSelection`, `moveByVerses`) within the
+  chapter shown moves only the selection (`stepSelection`): the chapter is
+  not read again and no row is announced (`versesChanged`), so no layout
+  reads its rows again; a step past the chapter's edge opens the next or
+  previous one (`goToSelection`). Holding `j` steps every 33 ms: the
+  command takes about 4 ms (BSB Psalm 119, any layout), where re-reading
+  every row took 60–75 ms (96–143 ms with a window beside).
 - Paragraph/Block: one `BlockDocument`. Annotation endpoints are reserved
   transparent inline cells (+ word joiners, no font merging) where QML paints
   brackets and superscript glyphs. Outer starts first, inner ends first;

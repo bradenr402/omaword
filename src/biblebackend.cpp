@@ -2994,9 +2994,18 @@ void BibleBackend::moveSelection(int delta, bool extend)
     const qint64 target = m_cursor ? qint64(m_cursor) + delta
         : qint64(edge) + delta - (delta > 0 ? 1 : -1);
     const int cursor = int(std::clamp(target,qint64(1),qint64(canonVerses().size()-1)));
+    stepSelection(extend && m_anchor ? m_anchor : cursor,cursor);
+}
+// A verse step: within the chapter shown it moves only the selection (held,
+// j steps 30 times a second); into another chapter it opens that chapter.
+void BibleBackend::stepSelection(int anchor, int cursor)
+{
     const auto v = endpoint(cursor);
-    goToSelection(v.book,v.chapter,extend && m_anchor ? m_anchor : cursor,cursor,
-                  v.book != m_book || v.chapter != m_chapter ? 0 : m_position);
+    if (v.book != m_book || v.chapter != m_chapter) { goToSelection(v.book,v.chapter,anchor,cursor,0); return; }
+    if (!persistState(m_book,m_chapter,anchor,cursor,m_position)) return;
+    m_anchor = anchor; m_cursor = cursor;
+    intersectSelection();
+    updateSelection(); clearError(); emit selectionChanged();
 }
 void BibleBackend::setReadingPosition(double position)
 {
@@ -3020,9 +3029,7 @@ void BibleBackend::moveByVerses(int delta, bool extend)
         else target = std::clamp(target,qint64(first),qint64(last));
     }
     const int cursor = int(std::clamp(target,qint64(1),qint64(canonVerses().size()-1)));
-    const auto v = endpoint(cursor);
-    goToSelection(v.book,v.chapter,extend ? (m_anchor ? m_anchor : first) : cursor,cursor,
-                  v.book != m_book || v.chapter != m_chapter ? 0 : m_position);
+    stepSelection(extend ? (m_anchor ? m_anchor : first) : cursor,cursor);
 }
 
 bool BibleBackend::loadAnnotations(QVector<Annotation> *result)

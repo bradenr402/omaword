@@ -522,6 +522,7 @@ private:
     bool protectDestination(const QString &path);
     bool goTo(int book, int chapter, int start, int end);
     bool goToSelection(int book, int chapter, int anchor, int cursor, double position);
+    void stepSelection(int anchor, int cursor);
     bool parseReference(QString input, int *book, int *chapter, int *start, int *end, QString *error) const;
     struct Link { int start = 0, length = 0, first = 0, last = 0; QString text, reference; };
     QVector<Link> findLinks(const QString &text) const;

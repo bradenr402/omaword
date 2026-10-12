@@ -401,6 +401,27 @@ private slots:
         QCOMPARE(bible->selectionReference(),QString("John 3:36–4:2"));
         bible->moveSelection(-3,true); QCOMPARE(bible->selectionReference(),QString("John 3:35–36"));
     }
+    // A verse step within the chapter shown moves only the selection: the
+    // chapter is neither read again nor announced (held, j steps 30 times a
+    // second, and every verse row would be read again for each); a step into
+    // another chapter opens it.
+    void verseStepsWithinAChapterMoveOnlyTheSelection() {
+        install(net); QVERIFY(bible->navigate("JHN 3:34"));
+        QSignalSpy verses(bible.get(), &BibleBackend::versesChanged), navigation(bible.get(), &BibleBackend::navigationChanged),
+            passage(bible.get(), &BibleBackend::passageChanged), selection(bible.get(), &BibleBackend::selectionChanged);
+        bible->moveSelection(1); QCOMPARE(bible->selectionReference(), QString("John 3:35"));
+        bible->moveSelection(1, true); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:35–36"));
+        bible->moveByVerses(-5); QCOMPARE(bible->cursorVerse(), 31);
+        QCOMPARE(selection.count(), 3);
+        QCOMPARE(verses.count(), 0); QCOMPARE(navigation.count(), 0); QCOMPARE(passage.count(), 0);
+        // Saved as it moves.
+        { BibleBackend reopened; QCOMPARE(reopened.selectionReference(), QString("John 3:31")); }
+        // From the last verse, into the next chapter: that one opens.
+        bible->selectVerses(36, 36); verses.clear(); navigation.clear();
+        bible->moveSelection(1); QCOMPARE(bible->selectionReference(), QString("John 4:1"));
+        QCOMPARE(bible->chapter(), 4); QCOMPARE(navigation.count(), 1); QVERIFY(verses.count() >= 1);
+        bible->moveSelection(-1); QCOMPARE(bible->selectionReference(), QString("John 3:36")); QCOMPARE(bible->chapter(), 3);
+    }
     void quotationReferenceTypography_data() {
         QTest::addColumn<QString>("input");
         QTest::addColumn<QString>("label");
