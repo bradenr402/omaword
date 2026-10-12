@@ -7670,6 +7670,7 @@ ApplicationWindow {
     // button, which closes it as a button does. The wheel still scrolls the
     // text beneath.
     MouseArea {
+        id: textPopoverOutside
         objectName: "textPopoverOutside"
         parent: Overlay.overlay
         anchors.fill: parent
@@ -7677,7 +7678,7 @@ ApplicationWindow {
         visible: textPopover.visible
         acceptedButtons: Qt.AllButtons
         onPressed: function(mouse) {
-            const onAa = textControl.contains(textControl.mapFromItem(this, mouse.x, mouse.y))
+            const onAa = textControl.contains(textControl.mapFromItem(textPopoverOutside, mouse.x, mouse.y))
             if (!onAa) textPopover.close()
             mouse.accepted = !onAa && mouse.button !== Qt.RightButton
         }
