@@ -11,10 +11,11 @@ Slider {
     implicitWidth: 200 * slider.controller.scale
     padding: 9 * slider.controller.scale
     Keys.priority: Keys.BeforeItem
-    // ← → and ↑ ↓ all adjust by one step (right and up increase).
+    // ← → adjust by one step (right increases); ↑ ↓ are left to the dialog,
+    // which steps between its controls with them.
     Keys.onPressed: function(event) {
-        if (event.modifiers === Qt.NoModifier && [Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down].includes(event.key)) {
-            if (event.key === Qt.Key_Up || event.key === Qt.Key_Right) increase()
+        if (event.modifiers === Qt.NoModifier && [Qt.Key_Left, Qt.Key_Right].includes(event.key)) {
+            if (event.key === Qt.Key_Right) increase()
             else decrease()
             moved()
             event.accepted = true

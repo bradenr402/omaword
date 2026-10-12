@@ -594,7 +594,7 @@ private slots:
         auto first = item("settingfocus"); QVERIFY(first); first->forceActiveFocus();
         QTRY_VERIFY(first->mapRectToItem(item("settingsScroll"), first->boundingRect()).top() >= -1);
         key(Qt::Key_Home); QTRY_COMPARE(contentY("settingsScroll"), 0.0);
-        key(Qt::Key_J); QTRY_VERIFY(contentY("settingsScroll") > 0);
+        key(Qt::Key_PageDown); QTRY_VERIFY(contentY("settingsScroll") > 0);
         key(Qt::Key_Home); QTRY_COMPARE(contentY("settingsScroll"), 0.0);
         auto line = item("lineHeightSlider"); line->forceActiveFocus(); QCoreApplication::processEvents();
         const auto slider = line->mapRectToItem(item("settingsScroll"), line->boundingRect());
@@ -1673,12 +1673,14 @@ private slots:
     void settingsSlidersTakeLeftAndRight() {
         run("settings"); QTRY_VERIFY(opened("settingsDialog"));
         auto font = item("fontSizeSlider"), line = item("lineHeightSlider");
-        // Keyboard: → and ↑ increase, ← and ↓ decrease.
+        // Keyboard: → increases, ← decreases; ↑ ↓ step to the other controls.
         font->forceActiveFocus();
         QTRY_VERIFY(object("fontSizeHints")->property("plainText").toString().contains(QStringLiteral("← → adjust")));
         key(Qt::Key_Right); QCOMPARE(bible->fontSize(), 19);
         key(Qt::Key_Left); key(Qt::Key_Left); QCOMPARE(bible->fontSize(), 17);
-        key(Qt::Key_Up); QCOMPARE(bible->fontSize(), 18);
+        key(Qt::Key_Right); QCOMPARE(bible->fontSize(), 18);
+        key(Qt::Key_Down); QVERIFY(line->hasActiveFocus()); QCOMPARE(bible->fontSize(), 18);
+        key(Qt::Key_Up); QVERIFY(font->hasActiveFocus()); QCOMPARE(bible->lineHeight(), 1.5);
         line->forceActiveFocus();
         QTRY_VERIFY(object("lineHeightHints")->property("plainText").toString().contains(QStringLiteral("← → adjust")));
         QVERIFY(!object("fontSizeHints")->property("plainText").toString().contains("adjust"));
@@ -2329,6 +2331,20 @@ private slots:
             QVERIFY2(order.contains(name), qPrintable(order.join(", ")));
         QVERIFY(order.indexOf("settingmarginNotes") < order.indexOf("readingMode:paragraph"));
         QVERIFY(order.indexOf("readingMode:block") < order.indexOf("fontSizeSlider"));
+        // Keyboard: ↓ and j step through the controls in tab's order, ↑ and k
+        // back, stopping at the ends; a disabled switch is passed over.
+        item("settingfocus")->forceActiveFocus();
+        QStringList stepped{focusName()};
+        for (int i = 0; i < 30; ++i) {
+            key(i % 2 ? Qt::Key_J : Qt::Key_Down);
+            if (focusName() == stepped.last()) break;
+            stepped << focusName();
+        }
+        QCOMPARE(stepped.first(), QString("settingfocus")); QCOMPARE(stepped.last(), QString("lineHeightSlider"));
+        QCOMPARE(lastSound(), QString("boundary"));
+        QCOMPARE(stepped, QStringList(QStringList{"settingfocus"} << order.mid(0, order.indexOf("lineHeightSlider") + 1)));
+        for (int i = stepped.size() - 2; i >= 0; --i) { key(i % 2 ? Qt::Key_K : Qt::Key_Up); QCOMPARE(focusName(), stepped[i]); }
+        key(Qt::Key_K); QCOMPARE(focusName(), QString("settingfocus")); QCOMPARE(lastSound(), QString("boundary"));
         // Keyboard: a focused layout choice takes enter; a switch takes space.
         item("readingMode:block")->forceActiveFocus(); key(Qt::Key_Return); QCOMPARE(bible->readingMode(), QString("block"));
         item("settingnumbers")->forceActiveFocus(); const bool numbers = bible->showVerseNumbers();

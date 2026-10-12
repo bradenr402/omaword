@@ -5269,6 +5269,23 @@ ApplicationWindow {
 
     // The layout icons (footer layout button, Reading settings' Layout
     // choices), drawn on a 24×24 canvas path already begun.
+    // Reading settings' controls in order (tab's order), the ones that take
+    // the keyboard now: ↑ ↓ and j k step through them, stopping at the ends.
+    function settingsControls() {
+        const list = []
+        for (let i = 0; i < settingSwitches.count; ++i) list.push(settingSwitches.itemAt(i))
+        for (let i = 0; i < settingsReimports.count; ++i) { const row = settingsReimports.itemAt(i); if (row) list.push(row.button) }
+        for (let i = 0; i < readingModeChoices.count; ++i) list.push(readingModeChoices.itemAt(i))
+        list.push(fontSizeSliderItem, lineHeightSlider)
+        return list.filter(function(control) { return !!control && control.visible && control.enabled })
+    }
+    function moveSetting(delta) {
+        const controls = settingsControls()
+        const at = controls.findIndex(function(control) { return control.activeFocus })
+        const next = at < 0 ? (delta > 0 ? 0 : controls.length - 1) : at + delta
+        if (next < 0 || next >= controls.length) { sounds.play("boundary"); return }
+        controls[next].forceActiveFocus(delta > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+    }
     function focusFirstSetting() {
         for (let i = 0; i < settingSwitches.count; ++i) {
             const control = settingSwitches.itemAt(i)
@@ -8664,6 +8681,15 @@ ApplicationWindow {
             id: settingsContent
             width: settingsScroll.availableWidth
             spacing: 12 * app.scale
+            // ↑ ↓ (j k) step through the settings as tab does; the page keys
+            // still scroll the dialog (KeyScrollView).
+            Keys.onPressed: function(event) {
+                const step = event.modifiers === Qt.NoModifier
+                    ? ([Qt.Key_Down, Qt.Key_J].includes(event.key) ? 1 : [Qt.Key_Up, Qt.Key_K].includes(event.key) ? -1 : 0) : 0
+                if (!step) return
+                event.accepted = true
+                app.moveSetting(step)
+            }
             RowLayout {
                 Label { text: "Reading settings"; color: desktop.foreground; font.pixelSize: 22 * app.scale; Layout.fillWidth: true }
             }
@@ -8677,16 +8703,19 @@ ApplicationWindow {
                 }
             }
             Repeater {
+                id: settingsReimports
                 model: Array.from(bible.versions).filter(function(version) { return app.wantsReimport(version) })
                 delegate: RowLayout {
                     id: reimportRow
                     required property var modelData
+                    readonly property Item button: reimportButton
                     Layout.fillWidth: true
                     Label {
                         text: reimportRow.modelData.abbreviation + " uses an older text format: re-import for " + app.reimportGains(reimportRow.modelData) + "."
                         color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                     }
                     QuietButton {
+                        id: reimportButton
                         objectName: "settingsReimport:" + reimportRow.modelData.id
                         text: "Re-import"; compact: true
                         enabled: !bible.busy && !catalog.busy
@@ -8706,6 +8735,7 @@ ApplicationWindow {
                 spacing: 4 * app.scale
                 uniformCellSizes: true
                 Repeater {
+                    id: readingModeChoices
                     model: ["paragraph", "verse", "block"]
                     delegate: QuietButton {
                         id: layoutChoice

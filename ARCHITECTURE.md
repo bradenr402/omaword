@@ -513,7 +513,10 @@ files.
   (`linkedFirstPending`).
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw
-  `paintLayoutGlyph`'s icons.
+  `paintLayoutGlyph`'s icons. In Reading settings `↑` `↓` and `j` `k` step
+  through the controls in tab's order (`settingsControls`, `moveSetting`:
+  disabled ones passed over, a boundary sound at the ends); the sliders take
+  only `←` `→`, and the page keys still scroll the dialog.
 - The side panels are not modal: with one open, the keys of
   `panelLeavingActions` (palettes, dialogs, reading toggles) act over it,
   from its list too, and while you write in a note or on the Desk page, the
