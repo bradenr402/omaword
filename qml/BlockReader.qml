@@ -178,7 +178,9 @@ Item {
     function focusMoved() {
         if (destroying || (dimFirst === focusFirst && dimLast === focusLast)) return
         dimFirst = focusFirst; dimLast = focusLast
-        updateDimRects()
+        // The veil (a canvas the size of the chapter) repaints only while it
+        // shows: outside focus mode a verse step must not repaint it.
+        if (backend.focusMode || dimLayer.visible) updateDimRects()
     }
     // Overlay alpha (0 = undimmed) currently painted over a verse; for tests.
     function dimLevel(number) {

@@ -5700,7 +5700,8 @@ ApplicationWindow {
                             objectName: "selectionBarHints"
                             x: parent.border.width; y: parent.border.width
                             theme: desktop
-                            parts: app.selectionBarParts()
+                            // Only while shown: hidden, it would remake its buttons on every verse step.
+                            parts: app.selectionBarShown ? app.selectionBarParts() : []
                             pixelSize: 12 * app.scale
                             partHeight: 30 * app.scale
                             partPadding: 10 * app.scale
@@ -5849,7 +5850,9 @@ ApplicationWindow {
                                 height: verseHeading.height + verseBody.height + 7 * app.readerScale
                                 // Focus-mode dimming: paint-only, so layout and hit-testing are unchanged.
                                 readonly property bool dimmed: app.verseDimmed(modelData.number)
-                                opacity: modelData.number < app.focusFirst || modelData.number > app.focusLast ? app.focusDimmedOpacity : 1
+                                // Outside focus mode (dimmed opacity 1) it reads no selection,
+                                // so a verse step does not reevaluate it on every row.
+                                opacity: app.focusDimmedOpacity === 1 ? 1 : modelData.number < app.focusFirst || modelData.number > app.focusLast ? app.focusDimmedOpacity : 1
                                 Item {
                                     id: verseHeading
                                     objectName: "verseHeading" + verseRow.modelData.number
@@ -5996,7 +5999,10 @@ ApplicationWindow {
                                 Rectangle {
                                     objectName: "selectionSegment" + verseRow.modelData.number
                                     x: verseRow.gutter - 9 * app.readerScale
-                                    y: verseRow.index > 0 && (bible.verses[verseRow.index - 1]?.number || 0) >= bible.selectedStart ? 0 : verseHeading.height
+                                    // Rows are in order and a selection is contiguous: a selected row
+                                    // after the first selected one joins the row above (no verse row is
+                                    // read here: every row reevaluates this on each verse step).
+                                    y: verseRow.selected && verseRow.modelData.number > bible.selectedStart ? 0 : verseHeading.height
                                     width: parent.width - x
                                     height: (verseRow.modelData.number < bible.selectedEnd ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
                                     visible: verseRow.selected && !app.charMode

@@ -620,9 +620,14 @@ files.
   chapter shown moves only the selection (`stepSelection`): the chapter is
   not read again and no row is announced (`versesChanged`), so no layout
   reads its rows again; a step past the chapter's edge opens the next or
-  previous one (`goToSelection`). Holding `j` steps every 33 ms: the
-  command takes about 4 ms (BSB Psalm 119, any layout), where re-reading
-  every row took 60–75 ms (96–143 ms with a window beside).
+  previous one (`goToSelection`). Holding `j` steps every 33 ms, so a step
+  touches nothing that does not change: Block's focus veil (a canvas the size
+  of the chapter) keeps its holes outside focus mode, the hidden selection
+  bar builds no buttons, and Verse rows read no other row and no selection
+  for their opacity outside focus mode. A step on BSB Psalm 119 (offscreen
+  software rendering, the whole frame) takes 3.5 ms in Paragraph and Block,
+  6.5 ms in Verse (7, 7, and 17.5 ms with a window beside), where re-reading
+  every row and repainting the veil took 35–63 ms (78–143 ms beside).
 - Paragraph/Block: one `BlockDocument`. Annotation endpoints are reserved
   transparent inline cells (+ word joiners, no font merging) where QML paints
   brackets and superscript glyphs. Outer starts first, inner ends first;

@@ -354,6 +354,19 @@ private slots:
     void dimmingInstantOnCursorMove() {
         QFETCH(QString, mode);
         setLayout(mode); navigate("John 1:5");
+        // Outside focus mode a verse step repaints nothing it does not show:
+        // the veil (a canvas the size of the chapter) keeps its holes, and
+        // the hidden selection bar has no buttons to remake.
+        if (mode != "verse") {
+            settle(); call("readerFocus");
+            const auto holes = [&] { return value(object("blockReader")->property("dimRects")).toList(); };
+            const auto before = holes();
+            key(Qt::Key_J); key(Qt::Key_J); settle();
+            QCOMPARE(holes(), before);
+            navigate("John 1:5");
+        }
+        QVERIFY(!prop("selectionBarShown").toBool());
+        QCOMPARE(object("selectionBarHints")->property("entries").toList().size(), 0);
         key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
         if (mode != "verse") QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() == bible->verses().size());
         settle(); call("readerFocus");
