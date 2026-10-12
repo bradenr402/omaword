@@ -7498,9 +7498,10 @@ ApplicationWindow {
     readonly property real textPopoverReserve: textPopover.visible ? Math.max(0, height - textPopover.y + 6 * scale) : 0
     onModalOpenChanged: if (modalOpen && textPopover.visible) textPopover.close()
     onFocusLayoutChanged: if (focusLayout && textPopover.visible) textPopover.close()
-    // A click anywhere outside Aa only closes it (Aa's own button included),
-    // as for menus; a right-click falls through, opening its menu there. The
-    // wheel still scrolls the text beneath.
+    // A click anywhere outside Aa only closes it, as for menus; a right-click
+    // falls through, opening its menu there, and so does a click on Aa's own
+    // button, which closes it as a button does. The wheel still scrolls the
+    // text beneath.
     MouseArea {
         objectName: "textPopoverOutside"
         parent: Overlay.overlay
