@@ -357,7 +357,7 @@ private slots:
     void reimportLocalFilePicker() {
         key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
         auto button = item("settingsReimport:study"); QVERIFY(button); QVERIFY(button->isVisible());
-        QVERIFY(item("wordsOfJesusUnmarked")->isVisible());
+        QVERIFY(item("settingwordsOfJesusNote")->isVisible());
         QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
         auto dialog = object("importDialog"); QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("visible").toBool());
