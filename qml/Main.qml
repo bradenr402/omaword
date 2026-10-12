@@ -8676,15 +8676,6 @@ ApplicationWindow {
                     Layout.fillWidth: true
                 }
             }
-            Label {
-                objectName: "wordsOfJesusUnmarked"
-                visible: bible.ready && !bible.hasWordsOfJesus
-                text: "Words of Jesus are not marked in this version" + (bible.textSchema > 0 && bible.textSchema < 4 ? " (re-import it in Versions to check)." : ".")
-                color: desktop.muted
-                font.pixelSize: 12 * app.scale
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
-            }
             Repeater {
                 model: Array.from(bible.versions).filter(function(version) { return app.wantsReimport(version) })
                 delegate: RowLayout {

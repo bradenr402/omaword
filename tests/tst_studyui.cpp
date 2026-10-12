@@ -285,7 +285,7 @@ private slots:
         BibleBackend reopened; QVERIFY(reopened.wordsOfJesus());
         key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
         QVERIFY(item("settingwordsOfJesus") && item("settingwordsOfJesus")->isVisible());
-        QVERIFY(!item("wordsOfJesusUnmarked")->isVisible());
+        QVERIFY(!item("settingwordsOfJesusNote")->isVisible());
     }
     void reimportFromCatalog() {
         catalog->entries = {QVariantMap{{"id","study"},{"name","Study fixture"},{"abbreviation","SF"},{"url","https://example.invalid/study.zip"},
@@ -325,13 +325,25 @@ private slots:
         key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
         auto toggle = item("settingwordsOfJesus"); QVERIFY(toggle && toggle->isVisible());
         QVERIFY(!toggle->isEnabled()); QVERIFY(!toggle->property("checked").toBool());
-        // Below Margin notes and directly above the hint.
-        auto margin = item("settingmarginNotes"), hint = item("wordsOfJesusUnmarked");
+        // Below Margin notes; the note why sits inside the toggle, right
+        // under its title, which keeps the other titles' color.
+        auto margin = item("settingmarginNotes"), title = item("settingwordsOfJesusLabel"), hint = item("settingwordsOfJesusNote");
         QVERIFY(hint->isVisible());
+        // (This version predates schema 4, which could mark them: a re-import tells.)
+        QCOMPARE(hint->property("text").toString(), QString("Words of Jesus are not marked in this version (re-import it in Versions to check)."));
+        QVERIFY(toggle->isAncestorOf(hint));
         const auto content = toggle->parentItem();
         QVERIFY(toggle->mapToItem(content, QPointF()).y() > margin->mapToItem(content, QPointF()).y());
-        const double gap = hint->mapToItem(content, QPointF()).y() - (toggle->mapToItem(content, QPointF()).y() + toggle->height());
-        QVERIFY2(gap >= 0 && gap < 20, qPrintable(QString::number(gap)));
+        const double gap = hint->mapToItem(toggle, QPointF()).y() - title->mapToItem(toggle, QPointF(0, title->height())).y();
+        QVERIFY2(gap >= 0 && gap < 6, qPrintable(QString::number(gap)));
+        QCOMPARE(hint->mapToItem(toggle, QPointF()).x(), title->mapToItem(toggle, QPointF()).x());
+        QCOMPARE(title->property("color"), item("settingmarginNotesLabel")->property("color"));
+        QCOMPARE(hint->property("color").value<QColor>(), qvariant_cast<QObject *>(engine->rootContext()->contextProperty("desktop"))->property("muted").value<QColor>());
+        // Its switch is drawn muted: no fill, a faint outline and thumb, unlike an off switch.
+        auto track = item("settingwordsOfJesusTrack"), offTrack = item("settingmarginNotesTrack");
+        QCOMPARE(track->property("color").value<QColor>().alpha(), 0);
+        QVERIFY(track->property("border").value<QObject *>()->property("color").value<QColor>() != offTrack->property("border").value<QObject *>()->property("color").value<QColor>());
+        QVERIFY(item("settingwordsOfJesusThumb")->property("color").value<QColor>().alphaF() < 0.5);
         for (auto child : content->childItems()) {
             if (child == toggle || !child->isVisible() || child->metaObject()->indexOfProperty("catalogAction") < 0) continue;
             QVERIFY2(child->mapToItem(content, QPointF()).y() < toggle->mapToItem(content, QPointF()).y(), qPrintable(child->objectName()));

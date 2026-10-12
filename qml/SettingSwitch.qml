@@ -14,11 +14,13 @@ Switch {
     objectName: "setting" + catalogAction.id
     text: catalogAction.title
     // Words of Jesus in a version that does not mark them: off and disabled,
-    // whatever the stored setting.
+    // whatever the stored setting, with a note why under its title.
     readonly property bool unsupported: catalogAction.id === "wordsOfJesus" && settingSwitch.backend.ready && !settingSwitch.backend.hasWordsOfJesus
+    readonly property string note: !unsupported ? ""
+        : "Words of Jesus are not marked in this version" + (settingSwitch.backend.textSchema > 0 && settingSwitch.backend.textSchema < 4 ? " (re-import it in Versions to check)." : ".")
     checked: !unsupported && !!settingSwitch.backend[catalogAction.setting]
     enabled: !unsupported && settingSwitch.controller.actionAvailable(catalogAction)
-    implicitHeight: Math.max(40 * settingSwitch.controller.scale, settingLabel.implicitHeight + 16 * settingSwitch.controller.scale)
+    implicitHeight: Math.max(40 * settingSwitch.controller.scale, settingTexts.implicitHeight + 16 * settingSwitch.controller.scale)
     padding: 0
     // Room inside the focus outline.
     leftPadding: 8 * settingSwitch.controller.scale
@@ -35,8 +37,10 @@ Switch {
         width: 36 * settingSwitch.controller.scale
         height: 20 * settingSwitch.controller.scale
         radius: Math.min(settingSwitch.theme.cornerRadius, width / 2, height / 2)
-        color: settingSwitch.checked ? settingSwitch.theme.accent : settingSwitch.theme.surface
-        border.color: settingSwitch.activeFocus ? settingSwitch.theme.foreground : settingSwitch.checked ? settingSwitch.theme.accent : settingSwitch.theme.border
+        // Disabled: a faint outline with a faint thumb, plainly not a choice.
+        color: !settingSwitch.enabled ? "transparent" : settingSwitch.checked ? settingSwitch.theme.accent : settingSwitch.theme.surface
+        border.color: !settingSwitch.enabled ? settingSwitch.controller.tint(settingSwitch.theme.muted, 0.35)
+            : settingSwitch.activeFocus ? settingSwitch.theme.foreground : settingSwitch.checked ? settingSwitch.theme.accent : settingSwitch.theme.border
         Rectangle {
             objectName: settingSwitch.objectName + "Thumb"
             x: (settingSwitch.checked ? 19 : 3) * settingSwitch.controller.scale
@@ -44,19 +48,35 @@ Switch {
             width: 14 * settingSwitch.controller.scale
             height: width
             radius: Math.min(settingSwitch.theme.cornerRadius, width / 2, height / 2)
-            color: settingSwitch.checked ? settingSwitch.theme.background : settingSwitch.theme.muted
+            color: !settingSwitch.enabled ? settingSwitch.controller.tint(settingSwitch.theme.muted, 0.35)
+                : settingSwitch.checked ? settingSwitch.theme.background : settingSwitch.theme.muted
         }
     }
     contentItem: RowLayout {
         spacing: 12 * settingSwitch.controller.scale
-        Label {
-            id: settingLabel
-            objectName: settingSwitch.objectName + "Label"
-            text: settingSwitch.text
-            color: settingSwitch.enabled ? settingSwitch.theme.foreground : settingSwitch.theme.muted
-            font.pixelSize: 13 * settingSwitch.controller.scale
-            wrapMode: Text.Wrap
+        ColumnLayout {
+            id: settingTexts
+            spacing: 2 * settingSwitch.controller.scale
             Layout.fillWidth: true
+            // Muted only while the setting cannot be changed at all (an
+            // import running); an unsupported one keeps its title's color.
+            Label {
+                objectName: settingSwitch.objectName + "Label"
+                text: settingSwitch.text
+                color: settingSwitch.controller.actionAvailable(settingSwitch.catalogAction) ? settingSwitch.theme.foreground : settingSwitch.theme.muted
+                font.pixelSize: 13 * settingSwitch.controller.scale
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            Label {
+                objectName: settingSwitch.objectName + "Note"
+                visible: text.length > 0
+                text: settingSwitch.note
+                color: settingSwitch.theme.muted
+                font.pixelSize: 12 * settingSwitch.controller.scale
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
         }
         Label {
             objectName: settingSwitch.objectName + "Key"

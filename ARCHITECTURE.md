@@ -656,7 +656,9 @@ files.
   the cells. Clicking one peeks at its note (Peek).
 - Words of Jesus: `<span class="wj">` gets an inline color (desktop `color1`,
   i.e. Omarchy `color1`/`red`, else accent) only while the setting is on;
-  layout is unchanged.
+  layout is unchanged. In a version that does not mark them, Reading settings'
+  switch is off, disabled, and drawn muted, with the reason under its title
+  (`SettingSwitch.note`); the title keeps the other switches' color.
 - Focus mode hides decoration cells (incl. footnote markers), rails, and annotation tints.
 - Focus mode's layout (no headings, verse numbers, decoration cells, margins,
   scrollbar or footer room) follows `focusLayout`, which `applyFocusLayout`
