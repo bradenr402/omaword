@@ -7471,8 +7471,8 @@ ApplicationWindow {
     // Aa: text size, line height, and layout at hand, docked above the left
     // footer group. The keyboard stays in the reader (these all have keys),
     // and it never covers the text: while it is open the reader's view ends
-    // above it (textPopoverReserve). Aa, esc, focus mode, or any panel or
-    // dialog closes it.
+    // above it (textPopoverReserve). Aa, esc, a click outside it, focus mode,
+    // or any panel or dialog closes it.
     function toggleTextPopover() {
         if (textPopover.visible) { textPopover.close(); return }
         if (modalOpen || !bible.ready) { rejected(); return }
@@ -7481,10 +7481,27 @@ ApplicationWindow {
     readonly property real textPopoverReserve: textPopover.visible ? Math.max(0, height - textPopover.y + 6 * scale) : 0
     onModalOpenChanged: if (modalOpen && textPopover.visible) textPopover.close()
     onFocusLayoutChanged: if (focusLayout && textPopover.visible) textPopover.close()
+    // A click anywhere outside Aa only closes it (Aa's own button included),
+    // as for menus; a right-click falls through, opening its menu there. The
+    // wheel still scrolls the text beneath.
+    MouseArea {
+        objectName: "textPopoverOutside"
+        parent: Overlay.overlay
+        anchors.fill: parent
+        z: textPopover.z - 0.5
+        visible: textPopover.visible
+        acceptedButtons: Qt.AllButtons
+        onPressed: function(mouse) {
+            textPopover.close()
+            mouse.accepted = mouse.button !== Qt.RightButton
+        }
+    }
     Popup {
         id: textPopover
         objectName: "textPopover"
         parent: Overlay.overlay
+        // Over the side panels (popups too), so a click on one is outside Aa.
+        z: 900
         modal: false
         dim: false
         focus: false

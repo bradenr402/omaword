@@ -4996,7 +4996,31 @@ private slots:
         click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
         key(Qt::Key_K,Qt::ControlModifier); QTRY_VERIFY(prop("passagePalette","opened").toBool());
         QVERIFY(!prop("textPopover","visible").toBool());
-        key(Qt::Key_Escape);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        // A click outside it only closes it: on the text (nothing selected),
+        // on a footer button (nothing opens), on an open side panel.
+        QVERIFY(QMetaObject::invokeMethod(window,"readerFocus"));
+        const auto selected = bible->selectionReference();
+        click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
+        QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,item("verseBody20")->mapToScene(QPointF(30,8)).toPoint());
+        QTRY_VERIFY(!prop("textPopover","visible").toBool()); QCOMPARE(bible->selectionReference(),selected);
+        click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
+        click(item("savedControl")); QTRY_VERIFY(!prop("textPopover","visible").toBool()); QVERIFY(!window->property("marksOpen").toBool());
+        key(Qt::Key_D,Qt::ShiftModifier); QTRY_VERIFY(window->property("deskOpen").toBool());
+        key(Qt::Key_W,Qt::ControlModifier); QTRY_VERIFY(window->activeFocusItem() == item("readerSurface"));
+        click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
+        click(item("deskEditor")); QTRY_VERIFY(!prop("textPopover","visible").toBool());
+        QVERIFY(!item("deskEditor")->hasActiveFocus());
+        // A right-click outside closes it and opens its menu there; the wheel still scrolls.
+        click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
+        const double before = prop("reading","contentY").toDouble();
+        const QPoint over = item("reading")->mapToScene(QPointF(item("reading")->width() / 2, 100)).toPoint();
+        QWheelEvent wheel(QPointF(over),QPointF(window->mapToGlobal(over)),QPoint(),QPoint(0,-240),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+        QCoreApplication::sendEvent(window,&wheel);
+        QTRY_VERIFY(prop("reading","contentY").toDouble() > before); QVERIFY(prop("textPopover","visible").toBool());
+        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,item("verseBody20")->mapToScene(QPointF(30,8)).toPoint());
+        QTRY_VERIFY(!prop("textPopover","visible").toBool()); QTRY_VERIFY(prop("contextMenu","visible").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("contextMenu","visible").toBool());
     }
     void keyNotation() {
         const QList<QPair<QStringList,QString>> cases = {

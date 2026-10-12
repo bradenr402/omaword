@@ -685,7 +685,10 @@ files.
   the keyboard in the reader (its controls all have keys). While it is open
   the reader's view ends above it (`reading`'s bottom margin,
   `textPopoverReserve`), so it never covers text. Aa, `esc`, focus mode, and
-  any panel or dialog close it.
+  any panel or dialog close it; so does a click anywhere outside it, which
+  does nothing else (`textPopoverOutside`, just under it in the overlay and
+  over the side panels; a right-click falls through to its menu, the wheel
+  to the text).
 - Chapter buttons (`chapterPreviousButton`/`chapterNextButton`): chevrons at the
   reader's outer edges, centred in the viewport, mouse only (h/l are the keys),
   disabled at the Bible's first/last chapter; steps are not History jumps. The
