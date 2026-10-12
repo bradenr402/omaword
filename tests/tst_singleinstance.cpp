@@ -1,6 +1,9 @@
 #include "testenvironment.h"
 #include <QtTest/QTest>
 #include "singleinstance.h"
+#include "executablewatch.h"
+#include <QSignalSpy>
+#include <cstdio>
 #include <QGuiApplication>
 #include <QElapsedTimer>
 #include <QFile>
@@ -45,6 +48,31 @@ class SingleInstanceTest : public QObject
 {
     Q_OBJECT
 private slots:
+    // An install renames a new executable over the old one's path: the
+    // running process notices (main.cpp then quits with its last window,
+    // clipboard or not), and nothing else in the directory counts.
+    void executableWatchNoticesAnInstall()
+    {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const QString path = dir.filePath("omaword");
+        const auto write = [](const QString &file, const QByteArray &data) {
+            QFile out(file); return out.open(QIODevice::WriteOnly) && out.write(data) == data.size();
+        };
+        QVERIFY(write(path, "the build running"));
+        ExecutableWatch watch(path, path);
+        QSignalSpy changed(&watch, &ExecutableWatch::changed);
+        QVERIFY(!watch.replaced());
+        QVERIFY(write(dir.filePath("README"), "another file"));
+        QTest::qWait(150);
+        QVERIFY(!watch.replaced()); QCOMPARE(changed.count(), 0);
+        QVERIFY(write(dir.filePath(".omaword.new"), "the new build"));
+        QCOMPARE(std::rename(QFile::encodeName(dir.filePath(".omaword.new")).constData(), QFile::encodeName(path).constData()), 0);
+        QTRY_VERIFY(changed.count() > 0);
+        QVERIFY(watch.replaced());
+        // Without a running image to compare (a path never installed), never.
+        ExecutableWatch nowhere(dir.filePath("missing"), dir.filePath("missing"));
+        QVERIFY(!nowhere.replaced());
+    }
     void canonicalScopeAndLegacyLock()
     {
         QTemporaryDir dir;

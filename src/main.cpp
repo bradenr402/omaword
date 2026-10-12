@@ -1,6 +1,7 @@
 #include "brand.h"
 #include "commandline.h"
 #include "desktop.h"
+#include "executablewatch.h"
 #include "singleinstance.h"
 #include "windowmanager.h"
 #include <QApplication>
@@ -70,14 +71,17 @@ int main(int argc, char *argv[]) {
     // window closes, OmaWord stays (windowless) while what you copied is
     // still on the clipboard, so it can be pasted, and quits once something
     // else is copied (or a window opens and closes again without a copy).
+    // Once an install has replaced its executable it lingers no more: the
+    // next launch would reach it and open the old build's window.
     app.setQuitOnLastWindowClosed(false);
     auto *clipboard = QGuiApplication::clipboard();
-    QObject::connect(&windows, &WindowManager::allClosed, &app, [&app, clipboard] {
-        if (!clipboard->ownsClipboard()) app.quit();
-    });
-    QObject::connect(clipboard, &QClipboard::changed, &app, [&app, &windows, clipboard] {
-        if (!windows.hasWindows() && !clipboard->ownsClipboard()) app.quit();
-    });
+    ExecutableWatch executable(QCoreApplication::applicationFilePath());
+    const auto quitWhenDone = [&app, &windows, &executable, clipboard] {
+        if (!windows.hasWindows() && (executable.replaced() || !clipboard->ownsClipboard())) app.quit();
+    };
+    QObject::connect(&windows, &WindowManager::allClosed, &app, quitWhenDone);
+    QObject::connect(clipboard, &QClipboard::changed, &app, quitWhenDone);
+    QObject::connect(&executable, &ExecutableWatch::changed, &app, quitWhenDone);
     QTimer::singleShot(0, &instance, [&] {
         windows.openRequest(initialRequest, [&](SingleInstance::Result result) {
             if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << result.error << Qt::endl;
