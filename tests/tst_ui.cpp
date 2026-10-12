@@ -1,6 +1,7 @@
 #include "testenvironment.h"
 #include <QWheelEvent>
 #include <QtTest/QTest>
+#include <QAbstractAnimation>
 #include <QApplication>
 #include <QClipboard>
 #include <QDir>
@@ -2233,6 +2234,130 @@ private slots:
         key(Qt::Key_M); QTRY_COMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
         QCOMPARE(bible->chapter(), 4); QCOMPARE(bible->noteText(), QString("Across the chapters"));
     }
+    // A selection reaching into another chapter shows that chapter whole
+    // beside the one read, in the layout chosen, until it reaches into it no
+    // more; what is on screen stays where it is as chapters come and go.
+    void crossChapterSelectionShowsEveryChapter_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("paragraph") << "paragraph"; QTest::newRow("block") << "block";
+    }
+    void crossChapterSelectionShowsEveryChapter() {
+        QFETCH(QString, mode);
+        bible->setReadingMode(mode);
+        reference("John 3:35"); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        const auto block = [&] { return mode != "verse"; };
+        // Where a verse's text begins on screen (reading's coordinates): in
+        // the chapter read, or in one shown beside it.
+        const auto screenPoint = [&](const QString &chapterTitle, int verse) -> QPointF {
+            if (chapterTitle == bible->passage()) {
+                QVariant extent; QMetaObject::invokeMethod(window, "measureVerse", Q_RETURN_ARG(QVariant, extent), Q_ARG(QVariant, verse));
+                const auto map = extent.value<QJSValue>().toVariant().toMap();
+                if (map.isEmpty()) return QPointF(qQNaN(), qQNaN());
+                return item("readerColumn")->mapToItem(item("reading"), QPointF(window->property("verseGutter").toDouble(), map["top"].toDouble()));
+            }
+            auto context = item(qPrintable("contextChapter:" + chapterTitle)); if (!context) return QPointF(qQNaN(), qQNaN());
+            if (!block()) {
+                auto row = item(qPrintable("contextVerse:" + chapterTitle + ":" + QString::number(verse)));
+                return row ? row->mapToItem(item("reading"), QPointF(window->property("verseGutter").toDouble(), 0)) : QPointF(qQNaN(), qQNaN());
+            }
+            auto body = item(qPrintable("contextBody:" + chapterTitle));
+            QObject *document = nullptr;
+            for (auto child : body->parentItem()->children()) if (QByteArray(child->metaObject()->className()).startsWith("BlockDocument")) document = child;
+            int position = -1;
+            for (const auto &span : document->property("spans").toList()) if (span.toMap()["number"].toInt() == verse) position = span.toMap()["textStart"].toInt();
+            QRectF rect; QMetaObject::invokeMethod(body, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, position));
+            return body->mapToItem(item("reading"), rect.topLeft());
+        };
+        const auto screenY = [&](const QString &chapterTitle, int verse) { return screenPoint(chapterTitle, verse).y(); };
+        // A click on a verse's first word.
+        const auto clickVerse = [&](const QString &chapterTitle, int verse, Qt::KeyboardModifiers modifiers) {
+            const QPointF at = screenPoint(chapterTitle, verse) + QPointF(12, 10);
+            QTest::mouseClick(window, Qt::LeftButton, modifiers, item("reading")->mapToScene(at).toPoint());
+        };
+        struct Held : QAnimationDriver { qint64 elapsed() const override { return 0; } };
+        const auto onScreen = [&](double y) { return !qIsNaN(y) && y >= -1 && y < item("reading")->height() - window->property("floatingSafety").toDouble(); };
+        QVERIFY(!item("contextChapter:John 3") && !item("contextChapter:John 4"));
+        // shift J into John 4: John 3 stays where it was, shown above John 4,
+        // which comes into view below it.
+        key(Qt::Key_J, Qt::ShiftModifier);
+        QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
+        const double at36 = screenY("John 3", 36);
+        QTest::keyClick(window, Qt::Key_J, Qt::ShiftModifier);
+        QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:35–4:1"));
+        QCoreApplication::processEvents(); // The step's own placing, after it.
+        QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
+        QCOMPARE(bible->passage(), QString("John 4"));
+        auto context = item("contextChapter:John 3"); QVERIFY(context && context->isVisible());
+        QCOMPARE(item("readerColumn")->childItems().indexOf(context) < item("readerColumn")->childItems().indexOf(item("chapterTitle")), true);
+        QVERIFY2(onScreen(screenY("John 3", 36)) && onScreen(screenY("John 4", 1)),
+            qPrintable(QString("%1 %2 (was %3)").arg(screenY("John 3", 36)).arg(screenY("John 4", 1)).arg(at36)));
+        // No further than 4:1 needs to come into view: John 3:36 moved up by less than a screen.
+        QVERIFY2(screenY("John 3", 36) <= at36 + 1 && at36 - screenY("John 3", 36) < item("reading")->height() / 2,
+            qPrintable(QString("%1 → %2").arg(at36).arg(screenY("John 3", 36))));
+        // Its selected verses tinted, its title as the reader's.
+        QCOMPARE(context->property("first").toInt(), 35); QCOMPARE(context->property("last").toInt(), 36);
+        QCOMPARE(item("contextTitle:John 3")->property("font").value<QFont>().pixelSize(), item("chapterTitle")->property("font").value<QFont>().pixelSize());
+        // Collapsing back into John 4 (esc): John 3 goes, and John 4 stays
+        // where it was, then glides up to its place at the top.
+        const double at41 = screenY("John 4", 1);
+        {
+            // Animation time held still, so the first frame is seen as it is.
+            Held held; held.install();
+            QTest::keyClick(window, Qt::Key_Escape);
+            QCOMPARE(bible->selectionReference(), QString("John 4:1")); QVERIFY(!item("contextChapter:John 3"));
+            QVERIFY2(qAbs(screenY("John 4", 1) - at41) < 1.5, qPrintable(QString("%1 → %2").arg(at41).arg(screenY("John 4", 1))));
+            held.uninstall();
+        }
+        QTRY_VERIFY(!object("columnSettle")->property("running").toBool());
+        QCOMPARE(prop("reading", "contentY").toDouble(), 0.0);
+        // Backwards (shift K from John 4:2 into John 3): John 4 is shown below, still.
+        key(Qt::Key_J); QTRY_COMPARE(bible->selectionReference(), QString("John 4:2"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
+        const double at42 = screenY("John 4", 2);
+        key(Qt::Key_K, Qt::ShiftModifier); key(Qt::Key_K, Qt::ShiftModifier);
+        QTRY_COMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
+        QCOMPARE(bible->passage(), QString("John 3"));
+        QVERIFY(item("contextChapter:John 4")); QVERIFY(!item("contextChapter:John 3"));
+        QVERIFY2(onScreen(screenY("John 4", 2)) && onScreen(screenY("John 3", 36)), qPrintable(QString("%1 (was %2)").arg(screenY("John 4", 2)).arg(at42)));
+        // A click on a verse of John 4 there selects it, which becomes the
+        // chapter read: it stays where it was, then glides into place.
+        const double clickedAt = screenY("John 4", 2);
+        {
+            Held held; held.install();
+            clickVerse("John 4", 2, Qt::NoModifier);
+            QCOMPARE(bible->selectionReference(), QString("John 4:2")); QVERIFY(!item("contextChapter:John 4"));
+            QVERIFY2(qAbs(screenY("John 4", 2) - clickedAt) < 1.5, qPrintable(QString("%1 → %2").arg(clickedAt).arg(screenY("John 4", 2))));
+            held.uninstall();
+        }
+        QTRY_VERIFY(!object("columnSettle")->property("running").toBool() && !window->property("restoringPosition").toBool());
+        QVERIFY(onScreen(screenY("John 4", 2)));
+        // Shift-click there extends the selection from its anchor (4:2) to it.
+        key(Qt::Key_K, Qt::ShiftModifier); key(Qt::Key_K, Qt::ShiftModifier);
+        QTRY_COMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
+        QTRY_VERIFY(item("contextChapter:John 4"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
+        QTRY_VERIFY(!object("columnSettle")->property("running").toBool());
+        QVERIFY(onScreen(screenY("John 4", 3)));
+        clickVerse("John 4", 3, Qt::ShiftModifier);
+        QTRY_COMPARE(bible->selectionReference(), QString::fromUtf8("John 4:2–3"));
+        QCOMPARE(bible->passage(), QString("John 4")); QTRY_VERIFY(!item("contextChapter:John 3"));
+        // A range over many chapters shows the nearest three each side; the
+        // reading position stays the chapter read's own.
+        reference("John 1:5-4:3"); QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        QCOMPARE(bible->passage(), QString("John 4"));
+        QCOMPARE(window->property("contextBefore").toStringList(), QStringList({"43:1", "43:2", "43:3"}));
+        QVERIFY(window->property("contextAfter").toStringList().isEmpty());
+        if (bible->chapterNumbers().size() > 6) {
+            reference("John 1:5-7:3"); QTRY_VERIFY(!window->property("restoringPosition").toBool());
+            QCOMPARE(window->property("contextBefore").toStringList(), QStringList({"43:4", "43:5", "43:6"}));
+            // The reader's place is the chapter read's: the first verse (with its title) in view.
+            QVERIFY(onScreen(screenY("John 7", 3)));
+        }
+        reference("John 3:1"); QTRY_VERIFY(!item("contextChapter:John 1"));
+        QVERIFY(window->property("contextBefore").toStringList().isEmpty());
+    }
     void visualActionsCompleteFullRange() {
         QFETCH(QString,mode); QFETCH(Qt::Key,action);
         bible->setReadingMode(mode);
@@ -2591,6 +2716,10 @@ private slots:
         key(Qt::Key_K,Qt::ShiftModifier);
         QVERIFY(bible->crossChapterSelection());
         QTRY_VERIFY(item("verseNumber35"));
+        // John 4 stays where it was below, 3:36 just above it: bring 3:35 into view.
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window,"scrollToVerse",Q_ARG(QVariant,35),Q_ARG(QVariant,true)));
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
         click(item("verseNumber35"),Qt::ShiftModifier);
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:35–36"));
         QCOMPARE(bible->cursorVerse(),35);

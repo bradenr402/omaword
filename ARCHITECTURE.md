@@ -29,6 +29,7 @@ files.
 | `src/markdownquotes.*`, `qml/QuoteBars.qml` | The Markdown previews' layout (Notes, the Desk): a single Enter breaks the line (`previewMarkdown` turns soft breaks into hard ones, except in lists, tables, and code, where Qt would make a break a new item), a gap of one line of the preview's text (its font's line spacing) above each paragraph, list, quote, heading, and code block (none between a paragraph's lines, a list's items, or a code block's lines; Qt sets none in a TextEdit), and block quotes narrowed from Qt's 40 px on both sides to 14 px on the left with a muted bar per level. Qt keeps no trace of where a quote starts or which blocks a line break split, so zero-width spaces mark them; `MarkdownQuotes` reads them into each block's user state and deletes them, once Qt has finished importing the text |
 | `src/textselection.*` | Character selection (`v`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
+| `qml/ContextChapter.qml` | A chapter a selection reaches into, shown whole beside the chapter read (Main's `contextBefore`/`contextAfter`), see Reader rendering |
 | `src/annotationpaint.*` | The flowing layouts' annotation marks (`AnnotationPaint`, a `QQuickPaintedItem`): tint bands and highlighter strokes from HandDrawn.js's shapes ported to C++ (same seeds and arithmetic). BlockReader lays them out (`layOut`, once per event loop turn); a selection move only refreshes `blockSelectionBackground` (plain rectangles), and a changed shape list repaints only the changed shapes' area (Psalm 119 in Block with 88 highlights, 58 noted and 44 tagged verses, offscreen software rendering: a verse move went from 4.3 s to 86 ms, a highlight toggle from 4.3 s to 0.47 s). `BlockDocument::rectangles` walks every character only on lines with right-to-left text |
 | `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing; Follow (`openBeside`): links two windows, relaying each one's `followMoved` to the other's `followTo` until either closes or unfollows |
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC (a request: reference, translation, import, activation token, `newWindow`, `lookup`) |
@@ -602,6 +603,19 @@ files.
   rendering): a highlight toggle went from 835 ms to 105–127 ms (a 40-verse
   chapter: 183 ms to 33 ms), against Block's 488 ms; opening the chapter is
   still about 2.9 s (Block: 3.3 s), a highlight repaint of every row 1.4 s.
+- Chapters a selection reaches into (`contextChapters`: the nearest three
+  before and after the chapter read, which is the cursor's) are shown whole
+  around it by `ContextChapter`, in the layout chosen, from `chapterRows`
+  (cached per version and text): the title, the text (Paragraph and Block
+  through `BlockDocument` without annotation cells; Verse as rows like the
+  reader's), the selected verses tinted, all but those dimmed in focus mode;
+  no marks or footnotes. A click there selects through `selectThrough`
+  (shift: from the anchor). The chapters shown keep their place on screen as
+  they change (`captureViewAnchor`/`restoreViewAnchor` around a step, a click
+  there, or a selection collapsing): the first still shown goes back where
+  it was; where the content cannot reach that (it now begins or ends nearer),
+  the column is held there and glides into place (`columnHold`). The reading
+  position stays the chapter read's (`chapterTopY`, `chapterTravel`).
 - A verse step (`j`, `k`, `5j`; `moveSelection`, `moveByVerses`) within the
   chapter shown moves only the selection (`stepSelection`): the chapter is
   not read again and no row is announced (`versesChanged`), so no layout

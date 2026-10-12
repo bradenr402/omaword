@@ -1303,6 +1303,49 @@ QVariantList BibleBackend::compareVersions(QVariantMap scope) const
     return rows;
 }
 
+QVariantList BibleBackend::contextChapters() const
+{
+    if (!m_ready || !m_anchor || !m_cursor) return {};
+    const int low = std::min(m_anchor,m_cursor), high = std::max(m_anchor,m_cursor);
+    struct Group { int book, chapter, first, last; bool before; };
+    QVector<Group> groups;
+    bool past = false;
+    for (int i = low; i <= high; ++i) {
+        const auto v = endpoint(i);
+        if (v.book == m_book && v.chapter == m_chapter) { past = true; continue; }
+        if (!groups.isEmpty() && groups.last().book == v.book && groups.last().chapter == v.chapter) groups.last().last = v.verse;
+        else groups.append({v.book,v.chapter,v.verse,v.verse,!past});
+    }
+    // The nearest three on each side.
+    int before = 0;
+    while (before < groups.size() && groups[before].before) ++before;
+    QVariantList shown;
+    for (int i = std::max(0,before - 3); i < std::min(int(groups.size()),before + 3); ++i) {
+        const auto &g = groups[i];
+        shown.append(QVariantMap{{"book",g.book},{"chapter",g.chapter},{"title",reference(g.book,g.chapter)},
+                                 {"first",g.first},{"last",g.last},{"before",g.before}});
+    }
+    return shown;
+}
+
+QVariantList BibleBackend::chapterRows(int book, int chapter)
+{
+    if (!m_ready || !chaptersForBook(book).contains(chapter)) return {};
+    const auto readAhead = m_prefetched;
+    QVariantList rows;
+    if (!readChapter(book,chapter,&rows)) rows.clear();
+    m_prefetched = readAhead;
+    return rows;
+}
+
+void BibleBackend::selectThrough(int book, int chapter, int verse, bool extend)
+{
+    if (!requireReady()) return;
+    const int cursor = absoluteVerse(book,chapter,verse);
+    if (!cursor) { setError("Choose an existing verse."); return; }
+    stepSelection(extend && m_anchor ? m_anchor : cursor,cursor);
+}
+
 QVariantMap BibleBackend::markAround() const
 {
     if (!m_ready || !m_anchor || !m_cursor) return {{"reason","Select a verse in a mark first"}};

@@ -3140,6 +3140,7 @@ ApplicationWindow {
         restoringPosition = true
         movingSelection = true
         const fromChapter = bible.book + ":" + bible.chapter
+        captureViewAnchor()
         if (bulk) bible.moveByVerses(delta, extend)
         else bible.moveSelection(delta, extend)
         movingSelection = false
@@ -3148,12 +3149,136 @@ ApplicationWindow {
             : bible.cursorVerse === bible.selectedStart ? bible.selectedEnd : bible.selectedStart
         const movedIdentity = selectionIdentity
         Qt.callLater(function() {
+            // What was on screen stays where it was (a chapter shown beside
+            // becoming the one read, or the other way), then the cursor's
+            // verse comes into view from there.
+            const kept = app.restoreViewAnchor()
             if (app.selectionIdentity !== movedIdentity) return
             readerColumn.forceLayout()
-            // Crossing into another chapter has nothing to slide from.
-            app.placeVerse(bible.cursorVerse, false, bible.book + ":" + bible.chapter !== fromChapter)
+            // Crossing into another chapter has nothing to slide from, unless it was on screen.
+            app.placeVerse(bible.cursorVerse, false, bible.book + ":" + bible.chapter !== fromChapter && !kept)
             app.restoringPosition = false
             app.savePosition()
+        })
+    }
+    // A selection reaching into other chapters shows them whole, above and
+    // below the chapter read (bible.contextChapters: the nearest three each
+    // side), until it reaches into them no more. Their rows are read once
+    // per version and text (contextRows), keyed "book:chapter".
+    property var contextBefore: []
+    property var contextAfter: []
+    property var contextData: ({})
+    property var contextRows: ({})
+    property string contextRowsKey: ""
+    property string contextChapterKey: ""
+    property string contextSignature: ""
+    function updateContextChapters() {
+        const generation = bible.versionId + ":" + bible.textGeneration
+        if (generation !== contextRowsKey) { contextRows = ({}); contextRowsKey = generation }
+        const chapters = bible.ready ? Array.from(bible.contextChapters()) : []
+        const here = bible.versionId + ":" + bible.book + ":" + bible.chapter
+        // Unchanged (most steps): nothing to do. Rows are compared by their chapter.
+        const signature = generation + "|" + JSON.stringify(chapters)
+        if (signature === contextSignature) { contextChapterKey = here; return }
+        contextSignature = signature
+        const data = {}, before = [], after = []
+        for (const entry of chapters) {
+            const key = entry.book + ":" + entry.chapter
+            if (!contextRows[key]) contextRows[key] = Array.from(bible.chapterRows(entry.book, entry.chapter))
+            data[key] = { book: entry.book, chapter: entry.chapter, title: entry.title, first: entry.first, last: entry.last, rows: contextRows[key] }
+            ;(entry.before ? before : after).push(key)
+        }
+        const same = JSON.stringify(before) === JSON.stringify(contextBefore) && JSON.stringify(after) === JSON.stringify(contextAfter)
+        // Chapters coming or going while the same one is read: what is on
+        // screen stays put. (A step owns its anchor; a jump places itself.)
+        const anchoring = !same && viewAnchor === null && here === contextChapterKey && !restoringPosition
+        if (anchoring) captureViewAnchor()
+        contextData = data
+        if (!same) { contextBefore = before; contextAfter = after }
+        contextChapterKey = here
+        if (anchoring) restoreViewAnchor()
+    }
+    // Where each chapter shown begins (readerColumn y, its title's top):
+    // those shown beside, and the one read.
+    function shownChapterTops() {
+        const tops = []
+        for (let i = 0; i < contextBeforeRepeater.count; ++i) {
+            const item = contextBeforeRepeater.itemAt(i) as ContextChapter
+            if (item) tops.push({ key: bible.versionId + ":" + item.book + ":" + item.chapterNumber, y: item.y })
+        }
+        tops.push({ key: bible.versionId + ":" + bible.book + ":" + bible.chapter, y: chapterTitle.y })
+        for (let i = 0; i < contextAfterRepeater.count; ++i) {
+            const item = contextAfterRepeater.itemAt(i) as ContextChapter
+            // Its title, below the room before it.
+            if (item) tops.push({ key: bible.versionId + ":" + item.book + ":" + item.chapterNumber, y: item.y + item.topPadding })
+        }
+        return tops
+    }
+    // Before the chapters shown change: each one's place on screen (a glide
+    // under way included), the one the view begins in first.
+    property var viewAnchor: null
+    function shownChapters() {
+        return JSON.stringify([contextBefore, bible.versionId + ":" + bible.book + ":" + bible.chapter, contextAfter])
+    }
+    function captureViewAnchor() {
+        readerColumn.forceLayout()
+        const tops = shownChapterTops(), top = reading.contentY
+        let at = 0
+        for (let i = 0; i < tops.length; ++i) if (tops[i].y <= top + 1) at = i
+        viewAnchor = { shown: shownChapters(), entries: [tops[at]].concat(tops.filter(function(entry, i) { return i !== at }))
+            .map(function(entry) { return { key: entry.key, offset: entry.y + columnHold - top } }) }
+    }
+    // After: the first of them still shown goes back where it was. Whether
+    // the chapters shown changed and one was kept.
+    function restoreViewAnchor() {
+        const anchor = viewAnchor
+        viewAnchor = null
+        if (!anchor || anchor.shown === shownChapters()) return false
+        settleReaderLayout()
+        const tops = shownChapterTops()
+        for (const entry of anchor.entries) {
+            const now = tops.find(function(top) { return top.key === entry.key })
+            if (!now) continue
+            const target = now.y - entry.offset, kept = clampReaderY(target)
+            setReaderY(kept)
+            holdColumn(kept - target)
+            return true
+        }
+        return false
+    }
+    // Where what stayed on screen cannot stay exactly (the text now begins,
+    // or ends, nearer than where it was), it is held where it was and glides
+    // into its place, rather than jumping.
+    property real columnHold: 0
+    NumberAnimation { id: columnSettle; objectName: "columnSettle"; target: app; property: "columnHold"; to: 0; duration: 2 * app.slideMs; easing.type: Easing.OutCubic }
+    function holdColumn(offset) {
+        columnSettle.stop()
+        columnHold = reduceMotion || Math.abs(offset) < 1 ? 0 : offset
+        if (columnHold) columnSettle.start()
+    }
+    // Where the chapter read begins below any shown above it: its top of view.
+    function chapterTopY() { return contextBeforeRepeater.count ? chapterTitle.y - readerColumn.topPadding : 0 }
+    // A click on a verse of a chapter shown beside: selects it (shift: from
+    // the anchor to it), that chapter becoming the one read, nothing moving.
+    function selectContextVerse(book, chapter, verse, extend) {
+        clearCount()
+        if (!flushNote() || bible.busy) return
+        pendingActionCollapse = null
+        clearTextSelection()
+        positionTimer.stop()
+        restoringPosition = true
+        movingSelection = true
+        captureViewAnchor()
+        bible.selectThrough(book, chapter, verse, extend)
+        movingSelection = false
+        selectionAnchor = bible.crossChapterSelection ? 0 : bible.cursorVerse === bible.selectedStart ? bible.selectedEnd : bible.selectedStart
+        syncNote()
+        readerFocus()
+        Qt.callLater(function() {
+            app.restoreViewAnchor()
+            app.restoringPosition = false
+            app.savePosition()
+            app.mouseSelected()
         })
     }
     // m: the whole mark the selection sits in (bible.markAround), so its
@@ -3770,10 +3895,18 @@ ApplicationWindow {
             desk: function() { app.addHistoryToDesk(id) }, canDesk: entry.available && !!scope,
             extras: [{ id: "remove", text: "Remove from History", shortcut: KeyNotation.format("Delete"), enabled: ready, run: function() { app.removeHistoryItem(id) } }] })
     }
+    // The reading position is the chapter read's own, chapters shown beside it aside.
+    function chapterTravel() { return Math.max(0, reading.contentHeight - contextHeight() - reading.height) }
+    function contextHeight() {
+        let height = 0
+        for (const repeater of [contextBeforeRepeater, contextAfterRepeater])
+            for (let i = 0; i < repeater.count; ++i) { const item = repeater.itemAt(i); if (item) height += item.height }
+        return height
+    }
     function savePosition() {
         if (!restoringPosition && bible.ready) {
-            let travel = Math.max(0, reading.contentHeight - reading.height)
-            bible.readingPosition = travel > 0 ? Math.max(0, Math.min(1, readerTargetY() / travel)) : 0
+            const travel = chapterTravel()
+            bible.readingPosition = travel > 0 ? Math.max(0, Math.min(1, (readerTargetY() - chapterTopY()) / travel)) : 0
         }
     }
     // Programmatic scrolls to a verse slide (ease-out, ~75 ms) and retarget
@@ -3805,10 +3938,12 @@ ApplicationWindow {
         let row = verseRepeater.itemAt(index) as VerseItem
         let block = blockLoader.item as BlockReader
         if (!row && !block) return
-        if (index === 0) { if (instant) setReaderY(0); else slideReader(0); return }
+        if (index === 0 && !contextBeforeRepeater.count) { if (instant) setReaderY(0); else slideReader(0); return }
         let rect = block ? block.verseRect(number) : null
         let y = rect ? blockLoader.mapToItem(readerColumn, 0, rect.y).y : row.mapToItem(readerColumn, 0, 0).y + row.textOffset
         let textHeight = rect ? rect.height : row.textHeight
+        // Below chapters shown beside it, the first verse keeps its chapter's title in view.
+        if (index === 0) { textHeight += y - chapterTitle.y; y = chapterTitle.y }
         let available = Math.max(1, reading.height - floatingSafety)
         let margin = Math.min(3 * readerLineHeight, Math.max(12 * readerScale, (available - textHeight) / 2))
         // A very long verse cannot fit. Keep its beginning and a useful context
@@ -5328,6 +5463,7 @@ ApplicationWindow {
     component KeyScrollView: Shared.KeyScrollView { controller: app; theme: desktop }
     component SettingSwitch: Shared.SettingSwitch { controller: app; theme: desktop; backend: bible }
     component SquareSlider: Shared.SquareSlider { controller: app; theme: desktop }
+    component ContextChapter: Shared.ContextChapter { controller: app; theme: desktop; backend: bible }
     // A step beside a Reading settings slider: − or + runs its action. Not a
     // tab stop: the slider's arrows and the actions' keys do the same by key.
     component SliderStep: QuietButton {
@@ -5629,12 +5765,28 @@ ApplicationWindow {
                         // margin notes may shift it left (app.marginSpace).
                         width: app.readerColumnWidth
                         x: app.columnTargetX + app.marginSlideOffset
+                        transform: Translate { y: app.columnHold }
                         onHeightChanged: { app.scheduleMargins(); if (app.selectionBarWanted) Qt.callLater(app.placeSelectionBar) }
                         onWidthChanged: { app.scheduleMargins(); if (app.selectionBarWanted) Qt.callLater(app.placeSelectionBar) }
                         topPadding: 48 * app.readerScale
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
                         spacing: 0
 
+                        // The chapters a selection reaches into, above and below this one.
+                        Repeater {
+                            id: contextBeforeRepeater
+                            model: app.contextBefore
+                            delegate: ContextChapter {
+                                required property string modelData
+                                readonly property var entry: app.contextData[modelData] || ({})
+                                readonly property string key: modelData
+                                objectName: "contextChapter:" + title
+                                width: readerColumn.width
+                                book: entry.book || 0; chapterNumber: entry.chapter || 0; title: entry.title || ""
+                                rows: entry.rows || []; first: entry.first || 0; last: entry.last || 0
+                                before: true
+                            }
+                        }
                         Label {
                             id: chapterTitle
                             objectName: "chapterTitle"
@@ -6054,11 +6206,26 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                             padding: 24
                         }
+                        Repeater {
+                            id: contextAfterRepeater
+                            model: app.contextAfter
+                            delegate: ContextChapter {
+                                required property string modelData
+                                readonly property var entry: app.contextData[modelData] || ({})
+                                readonly property string key: modelData
+                                objectName: "contextChapter:" + title
+                                width: readerColumn.width
+                                book: entry.book || 0; chapterNumber: entry.chapter || 0; title: entry.title || ""
+                                rows: entry.rows || []; first: entry.first || 0; last: entry.last || 0
+                                before: false
+                            }
+                        }
                     }
                     // Margin notes scroll with the text, beside their passages.
                     Item {
                         id: marginLayer
                         objectName: "marginLayer"
+                        transform: Translate { y: app.columnHold }
                         x: app.marginDrift
                         width: reading.width
                         height: readerColumn.height
@@ -7510,8 +7677,9 @@ ApplicationWindow {
         visible: textPopover.visible
         acceptedButtons: Qt.AllButtons
         onPressed: function(mouse) {
-            textPopover.close()
-            mouse.accepted = mouse.button !== Qt.RightButton
+            const onAa = textControl.contains(textControl.mapFromItem(this, mouse.x, mouse.y))
+            if (!onAa) textPopover.close()
+            mouse.accepted = !onAa && mouse.button !== Qt.RightButton
         }
     }
     Popup {
@@ -9553,7 +9721,7 @@ ApplicationWindow {
         interval: 80
         onTriggered: {
             if (app.positionJumpToSelection && bible.selectedStart > 0) app.placeVerse(bible.cursorVerse, true, !app.restoreSlides)
-            else app.setReaderY(Math.max(0, reading.contentHeight - reading.height) * Math.max(0, Math.min(1, bible.readingPosition)))
+            else app.setReaderY(app.chapterTopY() + app.chapterTravel() * Math.max(0, Math.min(1, bible.readingPosition)))
             app.restoringPosition = false
             app.followRestored()
         }
@@ -9724,7 +9892,10 @@ ApplicationWindow {
             app.dragAnchorRow = -1
         }
         // Open Notes follows the selection, however it moves.
-        function onSelectionChanged() { if (app.notesOpen && !noteEditor.activeFocus) Qt.callLater(app.syncNote) }
+        function onSelectionChanged() {
+            if (app.notesOpen && !noteEditor.activeFocus) Qt.callLater(app.syncNote)
+            app.updateContextChapters()
+        }
         function onDeskChanged() { app.syncDesk() }
         function onNavigationChanged() {
             app.selectionBarWanted = false
@@ -9750,7 +9921,7 @@ ApplicationWindow {
     Component.onCompleted: {
         syncVerseRows()
         focusLayout = bible.focusMode; marginFocusLevel = focusLayout ? 0 : 1; marginNotesOn = bible.marginNotes; outlineOn = bible.chapterOutline
-        readerInitialized = true; syncNote(); loadSavedDesk(); restorePosition(); restartDwell(); scheduleMargins()
+        readerInitialized = true; syncNote(); loadSavedDesk(); updateContextChapters(); restorePosition(); restartDwell(); scheduleMargins()
     }
     onClosing: function(close) {
         close.accepted = flushNote()

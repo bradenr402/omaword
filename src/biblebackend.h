@@ -374,6 +374,17 @@ public:
     // available is false where a version lacks an endpoint (its numbering
     // differs, or it has no such book).
     Q_INVOKABLE QVariantList compareVersions(QVariantMap scope = QVariantMap()) const;
+    // A selection reaching into other chapters: those chapters, in order,
+    // the nearest three before the chapter shown and three after it, each
+    // {book, chapter, title, first, last (its selected verses), before};
+    // [] for a selection within the chapter shown, or none.
+    Q_INVOKABLE QVariantList contextChapters() const;
+    // A chapter's verse rows as readChapter reads them (no marks), for
+    // showing it beside the chapter read; the read-ahead is kept.
+    Q_INVOKABLE QVariantList chapterRows(int book, int chapter);
+    // Selects a verse anywhere (with extend, from the anchor to it), opening
+    // its chapter if it is another: a click on a chapter shown beside.
+    Q_INVOKABLE void selectThrough(int book, int chapter, int verse, bool extend);
     // The smallest mark (highlight, note, or tag range) in this version that
     // holds the whole selection and more: its scope {versionId, reference,
     // book, chapter, start, endBook, endChapter, end}, or {reason} why there
