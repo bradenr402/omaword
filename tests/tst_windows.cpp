@@ -770,6 +770,40 @@ private slots:
         QTest::keyClick(follower, Qt::Key_J); QTRY_COMPARE(bible->selectionReference(), QString("John 4:4"));
         follower->close(); QTRY_COMPARE(windows->count(), 2);
     }
+    // j on a chapter's last verse goes on to the next chapter, k on its
+    // first back to the previous one, tapped or held, with a window beside
+    // following: the two stay on the same verse and neither pulls the other back.
+    void verseStepsCrossChaptersWithAWindowBeside_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("paragraph") << "paragraph"; QTest::newRow("block") << "block";
+    }
+    void verseStepsCrossChaptersWithAWindowBeside() {
+        QFETCH(QString, mode);
+        BibleBackend other; other.importUsfm(QUrl::fromLocalFile(structuredUsfm));
+        QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000); QVERIFY(other.switchVersion("engnet"));
+        auto *leader = windows->windowAt(0); auto *bible = windows->backendAt(0);
+        bible->setReadingMode(mode);
+        QVERIFY(bible->navigate("John 3:36")); QTRY_VERIFY(!leader->property("restoringPosition").toBool());
+        QVERIFY(windows->openBeside(leader, "window-original"));
+        auto *follower = windows->windowAt(2); auto *beside = windows->backendAt(2);
+        QTRY_COMPARE(beside->selectionReference(), QString("John 3:36"));
+        QTRY_VERIFY(!follower->property("restoringPosition").toBool());
+        leader->requestActivate(); QVERIFY(QTest::qWaitForWindowActive(leader));
+        QVERIFY(QMetaObject::invokeMethod(leader, "readerFocus"));
+        const auto both = [&](const QString &reference) {
+            return bible->selectionReference() == reference && beside->selectionReference() == reference
+                && !leader->property("restoringPosition").toBool() && !follower->property("restoringPosition").toBool();
+        };
+        QTest::keyClick(leader, Qt::Key_J); QTRY_VERIFY(both("John 4:1"));
+        QTest::keyClick(leader, Qt::Key_K); QTRY_VERIFY(both("John 3:36"));
+        QTest::keyClick(leader, Qt::Key_J); QTest::keyClick(leader, Qt::Key_J); QTRY_VERIFY(both("John 4:2"));
+        // Held k from John 4:2 runs back into John 3; released, both rest on one verse there.
+        QTest::keyPress(leader, Qt::Key_K); QTest::qWait(700); QTest::keyRelease(leader, Qt::Key_K);
+        QTRY_VERIFY(!leader->property("restoringPosition").toBool() && !follower->property("restoringPosition").toBool());
+        QTest::qWait(300);
+        QCOMPARE(bible->chapter(), 3); QCOMPARE(beside->selectionReference(), bible->selectionReference());
+        follower->close(); QTRY_COMPARE(windows->count(), 2);
+    }
     void realSecondaryCreatesAnotherWindow() {
         const auto directory = windows->backendAt(0)->dataDirectory();
         SingleInstance primary(directory,"windows-test",session->path());
