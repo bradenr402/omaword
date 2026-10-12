@@ -4066,7 +4066,7 @@ private slots:
         QVERIFY(window->property("verseCount").toString().isEmpty());
         type("4"); key(Qt::Key_End); QCOMPARE(bible->cursorVerse(),36);
         QVERIFY(window->property("verseCount").toString().isEmpty());
-        type("20g"); QCOMPARE(bible->cursorVerse(),20);
+        type("20gg"); QCOMPARE(bible->cursorVerse(),20);
         type("12"); key(Qt::Key_G,Qt::ShiftModifier); QCOMPARE(bible->cursorVerse(),12);
         type("2l"); QCOMPARE(bible->chapter(),5);
         type("3h"); QCOMPARE(bible->chapter(),2);
@@ -4220,8 +4220,12 @@ private slots:
                 key(forward,modifiers);
                 QCOMPARE(bible->chapter(),4); QCOMPARE(bible->cursorVerse(),1);
                 QCOMPARE(bible->crossChapterSelection(),visual);
-                QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
-                QVERIFY(item("chapterTitle")->mapToScene(QPointF()).y() >= 0);
+                // John 4 opens at its top; in Visual mode the selection's John 3 stays shown above it.
+                QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
+                QTRY_VERIFY(!object("columnSettle")->property("running").toBool());
+                if (!visual) QTRY_COMPARE(prop("reading","contentY").toDouble(),0.0);
+                const double title = item("chapterTitle")->mapToItem(item("reading"),QPointF()).y();
+                QVERIFY2(title >= 0 && title < item("reading")->height() / 2,qPrintable(QString::number(title)));
                 key(forward,modifiers); QCOMPARE(bible->cursorVerse(),1 + step);
                 key(backward,modifiers); QCOMPARE(bible->cursorVerse(),1);
                 key(backward,modifiers);
@@ -4615,7 +4619,7 @@ private slots:
         reference("John 3:16");
         key(Qt::Key_F1); QTRY_VERIFY(prop("helpDialog","opened").toBool());
         for (const auto &row : QList<QStringList>{{"Keybindings","help","?"},{"Open commands","commands","ctrl space"},
-                {"Go to verse number","goToVerse","20g"}}) {
+                {"Go to verse number","goToVerse","20gg"}}) {
             key(Qt::Key_A,Qt::ControlModifier); type(row[0]);
             QTRY_VERIFY(object(qPrintable("keybindingHint" + row[1])));
             QCOMPARE(plainHint(prop(qPrintable("keybindingHint" + row[1]),"text").toString()),row[2]);
