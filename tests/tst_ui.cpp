@@ -534,7 +534,7 @@ private slots:
             QCOMPARE(bible->fontSize(),18);
         }
         item("fontSizeSlider")->forceActiveFocus();
-        key(Qt::Key_Up); QCOMPARE(bible->fontSize(),19);
+        key(Qt::Key_Right); QCOMPARE(bible->fontSize(),19);
         QCOMPARE(prop("fontSizeValue","text").toString(),QString("19"));
         QCOMPARE(window->property("readerSize").toInt(),19);
         key(Qt::Key_Equal,Qt::ControlModifier); QCOMPARE(bible->fontSize(),20);
@@ -1495,7 +1495,7 @@ private slots:
         QCOMPARE(prop("lineHeightSlider","stepSize").toDouble(),0.1);
         key(Qt::Key_Right); QCOMPARE(bible->lineHeight(),1.6);
         key(Qt::Key_Left); QCOMPARE(bible->lineHeight(),1.5);
-        key(Qt::Key_Up); QTRY_COMPARE(bible->lineHeight(),1.6);
+        key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),1.6);
         capture("phase-b-line-height");
         for (int i = 0; i < 30; ++i) key(Qt::Key_Equal,Qt::ControlModifier | Qt::AltModifier);
         QCOMPARE(bible->lineHeight(),3.0);
@@ -3334,7 +3334,7 @@ private slots:
             const auto old = bible->lineHeight();
             key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
             key(Qt::Key_Left); QTRY_COMPARE(bible->lineHeight(),old);
-            key(Qt::Key_Up); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
+            key(Qt::Key_Right); QTRY_COMPARE(bible->lineHeight(),old + 0.1);
             QVERIFY(desktop->setProperty("accent",QColor("#b454ea")));
             QCOMPARE(track->property("color").value<QColor>(),QColor("#b454ea"));
             capture(QString("review-square-slider-") + query);
