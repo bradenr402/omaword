@@ -2122,6 +2122,31 @@ private slots:
         QVERIFY(!prop("paletteTextMode").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("passagePalette"));
     }
+    // Every focus ring in Reading settings stays at least a pixel inside the
+    // dialog's clipping view, on both sides, whatever the text size makes of
+    // its width (a ring on the clip edge loses its outer pixel on screen).
+    void settingsFocusRingsStayInsideTheView_data() {
+        QTest::addColumn<int>("fontSize"); QTest::addColumn<double>("scale");
+        QTest::newRow("default") << 18 << 1.0;
+        QTest::newRow("fractional") << 20 << 1.0;
+        QTest::newRow("scaled") << 23 << 1.25;
+    }
+    void settingsFocusRingsStayInsideTheView() {
+        QFETCH(int, fontSize); QFETCH(double, scale);
+        bible->setFontSize(fontSize); QVERIFY(desktop->setProperty("textScale", scale));
+        run("settings"); QTRY_VERIFY(opened("settingsDialog"));
+        QVERIFY(QQuickTest::qWaitForPolish(window));
+        auto scroll = item("settingsScroll");
+        const QRectF view = scroll->mapRectToScene(QRectF(0, 0, scroll->width(), scroll->height()));
+        for (const QString name : {"settingfocus", "settingnumbers", "settingmarginNotes", "readingMode:paragraph", "readingMode:block"}) {
+            auto control = item(name); QVERIFY2(control, qPrintable(name));
+            const QRectF ring = control->mapRectToScene(QRectF(0, 0, control->width(), control->height()));
+            QVERIFY2(ring.left() >= view.left() + 1 && ring.right() <= view.right() - 1,
+                qPrintable(QString("%1: %2..%3 in %4..%5").arg(name).arg(ring.left()).arg(ring.right()).arg(view.left()).arg(view.right())));
+        }
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("settingsDialog"));
+        bible->setFontSize(18); QVERIFY(desktop->setProperty("textScale", 1.0));
+    }
     void switchesAndTagButtonsShowFocus() {
         run("settings"); QTRY_VERIFY(opened("settingsDialog"));
         auto first = item("settingfocus"), outline = item("settingfocusFocus"), next = item("settingnumbersFocus");

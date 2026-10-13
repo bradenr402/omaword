@@ -8859,7 +8859,12 @@ ApplicationWindow {
             clip: true
         ColumnLayout {
             id: settingsContent
-            width: settingsScroll.availableWidth
+            // Its rows' focus rings (1 px borders, at fractional places where
+            // the text size scales the dialog) stay clear of the view's clip
+            // edges, which would otherwise cut off a ring's outer pixel.
+            readonly property real ringRoom: 2
+            x: ringRoom
+            width: settingsScroll.availableWidth - 2 * ringRoom
             spacing: 12 * app.scale
             // ↑ ↓ (j k) step through the settings as tab does; the page keys
             // still scroll the dialog (KeyScrollView).
