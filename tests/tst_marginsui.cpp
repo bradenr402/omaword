@@ -854,8 +854,12 @@ private slots:
         QCOMPARE(jumpIndex(), jumps + 1);
         QTRY_VERIFY(!prop("restoringPosition").toBool());
         QTRY_COMPARE(prop("outlineCurrent").toString(), QString("4:10"));
-        item("outlineList")->setProperty("contentY", 0); settle();
-        click(item("outlineEntry:1:0")); QTRY_COMPARE(bible->selectionReference(), QString("John 1:1"));
+        // A chapter's own entry opens it at its first verse, by key too:
+        // enter on it, wherever the outline has scrolled itself meanwhile.
+        item("chapterOutline")->forceActiveFocus(); QTRY_VERIFY(item("chapterOutline")->hasActiveFocus());
+        item("chapterOutline")->setProperty("keyIndex", 1);
+        QVERIFY(item("outlineEntryKey:1:0")->isVisible());
+        key(Qt::Key_Return); QTRY_COMPARE(bible->selectionReference(), QString("John 1:1"));
         // { } step through the book's sections, across chapters (a chapter
         // without a heading at its start stops at its top).
         navigate("John 3:31");
