@@ -5617,11 +5617,16 @@ ApplicationWindow {
             if (gap < distance) { distance = gap; row = i }
         }
         if (row < 0) row = fallback
-        // A page showing the whole first (last) row takes it, so pgdn then
-        // pgup returns to the top whatever the row heights.
+        // A page reaching the first (last) row takes it, at the list's very
+        // top (end), so pgdn then pgup returns to the top whatever the row
+        // heights. Rows not yet made have estimated places: a page clamped to
+        // the estimated end can stop short of the real one.
         const edge = view.itemAtIndex(direction < 0 ? 0 : view.count - 1)
-        if (edge && edge.y >= top - 1 && edge.y + edge.height <= top + view.height + 1)
-            row = direction < 0 ? 0 : view.count - 1
+        if (edge && edge.y < top + view.height && edge.y + edge.height > top) {
+            view.currentIndex = direction < 0 ? 0 : view.count - 1
+            if (direction < 0) view.positionViewAtBeginning(); else view.positionViewAtEnd()
+            return
+        }
         view.currentIndex = row
         view.contentY = top
     }
