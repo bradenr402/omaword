@@ -251,6 +251,8 @@ These also work, but stay out of the in-app list:
 
 Read in the Paragraph, Verse, or Block layout; **Aa** in the footer sets the text size and line height. Wide windows can add a chapter outline on the left and your notes in the right margin.
 
+Bible search (`ctrl /`) finds the verses holding all your words, and "an exact phrase" even across verses; `alt a` searches every version you installed. A query in slashes (`/lov(e|ed) the/`), or any query after `alt r`, is a regular expression, as is every find in the chapter (`/`). Case works as in Neovim: lowercase ignores it, a capital matches it, and `\c` / `\C` force either.
+
 Notes are Markdown with passage links: `[[` suggests a passage, and `alt v` previews the note. **Marks** gathers every highlight, note, and tag; **See also** follows your reading with cross-references, parallel passages, and the passages you tagged alike. `c` compares a passage across your versions, and `shift C` opens another version beside yours, the two scrolling together.
 
 The **Desk** is one Markdown page shared by every window: `d` quotes the passage you read on it, with a link back, and you write around the quotations.
@@ -265,9 +267,12 @@ omaword open jn316 --here        # the window you were reading, at a passage
 omaword lookup                   # look up a passage in a small window
 omaword quote ps23 -t KJV        # print a passage as a quotation
 omaword search "living water"    # search the version you read
+omaword link jn316               # print an omaword: link to a passage
 ```
 
-`omaword help` lists every command, and `man omaword` has the manual. `omaword lookup` suits a key binding; in Omarchy, add one, and a rule to center the window, to `~/.config/hypr/bindings.lua`:
+`quote`, `search`, and `link` print without opening a window. Links like `omaword:John%203:16` (or `omaword:jn316?translation=KJV`) open where you were reading, from `xdg-open` or a browser. `omaword help` lists every command and `man omaword` has the manual; `bin/install` adds bash completion, and `omaword completion zsh` (or `fish`) prints the others.
+
+`omaword lookup` suits a key binding; in Omarchy, add one, and a rule to center the window, to `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + ALT + B", "Look up a passage", "omaword lookup")
