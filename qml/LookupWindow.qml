@@ -12,8 +12,8 @@ import "KeyNotation.js" as KeyNotation
 // text) and enter opens it in your reading window. Its size is fixed, which
 // Hyprland floats. Its own backend reads the version you read, or the one
 // asked for, and saves nothing; with others installed, tab and shift tab
-// (or a click on the version) read another, and enter opens the passage
-// in that version.
+// (or the version button) read another, and enter opens the passage in
+// that version.
 Window {
     id: lookup
     objectName: "lookupWindow"
@@ -46,6 +46,7 @@ Window {
     property string initialVersion: ""
     property string chosenVersion: ""
     readonly property bool choosable: versionOrder.length > 1
+    function tint(color, alpha) { return Qt.rgba(color.r, color.g, color.b, alpha) }
 
     function refresh() {
         candidates = query.text.trim().length ? Array.from(lookup.backend.referenceCandidates(query.text, 6)) : []
@@ -101,12 +102,21 @@ Window {
         const at = versionOrder.findIndex(function(row) { return row.id === lookup.backend.versionId })
         readVersion(versionOrder[(at + delta + versionOrder.length) % versionOrder.length].id)
     }
+    // The version button: with two versions a click reads the other; with
+    // more it lists them (a dropdown).
+    function chooseVersion() {
+        if (versionOrder.length > 2) openVersionMenu()
+        else cycleVersion(1)
+    }
+    // Under the button, its right edge on the button's, the version read current.
     function openVersionMenu() {
-        const at = versionControl.mapToItem(null, 0, versionControl.height)
+        const at = versionControl.mapToItem(null, versionControl.width, versionControl.height + Math.round(4 * controlScale))
         versionMenu.show("lookupVersion", versionOrder.map(function(row) {
             return { id: row.id, text: (row.abbreviation ? row.abbreviation + " · " : "") + row.name,
                 shortcut: row.id === lookup.backend.versionId ? "reading" : "", run: function() { lookup.readVersion(row.id) } }
         }), at.x, at.y)
+        versionMenu.x = Math.max(0, Math.round(at.x - versionMenu.width))
+        versionMenu.currentIndex = Math.max(0, versionOrder.findIndex(function(row) { return row.id === lookup.backend.versionId }))
     }
     // The passage as the reader shows it: a number before each verse where there are several.
     function passageText(passage) {
@@ -182,41 +192,94 @@ Window {
                 font.weight: Font.Medium
                 elide: Text.ElideRight
             }
-            // The version it reads; with others installed, a click lists them.
+            // The version it reads. With others installed it is a button,
+            // framed like the input beside it, its glyph saying what a click
+            // does: with two versions it switches (⇄) to the other, with more
+            // it opens a list (a chevron); a right click, like tab, reads the
+            // next. With one it is only its name.
             Label {
                 id: versionControl
                 objectName: "lookupVersion"
                 readonly property bool choosable: lookup.choosable
+                readonly property bool dropdown: lookup.versionOrder.length > 2
+                readonly property real gap: Math.round(10 * lookup.controlScale)
+                readonly property var other: lookup.versionOrder.find(function(row) { return row.id !== lookup.backend.versionId }) || null
+                readonly property string tip: dropdown
+                    ? "Choose a version · " + KeyNotation.format("RightClick") + " or " + KeyNotation.format("Tab") + " next · " + KeyNotation.format("Shift+Tab") + " previous"
+                    : other ? "Switch to " + (other.abbreviation || other.name) + " · " + KeyNotation.format("Tab") : ""
                 text: lookup.backend.versionAbbreviation
                 textFormat: Text.PlainText
-                color: choosable && versionMouse.containsMouse ? lookup.theme.foreground : lookup.theme.muted
+                color: choosable ? lookup.theme.foreground : lookup.theme.muted
                 font.family: lookup.theme.fontFamily
                 font.pixelSize: Math.round(12 * lookup.controlScale)
                 // As tall as the input beside it, its name centred.
                 Layout.preferredHeight: query.implicitHeight
                 verticalAlignment: Text.AlignVCenter
-                leftPadding: Math.round(10 * lookup.controlScale); rightPadding: leftPadding
+                leftPadding: gap
+                rightPadding: choosable ? gap + versionGlyph.width + Math.round(6 * lookup.controlScale) : gap
                 background: Rectangle {
-                    visible: versionControl.choosable && versionMouse.containsMouse
-                    color: lookup.theme.surface
+                    objectName: "lookupVersionFrame"
+                    visible: versionControl.choosable
                     radius: Math.min(lookup.theme.cornerRadius, width / 2, height / 2)
+                    color: versionMouse.pressed ? lookup.tint(lookup.theme.accent, 0.18)
+                        : versionMouse.containsMouse ? lookup.tint(lookup.theme.accent, 0.09) : lookup.theme.surface
+                    border.color: lookup.theme.border
+                }
+                Canvas {
+                    id: versionGlyph
+                    objectName: "lookupVersionGlyph"
+                    visible: versionControl.choosable
+                    anchors.right: parent.right
+                    anchors.rightMargin: versionControl.gap
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.round(12 * lookup.controlScale)
+                    height: width
+                    property color ink: lookup.theme.foreground
+                    readonly property string glyph: versionControl.dropdown ? "chevron-down" : "swap"
+                    onInkChanged: requestPaint()
+                    onGlyphChanged: requestPaint()
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.scale(width / 24, height / 24)
+                        ctx.strokeStyle = ink
+                        ctx.lineWidth = 2.6
+                        ctx.lineCap = "square"
+                        ctx.lineJoin = "miter"
+                        ctx.beginPath()
+                        if (glyph === "chevron-down") {
+                            ctx.moveTo(5, 9); ctx.lineTo(12, 16); ctx.lineTo(19, 9)
+                        } else {
+                            // Two arrows, one each way: to the other version and back.
+                            ctx.moveTo(4, 7); ctx.lineTo(19, 7); ctx.moveTo(15, 3); ctx.lineTo(19, 7); ctx.lineTo(15, 11)
+                            ctx.moveTo(20, 17); ctx.lineTo(5, 17); ctx.moveTo(9, 13); ctx.lineTo(5, 17); ctx.lineTo(9, 21)
+                        }
+                        ctx.stroke()
+                    }
                 }
                 MouseArea {
                     id: versionMouse
                     anchors.fill: parent
                     enabled: versionControl.choosable
                     hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: lookup.openVersionMenu()
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    // A disabled MouseArea still sets the cursor.
+                    cursorShape: versionControl.choosable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: function(mouse) {
+                        if (mouse.button === Qt.RightButton) lookup.cycleVersion(1)
+                        else lookup.chooseVersion()
+                    }
                 }
                 AppToolTip {
                     theme: lookup.theme
                     uiScale: lookup.controlScale
-                    visible: versionMouse.containsMouse
-                    text: "Choose a version · " + KeyNotation.format("Tab") + " next · " + KeyNotation.format("Shift+Tab") + " previous"
+                    visible: versionMouse.containsMouse && !versionMenu.visible
+                    text: versionControl.tip
                 }
                 Accessible.role: choosable ? Accessible.Button : Accessible.StaticText
                 Accessible.name: "Version " + text
+                Accessible.description: choosable ? tip : ""
+                Accessible.onPressAction: if (choosable) lookup.chooseVersion()
             }
         }
         ListView {
@@ -350,7 +413,10 @@ Window {
         objectName: "lookupVersionMenu"
         theme: lookup.theme
         uiScale: lookup.controlScale
-        // No owner's catcher here: a press outside closes it.
+        // No owner's catcher here: a press outside closes it and acts on
+        // nothing else (modal), so a click on the version button closes
+        // the list rather than opening it again.
+        modal: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     }
 }

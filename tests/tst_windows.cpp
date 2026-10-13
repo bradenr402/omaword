@@ -554,6 +554,10 @@ private slots:
         auto *version = windowObject(lookup,"lookupVersion");
         QCOMPARE(version->property("text").toString(),bible->versionAbbreviation());
         QVERIFY(!version->property("choosable").toBool());
+        // Only its name: no frame, no glyph, no tooltip.
+        QVERIFY(!windowObject(lookup,"lookupVersionFrame")->property("visible").toBool());
+        QVERIFY(!windowObject(lookup,"lookupVersionGlyph")->property("visible").toBool());
+        QCOMPARE(version->property("tip").toString(),QString());
         QVERIFY(!windowObject(lookup,"lookupHints")->property("plainText").toString().contains("tab"));
         lookup->requestActivate(); QVERIFY(QTest::qWaitForWindowActive(lookup));
         // A pointing hand over the hints a click acts on (enter show, esc
@@ -623,15 +627,23 @@ private slots:
         QTest::keyClick(lookup,Qt::Key_Backtab,Qt::ShiftModifier);
         QCOMPARE(version->property("text").toString(),QString("NET")); QCOMPARE(shownVersion(),QString("engnet"));
         QCOMPARE(lookup->property("chosenVersion").toString(),QString()); // Back where it began.
-        // The menu lists them in the same order, the one read marked; choosing reads it.
+        // A button, framed, its glyph two arrows: with two versions a click
+        // switches to the other (no list), and a right click does too.
         auto *menu = windowObject(lookup,"lookupVersionMenu");
-        QVERIFY(QMetaObject::invokeMethod(lookup,"openVersionMenu")); QTRY_VERIFY(menu->property("visible").toBool());
-        const auto entries = menu->property("layout").value<QJSValue>().toVariant().toList();
-        QCOMPARE(entries.size(),2);
-        QCOMPARE(entries[0].toMap()["id"].toString(),QString("engnet")); QCOMPARE(entries[0].toMap()["shortcut"].toString(),QString("reading"));
-        QCOMPARE(entries[1].toMap()["id"].toString(),QString("window-original")); QCOMPARE(entries[1].toMap()["shortcut"].toString(),QString());
-        QVERIFY(QMetaObject::invokeMethod(menu,"triggerId",Q_ARG(QVariant,QString("window-original"))));
-        QTRY_COMPARE(shownVersion(),QString("window-original"));
+        QVERIFY(windowObject(lookup,"lookupVersionFrame")->property("visible").toBool());
+        QCOMPARE(windowObject(lookup,"lookupVersionGlyph")->property("glyph").toString(),QString("swap"));
+        QCOMPARE(version->property("tip").toString(),QString::fromUtf8("Switch to OWB · tab"));
+        const auto clickVersion = [&](Qt::MouseButton button) {
+            auto *item = qobject_cast<QQuickItem *>(version);
+            QTest::mouseClick(lookup,button,{},item->mapToScene(QPointF(item->width() / 2,item->height() / 2)).toPoint());
+            QCoreApplication::processEvents();
+        };
+        clickVersion(Qt::LeftButton); QCOMPARE(shownVersion(),QString("window-original"));
+        QVERIFY(!menu->property("visible").toBool());
+        QCOMPARE(version->property("tip").toString(),QString::fromUtf8("Switch to NET · tab"));
+        clickVersion(Qt::RightButton); QCOMPARE(shownVersion(),QString("engnet"));
+        clickVersion(Qt::LeftButton); QCOMPARE(shownVersion(),QString("window-original"));
+        QVERIFY(!menu->property("visible").toBool());
         // The list follows too, while choosing.
         QVERIFY(QMetaObject::invokeMethod(lookup,"back"));
         QTest::keyClick(lookup,Qt::Key_Tab); QCOMPARE(version->property("text").toString(),QString("NET"));
@@ -671,6 +683,40 @@ private slots:
         seen.clear();
         for (int i = 0; i < 4; ++i) { QTest::keyClick(lookup, Qt::Key_Backtab, Qt::ShiftModifier); seen << backend->versionId(); }
         QCOMPARE(seen, QStringList({order[3], order[2], order[1], order[0]}));
+        // With more than two, the version button opens the list of them (its
+        // glyph a chevron): under it, its right edge on the button's, the
+        // version read marked and current; choosing one reads it.
+        auto *version = qobject_cast<QQuickItem *>(windowObject(lookup, "lookupVersion"));
+        auto *menu = windowObject(lookup, "lookupVersionMenu");
+        QCOMPARE(windowObject(lookup, "lookupVersionGlyph")->property("glyph").toString(), QString("chevron-down"));
+        QVERIFY(version->property("tip").toString().startsWith("Choose a version"));
+        const QPoint centre = version->mapToScene(QPointF(version->width() / 2, version->height() / 2)).toPoint();
+        QTest::mouseClick(lookup, Qt::LeftButton, {}, centre); QTRY_VERIFY(menu->property("visible").toBool());
+        QStringList listed;
+        for (const auto &entry : menu->property("layout").value<QJSValue>().toVariant().toList()) {
+            listed << entry.toMap()["id"].toString();
+            QCOMPARE(entry.toMap()["shortcut"].toString(), entry.toMap()["id"] == backend->versionId() ? QString("reading") : QString());
+        }
+        QCOMPARE(listed, order);
+        QCOMPARE(menu->property("currentIndex").toInt(), 0);
+        const QPointF corner = version->mapToScene(QPointF(version->width(), version->height()));
+        QCOMPARE(menu->property("x").toDouble() + menu->property("width").toDouble(), qRound(corner.x()) * 1.0);
+        QVERIFY(menu->property("y").toDouble() >= corner.y());
+        // A click on the button again closes it, acting on nothing else.
+        QTest::mouseClick(lookup, Qt::LeftButton, {}, centre); QTRY_VERIFY(!menu->property("visible").toBool());
+        QCoreApplication::processEvents();
+        QVERIFY(!menu->property("visible").toBool()); QCOMPARE(backend->versionId(), order[0]);
+        QTest::mouseClick(lookup, Qt::LeftButton, {}, centre); QTRY_VERIFY(menu->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(menu, "triggerId", Q_ARG(QVariant, order[2])));
+        QTRY_COMPARE(backend->versionId(), order[2]);
+        // Opened again, the version read is the current row.
+        QTest::mouseClick(lookup, Qt::LeftButton, {}, centre); QTRY_VERIFY(menu->property("visible").toBool());
+        QCOMPARE(menu->property("currentIndex").toInt(), 2);
+        QTest::keyClick(lookup, Qt::Key_Escape); QTRY_VERIFY(!menu->property("visible").toBool());
+        // A right click reads the next, as tab does, with no list.
+        QTest::mouseClick(lookup, Qt::RightButton, {}, centre); QCOMPARE(backend->versionId(), order[3]);
+        QVERIFY(!menu->property("visible").toBool());
+        QTest::mouseClick(lookup, Qt::RightButton, {}, centre); QCOMPARE(backend->versionId(), order[0]);
         // The passage shown, by its scope.
         QVERIFY(QMetaObject::invokeMethod(lookup, "show", Q_ARG(QVariant, 0)));
         const auto shown = [&] {
