@@ -5,7 +5,11 @@
 #include <QCoreApplication>
 #include <QQmlEngine>
 #include <QQuickTextDocument>
+#include <QFontInfo>
 #include <QFontMetricsF>
+#include <QGuiApplication>
+#include <QPainter>
+#include <QPainterPath>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -77,6 +81,37 @@ void MarkdownQuotes::setListIndent(qreal indent)
 
 namespace {
 enum Flag { StartsQuote = 1, Continues = 2 };
+// previewMarkdown's mark for an image it made a link (U+2063, invisible).
+const QChar imageMark(0x2063);
+// An image glyph for a link's text em pixels high: a framed picture (a sun
+// over hills) in its ink, and the room before the text, drawn for the
+// screen's pixel ratio.
+QImage imageGlyph(const QColor &ink, int em, QSizeF *size)
+{
+    *size = QSizeF(std::ceil(em * 1.1), std::ceil(em * 0.72));
+    const qreal ratio = qGuiApp ? std::max<qreal>(1, qGuiApp->devicePixelRatio()) : 1;
+    QImage image((*size * ratio).toSize(), QImage::Format_ARGB32_Premultiplied);
+    image.setDevicePixelRatio(ratio);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const qreal pen = std::max<qreal>(1, em / 14.0);
+    const QRectF frame(pen / 2, pen / 2, em * 0.82 - pen, size->height() - pen);
+    painter.setPen(QPen(ink, pen));
+    painter.drawRoundedRect(frame, em * 0.09, em * 0.09);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(ink);
+    painter.drawEllipse(QPointF(frame.left() + frame.width() * 0.3, frame.top() + frame.height() * 0.33), em * 0.07, em * 0.07);
+    QPainterPath hills;
+    hills.moveTo(frame.left() + pen / 2, frame.bottom());
+    hills.lineTo(frame.left() + frame.width() * 0.42, frame.top() + frame.height() * 0.46);
+    hills.lineTo(frame.left() + frame.width() * 0.62, frame.top() + frame.height() * 0.7);
+    hills.lineTo(frame.left() + frame.width() * 0.76, frame.top() + frame.height() * 0.56);
+    hills.lineTo(frame.right() - pen / 2, frame.bottom());
+    hills.closeSubpath();
+    painter.drawPath(hills);
+    return image;
+}
 enum Kind { Paragraph, List, Code, Heading };
 Kind kind(const QTextBlock &block)
 {
@@ -158,6 +193,35 @@ void MarkdownQuotes::narrow()
                 cursor.setPosition(block.position() + block.length() - 1, QTextCursor::KeepAnchor);
                 cursor.mergeCharFormat(look);
                 cursor.mergeBlockCharFormat(look);
+            }
+            // An image's mark becomes its glyph, in the size and color of the
+            // link the image became, and a part of it: a click follows it.
+            for (int at = block.text().indexOf(imageMark); at >= 0; at = block.text().indexOf(imageMark, at + 1)) {
+                const int position = block.position() + at;
+                QTextCursor probe(m_document);
+                probe.setPosition(at + 1 < block.text().size() ? position + 2 : position + 1);
+                const QTextCharFormat link = probe.charFormat();
+                // Its size: the text's, or a heading's (Qt applies the size
+                // adjustment only when it lays the text out: as it scales the
+                // text, H6 to H1 at 0.7 to 2 times).
+                const QFont text = m_document->defaultFont();
+                static const qreal scales[] = {0.7, 0.8, 1.0, 1.2, 1.5, 2.0};
+                const qreal scale = link.hasProperty(QTextFormat::FontSizeAdjustment)
+                    ? scales[qBound(0, link.intProperty(QTextFormat::FontSizeAdjustment) + 2, 5)] : 1.0;
+                const int em = qRound(scale * (text.pixelSize() > 0 ? text.pixelSize() : QFontInfo(text).pixelSize()));
+                const QColor ink = link.foreground().style() != Qt::NoBrush ? link.foreground().color() : QColor(Qt::black);
+                const QUrl name(QStringLiteral("omaword-glyph:image/%1/%2").arg(ink.name(QColor::HexArgb).mid(1)).arg(em));
+                QSizeF size;
+                const QImage image = imageGlyph(ink, em, &size);
+                m_document->addResource(QTextDocument::ImageResource, name, image);
+                QTextImageFormat glyph;
+                glyph.merge(link);
+                glyph.setName(name.toString());
+                glyph.setWidth(size.width());
+                glyph.setHeight(size.height());
+                cursor.setPosition(position);
+                cursor.setPosition(position + 1, QTextCursor::KeepAnchor);
+                cursor.insertImage(glyph);
             }
         }
         // A paragraph's next line (a single Enter) follows without a gap, as

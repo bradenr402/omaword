@@ -5,10 +5,13 @@
 #include "soundeffects.h"
 #include "versioncatalog.h"
 #include <QCoreApplication>
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
 #include <QPointer>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQmlNetworkAccessManagerFactory>
 #include <QTextStream>
 #include <QTimer>
 #include <QWindow>
@@ -21,6 +24,31 @@ static QString palettePassage(const BibleBackend *bible, const QString &text)
     if (bible->resolveReference(text).value("valid").toBool()) return text;
     const auto candidates = bible->referenceCandidates(text, 1);
     return candidates.isEmpty() ? text : candidates.first().toMap().value("reference").toString();
+}
+
+namespace {
+// The interface reads nothing from the network: nothing QML would fetch (an
+// image a label's text names, as a book name in an imported USFM file could)
+// leaves the computer. Version downloads have their own connection
+// (VersionCatalog). Each request fails at once, its address replaced with
+// one of a scheme no handler knows, so nothing is sent.
+class OfflineNetwork : public QNetworkAccessManager
+{
+public:
+    using QNetworkAccessManager::QNetworkAccessManager;
+protected:
+    QNetworkReply *createRequest(Operation operation, const QNetworkRequest &request, QIODevice *data) override
+    {
+        QNetworkRequest refused(request);
+        refused.setUrl(QUrl(QStringLiteral("offline:")));
+        return QNetworkAccessManager::createRequest(operation, refused, data);
+    }
+};
+class OfflineNetworkFactory : public QQmlNetworkAccessManagerFactory
+{
+public:
+    QNetworkAccessManager *create(QObject *parent) override { return new OfflineNetwork(parent); }
+};
 }
 
 WindowManager::WindowManager(Desktop *desktop, QObject *parent, QUrl source)
@@ -55,6 +83,8 @@ void WindowManager::ensureEngine()
 {
     if (!m_engine) {
         m_engine = new QQmlEngine(this);
+        static OfflineNetworkFactory offline;
+        m_engine->setNetworkAccessManagerFactory(&offline);
         // Qt.quit() and Qt.exit() reach the application, as with QQmlApplicationEngine.
         connect(m_engine, &QQmlEngine::quit, QCoreApplication::instance(), &QCoreApplication::quit, Qt::QueuedConnection);
         connect(m_engine, &QQmlEngine::exit, QCoreApplication::instance(), &QCoreApplication::exit, Qt::QueuedConnection);

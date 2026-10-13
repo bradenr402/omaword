@@ -498,6 +498,47 @@ private slots:
         QVERIFY(headings[0].layout()->lineCount() > 0);
         QCOMPARE(headings[0].layout()->lineAt(0).height(), headings[1].layout()->lineAt(0).height());
     }
+    // The preview shows no image and loads nothing an image or HTML names:
+    // an image is a link to it, an image glyph before its alt text (else
+    // "image"), HTML shows as typed; code, autolinks, and passage links stay.
+    void previewsShowImagesAsLinksAndHtmlAsTyped() {
+        QVERIFY(bible->setDeskPage("Before ![A map](https://example.org/map.png) after\n\n![](https://example.org/x.png)\n\n"
+                                   "<img src=\"https://example.org/y.png\"> and <b>bold</b>\n\n`![code](x) <b>` stays\n\n"
+                                   "<https://example.org/auto>\n\nWow!John 1:4\n\n```\n<b>![fenced](z)</b>\n```\n\n    ![indented](w)\n\n# A ![map](https://example.org/h.png)", desk()));
+        openDesk(); key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        const auto document = item("deskPreview")->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTRY_VERIFY(!document->toPlainText().contains(QChar(0x200b)) && !document->toPlainText().contains(QChar(0x2063)));
+        const QString text = document->toPlainText();
+        QStringList glyphs, links;
+        QList<qreal> heights;
+        for (auto block = document->begin(); block.isValid(); block = block.next()) {
+            for (auto it = block.begin(); !it.atEnd(); ++it) {
+                const auto format = it.fragment().charFormat();
+                if (format.isImageFormat()) {
+                    const auto image = format.toImageFormat();
+                    QVERIFY2(image.name().startsWith("omaword-glyph:"), qPrintable(image.name()));
+                    QVERIFY(image.width() > 0 && image.height() > 0);
+                    const auto picture = document->resource(QTextDocument::ImageResource, QUrl(image.name())).value<QImage>();
+                    QVERIFY(!picture.isNull());
+                    glyphs << format.anchorHref(); heights << image.height();
+                } else if (format.isAnchor()) links << it.fragment().text() + " " + format.anchorHref();
+            }
+        }
+        QCOMPARE(glyphs, (QStringList{"https://example.org/map.png", "https://example.org/x.png", "https://example.org/h.png"}));
+        // In a heading, the glyph is the heading's size.
+        QVERIFY2(heights[2] >= 1.8 * heights[0], qPrintable(QString("%1 vs %2").arg(heights[2]).arg(heights[0])));
+        QVERIFY(text.contains(QStringLiteral("Before \uFFFCA map after")));
+        QVERIFY(links.contains("A map https://example.org/map.png"));
+        QVERIFY(links.contains("image https://example.org/x.png"));
+        QVERIFY(links.contains("https://example.org/auto https://example.org/auto"));
+        QVERIFY(text.contains("<img src=\"https://example.org/y.png\"> and <b>bold</b>"));
+        QVERIFY(text.contains("![code](x) <b> stays"));
+        QVERIFY(text.contains("<b>![fenced](z)</b>"));
+        QVERIFY(text.contains("![indented](w)"));
+        // A passage right after "!" stays a passage link.
+        QVERIFY(text.contains("Wow!John 1:4"));
+        QVERIFY(std::any_of(links.cbegin(), links.cend(), [](const QString &link) { return link.startsWith("John 1:4 omaword-passage:"); }));
+    }
     void cleanDeskAsksFirstAndUndoes() {
         navigate("John 1:4"); key(Qt::Key_D); navigate("John 1:5"); key(Qt::Key_D);
         const auto page = desk(); QVERIFY(!page.isEmpty());

@@ -259,7 +259,7 @@ Read in the Paragraph, Verse, or Block layout; **Aa** in the footer sets the tex
 
 Bible search (`ctrl /`) finds the verses holding all your words, and "an exact phrase" even across verses; `alt a` searches every version you installed. A query in slashes (`/lov(e|ed) the/`) is a regular expression, as every find in the chapter (`/`) is. Case works as in Neovim, words and all: lowercase ignores it, a capital matches it, and `\c` / `\C` force either.
 
-Notes are Markdown with passage links: `[[` suggests a passage, and `alt v` previews the note. **Marks** gathers every highlight, note, and tag; **See also** follows your reading with cross-references, parallel passages, and the passages you tagged alike. `c` compares a passage across your versions, and `shift C` opens another version beside yours, the two scrolling together.
+Notes are Markdown with passage links: `[[` suggests a passage, and `alt v` previews the note (an image shows as a link to it, so nothing loads from the web). **Marks** gathers every highlight, note, and tag; **See also** follows your reading with cross-references, parallel passages, and the passages you tagged alike. `c` compares a passage across your versions, and `shift C` opens another version beside yours, the two scrolling together.
 
 The **Desk** is one Markdown page shared by every window: `d` quotes the passage you read on it, with a link back, and you write around the quotations.
 

@@ -2124,15 +2124,59 @@ ApplicationWindow {
         linkDismissedAt = linkQueryStart
         linkQueryStart = -1; linkQuery = ""; linkSuggestions = []
     }
-    // Markdown preview with each passage link made clickable.
+    // Markdown preview with each passage link made clickable. A "!" right
+    // before one is escaped: "Wow!John 3:16" must not become an image.
     function linkedMarkdown(text) {
         const links = Array.from(bible.passageLinks(text))
         for (let i = links.length - 1; i >= 0; --i) {
             const link = links[i]
-            text = text.slice(0, link.start) + "[" + link.text + "](omaword-passage:" + encodeURIComponent(link.reference) + ")"
+            let backslashes = 0
+            while (text.charAt(link.start - 2 - backslashes) === "\\") ++backslashes
+            const bang = text.charAt(link.start - 1) === "!" && backslashes % 2 === 0 ? "\\" : ""
+            text = text.slice(0, link.start - bang.length) + bang + text.slice(link.start - bang.length, link.start)
+                + "[" + link.text + "](omaword-passage:" + encodeURIComponent(link.reference) + ")"
                 + text.slice(link.start + link.length)
         }
         return text
+    }
+    // A preview loads nothing an image or HTML in the text names (a web
+    // address, a file): an image becomes a link to it, its alt text (else
+    // "image") after a mark MarkdownQuotes draws as an image glyph, and
+    // HTML shows as typed, its "<" escaped. Code spans, autolinks
+    // (<https://…>), and a link destination in brackets stay as written.
+    readonly property string previewImageMark: "\u2063"
+    readonly property var previewAutolink: /^<(?:[A-Za-z][A-Za-z0-9+.\-]{1,31}:[^\s<>]*|[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~\-]+@[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)*)>/
+    function inertMarkdownLine(line) {
+        let out = ""
+        for (let i = 0; i < line.length;) {
+            const c = line.charAt(i)
+            if (c === "\\" && i + 1 < line.length) { out += line.substr(i, 2); i += 2; continue }
+            if (c === "`") {
+                // A code span runs to the next run of as many backticks; unmatched, they are text.
+                let n = 0
+                while (line.charAt(i + n) === "`") ++n
+                let end = i + n
+                for (let j = end; j < line.length;) {
+                    let k = j
+                    while (line.charAt(k) === "`") ++k
+                    if (k - j === n) { end = k; break }
+                    j = k > j ? k : j + 1
+                }
+                out += line.slice(i, end); i = end
+                continue
+            }
+            if (c === "!" && line.charAt(i + 1) === "[") {
+                out += previewImageMark + "[" + (line.charAt(i + 2) === "]" ? "image" : "")
+                i += 2
+                continue
+            }
+            if (c === "<" && !previewAutolink.test(line.slice(i)) && !out.endsWith("](") && !/^ {0,3}\[[^\]]+\]:\s*$/.test(out)) {
+                out += "\\<"; ++i
+                continue
+            }
+            out += c; ++i
+        }
+        return out
     }
     // A Markdown preview's text: passage links, and a single Enter as a line
     // break (as GitHub comments and Obsidian take it). Qt keeps no trace of
@@ -2147,11 +2191,16 @@ ApplicationWindow {
         const delimiterRow = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
         const content = function(line) { return line.replace(/^ {0,3}(?:> ?)*/, "") }
         const blank = function(line) { return !content(line).trim().length }
-        let quoting = false, opening = false, fenced = false, listing = false
+        let quoting = false, opening = false, fenced = false, listing = false, indentedCode = false
         for (let i = 0; i < lines.length; ++i) {
-            const line = lines[i]
-            if (fence.test(line)) { fenced = !fenced; continue }
+            if (fence.test(lines[i])) { fenced = !fenced; continue }
             if (fenced) continue
+            // An indented code block: four spaces in (inside a quote, past its
+            // marks), after a blank line or more code, outside a list.
+            const inner = /^ {0,3}>/.test(lines[i]) ? content(lines[i]) : lines[i]
+            indentedCode = !listing && /^(\t| {4})/.test(inner) && (indentedCode || i === 0 || blank(lines[i - 1]))
+                || (indentedCode && blank(lines[i]))
+            const line = indentedCode ? lines[i] : inertMarkdownLine(lines[i])
             const marks = /^( {0,3}(?:> ?)+)/.exec(line), body = content(line)
             if (marks && !quoting) opening = true
             if (listMarker.test(body)) listing = true

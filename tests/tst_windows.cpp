@@ -18,6 +18,10 @@
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QTcpServer>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QQmlEngine>
 #include <QTimer>
 #include <QWindow>
 #include <archive.h>
@@ -125,6 +129,23 @@ private slots:
         windows.reset(); desktop.reset();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         session.reset();
+    }
+    // The interface fetches nothing: a request through the windows' QML
+    // engine (an image a label's text names) fails at once, and nothing
+    // reaches the address it named; a plain manager does reach it.
+    void interfaceNeverGoesOnline() {
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost));
+        const QUrl address(QString("http://127.0.0.1:%1/image.png").arg(server.serverPort()));
+        auto *engine = qmlEngine(windows->windowAt(0)); QVERIFY(engine);
+        QVERIFY(engine->networkAccessManager());
+        std::unique_ptr<QNetworkReply> reply(engine->networkAccessManager()->get(QNetworkRequest(address)));
+        QTRY_VERIFY(reply->isFinished());
+        QVERIFY(reply->error() != QNetworkReply::NoError);
+        QVERIFY(!server.hasPendingConnections());
+        QNetworkAccessManager plain;
+        std::unique_ptr<QNetworkReply> direct(plain.get(QNetworkRequest(address)));
+        QVERIFY(server.waitForNewConnection(5000));
+        direct->abort();
     }
     void independentReadersAndSharedCommits() {
         auto *a = windows->backendAt(0), *b = windows->backendAt(1);

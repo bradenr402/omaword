@@ -17,7 +17,8 @@ class QTextDocument;
 // is cut off), puts `gap` (QuoteBars: a line of the text) above each paragraph, list, quote, heading, and code
 // block (not between a paragraph's lines, a list's items, or a code block's
 // lines), gives a heading's size and weight to all of it (Qt's import leaves
-// them off its links, emphasis, and code), and reports where each quote level's bar goes ({x, y, height,
+// them off its links, emphasis, and code), draws an image glyph at each mark
+// (U+2063) previewMarkdown leaves where it made an image a link, and reports where each quote level's bar goes ({x, y, height,
 // level} in document coordinates) for QuoteBars.qml. Qt keeps no trace of
 // where a quote starts or which blocks a line break split, so the text
 // (Main.previewMarkdown) marks them with zero-width spaces (U+200B): one
