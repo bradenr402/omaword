@@ -844,12 +844,16 @@ ApplicationWindow {
     onReduceMotionChanged: if (reduceMotion) { pulseAnimation.stop(); flashAnimation.stop(); pulseLevel = 0; flashLevel = 0; settleMargins() }
     // Deferred so the pulse marks the final selection after navigation settles.
     function pulseDestination() { Qt.callLater(app.startPulse) }
-    function startPulse() {
-        if (reduceMotion || !bible.ready || focusFirst <= 0) return
-        pulseFirst = focusFirst
-        pulseLast = focusLast
+    function startPulse() { pulseVerses(focusFirst, focusLast) }
+    function pulseVerses(first, last) {
+        if (reduceMotion || !bible.ready || first <= 0) return
+        pulseFirst = first
+        pulseLast = last
         pulseAnimation.restart()
     }
+    // A counted step (5j, 10k) is a jump: the verse it lands on pulses, as
+    // after 20gg (in Visual mode, only that verse, not the whole range).
+    function pulseCursor() { Qt.callLater(function() { app.pulseVerses(bible.cursorVerse, bible.cursorVerse) }) }
     function flashVerses(first, last) {
         if (reduceMotion || first <= 0) return
         flashFirst = first
@@ -5213,8 +5217,8 @@ ApplicationWindow {
         case "resume": openPalette(false, true); break
         case "previousChapter": chapterStep(-count); break
         case "nextChapter": chapterStep(count); break
-        case "previousVerse": moveVerse(-count, verseMode); break
-        case "nextVerse": moveVerse(count, verseMode); break
+        case "previousVerse": moveVerse(-count, verseMode); if (count > 1) pulseCursor(); break
+        case "nextVerse": moveVerse(count, verseMode); if (count > 1) pulseCursor(); break
         case "previousFive": moveVerse(-5 * count, verseMode, true); break
         case "nextFive": moveVerse(5 * count, verseMode, true); break
         case "previousTen": moveVerse(-10 * count, verseMode, true); break

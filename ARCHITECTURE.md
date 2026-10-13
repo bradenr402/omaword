@@ -653,6 +653,8 @@ files.
     highlighted row in Marks draws the same stroke under its reference.
   - Focus-mode dimming: follows the cursor instantly; only entering/leaving fades.
   - Jump pulse and copy flash rects. Reduce motion disables pulses/flashes/fades.
+    A counted verse step (`5j`, `10k`, `↓` `↑` with a count) pulses the verse it
+    lands on (`pulseCursor`; in Visual mode that verse, not the range).
   - Programmatic scrolls to a verse (`scrollToVerse`, `zz`/`zt`/`zb`, search,
     jumps) slide via one `readerSlide` animation (75 ms, ease-out) that
     retargets from the current position; `readerTargetY()` is the logical

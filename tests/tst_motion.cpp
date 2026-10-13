@@ -410,6 +410,16 @@ private slots:
         navigate("John 1:1"); type("12"); key(Qt::Key_G); key(Qt::Key_G);
         QTRY_COMPARE(bible->cursorVerse(), 12);
         expectPulse(12, 12);
+        // Counted j, k, ↓, ↑ (5j): the verse they land on; a plain step never.
+        type("5"); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(), 17); expectPulse(17, 17);
+        type("3"); key(Qt::Key_K); QCOMPARE(bible->cursorVerse(), 14); expectPulse(14, 14);
+        type("2"); key(Qt::Key_Down); QCOMPARE(bible->cursorVerse(), 16); expectPulse(16, 16);
+        type("2"); key(Qt::Key_Up); QCOMPARE(bible->cursorVerse(), 14); expectPulse(14, 14);
+        key(Qt::Key_J); for (int i = 0; i < 6; ++i) { QTest::qWait(20); QVERIFY(!prop("pulseActive").toBool()); }
+        // In Visual mode only the verse landed on, not the range.
+        key(Qt::Key_V, Qt::ShiftModifier); type("3"); key(Qt::Key_J);
+        QCOMPARE(bible->selectedStart(), 15); QCOMPARE(bible->selectedEnd(), 18); expectPulse(18, 18);
+        key(Qt::Key_Escape);
         // A link followed from the Desk (its quotation's reference).
         navigate("John 1:20"); key(Qt::Key_D); navigate("John 1:1");
         key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
