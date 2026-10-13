@@ -120,13 +120,13 @@ or no passage while input is piped in, it reads passages from standard input,
 one per line.
 .TP
 .BI search " words..."
-Searches as OmaWord does: every word in one verse, partial words included,
-case ignored; a "quoted phrase" may run across verses. Words in slashes, such as
+Searches as OmaWord does: every word in one verse, partial words included; a
+"quoted phrase" may run across verses. Words in slashes, such as
 .BR '/lov(e|ed)/' ,
-are a regular expression matched within one verse, case ignored unless it has a
-capital letter
+are a regular expression matched within one verse. Case is ignored unless a
+word (or the expression) has a capital letter
 .RB ( \ec
-ignores case,
+ignores it,
 .B \eC
 keeps it). Matches print in Bible order.
 .B \-\-all

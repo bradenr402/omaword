@@ -415,9 +415,12 @@ files.
   global preference: the active one first, then the others most recently
   used first); per-window state. Its key, `alt a`, is catalog scope `search`:
   live only while the palette holds a Bible search (`shortcutContext`);
-  Commands runs it anywhere. Case-insensitive, whitespace-collapsed, partial
-  words; punctuation and accents significant. Headings, numbers, notes, tags,
-  decorations never searched.
+  Commands runs it anywhere. Whitespace-collapsed, partial words; punctuation
+  and accents significant. Smart case, as chapter find's (`parse`): a word or
+  phrase with a capital matches its case (its source text there, spaces
+  collapsed, against what was typed), one without ignores it (folded, as the
+  index is); `\c`/`\C` anywhere force every term either way. Headings,
+  numbers, notes, tags, decorations never searched.
 - Bible search: unquoted terms AND within a verse; quoted phrases may span
   adjacent verses; mixed queries anchor on the minimal phrase range. Never
   crosses chapters. Max 4096 units; unbalanced quotes error. A query in

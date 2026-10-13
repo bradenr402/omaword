@@ -57,10 +57,10 @@ const QList<Command> &commands()
          {"omaword quote jn316", "omaword quote ps23 -t KJV --plain | wl-copy", "omaword quote \"Genesis 1:1-3\" \"John 1:1-5\"",
           "printf 'jn316\\nrom 8:28\\n' | omaword quote"}, true},
         {"search", "<words>... [--all | -t <name>] [--limit <n>] [--json]", "Search the Bible",
-         "Searches as OmaWord's search does: every word in one verse, partial words included, case ignored; a \"quoted "
-         "phrase\" may run across verses. Words in slashes are a regular expression, as in chapter find: matched within "
-         "one verse, case ignored unless it has a capital letter (\\c ignores case, \\C keeps it). Matches print in "
-         "Bible order, the matched words emphasized on a terminal. The exit status is 1 when nothing matches.",
+         "Searches as OmaWord's search does: every word in one verse, partial words included; a \"quoted phrase\" may "
+         "run across verses. Words in slashes are a regular expression, as in chapter find, matched within one verse. "
+         "Case is ignored unless a word (or the expression) has a capital letter: \\c ignores it, \\C keeps it. Matches "
+         "print in Bible order, the matched words emphasized on a terminal. The exit status is 1 when nothing matches.",
          {translationOption, {"    --all", "Search every installed translation, the one you read first."},
           {"    --limit <n>", "Print at most n matches (0: all). Default: 20 on a terminal, all otherwise."},
           {"    --color <when>", "Emphasize matches: auto (on a terminal, unless NO_COLOR is set), always, or never."},

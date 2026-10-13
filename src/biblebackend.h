@@ -223,8 +223,8 @@ public:
     QVariantList searchBooks() const { return m_searchBooks; }
     QString textGeneration() const { return m_textGeneration; }
     // Bible syntax: AND substrings in one verse, quoted phrases across adjacent
-    // source verses in a chapter. Quotes/backslashes can be backslash-escaped.
-    // A query in slashes is a regular expression.
+    // source verses in a chapter, smart case. Quotes/backslashes can be
+    // backslash-escaped. A query in slashes is a regular expression.
     // Queries over 4096 UTF-16 units return an explicit error, never truncation.
     // With searchAllVersions, every installed version's matches follow the
     // active one's, each in Bible order; searchBooks then has one entry per

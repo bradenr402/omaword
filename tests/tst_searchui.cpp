@@ -806,6 +806,26 @@ private slots:
         search("/alpha(/"); QVERIFY2(bible->searchError().startsWith("Invalid regular expression"), qPrintable(bible->searchError()));
         key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
     }
+    // Words use smart case, as regular expressions do: a word with a capital
+    // matches its case, in the results and in the reader after choosing one.
+    void wordsUseSmartCase() {
+        navigate("John 1:1");
+        search("alpha"); QTRY_COMPARE(bible->searchResultCount(), 8);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        search("ALPHA"); QTRY_COMPARE(bible->searchResultCount(), 2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        search("ALPHA\\c"); QTRY_COMPARE(bible->searchResultCount(), 8);
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        // Alpha: 1:8, 1:20, and 1:50 in each chapter, not ALPHA or alphabet.
+        search("Alpha"); QTRY_COMPARE(bible->searchResultCount(), 6);
+        QCOMPARE(bible->searchResults().first().toMap()["reference"].toString(), QString("John 1:8"));
+        QCOMPARE(bible->searchResults().first().toMap()["segments"].toList().size(), 1);
+        key(Qt::Key_Return); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
+        QCOMPARE(bible->selectionReference(), QString("John 1:8"));
+        // In the reader, only Alpha is marked: one a verse, never "another alpha".
+        QTRY_COMPARE(prop("searchMatches").toList().size(), 3);
+        for (const auto &match : prop("searchMatches").toList()) QCOMPARE(match.toMap()["segments"].toList().size(), 1);
+    }
     void focusEscapeAndVersionInvalidation() {
         find("alpha"); key(Qt::Key_Return); bible->setFocusMode(true); call("readerFocus");
         QTRY_VERIFY(item("searchMatchCount")->isVisible());

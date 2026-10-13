@@ -15,7 +15,9 @@ struct Verse { int number = 0; QString text; };
 struct Chapter { int book = 0, number = 0; QString name; QVector<Verse> verses; };
 struct Result { QString error; QVariantList matches; };
 // A chapter's matches: with bibleSyntax, the query as Bible search reads it
-// (searchEditions); without, the text as one phrase.
+// (searchEditions); without, the text as one phrase. Words and phrases use
+// smart case: one with a capital letter matches its case (in Bible syntax
+// \c anywhere ignores case, \C matches it, as in patterns).
 Result find(const Chapter &chapter, const QString &query, bool bibleSyntax = false,
             const Cancellation &cancel = {});
 // Chapter find (`/`): `pattern` is a regular expression (QRegularExpression,
@@ -28,7 +30,7 @@ Result findPattern(const Chapter &chapter, const QString &pattern, const Cancell
 // An edition to search: its text database, version ID, and abbreviation.
 struct Edition { QString path, versionId, abbreviation; };
 // A Bible search reads its query in Bible syntax (every word in one verse,
-// "phrases" across verses), but a query in
+// "phrases" across verses, smart case as find has it), but a query in
 // slashes, /lov(e|ed)/, as a regular expression as chapter find takes it
 // (findPattern's smart case, \c and \C), matched within each verse, a row per
 // verse with every match.

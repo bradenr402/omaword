@@ -58,8 +58,8 @@ private slots:
         QCOMPARE(identity["start"].toInt(),4); QCOMPARE(identity["length"].toInt(),3);
         const auto c = chapter({QString::fromUtf8("😀 Straße  é\t\nLIGHT café, ﬃ İ 𐐀 end"),"Next   verse"});
         for (const auto &pair : QList<QPair<QString,QString>>{
-                 {"STRASSE","Straße"},{"ss","ß"},{"e","é"},{"😀","😀"},{"𐐨","𐐀"},
-                 {"FFI","ﬃ"},{"i̇","İ"},{"é light","é\t\nLIGHT"},{"café,","café,"}}) {
+                 {"strasse","Straße"},{"ss","ß"},{"e","é"},{"😀","😀"},{"𐐨","𐐀"},
+                 {"ffi","ﬃ"},{"i̇","İ"},{"é light","é\t\nLIGHT"},{"café,","café,"}}) {
             const auto result = find(c,pair.first);
             QVERIFY(result.error.isEmpty()); QVERIFY2(!result.matches.isEmpty(),qPrintable(pair.first));
             bool matched = false;
@@ -72,7 +72,7 @@ private slots:
         QVERIFY(find(c,"cafe").matches.isEmpty());
         QVERIFY(find(c,"café.").matches.isEmpty());
         QVERIFY(find(c,"é light").matches.isEmpty()); // No canonical normalization.
-        const auto cross = find(c,"END\n next").matches;
+        const auto cross = find(c,"end\n next").matches;
         QCOMPARE(cross.size(),1);
         const auto map = cross.first().toMap(); QCOMPARE(map["start"].toInt(),990); QCOMPARE(map["end"].toInt(),991);
         QCOMPARE(map["book"].toInt(),80); QCOMPARE(map["chapter"].toInt(),999);
@@ -94,7 +94,7 @@ private slots:
     }
     void parserAndAndSemantics() {
         const auto c = chapter({"alpha alpha alphabet BETA beta", "alpha", "beta", "say \"hello\" \\ world"});
-        const auto matches = find(c,"AlPhA BETA",true).matches;
+        const auto matches = find(c,"alpha beta",true).matches;
         QCOMPARE(matches.size(),1); QCOMPARE(matches.first().toMap()["start"].toInt(),990);
         QCOMPARE(matches.first().toMap()["segments"].toList().size(),5);
         QCOMPARE(find(c,"alpha alpha",true).matches.size(),2);
@@ -134,6 +134,42 @@ private slots:
         QCOMPARE(rows("/the|of/"),QStringList({"990:the|the","991:of"}));
         QVERIFY(find(c,"/(word/",true).error.startsWith("Invalid regular expression"));
         QCOMPARE(rows("w(or)d"),QStringList());
+    }
+    // Words and phrases use smart case, as patterns do: one with a capital
+    // letter matches its case, one without ignores it; \c anywhere ignores
+    // case for every term, \C matches it (\c wins), an escaped \\c is text.
+    void wordsUseSmartCase() {
+        const auto c = chapter({"In the beginning was the Word", "every word of GOD", "God said, Let there be light", "a \\c b"});
+        auto rows = [&](const QString &query) {
+            QStringList out;
+            for (const auto &row : find(c,query,true).matches) {
+                QStringList spans;
+                for (const auto &segment : row.toMap()["segments"].toList()) spans << sourceSegment(c,segment);
+                out << QString::number(row.toMap()["start"].toInt()) + ":" + spans.join("|");
+            }
+            return out;
+        };
+        QCOMPARE(rows("word"),QStringList({"990:Word","991:word"}));
+        QCOMPARE(rows("Word"),QStringList({"990:Word"}));
+        QCOMPARE(rows("WORD"),QStringList());
+        QCOMPARE(rows("god"),QStringList({"991:GOD","992:God"}));
+        QCOMPARE(rows("God"),QStringList({"992:God"}));
+        // Each term its own: a lowercase one beside a capitalized one ignores case.
+        QCOMPARE(rows("GOD every"),QStringList({"991:every|GOD"}));
+        QCOMPARE(rows("GOD Every"),QStringList());
+        // A phrase as a whole.
+        QCOMPARE(rows("\"the Word\""),QStringList({"990:the Word"}));
+        QCOMPARE(rows("\"The Word\""),QStringList());
+        // \c and \C, anywhere.
+        QCOMPARE(rows("WORD\\c"),QStringList({"990:Word","991:word"}));
+        QCOMPARE(rows("\\C word"),QStringList({"991:word"}));
+        QCOMPARE(rows("\\c\\C Word"),QStringList({"990:Word","991:word"}));
+        QCOMPARE(rows("\"the word\\C\""),QStringList());
+        QCOMPARE(rows("\\\\c"),QStringList({"993:\\c"}));
+        QCOMPARE(rows("\\c"),QStringList());
+        // Folding still serves lowercase: strasse finds Straße, STRASSE does not.
+        QCOMPARE(find(chapter({QString::fromUtf8("Straße")}),"strasse",true).matches.size(),1);
+        QCOMPARE(find(chapter({QString::fromUtf8("Straße")}),"STRASSE",true).matches.size(),0);
     }
     void chapterFindPatterns() {
         const auto c = chapter({"For God so loved the world", "God is love. Loved ones", "a\\b and 123 SHOUT"});
@@ -312,7 +348,7 @@ private slots:
                 qInfo("Synthetic 30,000 verses: warm [%s] run %d: %lld ms",qPrintable(query),repeat+1,timer.elapsed());
             }
         }
-        const auto unicode = search(path,"synthetic","SYN","STRASSE");
+        const auto unicode = search(path,"synthetic","SYN","strasse");
         QCOMPARE(unicode.matches.size(),1);
         const auto unicodeRow = unicode.matches.first().toMap();
         const auto unicodeSegment = unicodeRow["displaySegments"].toList().first().toMap();
@@ -409,6 +445,12 @@ private slots:
         QCOMPARE(indexedEditions(index),QStringList({"alpha","beta"}));
         // A query error comes back as before.
         QVERIFY(!searchEditions(both,"\"unfinished",index).error.isEmpty());
+        // Words use smart case through the index too: a capital matches case.
+        QCOMPARE(references(searchEditions(both,"In",index)),QStringList({"alpha Genesis 1:1"}));
+        QCOMPARE(references(searchEditions(both,"in",index)),QStringList({"alpha Genesis 1:1","alpha Genesis 2:1"}));
+        QCOMPARE(references(searchEditions(both,"Straße",index)),QStringList({"alpha Exodus 1:1"}));
+        QCOMPARE(references(searchEditions(both,"STRASSE",index)),QStringList());
+        QCOMPARE(references(searchEditions(both,"STRASSE\\c",index)),QStringList({"alpha Exodus 1:1"}));
         // A regular expression in slashes: matched within each verse, a row
         // per verse with every match, smart case as in chapter find; indexed
         // or not, every chapter is read.

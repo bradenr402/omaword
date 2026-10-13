@@ -131,6 +131,11 @@ private slots:
         QCOMPARE(limited.out.count("\n  "), 1); QVERIFY(limited.err.contains("Showing 1 of"));
         auto none = run({"search", "nowhere"});
         QCOMPARE(none.status, 1); QVERIFY(none.err.contains("no match"));
+        // Words use smart case, as in the app: a capital matches it; \c ignores it.
+        QCOMPARE(run({"search", "The"}).out, QString("Genesis 1:2 (NET)\n  The earth was empty.\n"));
+        QCOMPARE(run({"search", "the", "--limit", "0"}).out.count("\n  "), 4);
+        QCOMPARE(run({"search", "THE"}).status, 1);
+        QCOMPARE(run({"search", "THE\\c", "--limit", "0"}).out.count("\n  "), 4);
         // Words in slashes are a regular expression, smart case, within one verse.
         QCOMPARE(run({"search", "/lov(e|ed) the/"}).out, QString("John 3:16 (NET)\n  For God so loved the world.\n"));
         QVERIFY(run({"search", "/loved?/", "--color", "always"}).out.contains("\x1b[1;4mloved\x1b[0m"));

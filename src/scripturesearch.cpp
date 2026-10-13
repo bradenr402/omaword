@@ -122,30 +122,44 @@ Normalized normalize(const QString &source)
     out.compact();
     return out;
 }
-struct Term { QString text; bool phrase = false; };
+// A word or phrase: its normalized text (what the index and the scan look
+// for), and, matching case (exact), the text as typed, its spaces collapsed.
+struct Term { QString text; bool phrase = false; bool exact = false; QString original; };
 // Words and phrases, or (regex) a pattern matched within each verse.
 struct Query { QString error; QVector<Term> terms; bool regex = false; QRegularExpression pattern; };
+// Smart case, as patterns have it: a word or phrase with a capital letter
+// matches its case, one without ignores it; in Bible syntax \c anywhere
+// ignores case for every term and \C matches it (\c wins).
 Query parse(const QString &input, bool syntax)
 {
     Query query;
     if (input.size() > MaximumQuerySize) { query.error = "Search queries may contain at most 4096 UTF-16 units."; return query; }
-    auto add = [&](const QString &text, bool phrase) {
-        const QString normalized = normalize(text).text.trimmed();
-        if (normalized.isEmpty()) return;
-        for (const auto &term : query.terms) if (term.text == normalized && term.phrase == phrase) return;
-        query.terms.append({normalized,phrase});
-    };
-    if (!syntax) { add(input,true); return query; }
-    QString part; bool quoted = false;
-    for (qsizetype i = 0; i < input.size(); ++i) {
-        const QChar c = input[i];
-        if (c == '\\' && i+1 < input.size() && (input[i+1] == '"' || input[i+1] == '\\')) part += input[++i];
-        else if (c == '"') { add(part,quoted); part.clear(); quoted = !quoted; }
-        else if (!quoted && c.isSpace()) { add(part,false); part.clear(); }
-        else part += c;
+    QVector<std::pair<QString,bool>> parts;
+    bool forceInsensitive = false, forceSensitive = false;
+    if (!syntax) parts.append({input,true});
+    else {
+        QString part; bool quoted = false;
+        for (qsizetype i = 0; i < input.size(); ++i) {
+            const QChar c = input[i];
+            if (c == '\\' && i+1 < input.size() && (input[i+1] == '"' || input[i+1] == '\\')) part += input[++i];
+            else if (c == '\\' && i+1 < input.size() && (input[i+1] == 'c' || input[i+1] == 'C')) (input[++i] == 'c' ? forceInsensitive : forceSensitive) = true;
+            else if (c == '"') { parts.append({part,quoted}); part.clear(); quoted = !quoted; }
+            else if (!quoted && c.isSpace()) { parts.append({part,false}); part.clear(); }
+            else part += c;
+        }
+        if (quoted) { query.error = "Unfinished quoted phrase."; return query; }
+        parts.append({part,false});
     }
-    if (quoted) { query.error = "Unfinished quoted phrase."; query.terms.clear(); }
-    else add(part,false);
+    for (const auto &[text, phrase] : parts) {
+        const QString normalized = normalize(text).text.trimmed();
+        if (normalized.isEmpty()) continue;
+        const QString original = text.simplified();
+        const bool exact = !forceInsensitive && (forceSensitive || std::any_of(original.cbegin(),original.cend(),[](QChar c) { return c.isUpper(); }));
+        const bool known = std::any_of(query.terms.cbegin(),query.terms.cend(),[&](const Term &term) {
+            return term.text == normalized && term.phrase == phrase && term.exact == exact && (!exact || term.original == original);
+        });
+        if (!known) query.terms.append({normalized,phrase,exact,original});
+    }
     return query;
 }
 // Chapter find's patterns (findPattern), and Bible search's: \c / \C stripped
@@ -301,6 +315,8 @@ Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, co
         for (qsizetype at = normalized.text.indexOf(needle); at >= 0; at = normalized.text.indexOf(needle,at+1)) {
             if (stopped(cancel)) return {};
             const int start = normalized.span(at).start, end = normalized.span(at+needle.size()-1).end;
+            // Matching case: the text there, its spaces collapsed, as typed.
+            if (query.terms[term].exact && source.mid(start,end-start).simplified() != query.terms[term].original) continue;
             const int first = std::upper_bound(ends.cbegin(),ends.cend(),start) - ends.cbegin();
             const int last = std::lower_bound(starts.cbegin(),starts.cend(),end) - starts.cbegin() - 1;
             if (first > last || first >= chapter.verses.size() || last < 0) continue;
