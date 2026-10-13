@@ -661,6 +661,24 @@ private slots:
         const auto shaft = arrow(3)["shaft"].toList();
         QCOMPARE(shaft.last().toMap()["x"].toDouble(), 20.0); QCOMPARE(shaft.last().toMap()["y"].toDouble(), 90.0);
         for (const auto &side : arrow(3)["head"].toList()) QVERIFY(side.toList().last().toMap()["x"].toDouble() > 20);
+        // It swoops: an S that leaves (200, 50) and reaches (20, 90) level, its
+        // middle crossing at the half-way height, never past either end.
+        const auto at = [&](double x) {
+            double best = 1e9, y = 0;
+            for (const auto &p : shaft) if (std::abs(p.toMap()["x"].toDouble() - x) < best) { best = std::abs(p.toMap()["x"].toDouble() - x); y = p.toMap()["y"].toDouble(); }
+            return y;
+        };
+        QVERIFY2(std::abs(at(190) - 50) < 3, qPrintable(QString::number(at(190))));
+        QVERIFY2(std::abs(at(30) - 90) < 3, qPrintable(QString::number(at(30))));
+        QVERIFY2(std::abs(at(110) - 70) < 4, qPrintable(QString::number(at(110))));
+        for (const auto &p : shaft) {
+            const double x = p.toMap()["x"].toDouble(), y = p.toMap()["y"].toDouble();
+            QVERIFY(x >= 20 - 0.01 && x <= 200 + 0.01); QVERIFY(y >= 50 - 2 && y <= 90 + 2);
+        }
+        // The head arrives level, as the shaft does: its two strokes mirror each other.
+        const auto head = arrow(3)["head"].toList();
+        const double up = head[0].toList().last().toMap()["y"].toDouble() - 90, down = head[1].toList().last().toMap()["y"].toDouble() - 90;
+        QVERIFY2(std::abs(up + down) < 1.5, qPrintable(QString("%1 %2").arg(up).arg(down)));
     }
 
     // ---- Chapter outline --------------------------------------------------

@@ -432,7 +432,66 @@ function wavyBrace(ctx, x, top, bottom, tipY, width, direction, s, scale, opts) 
     return brace
 }
 
-// A wavier pen arrow from (x1, y1) to (x2, y2), arrowhead at the end.
+// Pen samples {x, y, w} along a cubic curve from p0 to p3 (controls p1, p2),
+// wobbling as linePoints does along a line: the offset runs along the curve's
+// normal, by arc length, with the same envelope, thickness, and ends.
+function curvePoints(p0, p1, p2, p3, s, scale, opts) {
+    opts = opts || {}
+    const k = scale > 0 ? scale : 1
+    const at = function(t) {
+        const u = 1 - t
+        return { x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+                 y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y }
+    }
+    // The curve, finely, with its arc length so far at each sample.
+    const fine = [], steps = 96
+    let length = 0
+    for (let i = 0; i <= steps; ++i) {
+        const p = at(i / steps)
+        if (i > 0) length += Math.hypot(p.x - fine[i - 1].x, p.y - fine[i - 1].y)
+        fine.push({ x: p.x, y: p.y, d: length })
+    }
+    const width = opts.width === undefined ? k : opts.width
+    if (length < 0.001) return [{ x: p0.x, y: p0.y, w: width }, { x: p3.x, y: p3.y, w: width }]
+    const rand = mulberry32(s)
+    const amp = Math.min(opts.amp === undefined ? amplitude(s, k) : opts.amp, length / 4)
+    const wave = _wave(rand, k), thickness = _wave(rand, k)
+    const roughStart = opts.roughStart === undefined ? !opts.joinStart : opts.roughStart
+    const roughEnd = opts.roughEnd === undefined ? !opts.joinEnd : opts.roughEnd
+    const room = Math.max(0, length / 6)
+    const cut0 = roughStart ? Math.min(room, width * 0.5 + rand() * 0.6 * k) : 0
+    const cut1 = roughEnd ? Math.min(room, width * 0.5 + rand() * 0.6 * k) : 0
+    const from = cut0, to = length - cut1
+    const taper = Math.min(10 * k, length / 2)
+    const count = Math.max(2, Math.ceil((to - from) / Math.max(1, 3 * k)) + 1)
+    // The point and unit tangent at arc length d, between the fine samples.
+    let j = 0
+    const along = function(d) {
+        while (j + 1 < fine.length - 1 && fine[j + 1].d < d) ++j
+        const a = fine[j], b = fine[j + 1], span = Math.max(1e-9, b.d - a.d)
+        const t = Math.max(0, Math.min(1, (d - a.d) / span)), len = Math.hypot(b.x - a.x, b.y - a.y) || 1
+        return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, ux: (b.x - a.x) / len, uy: (b.y - a.y) / len }
+    }
+    const points = []
+    for (let i = 0; i < count; ++i) {
+        const d = from + (to - from) * i / (count - 1)
+        let envelope = 1
+        if (opts.joinStart) envelope *= _smooth(d / taper)
+        if (opts.joinEnd) envelope *= _smooth((length - d) / taper)
+        const c = along(d)
+        const offset = amp * envelope * _at(wave, d)
+        let w = width * (1 + 0.14 * envelope * _at(thickness, d))
+        if (roughStart && i === 0) w *= 0.78
+        if (roughEnd && i === count - 1) w *= 0.78
+        points.push({ x: c.x - c.uy * offset, y: c.y + c.ux * offset, w: w })
+    }
+    if (opts.joinEnd) points[points.length - 1] = { x: p3.x, y: p3.y, w: points[points.length - 1].w }
+    return points
+}
+
+// A wavier pen arrow from (x1, y1) to (x2, y2), arrowhead at the end. Its
+// shaft swoops: it leaves and arrives level, an S between ends at different
+// heights (a straight line between ends at one height).
 // Returns {shaft, head: [left, right]} samples.
 function wavyArrow(ctx, x1, y1, x2, y2, s, scale, opts) {
     opts = opts || {}
@@ -440,8 +499,15 @@ function wavyArrow(ctx, x1, y1, x2, y2, s, scale, opts) {
     const pen = opts.width === undefined ? 1.2 * k : opts.width
     const length = Math.hypot(x2 - x1, y2 - y1)
     const amp = opts.amp === undefined ? Math.min(2.4 * k, length / 8) : opts.amp
-    const shaft = wavyLine(ctx, x1, y1, x2, y2, seed(s, "shaft"), k, { width: pen, amp: amp, joinEnd: true, roughStart: true })
-    const ux = length > 0 ? (x2 - x1) / length : 1, uy = length > 0 ? (y2 - y1) / length : 0
+    // Controls halfway across, level with each end.
+    const reach = (x2 - x1) / 2
+    const c1 = { x: x1 + reach, y: y1 }, c2 = { x: x2 - reach, y: y2 }
+    const shaft = curvePoints({ x: x1, y: y1 }, c1, c2, { x: x2, y: y2 }, seed(s, "shaft"), k,
+        { width: pen, amp: Math.min(amp, 1.2 * k), joinEnd: true, roughStart: true })
+    if (ctx) _fillStroke(ctx, shaft, true, false)
+    // The head follows the curve as it arrives: level, unless the ends are level too.
+    const hx = x2 - c2.x, hy = y2 - c2.y, hl = Math.hypot(hx, hy)
+    const ux = hl > 0 ? hx / hl : length > 0 ? (x2 - x1) / length : 1, uy = hl > 0 ? hy / hl : length > 0 ? (y2 - y1) / length : 0
     const size = Math.min(opts.head === undefined ? 6 * k : opts.head, Math.max(2, length / 2))
     const head = []
     for (const side of [-1, 1]) {
