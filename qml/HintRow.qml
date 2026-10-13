@@ -98,7 +98,9 @@ Flow {
                 anchors.fill: row.buttons ? part : label
                 enabled: part.clickable
                 hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
+                // A disabled MouseArea still sets the cursor: a pointing hand
+                // only where a click acts.
+                cursorShape: part.clickable ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: part.activate()
             }
             Accessible.role: part.clickable ? Accessible.Button : Accessible.StaticText

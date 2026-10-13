@@ -439,11 +439,16 @@ private slots:
         shot("hints-desk-unhovered");
         QTest::mouseMove(window, center(write())); QTRY_VERIFY(tint()->isVisible());
         shot("hints-desk-hover-write");
-        QQuickItem *area = nullptr;
-        for (auto child : write()->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) area = child;
-        QVERIFY(area); QCOMPARE(area->cursor().shape(), Qt::PointingHandCursor);
+        const auto areaOf = [](QQuickItem *part) -> QQuickItem * {
+            for (auto child : part->childItems()) if (QByteArray(child->metaObject()->className()).contains("MouseArea")) return child;
+            return nullptr;
+        };
+        QVERIFY(areaOf(write())); QCOMPARE(areaOf(write())->cursor().shape(), Qt::PointingHandCursor);
         QTest::mouseMove(window, center(scroll())); QTRY_VERIFY(!tint()->isVisible());
         QVERIFY(!item("deskHintsPart:scroll:tint")->isVisible());
+        // A part a click cannot act on never shows the pointing hand (a
+        // disabled MouseArea still sets the cursor).
+        QVERIFY(areaOf(scroll())); QCOMPARE(areaOf(scroll())->cursor().shape(), Qt::ArrowCursor);
         // Mouse: a part runs what its key does, and the keyboard stays in the Margin.
         click(write()); QTRY_VERIFY(item("deskEditor")->hasActiveFocus()); QVERIFY(!prop("deskPreview").toBool());
         // Keyboard: the key itself still works.

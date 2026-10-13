@@ -556,6 +556,18 @@ private slots:
         QVERIFY(!version->property("choosable").toBool());
         QVERIFY(!windowObject(lookup,"lookupHints")->property("plainText").toString().contains("tab"));
         lookup->requestActivate(); QVERIFY(QTest::qWaitForWindowActive(lookup));
+        // A pointing hand over the hints a click acts on (enter show, esc
+        // close), never over the others (↑ ↓ choose).
+        const auto cursorOver = [&](const QString &part) {
+            auto *hint = qobject_cast<QQuickItem *>(windowObject(lookup,"lookupHintsPart:" + part));
+            if (!hint) return Qt::BlankCursor;
+            QTest::mouseMove(lookup, hint->mapToScene(QPointF(hint->width() / 2, hint->height() / 2)).toPoint());
+            QCoreApplication::processEvents();
+            return lookup->cursor().shape();
+        };
+        QCOMPARE(cursorOver("show"), Qt::PointingHandCursor);
+        QCOMPARE(cursorOver("choose"), Qt::ArrowCursor);
+        QCOMPARE(cursorOver("close"), Qt::PointingHandCursor);
         QVERIFY(QMetaObject::invokeMethod(lookup,"show",Q_ARG(QVariant,0)));
         QVERIFY(lookup->property("reading").toBool());
         QTest::keyClick(lookup,Qt::Key_Tab); QCOMPARE(version->property("text").toString(),bible->versionAbbreviation());
