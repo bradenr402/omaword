@@ -591,6 +591,12 @@ private slots:
         QVERIFY(windows->openLookup("rom 8:2")); lookup = windows->lookupWindow(); QVERIFY(lookup);
         version = windowObject(lookup,"lookupVersion");
         QCOMPARE(version->property("text").toString(),QString("NET")); QVERIFY(version->property("choosable").toBool());
+        // As tall as the input beside it, level with it.
+        {
+            auto *button = qobject_cast<QQuickItem *>(version), *input = qobject_cast<QQuickItem *>(windowObject(lookup,"lookupQuery"));
+            QTRY_COMPARE(button->height(), input->height());
+            QCOMPARE(button->mapToScene(QPointF()).y(), input->mapToScene(QPointF()).y());
+        }
         QVERIFY(windowObject(lookup,"lookupHints")->property("plainText").toString().contains("tab version"));
         const auto shownVersion = [&] {
             const auto shown = lookup->property("shown");

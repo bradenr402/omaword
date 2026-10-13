@@ -192,8 +192,10 @@ Window {
                 color: choosable && versionMouse.containsMouse ? lookup.theme.foreground : lookup.theme.muted
                 font.family: lookup.theme.fontFamily
                 font.pixelSize: Math.round(12 * lookup.controlScale)
-                leftPadding: Math.round(8 * lookup.controlScale); rightPadding: leftPadding
-                topPadding: Math.round(5 * lookup.controlScale); bottomPadding: topPadding
+                // As tall as the input beside it, its name centred.
+                Layout.preferredHeight: query.implicitHeight
+                verticalAlignment: Text.AlignVCenter
+                leftPadding: Math.round(10 * lookup.controlScale); rightPadding: leftPadding
                 background: Rectangle {
                     visible: versionControl.choosable && versionMouse.containsMouse
                     color: lookup.theme.surface
