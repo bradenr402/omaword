@@ -29,6 +29,11 @@ Column {
     property int last: 0
     // Above the chapter read (room below it), or below it (room above).
     property bool before: true
+    // Parked (the whole book's, far from the view): only its room, the
+    // height it had, nothing laid out.
+    property bool parked: false
+    property real parkedHeight: 0
+    height: parked ? parkedHeight : implicitHeight
     readonly property real readerScale: controller.readerScale
     readonly property real bodySize: controller.readerSize * readerScale
     readonly property bool focusLayout: !!controller.focusLayout
@@ -71,6 +76,7 @@ Column {
 
     Label {
         objectName: "contextTitle:" + chapter.title
+        visible: !chapter.parked
         text: chapter.title
         opacity: chapter.controller.focusDimmedOpacity
         color: chapter.theme.foreground
@@ -87,7 +93,7 @@ Column {
     Loader {
         id: flowing
         objectName: "contextFlow:" + chapter.title
-        active: chapter.continuous
+        active: chapter.continuous && !chapter.parked
         visible: active
         x: chapter.controller.verseGutter
         width: chapter.width - x - 9
@@ -111,7 +117,7 @@ Column {
     // marks update the rows rather than making them again.
     Repeater {
         id: verseRows
-        model: chapter.continuous ? 0 : chapter.rows.length
+        model: chapter.continuous || chapter.parked ? 0 : chapter.rows.length
         delegate: Item {
             id: row
             required property int index

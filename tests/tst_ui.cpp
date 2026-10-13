@@ -2521,6 +2521,64 @@ private slots:
         QTRY_COMPARE(bible->selectionReference(), range);
         QTRY_VERIFY(panelOpened("notes")); QCOMPARE(bible->noteText(), QString("A note beside"));
     }
+    // The whole book (alt b): the chapters around the one read are shown
+    // above and below it, loaded as the view comes near them, what is on
+    // screen staying put; the chapter read stays the selection's, and moving
+    // into another makes it the one read.
+    void wholeBookShowsTheChaptersAround_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("paragraph") << "paragraph"; QTest::newRow("block") << "block";
+    }
+    void wholeBookShowsTheChaptersAround() {
+        QFETCH(QString, mode);
+        bible->setReadingMode(mode);
+        reference("John 3:1"); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        const auto title = [&] { return item("chapterTitle")->mapToItem(item("reading"), QPointF()).y(); };
+        const double before = title();
+        key(Qt::Key_B, Qt::AltModifier); QVERIFY(bible->wholeBook());
+        QCOMPARE(prop("toast","text").toString(), QString("Whole book on"));
+        { BibleBackend reopened; QVERIFY(reopened.wholeBook()); }
+        QTRY_VERIFY(item("contextChapter:John 2"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("columnSettle")->property("running").toBool());
+        QVERIFY2(qAbs(title() - before) < 1.5, qPrintable(QString("%1 → %2").arg(before).arg(title())));
+        QCOMPARE(bible->passage(), QString("John 3")); QCOMPARE(bible->selectionReference(), QString("John 3:1"));
+        // Not every chapter at once: those the view comes near.
+        QVERIFY(!item("contextChapter:John 10"));
+        // Scrolled near the end, the next chapter comes.
+        auto reading = item("reading");
+        reading->setProperty("contentY", reading->property("contentHeight").toDouble() - reading->height());
+        QTRY_VERIFY(item("contextChapter:John 4"));
+        QCOMPARE(bible->passage(), QString("John 3"));
+        // Moving into it makes it the one read; the one it leaves is shown above.
+        key(Qt::Key_G, Qt::ShiftModifier); key(Qt::Key_J);
+        QTRY_COMPARE(bible->selectionReference(), QString("John 4:1"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        QVERIFY(item("contextChapter:John 3")); QVERIFY(!item("contextChapter:John 4"));
+        QCOMPARE(window->property("contextBefore").toStringList().last(), QString("43:3"));
+        // Far below, those far above park: their room kept, nothing laid
+        // out; near them again, they show again.
+        const auto john2 = [&] { return item("contextChapter:John 2"); };
+        for (int i = 0; i < 20 && !item("contextChapter:John 7"); ++i) {
+            reading->setProperty("contentY", reading->property("contentHeight").toDouble() - reading->height());
+            QTest::qWait(30);
+        }
+        QTRY_VERIFY(item("contextChapter:John 7"));
+        QTRY_VERIFY(john2()->property("parked").toBool());
+        QVERIFY(!item("context:John 2:blockBody") && !item("contextVerse:John 2:1"));
+        QVERIFY(john2()->height() > reading->height());
+        QCOMPARE(bible->passage(), QString("John 4"));
+        reading->setProperty("contentY", john2()->y());
+        QTRY_VERIFY(!john2()->property("parked").toBool());
+        QTRY_VERIFY(item(qPrintable(mode == "verse" ? "contextVerse:John 2:1" : "context:John 2:blockBody")));
+        // Another book starts again from its chapter.
+        reference("Romans 2:1"); QTRY_COMPARE(bible->passage(), QString("Romans 2"));
+        QTRY_VERIFY(!item("contextChapter:John 3"));
+        QTRY_VERIFY(item("contextChapter:Romans 1"));
+        // Off: only the chapter read.
+        key(Qt::Key_B, Qt::AltModifier); QVERIFY(!bible->wholeBook());
+        QTRY_VERIFY(!item("contextChapter:Romans 1"));
+        QVERIFY(window->property("contextBefore").toStringList().isEmpty() && window->property("contextAfter").toStringList().isEmpty());
+    }
     void visualActionsCompleteFullRange() {
         QFETCH(QString,mode); QFETCH(Qt::Key,action);
         bible->setReadingMode(mode);

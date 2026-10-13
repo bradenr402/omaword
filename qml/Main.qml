@@ -2548,8 +2548,22 @@ ApplicationWindow {
     // outline's exit (applyOutline), so it leaves before its room goes.
     property bool outlineOn: false // set from bible.chapterOutline on completion, then by applyOutline
     readonly property var outlineHeadings: !marginsAllowed || !outlineOn ? []
+        : bookWindow ? bookOutline
         : Array.from(bible.verses).filter(function(row) { return (row.heading || "").length > 0 })
             .map(function(row) { return { verse: row.number, text: row.heading } })
+    // The whole book's outline: its chapters, each followed by its headings
+    // (keys "chapter:verse", a chapter's verse 0), read once per book shown.
+    readonly property int outlineBook: bookWindow ? bookWindow.book : 0
+    readonly property var bookOutline: {
+        const entries = []
+        if (!outlineBook || !bible.ready || !bible.textGeneration) return entries
+        for (const chapter of Array.from(bible.bookOutline(outlineBook))) {
+            entries.push({ key: chapter.chapter + ":0", chapter: chapter.chapter, verse: 0, text: chapter.title, level: 0 })
+            for (const heading of Array.from(chapter.headings))
+                entries.push({ key: chapter.chapter + ":" + heading.verse, chapter: chapter.chapter, verse: heading.verse, text: heading.text, level: 1 })
+        }
+        return entries
+    }
     // Connector: "}" (braceWidth) after the text's right edge, an arrow, and a
     // "{" before the note text.
     readonly property real marginBraceWidth: 9 * readerScale
@@ -2848,14 +2862,85 @@ ApplicationWindow {
         for (const extent of extents) if (extent.top <= line) verse = extent.number
         return verse
     }
-    readonly property int outlineCurrent: {
-        const watch = [reading.contentY, verseExtents, bible.cursorVerse, bible.selectedStart]
-        return watch && outlineHeadings.length ? Margins.sectionOf(outlineHeadings, readingVerse()) : 0
+    readonly property var outlineCurrent: {
+        const watch = [reading.contentY, verseExtents, bible.cursorVerse, bible.selectedStart, contextData]
+        if (!watch || !outlineHeadings.length) return 0
+        return bookWindow ? bookSection() : Margins.sectionOf(outlineHeadings, readingVerse())
+    }
+    // The whole book's section being read ("chapter:verse" of its outline):
+    // the cursor's while it is on screen, otherwise the one at a reading line
+    // a quarter down the viewport, in whichever chapter shown it falls.
+    function bookSection() {
+        const place = bookReadingPlace()
+        let key = place.chapter + ":0"
+        for (const entry of outlineHeadings) if (entry.chapter === place.chapter && entry.verse > 0 && entry.verse <= place.verse) key = entry.key
+        return key
+    }
+    // Where the whole book is being read: {chapter, verse}, as readingVerse().
+    function bookReadingPlace() {
+        const available = Math.max(1, reading.height - floatingSafety)
+        const top = reading.contentY, line = top + 0.25 * available
+        const cursor = hasSelection && !bible.crossChapterSelection ? verseExtents.find(function(e) { return e.number === bible.cursorVerse }) : null
+        if (cursor && cursor.bottom > top && cursor.top < top + available) return { chapter: bible.chapter, verse: bible.cursorVerse }
+        const tops = shownChapterTops()
+        let at = tops[0]
+        for (const entry of tops) if (entry.y <= line) at = entry
+        const extents = at.item ? at.item.verseExtents().map(function(e) { return { number: e.number, top: at.item.y + e.top } }) : verseExtents
+        let verse = 0
+        for (const extent of extents) if (extent.top <= line) verse = extent.number
+        return { chapter: at.item ? at.item.chapterNumber : bible.chapter, verse: verse }
+    }
+    // The whole book's { }: between its sections across chapters, each
+    // chapter's top among them (where no heading opens it), as jumps.
+    function bookHeadingStep(direction, count) {
+        // A chapter's top stands at its first verse (1, as most begin).
+        const stops = [], key = function(chapter, verse) { return chapter * 1000 + Math.max(1, verse) }
+        for (const entry of bookOutline) {
+            if (entry.verse === 0 && bookOutline.some(function(other) { return other.chapter === entry.chapter && other.verse === 1 })) continue
+            stops.push({ verse: key(entry.chapter, entry.verse), entry: entry })
+        }
+        if (!stops.length) { rejected(); return }
+        if (!marginsMeasured) { readerColumn.forceLayout(); verseExtents = measureVerses() }
+        const here = bookReadingPlace()
+        const step = Margins.headingStep(stops, key(here.chapter, here.verse), direction, count, stops[0].verse)
+        if (step.moved) outlineJump(stops.find(function(stop) { return stop.verse === step.verse }).entry)
+        if (!step.moved || step.short) {
+            sounds.play("boundary")
+            notify(direction > 0 ? "No more headings below" : "Already at the top of " + bookName(bookWindow.book), true)
+        }
+    }
+    // An outline entry: a heading selected and brought to the top, as a
+    // jump; in the whole book, a chapter (its first verse) or a heading of
+    // another chapter too.
+    function outlineJump(entry) {
+        if (!bookWindow || entry.chapter === bible.chapter) {
+            if (entry.verse) jumpToHeading(entry.verse)
+            else if (bible.verses.length) jumpToHeading(bible.verses[0].number)
+            return
+        }
+        if (!entry.verse) { openChapter(bookWindow.book, entry.chapter); return }
+        if (!bible.ready || !flushNote()) return
+        const from = beginJump()
+        bible.selectThrough(bookWindow.book, entry.chapter, entry.verse, false)
+        if (bible.chapter !== entry.chapter || bible.cursorVerse !== entry.verse) return
+        endJump(from)
+        pulseDestination()
+    }
+    // The outline's title: the chapter's top; in the whole book, the book's first chapter.
+    function outlineTop() {
+        if (!bookWindow) { if (bible.verses.length) jumpToHeading(bible.verses[0].number); return }
+        const chapters = Array.from(bible.chaptersForBook(bookWindow.book))
+        if (chapters.length) outlineJump({ chapter: chapters[0], verse: 0 })
+    }
+    function bookName(book) {
+        const found = Array.from(bible.books).find(function(entry) { return entry.id === book })
+        return found ? found.name : ""
     }
     // `{` / `}`: previous/next section heading (counts), a History jump. `{`
     // ends at the chapter top (its first verse, scrolled to the top), also in
     // chapters and versions without headings.
     function headingStep(direction, count) {
+        if (bookWindow) { bookHeadingStep(direction, count); return }
         const headings = !bible.hasHeadings ? [] : Array.from(bible.verses)
             .filter(function(row) { return (row.heading || "").length > 0 })
             .map(function(row) { return { verse: row.number } })
@@ -3207,13 +3292,24 @@ ApplicationWindow {
     function updateContextChapters() {
         const generation = bible.versionId + ":" + bible.textGeneration
         if (generation !== contextRowsKey) { contextRows = ({}); contextRowsKey = generation }
-        const chapters = bible.ready ? Array.from(bible.contextChapters()) : []
+        // The whole book's chapters loaded stay while the chapter read moves
+        // among them; anywhere else, only it is, at first.
+        if (bible.ready && bible.wholeBook) {
+            const window = bookWindow
+            if (!window || window.book !== bible.book || bible.chapter < window.first || bible.chapter > window.last) {
+                bookWindow = { book: bible.book, first: bible.chapter, last: bible.chapter }
+                bookParked = ({})
+            }
+        } else { bookWindow = null; bookParked = ({}) }
+        const chapters = bible.ready ? Array.from(bible.contextChapters(bookWindow ? bookWindow.first : 0, bookWindow ? bookWindow.last : 0)) : []
         const here = bible.versionId + ":" + bible.book + ":" + bible.chapter
         // Unchanged (most steps): nothing to do. Rows are compared by their chapter.
-        const signature = generation + "|" + JSON.stringify(chapters)
+        const signature = generation + "|" + JSON.stringify(chapters) + "|" + JSON.stringify(bookParked)
         if (signature === contextSignature) { contextChapterKey = here; return }
         contextSignature = signature
-        const missing = chapters.filter(function(entry) { return !app.contextRows[entry.book + ":" + entry.chapter] })
+        // Parked chapters (the whole book's, far from the view) lay out nothing: no rows are read for them.
+        const parked = function(entry) { return !entry.first && app.bookParked[entry.book + ":" + entry.chapter] !== undefined }
+        const missing = chapters.filter(function(entry) { return !parked(entry) && !app.contextRows[entry.book + ":" + entry.chapter] })
         if (missing.length) {
             const read = Array.from(bible.chapterRows(missing.map(function(entry) { return { book: entry.book, chapter: entry.chapter } })))
             missing.forEach(function(entry, i) { app.contextRows[entry.book + ":" + entry.chapter] = Array.from(read[i] || []) })
@@ -3222,8 +3318,10 @@ ApplicationWindow {
         let marked = false
         for (const entry of chapters) {
             const key = entry.book + ":" + entry.chapter
-            data[key] = { book: entry.book, chapter: entry.chapter, title: entry.title, first: entry.first, last: entry.last, rows: contextRows[key] }
-            if (contextData[key] && contextData[key].rows !== contextRows[key]) marked = true
+            const away = parked(entry)
+            data[key] = { book: entry.book, chapter: entry.chapter, title: entry.title, first: entry.first, last: entry.last,
+                rows: away ? [] : contextRows[key], parked: away, height: away ? app.bookParked[key] : 0 }
+            if (contextData[key] && (contextData[key].rows !== data[key].rows || contextData[key].parked !== away)) marked = true
             ;(entry.before ? before : after).push(key)
         }
         const same = JSON.stringify(before) === JSON.stringify(contextBefore) && JSON.stringify(after) === JSON.stringify(contextAfter)
@@ -3235,7 +3333,10 @@ ApplicationWindow {
         const verse = anchoring && same ? verseAtViewTop() : null
         if (anchoring && !same) captureViewAnchor()
         contextData = data
-        if (!same) { contextBefore = before; contextAfter = after }
+        if (!same) {
+            contextBefore = before; contextAfter = after
+            syncContextModel(contextBeforeModel, before); syncContextModel(contextAfterModel, after)
+        }
         contextChapterKey = here
         if (verse) keepVerseAtViewTop(verse)
         else if (anchoring) restoreViewAnchor()
@@ -3277,13 +3378,13 @@ ApplicationWindow {
         const tops = []
         for (let i = 0; i < contextBeforeRepeater.count; ++i) {
             const item = contextBeforeRepeater.itemAt(i) as ContextChapter
-            if (item) tops.push({ key: bible.versionId + ":" + item.book + ":" + item.chapterNumber, y: item.y })
+            if (item) tops.push({ key: bible.versionId + ":" + item.book + ":" + item.chapterNumber, y: item.y, item: item })
         }
-        tops.push({ key: bible.versionId + ":" + bible.book + ":" + bible.chapter, y: chapterTitle.y })
+        tops.push({ key: bible.versionId + ":" + bible.book + ":" + bible.chapter, y: chapterTitle.y, item: null })
         for (let i = 0; i < contextAfterRepeater.count; ++i) {
             const item = contextAfterRepeater.itemAt(i) as ContextChapter
             // Its title, below the room before it.
-            if (item) tops.push({ key: bible.versionId + ":" + item.book + ":" + item.chapterNumber, y: item.y + item.topPadding })
+            if (item) tops.push({ key: bible.versionId + ":" + item.book + ":" + item.chapterNumber, y: item.y + item.topPadding, item: item })
         }
         return tops
     }
@@ -3331,11 +3432,62 @@ ApplicationWindow {
     }
     // Where the chapter read begins below any shown above it: its top of view.
     function chapterTopY() { return contextBeforeRepeater.count ? chapterTitle.y - readerColumn.topPadding : 0 }
+    // The chapters shown beside, as the Repeaters' models: kept in place as
+    // others come and go (the whole book shows many), each a "book:chapter" key.
+    ListModel { id: contextBeforeModel }
+    ListModel { id: contextAfterModel }
+    function syncContextModel(model, keys) {
+        for (let i = model.count - 1; i >= 0; --i) if (!keys.includes(model.get(i).key)) model.remove(i)
+        for (let i = 0; i < keys.length; ++i) if (i >= model.count || model.get(i).key !== keys[i]) model.insert(i, { key: keys[i] })
+    }
+    // Whole book (alt b): the chapters of the book read are shown above and
+    // below it, as those a selection reaches into are, loaded as the view
+    // comes near them (bookWindow: the book and its chapters loaded, first to
+    // last). The chapter read stays the selection's: moving or clicking into
+    // another makes it the one read. Those loaded but far from the view are
+    // parked (bookParked: their keys, with the height they had), keeping
+    // their room but laying out nothing, so a long read through the book
+    // keeps only a few chapters laid out.
+    property var bookWindow: null
+    property var bookParked: ({})
+    readonly property bool observedWholeBook: bible.wholeBook
+    onObservedWholeBookChanged: { updateContextChapters(); Qt.callLater(app.extendBook) }
+    // One more chapter where the view comes within a screen and a half of
+    // either end of those loaded (above first), then again a turn later,
+    // until it has that room both ways or the book ends. Chapters more than
+    // five screens from the view park; parked ones within two come back.
+    function extendBook() {
+        if (!bookWindow || !bible.wholeBook || !bible.ready || bible.busy || restoringPosition || viewAnchor !== null) return
+        const chapters = Array.from(bible.chaptersForBook(bookWindow.book))
+        const room = 1.5 * reading.height, near = 2 * reading.height, far = 5 * reading.height
+        const top = reading.contentY, bottom = top + reading.height
+        const at = chapters.indexOf(bookWindow.first), to = chapters.indexOf(bookWindow.last)
+        let first = bookWindow.first, last = bookWindow.last
+        if (top < room && at > 0) first = chapters[at - 1]
+        else if (bottom > reading.contentHeight - room && to >= 0 && to < chapters.length - 1) last = chapters[to + 1]
+        const parked = Object.assign({}, bookParked)
+        let moved = false
+        for (const repeater of [contextBeforeRepeater, contextAfterRepeater]) {
+            for (let i = 0; i < repeater.count; ++i) {
+                const item = repeater.itemAt(i) as ContextChapter
+                if (!item || item.first > 0) continue
+                const key = item.book + ":" + item.chapterNumber, start = item.y, end = item.y + item.height
+                const away = parked[key] !== undefined
+                if (!away && item.height > 0 && (end < top - far || start > bottom + far)) { parked[key] = item.height; moved = true }
+                else if (away && end > top - near && start < bottom + near) { delete parked[key]; moved = true }
+            }
+        }
+        if (first === bookWindow.first && last === bookWindow.last && !moved) return
+        bookWindow = { book: bookWindow.book, first: first, last: last }
+        bookParked = parked
+        updateContextChapters()
+        Qt.callLater(app.extendBook)
+    }
     // Marks changed (here or in another window): the chapters shown beside
     // read theirs again, and only those whose marks changed show again; the
     // others kept are read again when shown.
     function refreshContextMarks() {
-        const shown = contextBefore.concat(contextAfter).filter(function(key) { return !!app.contextData[key] })
+        const shown = contextBefore.concat(contextAfter).filter(function(key) { return !!app.contextData[key] && !app.contextData[key].parked })
         const read = shown.length && bible.ready
             ? Array.from(bible.chapterRows(shown.map(function(key) { return { book: app.contextData[key].book, chapter: app.contextData[key].chapter } }))) : []
         const rows = {}
@@ -4768,6 +4920,7 @@ ApplicationWindow {
         { id: "numbers", group: "Reading", title: "Show verse numbers", sequences: ["Alt+N"], setting: "showVerseNumbers", command: true },
         { id: "headings", group: "Reading", title: "Show headings", sequences: ["Alt+H"], setting: "showHeadings", command: true },
         { id: "chapterOutline", group: "Reading", title: "Chapter outline", sequences: ["Alt+O"], setting: "chapterOutline", command: true },
+        { id: "wholeBook", group: "Reading", title: "Whole book", sequences: ["Alt+B"], setting: "wholeBook", command: true },
         // alt w: w writes a note; alt w shows notes in the margin.
         { id: "marginNotes", group: "Reading", title: "Show notes in margin", sequences: ["Alt+W"], setting: "marginNotes", command: true },
         // Last of the switches: right above Reading settings' "not marked" hint.
@@ -5476,6 +5629,7 @@ ApplicationWindow {
             bible.setWordsOfJesus(!bible.wordsOfJesus)
             break
         case "chapterOutline": bible.setChapterOutline(!bible.chapterOutline); break
+        case "wholeBook": bible.setWholeBook(!bible.wholeBook); break
         case "marginNotes": bible.setMarginNotes(!bible.marginNotes); break
         case "previousHeading": headingStep(-1, count); break
         case "nextHeading": headingStep(1, count); break
@@ -5866,7 +6020,7 @@ ApplicationWindow {
                         if (app.hasSelection)
                             Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
                     }
-                    onContentYChanged: { positionSaveTimer.restart(); app.queueFollow() }
+                    onContentYChanged: { positionSaveTimer.restart(); app.queueFollow(); if (app.bookWindow) Qt.callLater(app.extendBook) }
                     onMovementStarted: readerSlide.stop()
                     // ctrl + wheel and a pinch change the Text size, as ctrl = and ctrl - do.
                     WheelHandler {
@@ -6005,7 +6159,11 @@ ApplicationWindow {
                         width: app.readerColumnWidth
                         x: app.columnTargetX + app.marginSlideOffset
                         transform: Translate { y: app.columnHold }
-                        onHeightChanged: { app.scheduleMargins(); if (app.selectionBarWanted) Qt.callLater(app.placeSelectionBar) }
+                        onHeightChanged: {
+                            app.scheduleMargins()
+                            if (app.selectionBarWanted) Qt.callLater(app.placeSelectionBar)
+                            if (app.bookWindow) Qt.callLater(app.extendBook)
+                        }
                         onWidthChanged: { app.scheduleMargins(); if (app.selectionBarWanted) Qt.callLater(app.placeSelectionBar) }
                         topPadding: 48 * app.readerScale
                         bottomPadding: app.floatingSafety + 3 * app.readerLineHeight
@@ -6014,15 +6172,15 @@ ApplicationWindow {
                         // The chapters a selection reaches into, above and below this one.
                         Repeater {
                             id: contextBeforeRepeater
-                            model: app.contextBefore
+                            model: contextBeforeModel
                             delegate: ContextChapter {
-                                required property string modelData
-                                readonly property var entry: app.contextData[modelData] || ({})
-                                readonly property string key: modelData
+                                required property string key
+                                readonly property var entry: app.contextData[key] || ({})
                                 objectName: "contextChapter:" + title
                                 width: readerColumn.width
                                 book: entry.book || 0; chapterNumber: entry.chapter || 0; title: entry.title || ""
                                 rows: entry.rows || []; first: entry.first || 0; last: entry.last || 0
+                                parked: !!entry.parked; parkedHeight: entry.height || 0
                                 before: true
                             }
                         }
@@ -6353,15 +6511,15 @@ ApplicationWindow {
                         }
                         Repeater {
                             id: contextAfterRepeater
-                            model: app.contextAfter
+                            model: contextAfterModel
                             delegate: ContextChapter {
-                                required property string modelData
-                                readonly property var entry: app.contextData[modelData] || ({})
-                                readonly property string key: modelData
+                                required property string key
+                                readonly property var entry: app.contextData[key] || ({})
                                 objectName: "contextChapter:" + title
                                 width: readerColumn.width
                                 book: entry.book || 0; chapterNumber: entry.chapter || 0; title: entry.title || ""
                                 rows: entry.rows || []; first: entry.first || 0; last: entry.last || 0
+                                parked: !!entry.parked; parkedHeight: entry.height || 0
                                 before: false
                             }
                         }
@@ -6512,17 +6670,18 @@ ApplicationWindow {
                     width: app.marginSpace.outline.width
                     height: Math.max(0, reading.height - app.floatingSafety - y - 12 * app.readerScale)
                     headings: app.outlineHeadings
-                    title: bible.passage
+                    title: app.bookWindow ? app.bookName(app.bookWindow.book) : bible.passage
                     current: app.outlineCurrent
                     theme: desktop
                     uiScale: app.readerScale
-                    onActivated: function(verse) { app.jumpToHeading(verse) }
-                    onActivatedTop: if (bible.verses.length) app.jumpToHeading(bible.verses[0].number)
+                    onActivated: function(entry) { app.outlineJump(entry) }
+                    onActivatedTop: app.outlineTop()
                     scrollKey: app.scrollKey
                     onLeave: app.readerFocus()
                     onBoundary: sounds.play("boundary")
                     onStepHeading: function(direction) { app.runCommand(direction > 0 ? "nextHeading" : "previousHeading") }
-                    titleTip: "Jump to the chapter top · " + app.menuKey("previousHeading") + " steps back to it"
+                    titleTip: app.bookWindow ? "Jump to the book's first chapter · " + app.menuKey("previousBook") + " " + app.menuKey("nextBook") + " other books"
+                        : "Jump to the chapter top · " + app.menuKey("previousHeading") + " steps back to it"
                     entryTip: "Jump to this section · " + app.menuKey("previousHeading") + " " + app.menuKey("nextHeading") + " step between sections"
                 }
                 // A continuous fade keeps floating controls legible without a
@@ -9889,7 +10048,7 @@ ApplicationWindow {
     function queueFollow() { if (following && !followApplying) Qt.callLater(app.emitFollow) }
     // Nothing is sent while this window restores or places a moved selection
     // (emitFollow): the place it ends at is (a j that scrolls nothing too).
-    onRestoringPositionChanged: if (!restoringPosition) queueFollow()
+    onRestoringPositionChanged: if (!restoringPosition) { queueFollow(); if (bookWindow) Qt.callLater(app.extendBook) }
     Connections {
         target: bible
         enabled: app.following

@@ -1,22 +1,27 @@
 import QtQuick
 
 // Chapter outline: the book and chapter over its section headings in the left
-// margin. It stays put while the reader scrolls, highlights the current
-// section (the title before the first heading), and scrolls itself to keep
-// that entry visible when it is taller than its space. Clicking a heading asks
-// the reader to jump there; clicking the title, to the top of the chapter.
+// margin (in the whole book, the book over its chapters, each with its
+// headings under it). It stays put while the reader scrolls, highlights the
+// current section (the title before the first heading), and scrolls itself to
+// keep that entry visible when it is taller than its space. Clicking an entry
+// asks the reader to jump there; clicking the title, to the top.
 Item {
     id: root
-    required property var headings // [{verse, text}]
+    // [{verse, text}]; in the whole book [{key, chapter, verse, text, level}]:
+    // a chapter (level 0, verse 0) and its headings (level 1).
+    required property var headings
     required property var theme
-    property string title: "" // e.g. "John 3"
-    property int current: 0 // a heading's verse; 0 before the first heading
+    property string title: "" // e.g. "John 3", or the book's name
+    // The current entry's key (an entry's key, else its verse); 0: the title.
+    property var current: 0
     property real uiScale: 1
     // Tooltips naming the keyboard equivalents (the app fills in its keys).
     property string titleTip: ""
     property string entryTip: ""
-    signal activated(int verse)
+    signal activated(var entry)
     signal activatedTop()
+    function entryKey(entry) { return entry.key !== undefined ? entry.key : entry.verse }
     // Reached by tab from the reader: scroll keys move the outline; esc
     // (or tab onward) leaves it. `scrollKey(flickable, event)` is the app's.
     signal leave()
@@ -28,7 +33,7 @@ Item {
     // current section; ↑ ↓ (j k) move it, enter (space) jumps there.
     property int keyIndex: 0
     readonly property int currentIndex: {
-        for (let i = 0; i < headings.length; ++i) if (headings[i].verse === current) return i + 1
+        for (let i = 0; i < headings.length; ++i) if (entryKey(headings[i]) === current) return i + 1
         return 0
     }
     onActiveFocusChanged: if (activeFocus) keyIndex = currentIndex
@@ -44,7 +49,7 @@ Item {
     }
     function activateKey() {
         if (keyIndex === 0) root.activatedTop()
-        else if (headings[keyIndex - 1]) root.activated(headings[keyIndex - 1].verse)
+        else if (headings[keyIndex - 1]) root.activated(headings[keyIndex - 1])
     }
     signal boundary()
     Keys.onEscapePressed: root.leave()
@@ -70,17 +75,22 @@ Item {
         radius: Math.min(root.theme.cornerRadius || 0, 8 * root.uiScale)
     }
 
+    // The entry last brought into view: a current entry that only flickered
+    // (the reader placing a chapter it loaded above) scrolls nothing.
+    property var revealed: null
+    function revealCurrent() { if (current !== revealed) reveal() }
     function reveal() {
+        revealed = current
         if (current === 0) { list.contentY = 0; return }
         for (let i = 0; i < entries.count; ++i) {
             const entry = entries.itemAt(i)
-            if (!entry || !root.headings[i] || root.headings[i].verse !== current) continue
+            if (!entry || !root.headings[i] || root.entryKey(root.headings[i]) !== current) continue
             if (entry.y < list.contentY || entry.y + entry.height > list.contentY + list.height)
                 list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, entry.y - (list.height - entry.height) / 2))
             return
         }
     }
-    onCurrentChanged: Qt.callLater(root.reveal)
+    onCurrentChanged: Qt.callLater(root.revealCurrent)
     onHeightChanged: Qt.callLater(root.reveal)
 
     Flickable {
@@ -155,16 +165,18 @@ Item {
                     id: entry
                     required property var modelData
                     required property int index
-                    readonly property int verse: modelData.verse
-                    readonly property bool isCurrent: root.current === verse
-                    objectName: "outlineEntry:" + verse
+                    readonly property var key: root.entryKey(modelData)
+                    readonly property bool isCurrent: root.current === key
+                    // A chapter in the whole book's outline (its headings under it).
+                    readonly property bool chapter: modelData.level === 0
+                    objectName: "outlineEntry:" + key
                     width: column.width
                     height: label.implicitHeight + 10 * root.uiScale
                     Accessible.role: Accessible.Button
-                    Accessible.name: "Section " + modelData.text + (isCurrent ? ", current" : "")
-                    Accessible.onPressAction: root.activated(entry.verse)
+                    Accessible.name: (chapter ? "" : "Section ") + modelData.text + (isCurrent ? ", current" : "")
+                    Accessible.onPressAction: root.activated(entry.modelData)
                     Rectangle {
-                        objectName: "outlineEntryKey:" + entry.verse
+                        objectName: "outlineEntryKey:" + entry.key
                         anchors.fill: parent
                         visible: root.activeFocus && root.keyIndex === entry.index + 1
                         color: Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.11)
@@ -181,8 +193,8 @@ Item {
                     }
                     Text {
                         id: label
-                        objectName: "outlineEntryText:" + entry.verse
-                        x: 10 * root.uiScale
+                        objectName: "outlineEntryText:" + entry.key
+                        x: (entry.modelData.level === 1 ? 22 : 10) * root.uiScale
                         y: 5 * root.uiScale
                         width: parent.width - x
                         // An LRM keeps a Hebrew-first heading ("א Aleph") in an
@@ -192,8 +204,8 @@ Item {
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
                         font.family: root.theme.fontFamily
-                        font.pixelSize: 12.5 * root.uiScale
-                        font.weight: entry.isCurrent ? Font.DemiBold : Font.Normal
+                        font.pixelSize: (entry.chapter ? 13.5 : 12.5) * root.uiScale
+                        font.weight: entry.isCurrent || entry.chapter ? Font.DemiBold : Font.Normal
                         color: entry.isCurrent || mouse.containsMouse ? root.theme.foreground : root.theme.muted
                     }
                     MouseArea {
@@ -201,7 +213,7 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.activated(entry.verse)
+                        onClicked: root.activated(entry.modelData)
                     }
                     AppToolTip {
                         theme: root.theme

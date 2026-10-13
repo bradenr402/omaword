@@ -814,6 +814,54 @@ private slots:
             QVERIFY(!item("outlineTitle")->property("isCurrent").toBool());
         }
     }
+    // The whole book's outline: the book over its chapters, each with its
+    // headings under it; the section read is current, in whichever chapter
+    // shown it is; an entry of another chapter goes there, as a jump.
+    void wholeBookOutline() {
+        bible->setChapterOutline(true); bible->setWholeBook(true);
+        navigate("John 3:2");
+        QTRY_VERIFY(outlineShown());
+        QCOMPARE(item("outlineTitleText")->property("text").toString(), QString("John"));
+        for (const QString key : {"1:0", "1:4", "2:0", "3:0", "3:16", "4:0", "4:52"}) QVERIFY2(item("outlineEntry:" + key), qPrintable(key));
+        QCOMPARE(item("outlineEntryText:3:0")->property("text").toString().remove(QChar(0x200e)), QString("John 3"));
+        QVERIFY(item("outlineEntryText:3:16")->x() > item("outlineEntryText:3:0")->x());
+        QTRY_COMPARE(prop("outlineCurrent").toString(), QString("3:1"));
+        // Scrolled up into John 2 (shown above): its chapter is current.
+        QTRY_VERIFY(item("contextChapter:John 2"));
+        const auto john2 = item("contextChapter:John 2");
+        item("reading")->setProperty("contentY", john2->y() + 100);
+        QTRY_COMPARE(prop("outlineCurrent").toString(), QString("2:0"));
+        QCOMPARE(bible->passage(), QString("John 3"));
+        // (John 1 comes above, the view staying in John 2.)
+        QTRY_VERIFY(item("contextChapter:John 1")); settle();
+        QCOMPARE(prop("outlineCurrent").toString(), QString("2:0"));
+        const int jumps = jumpIndex();
+        item("outlineList")->setProperty("contentY", item("outlineEntry:4:10")->y() - 20); settle();
+        click(item("outlineEntry:4:10"));
+        QTRY_COMPARE(bible->passage(), QString("John 4")); QCOMPARE(bible->cursorVerse(), 10);
+        QCOMPARE(jumpIndex(), jumps + 1);
+        QTRY_VERIFY(!prop("restoringPosition").toBool());
+        QTRY_COMPARE(prop("outlineCurrent").toString(), QString("4:10"));
+        item("outlineList")->setProperty("contentY", 0); settle();
+        click(item("outlineEntry:1:0")); QTRY_COMPARE(bible->selectionReference(), QString("John 1:1"));
+        // { } step through the book's sections, across chapters (a chapter
+        // without a heading at its start stops at its top).
+        navigate("John 3:31");
+        key(Qt::Key_BraceRight); QTRY_COMPARE(bible->selectionReference(), QString("John 4:1"));
+        QTRY_VERIFY(!prop("restoringPosition").toBool());
+        key(Qt::Key_BraceLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 3:31"));
+        navigate("John 3:2");
+        key(Qt::Key_BraceLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 3:1"));
+        QTRY_VERIFY(!prop("restoringPosition").toBool());
+        key(Qt::Key_BraceLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 2:1"));
+        QTRY_VERIFY(!prop("restoringPosition").toBool());
+        key(Qt::Key_BraceLeft); QTRY_COMPARE(bible->selectionReference(), QString("John 1:35"));
+        // Off: the chapter's own outline again.
+        bible->setWholeBook(false);
+        QTRY_COMPARE(item("outlineTitleText")->property("text").toString(), QString("John 1"));
+        QVERIFY(item("outlineEntry:4")); QVERIFY(!item("outlineEntry:3:0"));
+        bible->setChapterOutline(false);
+    }
     void outlineScrollsToCurrentWhenTall() {
         bible->setChapterOutline(true);
         resize(1600, 520);

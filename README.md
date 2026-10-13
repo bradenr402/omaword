@@ -225,6 +225,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `alt n`: Show verse numbers
 - `alt h`: Show headings
 - `alt o`: Chapter outline
+- `alt b`: Whole book
 - `alt w`: Show notes in margin
 - `alt j`: Highlight words of Jesus
 - `alt l`: Layout
@@ -290,6 +291,7 @@ These also work, but stay out of the in-app list:
 - A comfortable page: the column is about 66 characters wide and grows with the Text size; the title, headings, verse numbers, and notes are steps of one type scale; poetry lines are indented by level (`\q1`, `\q2`, …) with hanging wrapped lines in the Paragraph and Verse layouts, and run on as prose in Block.
 - Focus mode (`f`) dims everything but the current verse and keeps it 40% down the window, like a typewriter. The footer then shows only the focus button; rest the pointer on it (or tab to it) to reveal the rest in place.
 - `j` on a chapter's last verse goes on to the next chapter's first, `k` on its first back to the previous chapter's last. A selection you extend across chapters (`shift J` / `shift K`, or a passage like `John 3:35-4:2`) shows each chapter it reaches whole, in your layout, above or below the one you are in (up to three each way), with its marks, footnotes, and margin notes, its selected verses tinted; what is on screen stays where it is as they come and go. A click on a verse there selects it, `shift` click extends the selection to it.
+- **Whole book** (`alt b`, or Reading settings) shows the book's other chapters above and below the one you read, as you scroll toward them, so a book reads as one text; the chapter outline then lists the book's chapters with their sections, and `{` / `}` step through them. The chapter you read stays the one you selected in (moving or clicking into another chapter makes it yours), so scrolling to look around changes nothing.
 - **Highlight words of Jesus** (`alt j`) colors them with your theme's palette, where the version marks them (KJV).
 - Wide windows add margins: a sticky **Chapter outline** of the chapter and its section headings on the left (`alt o`; `{` / `}` jump between headings, `{` ending at the top of the chapter), and notes in the right margin (**Show notes in margin**, `alt w`), each joined to its passage by hand-drawn braces and an arrow that swoops between them. Margin notes take priority and may move the text left, keeping it there from chapter to chapter, notes or not, but leave the outline its room where both fit; both are off by default.
 

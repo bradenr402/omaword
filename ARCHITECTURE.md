@@ -183,7 +183,7 @@ files.
   unique per version + endpoints, start/end 0 = a whole chapter, scroll
   position, visit time; capped at 500) and `recent_queries` (last 5 Bible
   searches); `ribbon` (one row: version, endpoints as in `history`, position,
-  placed time); `preferences` (global, incl. `historyEnabled`); `installed`, `library`.
+  placed time); `preferences` (global, incl. `historyEnabled`, `wholeBook`); `installed`, `library`.
 - History: each window keeps an in-memory jump stack in QML (`[`/`]` browser
   semantics, `-` swaps with the previous location; never saved). Jumps
   (palette, search, panel opens, `gg`/`G`/counts, `gb`, `gm`/`gn`/`gt`, `gi`,
@@ -644,6 +644,20 @@ files.
   it was; where the content cannot reach that (it now begins or ends nearer),
   the column is held there and glides into place (`columnHold`). The reading
   position stays the chapter read's (`chapterTopY`, `chapterTravel`).
+- Whole book (`wholeBook`, `alt b`): the book's other chapters are shown the
+  same way, above and below the chapter read, which stays the selection's
+  (moving or clicking into another makes it the one read). `bookWindow`
+  holds the chapters loaded, `contextChapters(first, last)` gives them with
+  any a selection reaches into; `extendBook` (on scroll, layout, restore)
+  adds one at an end within 1.5 screens of the view at a time, under the
+  view anchor, and parks chapters more than five screens away
+  (`bookParked`: their height; `ContextChapter.parked` keeps the room and
+  lays out nothing, reading no rows), unparking those within two. Opening a
+  chapter outside the window, or another book, starts it again from that
+  chapter. Scrolling 150 screens down Psalms from Psalm 23 on BSB (offscreen
+  software rendering) kept a frame at a median 18–26 ms and memory within
+  40–90 MB of where it started, where keeping every chapter laid out grew it
+  by 0.5–1 GB (Block least, Verse most).
 - A verse step (`j`, `k`, `5j`; `moveSelection`, `moveByVerses`) within the
   chapter shown moves only the selection (`stepSelection`): the chapter is
   not read again and no row is announced (`versesChanged`), so no layout
@@ -785,7 +799,13 @@ files.
   screen, else the one at a reading line ¼ down (the chapter title above the
   headings is current before the first one, and jumps to the chapter top);
   `{`/`}` step headings from the same verse (History jumps), `{` ending at the
-  chapter top (`Margins.headingStep`'s `top`), even without headings. Toggling notes (`applyMarginNotes`, driven
+  chapter top (`Margins.headingStep`'s `top`), even without headings. In the
+  whole book the outline is the book's (`bookOutline`: each chapter, then its
+  headings, keyed "chapter:verse"), its current entry wherever the reading
+  line falls among the chapters shown (`bookSection`), and `{`/`}` step
+  through it across chapters (`bookHeadingStep`; a chapter's top is a stop
+  where no heading opens it), an entry in another chapter selecting there
+  (`outlineJump`). Toggling notes (`applyMarginNotes`, driven
   by an actual `bible.marginNotes` change) fades them in while the column slides left,
   or fades them out before it slides back (`marginSlideOffset`, 100 ms
   ease-out). Toggling the outline (`applyOutline`, from an actual

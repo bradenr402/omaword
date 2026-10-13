@@ -56,6 +56,7 @@ class BibleBackend : public QObject
     // Margins (off by default, shared preferences): left chapter outline, right margin notes.
     Q_PROPERTY(bool chapterOutline READ chapterOutline WRITE setChapterOutline NOTIFY preferencesChanged)
     Q_PROPERTY(bool marginNotes READ marginNotes WRITE setMarginNotes NOTIFY preferencesChanged)
+    Q_PROPERTY(bool wholeBook READ wholeBook WRITE setWholeBook NOTIFY preferencesChanged)
     // Bible search: every installed version (the active one first), or the active one only.
     Q_PROPERTY(bool searchAllVersions READ searchAllVersions WRITE setSearchAllVersions NOTIFY preferencesChanged)
     Q_PROPERTY(bool searchRegex READ searchRegex WRITE setSearchRegex NOTIFY preferencesChanged)
@@ -193,6 +194,7 @@ public:
     bool focusMode() const { return m_focusMode; }
     bool wordsOfJesus() const { return m_wordsOfJesus; }
     bool chapterOutline() const { return m_chapterOutline; }
+    bool wholeBook() const { return m_wholeBook; }
     bool marginNotes() const { return m_marginNotes; }
     bool searchAllVersions() const { return m_searchAllVersions; }
     // Bible search reads every query as a regular expression (alt r);
@@ -251,6 +253,7 @@ public:
     Q_INVOKABLE void setFocusMode(bool value);
     Q_INVOKABLE void setWordsOfJesus(bool value);
     Q_INVOKABLE void setChapterOutline(bool value);
+    Q_INVOKABLE void setWholeBook(bool value);
     Q_INVOKABLE void setMarginNotes(bool value);
     Q_INVOKABLE void setSearchAllVersions(bool value);
     Q_INVOKABLE void setSearchRegex(bool value);
@@ -374,11 +377,15 @@ public:
     // available is false where a version lacks an endpoint (its numbering
     // differs, or it has no such book).
     Q_INVOKABLE QVariantList compareVersions(QVariantMap scope = QVariantMap()) const;
-    // A selection reaching into other chapters: those chapters, in order,
-    // the nearest three before the chapter shown and three after it, each
-    // {book, chapter, title, first, last (its selected verses), before};
-    // [] for a selection within the chapter shown, or none.
-    Q_INVOKABLE QVariantList contextChapters() const;
+    // The chapters shown beside the one read, in order, each {book, chapter,
+    // title, first, last (its selected verses, or 0), before}: those a
+    // selection reaches into (the nearest three before the chapter read and
+    // three after it), and in the whole-book view the book's chapters
+    // numbered first to last (0, 0: none).
+    Q_INVOKABLE QVariantList contextChapters(int first = 0, int last = 0) const;
+    // The whole-book view's outline of a book: its chapters, in order, each
+    // {chapter, title, headings: [{verse, text}]}.
+    Q_INVOKABLE QVariantList bookOutline(int book) const;
     // Chapters' verse rows ([{book, chapter}], one list each, in order) with
     // their marks, as the chapter read has them, for showing them beside it;
     // the read-ahead is kept.
@@ -660,7 +667,7 @@ private:
     int m_anchor = 0, m_cursor = 0; // Directional canonical indices; zero means no selection.
     double m_position = 0, m_progress = 0;
     bool m_showVerseNumbers = true, m_showHeadings = true, m_focusMode = false, m_wordsOfJesus = false;
-    bool m_chapterOutline = false, m_marginNotes = false, m_searchAllVersions = false, m_searchRegex = false;
+    bool m_chapterOutline = false, m_wholeBook = false, m_marginNotes = false, m_searchAllVersions = false, m_searchRegex = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;
     bool m_hasParagraphs = false, m_hasWordsOfJesus = false, m_hasHeadings = false, m_hasCrossReferences = false;

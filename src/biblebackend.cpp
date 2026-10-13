@@ -1303,29 +1303,57 @@ QVariantList BibleBackend::compareVersions(QVariantMap scope) const
     return rows;
 }
 
-QVariantList BibleBackend::contextChapters() const
+QVariantList BibleBackend::contextChapters(int first, int last) const
 {
-    if (!m_ready || !m_anchor || !m_cursor) return {};
-    const int low = std::min(m_anchor,m_cursor), high = std::max(m_anchor,m_cursor);
-    struct Group { int book, chapter, first, last; bool before; };
+    if (!m_ready) return {};
+    struct Group { int book, chapter, first, last; bool before; int order = 0; };
     QVector<Group> groups;
-    bool past = false;
-    for (int i = low; i <= high; ++i) {
-        const auto v = endpoint(i);
-        if (v.book == m_book && v.chapter == m_chapter) { past = true; continue; }
-        if (!groups.isEmpty() && groups.last().book == v.book && groups.last().chapter == v.chapter) groups.last().last = v.verse;
-        else groups.append({v.book,v.chapter,v.verse,v.verse,!past});
+    if (m_anchor && m_cursor) {
+        const int low = std::min(m_anchor,m_cursor), high = std::max(m_anchor,m_cursor);
+        bool past = false;
+        for (int i = low; i <= high; ++i) {
+            const auto v = endpoint(i);
+            if (v.book == m_book && v.chapter == m_chapter) { past = true; continue; }
+            if (!groups.isEmpty() && groups.last().book == v.book && groups.last().chapter == v.chapter) groups.last().last = v.verse;
+            else groups.append({v.book,v.chapter,v.verse,v.verse,!past,i});
+        }
+        // The nearest three on each side.
+        int before = 0;
+        while (before < groups.size() && groups[before].before) ++before;
+        groups = groups.mid(std::max(0,before - 3),std::min(int(groups.size()),before + 3) - std::max(0,before - 3));
     }
-    // The nearest three on each side.
-    int before = 0;
-    while (before < groups.size() && groups[before].before) ++before;
+    // The whole-book view's chapters, in Bible order with the selection's.
+    for (const auto &value : chaptersForBook(m_book)) {
+        const int c = value.toInt();
+        if (c < first || c > last || c == m_chapter
+            || std::any_of(groups.cbegin(),groups.cend(),[&](const Group &g) { return g.book == m_book && g.chapter == c; })) continue;
+        // Ordered by its first verse (most chapters start at 1: one lookup).
+        int start = 0;
+        for (int v = 1; v <= 999 && !start; ++v) start = absoluteVerse(m_book,c,v);
+        if (start) groups.append({m_book,c,0,0,c < m_chapter,start});
+    }
+    std::sort(groups.begin(),groups.end(),[](const Group &a, const Group &b) { return a.order < b.order; });
     QVariantList shown;
-    for (int i = std::max(0,before - 3); i < std::min(int(groups.size()),before + 3); ++i) {
-        const auto &g = groups[i];
+    for (const auto &g : std::as_const(groups))
         shown.append(QVariantMap{{"book",g.book},{"chapter",g.chapter},{"title",reference(g.book,g.chapter)},
                                  {"first",g.first},{"last",g.last},{"before",g.before}});
-    }
     return shown;
+}
+
+QVariantList BibleBackend::bookOutline(int book) const
+{
+    if (!m_ready) return {};
+    QHash<int,QVariantList> headings;
+    QSqlQuery q(m_bible);
+    q.prepare("SELECT chapter,number,heading FROM verses WHERE book=? AND heading<>'' ORDER BY chapter,number");
+    q.addBindValue(book);
+    if (q.exec()) while (q.next()) headings[q.value(0).toInt()].append(QVariantMap{{"verse",q.value(1)},{"text",q.value(2)}});
+    QVariantList outline;
+    for (const auto &value : chaptersForBook(book)) {
+        const int c = value.toInt();
+        outline.append(QVariantMap{{"chapter",c},{"title",reference(book,c)},{"headings",headings.value(c)}});
+    }
+    return outline;
 }
 
 QVariantList BibleBackend::chapterRows(const QVariantList &chapters)
@@ -1916,6 +1944,7 @@ bool BibleBackend::loadPreferences()
     m_focusMode = boolean("focusMode",false);
     m_wordsOfJesus = boolean("wordsOfJesus",false);
     m_chapterOutline = boolean("chapterOutline",false);
+    m_wholeBook = boolean("wholeBook",false);
     m_marginNotes = boolean("marginNotes",false);
     m_searchAllVersions = boolean("searchAllVersions",false);
     m_searchRegex = boolean("searchRegex",false);
@@ -1973,6 +2002,11 @@ void BibleBackend::setChapterOutline(bool value)
 {
     if (value == m_chapterOutline || !savePreference("chapterOutline",int(value))) return;
     m_chapterOutline = value; emit preferencesChanged();
+}
+void BibleBackend::setWholeBook(bool value)
+{
+    if (value == m_wholeBook || !savePreference("wholeBook",int(value))) return;
+    m_wholeBook = value; emit preferencesChanged();
 }
 void BibleBackend::setMarginNotes(bool value)
 {
