@@ -818,7 +818,19 @@ private slots:
     // headings under it; the section read is current, in whichever chapter
     // shown it is; an entry of another chapter goes there, as a jump.
     void wholeBookOutline() {
-        bible->setChapterOutline(true); bible->setWholeBook(true);
+        bible->setChapterOutline(true);
+        // Reading settings has its switch, and Commands has it too.
+        key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
+        QVERIFY(item("settingwholeBook") && item("settingwholeBook")->isVisible());
+        QCOMPARE(item("settingwholeBook")->property("text").toString(), QString("Whole book"));
+        click(item("settingwholeBook")); QTRY_VERIFY(bible->wholeBook());
+        QVERIFY(item("settingwholeBook")->property("checked").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("settingsDialog")->property("visible").toBool());
+        QStringList commands;
+        QVERIFY(QMetaObject::invokeMethod(window, "openPalette", Q_ARG(QVariant, true), Q_ARG(QVariant, false)));
+        for (const auto &entry : js("paletteEntries").toList()) commands << entry.toMap()["title"].toString();
+        QVERIFY2(commands.contains("Whole book"), qPrintable(commands.join(", ")));
+        key(Qt::Key_Escape); QTRY_VERIFY(!object("passagePalette")->property("visible").toBool());
         navigate("John 3:2");
         QTRY_VERIFY(outlineShown());
         QCOMPARE(item("outlineTitleText")->property("text").toString(), QString("John"));
