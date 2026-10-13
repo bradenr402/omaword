@@ -289,6 +289,6 @@ Omarchy already provides most of these; the install command above adds the rest.
 
 ## Credits
 
-Bible text has its own copyright and attribution, shown in About & Attribution. Cross-references come from each version's source and from [OpenBible.info](https://www.openbible.info/labs/cross-references/) (CC BY). The application code is [MIT licensed](LICENSE).
+Bible text has its own copyright and attribution, shown in About & Attribution. Cross-references come from each version's source and from "Cross references" by [OpenBible.info](https://www.openbible.info/labs/cross-references/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) and converted for OmaWord (entries without positive votes dropped, duplicates merged); that data, `resources/crossrefs.bin`, stays under CC BY 4.0. The application code is [MIT licensed](LICENSE).
 
 Found a problem or have an idea? [Open a GitHub issue](https://github.com/bradenr402/omaword/issues). See [ARCHITECTURE.md](ARCHITECTURE.md) and [tests/README.md](tests/README.md) for development.

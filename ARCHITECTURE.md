@@ -105,8 +105,10 @@ files.
 ## Versions and attribution
 
 - Cross references: the version's own source first (`\x` notes, schema 4),
-  then OpenBible.info's community set (CC BY, credited in About and README,
-  every row labeled). `crossReferences(scope)` reads the `\x` targets of the
+  then OpenBible.info's community set (CC BY 4.0, credited in About and
+  README with the license's link and what the conversion changed, every row
+  labeled; `resources/crossrefs.bin` stays under CC BY 4.0, not MIT, and the
+  package lists both). `crossReferences(scope)` reads the `\x` targets of the
   selection's verses (≤ 50) in source order (verse, note, list order; parsed
   with book/chapter carry-over), then appends OpenBible's targets for the same
   verses by votes (ties in canonical order), each exact range once (the

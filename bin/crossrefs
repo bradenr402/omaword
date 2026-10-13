@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Convert OpenBible.info cross references into resources/crossrefs.bin.
 
-Source: https://a.openbible.info/data/cross-references.zip (CC-BY,
-"Cross references: OpenBible.info"). Run at development time only; the app
-never downloads anything. Usage:
+Source: https://a.openbible.info/data/cross-references.zip, "Cross
+references" by OpenBible.info (https://www.openbible.info/labs/cross-references/),
+licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). The output
+is an adaptation of it (converted; rows without positive votes dropped,
+duplicates merged), under the same license, not the app's MIT. Run at
+development time only; the app never downloads anything. Usage:
 
     bin/crossrefs [cross-references.zip | cross_references.txt]
 
@@ -12,7 +15,8 @@ Without an argument the ZIP is downloaded to a temporary directory.
 OpenBible verse IDs ("Gen.1.1", ranges "Ps.89.11-Ps.89.12") use KJV
 versification and OSIS-style book abbreviations. They are mapped to the app's
 USFM book codes, then to the stable book IDs of src/biblebooks.cpp (GEN = 1).
-Rows with votes <= 0 (disputed or unvoted) are dropped.
+Rows with votes <= 0 (disputed or unvoted) are dropped; a pair listed more
+than once keeps its highest votes.
 
 Output: a qCompress() payload (4-byte big-endian length + zlib stream) of
 
