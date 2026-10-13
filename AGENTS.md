@@ -41,7 +41,7 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 
 All actions live in the `actions` catalog in `qml/Main.qml` (`id`, `group`, `title`, `sequences`, optional `aliases`/`aliasReason`, `command`, `explanation`). It feeds the in-app Keybindings list (`?`), the command palette, and README.
 
-- **After changing the catalog, run `bin/shortcuts`** to regenerate README's shortcut section (between the `shortcuts:` markers). Never edit that section by hand; CI fails on `--check`.
+- **After changing the catalog, run `bin/shortcuts`** to regenerate README's shortcut section (between the `shortcuts:` markers, collapsed under "Every key"). Never edit that section by hand; CI fails on `--check`. README's short Shortcuts list above it is written by hand: keep the keys it names current.
 - Display every key through `qml/KeyNotation.js` (lowercase modifiers, `shift G`, `ctrl k`, arrows as `↑`). `bin/shortcuts` mirrors it; keep them in sync.
 - Conventions (with deliberate exceptions; check the catalog for prior art before choosing):
   - **Single letters for common actions**, Vim-flavored: `j`/`k`/`h`/`l` move, `y` copies, `x` highlight, `w` note, `t` tag, `d` Desk, `f` focus, `/` find, `n`/`shift N` next/previous match, `u` undo. Multi-key sequences follow Vim (`zz`, `gg` and `20gg`, `[[`); a key after a lone `g` is spent, as in Vim.
@@ -61,7 +61,7 @@ All actions live in the `actions` catalog in `qml/Main.qml` (`id`, `group`, `tit
 - A side panel is a mode of the Margin (`marginMode`): a `SidePanel` headed by `SidePanelHeader`, its content at the shell's `inset`, its keys in a `HintRow` (ending with Main's `panelReturnHint` and `esc` close, and only `panelAwayHints` while the reader has the keyboard, `!marginKeys`); a modal is a `ModalCard` with a `HintRow`. `tst_ui`'s `panelsAndModalsShareTheirShells` checks both.
 - A QML file that needs the window takes `controller` and `theme` (not `app`/`desktop`), and Main binds them once in a same-named inline component (`component QuietButton: Shared.QuietButton { controller: app; theme: desktop }`). Inside an inline component a property named like an outer id binds to itself (`app: app` is undefined), so name it differently.
 - Everything must work by keyboard and by mouse; `a11yui` pins this. Respect **Disable animations** and **Disable sound effects**.
-- User-visible feature changes update README's Features section; durable internal contracts update `ARCHITECTURE.md`; suite changes update `tests/README.md`.
+- `README.md` stays short, in the spirit of [Omawrite's](https://github.com/omacom/omawrite/blob/master/README.md): change it where a change makes it wrong or adds what a new user needs (a major feature, an install step), in a sentence; details belong in the app (Keybindings, hints, tooltips). Durable internal contracts update `ARCHITECTURE.md`; suite changes update `tests/README.md`.
 
 ## Code style
 
