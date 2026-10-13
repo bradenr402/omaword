@@ -144,6 +144,21 @@ void MarkdownQuotes::narrow()
                 cursor.setPosition(block.position());
                 cursor.deleteChar();
             }
+            // Qt's import gives a heading's size and weight only to its text
+            // outside links, emphasis, and code; from a span on (and in a
+            // heading that begins with one, at the page's top, throughout) the
+            // text is set as a paragraph's. Every part of a heading takes them,
+            // as Qt sets them (H1 to H6: size +3 to -2, bold); a link keeps
+            // its color, emphasis its slant, code its face.
+            if (const int heading = format.headingLevel(); heading > 0) {
+                QTextCharFormat look;
+                look.setProperty(QTextFormat::FontSizeAdjustment, 4 - heading);
+                look.setFontWeight(QFont::Bold);
+                cursor.setPosition(block.position());
+                cursor.setPosition(block.position() + block.length() - 1, QTextCursor::KeepAnchor);
+                cursor.mergeCharFormat(look);
+                cursor.mergeBlockCharFormat(look);
+            }
         }
         // A paragraph's next line (a single Enter) follows without a gap, as
         // do a list's items and a code block's lines; anything else starts

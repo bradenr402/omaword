@@ -18,6 +18,7 @@
 #include <QTextDocument>
 #include <QTextBlock>
 #include <QTextFragment>
+#include <QTextLayout>
 #include <archive.h>
 #include <archive_entry.h>
 #include "biblebackend.h"
@@ -457,6 +458,45 @@ private slots:
         QCOMPARE(xs["ten"], xs["nine"]);
         QVERIFY(xs["task"] - xs["Para"] >= level);
         QVERIFY(level < 40);
+    }
+    // A heading keeps its size and weight to its end, whatever it holds: a
+    // passage link (the preview makes one of a reference), a web link,
+    // emphasis, code; at the top of the page or below other text. Its link
+    // keeps its color, its emphasis its slant, its code its face.
+    void headingsKeepTheirLookThroughLinksAndEmphasis() {
+        QVERIFY(bible->setDeskPage("# John 1:4 vs John 1:5\n\nText under it.\n\n# Plain title\n## A *quiet* [link](https://example.org) and `code`\n\n"
+                                   "## Plain second\n\n### John 1:6\n\n### Plain third", desk()));
+        openDesk(); key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        const auto document = item("deskPreview")->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTRY_VERIFY(!document->toPlainText().contains(QChar(0x200b)));
+        // Each level's look, as Qt gives a plain heading.
+        QHash<int, QTextCharFormat> plain;
+        QList<QTextBlock> headings;
+        for (auto block = document->begin(); block.isValid(); block = block.next()) {
+            const int level = block.blockFormat().headingLevel();
+            if (!level) continue;
+            headings << block;
+            if (block.text().startsWith("Plain")) plain.insert(level, block.begin().fragment().charFormat());
+        }
+        QCOMPARE(headings.size(), 6); QCOMPARE(plain.size(), 3);
+        QVERIFY(plain[1].font().pixelSize() > plain[2].font().pixelSize());
+        QVERIFY(plain[2].font().pixelSize() > plain[3].font().pixelSize());
+        const int body = item("deskPreview")->property("font").value<QFont>().pixelSize();
+        QVERIFY(plain[3].font().pixelSize() > body);
+        int anchors = 0, italics = 0, codes = 0;
+        for (const auto &block : headings) {
+            const auto &look = plain[block.blockFormat().headingLevel()];
+            for (auto it = block.begin(); !it.atEnd(); ++it) {
+                const auto format = it.fragment().charFormat();
+                QVERIFY2(format.font().pixelSize() == look.font().pixelSize() && format.fontWeight() == look.fontWeight(), qPrintable(block.text() + ": " + it.fragment().text()));
+                anchors += format.isAnchor(); italics += format.fontItalic(); codes += format.fontFixedPitch();
+                if (format.isAnchor()) QVERIFY(format.foreground().color() != look.foreground().color());
+            }
+        }
+        QCOMPARE(anchors, 4); QCOMPARE(italics, 1); QCOMPARE(codes, 1);
+        // The page's first line, all links and words, stands as tall as an H1.
+        QVERIFY(headings[0].layout()->lineCount() > 0);
+        QCOMPARE(headings[0].layout()->lineAt(0).height(), headings[1].layout()->lineAt(0).height());
     }
     void cleanDeskAsksFirstAndUndoes() {
         navigate("John 1:4"); key(Qt::Key_D); navigate("John 1:5"); key(Qt::Key_D);
