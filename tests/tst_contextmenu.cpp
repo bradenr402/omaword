@@ -538,14 +538,12 @@ private slots:
         QTest::mouseClick(window, Qt::LeftButton, {}, versePoint(3)); QCoreApplication::processEvents();
         QTRY_COMPARE(bible->selectionReference(), QString("John 1:3"));
         QTRY_VERIFY(item("selectionBar")->isVisible());
-        const auto bar = item("selectionBar")->mapToScene(QPointF(0, 0));
-        QVERIFY(bar.y() + item("selectionBar")->height() <= versePoint(3).y() + 2);
         QCOMPARE(object("selectionBarHints")->property("plainText").toString(),
                  QString::fromUtf8("x highlight    w note    t tag    y copy    ⋯"));
-        // Its actions are buttons the bar's full height, edge to edge (once
-        // its row has laid them out: a new selection makes them afresh).
+        // Its actions are buttons the bar's full height, edge to edge, once
+        // its row has laid them out (at the next frame's polish: a new
+        // selection makes them afresh), and it sits above the verse.
         const QStringList labels{"highlight", "note", "tag", "copy", QString::fromUtf8("⋯")};
-        const double inner = item("selectionBar")->height() - 2;
         const auto edgeToEdge = [&] {
             for (int i = 1; i < labels.size(); ++i) {
                 auto button = item("selectionBarHintsPart:" + labels[i]), previous = item("selectionBarHintsPart:" + labels[i - 1]);
@@ -554,6 +552,9 @@ private slots:
             return true;
         };
         QTRY_VERIFY(edgeToEdge());
+        const auto bar = item("selectionBar")->mapToScene(QPointF(0, 0));
+        QVERIFY(bar.y() + item("selectionBar")->height() <= versePoint(3).y() + 2);
+        const double inner = item("selectionBar")->height() - 2;
         for (const auto &label : labels) {
             auto button = item("selectionBarHintsPart:" + label); QVERIFY(button);
             QCOMPARE(button->height(), inner);
