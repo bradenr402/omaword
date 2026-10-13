@@ -4388,6 +4388,22 @@ ApplicationWindow {
         if (instant) setReaderY(target)
         else slideReader(target)
     }
+    // The reader's width changed (a panel docked or closed, the window
+    // resized) and its text may have reflowed: a selection still wholly in
+    // view stays where it is; one out of it comes back to the middle (its
+    // start near the top when it is taller than the view). Focus mode keeps
+    // its cursor verse 40% down.
+    function keepSelectionInView() {
+        if (!hasSelection || restoringPosition) return
+        if (focusLayout) { scrollToVerse(bible.cursorVerse, true); return }
+        readerColumn.forceLayout()
+        const first = measureVerse(bible.selectedStart), last = measureVerse(bible.selectedEnd)
+        if (!first || !last) return
+        const top = readerTargetY(), available = Math.max(1, reading.height - floatingSafety)
+        if (first.top >= top && last.bottom <= top + available) return
+        const height = last.bottom - first.top, margin = Math.min(3 * readerLineHeight, available * 0.2)
+        slideReader(height > available - 2 * margin ? first.top - margin : first.top - (available - height) / 2)
+    }
     function alignCurrentVerse(alignment) {
         positionTimer.stop()
         restoringPosition = false
@@ -6109,8 +6125,7 @@ ApplicationWindow {
                         // A dock change glides (glideFromDock); any other resize jumps.
                         if (isNaN(app.dockSlideFrom)) app.settleMargins()
                         else Qt.callLater(app.endDockGlide)
-                        if (app.hasSelection)
-                            Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
+                        if (app.hasSelection) Qt.callLater(app.keepSelectionInView)
                     }
                     onContentYChanged: { positionSaveTimer.restart(); app.queueFollow(); if (app.bookWindow) Qt.callLater(app.extendBook) }
                     onMovementStarted: readerSlide.stop()

@@ -729,6 +729,11 @@ files.
     retargets from the current position; `readerTargetY()` is the logical
     position (saved positions use it). User drags stop it. Focus mode keeps the
     cursor verse 40% down. Instant when animations are disabled.
+  - When the reader's width changes (a panel docking or closing, a resize) and
+    its text reflows, a selection still wholly in view stays where it is; one
+    out of view slides back to the middle, its start near the top when it is
+    taller than the view (`keepSelectionInView`; focus mode re-places its
+    cursor verse).
   - Popup motion (interfaces.dev: exits subtler than entrances, from their
     trigger; frequent popups open instantly): menus and modals (palette,
     dialogs, tag picker, range dialogs, and chapter find's bar, which fades

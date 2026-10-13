@@ -1274,6 +1274,45 @@ private slots:
         QCOMPARE(jump[1].columnX, docked);
     }
 
+    // A panel docking beside the text (Notes, Marks) or a resize changes the
+    // reader's width: a selection still wholly in view stays where it is,
+    // and one out of view comes back to the middle.
+    void panelsKeepAVisibleSelectionStill() {
+        resize(1800, 900);
+        navigate("John 3:16");
+        const auto contentY = [this] { return item("reading")->property("contentY").toDouble(); };
+        const auto opened = [this](const QString &mode) { return prop("marginMode").toString() == mode && object("notesDrawer")->property("opened").toBool(); };
+        const auto closed = [this] { return !object("notesDrawer")->property("visible").toBool(); };
+        const auto view = [&] {
+            const double top = contentY();
+            return std::make_pair(top, top + item("reading")->height() - prop("floatingSafety").toDouble());
+        };
+        const auto inView = [&] {
+            const auto verse = js("measureVerse", {16}).toMap(); const auto [top, bottom] = view();
+            return verse["top"].toDouble() >= top && verse["bottom"].toDouble() <= bottom;
+        };
+        // Away from where a jump puts it, still in view.
+        QVERIFY(QMetaObject::invokeMethod(window, "scrollBy", Q_ARG(QVariant, -150))); settle();
+        QVERIFY(inView());
+        const double before = contentY();
+        key(Qt::Key_W); QTRY_VERIFY(opened("notes")); QVERIFY(prop("notesDocked").toBool()); settle();
+        QCOMPARE(contentY(), before); QVERIFY(inView());
+        key(Qt::Key_Escape); QTRY_VERIFY(closed()); settle();
+        QCOMPARE(contentY(), before);
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(opened("marks")); settle();
+        QCOMPARE(contentY(), before);
+        key(Qt::Key_Escape); QTRY_VERIFY(closed()); settle();
+        QCOMPARE(contentY(), before);
+        resize(1500, 900);
+        QCOMPARE(contentY(), before);
+        // Scrolled out of view, it comes back to the middle.
+        QVERIFY(QMetaObject::invokeMethod(window, "scrollBy", Q_ARG(QVariant, 1500))); settle();
+        QVERIFY(!inView());
+        key(Qt::Key_M, Qt::ShiftModifier); QTRY_VERIFY(opened("marks")); QTRY_VERIFY(inView());
+        const auto verse = js("measureVerse", {16}).toMap(); const auto [top, bottom] = view();
+        QVERIFY(std::abs((verse["top"].toDouble() + verse["bottom"].toDouble()) / 2 - (top + bottom) / 2) < 2);
+    }
+
     // ---- Focus mode with margins ----------------------------------------------
     // Entering and leaving focus mode with margin notes and the outline on:
     // frame by frame (verifyTransition), with rapid retargeting toggles and
