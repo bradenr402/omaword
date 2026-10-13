@@ -180,6 +180,9 @@ class StudyUiTest : public QObject
     }
     void navigate(const QString &reference) {
         QVERIFY(bible->navigate(reference)); call("readerFocus"); QTRY_VERIFY(!prop("restoringPosition").toBool());
+        // Within the chapter shown the reader then slides there: let it land
+        // before anything on screen is measured or clicked.
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
     }
     void setMode(const QString &mode) {
         bible->setReadingMode(mode); QTRY_COMPARE(prop("continuousReader").toBool(), mode != "verse");
