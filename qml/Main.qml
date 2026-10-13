@@ -3992,7 +3992,17 @@ ApplicationWindow {
     // The Desk editor's own keys: tab types a tab and shift tab takes one
     // back (the editor keeps the keyboard), alt enter follows the link at the
     // cursor, ctrl s and ctrl shift S settle another window's change.
+    // ctrl y redoes typing in a note, the Desk, or a mark's note written in
+    // place, as ctrl shift Z does there (the redo key in most editors; Qt
+    // gives it only on Windows). True when it was the key.
+    function typingRedoKey(editor, event) {
+        if (event.key !== Qt.Key_Y || event.modifiers !== Qt.ControlModifier) return false
+        if (editor.canRedo) editor.redo()
+        event.accepted = true
+        return true
+    }
     function deskKey(event) {
+        if (typingRedoKey(deskEditor, event)) return
         const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
         if (event.key === Qt.Key_Tab && event.modifiers === Qt.NoModifier) {
             deskEditor.remove(deskEditor.selectionStart, deskEditor.selectionEnd)
@@ -4870,6 +4880,7 @@ ApplicationWindow {
         { id: "noteUseSaved", group: "Annotate", title: "Note or Desk changed in another window: use the saved text", sequences: ["Ctrl+Shift+S"], scope: "noteEditor" },
         { id: "noteLinkedFrom", group: "Annotate", title: "From a note to its Linked from list (esc returns)", sequences: ["Ctrl+Down"], scope: "noteEditor" },
         { id: "noteLeave", group: "Annotate", title: "Close a note or the Desk, the draft saved (its link suggestions first)", sequences: ["Escape"], scope: "noteEditor", explanation: true },
+        { id: "noteTypingUndo", group: "Annotate", title: "Undo, redo typing (in a note or the Desk)", sequences: ["Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y"], scope: "noteEditor", explanation: true },
         { id: "copy", group: "Copy", title: "Copy passage as quotation", sequences: ["Y"], command: true },
         { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
@@ -6946,6 +6957,7 @@ ApplicationWindow {
                                 }
                                 onCursorPositionChanged: app.updateLinkSuggestions()
                                 Keys.onPressed: function(event) {
+                                    if (app.typingRedoKey(noteEditor, event)) return
                                     const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                                     // Tab types a tab (it accepts a [[ suggestion instead, below);
                                     // shift tab takes one back. The editor keeps the keyboard.
@@ -7588,6 +7600,7 @@ ApplicationWindow {
                                         selectByMouse: true
                                         ContextMenu.menu: null
                                         ContextMenu.onRequested: function(position) { app.openTextMenu(markEditor, position) }
+                                        Keys.onPressed: function(event) { app.typingRedoKey(markEditor, event) }
                                         onVisibleChanged: if (visible) text = app.markEditText
                                         onTextChanged: if (savedEntry.editing && text !== app.markEditText) {
                                             app.markEditText = text

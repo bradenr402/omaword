@@ -2963,9 +2963,14 @@ private slots:
         QVERIFY(bible->selectionHighlighted());
         QVERIFY(!window->property("verseMode").toBool());
         QCOMPARE(prop("noteEditor", "cursorPosition").toInt(), first.size());
-        // Standard undo must stay inside the editor too.
+        // Standard undo must stay inside the editor too; ctrl shift Z and
+        // ctrl y redo the typing, as in most editors.
         type("!"); key(Qt::Key_Z, Qt::ControlModifier);
         QVERIFY(!bible->noteText().endsWith('!'));
+        key(Qt::Key_Y, Qt::ControlModifier); QVERIFY(bible->noteText().endsWith('!'));
+        key(Qt::Key_Z, Qt::ControlModifier); key(Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(bible->noteText().endsWith('!'));
+        QVERIFY(bible->selectionHighlighted()); QVERIFY(item("noteEditor")->hasActiveFocus());
         key(Qt::Key_A, Qt::ControlModifier); type(first);
         // ctrl w hands the keyboard back with Notes open: j moves on, and Notes follows.
         key(Qt::Key_W,Qt::ControlModifier);
@@ -6640,6 +6645,10 @@ private slots:
         QCOMPARE(editor->property("text").toString(),QString("First"));
         QVERIFY(item("savedNoteTextJohn 3:16")->property("text").toString().isEmpty());
         type(" thought j k d y");
+        QCOMPARE(bible->savedNote(noted),QString("First thought j k d y"));
+        // ctrl z, then ctrl y, as in Notes.
+        key(Qt::Key_Z,Qt::ControlModifier); QVERIFY(editor->property("text").toString() != QString("First thought j k d y"));
+        key(Qt::Key_Y,Qt::ControlModifier); QCOMPARE(editor->property("text").toString(),QString("First thought j k d y"));
         QCOMPARE(bible->savedNote(noted),QString("First thought j k d y"));
         QCOMPARE(bible->selectionReference(),QString("John 4:1"));
         QCOMPARE(item("markEditor"),editor); // Saving never rebuilds the row under the editor.

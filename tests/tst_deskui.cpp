@@ -292,6 +292,12 @@ private slots:
         item("deskEditor")->forceActiveFocus(); item("deskEditor")->setProperty("cursorPosition", desk().size());
         key(Qt::Key_Tab); QCOMPARE(desk(), QString("See John 1:4 here.\t")); QVERIFY(item("deskEditor")->hasActiveFocus());
         key(Qt::Key_Backtab); QCOMPARE(desk(), QString("See John 1:4 here."));
+        // ctrl z undoes typing; ctrl y redoes it, as ctrl shift Z does.
+        type("!"); key(Qt::Key_Z, Qt::ControlModifier); QCOMPARE(desk(), QString("See John 1:4 here."));
+        key(Qt::Key_Y, Qt::ControlModifier); QCOMPARE(desk(), QString("See John 1:4 here.!"));
+        key(Qt::Key_Z, Qt::ControlModifier); key(Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(desk(), QString("See John 1:4 here.!")); QVERIFY(item("deskEditor")->hasActiveFocus());
+        key(Qt::Key_Backspace); QCOMPARE(desk(), QString("See John 1:4 here."));
         // alt v: Preview renders the link; a click on it jumps there.
         navigate("John 1:1"); key(Qt::Key_D, Qt::ShiftModifier); QTRY_VERIFY(item("deskEditor")->hasActiveFocus());
         key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());

@@ -177,6 +177,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl shift S`: Note or Desk changed in another window: use the saved text
 - `ctrl ↓`: From a note to its Linked from list (esc returns)
 - `esc`: Close a note or the Desk, the draft saved (its link suggestions first)
+- `ctrl z` · `ctrl shift Z` · `ctrl y`: Undo, redo typing (in a note or the Desk)
 
 ### Copy
 
