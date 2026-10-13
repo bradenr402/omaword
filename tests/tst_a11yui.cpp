@@ -1674,8 +1674,19 @@ private slots:
         run("settings"); QTRY_VERIFY(opened("settingsDialog"));
         auto font = item("fontSizeSlider"), line = item("lineHeightSlider");
         // Keyboard: → increases, ← decreases; ↑ ↓ step to the other controls.
+        // Focused, the slider adds "← → adjust" after the others, which keep their places.
+        const QString unfocused = object("fontSizeHints")->property("plainText").toString();
+        const auto partX = [&](const char *row, const QString &name) {
+            auto part = item(QString("%1Part:%2").arg(row, name)); return part ? part->mapToScene(QPointF()).x() : -1;
+        };
+        QVERIFY(QQuickTest::qWaitForPolish(window));
+        const double decreaseAt = partX("fontSizeHints", "decrease"), resetAt = partX("fontSizeHints", "reset");
         font->forceActiveFocus();
         QTRY_VERIFY(object("fontSizeHints")->property("plainText").toString().contains(QStringLiteral("← → adjust")));
+        QVERIFY(object("fontSizeHints")->property("plainText").toString().startsWith(unfocused));
+        QVERIFY(object("fontSizeHints")->property("plainText").toString().endsWith(QStringLiteral("← → adjust")));
+        QVERIFY(QQuickTest::qWaitForPolish(window));
+        QTRY_COMPARE(partX("fontSizeHints", "decrease"), decreaseAt); QTRY_COMPARE(partX("fontSizeHints", "reset"), resetAt);
         key(Qt::Key_Right); QCOMPARE(bible->fontSize(), 19);
         key(Qt::Key_Left); key(Qt::Key_Left); QCOMPARE(bible->fontSize(), 17);
         key(Qt::Key_Right); QCOMPARE(bible->fontSize(), 18);

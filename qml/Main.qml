@@ -9000,10 +9000,11 @@ ApplicationWindow {
             HintRow {
                 objectName: "fontSizeHints"
                 theme: desktop
-                // With the slider focused, its arrows adjust it too.
-                parts: (fontSizeSliderItem.activeFocus ? [[["Left", "Right"], "adjust"]] : []).concat(["smaller", "larger", "resetText"].map(function(id, index) {
+                // With the slider focused, its arrows adjust it too: listed last,
+                // so the others keep their places as it comes and goes.
+                parts: ["smaller", "larger", "resetText"].map(function(id, index) {
                     return [app.actionKeys(id)[0], ["decrease", "increase", "reset"][index], () => app.runCommand(id), app.actionAvailable(id)]
-                }))
+                }).concat(fontSizeSliderItem.activeFocus ? [[["Left", "Right"], "adjust"]] : [])
                 pixelSize: 11 * app.scale
                 Layout.fillWidth: true
             }
@@ -9041,10 +9042,11 @@ ApplicationWindow {
             HintRow {
                 objectName: "lineHeightHints"
                 theme: desktop
-                // With the slider focused, its arrows adjust it too.
-                parts: (lineHeightSlider.activeFocus ? [[["Left", "Right"], "adjust"]] : []).concat(["lineLess", "lineMore", "lineReset"].map(function(id, index) {
+                // With the slider focused, its arrows adjust it too: listed last,
+                // so the others keep their places as it comes and goes.
+                parts: ["lineLess", "lineMore", "lineReset"].map(function(id, index) {
                     return [app.actionKeys(id)[0], ["decrease", "increase", "reset"][index], () => app.runCommand(id), app.actionAvailable(id)]
-                }))
+                }).concat(lineHeightSlider.activeFocus ? [[["Left", "Right"], "adjust"]] : [])
                 pixelSize: 11 * app.scale
                 Layout.fillWidth: true
             }
