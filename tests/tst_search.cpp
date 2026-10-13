@@ -116,6 +116,25 @@ private slots:
         QCOMPARE(folds.size(),1); QCOMPARE(folds.first().toMap()["length"].toInt(),2);
         QCOMPARE(find(chapter({"ßß"}),"s").matches.size(),2);
     }
+    // A Bible search's query in slashes is a regular expression in a chapter
+    // too (the result chosen, marked in its chapter): one row a verse.
+    void slashedQueriesInAChapter() {
+        const auto c = chapter({"In the beginning was the Word", "every word of GOD"});
+        auto rows = [&](const QString &query) {
+            QStringList out;
+            for (const auto &row : find(c,query,true).matches) {
+                QStringList spans;
+                for (const auto &segment : row.toMap()["segments"].toList()) spans << sourceSegment(c,segment);
+                out << QString::number(row.toMap()["start"].toInt()) + ":" + spans.join("|");
+            }
+            return out;
+        };
+        QCOMPARE(rows("/w(or)d/"),QStringList({"990:Word","991:word"}));
+        QCOMPARE(rows("/W(or)d/"),QStringList({"990:Word"}));
+        QCOMPARE(rows("/the|of/"),QStringList({"990:the|the","991:of"}));
+        QVERIFY(find(c,"/(word/",true).error.startsWith("Invalid regular expression"));
+        QCOMPARE(rows("w(or)d"),QStringList());
+    }
     void chapterFindPatterns() {
         const auto c = chapter({"For God so loved the world", "God is love. Loved ones", "a\\b and 123 SHOUT"});
         auto count = [&](const QString &pattern) { return findPattern(c,pattern).matches.size(); };
@@ -390,9 +409,9 @@ private slots:
         QCOMPARE(indexedEditions(index),QStringList({"alpha","beta"}));
         // A query error comes back as before.
         QVERIFY(!searchEditions(both,"\"unfinished",index).error.isEmpty());
-        // A regular expression, in slashes or as the syntax asked for: matched
-        // within each verse, a row per verse with every match, smart case as in
-        // chapter find; indexed or not, every chapter is read.
+        // A regular expression in slashes: matched within each verse, a row
+        // per verse with every match, smart case as in chapter find; indexed
+        // or not, every chapter is read.
         auto spans = [](const Result &result, int row) {
             QStringList list;
             const auto map = result.matches[row].toMap();
@@ -405,7 +424,9 @@ private slots:
         QCOMPARE(references(heavens),QStringList({"alpha Genesis 1:2","alpha Genesis 2:1","beta Genesis 1:1"}));
         QCOMPARE(spans(heavens,0),QStringList({"heaven"}));
         QCOMPARE(heavens.matches.first().toMap()["segments"].toList().first().toMap()["verse"].toInt(),2);
-        QCOMPARE(references(searchEditions(both,"th(e|us)\\b",index,{},{},Syntax::Pattern)).size(),4);
+        QCOMPARE(references(searchEditions(both,"/th(e|us)\\b/",index)).size(),4);
+        // Without the slashes it is words.
+        QCOMPARE(references(searchEditions(both,"th(e|us)\\b",index)).size(),0);
         const auto every = searchEditions(both," /the/ ",index);
         QCOMPARE(spans(every,0),QStringList({"the"})); // Genesis 1:1: "In the beginning"
         QCOMPARE(spans(every,1),QStringList({"the","the"}));

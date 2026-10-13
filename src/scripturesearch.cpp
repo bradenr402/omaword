@@ -148,6 +148,52 @@ Query parse(const QString &input, bool syntax)
     else add(part,false);
     return query;
 }
+// Chapter find's patterns (findPattern), and Bible search's: \c / \C stripped
+// (an escaped backslash kept), case ignored unless the pattern has an
+// unescaped uppercase letter. An empty pattern stays empty.
+QRegularExpression compilePattern(const QString &input)
+{
+    // Strip \c / \C (keeping an escaped backslash), and look for an
+    // unescaped uppercase letter for smart-case.
+    QString pattern; pattern.reserve(input.size());
+    bool forceInsensitive = false, forceSensitive = false, upper = false;
+    for (qsizetype i = 0; i < input.size(); ++i) {
+        const QChar c = input[i];
+        if (c == '\\' && i+1 < input.size()) {
+            const QChar next = input[i+1];
+            if (next == 'c') { forceInsensitive = true; ++i; continue; }
+            if (next == 'C') { forceSensitive = true; ++i; continue; }
+            pattern += c; pattern += next; ++i;
+            // \p{Lu} / \P{Lu}: the property name is not a typed letter.
+            if ((next == 'p' || next == 'P') && i+1 < input.size() && input[i+1] == '{') {
+                const qsizetype close = input.indexOf('}',i+1);
+                if (close > 0) { pattern += input.mid(i+1,close-i); i = close; }
+            }
+            continue;
+        }
+        if (c.isUpper()) upper = true;
+        pattern += c;
+    }
+    const bool insensitive = forceInsensitive || (!forceSensitive && !upper);
+    return QRegularExpression(pattern, QRegularExpression::UseUnicodePropertiesOption
+        | (insensitive ? QRegularExpression::CaseInsensitiveOption : QRegularExpression::NoPatternOption));
+}
+// A Bible search's query: a regular expression in slashes, /lov(e|ed)/;
+// anything else words and "phrases".
+Query parseSearch(const QString &query)
+{
+    const QString trimmed = query.trimmed();
+    if (trimmed.size() <= 2 || !trimmed.startsWith('/') || !trimmed.endsWith('/')) return parse(query,true);
+    Query parsed;
+    parsed.regex = true;
+    if (query.size() > MaximumQuerySize) parsed.error = "Search queries may contain at most 4096 UTF-16 units.";
+    else {
+        parsed.pattern = compilePattern(trimmed.mid(1,trimmed.size()-2));
+        if (!parsed.pattern.isValid()) parsed.error = "Invalid regular expression: " + parsed.pattern.errorString() + '.';
+        else parsed.pattern.optimize();
+    }
+    return parsed;
+}
 struct Occurrence { int start, end, first, last, term; };
 
 // Sweep right endpoints, retaining the latest left endpoint for each label.
@@ -324,42 +370,10 @@ Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, co
 
 Result find(const Chapter &chapter, const QString &query, bool bibleSyntax, const Cancellation &cancel)
 {
-    const auto parsed = parse(query,bibleSyntax);
-    if (!parsed.error.isEmpty() || parsed.terms.isEmpty() || stopped(cancel)) return {parsed.error,{}};
+    const auto parsed = bibleSyntax ? parseSearch(query) : parse(query,false);
+    const bool empty = parsed.regex ? parsed.pattern.pattern().isEmpty() : parsed.terms.isEmpty();
+    if (!parsed.error.isEmpty() || empty || stopped(cancel)) return {parsed.error,{}};
     return scan(PreparedChapter(chapter),parsed,bibleSyntax,cancel);
-}
-
-namespace {
-// Chapter find's patterns (findPattern), and Bible search's: \c / \C stripped
-// (an escaped backslash kept), case ignored unless the pattern has an
-// unescaped uppercase letter. An empty pattern stays empty.
-QRegularExpression compilePattern(const QString &input)
-{
-    // Strip \c / \C (keeping an escaped backslash), and look for an
-    // unescaped uppercase letter for smart-case.
-    QString pattern; pattern.reserve(input.size());
-    bool forceInsensitive = false, forceSensitive = false, upper = false;
-    for (qsizetype i = 0; i < input.size(); ++i) {
-        const QChar c = input[i];
-        if (c == '\\' && i+1 < input.size()) {
-            const QChar next = input[i+1];
-            if (next == 'c') { forceInsensitive = true; ++i; continue; }
-            if (next == 'C') { forceSensitive = true; ++i; continue; }
-            pattern += c; pattern += next; ++i;
-            // \p{Lu} / \P{Lu}: the property name is not a typed letter.
-            if ((next == 'p' || next == 'P') && i+1 < input.size() && input[i+1] == '{') {
-                const qsizetype close = input.indexOf('}',i+1);
-                if (close > 0) { pattern += input.mid(i+1,close-i); i = close; }
-            }
-            continue;
-        }
-        if (c.isUpper()) upper = true;
-        pattern += c;
-    }
-    const bool insensitive = forceInsensitive || (!forceSensitive && !upper);
-    return QRegularExpression(pattern, QRegularExpression::UseUnicodePropertiesOption
-        | (insensitive ? QRegularExpression::CaseInsensitiveOption : QRegularExpression::NoPatternOption));
-}
 }
 
 Result findPattern(const Chapter &chapter, const QString &input, const Cancellation &cancel)
@@ -582,20 +596,9 @@ QString defaultIndexPath()
 }
 
 Result searchEditions(const QVector<Edition> &editions, const QString &query, const QString &indexPath,
-                      const QStringList &installed, const Cancellation &cancel, Syntax syntax)
+                      const QStringList &installed, const Cancellation &cancel)
 {
-    Query parsed;
-    const QString trimmed = query.trimmed();
-    const bool slashed = trimmed.size() > 2 && trimmed.startsWith('/') && trimmed.endsWith('/');
-    if (syntax == Syntax::Pattern || slashed) {
-        parsed.regex = true;
-        if (query.size() > MaximumQuerySize) parsed.error = "Search queries may contain at most 4096 UTF-16 units.";
-        else {
-            parsed.pattern = compilePattern(slashed ? trimmed.mid(1,trimmed.size()-2) : query);
-            if (!parsed.pattern.isValid()) parsed.error = "Invalid regular expression: " + parsed.pattern.errorString() + '.';
-            else parsed.pattern.optimize();
-        }
-    } else parsed = parse(query,true);
+    const Query parsed = parseSearch(query);
     Result result{parsed.error,{}};
     const bool empty = parsed.regex ? parsed.pattern.pattern().isEmpty() : parsed.terms.isEmpty();
     if (!result.error.isEmpty() || empty || stopped(cancel)) return result;

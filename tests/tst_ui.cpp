@@ -2151,9 +2151,6 @@ private slots:
             } else if (mode == "chapters") {
                 // A book's chapter grid: every arrow chooses; backspace returns to the books.
                 QCOMPARE(text,QString::fromUtf8("← → ↑ ↓ choose    enter select    backspace books    tab mode    esc close"));
-            } else if (mode == "text") {
-                // Search names its regular-expression switch (alt r).
-                QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    alt r regex    enter select    tab mode    esc close"));
             } else QCOMPARE(text,QString::fromUtf8("↑ ↓ choose    enter select    tab mode    esc close"));
         }
     }

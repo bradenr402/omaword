@@ -1947,7 +1947,6 @@ bool BibleBackend::loadPreferences()
     m_wholeBook = boolean("wholeBook",false);
     m_marginNotes = boolean("marginNotes",false);
     m_searchAllVersions = boolean("searchAllVersions",false);
-    m_searchRegex = boolean("searchRegex",false);
     m_historyEnabled = boolean("historyEnabled",true);
     const QString mode = values.value("readingMode").toString();
     m_readingMode = mode == "block" || mode == "verse" ? mode : "paragraph";
@@ -2017,11 +2016,6 @@ void BibleBackend::setSearchAllVersions(bool value)
 {
     if (value == m_searchAllVersions || !savePreference("searchAllVersions",int(value))) return;
     m_searchAllVersions = value; emit preferencesChanged();
-}
-void BibleBackend::setSearchRegex(bool value)
-{
-    if (value == m_searchRegex || !savePreference("searchRegex",int(value))) return;
-    m_searchRegex = value; emit preferencesChanged();
 }
 void BibleBackend::setBlockMode(bool value)
 {
@@ -2470,7 +2464,6 @@ void BibleBackend::searchScripture(QString query)
     const quint64 request = m_searchRequest;
     const QString generation = m_textGeneration, id = m_versionId;
     const auto editions = searchEditions(m_searchAllVersions);
-    const auto syntax = m_searchRegex ? ScriptureSearch::Syntax::Pattern : ScriptureSearch::Syntax::Bible;
     QStringList installed;
     for (const auto &value : std::as_const(m_versions)) installed << value.toMap().value("id").toString();
     const auto cancel = std::make_shared<std::atomic_bool>(false);
@@ -2502,8 +2495,8 @@ void BibleBackend::searchScripture(QString query)
             }
             emit searchChanged();
         });
-    watcher->setFuture(QtConcurrent::run([editions,installed,query,cancel,syntax] {
-        return ScriptureSearch::searchEditions(editions,query,ScriptureSearch::defaultIndexPath(),installed,cancel,syntax);
+    watcher->setFuture(QtConcurrent::run([editions,installed,query,cancel] {
+        return ScriptureSearch::searchEditions(editions,query,ScriptureSearch::defaultIndexPath(),installed,cancel);
     }));
     emit searchChanged();
 }

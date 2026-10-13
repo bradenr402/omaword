@@ -413,19 +413,20 @@ files.
 ### Search
 - The active version, or every installed version (`searchAllVersions`, a
   global preference: the active one first, then the others most recently
-  used first); per-window state. Its keys, `alt a` and `searchRegex`'s `alt r`,
-  are catalog scope `search`: live only while the palette holds a Bible search
-  (`shortcutContext`); Commands runs them anywhere. Case-insensitive, whitespace-collapsed,
-  partial words; punctuation and accents significant. Headings, numbers, notes,
-  tags, decorations never searched.
+  used first); per-window state. Its key, `alt a`, is catalog scope `search`:
+  live only while the palette holds a Bible search (`shortcutContext`);
+  Commands runs it anywhere. Case-insensitive, whitespace-collapsed, partial
+  words; punctuation and accents significant. Headings, numbers, notes, tags,
+  decorations never searched.
 - Bible search: unquoted terms AND within a verse; quoted phrases may span
   adjacent verses; mixed queries anchor on the minimal phrase range. Never
   crosses chapters. Max 4096 units; unbalanced quotes error. A query in
-  slashes (`/lov(e|ed)/`), or any query with the `searchRegex` preference
-  (`alt r`), is a regular expression (`ScriptureSearch::Syntax::Pattern`,
-  chapter find's `compilePattern`: smart case, `\c`/`\C`) matched within each
-  verse, a row per verse with all its matches; the index cannot narrow it, so
-  every chapter is read. Results come in
+  slashes (`/lov(e|ed)/`), in the palette as in `omaword search`, is a
+  regular expression (`parseSearch`, chapter find's `compilePattern`: smart
+  case, `\c`/`\C`) matched within each verse, a row per verse with all its
+  matches; the index cannot narrow it, so every chapter is read. A result
+  chosen marks the same matches in its chapter (`findInChapter` with Bible
+  syntax reads the query as the search did). Results come in
   Bible order (the edition's book order, chapter, verse), never ranked;
   `searchBooks` sums them per version and book ({versionId,
   versionAbbreviation, book, name, count, index}) for the palette's book
