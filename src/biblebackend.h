@@ -385,6 +385,15 @@ public:
     // Selects a verse anywhere (with extend, from the anchor to it), opening
     // its chapter if it is another: a click on a chapter shown beside.
     Q_INVOKABLE void selectThrough(int book, int chapter, int verse, bool extend);
+    // The nearest mark of this version after (direction 1) or before (-1)
+    // the selection, or the chapter's start without one, in Bible order
+    // (start, then end), one stop per range: kind "" any mark (highlight,
+    // note, or tag), "note" notes, "tag" tagged ranges. Its scope (as
+    // markAround's), or {reason}.
+    Q_INVOKABLE QVariantMap nearMark(int direction, const QString &kind = QString()) const;
+    // The note last written in this version (latest saved): its scope (as
+    // markAround's), or {reason}.
+    Q_INVOKABLE QVariantMap lastNote() const;
     // The smallest mark (highlight, note, or tag range) in this version that
     // holds the whole selection and more: its scope {versionId, reference,
     // book, chapter, start, endBook, endChapter, end}, or {reason} why there
@@ -543,6 +552,8 @@ private:
     bool commitAnnotations(const QVector<Annotation> &annotations, const QVector<Annotation> &before, const QString &label);
     bool highlightCovered(const QVector<Annotation> &annotations) const;
     QString rangeReference(int start, int end) const;
+    // Absolute verses first..last as a mark's scope for QML (see markAround).
+    QVariantMap markScope(int first, int last) const;
     // readPassage's result for absolute verses start..end; chapter: a whole chapter's scope.
     QVariantMap passageAt(int start, int end, const QString &label, bool chapter = false);
     bool validRange(int book, int chapter, int start, int end) const;

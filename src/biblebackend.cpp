@@ -1346,6 +1346,55 @@ void BibleBackend::selectThrough(int book, int chapter, int verse, bool extend)
     stepSelection(extend && m_anchor ? m_anchor : cursor,cursor);
 }
 
+QVariantMap BibleBackend::markScope(int first, int last) const
+{
+    const auto a = endpoint(first), z = endpoint(last);
+    return {{"versionId",m_versionId},{"reference",rangeReference(first,last)},{"book",a.book},{"chapter",a.chapter},
+            {"start",a.verse},{"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse}};
+}
+
+QVariantMap BibleBackend::nearMark(int direction, const QString &kind) const
+{
+    if (!m_ready || m_verses.isEmpty()) return {{"reason","Open a passage first"}};
+    QSet<QPair<int,int>> seen;
+    QVector<QPair<int,int>> marks;
+    const auto add = [&](int a, int z) { if (a && z >= a && !seen.contains({a,z})) { seen.insert({a,z}); marks.append({a,z}); } };
+    if (kind != "tag")
+        for (const auto &a : m_annotations)
+            if (kind == "note" ? !a.note.isEmpty() : a.highlight || !a.note.isEmpty()) add(a.start,a.end);
+    if (kind.isEmpty() || kind == "tag")
+        for (const auto &value : tagRangeRows(m_versionId,false)) {
+            const auto range = value.toMap();
+            add(absoluteVerse(range.value("book").toInt(),range.value("chapter").toInt(),range.value("start").toInt()),
+                absoluteVerse(range.value("endBook").toInt(),range.value("endChapter").toInt(),range.value("end").toInt()));
+        }
+    std::sort(marks.begin(),marks.end());
+    // From the selection, else from the chapter's start.
+    const int first = absoluteVerse(m_book,m_chapter,m_verses.first().toMap().value("number").toInt());
+    const QPair<int,int> here = m_anchor ? qMakePair(std::min(m_anchor,m_cursor),std::max(m_anchor,m_cursor))
+        : direction > 0 ? qMakePair(first - 1,std::numeric_limits<int>::max()) : qMakePair(first,-1);
+    const QPair<int,int> *found = nullptr;
+    if (direction > 0) { for (const auto &m : marks) if (m > here) { found = &m; break; } }
+    else for (const auto &m : marks) if (m < here) found = &m;
+    if (!found) {
+        const QString what = kind == "note" ? "note" : kind == "tag" ? "tagged passage" : "mark";
+        const QString where = direction < 0 ? "before" : m_anchor ? "after" : "in or after";
+        return {{"reason",QString("No %1 %2 %3").arg(what,where,selectionReference())}};
+    }
+    return markScope(found->first,found->second);
+}
+
+QVariantMap BibleBackend::lastNote() const
+{
+    if (!m_ready) return {{"reason","Open a passage first"}};
+    const Annotation *latest = nullptr;
+    const auto when = [](const Annotation &a) { return a.updated.isEmpty() ? a.created : a.updated; };
+    for (const auto &a : m_annotations)
+        if (!a.note.isEmpty() && (!latest || when(a) >= when(*latest))) latest = &a;
+    if (!latest) return {{"reason","No notes in " + m_abbreviation + " yet"}};
+    return markScope(latest->start,latest->end);
+}
+
 QVariantMap BibleBackend::markAround() const
 {
     if (!m_ready || !m_anchor || !m_cursor) return {{"reason","Select a verse in a mark first"}};
@@ -1366,9 +1415,7 @@ QVariantMap BibleBackend::markAround() const
         if (z - a > high - low && (!first || z - a < last - first)) { first = a; last = z; }
     }
     if (!first) return {{"reason",around ? "The selection is the whole mark" : "No mark around the selection"}};
-    const auto a = endpoint(first), z = endpoint(last);
-    return {{"versionId",m_versionId},{"reference",rangeReference(first,last)},{"book",a.book},{"chapter",a.chapter},
-            {"start",a.verse},{"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse}};
+    return markScope(first,last);
 }
 
 QVariantMap BibleBackend::currentLocation() const

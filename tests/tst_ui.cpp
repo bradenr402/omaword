@@ -164,6 +164,8 @@ class UiTest : public QObject
         QTest::keyClick(window, key, modifiers);
         QCoreApplication::processEvents();
     }
+    // g, then a key (gm, gB, …).
+    void g(Qt::Key second, Qt::KeyboardModifiers modifiers = Qt::NoModifier) { key(Qt::Key_G); key(second, modifiers); }
     void type(const QString &text) {
         // QWindow has keyClick, but no keyClicks overload. Let Qt translate each
         // Latin-1 key as it would a real keyboard, including shifted punctuation.
@@ -495,6 +497,12 @@ private slots:
         QVERIFY(prop("keyStripHints","plainText").toString().contains("z center"));
         QCOMPARE(prop("keyStripPending","text").toString(),QString("z"));
         key(Qt::Key_Z); QTRY_VERIFY(!item("keyStrip")->isVisible());
+        // So does g; esc takes back only the g.
+        key(Qt::Key_G); QTRY_VERIFY(item("keyStrip")->isVisible());
+        QVERIFY(prop("keyStripHints","plainText").toString().contains("gb gB next, previous book"));
+        QCOMPARE(prop("keyStripPending","text").toString(),QString("g"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("keyStrip")->isVisible());
+        QVERIFY(!window->property("gPending").toBool()); QCOMPARE(bible->cursorVerse(),16);
         // A count names what it would count.
         key(Qt::Key_3); QTRY_VERIFY(item("keyStrip")->isVisible());
         QVERIFY(prop("keyStripHints","plainText").toString().contains("j k 3 verses"));
@@ -1537,7 +1545,7 @@ private slots:
         QVERIFY(!item("keybindingsClose"));
         QCOMPARE(search->width(),item("keybindingResults")->width());
         type("chapter");
-        QCOMPARE(prop("keybindingResults","count").toInt(),8);
+        QCOMPARE(prop("keybindingResults","count").toInt(),9);
         QVERIFY(item("keybindingFind in chapter"));
         key(Qt::Key_Down); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),1);
         key(Qt::Key_Up); QCOMPARE(prop("keybindingResults","currentIndex").toInt(),0);
@@ -2235,6 +2243,104 @@ private slots:
         reference("John 4:1"); QCOMPARE(bible->selectionReference(), QString("John 4:1"));
         key(Qt::Key_M); QTRY_COMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
         QCOMPARE(bible->chapter(), 4); QCOMPARE(bible->noteText(), QString("Across the chapters"));
+    }
+    // gm, gn, gt (and shifted, back): the next mark of the kind in this
+    // version, across chapters, selected whole as a jump; at the last one a
+    // boundary sound and a toast.
+    void gKeysStepThroughMarks() {
+        reference("John 3:3"); QVERIFY(bible->toggleHighlight());
+        bible->selectVerses(16, 17); bible->setNoteText("Loved");
+        bible->selectVerses(20, 20); QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "Light").isEmpty());
+        reference("John 3:36-4:2"); bible->setNoteText("Across the chapters");
+        reference("John 4:10"); QVERIFY(bible->toggleHighlight());
+        // Where a verse of the chapter read begins, in the view: shown or not.
+        const auto shown = [&](int verse) {
+            QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
+            QVariant extent; QMetaObject::invokeMethod(window, "measureVerse", Q_RETURN_ARG(QVariant, extent), Q_ARG(QVariant, verse));
+            const double top = item("readerColumn")->mapToItem(item("reading"), QPointF(0, extent.value<QJSValue>().toVariant().toMap()["top"].toDouble())).y();
+            QVERIFY2(top >= 0 && top < item("reading")->height(), qPrintable(QString::number(top)));
+        };
+        reference("John 3:1");
+        g(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString("John 3:3"));
+        QVERIFY(!window->property("gPending").toBool());
+        g(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:16–17"));
+        QCOMPARE(bible->noteText(), QString("Loved")); shown(16);
+        g(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString("John 3:20"));
+        g(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
+        QCOMPARE(bible->chapter(), 4);
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        g(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString("John 4:10"));
+        g(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString("John 4:10"));
+        QCOMPARE(prop("toast","text").toString(), QString("No mark after John 4:10"));
+        QCOMPARE(sounds->lastSound(), QString("boundary"));
+        // Notes only, and tagged passages only.
+        g(Qt::Key_N, Qt::ShiftModifier); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
+        g(Qt::Key_N, Qt::ShiftModifier); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:16–17"));
+        // Opened in another chapter, the mark shows from its first verse.
+        QCOMPARE(bible->chapter(), 3); shown(16);
+        g(Qt::Key_T); QCOMPARE(bible->selectionReference(), QString("John 3:20"));
+        g(Qt::Key_T); QCOMPARE(prop("toast","text").toString(), QString("No tagged passage after John 3:20"));
+        g(Qt::Key_N); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        g(Qt::Key_M, Qt::ShiftModifier); QCOMPARE(bible->selectionReference(), QString("John 3:20"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        // Each is a jump: [ goes back.
+        key(Qt::Key_BracketLeft); QTRY_COMPARE(bible->selectionReference(), QString::fromUtf8("John 3:36–4:2"));
+        // Commands has them too.
+        QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QString("previousMark"))));
+        QCOMPARE(bible->selectionReference(), QString("John 3:20"));
+    }
+    // gb gB: the next or previous book at its first chapter; gc: this book's
+    // chapters; gy: the reference alone.
+    void gKeysReachBooksChaptersAndTheReference() {
+        reference("John 3:16");
+        g(Qt::Key_B); QCOMPARE(bible->selectionReference(), QString("Acts 1:1"));
+        g(Qt::Key_B, Qt::ShiftModifier); QCOMPARE(bible->selectionReference(), QString("John 1:1"));
+        key(Qt::Key_BracketLeft); QTRY_COMPARE(bible->selectionReference(), QString("Acts 1:1"));
+        reference("Revelation 22:1"); g(Qt::Key_B); QCOMPARE(bible->selectionReference(), QString("Revelation 22:1"));
+        QCOMPARE(prop("toast","text").toString(), QString("No book after Revelation"));
+        QCOMPARE(sounds->lastSound(), QString("boundary"));
+        reference("Genesis 2:1"); g(Qt::Key_B, Qt::ShiftModifier);
+        QCOMPARE(prop("toast","text").toString(), QString("No book before Genesis"));
+        reference("John 3:16");
+        g(Qt::Key_C); QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QCOMPARE(window->property("paletteBook").toInt(), 43); QCOMPARE(prop("paletteChapters","currentIndex").toInt(), 2);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        bible->selectVerses(16, 18); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        g(Qt::Key_Y); QCOMPARE(QGuiApplication::clipboard()->text(), QString::fromUtf8("John 3:16–18"));
+        QCOMPARE(prop("toast","text").toString(), QString::fromUtf8("Reference John 3:16–18 copied"));
+        QCOMPARE(sounds->lastSound(), QString("chime"));
+    }
+    // gi: the note last written, open to write on at its end; gv: the range
+    // of verses selected before, again, in Visual mode (gv there swaps back).
+    void gKeysReturnToTheLastNoteAndTheEarlierSelection() {
+        reference("John 3:20");
+        g(Qt::Key_I); QCOMPARE(prop("toast","text").toString(), QString("No notes in NET yet"));
+        QCOMPARE(sounds->lastSound(), QString("error"));
+        g(Qt::Key_V); QCOMPARE(prop("toast","text").toString(), QString("No earlier selection"));
+        reference("John 4:7-8"); bible->setNoteText("Older note");
+        // Saves are timed to the millisecond: the next is later.
+        const auto saved = QDateTime::currentMSecsSinceEpoch();
+        QTRY_VERIFY(QDateTime::currentMSecsSinceEpoch() > saved);
+        reference("John 3:5"); bible->setNoteText("Newest note");
+        reference("John 3:20");
+        g(Qt::Key_I); QCOMPARE(bible->selectionReference(), QString("John 3:5"));
+        QTRY_VERIFY(panelOpened("notes")); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());
+        QCOMPARE(prop("noteEditor","cursorPosition").toInt(), QString("Newest note").size());
+        item("notesPanel")->forceActiveFocus(); closeMargin();
+        // gv
+        reference("John 3:2-4"); key(Qt::Key_J); QCOMPARE(bible->selectionReference(), QString("John 3:5"));
+        g(Qt::Key_V); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:2–4"));
+        QVERIFY(window->property("verseMode").toBool());
+        // Grown, it is the same selection.
+        key(Qt::Key_J, Qt::ShiftModifier); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:2–5"));
+        key(Qt::Key_Escape); QCOMPARE(bible->selectionReference(), QString("John 3:5"));
+        g(Qt::Key_V); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:2–5"));
+        reference("John 4:1-3"); QTRY_COMPARE(bible->chapter(), 4);
+        g(Qt::Key_V); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:2–5"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        QVERIFY(window->property("verseMode").toBool());
+        g(Qt::Key_V); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 4:1–3"));
     }
     // A selection reaching into another chapter shows that chapter whole
     // beside the one read, in the layout chosen, until it reaches into it no
@@ -4208,6 +4314,15 @@ private slots:
         type("20"); QTest::qWait(2100);
         QVERIFY(window->property("verseCount").toString().isEmpty());
         key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(bible->cursorVerse(),1);
+        // A key after a lone g is spent, as in Vim (a digit too); esc in
+        // Visual mode takes back only the g.
+        key(Qt::Key_G); key(Qt::Key_J); QCOMPARE(bible->cursorVerse(),1);
+        QVERIFY(!window->property("gPending").toBool());
+        key(Qt::Key_J); QCOMPARE(bible->cursorVerse(),2);
+        key(Qt::Key_G); type("5"); QVERIFY(window->property("verseCount").toString().isEmpty());
+        QVERIFY(!window->property("gPending").toBool());
+        key(Qt::Key_V,Qt::ShiftModifier); key(Qt::Key_G); key(Qt::Key_Escape);
+        QVERIFY(!window->property("gPending").toBool()); QVERIFY(window->property("verseMode").toBool());
     }
     void fiveAndTenVerseMovement() {
         for (bool visual : {false,true}) {
@@ -5173,7 +5288,7 @@ private slots:
         // Every catalog key reads in the shared notation: lowercase except a
         // shifted letter or function key, arrows as glyphs, muted separators.
         const QRegularExpression notation(QString::fromUtf8(
-            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}()$^,]+|[0-9]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|mouse back|mouse forward|[A-Z])$"));
+            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}()$^,]+|[0-9a-z]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|mouse back|mouse forward|[A-Z])$"));
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         for (const auto &record : records) {
             const auto action = record.toMap();

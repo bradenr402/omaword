@@ -238,9 +238,13 @@ ApplicationWindow {
     // since Qt's multi-key sequences stay in a partial-match state that
     // swallows unrelated keys (digits, Ctrl+K) across focus changes.
     property bool zPending: false
-    // Which key: a key that waits for another (z, a count, character
+    // Pending g prefix for gg (20gg), gb, gm, gi, gv, gy, … the same way; it
+    // keeps a count for gg. While it waits only its keys act: any other
+    // reader key is spent, as in Vim.
+    property bool gPending: false
+    // Which key: a key that waits for another (z, g, a count, character
     // selection's g, i, a) shows what can follow after a moment.
-    readonly property bool keyPending: zPending || verseCount.length > 0 || (charMode && charPending.length > 0)
+    readonly property bool keyPending: zPending || gPending || verseCount.length > 0 || (charMode && charPending.length > 0)
     property bool whichKeyShown: false
     onKeyPendingChanged: { whichKeyShown = false; if (keyPending) whichKeyTimer.restart(); else whichKeyTimer.stop() }
     Timer { id: whichKeyTimer; objectName: "whichKeyTimer"; interval: 400; onTriggered: app.whichKeyShown = app.keyPending }
@@ -248,6 +252,9 @@ ApplicationWindow {
         if (charMode && charPending === "g") return [["G", "chapter start"], ["E", "previous word end"]]
         if (charMode && (charPending === "i" || charPending === "a")) return [["W", charPending === "i" ? "word" : "word and space"], ["S", "sentence"]]
         if (zPending) return [["Z", "center"], ["T", "to top"], ["B", "to bottom"]]
+        if (gPending) return [["G, G", verseCount.length ? "verse " + verseCount : "chapter start"], [["G, B", "G, Shift+B"], "next, previous book"],
+            ["G, C", "chapters"], [["G, M", "G, Shift+M"], "mark"], [["G, N", "G, Shift+N"], "note"], [["G, T", "G, Shift+T"], "tagged"],
+            ["G, I", "last note"], ["G, V", "earlier selection"], ["G, Y", "copy reference"], ["Escape", "cancel", function() { app.clearCount() }]]
         if (verseCount.length) return [[["J", "K"], verseCount + " verses"], ["G, G", "verse " + verseCount], [["H", "L"], verseCount + " chapters"],
             ["Escape", "cancel", function() { app.clearCount() }]]
         return []
@@ -1973,7 +1980,7 @@ ApplicationWindow {
         }
     }
 
-    function clearCount() { verseCount = ""; zPending = false; if (countTimer) countTimer.stop() }
+    function clearCount() { verseCount = ""; zPending = false; gPending = false; if (countTimer) countTimer.stop() }
     function countDigit(digit) {
         zPending = false
         if (verseCount.length < 6) verseCount += digit
@@ -2368,6 +2375,7 @@ ApplicationWindow {
         if (action.id === "unfollow" && !following) return "No window follows this one · " + keyText("openBeside") + " opens a version beside it"
         if (action.id === "ribbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon yet · " + keyText("placeRibbon") + " places it"
         if (action.id === "removeRibbon" && bible.ready && !bible.ribbon.versionId) return "No ribbon to remove"
+        if (action.id === "reselect" && bible.ready && !earlierRange) return "No earlier selection"
         if (!bible.ready) return "Add a Bible version first"
         return ""
     }
@@ -3285,6 +3293,29 @@ ApplicationWindow {
             app.mouseSelected()
         })
     }
+    // Selects a scope's verses: in the chapter read only the selection moves;
+    // another chapter opens on them. False (with the error sound) where it cannot.
+    function selectScope(scope) {
+        const here = [scope.book, scope.endBook].every(function(book) { return book === bible.book })
+            && [scope.chapter, scope.endChapter].every(function(chapter) { return chapter === bible.chapter })
+            && verseRows.includes(scope.start) && verseRows.includes(scope.end)
+        if (here) {
+            selectionAnchor = scope.start
+            bible.selectVerses(scope.start, scope.end)
+            return true
+        }
+        if (bible.restoreSelection(scope, false, -1)) return true
+        rejected()
+        return false
+    }
+    // Scrolls the least that shows the selection in the chapter read, its
+    // first verse where it cannot all show (focus mode keeps its cursor verse).
+    function revealSelection() {
+        Qt.callLater(function() {
+            app.scrollToVerse(bible.cursorVerse, false)
+            if (!app.focusLayout && bible.selectedStart > 0) app.scrollToVerse(bible.selectedStart, false)
+        })
+    }
     // m: the whole mark the selection sits in (bible.markAround), so its
     // passage can be copied, noted, or tagged at once; again, the next larger.
     function selectMarkAround() {
@@ -3293,15 +3324,51 @@ ApplicationWindow {
         if (!flushNote()) return
         pendingActionCollapse = null
         clearTextSelection()
-        const here = [mark.book, mark.endBook].every(function(book) { return book === bible.book })
-            && [mark.chapter, mark.endChapter].every(function(chapter) { return chapter === bible.chapter })
-        if (here) {
-            selectionAnchor = mark.start
-            bible.selectVerses(mark.start, mark.end)
-        } else if (!bible.restoreSelection(mark, false, -1)) { rejected(); return }
+        if (!selectScope(mark)) return
         syncNote()
         notify("Selected " + mark.reference, true)
         sounds.play("select")
+    }
+    // gm gM, gn gN, gt gT: the next or previous mark (kind "": any; "note";
+    // "tag": a tagged passage) in this version, selected whole; a jump.
+    function goToNearMark(direction, kind) {
+        const mark = bible.nearMark(direction, kind)
+        if (!mark.reference) { sounds.play("boundary"); notify(mark.reason, true); return }
+        selectJump(mark)
+    }
+    // A jump to a scope's verses: in the chapter read the least scroll shows
+    // them; another chapter opens with their first verse there at the top
+    // (positionTimer, revealIdentity).
+    function selectJump(scope) {
+        pendingActionCollapse = null
+        clearTextSelection()
+        const chapter = bible.book + ":" + bible.chapter
+        const from = beginJump()
+        if (!selectScope(scope)) return false
+        endJump(from)
+        syncNote()
+        if (bible.book + ":" + bible.chapter === chapter) revealSelection()
+        else revealIdentity = selectionIdentity
+        pulseDestination()
+        return true
+    }
+    property string revealIdentity: ""
+    // gv, as in Vim: the range of verses selected before this one, selected
+    // again in Visual mode; from a range, gv again swaps back. Growing or
+    // shrinking a range from one end keeps it the same selection.
+    property var selectedRange: null
+    property var earlierRange: null
+    function trackRange() {
+        const range = bible.selectedStart > 0 && (bible.crossChapterSelection || bible.selectedStart !== bible.selectedEnd) ? bible.tagScope() : null
+        const kept = function(keys) { return !!range && keys.every(function(key) { return range[key] === app.selectedRange[key] }) }
+        if (selectedRange && !kept(["book", "chapter", "start"]) && !kept(["endBook", "endChapter", "end"])) earlierRange = selectedRange
+        selectedRange = range
+    }
+    function reselect() {
+        const now = selectedRange
+        if (!selectJump(Object.assign({}, earlierRange, { versionId: bible.versionId }))) return
+        if (now) earlierRange = now
+        verseMode = true
     }
     function setVisualMode(enabled) {
         clearCount()
@@ -3345,6 +3412,18 @@ ApplicationWindow {
         if (current >= 0 && target !== current) bible.openChapter(chapters[target].book, chapters[target].chapter)
         readerFocus()
     }
+    // gb, gB: the next or previous book, at its first chapter (a jump).
+    function bookStep(delta) {
+        const books = Array.from(bible.books)
+        const index = books.findIndex(function(book) { return book.id === bible.book })
+        const target = index >= 0 ? books[index + delta] : null
+        if (!target) {
+            sounds.play("boundary")
+            notify((delta > 0 ? "No book after " : "No book before ") + (index >= 0 ? books[index].name : bible.passage), true)
+            return
+        }
+        openChapter(target.id, target.chapterNumbers[0])
+    }
     function jump(reference) { goToReference(reference, false) }
     // firstVerse: a chapter (no verse given) opens on its first verse, as the
     // palette does: "Galatians 2" selects Galatians 2:1.
@@ -3371,8 +3450,11 @@ ApplicationWindow {
         savePosition()
         selectFirstVerse()
         endJump(from)
-        passagePalette.navigated = true
-        passagePalette.close()
+        // From the palette's grid; gb opens a chapter without it.
+        if (passagePalette.visible) {
+            passagePalette.navigated = true
+            passagePalette.close()
+        }
         readerFocus()
     }
     function selectFirstVerse() {
@@ -3519,6 +3601,17 @@ ApplicationWindow {
             notify(reference + (plainText ? " copied as plain text" : " copied"))
             sounds.play("chime")
         }
+    }
+    // gy: only the reference ("John 3:16–18"), the chapter's without a selection.
+    function copyReference() {
+        const scope = actionScope()
+        const reference = hasSelection ? bible.selectionReference : bible.passage
+        const first = hasSelection ? bible.selectedStart : 0, last = bible.selectedEnd
+        bible.copyText(reference)
+        if (first > 0) flashVerses(first, last); else flashChapter()
+        completeRangeAction(scope, false)
+        notify("Reference " + reference + " copied")
+        sounds.play("chime")
     }
     function highlightPassage() {
         if (!hasSelection || !flushNote()) return
@@ -4187,6 +4280,13 @@ ApplicationWindow {
         Qt.callLater(function() { app.scrollToVerse(bible.cursorVerse, true) })
         pulseDestination()
     }
+    // gi: the note last written in this version, open to write on at its end.
+    function goToLastNote() {
+        const note = bible.lastNote()
+        if (!note.reference) { rejected(note.reason); return }
+        if (sidePanel !== "notes" && !leaveSidePanel("notes")) return
+        openNoteScope(note)
+    }
     // With a selection, Versions shows its text in each version too.
     function openVersions(removing) {
         if (bible.busy || !flushNote()) return false
@@ -4443,8 +4543,17 @@ ApplicationWindow {
         { id: "bottomVerse", group: "Navigate", title: "Scroll current verse to bottom", sequences: ["Z, B"], command: true },
         { id: "previousChapter", group: "Navigate", title: "Previous chapter", sequences: ["H", "Left"] },
         { id: "nextChapter", group: "Navigate", title: "Next chapter", sequences: ["L", "Right"] },
+        { id: "previousBook", group: "Navigate", title: "Previous book", sequences: ["G, Shift+B"], command: true },
+        { id: "nextBook", group: "Navigate", title: "Next book", sequences: ["G, B"], command: true },
+        { id: "chapterList", group: "Navigate", title: "This book's chapters", sequences: ["G, C"], command: true },
         { id: "previousHeading", group: "Navigate", title: "Previous heading or chapter top", sequences: ["{"] },
         { id: "nextHeading", group: "Navigate", title: "Next section heading", sequences: ["}"] },
+        { id: "previousMark", group: "Navigate", title: "Previous mark (highlight, note, or tag)", sequences: ["G, Shift+M"], command: true },
+        { id: "nextMark", group: "Navigate", title: "Next mark (highlight, note, or tag)", sequences: ["G, M"], command: true },
+        { id: "previousNote", group: "Navigate", title: "Previous note", sequences: ["G, Shift+N"], command: true },
+        { id: "nextNote", group: "Navigate", title: "Next note", sequences: ["G, N"], command: true },
+        { id: "previousTagged", group: "Navigate", title: "Previous tagged passage", sequences: ["G, Shift+T"], command: true },
+        { id: "nextTagged", group: "Navigate", title: "Next tagged passage", sequences: ["G, T"], command: true },
         { id: "historyBack", group: "History", title: "Back to the previous jump", sequences: ["["] },
         { id: "historyForward", group: "History", title: "Forward to the next jump", sequences: ["]"] },
         { id: "historySwap", group: "History", title: "Swap with the previous jump", sequences: ["-"] },
@@ -4476,6 +4585,7 @@ ApplicationWindow {
         { id: "extendPrevious", group: "Select", title: "Extend to previous verse", sequences: ["Shift+K", "Shift+Up"] },
         // The smallest highlight, note, or tag range around the selection; again, the next larger.
         { id: "selectMark", group: "Select", title: "Select the whole mark around the selection", sequences: ["M"], command: true },
+        { id: "reselect", group: "Select", title: "Select the earlier range of verses again", sequences: ["G, V"], command: true },
         { id: "chapterFind", group: "Search", title: "Find in chapter", sequences: ["/"], command: true },
         { id: "nextMatch", group: "Search", title: "Next search match", sequences: ["N"] },
         { id: "previousMatch", group: "Search", title: "Previous search match", sequences: ["Shift+N"] },
@@ -4487,6 +4597,7 @@ ApplicationWindow {
         { id: "searchBookJump", group: "Search", title: "Bible search: next book, previous book", sequences: ["Ctrl+Down", "Ctrl+Up"], scope: "search", explanation: true },
         { id: "highlight", group: "Annotate", title: "Highlight selection", sequences: ["X"], command: true },
         { id: "notes", group: "Annotate", title: "Write a note", sequences: ["W"], scope: "notes", command: true },
+        { id: "lastNote", group: "Annotate", title: "Write on in the note last written", sequences: ["G, I"], command: true },
         { id: "tags", group: "Annotate", title: "Tag passage", sequences: ["T"], command: true },
         { id: "toggleDesk", group: "Annotate", title: "Add to Desk", sequences: ["D"], command: true },
         // Also on the Desk page while typing (deskKey); it asks first, and u undoes it.
@@ -4513,6 +4624,7 @@ ApplicationWindow {
         { id: "copyText", group: "Copy", title: "Copy selected text as quotation (else the passage)", sequences: ["Ctrl+C"] },
         { id: "middleCopy", group: "Copy", title: "Copy passage as quotation", sequences: ["MiddleClick"], explanation: true },
         { id: "copyPlain", group: "Copy", title: "Copy passage as plain text", sequences: ["Shift+Y"], command: true },
+        { id: "copyReference", group: "Copy", title: "Copy only the passage's reference", sequences: ["G, Y"], command: true },
         { id: "copyTextPlain", group: "Copy", title: "Copy selected text as plain text (else the passage)", sequences: ["Ctrl+Shift+C"] },
         { id: "contextMenu", group: "Copy", title: "Open context menu", sequences: ["Menu", "Shift+F10"] },
         { id: "clickMenu", group: "Copy", title: "Open context menu", sequences: ["RightClick"], explanation: true },
@@ -4772,6 +4884,8 @@ ApplicationWindow {
         // palette; Commands runs them anywhere.
         if (action.scope === "search") return passagePalette.visible && paletteTextMode && !contextMenu.visible
         if (zPending && action.sequences.some(function(sequence) { return ["Z", "T", "B"].includes(sequence) })) return false
+        // After a lone g only its own keys act (the g Instantiator); window keys still do.
+        if (gPending && action.scope !== "global" && action.scope !== "palette") return false
         // In the Notes editor, the palette and dialog launchers (Ctrl, F-keys)
         // still work, saving the note first (runKey); its plain keys type.
         if (noteEditorTyping() && noteEditorLaunchActions.includes(action.id))
@@ -4817,6 +4931,7 @@ ApplicationWindow {
         if (action.id === "undo") return bible.canUndo
         if (action.id === "redo") return bible.canRedo
         if (action.id === "ribbon" || action.id === "removeRibbon") return bible.ready && !!bible.ribbon.versionId
+        if (action.id === "reselect") return bible.ready && !!earlierRange
         // Notes editor keys, run from Keybindings: they act in an open Notes panel.
         if (["openNoteLink", "notePreview"].includes(action.id) && deskOpen) return true
         if (["noteLinkSuggest", "openNoteLink", "notePreview"].includes(action.id)) return notesOpen && hasSelection
@@ -5218,6 +5333,18 @@ ApplicationWindow {
         case "resume": openPalette(false, true); break
         case "previousChapter": chapterStep(-count); break
         case "nextChapter": chapterStep(count); break
+        case "previousBook": bookStep(-1); break
+        case "nextBook": bookStep(1); break
+        case "chapterList": openChapterList(); break
+        case "previousMark": goToNearMark(-1, ""); break
+        case "nextMark": goToNearMark(1, ""); break
+        case "previousNote": goToNearMark(-1, "note"); break
+        case "nextNote": goToNearMark(1, "note"); break
+        case "previousTagged": goToNearMark(-1, "tag"); break
+        case "nextTagged": goToNearMark(1, "tag"); break
+        case "reselect": reselect(); break
+        case "lastNote": goToLastNote(); break
+        case "copyReference": copyReference(); break
         case "previousVerse": moveVerse(-count, verseMode); if (count > 1) pulseCursor(); break
         case "nextVerse": moveVerse(count, verseMode); if (count > 1) pulseCursor(); break
         case "previousFive": moveVerse(-5 * count, verseMode, true); break
@@ -9607,7 +9734,7 @@ ApplicationWindow {
             Label {
                 objectName: "keyStripPending"
                 visible: keyStrip.whichKey
-                text: app.zPending ? "z" : app.charMode && app.charPending.length ? app.charPending : app.verseCount
+                text: app.zPending ? "z" : app.gPending ? app.verseCount + "g" : app.charMode && app.charPending.length ? app.charPending : app.verseCount
                 color: desktop.accent; font.pixelSize: 13 * app.scale; font.weight: Font.DemiBold
             }
             HintRow {
@@ -9739,7 +9866,9 @@ ApplicationWindow {
         id: positionTimer
         interval: 80
         onTriggered: {
-            if (app.positionJumpToSelection && bible.selectedStart > 0) app.placeVerse(bible.cursorVerse, true, !app.restoreSlides)
+            const reveal = app.revealIdentity === app.selectionIdentity && !app.focusLayout
+            app.revealIdentity = ""
+            if (app.positionJumpToSelection && bible.selectedStart > 0) app.placeVerse(reveal ? bible.selectedStart : bible.cursorVerse, true, !app.restoreSlides)
             else app.setReaderY(app.chapterTopY() + app.chapterTravel() * Math.max(0, Math.min(1, bible.readingPosition)))
             app.restoringPosition = false
             app.followRestored()
@@ -9914,6 +10043,7 @@ ApplicationWindow {
         function onSelectionChanged() {
             if (app.notesOpen && !noteEditor.activeFocus) Qt.callLater(app.syncNote)
             app.updateContextChapters()
+            app.trackRange()
         }
         function onDeskChanged() { app.syncDesk() }
         function onNavigationChanged() {
@@ -9940,7 +10070,7 @@ ApplicationWindow {
     Component.onCompleted: {
         syncVerseRows()
         focusLayout = bible.focusMode; marginFocusLevel = focusLayout ? 0 : 1; marginNotesOn = bible.marginNotes; outlineOn = bible.chapterOutline
-        readerInitialized = true; syncNote(); loadSavedDesk(); updateContextChapters(); restorePosition(); restartDwell(); scheduleMargins()
+        readerInitialized = true; syncNote(); loadSavedDesk(); updateContextChapters(); trackRange(); restorePosition(); restartDwell(); scheduleMargins()
     }
     onClosing: function(close) {
         close.accepted = flushNote()
@@ -9949,15 +10079,14 @@ ApplicationWindow {
     }
 
     Instantiator {
-        model: app.actions.filter(function(action) { return app.globallyBound(action) && !action.sequences.some(function(sequence) { return sequence.startsWith("Z, ") }) })
+        model: app.actions.filter(function(action) { return app.globallyBound(action) && !action.sequences.some(function(sequence) { return sequence.startsWith("Z, ") || sequence.startsWith("G, ") }) })
         delegate: Shortcut {
             required property var modelData
             // Application context reaches the notes drawer's popup focus scope;
             // only the active reader window may register its catalog shortcuts.
             context: Qt.ApplicationShortcut
-            // Home/End stay plain chapter edges; gg/G also accept a count (20gg).
-            sequences: modelData.id === "first" ? ["G, G"] : modelData.id === "last" ? ["Shift+G"]
-                : modelData.sequences.concat(modelData.aliases || [])
+            // End stays a plain chapter edge (its own Shortcut); shift G also takes a count (20G).
+            sequences: modelData.id === "last" ? ["Shift+G"] : modelData.sequences.concat(modelData.aliases || [])
             enabled: app.active && app.shortcutEnabled(modelData)
             // Verse motions repeat on our own timer, without the platform delay.
             autoRepeat: !app.heldKeys[modelData.id]
@@ -9971,11 +10100,11 @@ ApplicationWindow {
         delegate: Shortcut {
             required property int index
             sequence: String(index)
-            enabled: app.readerKeys
+            enabled: app.readerKeys && !app.gPending
             onActivated: app.countDigit(String(index))
         }
     }
-    Shortcut { sequence: "Z"; enabled: app.active && app.readerKeys && !app.zPending; onActivated: { app.clearCount(); app.zPending = true; countTimer.restart() } }
+    Shortcut { sequence: "Z"; enabled: app.active && app.readerKeys && !app.zPending && !app.gPending; onActivated: { app.clearCount(); app.zPending = true; countTimer.restart() } }
     Instantiator {
         model: app.actions.filter(function(action) { return app.globallyBound(action) && action.sequences.some(function(sequence) { return sequence.startsWith("Z, ") }) })
         delegate: Shortcut {
@@ -9983,6 +10112,18 @@ ApplicationWindow {
             sequence: modelData.sequences.find(function(sequence) { return sequence.startsWith("Z, ") }).slice(3)
             enabled: app.active && app.zPending && app.actionAvailable(modelData) && app.readerKeys
             onActivated: app.runCommand(modelData.id)
+        }
+    }
+    // g keeps a count (20gg); its keys fire even where their action cannot
+    // run, so runCommand says why.
+    Shortcut { objectName: "gPrefix"; sequence: "G"; enabled: app.active && app.readerKeys && !app.gPending && !app.zPending; onActivated: { app.gPending = true; countTimer.restart() } }
+    Instantiator {
+        model: app.actions.filter(function(action) { return app.globallyBound(action) && action.sequences.some(function(sequence) { return sequence.startsWith("G, ") }) })
+        delegate: Shortcut {
+            required property var modelData
+            sequence: modelData.sequences.find(function(sequence) { return sequence.startsWith("G, ") }).slice(3)
+            enabled: app.active && app.gPending && app.readerKeys
+            onActivated: { app.gPending = false; app.runKey(modelData.id) }
         }
     }
     // alt v in the Margin (a note's editor, preview, Linked from; the Desk's);
@@ -9996,12 +10137,14 @@ ApplicationWindow {
         enabled: app.active && app.marginOpen && app.focusWithin(notesDrawer.contentItem) && !app.modalOpen
         onActivated: if (app.deskOpen) app.toggleDeskPreview(); else app.toggleNotePreview()
     }
-    Shortcut { sequence: "Home"; enabled: app.readerKeys; onActivated: app.chapterEdge(false) }
-    Shortcut { sequence: "End"; enabled: app.readerKeys; onActivated: app.chapterEdge(true) }
+    Shortcut { sequence: "Home"; enabled: app.readerKeys && !app.gPending; onActivated: app.chapterEdge(false) }
+    Shortcut { sequence: "End"; enabled: app.readerKeys && !app.gPending; onActivated: app.chapterEdge(true) }
     Shortcut {
         sequence: "Escape"
         enabled: app.readerKeys
         onActivated: {
+            // A lone g waits for its key: esc takes back only the g (and its count).
+            if (app.gPending) { app.clearCount(); return }
             if (textPopover.visible) { textPopover.close(); return }
             if (app.keyStripShown) { app.dismissKeyStrip(); return }
             if (app.selectionBarShown) { app.selectionBarWanted = false; return }

@@ -168,6 +168,14 @@ files.
   selection and more; so pressed again, the next larger. Selected in place
   (`selectVerses`) within the chapter, through `restoreSelection` across
   chapters; otherwise its `reason` (none around it, or the selection is it).
+- `gm`/`gM`, `gn`/`gN`, `gt`/`gT` (`nearMark(direction, kind)`): the same
+  marks (only notes, only tag ranges), one stop per exact range, ordered by
+  (start, end): the first after (before) the selection's, else after the
+  chapter's start; selected as `m` selects, as a History jump. `gi`
+  (`lastNote`): the note row with the latest `updated` (else `created`).
+  `gv` (`earlierRange`, kept by `trackRange` on every selection change): the
+  last range of several verses the selection left, unless it only grew or
+  shrank from one end.
 - Tables: `annotations` (highlight + note per exact range), `reading` (per
   `version_id`); `tags(id,name,name_key)`;
   `tag_assignments` (PK version + both endpoints + tag); `desk_page` (the
@@ -178,7 +186,8 @@ files.
   placed time); `preferences` (global, incl. `historyEnabled`); `installed`, `library`.
 - History: each window keeps an in-memory jump stack in QML (`[`/`]` browser
   semantics, `-` swaps with the previous location; never saved). Jumps
-  (palette, search, panel opens, `gg`/`G`/counts, version switches) push it; verse
+  (palette, search, panel opens, `gg`/`G`/counts, `gb`, `gm`/`gn`/`gt`, `gi`,
+  `gv`, version switches) push it; verse
   and chapter steps do not. A location enters the shared `history` list only
   after the window stays on that chapter for `historyDwellMs` (5 s). Disabling
   History clears both tables and stops recording; it is excluded from backups.
@@ -504,14 +513,20 @@ files.
   clickable where they act) above the list, sorted by group (the order groups
   first appear in the catalog) under sticky section headers (rows reached by
   key scroll clear of them, `clearKeybindingHeader`). A key waiting for
-  another (`keyPending`: `z`, a count, character selection's `g`/`i`/`a`)
+  another (`keyPending`: `z`, `g`, a count, character selection's `g`/`i`/`a`)
   shows `whichKeyParts` in `keyStrip` after 400 ms; the same strip shows the
   first keys (`introParts`) once, when the library goes from empty to ready,
   remembered in `discovery.ini` (`AppConfigLocation`). `modePill` names Visual
   or Characters above the footer's mode button.
-- `gg` (`first`; a count first: `20gg`) and the lists' `gg` (`ListMotionKeys`)
-  are two-key Qt sequences, so a key after a lone `g` is spent, as in Vim;
-  Notes' Linked from list, which handles its keys itself, does the same
+- The reader's `z` and `g` are prefixes (`zPending`, `gPending`), not Qt's
+  two-key sequences, whose partial match swallows unrelated keys across focus
+  changes: the catalog's `"Z, …"` and `"G, …"` rows are bound as single keys
+  enabled only while their prefix waits, and `shortcutContext` turns off the
+  catalog keys they would collide with (for `g`, every reader key: a key
+  after a lone `g` is spent, as in Vim). `g` keeps a count for `gg` (`20gg`,
+  `first`); `esc`, a focus change, or 2 s (`countTimer`) end it. The
+  lists' `gg` (`ListMotionKeys`) stays a two-key Qt sequence; Notes' Linked
+  from list, which handles its keys itself, spends a key after `g` too
   (`linkedFirstPending`).
 - `larger` lists `ctrl =`; `ctrl +` is an unlisted alias (`aliases`). Reading
   settings → Layout and the Aa popover (`readingMode`, still the id) draw

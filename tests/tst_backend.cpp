@@ -1234,6 +1234,56 @@ private slots:
         QCOMPARE(bible->marks().size(),1);
         auto bad = kjvScope; bad["end"] = 99; QVERIFY(!bible->setScopeNote(bad,"x",""));
     }
+    // gm, gn, gt: the reading version's marks in Bible order, one stop per
+    // range (a note and a tag on it), from the selection, else from the
+    // chapter's start; gi: the note last written.
+    void nearMarksAndTheLastNote() {
+        install(net);
+        QVERIFY(bible->navigate("John 3:1"));
+        QCOMPARE(bible->nearMark(1).value("reason").toString(),QString("No mark after John 3:1"));
+        QCOMPARE(bible->lastNote().value("reason").toString(),"No notes in " + bible->versionAbbreviation() + " yet");
+        const auto tick = [] { const auto now = QDateTime::currentMSecsSinceEpoch(); while (QDateTime::currentMSecsSinceEpoch() == now) {} };
+        QVERIFY(bible->navigate("Genesis 1:3")); QVERIFY(bible->toggleHighlight());
+        QVERIFY(bible->navigate("John 3:16")); QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Loved").isEmpty());
+        QVERIFY(bible->navigate("John 3:16-17")); bible->setNoteText("So loved");
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Gospel").isEmpty());
+        tick(); QVERIFY(bible->navigate("John 3:36-4:2")); bible->setNoteText("Across");
+        install(kjv); QVERIFY(bible->navigate("John 3:20")); bible->setNoteText("Another version");
+        QVERIFY(bible->switchVersion("engnet"));
+        // Each mark selected in turn, until there is none.
+        const auto walk = [&](const QString &from, int direction, const QString &kind) {
+            QStringList seen;
+            if (!bible->navigate(from)) return QStringList{bible->error()};
+            for (auto mark = bible->nearMark(direction,kind); seen.size() < 9; mark = bible->nearMark(direction,kind)) {
+                if (mark.contains("reason")) { seen << mark.value("reason").toString(); break; }
+                seen << mark.value("reference").toString();
+                if (!bible->restoreSelection(mark)) return seen << bible->error();
+            }
+            return seen;
+        };
+        QCOMPARE(walk("Genesis 1:1",1,""),(QStringList{"Genesis 1:3","John 3:16",QString::fromUtf8("John 3:16–17"),
+            QString::fromUtf8("John 3:36–4:2"),QString::fromUtf8("No mark after John 3:36–4:2")}));
+        QCOMPARE(walk("John 4:5",-1,"note"),(QStringList{QString::fromUtf8("John 3:36–4:2"),QString::fromUtf8("John 3:16–17"),
+            QString::fromUtf8("No note before John 3:16–17")}));
+        QCOMPARE(walk("Genesis 1:1",1,"tag"),(QStringList{"John 3:16",QString::fromUtf8("John 3:16–17"),
+            QString::fromUtf8("No tagged passage after John 3:16–17")}));
+        // Inside a mark, back goes to its start.
+        QCOMPARE(walk("John 3:17",-1,"").first(),QString::fromUtf8("John 3:16–17"));
+        // Nothing selected: from the chapter's start.
+        QVERIFY(bible->navigate("John 3:30")); bible->clearSelection();
+        QCOMPARE(bible->nearMark(1).value("reference").toString(),QString("John 3:16"));
+        QCOMPARE(bible->nearMark(-1).value("reference").toString(),QString("Genesis 1:3"));
+        QVERIFY(bible->navigate("John 4:30")); bible->clearSelection();
+        QCOMPARE(bible->nearMark(1,"tag").value("reason").toString(),QString("No tagged passage in or after John 4"));
+        // The last note: this version's, and an earlier one written again.
+        auto last = bible->lastNote();
+        QCOMPARE(last.value("reference").toString(),QString::fromUtf8("John 3:36–4:2"));
+        QCOMPARE(last.value("versionId").toString(),QString("engnet"));
+        tick(); QVERIFY(bible->navigate("John 3:16-17")); bible->setNoteText("So loved, again");
+        last = bible->lastNote();
+        QCOMPARE(last.value("reference").toString(),QString::fromUtf8("John 3:16–17"));
+        QCOMPARE(last.value("start").toInt(),16); QCOMPARE(last.value("end").toInt(),17);
+    }
     void undoAcrossWindowsAndVersions() {
         install(net); BibleBackend peer;
         QVERIFY(bible->navigate("John 3:16")); QVERIFY(peer.navigate("John 3:16"));

@@ -99,8 +99,17 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `zb`: Scroll current verse to bottom
 - `h` · `←`: Previous chapter
 - `l` · `→`: Next chapter
+- `gB`: Previous book
+- `gb`: Next book
+- `gc`: This book's chapters
 - `{`: Previous heading or chapter top
 - `}`: Next section heading
+- `gM`: Previous mark (highlight, note, or tag)
+- `gm`: Next mark (highlight, note, or tag)
+- `gN`: Previous note
+- `gn`: Next note
+- `gT`: Previous tagged passage
+- `gt`: Next tagged passage
 
 ### History
 
@@ -133,6 +142,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `shift J` · `shift ↓`: Extend to next verse
 - `shift K` · `shift ↑`: Extend to previous verse
 - `m`: Select the whole mark around the selection
+- `gv`: Select the earlier range of verses again
 
 ### Search
 
@@ -148,6 +158,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 
 - `x`: Highlight selection
 - `w`: Write a note
+- `gi`: Write on in the note last written
 - `t`: Tag passage
 - `d`: Add to Desk
 - `ctrl shift D`: Clean Desk
@@ -172,6 +183,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `y` · `middle click`: Copy passage as quotation
 - `ctrl c`: Copy selected text as quotation (else the passage)
 - `shift Y`: Copy passage as plain text
+- `gy`: Copy only the passage's reference
 - `ctrl shift C`: Copy selected text as plain text (else the passage)
 - `menu` · `shift F10` · `right click`: Open context menu
 
@@ -284,14 +296,14 @@ These also work, but stay out of the in-app list:
 ### Finding passages
 - The passage palette understands compact references like `jn316`, `1co13`, or `rev 3 14-22`, and lists likely matches, best first. Choosing a book (`enter` or `→`) shows its chapters as a grid of numbers, five to a row: arrows move, typing a number narrows the grid, `3:16` goes to that verse, and `backspace` returns to the books. A chapter opens on its first verse ("Galatians 2" selects 2:1), ready for `j` and `k`.
 - Search Scripture in the version you read, or in every version you installed (`alt a` in the search palette): results come in Bible order under each book's name and count (and its version's, searching them all), and `ctrl ↓` / `ctrl ↑` jump between books. A search index kept in `~/.cache/omaword/` makes searches quick from the second one on. Words find verses holding them all, and "an exact phrase" may run across verses; a query in slashes (`/lov(e|ed) the/`), or any query once `alt r` (in the search palette) switches the search to regular expressions, is a regular expression matched within each verse. Find in the current chapter (`/`) takes regular expressions too. Both use Neovim-style smart case: lowercase ignores case, any capital matches it, `\c` / `\C` force either way.
-- Click the chapter title for the book's chapter grid, the current chapter chosen; the `<` `>` buttons at the window's edges step chapters (`h` `l`). The next chapter is read ahead while you read, so turning to it is quick.
+- Click the chapter title (or press `gc`) for the book's chapter grid, the current chapter chosen; the `<` `>` buttons at the window's edges step chapters (`h` `l`), and `gb` / `gB` open the next and previous book. The next chapter is read ahead while you read, so turning to it is quick.
 - `ctrl` + mouse wheel and a touchpad pinch change the Text size, like `ctrl =` and `ctrl -`.
 - `[` and `]` (or the mouse's back and forward buttons) step back and forward through the passages you jumped to in this window; `-` swaps with the previous one.
 - One ribbon keeps your reading place: `shift R` places it at the selected verses (or the chapter, scrolled as it is) and it stays there until you place it again; `r` returns to it from any window, in the version you are reading. Its chapter shows an accent ribbon at the top right of the text, which drops in as you place it; elsewhere the footer offers a small ribbon and "Mark 5" and the passage palette starts with **Continue**. `ctrl shift R` removes it (so do the right-click menus of the ribbon and of its chapter in the footer, and `delete` on **Continue**), and none comes back until you place one.
 - History keeps the passages you stayed on for a few seconds, shared by every window. The passage palette lists the latest five above the books, then **All History**; `ctrl h` opens it directly: newest first under Today, Yesterday, and Earlier, typing narrows it, `delete` removes a passage and `shift delete` clears it. It never goes into backups, and Commands can clear or disable it.
 
 ### Studying
-- Highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. Highlights are paint: `x` paints the selected verses, joining any highlight they overlap or touch, and on verses already all highlighted it erases them, keeping the rest. `m` selects the whole highlight, note, or tag range the selection sits in (the smallest; again, the next larger), with a short rising sound, so you can copy, note, or tag the marked passage at once. Bookmarks are a tag, **Bookmarked**: bookmarks made in earlier versions carry it, and `t` adds it like any tag. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from). Notes (`w`) sits beside the text where the window is wide enough, the text making room for it (and margin notes stepping aside until it closes), and over the text's right edge in narrower windows; either way the text stays in view and clickable. `esc` in a note saves and closes it, as does its `×`; `ctrl w` (or `F6`) instead hands the keyboard back to the text with Notes still open, where `j` and `k` move on and Notes follows the selection, and `ctrl w` again returns to the note. The panel with the keyboard has an accent edge toward the text; while the text has it, the panel's current row turns grey and its hints say `ctrl w keys here`. Every side panel works this way, Notes, the Desk, Marks, and See also, in the same place beside the text (the Margin), under the same header: their keys turn the Margin from one to another, and palettes and dialogs open over them and hand the keyboard back.
+- Highlight, tag, and write Markdown notes; notes save when you pause typing, and before you move on. Highlights are paint: `x` paints the selected verses, joining any highlight they overlap or touch, and on verses already all highlighted it erases them, keeping the rest. `m` selects the whole highlight, note, or tag range the selection sits in (the smallest; again, the next larger), with a short rising sound, so you can copy, note, or tag the marked passage at once. `gm` / `gM` go to the next and previous mark in the version you read, across chapters and books, and select it whole (`gn` / `gN` only notes, `gt` / `gT` only tagged passages); `gi` returns to the note you wrote last, ready to write on; `gv` selects again the verses you selected before, in Visual mode; `gy` copies only the reference ("John 3:16–18"). Bookmarks are a tag, **Bookmarked**: bookmarks made in earlier versions carry it, and `t` adds it like any tag. `alt v` switches a note between Write and Preview; the editor keeps the keyboard (`tab` types a tab, `ctrl ↓` reaches Linked from). Notes (`w`) sits beside the text where the window is wide enough, the text making room for it (and margin notes stepping aside until it closes), and over the text's right edge in narrower windows; either way the text stays in view and clickable. `esc` in a note saves and closes it, as does its `×`; `ctrl w` (or `F6`) instead hands the keyboard back to the text with Notes still open, where `j` and `k` move on and Notes follows the selection, and `ctrl w` again returns to the note. The panel with the keyboard has an accent edge toward the text; while the text has it, the panel's current row turns grey and its hints say `ctrl w keys here`. Every side panel works this way, Notes, the Desk, Marks, and See also, in the same place beside the text (the Margin), under the same header: their keys turn the Margin from one to another, and palettes and dialogs open over them and hand the keyboard back.
 - `u` or `ctrl z` undoes this window's last change to marks, notes, or tags, deletions included, or its last addition to the Desk, so deleting asks nothing first; `ctrl shift Z` or `ctrl r` redoes. It works from the side panels and while selecting characters, and the passage menu, row menus, and Commands name the step ("Undo highlight on John 3:16"). A passage changed since in another window is left as it is, and a toast says so.
 - Previews keep your line breaks (a single Enter is a new line, as in GitHub comments and Obsidian), set paragraphs, lists, and quotes a blank line apart, and draw block quotes (`>`) with a small indent and a muted bar beside them. In a note, `[[` suggests passages and inserts the full reference. Exact references such as `John 3:16` become links (`alt enter` or `ctrl click` follows one, or opens a web address), and Notes lists the other notes that link to a passage.
 - Quote part of a passage: `v` selects characters with Vim motions (`w`, `e`, `)`, `j`, `$`, `iw`, `as`, counts, …), or drag with the mouse; `y` or `ctrl c` copies a quotation with `…` where verses are cut and the reference, `shift Y` or `ctrl shift C` the plain text.
@@ -303,13 +315,13 @@ These also work, but stay out of the in-app list:
 
 ### Feel
 - Notes and tags look like pen marks; highlights like a highlighter on paper, in your theme's yellow.
-- Moving to a verse slides briefly, jumps pulse (a passage you go to, `20gg`, a counted step like `5j`), copies flash, the text slides aside for margin notes, and the chapter outline slides in and out. Menus and dialogs open instantly and fade out toward where they came from; side panels slide in and ease out. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows, and nothing moves while Hyprland's own animations are off.
+- Moving to a verse slides briefly, jumps pulse (a passage you go to, `20gg`, `gm`, a counted step like `5j`), copies flash, the text slides aside for margin notes, and the chapter outline slides in and out. Menus and dialogs open instantly and fade out toward where they came from; side panels slide in and ease out. **Disable animations** (`alt m`) and **Disable sound effects** (`alt s`) turn these off for all windows, and nothing moves while Hyprland's own animations are off.
 - Colors come from your Omarchy theme: secondary text uses the theme's quietest text color that still reads (4.5:1 contrast), errors its red, and selected text its selection color. Screen readers hear each button's action, with its keys as the description.
 - The footer holds focus, Aa, mode, and help on the left; search, passage, the way back to the ribbon (where there is room), and version in the center; and Marks, See also, and Desk on the right (Notes opens with `w`). Buttons in each group sit edge to edge. In narrow windows focus and help give way first, then the right group stacks into a column and folds into a `…` menu, Aa with it when even that is not enough.
 
 ### Keyboard and mouse
 - Selecting verses with the mouse brings up a small bar above them: **x highlight · w note · t tag · y copy** and `⋯` for Desk, Compare versions, plain text, and See also. Any key or `esc` puts it away. Dragging over the text selects the verses it runs over as well as the text, so the bar's actions take those verses while `ctrl c` copies the text.
-- Keybindings (`?`) opens on the essentials, then lists every key under its group's header, which stays in view as you scroll. A key that waits for another (`z`, a count, character selection's `g`, `i`, `a`) shows what can follow after a moment, a pill above the footer names the selection mode (Visual, Characters), and the first time a version is installed a strip shows the keys to start with.
+- Keybindings (`?`) opens on the essentials, then lists every key under its group's header, which stays in view as you scroll. A key that waits for another (`z`, `g`, a count, character selection's `g`, `i`, `a`) shows what can follow after a moment, a pill above the footer names the selection mode (Visual, Characters), and the first time a version is installed a strip shows the keys to start with.
 - Every key hint is clickable where its action works now (hover shows a hand); every list row has the same right-click menu (Open · Copy · Copy plain text · Add to Desk), and `menu` or `shift F10` opens it from the keyboard.
 - Footer and dialog buttons take the keyboard by `tab` only; a focused button takes `enter` and `space`. Scrollable dialogs scroll with `j` `k`, `pgup` `pgdn`, `ctrl d` `ctrl u`, `home` `end`; in Reading settings, `↑` `↓` and `j` `k` step between the settings instead, and `←` `→` move a slider.
 - Clicking outside a panel, dialog, or picker only closes it (in confirmations it steps back, like `esc`); right-clicking elsewhere while a menu is open opens the new menu there at once. Keys and disabled rows that cannot act sound an error and say why ("Select a verse first"). Mouse back closes the top dialog.
