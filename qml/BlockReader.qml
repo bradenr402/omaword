@@ -21,9 +21,22 @@ Item {
     property string mode: "block"
     property alias body: body
     property alias mapping: document
+    // The chapter shown: the one read (the backend's), or one shown beside it
+    // (ContextChapter, beside: its rows and selected verses). Beside, it only
+    // shows: a click selects through the controller (selectContextVerse), and
+    // the reader's motion, search, and focus state (all of its own chapter)
+    // stay off.
+    property bool beside: false
+    property var verses: backend.verses
+    property int book: backend.book
+    property int chapterNumber: backend.chapter
+    property int selectedFirst: controller.charMode ? 0 : backend.selectedStart
+    property int selectedLast: backend.selectedEnd
+    // Names its items apart from the chapter read's ("context:John 3:").
+    property string namePrefix: ""
     property var annotationRanges: []
     property var inlineMarkers: []
-    readonly property var searchSegments: controller.searchSegments || []
+    readonly property var searchSegments: beside ? [] : controller.searchSegments || []
     onSearchSegmentsChanged: if (!destroying) searchPaint.requestPaint()
     readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
     // Source callers that are letters or digits show as-is; "+"/"-" become a dagger.
@@ -34,12 +47,12 @@ Item {
     // readerScale (tests) falls back to its plain scale.
     readonly property real readerScale: controller.readerScale > 0 ? controller.readerScale
         : controller.scale > 0 ? controller.scale : 1
-    readonly property string annotationKey: JSON.stringify(backend.verses) + JSON.stringify(backend.collection)
-        + backend.book + ":" + backend.chapter
+    readonly property string annotationKey: JSON.stringify(verses) + JSON.stringify(backend.collection)
+        + book + ":" + chapterNumber
     onAnnotationKeyChanged: if (!destroying) geometryTimer.restart()
     function updateAnnotations() {
         if (destroying) return
-        const ranges = document.annotations(backend.verses, backend.collection, backend.book, backend.chapter)
+        const ranges = document.annotations(verses, backend.collection, book, chapterNumber)
         const markers = document.inlineDecorations()
         if (JSON.stringify(markers) !== JSON.stringify(inlineMarkers)) inlineMarkers = markers
         if (JSON.stringify(ranges) === JSON.stringify(annotationRanges) && annotationScale === root.readerScale) return
@@ -68,20 +81,20 @@ Item {
     // rebuild.
     readonly property bool noteMarks: focusLayout || controller.inlineNoteMarks === undefined || !!controller.inlineNoteMarks
     // Annotation tint layers per verse (HandDrawn.tintCount), none in focus mode.
-    readonly property var tintCounts: backend.focusMode ? [] : Array.from(backend.verses).map(function(v) { return HandDrawn.tintCount(v) })
+    readonly property var tintCounts: backend.focusMode ? [] : Array.from(verses).map(function(v) { return HandDrawn.tintCount(v) })
     readonly property bool numbers: backend.showVerseNumbers && !focusLayout
     readonly property bool headings: backend.showHeadings && !focusLayout
     // Display copies of the verses: words of Jesus colored (format only).
     function displayVerses() {
-        if (!controller.verseHtml) return backend.verses
-        return Array.from(backend.verses).map(function(v) {
+        if (!controller.verseHtml) return verses
+        return Array.from(verses).map(function(v) {
             const html = controller.verseHtml(v.html)
             if (html === v.html) return v
             const copy = Object.assign({}, v); copy.html = html; return copy
         })
     }
     // Note text is not layout: a typed note repaints the marks, never rebuilds.
-    readonly property string contentKey: JSON.stringify(Array.from(backend.verses).map(function(v) {
+    readonly property string contentKey: JSON.stringify(Array.from(verses).map(function(v) {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart, indents: v.indents,
             tagRanges: v.tagRanges, footnotes: v.footnotes,
             noteRanges: Array.from(v.noteRanges || []).map(function(r) { return [r.reference, r.continuesBefore, r.continuesAfter] }) }
@@ -167,8 +180,8 @@ Item {
     // Focus-mode dimming follows the cursor instantly; only entering or leaving
     // focus mode as a whole fades. Controllers without motion state (tests,
     // embedders) get static defaults.
-    readonly property int focusFirst: controller.focusFirst || 0
-    readonly property int focusLast: controller.focusLast || 0
+    readonly property int focusFirst: beside ? selectedFirst : controller.focusFirst || 0
+    readonly property int focusLast: beside ? selectedLast : controller.focusLast || 0
     readonly property int fadeMs: controller.fadeMs || 0
     readonly property real dimOpacity: controller.focusDimOpacity === undefined ? 0.32 : controller.focusDimOpacity
     property int dimFirst: 0
@@ -228,7 +241,7 @@ Item {
     // their shapes change, never for a selection move (selectionPaint).
     AnnotationPaint {
         id: paint
-        objectName: "blockRangeBackground"
+        objectName: root.namePrefix + "blockRangeBackground"
         // Paint outside the first/continuation line without changing body layout
         // or the right endpoint. The same inset is reserved at verse separators.
         readonly property real leftInset: 5
@@ -238,9 +251,9 @@ Item {
         height: body.height
         inset: leftInset
         penScale: root.readerScale > 0 ? root.readerScale : 1
-        property var annotations: root.backend.verses
-        property int first: root.controller.charMode ? 0 : root.backend.selectedStart
-        property int last: root.backend.selectedEnd
+        property var annotations: root.verses
+        property int first: root.selectedFirst
+        property int last: root.selectedLast
         property color accent: root.theme.accent
         property var tintCounts: root.tintCounts
         ink: root.controller.highlightInk || root.theme.color3 || accent
@@ -304,7 +317,7 @@ Item {
     // The selection's tint, above the marks and below search and the text.
     Item {
         id: selectionPaint
-        objectName: "blockSelectionBackground"
+        objectName: root.namePrefix + "blockSelectionBackground"
         x: paint.x; y: paint.y
         width: paint.width; height: paint.height
         property var rects: []
@@ -326,7 +339,7 @@ Item {
     // Search is a separate background above annotations and below native text.
     Canvas {
         id: searchPaint
-        objectName: "blockSearchBackground"
+        objectName: root.namePrefix + "blockSearchBackground"
         x: body.x; y: body.y
         width: body.width; height: body.height
         property color accent: root.theme.accent
@@ -345,12 +358,12 @@ Item {
     // rectangles with animated opacity; nothing repaints per frame.
     property var pulseRects: []
     property var flashRects: []
-    readonly property int pulseFirst: controller.pulseFirst || 0
-    readonly property int pulseLast: controller.pulseLast || 0
-    readonly property int flashFirst: controller.flashFirst || 0
-    readonly property int flashLast: controller.flashLast || 0
-    readonly property bool pulseActive: !!controller.pulseActive
-    readonly property bool flashActive: !!controller.flashActive
+    readonly property int pulseFirst: beside ? 0 : controller.pulseFirst || 0
+    readonly property int pulseLast: beside ? 0 : controller.pulseLast || 0
+    readonly property int flashFirst: beside ? 0 : controller.flashFirst || 0
+    readonly property int flashLast: beside ? 0 : controller.flashLast || 0
+    readonly property bool pulseActive: !beside && !!controller.pulseActive
+    readonly property bool flashActive: !beside && !!controller.flashActive
     readonly property bool dimShown: backend.focusMode
     onPulseActiveChanged: if (!destroying && pulseActive) geometryTimer.restart()
     onFlashActiveChanged: if (!destroying && flashActive) geometryTimer.restart()
@@ -362,11 +375,11 @@ Item {
     onFlashLastChanged: if (!destroying) geometryTimer.restart()
     Item {
         id: motionLayer
-        objectName: "blockMotionBackground"
+        objectName: root.namePrefix + "blockMotionBackground"
         x: body.x; y: body.y
         width: body.width; height: body.height
-        readonly property real pulse: root.controller.pulseActive ? root.controller.pulseLevel : 0
-        readonly property real flash: root.controller.flashActive ? root.controller.flashLevel : 0
+        readonly property real pulse: root.pulseActive ? root.controller.pulseLevel : 0
+        readonly property real flash: root.flashActive ? root.controller.flashLevel : 0
         visible: pulse > 0 || flash > 0
         Repeater {
             model: motionLayer.pulse > 0 ? root.pulseRects : []
@@ -389,7 +402,7 @@ Item {
     }
     TextEdit {
         id: body
-        objectName: "blockBody"
+        objectName: root.namePrefix + "blockBody"
         width: parent.width
         height: contentHeight
         // Explicit, so Hebrew-first text cannot mirror the alignment.
@@ -443,7 +456,7 @@ Item {
             onExited: hoveredNumber = 0
             onPressed: function(mouse) {
                 hoveredNumber = 0
-                if (mouse.button !== Qt.LeftButton) return
+                if (mouse.button !== Qt.LeftButton || root.beside) return
                 root.pressed = true
                 root.origin = mapToItem(root.viewport, mouse.x, mouse.y)
                 root.pointer = root.origin
@@ -464,6 +477,11 @@ Item {
                 root.updateDrag()
             }
             onReleased: function(mouse) {
+                if (root.beside) {
+                    const point = mapToItem(null, mouse.x, mouse.y)
+                    root.controller.besideClick(root.book, root.chapterNumber, root.hit(mouse.x, mouse.y), mouse.button, mouse.modifiers, point.x, point.y)
+                    return
+                }
                 if (mouse.button === Qt.LeftButton) {
                     // A finished selection becomes PRIMARY (controllers without it: tests).
                     const finished = root.wordClick || root.dragging
@@ -481,7 +499,7 @@ Item {
             }
             onCanceled: root.cancelDrag()
             onDoubleClicked: function(mouse) {
-                if (mouse.button !== Qt.LeftButton) return
+                if (mouse.button !== Qt.LeftButton || root.beside) return
                 const number = root.numberAt(mouse.x, mouse.y)
                 if (number > 0) {
                     root.controller.selectVerse(number, false)
@@ -489,7 +507,7 @@ Item {
                 } else root.selectWordAt(mouse.x, mouse.y)
             }
             AppToolTip {
-                objectName: "blockNumberTip"
+                objectName: root.namePrefix + "blockNumberTip"
                 theme: root.theme
                 uiScale: root.controller.scale
                 x: mouseArea.hoverPoint.x + 12 * uiScale
@@ -506,7 +524,7 @@ Item {
     function updateDimRects() { dimRects = verseRangeRects(dimFirst, dimLast) }
     Item {
         id: dimLayer
-        objectName: "blockFocusDim"
+        objectName: root.namePrefix + "blockFocusDim"
         x: body.x; y: body.y
         width: body.width; height: body.height
         z: 1
@@ -548,7 +566,7 @@ Item {
                 : (modelData.kind === "note" ? "Note" : "Tag") + "\n"
                 + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
                 + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
-            objectName: "blockInlineMarker:" + modelData.kind + ":" + modelData.edge + ":" + modelData.reference
+            objectName: root.namePrefix + "blockInlineMarker:" + modelData.kind + ":" + modelData.edge + ":" + modelData.reference
             x: modelData.x; y: modelData.y
             width: modelData.width; height: modelData.height
             z: 2
@@ -564,7 +582,7 @@ Item {
             }
             Canvas {
                 id: inlinePaint
-                objectName: "blockInlinePaint:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
+                objectName: root.namePrefix + "blockInlinePaint:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
                 anchors.fill: parent
                 visible: !inlineMarker.footnote
                 property color accent: root.theme.accent
@@ -609,7 +627,7 @@ Item {
             }
             // A small superscript caller (or dagger) in the reserved cell.
             Text {
-                objectName: "blockFootnoteMark:" + inlineMarker.modelData.reference
+                objectName: root.namePrefix + "blockFootnoteMark:" + inlineMarker.modelData.reference
                 visible: inlineMarker.footnote
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: 0
@@ -620,7 +638,7 @@ Item {
                 textFormat: Text.PlainText
             }
             AnnotationGlyph {
-                objectName: "blockInlineGlyph:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.reference
+                objectName: root.namePrefix + "blockInlineGlyph:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.reference
                 visible: inlineMarker.opening && !inlineMarker.footnote
                 kind: inlineMarker.modelData.kind
                 ink: root.theme.accent
@@ -632,7 +650,7 @@ Item {
             }
             MouseArea {
                 id: inlineMouse
-                objectName: "blockInlineHit:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
+                objectName: root.namePrefix + "blockInlineHit:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
                 // A taller, invisible target than the narrow cell (layout unchanged):
                 // it grows above and below only, so it never covers the next word.
                 anchors.fill: parent
@@ -643,13 +661,12 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: function(mouse) {
                     if (inlineMarker.footnote) {
-                        if (mouse.button === Qt.RightButton) {
-                            const p = mapToItem(null, mouse.x, mouse.y)
-                            root.controller.openPassageMenu(inlineMarker.modelData.verse, p.x, p.y)
-                        } else {
-                            const at = inlineMarker.mapToItem(null, 0, 0)
-                            root.controller.peekFootnote(inlineMarker.modelData.verse, inlineMarker.modelData.seq, at.x, at.y, inlineMarker.height)
-                        }
+                        const note = inlineMarker.modelData, p = mapToItem(null, mouse.x, mouse.y)
+                        const at = inlineMarker.mapToItem(null, 0, 0), height = inlineMarker.height
+                        // Beside, its verse is selected first (its chapter becoming the one read).
+                        if (root.beside) root.controller.selectContextVerse(root.book, root.chapterNumber, note.verse, false)
+                        if (mouse.button === Qt.RightButton) root.controller.openPassageMenu(note.verse, p.x, p.y)
+                        else root.controller.peekFootnote(note.verse, note.seq, at.x, at.y, height)
                     } else if (mouse.button === Qt.RightButton) {
                         const entry = inlineMarker.modelData
                         const point = mapToItem(null, mouse.x, mouse.y)

@@ -1284,6 +1284,36 @@ private slots:
         QCOMPARE(last.value("reference").toString(),QString::fromUtf8("John 3:16–17"));
         QCOMPARE(last.value("start").toInt(),16); QCOMPARE(last.value("end").toInt(),17);
     }
+    // Chapters shown beside the one read come with their marks, as the
+    // chapter read has them; the reader stays where it is.
+    void chapterRowsCarryTheirMarks() {
+        install(net);
+        QVERIFY(bible->navigate("John 3:16-17")); QVERIFY(bible->toggleHighlight()); bible->setNoteText("Loved");
+        QVERIFY(bible->navigate("John 3:36-4:2")); bible->setNoteText("Across");
+        QVERIFY(bible->navigate("John 4:1")); QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Well").isEmpty());
+        QVERIFY(bible->navigate("Genesis 1:1"));
+        const auto read = bible->chapterRows({QVariantMap{{"book",43},{"chapter",3}},QVariantMap{{"book",43},{"chapter",4}},
+                                             QVariantMap{{"book",43},{"chapter",99}}});
+        QCOMPARE(read.size(),3);
+        QVERIFY(read[2].toList().isEmpty());
+        const auto row = [&](int chapter, int verse) {
+            for (const auto &value : read[chapter - 3].toList()) if (value.toMap()["number"].toInt() == verse) return value.toMap();
+            return QVariantMap();
+        };
+        const auto loved = row(3,16);
+        QVERIFY(loved["highlighted"].toBool()); QVERIFY(loved["hasNote"].toBool());
+        QCOMPARE(loved["noteRanges"].toList().first().toMap()["note"].toString(),QString("Loved"));
+        QCOMPARE(loved["highlightRanges"].toList().size(),1); QVERIFY(loved["highlightStart"].toBool());
+        QVERIFY(!row(3,15)["highlighted"].toBool()); QVERIFY(row(3,15)["noteRanges"].toList().isEmpty());
+        const auto across = row(3,36)["noteRanges"].toList().first().toMap();
+        QCOMPARE(across["reference"].toString(),QString::fromUtf8("John 3:36–4:2")); QVERIFY(across["continuesAfter"].toBool());
+        const auto end = row(4,2)["noteRanges"].toList().first().toMap();
+        QVERIFY(end["noteEnd"].toBool()); QVERIFY(end["continuesBefore"].toBool());
+        QVERIFY(row(4,1)["hasTags"].toBool());
+        QCOMPARE(row(4,1)["tagRanges"].toList().first().toMap()["tags"].toList().first().toMap()["name"].toString(),QString("Well"));
+        QVERIFY(!row(4,3)["hasTags"].toBool());
+        QCOMPARE(bible->book(),1); QCOMPARE(bible->chapter(),1); QCOMPARE(bible->selectionReference(),QString("Genesis 1:1"));
+    }
     void undoAcrossWindowsAndVersions() {
         install(net); BibleBackend peer;
         QVERIFY(bible->navigate("John 3:16")); QVERIFY(peer.navigate("John 3:16"));

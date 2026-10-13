@@ -2369,9 +2369,9 @@ private slots:
                 auto row = item(qPrintable("contextVerse:" + chapterTitle + ":" + QString::number(verse)));
                 return row ? row->mapToItem(item("reading"), QPointF(window->property("verseGutter").toDouble(), 0)) : QPointF(qQNaN(), qQNaN());
             }
-            auto body = item(qPrintable("contextBody:" + chapterTitle));
-            QObject *document = nullptr;
-            for (auto child : body->parentItem()->children()) if (QByteArray(child->metaObject()->className()).startsWith("BlockDocument")) document = child;
+            auto body = item(qPrintable("context:" + chapterTitle + ":blockBody"));
+            if (!body) return QPointF(qQNaN(), qQNaN());
+            const auto document = body->parentItem()->property("mapping").value<QObject *>();
             int position = -1;
             for (const auto &span : document->property("spans").toList()) if (span.toMap()["number"].toInt() == verse) position = span.toMap()["textStart"].toInt();
             QRectF rect; QMetaObject::invokeMethod(body, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, position));
@@ -2465,6 +2465,61 @@ private slots:
         }
         reference("John 3:1"); QTRY_VERIFY(!item("contextChapter:John 1"));
         QVERIFY(window->property("contextBefore").toStringList().isEmpty());
+    }
+    // A chapter shown beside the one read shows its marks as the reader
+    // does (highlights, notes, tags), and marks made meanwhile, here or in
+    // another window, without moving what is on screen.
+    void chapterShownBesideShowsItsMarks_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("paragraph") << "paragraph"; QTest::newRow("block") << "block";
+    }
+    void chapterShownBesideShowsItsMarks() {
+        QFETCH(QString, mode);
+        bible->setReadingMode(mode);
+        const bool verse = mode == "verse";
+        const QString range = QString::fromUtf8("John 3:30–32");
+        reference("John 3:30-32"); QVERIFY(bible->toggleHighlight()); bible->setNoteText("A note beside");
+        auto tagged = bible->tagScope(); tagged["start"] = tagged["end"] = 33;
+        QVERIFY(!bible->createAndAssignTag(tagged, "Beside").isEmpty());
+        reference("John 3:35"); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        key(Qt::Key_J, Qt::ShiftModifier); key(Qt::Key_J, Qt::ShiftModifier);
+        QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:35–4:1"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
+        QCOMPARE(bible->passage(), QString("John 4")); QTRY_VERIFY(item("contextChapter:John 3"));
+        const QString beside = "context:John 3:";
+        const auto marked = [&](const QString &name) { auto found = item(qPrintable(beside + name)); return found && found->isVisible(); };
+        if (verse) {
+            QTRY_VERIFY(marked("highlightSegment30:" + range)); QVERIFY(marked("highlightSegment32:" + range));
+            QVERIFY(!item(qPrintable(beside + "highlightSegment33:" + range)));
+            QVERIFY(marked("verseNoteMarker30")); QVERIFY(marked("verseTagMarker33"));
+            QVERIFY(marked("annotationTint31"));
+        } else {
+            QTRY_VERIFY(marked("blockInlineMarker:note:open:" + range));
+            QVERIFY(marked("blockInlineMarker:tag:open:John 3:33"));
+            QTRY_VERIFY(!prop(qPrintable(beside + "blockRangeBackground"), "strokes").toList().isEmpty());
+        }
+        // The chapter read has none of them (its own verses 30 to 33 are unmarked).
+        QVERIFY(!item(qPrintable("highlightSegment30:" + range)));
+        QVERIFY(verse ? !item("verseNoteMarker30")->isVisible() : !item(qPrintable("blockInlineMarker:note:open:" + range)));
+        // A new mark there shows at once; what is on screen stays where it was.
+        const auto title = [&] { return item("chapterTitle")->mapToItem(item("reading"), QPointF()).y(); };
+        const double before = title();
+        auto more = tagged; more["start"] = more["end"] = 20;
+        QVERIFY(!bible->createAndAssignTag(more, "Later").isEmpty());
+        if (verse) QTRY_VERIFY(marked("verseTagMarker20"));
+        else QTRY_VERIFY(marked("blockInlineMarker:tag:open:John 3:20"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        QVERIFY2(qAbs(title() - before) < 1.5, qPrintable(QString("%1 → %2").arg(before).arg(title())));
+        // Its marks open their passage, as in the chapter read.
+        QVariant extents; QVERIFY(QMetaObject::invokeMethod(item("contextChapter:John 3"), "verseExtents", Q_RETURN_ARG(QVariant, extents)));
+        for (const auto &extent : extents.value<QJSValue>().toVariant().toList())
+            if (extent.toMap()["number"].toInt() == 30)
+                item("reading")->setProperty("contentY", item("contextChapter:John 3")->y() + extent.toMap()["top"].toDouble() - 60);
+        QCoreApplication::processEvents();
+        if (verse) click(item(qPrintable(beside + "verseNoteMarker30")));
+        else click(item(qPrintable(beside + "blockInlineHit:note:open:" + range)));
+        QTRY_COMPARE(bible->selectionReference(), range);
+        QTRY_VERIFY(panelOpened("notes")); QCOMPARE(bible->noteText(), QString("A note beside"));
     }
     void visualActionsCompleteFullRange() {
         QFETCH(QString,mode); QFETCH(Qt::Key,action);

@@ -790,6 +790,12 @@ ApplicationWindow {
     function settleReaderLayout() {
         const block = blockLoader.item as BlockReader
         if (block) block.settle()
+        for (const repeater of [contextBeforeRepeater, contextAfterRepeater]) {
+            for (let i = 0; i < repeater.count; ++i) {
+                const item = repeater.itemAt(i) as ContextChapter
+                if (item) item.settle()
+            }
+        }
         readerColumn.forceLayout()
         updateMargins()
         marginTimer.stop()
@@ -2509,23 +2515,33 @@ ApplicationWindow {
     // bible.marginNotes as the margins show it: toggling off lags by the notes'
     // fade-out (applyMarginNotes) so they leave before the reader slides back.
     property bool marginNotesOn: false // set from bible.marginNotes on completion, then by applyMarginNotes
-    // Chapter notes, one per annotation, with the chapter rows they cover.
+    // The notes of the chapters shown (the one read, and those shown beside
+    // it), one per annotation, with the first and last verses they cover
+    // there: numbers, and keys "book:chapter:verse" (shownVerseSpans).
     readonly property var marginNoteEntries: {
         if (!marginsAllowed || !marginNotesOn) return []
         const byKey = {}, list = []
-        for (const row of Array.from(bible.verses)) {
-            for (const range of Array.from(row.noteRanges || [])) {
-                const key = [range.book, range.chapter, range.start, range.endBook, range.endChapter, range.end].join(":")
-                let entry = byKey[key]
-                if (!entry) {
-                    entry = byKey[key] = { key: key, reference: range.reference, note: range.note || "", scope: range,
-                        first: row.number, last: row.number, continuesBefore: !!range.continuesBefore }
-                    list.push(entry)
+        const add = function(book, chapter, rows) {
+            for (const row of Array.from(rows || [])) {
+                for (const range of Array.from(row.noteRanges || [])) {
+                    const key = [range.book, range.chapter, range.start, range.endBook, range.endChapter, range.end].join(":")
+                    const verse = book + ":" + chapter + ":" + row.number
+                    let entry = byKey[key]
+                    if (!entry) {
+                        entry = byKey[key] = { key: key, reference: range.reference, note: range.note || "", scope: range,
+                            first: row.number, firstKey: verse, continuesBefore: !!range.continuesBefore }
+                        list.push(entry)
+                    }
+                    entry.last = row.number
+                    entry.lastKey = verse
+                    entry.continuesAfter = !!range.continuesAfter
                 }
-                entry.last = row.number
-                entry.continuesAfter = !!range.continuesAfter
             }
         }
+        const beside = function(keys) { for (const key of keys) { const entry = app.contextData[key]; if (entry) add(entry.book, entry.chapter, entry.rows) } }
+        beside(contextBefore)
+        add(bible.book, bible.chapter, bible.verses)
+        beside(contextAfter)
         return list
     }
     // bible.chapterOutline as the margin shows it: toggling off lags by the
@@ -2753,13 +2769,15 @@ ApplicationWindow {
         verseExtents = extents
         if (!marginSpace.notes.visible) { if (marginLayout.length) marginLayout = []; return }
         const entries = marginNoteEntries
+        const spans = {}
+        for (const verse of shownVerseSpans(extents)) spans[verse.key] = verse
         const span = function(first, last) {
-            const a = extents.find(function(e) { return e.number === first }), z = extents.find(function(e) { return e.number === last })
+            const a = spans[first], z = spans[last]
             return a && z ? { top: a.top, bottom: z.bottom } : null
         }
         const items = [], keys = []
         for (let i = 0; i < entries.length; ++i) {
-            const passage = span(entries[i].first, entries[i].last)
+            const passage = span(entries[i].firstKey, entries[i].lastKey)
             const delegate = marginRepeater.itemAt(i)
             if (!passage || !delegate) continue
             items.push({ top: passage.top, bottom: passage.bottom, lines: Math.max(1, delegate.naturalLines), lineHeight: marginNoteLineHeight, pad: 0 })
@@ -3175,8 +3193,10 @@ ApplicationWindow {
     }
     // A selection reaching into other chapters shows them whole, above and
     // below the chapter read (bible.contextChapters: the nearest three each
-    // side), until it reaches into them no more. Their rows are read once
-    // per version and text (contextRows), keyed "book:chapter".
+    // side), until it reaches into them no more. Their rows, with their
+    // marks, are read once per version and text (contextRows), keyed
+    // "book:chapter"; a change of marks in any window reads the shown ones
+    // again (refreshContextMarks).
     property var contextBefore: []
     property var contextAfter: []
     property var contextData: ({})
@@ -3193,22 +3213,63 @@ ApplicationWindow {
         const signature = generation + "|" + JSON.stringify(chapters)
         if (signature === contextSignature) { contextChapterKey = here; return }
         contextSignature = signature
+        const missing = chapters.filter(function(entry) { return !app.contextRows[entry.book + ":" + entry.chapter] })
+        if (missing.length) {
+            const read = Array.from(bible.chapterRows(missing.map(function(entry) { return { book: entry.book, chapter: entry.chapter } })))
+            missing.forEach(function(entry, i) { app.contextRows[entry.book + ":" + entry.chapter] = Array.from(read[i] || []) })
+        }
         const data = {}, before = [], after = []
+        let marked = false
         for (const entry of chapters) {
             const key = entry.book + ":" + entry.chapter
-            if (!contextRows[key]) contextRows[key] = Array.from(bible.chapterRows(entry.book, entry.chapter))
             data[key] = { book: entry.book, chapter: entry.chapter, title: entry.title, first: entry.first, last: entry.last, rows: contextRows[key] }
+            if (contextData[key] && contextData[key].rows !== contextRows[key]) marked = true
             ;(entry.before ? before : after).push(key)
         }
         const same = JSON.stringify(before) === JSON.stringify(contextBefore) && JSON.stringify(after) === JSON.stringify(contextAfter)
-        // Chapters coming or going while the same one is read: what is on
-        // screen stays put. (A step owns its anchor; a jump places itself.)
-        const anchoring = !same && viewAnchor === null && here === contextChapterKey && !restoringPosition
-        if (anchoring) captureViewAnchor()
+        // Chapters coming or going, or their marks changing, while the same
+        // one is read: what is on screen stays put. (A step owns its anchor;
+        // a jump places itself.)
+        const anchoring = (!same || marked) && viewAnchor === null && here === contextChapterKey && !restoringPosition
+        // New marks alone move what follows them: the verse at the top stays.
+        const verse = anchoring && same ? verseAtViewTop() : null
+        if (anchoring && !same) captureViewAnchor()
         contextData = data
         if (!same) { contextBefore = before; contextAfter = after }
         contextChapterKey = here
-        if (anchoring) restoreViewAnchor()
+        if (verse) keepVerseAtViewTop(verse)
+        else if (anchoring) restoreViewAnchor()
+    }
+    // Every verse shown, in order, in the chapters beside and the one read
+    // (its extents measured already, or now): {key "book:chapter:verse",
+    // top, bottom} (readerColumn coordinates).
+    function shownVerseSpans(extents) {
+        const spans = []
+        const add = function(book, chapter, extents, offset) {
+            for (const extent of extents) spans.push({ key: book + ":" + chapter + ":" + extent.number, top: offset + extent.top, bottom: offset + extent.bottom })
+        }
+        const beside = function(repeater) {
+            for (let i = 0; i < repeater.count; ++i) {
+                const item = repeater.itemAt(i) as ContextChapter
+                if (item) add(item.book, item.chapterNumber, item.verseExtents(), item.y)
+            }
+        }
+        beside(contextBeforeRepeater)
+        add(bible.book, bible.chapter, extents || measureVerses(), 0)
+        beside(contextAfterRepeater)
+        return spans
+    }
+    // The verse at the top of the view, and how far below it the view begins.
+    function verseAtViewTop() {
+        readerColumn.forceLayout()
+        const top = reading.contentY
+        const span = shownVerseSpans().find(function(span) { return span.bottom > top })
+        return span ? { key: span.key, offset: span.top - top } : null
+    }
+    function keepVerseAtViewTop(verse) {
+        settleReaderLayout()
+        const span = shownVerseSpans().find(function(span) { return span.key === verse.key })
+        if (span) setReaderY(span.top - verse.offset)
     }
     // Where each chapter shown begins (readerColumn y, its title's top):
     // those shown beside, and the one read.
@@ -3270,8 +3331,45 @@ ApplicationWindow {
     }
     // Where the chapter read begins below any shown above it: its top of view.
     function chapterTopY() { return contextBeforeRepeater.count ? chapterTitle.y - readerColumn.topPadding : 0 }
+    // Marks changed (here or in another window): the chapters shown beside
+    // read theirs again, and only those whose marks changed show again; the
+    // others kept are read again when shown.
+    function refreshContextMarks() {
+        const shown = contextBefore.concat(contextAfter).filter(function(key) { return !!app.contextData[key] })
+        const read = shown.length && bible.ready
+            ? Array.from(bible.chapterRows(shown.map(function(key) { return { book: app.contextData[key].book, chapter: app.contextData[key].chapter } }))) : []
+        const rows = {}
+        shown.forEach(function(key, i) {
+            const fresh = Array.from(read[i] || [])
+            rows[key] = app.marksKey(fresh) === app.marksKey(app.contextRows[key]) ? app.contextRows[key] : fresh
+        })
+        contextRows = rows
+        contextSignature = ""
+        updateContextChapters()
+    }
+    function marksKey(rows) {
+        return JSON.stringify(Array.from(rows || []).map(function(row) { return [row.highlightRanges, row.noteRanges, row.tagRanges] }))
+    }
     // A click on a verse of a chapter shown beside: selects it (shift: from
     // the anchor to it), that chapter becoming the one read, nothing moving.
+    // Any button on a verse of a chapter shown beside: the left selects it
+    // (shift: extends); the right opens the passage menu (on the selection
+    // when it holds the verse, else selecting it first), the middle selects
+    // and copies it, as they do in the chapter read.
+    function besideClick(book, chapter, verse, button, modifiers, sceneX, sceneY) {
+        if (verse <= 0) return
+        const scope = hasSelection ? bible.tagScope() : null
+        const here = verseKey(book, chapter, verse)
+        if (button === Qt.RightButton && scope && scope.start
+                && verseKey(scope.book, scope.chapter, scope.start) <= here && here <= verseKey(scope.endBook, scope.endChapter, scope.end)) {
+            openPassageMenu(0, sceneX, sceneY)
+            return
+        }
+        selectContextVerse(book, chapter, verse, button === Qt.LeftButton && !!(modifiers & Qt.ShiftModifier))
+        if (bible.book !== book || bible.chapter !== chapter || bible.cursorVerse !== verse) return
+        if (button === Qt.RightButton) openPassageMenu(verse, sceneX, sceneY)
+        else if (button === Qt.MiddleButton) copyClickedVerse(verse, false)
+    }
     function selectContextVerse(book, chapter, verse, extend) {
         clearCount()
         if (!flushNote() || bible.busy) return
@@ -5595,7 +5693,10 @@ ApplicationWindow {
     component KeyScrollView: Shared.KeyScrollView { controller: app; theme: desktop }
     component SettingSwitch: Shared.SettingSwitch { controller: app; theme: desktop; backend: bible }
     component SquareSlider: Shared.SquareSlider { controller: app; theme: desktop }
-    component ContextChapter: Shared.ContextChapter { controller: app; theme: desktop; backend: bible }
+    component ContextChapter: Shared.ContextChapter { controller: app; theme: desktop; backend: bible; viewport: reading; rangeMenu: verseTagMenu }
+    component VerseTint: Shared.VerseTint { controller: app; theme: desktop }
+    component VerseHighlights: Shared.VerseHighlights { controller: app }
+    component FootnoteMarks: Shared.FootnoteMarks { controller: app; theme: desktop }
     // A step beside a Reading settings slider: − or + runs its action. Not a
     // tab stop: the slider's arrows and the actions' keys do the same by key.
     component SliderStep: QuietButton {
@@ -5967,13 +6068,11 @@ ApplicationWindow {
                                 readonly property bool selected: modelData.number >= bible.selectedStart && modelData.number <= bible.selectedEnd && bible.selectedStart > 0
                                 readonly property real gutter: app.verseGutter
                                 // What a change of marks leaves alone, as values (a string or a
-                                // number changes only when its value does): the text, the number,
-                                // and the lists rows make from.
+                                // number changes only when its value does): the text and the
+                                // number (VerseHighlights and FootnoteMarks keep their lists so).
                                 readonly property int verseNumber: modelData.number || 0
                                 readonly property string bodyHtml: '<div style="line-height:' + (bible.lineHeight * 100) + '%">'
                                     + (app.footnoteHtml(app.verseHtml(modelData.html), modelData.footnotes) || String(modelData.text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
-                                readonly property string highlightKey: JSON.stringify(modelData.highlightRanges || [])
-                                readonly property string footnoteKey: JSON.stringify(modelData.footnotes || [])
                                 body: verseBody
                                 searchOverlay: verseSearch
                                 textOffset: verseHeading.height
@@ -6033,38 +6132,18 @@ ApplicationWindow {
                                     height: verseRow.height
                                     visible: ranges.length > 0 && !bible.focusMode && app.inlineNoteMarks
                                 }
-                                // Annotation tint: one translucent layer per covering range
-                                // (HandDrawn.tintCount, capped), joined with neighbouring rows
-                                // that keep the layer; highlights paint on top.
-                                Canvas {
-                                    id: annotationTint
+                                VerseTint {
                                     objectName: "annotationTint" + verseRow.modelData.number
-                                    readonly property int layers: bible.focusMode ? 0 : HandDrawn.tintCount(verseRow.modelData)
-                                    readonly property int layersBefore: verseRow.index > 0 ? HandDrawn.tintCount(bible.verses[verseRow.index - 1]) : 0
-                                    readonly property int layersAfter: HandDrawn.tintCount(bible.verses[verseRow.index + 1])
+                                    row: verseRow.modelData
+                                    previous: verseRow.index > 0 ? bible.verses[verseRow.index - 1] : null
+                                    next: bible.verses[verseRow.index + 1] || null
+                                    headingHeight: verseHeading.height
+                                    bodyHeight: verseBody.height
+                                    versionId: bible.versionId
+                                    focusMode: bible.focusMode
                                     x: verseRow.gutter - 9 * app.readerScale
                                     width: verseRow.width - x
                                     height: verseRow.height
-                                    visible: layers > 0
-                                    property color ink: desktop.accent
-                                    readonly property var paintKey: [layers, layersBefore, layersAfter, width, height, verseHeading.height,
-                                        verseBody.height, app.readerScale, bible.versionId]
-                                    onPaintKeyChanged: requestPaint()
-                                    onInkChanged: requestPaint()
-                                    onPaint: {
-                                        const ctx = getContext("2d")
-                                        ctx.reset()
-                                        const k = app.readerScale
-                                        ctx.fillStyle = Qt.rgba(ink.r, ink.g, ink.b, HandDrawn.tintAlpha())
-                                        for (let layer = 1; layer <= layers; ++layer) {
-                                            const before = layersBefore >= layer, after = layersAfter >= layer
-                                            const top = before ? 0 : verseHeading.height
-                                            const bottom = after ? height : verseHeading.height + verseBody.height + 3
-                                            HandDrawn.highlighterBand(ctx, Qt.rect(0, top, width, bottom - top),
-                                                HandDrawn.seed("tint", bible.versionId, layer, verseRow.modelData.number), k,
-                                                { top: !before, bottom: !after })
-                                        }
-                                    }
                                 }
                                 Rectangle {
                                     objectName: "jumpPulse" + verseRow.modelData.number
@@ -6088,45 +6167,15 @@ ApplicationWindow {
                                     opacity: target && app.flashActive ? 0.3 * app.flashLevel : 0
                                     visible: opacity > 0
                                 }
-                                Repeater {
-                                    model: JSON.parse(verseRow.highlightKey)
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        objectName: "highlightSegment" + verseRow.modelData.number + ":" + modelData.reference
-                                        x: verseRow.gutter - 9 * app.readerScale
-                                        y: modelData.highlightContinuesBefore ? 0 : verseHeading.height
-                                        width: verseRow.width - x
-                                        height: (modelData.highlightContinuesAfter ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
-                                        radius: 0
-                                        // Painted as a highlighter band by highlightPaint.
-                                        color: "transparent"
-                                        Canvas {
-                                            id: highlightPaint
-                                            objectName: "highlightPaint" + verseRow.modelData.number + ":" + parent.modelData.reference
-                                            anchors.fill: parent
-                                            readonly property var range: parent.modelData
-                                            property color ink: app.highlightInk
-                                            readonly property var paintKey: [app.readerScale, width, height, verseBody.width, verseBody.height, verseBody.y,
-                                                app.highlightBand, app.highlightAlpha, range.reference, bible.versionId]
-                                            onPaintKeyChanged: requestPaint()
-                                            onInkChanged: requestPaint()
-                                            Connections { target: app; function onHighlightsRepaint() { highlightPaint.requestPaint() } }
-                                            onPaint: {
-                                                const ctx = getContext("2d")
-                                                ctx.reset()
-                                                const k = app.readerScale
-                                                const s = HandDrawn.seed("highlight", bible.versionId, range.reference, verseRow.modelData.number)
-                                                const band = app.highlightBand
-                                                const lines = verseRow.searchOverlay ? verseRow.searchOverlay.lineRects(0, String(verseRow.modelData.text || "").length) : []
-                                                for (let i = 0; i < lines.length; ++i) {
-                                                    const r = lines[i]
-                                                    const p = verseBody.mapToItem(highlightPaint, r.x, r.y)
-                                                    HandDrawn.highlighterStroke(ctx, Qt.rect(p.x, p.y + band.top, r.width, band.height),
-                                                        ink, app.highlightAlpha, HandDrawn.seed(s, i), k)
-                                                }
-                                            }
-                                        }
-                                    }
+                                VerseHighlights {
+                                    row: verseRow.modelData
+                                    versionId: bible.versionId
+                                    gutter: verseRow.gutter
+                                    rowWidth: verseRow.width
+                                    rowHeight: verseRow.height
+                                    headingHeight: verseHeading.height
+                                    body: verseBody
+                                    lines: verseRow.searchOverlay
                                 }
                                 Rectangle {
                                     objectName: "selectionSegment" + verseRow.modelData.number
@@ -6202,57 +6251,10 @@ ApplicationWindow {
                                         text: "Select verse " + verseRow.modelData.number + " · " + KeyNotation.format("Shift+Click") + " extends · " + KeyNotation.format("MiddleClick") + " copies" + (verseRow.modelData.hasNote ? "\nHas a note" : "") + (verseRow.modelData.hasTags ? "\nTagged" : "")
                                     }
                                 }
-                                Repeater {
-                                    model: app.focusLayout ? [] : JSON.parse(verseRow.footnoteKey)
-                                    delegate: Item {
-                                        id: footnoteMarker
-                                        required property var modelData
-                                        objectName: "verseFootnoteMark:" + verseRow.modelData.number + "." + modelData.seq
-                                        // When the chapter or version changes, a row reads its new
-                                        // verse a moment before its old markers go: their cells
-                                        // may lie past the new text, so they take no place.
-                                        readonly property int at: app.footnoteCellPosition(verseRow.modelData.footnotes, modelData)
-                                        readonly property rect cell: verseBody.width > 0 && verseBody.contentHeight > 0 && at <= verseBody.length
-                                            ? verseBody.positionToRectangle(at) : Qt.rect(0, 0, 0, 0)
-                                        x: verseBody.x + cell.x
-                                        y: verseBody.y + cell.y
-                                        width: app.footnoteCellWidth
-                                        height: cell.height
-                                        z: 3
-                                        // Out of the tab order: i peeks at the cursor verse's notes.
-                                        activeFocusOnTab: false
-                                        Text {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            text: app.footnoteMark(footnoteMarker.modelData.caller)
-                                            color: desktop.accent
-                                            font.family: desktop.fontFamily
-                                            font.pixelSize: Math.max(6, TypeScale.size(app.readerBodySize, TypeScale.mark))
-                                            textFormat: Text.PlainText
-                                        }
-                                        MouseArea {
-                                            id: footnoteMouse
-                                            objectName: "verseFootnoteHit:" + verseRow.modelData.number + "." + footnoteMarker.modelData.seq
-                                            // A taller, invisible target than the small mark (layout unchanged):
-                                            // above and below only, never over the neighboring words.
-                                            anchors.fill: parent
-                                            anchors.topMargin: -app.markerHitMargin
-                                            anchors.bottomMargin: -app.markerHitMargin
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                const p = footnoteMarker.mapToItem(null, 0, 0)
-                                                app.peekFootnote(verseRow.modelData.number, footnoteMarker.modelData.seq, p.x, p.y, footnoteMarker.height)
-                                            }
-                                        }
-                                        Accessible.role: Accessible.Button
-                                        Accessible.name: "Footnote: " + footnoteMarker.modelData.text
-                                        AppToolTip {
-                                            theme: desktop
-                                            uiScale: app.scale
-                                            visible: footnoteMouse.containsMouse
-                                            text: "Footnote · " + footnoteMarker.modelData.text + "\n" + app.footnoteHint
-                                        }
-                                    }
+                                FootnoteMarks {
+                                    row: verseRow.modelData
+                                    body: verseBody
+                                    onActivated: function(note, x, y, height) { app.peekFootnote(verseRow.modelData.number, note.seq, x, y, height) }
                                 }
                                 SearchHighlights {
                                     id: verseSearch
@@ -10045,6 +10047,8 @@ ApplicationWindow {
             app.updateContextChapters()
             app.trackRange()
         }
+        // Marks changed (here or in another window): chapters shown beside show them.
+        function onCollectionChanged() { Qt.callLater(app.refreshContextMarks) }
         function onDeskChanged() { app.syncDesk() }
         function onNavigationChanged() {
             app.selectionBarWanted = false

@@ -940,6 +940,37 @@ private slots:
         key(Qt::Key_W, Qt::AltModifier); QTRY_VERIFY(!bible->marginNotes());
         QTRY_VERIFY(!item("marginLayer")->isVisible());
     }
+    // Notes in a chapter shown beside the one read (a selection across
+    // chapters) are in the margin too, beside their passage there; a note
+    // across both chapters is one note, beside all of its passage.
+    void marginNotesInChaptersShownBeside() {
+        note("John 3:30", 30, 32, "A note on the chapter shown beside.");
+        QVERIFY(bible->navigate("John 3:36-4:2")); bible->setNoteText("Across the chapters.");
+        note("John 4:5", 5, 5, "In the chapter read.");
+        bible->setMarginNotes(true);
+        const auto span = [this](const QString &key) {
+            for (const auto &entry : js("shownVerseSpans", {QVariant()}).toList()) if (entry.toMap()["key"] == key) return entry.toMap();
+            return QVariantMap();
+        };
+        const QString beside = QString::fromUtf8("John 3:30–32"), across = QString::fromUtf8("John 3:36–4:2");
+        for (const QString mode : {"verse", "paragraph", "block"}) {
+            setMode(mode); navigate("John 3:35-4:1");
+            QCOMPARE(bible->passage(), QString("John 4")); QTRY_VERIFY(item("contextChapter:John 3"));
+            QTRY_VERIFY(notesShown()); QTRY_COMPARE(layout().size(), 3);
+            QTRY_COMPARE(placement(beside)["passageTop"].toDouble(), span("43:3:30")["top"].toDouble());
+            QCOMPARE(placement(beside)["passageBottom"].toDouble(), span("43:3:32")["bottom"].toDouble());
+            QCOMPARE(placement(across)["passageTop"].toDouble(), span("43:3:36")["top"].toDouble());
+            QCOMPARE(placement(across)["passageBottom"].toDouble(), span("43:4:2")["bottom"].toDouble());
+            QVERIFY(item("marginNote:" + beside) && item("marginNote:" + beside)->isVisible());
+            // In the margin, they leave the text unmarked (as in the chapter read).
+            if (mode == "verse") {
+                auto rail = item("context:John 3:verseNoteMarker30"); QVERIFY(!rail || !rail->isVisible());
+            } else {
+                auto marker = item("context:John 3:blockInlineMarker:note:open:" + beside); QVERIFY(!marker || !marker->isVisible());
+            }
+        }
+        bible->setMarginNotes(false);
+    }
     void marginNotesHideInlineNoteMarks() {
         note("John 3:16", 16, 16, "A note shown in the margin.");
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16);

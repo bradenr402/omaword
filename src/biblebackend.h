@@ -379,9 +379,10 @@ public:
     // {book, chapter, title, first, last (its selected verses), before};
     // [] for a selection within the chapter shown, or none.
     Q_INVOKABLE QVariantList contextChapters() const;
-    // A chapter's verse rows as readChapter reads them (no marks), for
-    // showing it beside the chapter read; the read-ahead is kept.
-    Q_INVOKABLE QVariantList chapterRows(int book, int chapter);
+    // Chapters' verse rows ([{book, chapter}], one list each, in order) with
+    // their marks, as the chapter read has them, for showing them beside it;
+    // the read-ahead is kept.
+    Q_INVOKABLE QVariantList chapterRows(const QVariantList &chapters);
     // Selects a verse anywhere (with extend, from the anchor to it), opening
     // its chapter if it is another: a click on a chapter shown beside.
     Q_INVOKABLE void selectThrough(int book, int chapter, int verse, bool extend);
@@ -533,6 +534,9 @@ private:
     void closeBible();
     bool loadChapter();
     bool readChapter(int book, int chapter, QVariantList *rows);
+    // A chapter's rows (as readChapter reads them) with the marks over each
+    // verse: highlight, note, and tag ranges (tagged: tagRangeRows').
+    void markRows(QVariantList *rows, int book, int chapter, const QVariantList &tagged) const;
     void prefetchNextChapter();
     QPair<QPair<int,int>, QVariantList> m_prefetched;
     QString m_prefetchGeneration;

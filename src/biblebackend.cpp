@@ -1328,14 +1328,22 @@ QVariantList BibleBackend::contextChapters() const
     return shown;
 }
 
-QVariantList BibleBackend::chapterRows(int book, int chapter)
+QVariantList BibleBackend::chapterRows(const QVariantList &chapters)
 {
-    if (!m_ready || !chaptersForBook(book).contains(chapter)) return {};
+    if (!m_ready) return {};
     const auto readAhead = m_prefetched;
-    QVariantList rows;
-    if (!readChapter(book,chapter,&rows)) rows.clear();
+    const auto tagged = tagRangeRows(m_versionId,false);
+    QVariantList result;
+    for (const auto &value : chapters) {
+        const auto entry = value.toMap();
+        const int book = entry.value("book").toInt(), chapter = entry.value("chapter").toInt();
+        QVariantList rows;
+        if (!chaptersForBook(book).contains(chapter) || !readChapter(book,chapter,&rows)) rows.clear();
+        markRows(&rows,book,chapter,tagged);
+        result.append(QVariant(rows));
+    }
     m_prefetched = readAhead;
-    return rows;
+    return result;
 }
 
 void BibleBackend::selectThrough(int book, int chapter, int verse, bool extend)
@@ -3171,10 +3179,14 @@ bool BibleBackend::highlightCovered(const QVector<Annotation> &annotations) cons
 }
 void BibleBackend::updateAnnotations()
 {
-    const auto tagged = tagRangeRows(m_versionId,false);
-    for (auto &row : m_verses) {
+    markRows(&m_verses,m_book,m_chapter,tagRangeRows(m_versionId,false));
+    emit versesChanged(); updateSelection();
+}
+void BibleBackend::markRows(QVariantList *rows, int book, int chapter, const QVariantList &tagged) const
+{
+    for (auto &row : *rows) {
         auto map = row.toMap();
-        const int v = absoluteVerse(m_book,m_chapter,map.value("number").toInt());
+        const int v = absoluteVerse(book,chapter,map.value("number").toInt());
         bool highlight = false, note = false;
         bool highlightStart = false, highlightEnd = false, highlightBefore = false, highlightAfter = false;
         QVariantList highlightRanges, noteRanges;
@@ -3217,7 +3229,6 @@ void BibleBackend::updateAnnotations()
         map["highlightRanges"] = highlightRanges;
         row = map;
     }
-    emit versesChanged(); updateSelection();
 }
 void BibleBackend::refreshCollection()
 {

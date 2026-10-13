@@ -32,6 +32,9 @@
     <file>qml/SquareSlider.qml</file>
     <file>qml/FloatingButton.qml</file>
     <file>qml/RangeMarker.qml</file>
+    <file>qml/VerseTint.qml</file>
+    <file>qml/VerseHighlights.qml</file>
+    <file>qml/FootnoteMarks.qml</file>
     <file>qml/ModalCard.qml</file>
     <file>qml/SidePanel.qml</file>
     <file>qml/LookupWindow.qml</file>

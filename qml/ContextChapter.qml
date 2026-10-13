@@ -3,24 +3,26 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import "TypeScale.js" as TypeScale
-// qmllint disable import
-import OmaWord.Reader 1.0
-// qmllint enable import
 
 // A chapter a selection reaches into, shown whole above or below the chapter
 // read while the selection spans them (Main's context chapters): its title,
-// its text in the layout chosen, and its selected verses tinted, as the
-// reader shows them; marks and footnotes are left out. A click on a verse
-// selects it there (shift: extends the selection to it).
+// its text in the layout chosen, with its marks and footnotes, and its
+// selected verses tinted, as the reader shows them. A click on a verse
+// selects it there (shift: extends the selection to it), its chapter
+// becoming the one read (Main.besideClick).
 Column {
     id: chapter
-    // The reader window (Main), the live theme, and the backend it reads.
+    // The reader window (Main), the live theme, the backend it reads, the
+    // reader's view, and the menu of ranges starting on one verse.
     required property var controller
     required property var theme
     required property var backend
+    required property Flickable viewport
+    required property var rangeMenu
     required property int book
     required property int chapterNumber
     required property string title
+    // Its rows with their marks (bible.chapterRows).
     required property var rows
     // The verses of this chapter in the selection.
     property int first: 0
@@ -34,12 +36,37 @@ Column {
     readonly property bool headings: backend.showHeadings && !focusLayout
     readonly property bool continuous: !!controller.continuousReader
     readonly property real gap: 48 * readerScale
+    // Its items' names, apart from the chapter read's.
+    readonly property string namePrefix: "context:" + title + ":"
+    // The Verse layout's rail lanes for its rows.
+    readonly property var lanes: controller.packAnnotationLanes(rows)
     topPadding: before ? 0 : gap
     bottomPadding: before ? gap : 0
     function selected(number) { return number >= first && number <= last }
     function verseHtml(row) {
-        const html = controller.verseHtml ? controller.verseHtml(row.html) : row.html
+        const html = controller.footnoteHtml(controller.verseHtml ? controller.verseHtml(row.html) : row.html, row.footnotes)
         return '<div style="line-height:' + (backend.lineHeight * 100) + '%">' + html + '</div>'
+    }
+    function click(number, mouse, item) {
+        const point = item.mapToItem(null, mouse.x, mouse.y)
+        controller.besideClick(book, chapterNumber, number, mouse.button, mouse.modifiers, point.x, point.y)
+    }
+    // The flowing layouts' reader, settled now (Main measures beside it).
+    function settle() { if (flowing.item) (flowing.item as BlockReader).settle() }
+    // Where each verse's text is: {number, top, bottom}, in this item.
+    function verseExtents() {
+        const out = []
+        const reader = flowing.item as BlockReader
+        if (reader) {
+            const offset = reader.body.mapToItem(chapter, 0, 0).y
+            for (const extent of reader.verseExtents()) out.push({ number: extent.number, top: offset + extent.top, bottom: offset + extent.bottom })
+            return out
+        }
+        for (let i = 0; i < verseRows.count; ++i) {
+            const item = verseRows.itemAt(i)
+            if (item) out.push({ number: item.number, top: item.y + item.textTop, bottom: item.y + item.textTop + item.textHeight })
+        }
+        return out
     }
 
     Label {
@@ -56,108 +83,42 @@ Column {
         wrapMode: Text.Wrap
     }
 
-    // Paragraph and Block: one flowing document, as BlockReader builds it.
-    Item {
+    // Paragraph and Block: the reader's own flowing layout, beside.
+    Loader {
         id: flowing
-        visible: chapter.continuous
+        objectName: "contextFlow:" + chapter.title
+        active: chapter.continuous
+        visible: active
         x: chapter.controller.verseGutter
         width: chapter.width - x - 9
-        height: visible ? body.height : 0
-        TextEdit {
-            id: body
-            objectName: "contextBody:" + chapter.title
-            width: parent.width
-            height: contentHeight
-            horizontalAlignment: TextEdit.AlignLeft
-            textFormat: TextEdit.RichText
-            font.family: chapter.theme.fontFamily
-            font.pixelSize: chapter.bodySize
-            color: chapter.theme.foreground
-            readOnly: true
-            selectByMouse: false
-            activeFocusOnTab: false
-            wrapMode: TextEdit.Wrap
-            padding: 0
-            Accessible.name: chapter.title
-        }
-        // qmllint disable import
-        BlockDocument { id: document }
-        // qmllint enable import
-        readonly property string buildKey: chapter.continuous ? JSON.stringify([chapter.rows.length, chapter.numbers, chapter.headings,
-            chapter.backend.lineHeight, chapter.backend.readingMode, chapter.bodySize, chapter.controller.wordsOfJesusColor || ""]) : ""
-        onBuildKeyChanged: build()
-        onWidthChanged: refresh()
-        Component.onCompleted: build()
-        function build() {
-            if (!chapter.continuous) return
-            const em = chapter.bodySize
-            const verses = Array.from(chapter.rows).map(function(row) {
-                const html = chapter.controller.verseHtml ? chapter.controller.verseHtml(row.html) : row.html
-                return html === row.html ? row : Object.assign({}, row, { html: html })
-            })
-            document.build(body.textDocument, verses, chapter.numbers, chapter.headings, chapter.backend.lineHeight,
-                chapter.backend.readingMode, false, em, false, { headingAbove: TypeScale.size(em, TypeScale.headingAbove),
-                    headingBelow: TypeScale.size(em, TypeScale.headingBelow), poetryIndent: em * TypeScale.poetryIndent })
-            refresh()
-        }
-        // The selected verses' line boxes, refreshed after a build or a resize.
-        property var selectionRects: []
-        function refresh() {
-            if (!chapter.continuous) return
-            const spans = Array.from(document.spans).filter(function(span) { return chapter.selected(span.number) })
-            selectionRects = spans.length ? Array.from(document.rectangles(spans[0].start, spans[spans.length - 1].end)) : []
-            veil.requestPaint()
-        }
-        Connections {
-            target: chapter
-            function onFirstChanged() { flowing.refresh() }
-            function onLastChanged() { flowing.refresh() }
-            function onRowsChanged() { flowing.build() }
-        }
-        Repeater {
-            model: flowing.selectionRects
-            delegate: Rectangle {
-                required property var modelData
-                x: modelData.x - 5; y: modelData.y
-                width: modelData.width + 5; height: modelData.height
-                z: -1
-                color: chapter.controller.tint(chapter.theme.accent, 0.22)
-            }
-        }
-        // Focus mode: all but the selected verses recede, as the reader's do.
-        Canvas {
-            id: veil
-            anchors.fill: body
-            readonly property real alpha: 1 - chapter.controller.focusDimmedOpacity
-            visible: alpha > 0
-            onAlphaChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            onPaint: {
-                const ctx = getContext("2d")
-                ctx.reset()
-                ctx.fillStyle = Qt.rgba(chapter.theme.background.r, chapter.theme.background.g, chapter.theme.background.b, alpha)
-                ctx.fillRect(0, 0, width, height)
-                for (const r of flowing.selectionRects) ctx.clearRect(r.x - 5, r.y, r.width + 5, r.height)
-            }
-        }
-        MouseArea {
-            anchors.fill: body
-            acceptedButtons: Qt.LeftButton
-            onClicked: function(mouse) {
-                const number = document.verseAtPoint(mouse.x, mouse.y)
-                if (number > 0) chapter.controller.selectContextVerse(chapter.book, chapter.chapterNumber, number, !!(mouse.modifiers & Qt.ShiftModifier))
-            }
+        sourceComponent: BlockReader {
+            beside: true
+            namePrefix: chapter.namePrefix
+            controller: chapter.controller
+            backend: chapter.backend
+            theme: chapter.theme
+            viewport: chapter.viewport
+            mode: chapter.backend.readingMode
+            verses: chapter.rows
+            book: chapter.book
+            chapterNumber: chapter.chapterNumber
+            selectedFirst: chapter.first
+            selectedLast: chapter.last
         }
     }
 
-    // Verse: a row per verse, as the reader's rows.
+    // Verse: a row per verse, as the reader's rows; read in place, so new
+    // marks update the rows rather than making them again.
     Repeater {
-        model: chapter.continuous ? [] : chapter.rows
+        id: verseRows
+        model: chapter.continuous ? 0 : chapter.rows.length
         delegate: Item {
             id: row
-            required property var modelData
             required property int index
+            readonly property var modelData: chapter.rows[index] || ({ number: 0, text: "", html: "" })
+            readonly property int number: modelData.number
+            readonly property real textTop: heading.height
+            readonly property real textHeight: rowBody.height
             readonly property bool chosen: chapter.selected(modelData.number)
             readonly property bool hasHeading: chapter.headings && (modelData.heading || "").length > 0
             objectName: "contextVerse:" + chapter.title + ":" + modelData.number
@@ -183,6 +144,59 @@ Column {
                     wrapMode: Text.Wrap
                     color: chapter.theme.foreground
                 }
+            }
+            // Tag and note rails, made only for rows they mark, above the
+            // row's click area.
+            Loader {
+                z: 2
+                active: Array.from(row.modelData.tagRanges || []).length > 0
+                sourceComponent: RangeMarker {
+                    objectName: chapter.namePrefix + "verseTagMarker" + row.modelData.number
+                    controller: chapter.controller; theme: chapter.theme; backend: chapter.backend; rangeMenu: chapter.rangeMenu
+                    kind: "tag"; number: row.modelData.number; rowIndex: row.index; lanes: chapter.lanes
+                    ranges: Array.from(row.modelData.tagRanges || [])
+                    headingHeight: heading.height; bodyHeight: rowBody.height
+                    height: row.height
+                }
+            }
+            Loader {
+                z: 2
+                active: Array.from(row.modelData.noteRanges || []).length > 0
+                sourceComponent: RangeMarker {
+                    objectName: chapter.namePrefix + "verseNoteMarker" + row.modelData.number
+                    controller: chapter.controller; theme: chapter.theme; backend: chapter.backend; rangeMenu: chapter.rangeMenu
+                    kind: "note"; number: row.modelData.number; rowIndex: row.index; lanes: chapter.lanes
+                    ranges: Array.from(row.modelData.noteRanges || [])
+                    headingHeight: heading.height; bodyHeight: rowBody.height
+                    height: row.height
+                    visible: ranges.length > 0 && !chapter.backend.focusMode && chapter.controller.inlineNoteMarks
+                }
+            }
+            VerseTint {
+                objectName: chapter.namePrefix + "annotationTint" + row.modelData.number
+                controller: chapter.controller; theme: chapter.theme
+                row: row.modelData
+                previous: row.index > 0 ? chapter.rows[row.index - 1] : null
+                next: chapter.rows[row.index + 1] || null
+                headingHeight: heading.height
+                bodyHeight: rowBody.height
+                versionId: chapter.backend.versionId
+                focusMode: chapter.backend.focusMode
+                x: chapter.controller.verseGutter - 9 * chapter.readerScale
+                width: row.width - x
+                height: row.height
+            }
+            VerseHighlights {
+                controller: chapter.controller
+                namePrefix: chapter.namePrefix
+                row: row.modelData
+                versionId: chapter.backend.versionId
+                gutter: chapter.controller.verseGutter
+                rowWidth: row.width
+                rowHeight: row.height
+                headingHeight: heading.height
+                body: rowBody
+                lines: rowLines
             }
             Rectangle {
                 x: chapter.controller.verseGutter - 9 * chapter.readerScale
@@ -210,6 +224,17 @@ Column {
                 color: row.chosen ? chapter.theme.accent : chapter.theme.muted
                 FontMetrics { id: numberMetrics; font: numberLabel.font }
             }
+            FootnoteMarks {
+                controller: chapter.controller; theme: chapter.theme
+                namePrefix: chapter.namePrefix
+                row: row.modelData
+                body: rowBody
+                // Its verse is selected first, its chapter becoming the one read.
+                onActivated: function(note, x, y, height) {
+                    chapter.controller.selectContextVerse(chapter.book, chapter.chapterNumber, row.modelData.number, false)
+                    chapter.controller.peekFootnote(row.modelData.number, note.seq, x, y, height)
+                }
+            }
             TextEdit {
                 id: rowBody
                 x: chapter.controller.verseGutter
@@ -229,8 +254,12 @@ Column {
                 padding: 0
                 Accessible.name: "Verse " + row.modelData.number + ": " + row.modelData.text
             }
-            // Poetry lines indented by level, as in the reader.
+            // Poetry lines indented by level, as in the reader; its line boxes
+            // place the highlights.
             SearchHighlights {
+                id: rowLines
+                x: rowBody.x; y: rowBody.y
+                width: rowBody.width; height: rowBody.height
                 body: rowBody
                 sourceText: row.modelData.text
                 lineIndents: row.modelData.indents || []
@@ -238,11 +267,10 @@ Column {
                 theme: chapter.theme
             }
             MouseArea {
+                id: rowMouse
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton
-                onClicked: function(mouse) {
-                    chapter.controller.selectContextVerse(chapter.book, chapter.chapterNumber, row.modelData.number, !!(mouse.modifiers & Qt.ShiftModifier))
-                }
+                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                onClicked: function(mouse) { chapter.click(row.modelData.number, mouse, rowMouse) }
             }
         }
     }

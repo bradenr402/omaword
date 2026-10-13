@@ -25,11 +25,11 @@ files.
 | `src/scripturesearch.*` | Normalized, cancellable Bible-wide search on a worker pool |
 | `src/searchdocument.*` | Offset mapping into rich text (both directions); LTR forcing helpers |
 | `qml/Rule.qml`, `qml/SectionTitle.qml` | Shared looks: the hairline rule between sections and a section's small title (Main's `FineRule`/`SectionLabel` and TagsPanel's `FineRule` wrap them with their theme and scale) |
-| `qml/QuietButton.qml`, `qml/FloatingButton.qml`, `qml/ModalCard.qml`, `qml/SettingSwitch.qml`, `qml/SquareSlider.qml`, `qml/OverlayScrollbar.qml`, `qml/OverlayScrollView.qml`, `qml/KeyScrollView.qml`, `qml/RangeMarker.qml`, `qml/VerseItem.qml`, `qml/SavedEntry.qml` | Main's controls, each in its own file: panel and footer buttons, modal cards, Reading settings' switches and sliders, overlay scrollbars and key-scrolled panes, the Verse layout's range rails, and the Verse and Marks row types. Those that need the window take `controller` (Main) and `theme` (Desktop), and `backend` where they read the Bible; Main binds them once in a same-named inline component (`component QuietButton: Shared.QuietButton { controller: app; theme: desktop }`, `Shared` being `import "."`), so its uses set neither |
+| `qml/QuietButton.qml`, `qml/FloatingButton.qml`, `qml/ModalCard.qml`, `qml/SettingSwitch.qml`, `qml/SquareSlider.qml`, `qml/OverlayScrollbar.qml`, `qml/OverlayScrollView.qml`, `qml/KeyScrollView.qml`, `qml/RangeMarker.qml`, `qml/VerseTint.qml`, `qml/VerseHighlights.qml`, `qml/FootnoteMarks.qml`, `qml/VerseItem.qml`, `qml/SavedEntry.qml` | Main's controls, each in its own file: panel and footer buttons, modal cards, Reading settings' switches and sliders, overlay scrollbars and key-scrolled panes, the Verse layout's range rails, tints, highlighter strokes, and footnote marks (the chapter read's and those shown beside it), and the Verse and Marks row types. Those that need the window take `controller` (Main) and `theme` (Desktop), and `backend` where they read the Bible; Main binds them once in a same-named inline component (`component QuietButton: Shared.QuietButton { controller: app; theme: desktop }`, `Shared` being `import "."`), so its uses set neither |
 | `src/markdownquotes.*`, `qml/QuoteBars.qml` | The Markdown previews' layout (Notes, the Desk): a single Enter breaks the line (`previewMarkdown` turns soft breaks into hard ones, except in lists, tables, and code, where Qt would make a break a new item), a gap of one line of the preview's text (its font's line spacing) above each paragraph, list, quote, heading, and code block (none between a paragraph's lines, a list's items, or a code block's lines; Qt sets none in a TextEdit), and block quotes narrowed from Qt's 40 px on both sides to 14 px on the left with a muted bar per level. Qt keeps no trace of where a quote starts or which blocks a line break split, so zero-width spaces mark them; `MarkdownQuotes` reads them into each block's user state and deletes them, once Qt has finished importing the text |
 | `src/textselection.*` | Character selection (`v`) over a chapter's source text: Vim motions/text objects, quotation/plain copy text |
 | `src/blockdocument.*`, `qml/BlockReader.qml` | Flowing Paragraph/Block layout, verse↔document mapping, overlays |
-| `qml/ContextChapter.qml` | A chapter a selection reaches into, shown whole beside the chapter read (Main's `contextBefore`/`contextAfter`), see Reader rendering |
+| `qml/ContextChapter.qml` | A chapter a selection reaches into, shown whole beside the chapter read with its marks (Main's `contextBefore`/`contextAfter`), see Reader rendering |
 | `src/annotationpaint.*` | The flowing layouts' annotation marks (`AnnotationPaint`, a `QQuickPaintedItem`): tint bands and highlighter strokes from HandDrawn.js's shapes ported to C++ (same seeds and arithmetic). BlockReader lays them out (`layOut`, once per event loop turn); a selection move only refreshes `blockSelectionBackground` (plain rectangles), and a changed shape list repaints only the changed shapes' area (Psalm 119 in Block with 88 highlights, 58 noted and 44 tagged verses, offscreen software rendering: a verse move went from 4.3 s to 86 ms, a highlight toggle from 4.3 s to 0.47 s). `BlockDocument::rectangles` walks every character only on lines with right-to-left text |
 | `src/windowmanager.*` | One backend + catalog + QML engine + window per reader; request routing; Follow (`openBeside`): links two windows, relaying each one's `followMoved` to the other's `followTo` until either closes or unfollows |
 | `src/singleinstance.*` | One process per data dir: `omaword.lock` + bounded local-socket IPC (a request: reference, translation, import, activation token, `newWindow`, `lookup`) |
@@ -622,12 +622,24 @@ files.
 - Chapters a selection reaches into (`contextChapters`: the nearest three
   before and after the chapter read, which is the cursor's) are shown whole
   around it by `ContextChapter`, in the layout chosen, from `chapterRows`
-  (cached per version and text): the title, the text (Paragraph and Block
-  through `BlockDocument` without annotation cells; Verse as rows like the
-  reader's), the selected verses tinted, all but those dimmed in focus mode;
-  no marks or footnotes. A click there selects through `selectThrough`
-  (shift: from the anchor). The chapters shown keep their place on screen as
-  they change (`captureViewAnchor`/`restoreViewAnchor` around a step, a click
+  (one call for every chapter missing; rows with their marks, `markRows`, as
+  `updateAnnotations` gives the chapter read; cached per version and text):
+  the title and the text with its marks and footnotes, as the reader draws
+  them (Paragraph and Block: a `BlockReader` with `beside`, given the
+  chapter's rows, place, and selected verses, showing no motion, search, or
+  character selection of the chapter read; Verse: rows with `RangeMarker`,
+  `VerseTint`, `VerseHighlights`, and `FootnoteMarks`, as the reader's, read
+  in place), the selected verses tinted, all but those dimmed in focus mode.
+  Their notes are in the margin too (`marginNoteEntries` covers every chapter
+  shown, placed by `shownVerseSpans`). A change of marks in any window
+  (`collectionChanged`) reads the shown chapters' rows again
+  (`refreshContextMarks`): those whose marks changed show again, the verse at
+  the top of the view staying put (`verseAtViewTop`); the rest of the cache is
+  dropped. A click there (`besideClick`) selects through `selectThrough`
+  (shift: from the anchor), its chapter becoming the one read, then does what
+  the button does there (passage menu, copy); a footnote mark selects its
+  verse, then peeks. The chapters shown keep their place on screen as they
+  change (`captureViewAnchor`/`restoreViewAnchor` around a step, a click
   there, or a selection collapsing): the first still shown goes back where
   it was; where the content cannot reach that (it now begins or ends nearer),
   the column is held there and glides into place (`columnHold`). The reading
