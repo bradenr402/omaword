@@ -1351,7 +1351,9 @@ ApplicationWindow {
         const first = bible.verses[0].number
         return bible.textMotion("", first, firstInk(first))
     }
-    function reapplyCharSelection() { if (charMode && charAnchor && charCursor) applyCharSelection() }
+    // Reselects after a relayout, leaving the view where it is (a reveal
+    // would scroll the text from under the pointer that just selected it).
+    function reapplyCharSelection() { if (charMode && charAnchor && charCursor) applyCharSelection(false) }
     // Text size and scale reflow the Verse rows too: reselect once laid out.
     readonly property var charLayoutKey: [readerSize, readerScale, bible.lineHeight]
     onCharLayoutKeyChanged: if (charMode) charReapplyTimer.restart()

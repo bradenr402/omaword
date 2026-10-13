@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QDir>
 #include <QRegularExpression>
+#include <QSignalSpy>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -1436,21 +1437,36 @@ private slots:
         for (const QString mode : {"verse", "block", "paragraph"}) {
             setMode(mode); navigate("John 3:16"); bible->clearSelection(); call("readerFocus");
             object("toast")->setProperty("text", QString("before"));
+            // Verse 16's first line just under the view's top, where a reveal would move it.
+            QVERIFY(QMetaObject::invokeMethod(window, "scrollBy", Q_ARG(QVariant, 2 * prop("readerLineHeight").toDouble())));
             const QPoint start = charPoint(16, 4), end = charPoint(17, 7);
             QVERIFY2(!start.isNull() && !end.isNull(), qPrintable(mode));
-            // Back from verse 17 into verse 16.
+            // Within a pixel: the reader rounds a fractional scroll as it resizes.
+            const auto still = [&](const QPoint &at) { return (charPoint(16, 4) - at).manhattanLength() <= 1; };
+            // Back from verse 17 into verse 16, the cursor near the view's top.
             drag(end, start); QTRY_VERIFY2(prop("charMode").toBool(), qPrintable(mode));
-            QCOMPARE(charPoint(16, 4), start); QCOMPARE(toast(), QString("before"));
+            QVERIFY(still(start)); QCOMPARE(toast(), QString("before"));
+            // Still so once laid out with its bar and reselected there.
+            QSignalSpy frames(window, &QQuickWindow::frameSwapped);
+            for (int frame = 0; frame < 2; ++frame) {
+                const int before = frames.count(); window->update();
+                QVERIFY(QTest::qWaitFor([&] { return frames.count() > before; }, 1000));
+            }
+            QVERIFY(!object("readerSlide")->property("running").toBool()); QVERIFY(still(start));
             QVERIFY(!prop("selectionBarShown").toBool());
             QVERIFY(charAt(charCursor(), 16, 4)); QVERIFY(charAt(charAnchor(), 17, 6));
             const QString dragged = prop("freeSelectedText").toString();
             QVERIFY2(dragged.startsWith("God so loved") && dragged.endsWith(verseText(17).left(7)), qPrintable(dragged));
+            // A motion moves that end (and, as a key, reveals it).
             keys("b"); QVERIFY(charAt(charCursor(), 16, 0));
             QCOMPARE(prop("freeSelectedText").toString(), "For " + dragged);
+            QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
+            const QPoint shown = charPoint(16, 4);
+            // esc returns to the verses it ran over, the text still.
             key(Qt::Key_Escape); QVERIFY(!prop("charMode").toBool());
             QVERIFY(prop("freeSelectedText").toString().isEmpty());
             QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:16–17"));
-            QCOMPARE(charPoint(16, 4), start);
+            QVERIFY(still(shown));
             // A double-clicked word, extended by a word.
             QTest::mouseDClick(window, Qt::LeftButton, {}, charPoint(16, 5));
             QTRY_VERIFY2(prop("charMode").toBool(), qPrintable(mode));
