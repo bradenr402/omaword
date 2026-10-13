@@ -19,12 +19,13 @@ class CliTest : public QObject
     QTemporaryDir fixtures;
     QString net, kjv;
     struct Output { int status; QString out, err; };
-    static bool archiveFile(const QString &path, const QByteArray &id, const QByteArray &john, const QByteArray &genesis) {
+    static bool archiveFile(const QString &path, const QByteArray &id, const QByteArray &john, const QByteArray &genesis,
+                            const QByteArray &title = "Fixture", const QByteArray &johnName = "John") {
         archive *a = archive_write_new();
         const auto cleanup = qScopeGuard([&] { archive_write_free(a); });
         if (archive_write_set_format_zip(a) != ARCHIVE_OK || archive_write_open_filename(a, QFile::encodeName(path).constData()) != ARCHIVE_OK) return false;
-        const QList<QPair<QByteArray, QByteArray>> files{{"01-GEN" + id + ".usfm", "\\id GEN Fixture\n\\h Genesis\n\\c 1\n\\p\n\\v 1 " + genesis + "\n\\v 2 The earth was empty.\n"},
-            {"44-JHN" + id + ".usfm", "\\id JHN Fixture\n\\h John\n\\c 3\n\\p\n\\v 16 " + john + "\n\\v 17 He came to save the world.\n"}};
+        const QList<QPair<QByteArray, QByteArray>> files{{"01-GEN" + id + ".usfm", "\\id GEN " + title + "\n\\h Genesis\n\\c 1\n\\p\n\\v 1 " + genesis + "\n\\v 2 The earth was empty.\n"},
+            {"44-JHN" + id + ".usfm", "\\id JHN " + title + "\n\\h " + johnName + "\n\\c 3\n\\p\n\\v 16 " + john + "\n\\v 17 He came to save the world.\n"}};
         for (const auto &[name, body] : files) {
             archive_entry *entry = archive_entry_new();
             archive_entry_set_pathname(entry, name.constData()); archive_entry_set_size(entry, body.size());
@@ -158,6 +159,40 @@ private slots:
         QCOMPARE(run({"link", "jn316"}).out, QString("omaword:John%203:16\n"));
         QCOMPARE(run({"link", "John 3:16-17", "-t", "kjv"}).out, QString("omaword:John%203:16-17?translation=KJV\n"));
     }
+    // What a translation brings (its name, a book's, a verse) and what you
+    // type print with each control character as U+FFFD, one for one: no
+    // escape sequence reaches the terminal, and search emphasis still
+    // covers its word. JSON keeps the text exact, escaped.
+    void controlCharactersPrintReplaced() {
+        const QString evil = fixtures.filePath("evil_usfm.zip");
+        QVERIFY(archiveFile(evil, "evil", "For God so \x1b]0;owned\x07 \xc2\x9b" "2J\x7f loved the world.", "In the beginning.",
+                            "Evil\x1b[31m Bible", "Jo\x1b[2Jhn"));
+        install(evil);
+        const auto controls = [](const QString &text) {
+            int count = 0;
+            for (const QChar c : text) count += (c.unicode() < 0x20 && c != '\n' && c != '\t') || (c.unicode() >= 0x7f && c.unicode() <= 0x9f);
+            return count;
+        };
+        const QString verse = QStringLiteral("For God so \uFFFD]0;owned\uFFFD \uFFFD" "2J\uFFFD loved the world.");
+        QCOMPARE(run({"quote", "jn316", "-t", "EB", "--plain"}).out, verse + '\n');
+        const auto quotation = run({"quote", "jn316", "-t", "EB"});
+        QCOMPARE(controls(quotation.out), 0); QVERIFY2(quotation.out.endsWith(QStringLiteral("Jo\uFFFD[2Jhn 3:16\n")), qPrintable(quotation.out));
+        const auto found = run({"search", "loved", "-t", "EB", "--color", "always"});
+        QCOMPARE(found.out, QStringLiteral("\x1b[1mJo\uFFFD[2Jhn 3:16 (EB)\x1b[0m\n  For God so \uFFFD]0;owned\uFFFD \uFFFD" "2J\uFFFD \x1b[1;4mloved\x1b[0m the world.\n"));
+        const auto list = run({"translations"});
+        QCOMPARE(controls(list.out), 0); QVERIFY2(list.out.contains(QStringLiteral("Evil\uFFFD[31m Bible")), qPrintable(list.out));
+        const auto json = run({"quote", "jn316", "-t", "EB", "--json"}).out;
+        QCOMPARE(controls(json), 0); QVERIFY(json.contains("\\u001b]0;owned\\u0007 \\u009b2J\\u007f loved"));
+        QCOMPARE(QJsonDocument::fromJson(json.toUtf8()).array().first().toObject()["text"].toString(),
+                 QStringLiteral("For God so \x1b]0;owned\x07 \u009b" "2J\x7f loved the world."));
+        const auto unknown = run({"quote", "jn316", "-t", "x\x1b[31m"});
+        QCOMPARE(unknown.status, 1); QCOMPARE(controls(unknown.err), 0); QVERIFY(unknown.err.contains(QStringLiteral("x\uFFFD[31m")));
+        const auto command = run({"nope\x1b[2J"});
+        QCOMPARE(command.status, 2); QCOMPARE(controls(command.err), 0); QVERIFY(command.err.contains(QStringLiteral("nope\uFFFD[2J")));
+        SingleInstance::Request request; QString error;
+        QVERIFY(!CommandLine::request({"--bogus\x1b[2J"}, &request, &error)); QCOMPARE(controls(error), 0);
+        QCOMPARE(CommandLine::printable(QStringLiteral("a\tb\nc\rd\u0085e\u00a0f")), QStringLiteral("a\tb\nc\uFFFDd\uFFFDe\u00a0f"));
+    }
     void completionScripts() {
         QVERIFY(run({"completion", "bash"}).out.contains("complete -F _omaword omaword"));
         QVERIFY(run({"completion", "zsh"}).out.startsWith("#compdef omaword"));
@@ -189,7 +224,13 @@ private slots:
         QVERIFY(CommandLine::parseLink("omaword://John%203:16/", &reference, &translation)); QCOMPARE(reference, QString("John 3:16")); QVERIFY(translation.isEmpty());
         QVERIFY(CommandLine::parseLink("OmaWord:jn316?t=kjv", &reference, &translation)); QCOMPARE(reference, QString("jn316")); QCOMPARE(translation, QString("kjv"));
         QVERIFY(!CommandLine::parseLink("https://example.org", &reference, &translation));
-        QVERIFY(!CommandLine::parseLink("omaword:", &reference, &translation));
+        // A link naming no passage brings the reader you were using forward,
+        // switched to the translation it names: never a new window.
+        QVERIFY(CommandLine::parseLink("omaword:", &reference, &translation)); QVERIFY(reference.isEmpty());
+        QVERIFY(CommandLine::request({"omaword:"}, &request, &error));
+        QVERIFY(request.reference.isEmpty()); QVERIFY(request.translation.isEmpty()); QVERIFY(!request.newWindow);
+        QVERIFY(CommandLine::request({"omaword://?translation=KJV"}, &request, &error));
+        QVERIFY(request.reference.isEmpty()); QCOMPARE(request.translation, QString("KJV")); QVERIFY(!request.newWindow);
         QCOMPARE(CommandLine::link(QStringLiteral("Genesis 1:1\u20132:3"), "KJV"), QString("omaword:Genesis%201:1-2:3?translation=KJV"));
     }
 };

@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
         // Do not construct a backend or replay the primary's original CLI import.
         QTimer::singleShot(0, &instance, [&] {
             instance.forward(initialRequest, [&](SingleInstance::Result result) {
-                if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << result.error << Qt::endl;
+                if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << CommandLine::printable(result.error) << Qt::endl;
                 app.exit(result.ok ? 0 : 1);
             });
         });
@@ -84,7 +84,7 @@ int main(int argc, char *argv[]) {
     QObject::connect(&executable, &ExecutableWatch::changed, &app, quitWhenDone);
     QTimer::singleShot(0, &instance, [&] {
         windows.openRequest(initialRequest, [&](SingleInstance::Result result) {
-            if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << result.error << Qt::endl;
+            if (!result.ok) QTextStream(stderr) << Brand::name() << ": " << CommandLine::printable(result.error) << Qt::endl;
             if (!windows.hasWindows()) app.exit(1);
         }, false);
         instance.setHandler([&](const SingleInstance::Request &request, SingleInstance::Reply reply) {

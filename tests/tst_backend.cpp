@@ -1573,6 +1573,37 @@ private slots:
         QVERIFY(!bible->removeVersion("engnet",true)); QVERIFY(QFile::exists(saved)); QVERIFY(QFile::remove(saved));
         QVERIFY(bible->removeVersion("engnet",false));
     }
+    // A new export or backup is yours alone (0600) from the start; a file it
+    // replaces keeps its permissions; your own symlink is followed, and one
+    // another user owns (as one left in /tmp could be) is refused unwritten.
+    void exportsArePrivateAndFollowOnlyYourLinks() {
+        install(net); QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Private");
+        const auto mode = [](const QString &path) {
+            struct stat info;
+            return ::stat(QFile::encodeName(path).constData(),&info) == 0 ? int(info.st_mode & 07777) : -1;
+        };
+        const QString fresh = session->filePath("fresh.json");
+        QVERIFY(bible->exportBackup(QUrl::fromLocalFile(fresh))); QCOMPARE(mode(fresh),0600);
+        QVERIFY(bible->exportNotes(QUrl::fromLocalFile(session->path()))); QCOMPARE(mode(session->filePath("omaword-notes.md")),0600);
+        const QString shared = session->filePath("shared.json");
+        { QFile file(shared); QVERIFY(file.open(QIODevice::WriteOnly)); }
+        QVERIFY(QFile::setPermissions(shared,QFile::ReadOwner|QFile::WriteOwner|QFile::ReadGroup|QFile::ReadOther));
+        QVERIFY(bible->exportBackup(QUrl::fromLocalFile(shared))); QCOMPARE(mode(shared),0644); QVERIFY(QFileInfo(shared).size() > 0);
+        const QString target = session->filePath("target.json"), link = session->filePath("link.json");
+        QVERIFY(QFile::link(target,link));
+        QVERIFY(bible->exportBackup(QUrl::fromLocalFile(link)));
+        QVERIFY(QFileInfo(link).isSymLink()); QVERIFY(QFileInfo(target).size() > 0); QCOMPARE(mode(target),0600);
+        // Another user's link: one of root's in /etc, whose target you could not write anyway.
+        QString foreign;
+        for (const auto &entry : QDir("/etc").entryInfoList(QDir::AllEntries|QDir::System|QDir::NoDotAndDotDot)) {
+            struct stat info;
+            if (entry.isSymLink() && ::lstat(QFile::encodeName(entry.filePath()).constData(),&info) == 0 && info.st_uid != ::getuid()
+                && !QFileInfo(QFileInfo(entry.symLinkTarget()).absolutePath()).isWritable()) { foreign = entry.filePath(); break; }
+        }
+        if (foreign.isEmpty()) QSKIP("No symlink another user owns in /etc (as when the tests run as root).");
+        QVERIFY(!bible->exportBackup(QUrl::fromLocalFile(foreign)));
+        QVERIFY2(bible->error().contains("symlink another user owns"), qPrintable(foreign + ": " + bible->error()));
+    }
     void invalidImportPreservesTarget() {
         const auto target = session->filePath("target.sqlite"), invalid = session->filePath("bad.zip");
         QVERIFY(write(target,"Original target")); QVERIFY(write(invalid,"Not a ZIP"));

@@ -176,12 +176,12 @@ void printHelp(QTextStream &out, const Command &command)
 int usage(QTextStream &err, const QString &command, const QString &message)
 {
     const QString name = command.isEmpty() ? QString() : ' ' + command;
-    err << branded("omaword" + name + ": " + message + "\nRun 'omaword help" + name + "' for usage.") << Qt::endl;
+    err << branded("omaword" + name + ": " + printable(message) + "\nRun 'omaword help" + name + "' for usage.") << Qt::endl;
     return Usage;
 }
 int failure(QTextStream &err, const QString &command, const QString &message)
 {
-    err << branded("omaword " + command + ": ") << message << Qt::endl;
+    err << branded("omaword " + command + ": ") << printable(message) << Qt::endl;
     return Failure;
 }
 
@@ -278,6 +278,21 @@ bool useTranslation(BibleBackend &bible, const QString &name, const QString &com
     return false;
 }
 
+// JSON as QJsonDocument writes it, but with DEL and the C1 controls, which
+// it leaves raw, escaped as well: the values read back exact, and no control
+// character reaches a terminal.
+QString json(const QJsonArray &array)
+{
+    const QString text = QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Indented));
+    QString escaped;
+    escaped.reserve(text.size());
+    for (const QChar c : text) {
+        if (c.unicode() >= 0x7f && c.unicode() <= 0x9f) escaped += QStringLiteral("\\u%1").arg(int(c.unicode()), 4, 16, QChar('0'));
+        else escaped += c;
+    }
+    return escaped;
+}
+
 int quote(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal)
 {
     const QCommandLineOption plain(QStringLiteral("plain")), json(QStringLiteral("json"));
@@ -302,8 +317,8 @@ int quote(const QStringList &arguments, QTextStream &out, QTextStream &err, QTex
                                  {"translationId", passage.value("versionId").toString()}, {"translationName", passage.value("name").toString()},
                                  {"text", passage.value("plain").toString()}, {"quotation", passage.value("quotation").toString()}, {"verses", verses}});
     }
-    if (p.parser.isSet(json)) out << QJsonDocument(array).toJson(QJsonDocument::Indented);
-    else if (!texts.isEmpty()) out << texts.join(QStringLiteral("\n\n")) << '\n';
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    else if (!texts.isEmpty()) out << printable(texts.join(QStringLiteral("\n\n"))) << '\n';
     out.flush();
     return status;
 }
@@ -358,13 +373,14 @@ int search(const QStringList &arguments, QTextStream &out, QTextStream &err, con
                                      {"chapter", row.value("chapter").toInt()}, {"verse", row.value("start").toInt()}, {"endVerse", row.value("end").toInt()},
                                      {"text", row.value("text").toString()}, {"matches", spans}});
         }
-        out << QJsonDocument(array).toJson(QJsonDocument::Indented);
+        out << CommandLine::json(array);
     } else {
         for (qsizetype i = 0; i < shown; ++i) {
             const auto row = result.matches[i].toMap();
-            const QString reference = row.value("reference").toString() + " (" + row.value("versionAbbreviation").toString() + ")";
-            // One line per match: the text's own breaks become spaces (same length, so spans hold).
-            QString text = row.value("text").toString();
+            const QString reference = printable(row.value("reference").toString() + " (" + row.value("versionAbbreviation").toString() + ")");
+            // One line per match: the text's own breaks become spaces (each
+            // replacement the same length, so spans hold).
+            QString text = printable(row.value("text").toString());
             text.replace('\n', ' ').replace(QChar(0x2028), ' ');
             out << (color ? QStringLiteral("\x1b[1m") + reference + QStringLiteral("\x1b[0m") : reference) << '\n'
                 << "  " << emphasized(text, row.value("displaySegments").toList(), color) << '\n';
@@ -393,7 +409,7 @@ int translations(const QStringList &arguments, QTextStream &out, QTextStream &er
             array.append(QJsonObject{{"id", row.value("id").toString()}, {"abbreviation", row.value("abbreviation").toString()},
                                      {"name", row.value("name").toString()}, {"active", row.value("active").toBool()}});
         }
-        out << QJsonDocument(array).toJson(QJsonDocument::Indented);
+        out << CommandLine::json(array);
         out.flush();
         return Success;
     }
@@ -403,7 +419,7 @@ int translations(const QStringList &arguments, QTextStream &out, QTextStream &er
         const auto row = value.toMap();
         if (p.parser.isSet(names)) { out << row.value("abbreviation").toString() << '\n'; continue; }
         out << (row.value("active").toBool() ? "* " : "  ") << row.value("abbreviation").toString().leftJustified(width + 2)
-            << row.value("name").toString() << "  (" << row.value("id").toString() << ")\n";
+            << printable(row.value("name").toString()) << "  (" << row.value("id").toString() << ")\n";
     }
     out.flush();
     if (rows.isEmpty() && !p.parser.isSet(names))
@@ -450,6 +466,18 @@ int completion(const QStringList &arguments, QTextStream &out, QTextStream &err)
 }
 }
 
+// Imported text (a book or translation name, a verse) or an argument could
+// hold an escape sequence that rewrites the screen or the window's title.
+// Replaced rather than removed, so match offsets in a line still hold.
+QString printable(QString text)
+{
+    for (QChar &c : text) {
+        const char16_t u = c.unicode();
+        if ((u < 0x20 && u != '\n' && u != '\t') || (u >= 0x7f && u <= 0x9f)) c = QChar::ReplacementCharacter;
+    }
+    return text;
+}
+
 bool headless(const QStringList &arguments)
 {
     if (arguments.isEmpty()) return false;
@@ -491,7 +519,7 @@ bool request(const QStringList &arguments, SingleInstance::Request *request, QSt
     parser.addOption(importOption); parser.addOption(here); parser.addOption(translationOption);
     const QString name = command.isEmpty() ? QString() : ' ' + command;
     auto fail = [&](const QString &message) {
-        *error = branded("omaword" + name + ": " + message + "\nRun 'omaword help" + name + "' for usage.");
+        *error = branded("omaword" + name + ": " + printable(message) + "\nRun 'omaword help" + name + "' for usage.");
         return false;
     };
     if (!parser.parse(QStringList{QStringLiteral("omaword")} + words)) return fail(parser.errorText());
@@ -514,6 +542,8 @@ bool request(const QStringList &arguments, SingleInstance::Request *request, QSt
         request->importPath = QFileInfo(positional.first()).absoluteFilePath();
         request->newWindow = false;
     } else if (positional.size() == 1 && parseLink(positional.first(), &request->reference, &request->translation)) {
+        // Even a link naming no passage goes to the reader you were using
+        // (switched to its translation, if it names one): never a new window.
         if (parser.isSet(translationOption)) request->translation = parser.value(translationOption);
         request->newWindow = false;
     } else {
@@ -540,7 +570,7 @@ bool parseLink(const QString &text, QString *reference, QString *translation)
     const QUrlQuery items(query);
     for (const QString key : {"translation", "t", "version"})
         if (items.hasQueryItem(key)) { *translation = items.queryItemValue(key, QUrl::FullyDecoded); break; }
-    return !reference->isEmpty();
+    return true;
 }
 
 QString link(const QString &reference, const QString &translation)

@@ -105,7 +105,14 @@ bool writeAtomic(const QString &path, const QByteArray &bytes, QString *error)
 {
     QSaveFile file(path);
     file.setDirectWriteFallback(false);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+    // Exports and backups hold your notes: a new file is yours alone from its
+    // first moment, not once written (a file replaced keeps its permissions).
+    // The mask is the process's: a file another thread creates meanwhile is
+    // only made private too.
+    const mode_t mask = ::umask(0077);
+    const bool opened = file.open(QIODevice::WriteOnly);
+    ::umask(mask);
+    if (!opened || file.write(bytes) != bytes.size() || !file.commit()) {
         *error = file.errorString();
         return false;
     }
@@ -4075,6 +4082,11 @@ bool BibleBackend::protectDestination(const QString &path)
     QSet<QString> seen;
     for (int hops = 0; QFileInfo(destination).isSymLink(); ++hops) {
         if (hops >= 40 || seen.contains(destination)) return setError("The export destination contains a symlink loop.");
+        // Follow only your own links: one another user left in a shared
+        // directory (such as /tmp) could aim the export at any file of yours.
+        struct stat link;
+        if (::lstat(QFile::encodeName(destination).constData(),&link) != 0) return setError("Cannot inspect the export destination.");
+        if (link.st_uid != ::getuid()) return setError("The export destination is a symlink another user owns. Choose another.");
         seen.insert(destination);
         destination = QFileInfo(destination).symLinkTarget();
     }

@@ -24,7 +24,11 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
 // The request for the running OmaWord, or false with `error` (exit status 2).
 bool request(const QStringList &arguments, SingleInstance::Request *request, QString *error);
 // omaword: links: `omaword:John%203:16`, `omaword:jn316?translation=KJV`,
-// `omaword://John%203:16/`. False when `text` is not one.
+// `omaword://John%203:16/`. False when `text` is not one; `reference` is
+// empty for one naming no passage (`omaword:`, `omaword:?translation=KJV`).
 bool parseLink(const QString &text, QString *reference, QString *translation);
+// `text` safe to print to a terminal: each control character becomes U+FFFD,
+// one for one; line breaks and tabs stay.
+QString printable(QString text);
 QString link(const QString &reference, const QString &translation = {});
 }
