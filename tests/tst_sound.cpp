@@ -93,7 +93,7 @@ private slots:
     }
     void testHook() {
         SoundEffects sounds(nullptr, path(), false);
-        QCOMPARE(SoundEffects::names(), QStringList({"tick", "boundary", "chime", "remove", "error"}));
+        QCOMPARE(SoundEffects::names(), QStringList({"tick", "boundary", "chime", "remove", "select", "error"}));
         QSignalSpy played(&sounds, &SoundEffects::played);
         QVERIFY(sounds.play("chime"));
         QCOMPARE(sounds.lastSound(), QString("chime"));

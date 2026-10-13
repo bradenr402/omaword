@@ -3301,6 +3301,7 @@ ApplicationWindow {
         } else if (!bible.restoreSelection(mark, false, -1)) { rejected(); return }
         syncNote()
         notify("Selected " + mark.reference, true)
+        sounds.play("select")
     }
     function setVisualMode(enabled) {
         clearCount()

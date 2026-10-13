@@ -2209,6 +2209,7 @@ private slots:
         QCoreApplication::processEvents();
         key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:2–3"));
         QCOMPARE(prop("toast","text").toString(), QString::fromUtf8("Selected John 3:2–3"));
+        QCOMPARE(sounds->lastSound(), QString("select"));
         QCOMPARE(bible->noteText(), QString("A note on two verses"));
         key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:1–5"));
         QVERIFY(bible->selectionHighlighted());
@@ -2217,6 +2218,7 @@ private slots:
         // j goes on from its end.
         key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:1–10"));
         QCOMPARE(prop("toast","text").toString(), QString("The selection is the whole mark"));
+        QCOMPARE(sounds->lastSound(), QString("error"));
         key(Qt::Key_J); QCOMPARE(bible->selectionReference(), QString("John 3:11"));
         key(Qt::Key_M); QCOMPARE(bible->selectionReference(), QString("John 3:11"));
         QCOMPARE(prop("toast","text").toString(), QString("No mark around the selection"));

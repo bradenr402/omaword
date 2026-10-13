@@ -234,7 +234,8 @@ files.
   moment; a drained stream goes inactive, so an idle app is never woken. A
   missing or restarted PipeWire is retried after 5 s, never given up. `error`
   and `boundary` sound once per 500 ms burst (a held key), other cues per
-  50 ms. The first cue ever heard (`sound/introduced`) shows how to turn them
+  50 ms. The cues: `tick` (a setting toggled), `chime` (copied, saved),
+  `remove`, `select` (`m` taking in a mark), `boundary`, `error`. The first cue ever heard (`sound/introduced`) shows how to turn them
   off. Offscreen sessions and `OMAWORD_SOUND=0` never open PipeWire.
 - Windows: one QML engine for every reader window (`WindowManager`: Main.qml
   compiled once, one JavaScript heap); each window is created in its own

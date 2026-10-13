@@ -47,6 +47,8 @@ QHash<QString, QByteArray> baseTones()
     tones.insert(QStringLiteral("boundary"), synthesize({{420, 380, 60, 0.12}}));
     tones.insert(QStringLiteral("chime"), synthesize({{880, 880, 70, 0.09}, {1320, 1320, 110, 0.08}}));
     tones.insert(QStringLiteral("remove"), synthesize({{740, 520, 110, 0.10}}));
+    // A selection taking in a whole passage (m): a short rising glide that settles.
+    tones.insert(QStringLiteral("select"), synthesize({{560, 840, 45, 0.09}, {840, 860, 60, 0.07}}));
     // As loud as the others: a key that cannot act is not an alarm.
     tones.insert(QStringLiteral("error"), synthesize({{170, 110, 90, 0.10}}));
     return tones;
@@ -221,7 +223,7 @@ QByteArray SoundEffects::render(const QString &name)
 QStringList SoundEffects::names()
 {
     return {QStringLiteral("tick"), QStringLiteral("boundary"), QStringLiteral("chime"), QStringLiteral("remove"),
-            QStringLiteral("error")};
+            QStringLiteral("select"), QStringLiteral("error")};
 }
 
 int SoundEffects::cooldownFor(const QString &name)
