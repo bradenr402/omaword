@@ -23,7 +23,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed base-devel git qt6-base qt6-declarative \
             libpipewire libarchive fontconfig ttf-dejavu python
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: README shortcuts are current
         run: bin/shortcuts --check
       - name: Build
@@ -36,7 +36,7 @@ jobs:
           --suite importer --suite catalog --suite sound --suite cli
       - name: Upload test logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-logs
           path: build/test-logs/
@@ -59,7 +59,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed base-devel git qt6-base qt6-declarative \
             libpipewire libarchive fontconfig ttf-dejavu python
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Run
         env:
           SHARD: ${{ matrix.shard }}
@@ -77,7 +77,7 @@ jobs:
           fi
       - name: Upload test logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-logs-${{ strategy.job-index }}
           path: build/test-logs/

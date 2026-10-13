@@ -7,11 +7,11 @@
 moc_*.cpp
 qrc_*.cpp
 
-# Arch packaging output (packaging/src is makepkg's work directory)
+# Arch packaging output (packaging/src is makepkg's work directory,
+# packaging/omaword its clone of the source)
 /packaging/src/
 /packaging/pkg/
-/pkgbuild/src/
-/pkgbuild/pkg/
+/packaging/omaword/
 *.pkg.tar.*
 *.src.tar.*
 *.log
