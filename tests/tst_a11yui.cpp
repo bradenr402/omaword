@@ -1248,26 +1248,26 @@ private slots:
                 QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<BlockDocument *>()->positionFor(4) + 2));
                 from = blockBody->mapToScene(rect.center()).toPoint(); to = QPoint(from.x() + 200, from.y());
             }
-            // Mouse: drag over text, then right-click on it.
-            QTest::mousePress(window, Qt::LeftButton, {}, from);
-            for (int i = 1; i <= 5; ++i) QTest::mouseMove(window, from + (to - from) * i / 5);
-            QTest::mouseRelease(window, Qt::LeftButton, {}, to);
-            QTRY_VERIFY2(!prop("freeSelectedText").toString().isEmpty(), qPrintable(mode));
-            const QString selected = prop("freeSelectedText").toString();
+            // Mouse: drag over text (a character selection), then right-click on it.
+            drag(from, to);
+            QTRY_VERIFY2(prop("charMode").toBool(), qPrintable(mode));
+            const QString selected = prop("freeSelectedText").toString(); QVERIFY(!selected.isEmpty());
             const auto selection = bible->tagScope();
             clickAt((from + to) / 2, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
             QCOMPARE(menuIds().first(), QString("copySelected")); QCOMPARE(menuShortcut("copySelected"), QString("ctrl c"));
             QCOMPARE(prop("freeSelectedText").toString(), selected); QCOMPARE(bible->tagScope(), selection);
-            // Copy selected text is a quotation (ctrl c); the plain entry follows.
+            // Copy selected text is a quotation (ctrl c), which, as y, ends
+            // the selection; the plain entry follows.
             QGuiApplication::clipboard()->clear(); chooseMenu("copySelected");
             QTRY_VERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("”\n\n— John 3:4")));
-            QCOMPARE(prop("freeSelectedText").toString(), selected);
-            // Keyboard: the menu key offers it first too; enter copies.
+            QVERIFY(!prop("charMode").toBool()); QCOMPARE(bible->tagScope(), selection);
+            // Keyboard: dragged again, the menu key offers it first too; enter copies.
+            drag(from, to); QTRY_COMPARE(prop("freeSelectedText").toString(), selected);
             key(Qt::Key_Menu); QTRY_VERIFY(menu()->property("opened").toBool());
             QCOMPARE(menuIds().first(), QString("copySelected"));
             QGuiApplication::clipboard()->clear(); key(Qt::Key_Down); key(Qt::Key_Return);
             QTRY_COMPARE(QGuiApplication::clipboard()->text(), selected);
-            key(Qt::Key_Escape); QTRY_VERIFY(prop("freeSelectedText").toString().isEmpty());
+            QTRY_VERIFY(prop("freeSelectedText").toString().isEmpty());
         }
     }
 
@@ -1417,10 +1417,9 @@ private slots:
             key(Qt::Key_Minus, Qt::ControlModifier); QCOMPARE(bible->fontSize(), size); expectKept(anchor, cursor, text, "smaller");
             // Its keys still work afterwards.
             keys("w"); QVERIFY(charCursor() != cursor); key(Qt::Key_Escape); QVERIFY(!prop("charMode").toBool());
-            // Mouse: a dragged selection turned into characters (v) survives too.
+            // Mouse: a dragged selection, characters by itself, survives too.
             const QPoint from = charPoint(16, 4), to = charPoint(16, 16);
-            drag(from, to); QTRY_VERIFY(!prop("freeSelectedText").toString().isEmpty());
-            key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
+            drag(from, to); QTRY_VERIFY(prop("charMode").toBool());
             const auto dragAnchor = charAnchor(), dragCursor = charCursor(); const QString dragged = prop("freeSelectedText").toString();
             key(Qt::Key_Equal, Qt::ControlModifier | Qt::AltModifier); expectKept(dragAnchor, dragCursor, dragged, "mouse line more");
             key(Qt::Key_0, Qt::ControlModifier); expectKept(dragAnchor, dragCursor, dragged, "mouse reset size");
@@ -1429,42 +1428,77 @@ private slots:
             bible->setFontSize(size); bible->setLineHeight(line);
         }
     }
+    // A drag over the text, or a double-clicked word, begins character
+    // selection quietly: the text holds still under the pointer, with no
+    // toast and no selection bar. Its cursor is where the pointer let go, its
+    // motions move that end, and esc returns to the verses it ran over.
+    void dragAndDoubleClickSelectCharactersQuietly() {
+        for (const QString mode : {"verse", "block", "paragraph"}) {
+            setMode(mode); navigate("John 3:16"); bible->clearSelection(); call("readerFocus");
+            object("toast")->setProperty("text", QString("before"));
+            const QPoint start = charPoint(16, 4), end = charPoint(17, 7);
+            QVERIFY2(!start.isNull() && !end.isNull(), qPrintable(mode));
+            // Back from verse 17 into verse 16.
+            drag(end, start); QTRY_VERIFY2(prop("charMode").toBool(), qPrintable(mode));
+            QCOMPARE(charPoint(16, 4), start); QCOMPARE(toast(), QString("before"));
+            QVERIFY(!prop("selectionBarShown").toBool());
+            QVERIFY(charAt(charCursor(), 16, 4)); QVERIFY(charAt(charAnchor(), 17, 6));
+            const QString dragged = prop("freeSelectedText").toString();
+            QVERIFY2(dragged.startsWith("God so loved") && dragged.endsWith(verseText(17).left(7)), qPrintable(dragged));
+            keys("b"); QVERIFY(charAt(charCursor(), 16, 0));
+            QCOMPARE(prop("freeSelectedText").toString(), "For " + dragged);
+            key(Qt::Key_Escape); QVERIFY(!prop("charMode").toBool());
+            QVERIFY(prop("freeSelectedText").toString().isEmpty());
+            QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:16–17"));
+            QCOMPARE(charPoint(16, 4), start);
+            // A double-clicked word, extended by a word.
+            QTest::mouseDClick(window, Qt::LeftButton, {}, charPoint(16, 5));
+            QTRY_VERIFY2(prop("charMode").toBool(), qPrintable(mode));
+            QCOMPARE(prop("freeSelectedText").toString(), QString("God")); QCOMPARE(toast(), QString("before"));
+            keys("e"); QCOMPARE(prop("freeSelectedText").toString(), QString("God so"));
+            key(Qt::Key_Escape); QVERIFY(!prop("charMode").toBool());
+            QCOMPARE(bible->selectionReference(), QString("John 3:16"));
+        }
+    }
     void characterSelectionByMouse() {
         for (const QString mode : {"verse", "block"}) {
             setMode(mode); navigate("John 3:16"); bible->clearSelection(); call("readerFocus");
-            // Mouse: a drag inside verse 16 copies a quotation with ellipses on ctrl c.
+            // Mouse: a drag inside verse 16 is a character selection; ctrl c
+            // copies it as a quotation with ellipses, which ends it.
             const QString v16 = verseText(16);
             const QPoint from = charPoint(16, 4), to = charPoint(16, 16);
             QVERIFY(!from.isNull() && !to.isNull());
-            drag(from, to); QTRY_VERIFY(!prop("freeSelectedText").toString().isEmpty());
+            drag(from, to); QTRY_VERIFY(prop("charMode").toBool());
             QGuiApplication::clipboard()->clear();
             key(Qt::Key_C, Qt::ControlModifier);
             const QString quote = QGuiApplication::clipboard()->text();
             QVERIFY2(quote.startsWith(QStringLiteral("“… God so loved")) && quote.endsWith(QStringLiteral(" …”\n\n— John 3:16")), qPrintable(mode + ": " + quote));
             QCOMPARE(toast(), QString("Selected text copied as quotation"));
+            QVERIFY(!prop("charMode").toBool());
+            // ctrl shift C copies its plain text.
+            drag(from, to); QTRY_VERIFY(prop("charMode").toBool());
+            const QString dragged = prop("freeSelectedText").toString();
             key(Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier);
-            QCOMPARE(QGuiApplication::clipboard()->text(), prop("freeSelectedText").toString());
-            QVERIFY(QGuiApplication::clipboard()->text().startsWith("God so loved"));
+            QCOMPARE(QGuiApplication::clipboard()->text(), dragged);
+            QVERIFY(dragged.startsWith("God so loved"));
             // The menu copies either way.
+            drag(from, to); QTRY_VERIFY(prop("charMode").toBool());
             clickAt((from + to) / 2, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
             QCOMPARE(menuIds().mid(0, 2), QStringList({"copySelected", "copySelectedPlain"}));
             QCOMPARE(menuShortcut("copySelectedPlain"), QString("ctrl shift C"));
             QGuiApplication::clipboard()->clear(); chooseMenu("copySelected");
             QTRY_VERIFY(QGuiApplication::clipboard()->text().startsWith(QStringLiteral("“… God")));
-            // A drag across a verse break: the later verse is numbered.
+            // A drag across a verse break, its keys in the reader.
             const QPoint end = charPoint(17, 7);
-            drag(from, end); QTRY_VERIFY(!prop("freeSelectedText").toString().isEmpty());
-            key(Qt::Key_C, Qt::ControlModifier);
-            QVERIFY2(QGuiApplication::clipboard()->text().contains(QStringLiteral("Son. ¹⁷ Origin")), qPrintable(QGuiApplication::clipboard()->text()));
-            QVERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("— John 3:16–17")));
-            // v turns the dragged text into a character selection.
-            key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
+            drag(from, end); QTRY_VERIFY(prop("charMode").toBool());
             QCOMPARE(charAnchor()["verse"].toInt(), 16); QCOMPARE(charCursor()["verse"].toInt(), 17);
             QVERIFY(readerFocused());
-            // Mouse: the hint parts act; quotation copies and leaves.
+            // Mouse: the hint parts act; quotation copies (the later verse
+            // numbered) and leaves.
             QGuiApplication::clipboard()->clear();
             clickHint("characterHintsPart:quotation");
             QTRY_VERIFY(!prop("charMode").toBool());
+            QVERIFY2(QGuiApplication::clipboard()->text().contains(QStringLiteral("Son. ¹⁷ Origin")), qPrintable(QGuiApplication::clipboard()->text()));
             QVERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("— John 3:16–17")));
             // The footer mode button leaves character selection; a click in the text does too.
             key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());

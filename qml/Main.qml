@@ -1036,13 +1036,22 @@ ApplicationWindow {
     // A finished mouse selection (drag or double-clicked word) becomes the
     // desktop's PRIMARY selection, as plain selected text.
     function publishPrimary() { if (freeSelectedText.length) bible.setPrimarySelection(freeSelectedText) }
+    // Text dragged over, or a double-clicked word, becomes a character
+    // selection (beginCharMode); a click, or a drag over the numbers, offers
+    // the selection bar.
     function finishTextDrag(number, mouse) {
-        if (wordClick) { wordClick = false; draggingText = false; dragAnchorRow = -1; return }
+        if (wordClick) { wordClick = false; draggingText = false; dragAnchorRow = -1; beginCharMode(true); return }
         if (draggingText) publishPrimary()
         if (!draggingText) { clearTextSelection(); selectVerse(number, !!(mouse.modifiers & Qt.ShiftModifier)) }
+        let characters = false
+        if (draggingText && !gutterDrag) {
+            // Let go before where it began: the cursor is the selection's start.
+            const hit = textHit(dragPoint)
+            characters = beginCharMode(true, hit.row < dragAnchorRow || (hit.row === dragAnchorRow && hit.position < dragAnchorPosition))
+        }
         draggingText = false
         dragAnchorRow = -1
-        mouseSelected()
+        if (!characters) mouseSelected()
     }
     // A selection made with the mouse offers its common actions in a bar
     // above it (Highlight · Note · Tag · Copy · more); any key, another
@@ -1296,22 +1305,29 @@ ApplicationWindow {
         while (i < text.length - 1 && /\s/.test(text.charAt(i))) ++i
         return i
     }
-    function beginCharMode() {
-        if (!bible.ready || bible.busy || !bible.verses.length) { rejected(unavailableReason("characterVisual")); return false }
-        clearCount()
+    // v; or, `fromMouse`, the end of a drag over the text or of a double
+    // click on a word, which begins it quietly: no toast, no scroll, no
+    // selection bar, the cursor at the end the pointer let go (`backward`:
+    // the start). From the mouse, a selection holding no Scripture text (a
+    // heading alone) stays as it is. Whether it began.
+    function beginCharMode(fromMouse, backward) {
+        if (!bible.ready || bible.busy || !bible.verses.length) { if (!fromMouse) rejected(unavailableReason("characterVisual")); return false }
         // A mouse-dragged selection becomes the character selection.
         const dragged = freeSelectedText.length ? selectedSourceRange() : null
+        if (fromMouse && !dragged) return false
+        clearCount()
         let anchor, cursor
         if (dragged) {
             anchor = dragged.start
             cursor = bible.textMotion("", dragged.end.verse, Math.max(0, dragged.end.offset - 1))
+            if (backward) { const end = cursor; cursor = anchor; anchor = end }
         } else {
             // The cursor verse when one is selected, else the first text on screen.
             const number = hasSelection && bible.cursorVerse > 0 ? bible.cursorVerse : 0
             anchor = number ? bible.textMotion("", number, firstInk(number)) : firstVisibleChar()
             cursor = anchor
         }
-        if (!anchor || !anchor.verse || !cursor || !cursor.verse) { rejected(); return false }
+        if (!anchor || !anchor.verse || !cursor || !cursor.verse) { if (!fromMouse) rejected(); return false }
         if (verseMode) { verseMode = false }
         charAnchor = { verse: anchor.verse, offset: anchor.offset }
         charCursor = { verse: cursor.verse, offset: cursor.offset }
@@ -1319,6 +1335,7 @@ ApplicationWindow {
         charPending = ""
         charMode = true
         readerFocus()
+        if (fromMouse) { selectionBarWanted = false; applyCharSelection(false); return true }
         applyCharSelection()
         notify("Character selection", true)
         return true
@@ -4317,6 +4334,14 @@ ApplicationWindow {
     NumberAnimation { id: readerSlide; objectName: "readerSlide"; target: reading; property: "contentY"; duration: app.slideMs; easing.type: Easing.OutCubic }
     function clampReaderY(y) { return Math.max(0, Math.min(Math.max(0, reading.contentHeight - reading.height), y)) }
     function readerTargetY() { return readerSlide.running ? readerSlide.to : reading.contentY }
+    // The reader's top moved down by `delta` (a bar above it came, or went:
+    // less than 0): scroll as far, so the text stays where it is on screen.
+    function keepReaderText(delta) {
+        const sliding = readerSlide.running, to = readerSlide.to + delta
+        readerSlide.stop()
+        reading.contentY = Math.max(0, reading.contentY + delta)
+        if (sliding) slideReader(to)
+    }
     function setReaderY(y) { readerSlide.stop(); reading.contentY = clampReaderY(y) }
     function slideReader(y) {
         const target = clampReaderY(y)
@@ -4872,6 +4897,7 @@ ApplicationWindow {
         { id: "selectRange", group: "Select", title: "Select a range", sequences: ["Shift+Click"], explanation: true },
         { id: "visual", group: "Select", title: "Toggle visual selection", sequences: ["Shift+V"] },
         { id: "characterVisual", group: "Select", title: "Select characters (Vim charwise visual)", sequences: ["V"] },
+        { id: "mouseCharacters", group: "Select", title: "Select the characters dragged over, or the word double clicked", sequences: ["Drag", "DoubleClick"], explanation: true },
         // Bound by character selection itself (charKey).
         { id: "charMove", group: "Select", title: "Characters: left, right (across verses)", sequences: ["H", "L"], scope: "characters", explanation: true },
         { id: "charWords", group: "Select", title: "Characters: by word", sequences: ["W", "B", "E", "G, E"], scope: "characters", explanation: true },
@@ -5930,7 +5956,10 @@ ApplicationWindow {
         anchors.rightMargin: app.notesDock
         spacing: 0
         // Character selection (v): the mode, its keys, and what is selected.
+        // Its room comes off the reader's top without moving the text
+        // (workspace.characterRoom).
         Rectangle {
+            id: characterStatus
             objectName: "characterStatus"
             Layout.fillWidth: true
             implicitHeight: characterStatusContent.implicitHeight + 16
@@ -5983,6 +6012,17 @@ ApplicationWindow {
             id: workspace
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // As the layout moves the reader down for the character selection
+            // bar (or back up), the reader scrolls as far, in the same pass:
+            // the text holds still, and what a drag just selected stays under
+            // the pointer.
+            property real characterRoom: 0
+            onYChanged: {
+                const room = characterStatus.visible ? characterStatus.height : 0
+                if (room === characterRoom) return
+                app.keepReaderText(room - characterRoom)
+                characterRoom = room
+            }
 
             Item {
                 id: readerSurface

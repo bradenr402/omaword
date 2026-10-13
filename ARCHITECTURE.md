@@ -375,7 +375,8 @@ files.
 
 ### Selection bar
 - A verse selection made with the mouse (`mouseSelected`, from Verse rows and
-  BlockReader releases) shows a bar above the selection's first line: a
+  BlockReader releases: a click, a drag over the numbers, a drag holding no
+  Scripture text) shows a bar above the selection's first line: a
   HintRow in buttons mode (`partHeight`: every part a full-height button,
   edge to edge), inside the reader's flickable so it scrolls with the text;
   it flips below at the top and is placed again after relayouts. Any catalog
@@ -513,13 +514,23 @@ files.
   Leaving the chapter, layout, or reader keys (a modal) ends it. A relayout
   (text size, line height, any document rebuild) keeps it: the source
   positions are reselected in the new layout (`reapplyCharSelection`).
+- A drag over the text, or a double-clicked word, ends in character selection
+  (`beginCharMode(true, backward)`, from `finishTextDrag` and BlockReader's
+  release): quietly, with no toast, no reveal, and no selection bar, the cursor
+  at the end where the pointer let go. A selection holding no Scripture text
+  (a heading alone) stays plain selected text with the bar. Its status bar
+  above the reader takes its room without moving the text: as the layout
+  moves the reader (`workspace.onYChanged`), the reader scrolls as far
+  (`keepReaderText`) in the same pass, so nothing the pointer is over moves.
 
 - A finished mouse selection (drag end, double-clicked word) is offered as the
-  PRIMARY selection (`bible.setPrimarySelection`, plain text).
+  PRIMARY selection (`bible.setPrimarySelection`, plain text as shown), before
+  it becomes a character selection.
 - A drag over the text or the verse numbers, in every layout, selects the
   verses it runs over as it goes (`dragSelectVerses`: from the verse it began
-  in to the one under the pointer, persisted like any selection); the
-  selection bar waits for the release.
+  in to the one under the pointer, persisted like any selection), where `esc`
+  from the character selection returns; the selection bar of a drag over the
+  numbers waits for the release.
 
 ### Keys
 - Panel- and mode-local keys are catalog rows with a non-global `scope`

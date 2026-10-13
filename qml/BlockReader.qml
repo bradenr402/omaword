@@ -483,13 +483,19 @@ Item {
                     return
                 }
                 if (mouse.button === Qt.LeftButton) {
-                    // A finished selection becomes PRIMARY (controllers without it: tests).
+                    // A finished selection becomes PRIMARY, and a character
+                    // selection unless it holds no Scripture text (a heading
+                    // alone); a click offers the selection bar (controllers
+                    // without them: tests).
                     const finished = root.wordClick || root.dragging
+                    // Let go before where it began: the cursor is the selection's start.
+                    const backward = root.dragging && body.cursorPosition < root.anchor
                     if (finished && typeof root.controller.publishPrimary === "function") root.controller.publishPrimary()
                     if (root.wordClick) root.wordClick = false
                     else if (!root.dragging) root.controller.selectVerse(root.pressedVerse, !!(mouse.modifiers & Qt.ShiftModifier))
                     root.cancelDrag()
-                    if (typeof root.controller.mouseSelected === "function") root.controller.mouseSelected()
+                    const characters = finished && typeof root.controller.beginCharMode === "function" && root.controller.beginCharMode(true, backward)
+                    if (!characters && typeof root.controller.mouseSelected === "function") root.controller.mouseSelected()
                 } else if (mouse.button === Qt.MiddleButton) {
                     root.controller.copyClickedVerse(root.hit(mouse.x, mouse.y), false)
                 } else {

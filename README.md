@@ -37,7 +37,7 @@ To update, `git pull`, run `bin/build` and `bin/install` again, and close every 
 ## Shortcuts
 
 - `j` `k` step through verses, `h` `l` through chapters, and `ctrl k` goes to any passage (`jn316` works).
-- `shift V` selects verses and `v` characters, Vim style; `x` highlights, `w` writes a note, `t` tags, `y` copies, and `u` undoes.
+- `shift V` selects verses and `v` characters (so does a drag), Vim style; `x` highlights, `w` writes a note, `t` tags, `y` copies, and `u` undoes.
 - `/` finds in the chapter, `ctrl /` searches the Bible, and `ctrl space` runs any command.
 - `shift M` lists your marks, `shift S` shows cross-references, and `d` adds the passage to the Desk, a study page (`shift D`).
 - `shift R` places your ribbon and `r` returns to it; `[` and `]` step back and forward through the passages you jumped to.
@@ -97,6 +97,7 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `shift click`: Select a range
 - `shift V`: Toggle visual selection
 - `v`: Select characters (Vim charwise visual)
+- `drag` · `double click`: Select the characters dragged over, or the word double clicked
 - `h` · `l`: Characters: left, right (across verses)
 - `w` · `b` · `e` · `ge`: Characters: by word
 - `shift W` · `shift B` · `shift E`: Characters: by WORD (no spaces)

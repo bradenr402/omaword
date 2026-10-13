@@ -3073,20 +3073,24 @@ private slots:
             QTRY_VERIFY(item("readerSurface")->hasActiveFocus());
         }
     }
-    void lineHeightClearsFreeSelectionCoherently() {
+    // A relayout (line height, by key or from the backend) replaces the
+    // documents: a dragged selection, a character selection, is selected
+    // again in the new layout and copies as it did.
+    void lineHeightKeepsADraggedSelection() {
         installDragFixture();
         for (bool backendChange : {false,true}) {
             drag(textPoint(1,6),textPoint(3,18));
-            QVERIFY(!window->property("freeSelectedText").toString().isEmpty());
-            QVERIFY(!prop("verseBody2","selectedText").toString().isEmpty());
+            QVERIFY(window->property("charMode").toBool());
+            const auto text = window->property("freeSelectedText").toString(), shown = prop("verseBody2","selectedText").toString();
+            QVERIFY(!text.isEmpty()); QVERIFY(!shown.isEmpty());
             if (backendChange) bible->setLineHeight(1.8);
             else key(Qt::Key_Equal,Qt::ControlModifier | Qt::AltModifier);
-            QVERIFY(window->property("freeSelectedText").toString().isEmpty());
-            for (int v = 1; v <= 3; ++v)
-                QVERIFY(prop(qPrintable("verseBody" + QString::number(v)),"selectedText").toString().isEmpty());
+            QTRY_COMPARE(prop("verseBody2","selectedText").toString(),shown);
+            QVERIFY(window->property("charMode").toBool());
+            QCOMPARE(window->property("freeSelectedText").toString(),text);
             QApplication::clipboard()->setText("No stale selection");
             key(Qt::Key_C,Qt::ControlModifier);
-            QCOMPARE(QApplication::clipboard()->text(),bible->copySelection());
+            QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
             // The verses the drag selected stay selected.
             QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:1–3"));
         }
@@ -3361,26 +3365,32 @@ private slots:
         QTRY_VERIFY(settled());
         const auto first = blockPoint(1,6), last = blockPoint(3,18);
         drag(reverse ? last : first,reverse ? first : last);
-        QCOMPARE(window->property("freeSelectedText").toString(),expected);
+        // The drag is a character selection: its text is the source's (no
+        // verse numbers, the verse's own line break); PRIMARY has it as shown.
+        const auto source = plain.mid(6,plain.indexOf(" ends here.") - 6);
+        QVERIFY(window->property("charMode").toBool());
+        QCOMPARE(bible->lastPrimarySelection(),expected);
+        QCOMPARE(window->property("freeSelectedText").toString(),source);
         QCOMPARE(prop("blockBody","selectedText").toString(),documentSelection);
         QCOMPARE(bible->selectionReference(),range);
-        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
-        QCOMPARE(QApplication::clipboard()->text(),expected);
-        // ctrl c quotes it: ellipses at the cut verses, numbers where a verse starts.
-        key(Qt::Key_C,Qt::ControlModifier);
-        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
-        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n— John 3:1–3")));
-        key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),quoted);
-        key(Qt::Key_Y,Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),plain);
-        // With selected text, ctrl shift C copies that text; shift Y the passage.
-        key(Qt::Key_C,Qt::ControlModifier | Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),expected);
-        QCOMPARE(window->property("freeSelectedText").toString(),expected);
-        QCOMPARE(bible->collection(),annotations);
+        // A middle click copies the passage and keeps it.
         QTest::mouseClick(window,Qt::MiddleButton,Qt::NoModifier,blockPoint(2,4));
         QCOMPARE(QApplication::clipboard()->text(),quoted);
         QCOMPARE(prop("toast","text").toString(),range + " copied");
         QCOMPARE(bible->selectionReference(),range);
-        QCOMPARE(window->property("freeSelectedText").toString(),expected);
+        QCOMPARE(window->property("freeSelectedText").toString(),source);
+        // ctrl shift C copies its text, which ends it.
+        key(Qt::Key_C,Qt::ControlModifier | Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),source);
+        QVERIFY(!window->property("charMode").toBool());
+        // Dragged again, ctrl c quotes it: ellipses at the cut verses, numbers where a verse starts.
+        drag(reverse ? blockPoint(3,18) : blockPoint(1,6),reverse ? blockPoint(1,6) : blockPoint(3,18));
+        key(Qt::Key_C,Qt::ControlModifier);
+        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
+        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n— John 3:1–3")));
+        // The verses it ran over stay selected: y and shift Y copy the passage.
+        key(Qt::Key_Y); QCOMPARE(QApplication::clipboard()->text(),quoted);
+        key(Qt::Key_Y,Qt::ShiftModifier); QCOMPARE(QApplication::clipboard()->text(),plain);
+        QCOMPARE(bible->collection(),annotations);
         bible->selectVerses(1,3);
         QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,blockPoint(2,4));
         QTRY_VERIFY(prop("contextMenu","visible").toBool());
@@ -3706,7 +3716,12 @@ private slots:
         QVERIFY(expected.contains(QString::fromUtf8("שלום")));
         const auto first = textPoint(1,start), last = textPoint(3,end);
         drag(reverse ? last : first,reverse ? first : last);
-        QCOMPARE(window->property("freeSelectedText").toString(),expected);
+        // The drag is a character selection: its text is the source's, the
+        // verses of a paragraph joined by a space; PRIMARY has it as shown.
+        const auto source = QString::fromUtf8("café — λόγος 🌿 and finish. Poetry sings softly.\nA second line — שלום. Final naïve résumé");
+        QVERIFY(window->property("charMode").toBool());
+        QCOMPARE(bible->lastPrimarySelection(),expected);
+        QCOMPARE(window->property("freeSelectedText").toString(),source);
         QCOMPARE(prop("verseBody1","selectedText").toString(),bodyText(1).mid(start));
         QCOMPARE(prop("verseBody2","selectedText").toString(),bodyText(2));
         QCOMPARE(prop("verseBody3","selectedText").toString(),bodyText(3).left(end));
@@ -3715,31 +3730,31 @@ private slots:
         QCOMPARE(bible->cursorVerse(),reverse ? 1 : 3);
         QCOMPARE(window->property("selectionAnchor").toInt(),reverse ? 3 : 1);
         QCOMPARE(saved(1).value("note").toString(),note);
-        QVERIFY(window->activeFocusItem()->objectName().startsWith("verseBody"));
-        QApplication::clipboard()->setText("replace me");
-        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
-        QCOMPARE(QApplication::clipboard()->text(),expected);
-        // Ctrl+C (a quotation) also works after moving focus out of the TextEdit.
-        item("readerSurface")->forceActiveFocus();
-        QApplication::clipboard()->setText("replace again");
-        key(Qt::Key_C,Qt::ControlModifier);
-        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
-        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n— John 3:1–3")));
-        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
-        QCOMPARE(QApplication::clipboard()->text(),expected);
-        // Middle clicks must not consume the free selection or alter the
+        // Its keys go to the reader.
+        QVERIFY(item("readerSurface")->hasActiveFocus());
+        // Middle clicks must not consume the selected text or alter the
         // verse selection before deciding which passage to copy: inside it,
         // the selection; outside, that verse, which it then selects.
         const auto range = bible->copySelection();
         mouseCopy(2,Qt::MiddleButton);
         QCOMPARE(QApplication::clipboard()->text(),range);
-        QCOMPARE(window->property("freeSelectedText").toString(),expected);
+        QCOMPARE(window->property("freeSelectedText").toString(),source);
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:1–3"));
         mouseCopy(4,Qt::MiddleButton);
         QCOMPARE(QApplication::clipboard()->text(),bible->copyVerse(4));
         QCOMPARE(bible->selectionReference(),QString("John 3:4"));
-        QCOMPARE(window->property("freeSelectedText").toString(),expected);
+        QCOMPARE(window->property("freeSelectedText").toString(),source);
         QCOMPARE(saved(1).value("note").toString(),note);
+        // ctrl shift C copies its text, which ends it; dragged again, ctrl c quotes it.
+        QApplication::clipboard()->setText("replace me");
+        key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
+        QCOMPARE(QApplication::clipboard()->text(),source);
+        QVERIFY(!window->property("charMode").toBool());
+        drag(reverse ? textPoint(3,end) : textPoint(1,start),reverse ? textPoint(1,start) : textPoint(3,end));
+        QApplication::clipboard()->setText("replace again");
+        key(Qt::Key_C,Qt::ControlModifier);
+        QVERIFY2(QApplication::clipboard()->text().startsWith(QStringLiteral("“… café")),qPrintable(QApplication::clipboard()->text()));
+        QVERIFY(QApplication::clipboard()->text().endsWith(QStringLiteral(" …”\n\n— John 3:1–3")));
         QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,textPoint(2,4));
         QCOMPARE(bible->cursorVerse(),2);
         QVERIFY(window->property("freeSelectedText").toString().isEmpty());
@@ -3803,7 +3818,7 @@ private slots:
         QTRY_VERIFY(settled());
         // From inside verse 2 over verse 3 into verse 4 (or back), the verse
         // selection follows the pointer before the button comes up; the
-        // selection bar waits for the release.
+        // release makes the text a character selection.
         const int from = reverse ? 4 : 2, to = reverse ? 2 : 4;
         const QPoint start = point(from,6), middle = point(3,6), end = point(to,6);
         QTest::mousePress(window,Qt::LeftButton,Qt::NoModifier,start);
@@ -3817,10 +3832,42 @@ private slots:
         QCOMPARE(bible->selectedStart(),2); QCOMPARE(bible->selectedEnd(),4);
         QTest::mouseRelease(window,Qt::LeftButton,Qt::NoModifier,end);
         QCOMPARE(window->property("selectionAnchor").toInt(),from);
-        QTRY_VERIFY(prop("selectionBar","visible").toBool());
-        // The text stays selected for copying; the bar's actions take the verses.
+        // Quietly: no selection bar, and its cursor where the pointer let go.
+        QTRY_VERIFY(window->property("charMode").toBool());
+        QVERIFY(!prop("selectionBar","visible").toBool());
+        QCOMPARE(window->property("charCursor").value<QJSValue>().property("verse").toInt(),to);
         QVERIFY(window->property("freeSelectedText").toString().contains(QString::fromUtf8("Final naïve résumé ends here.")));
         QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:2–4"));
+        // esc returns to the verses it ran over.
+        key(Qt::Key_Escape);
+        QVERIFY(!window->property("charMode").toBool());
+        QVERIFY(window->property("freeSelectedText").toString().isEmpty());
+        QCOMPARE(bible->selectionReference(),QString::fromUtf8("John 3:2–4"));
+    }
+    // A drag over a heading alone holds no Scripture text: it stays plain
+    // selected text, and the selection bar offers the verse's actions.
+    void headingDragStaysPlainText() {
+        installDragFixture();
+        bible->setBlockMode(true);
+        QTRY_VERIFY(blockMapping() && blockMapping()->spans().size() > 3);
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        QCOMPARE(blockTextDocument()->toPlainText().left(15),QString("A section title"));
+        const auto point = [this](int position) { return item("blockBody")->mapToScene(blockRect(position).center()).toPoint(); };
+        // The new layout places itself over a frame or two: drag once the
+        // heading sits under the chapter title and holds still.
+        QSignalSpy frames(window,&QQuickWindow::frameSwapped);
+        const auto settled = [&] {
+            const auto at = point(2);
+            const int before = frames.count();
+            window->update();
+            if (!QTest::qWaitFor([&] { return frames.count() > before; },1000)) return false;
+            return at == point(2) && at.y() > item("chapterTitle")->mapToScene(QPointF(0,item("chapterTitle")->height())).y();
+        };
+        QTRY_VERIFY(settled());
+        drag(point(2),point(13));
+        QVERIFY(!window->property("charMode").toBool());
+        QCOMPARE(window->property("freeSelectedText").toString(),QString("section tit"));
+        QTRY_VERIFY(prop("selectionBar","visible").toBool());
     }
     void mouseCopySingleAndCanonicalRange() {
         installDragFixture();
@@ -3870,9 +3917,13 @@ private slots:
         QVERIFY(!item("verseBody21"));
         const int start = 10, end = 15;
         drag(textPoint(20,start),textPoint(22,end));
-        // Positions are document positions; footnote cells (real NET) never reach the copy.
-        QCOMPARE(window->property("freeSelectedText").toString(),
+        // Positions are document positions; footnote cells (real NET) never
+        // reach the text: PRIMARY's, as shown, or the character selection's,
+        // the source's (the verses of a paragraph joined by a space).
+        QCOMPARE(bible->lastPrimarySelection(),
                  (rawBodyText(20).mid(start) + '\n' + rawBodyText(22).left(end)).remove(QChar(0xfffc)).remove(QChar(0x2060)));
+        QCOMPARE(window->property("freeSelectedText").toString(),
+                 (rawBodyText(20).mid(start) + ' ' + rawBodyText(22).left(end)).remove(QChar(0xfffc)).remove(QChar(0x2060)));
         // The number gutter remains a canonical range target when labels hide.
         click(item("verseNumber20"));
         click(item("verseNumber22"),Qt::ShiftModifier);
@@ -3883,6 +3934,9 @@ private slots:
         drag(gutterPoint(22),gutterPoint(20));
         QCOMPARE(bible->selectedStart(),20); QCOMPARE(bible->selectedEnd(),22);
         QCOMPARE(bible->cursorVerse(),20);
+        // Over the numbers it selects verses, and the selection bar offers their actions.
+        QVERIFY(!window->property("charMode").toBool());
+        QTRY_VERIFY(prop("selectionBar","visible").toBool());
         reference("John 3:10");
         const auto before = prop("reading","contentY").toDouble();
         const QPoint origin = textPoint(10,8);
@@ -3905,8 +3959,9 @@ private slots:
         const int row = hit.value<QJSValue>().toVariant().toMap().value("row").toInt();
         QCOMPARE(window->property("selectionAnchor").toInt(),10);
         QCOMPARE(bible->cursorVerse(),bible->verses().at(row).toMap().value("number").toInt());
+        const auto dragged = window->property("freeSelectedText").toString();
         key(Qt::Key_C,Qt::ControlModifier|Qt::ShiftModifier);
-        QCOMPARE(QApplication::clipboard()->text(),window->property("freeSelectedText").toString());
+        QCOMPARE(QApplication::clipboard()->text(),dragged);
     }
     void ctrlWheelZoom() {
         reference("John 3:16");
@@ -5398,12 +5453,13 @@ private slots:
             {{"Ctrl++","Ctrl+="},QString::fromUtf8("ctrl + · ctrl =")}, {{"Ctrl+-"},"ctrl -"},
             {{"Ctrl+Alt+="},"ctrl alt ="}, {{"Ctrl+Shift+C"},"ctrl shift C"}, {{"Shift+F10"},"shift F10"},
             {{"F1"},"F1"}, {{"Menu"},"menu"}, {{"RightClick"},"right click"}, {{"MiddleClick"},"middle click"},
-            {{"Click"},"click"}, {{"Shift+Click"},"shift click"}, {{"BackClick"},"mouse back"}, {{"ForwardClick"},"mouse forward"}};
+            {{"Click"},"click"}, {{"Shift+Click"},"shift click"}, {{"BackClick"},"mouse back"}, {{"ForwardClick"},"mouse forward"},
+            {{"Drag","DoubleClick"},QString::fromUtf8("drag · double click")}};
         for (const auto &entry : cases) QCOMPARE(formatKeys(entry.first),entry.second);
         // Every catalog key reads in the shared notation: lowercase except a
         // shifted letter or function key, arrows as glyphs, muted separators.
         const QRegularExpression notation(QString::fromUtf8(
-            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}()$^,]+|[0-9a-z]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|mouse back|mouse forward|[A-Z])$"));
+            "^((ctrl|alt|shift) )*([a-z0-9?/\\\\+=\\-\\[\\]{}()$^,]+|[0-9a-z]+[A-Z]|[↑↓←→]|esc|enter|delete|backspace|space|tab|pgup|pgdn|home|end|menu|F\\d+|click|right click|middle click|double click|drag|mouse back|mouse forward|[A-Z])$"));
         const auto records = window->property("actions").value<QJSValue>().toVariant().toList();
         for (const auto &record : records) {
             const auto action = record.toMap();
