@@ -4,12 +4,19 @@
 
 A minimal, keyboard-first Bible reader built with Qt Quick and C++ that follows your Omarchy theme, system font, and desktop corners. Read offline, highlight and tag passages, and keep Markdown notes alongside the text.
 
-![OmaWord reading John 1 with a highlighted range and inline annotation brackets](screenshots/reader.png)
+![OmaWord reading John 1, with the chapter outline beside it, a highlighted passage, and a selected verse](screenshots/reader.png)
 
 <p>
-  <img src="screenshots/palette.png" alt="The passage palette over the reader" width="49%">
-  <img src="screenshots/search.png" alt="Bible search results in a light theme" width="49%">
+  <img src="screenshots/notes.png" alt="Notes beside the text, a note being written on John 1:6" width="49%">
+  <img src="screenshots/desk.png" alt="The Desk: a Markdown study page of quotations, headings, and lists beside Proverbs 6" width="49%">
+  <img src="screenshots/marks.png" alt="Marks in a light theme: every highlight, tag, and note, one row per passage" width="49%">
+  <img src="screenshots/palette.png" alt="The passage palette over the reader, with the ribbon and recent passages" width="49%">
 </p>
+<p align="center">
+  <img src="screenshots/lookup.png" alt="The lookup window showing John 3:16 over the desktop" width="49%">
+</p>
+
+Screenshots show the [NET](https://netbible.org) Bible®, quoted by permission (see [Credits](#credits)).
 
 ## Install
 
@@ -289,6 +296,10 @@ Omarchy already provides most of these; the install command above adds the rest.
 
 ## Credits
 
-Bible text has its own copyright and attribution, shown in About & Attribution. Cross-references come from each version's source and from "Cross references" by [OpenBible.info](https://www.openbible.info/labs/cross-references/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) and converted for OmaWord (entries without positive votes dropped, duplicates merged); that data, `resources/crossrefs.bin`, stays under CC BY 4.0. The application code is [MIT licensed](LICENSE).
+Bible text has its own copyright and attribution, shown in About & Attribution. The screenshots quote the NET Bible, under its own permission rather than the MIT license:
 
-Found a problem or have an idea? [Open a GitHub issue](https://github.com/bradenr402/omaword/issues). See [ARCHITECTURE.md](ARCHITECTURE.md) and [tests/README.md](tests/README.md) for development.
+> Scripture quoted by permission. Quotations designated (NET) are from the NET Bible® copyright ©1996, 2019 by Biblical Studies Press, L.L.C. http://netbible.com All rights reserved.
+
+Cross-references come from each version's source and from "Cross references" by [OpenBible.info](https://www.openbible.info/labs/cross-references/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) and converted for OmaWord (entries without positive votes dropped, duplicates merged); that data, `resources/crossrefs.bin`, stays under CC BY 4.0. The application code is [MIT licensed](LICENSE).
+
+Found a problem or have an idea? [Open a GitHub issue](https://github.com/bradenr402/omaword/issues), or a pull request. Agent contributions are welcome. See [ARCHITECTURE.md](ARCHITECTURE.md), [tests/README.md](tests/README.md), and [AGENTS.md](AGENTS.md) for development.
