@@ -9,9 +9,12 @@
 class QTextDocument;
 
 // A Markdown TextEdit's preview layout (TextEdit.MarkdownText). Qt indents
-// block quotes 40 px on both sides and draws nothing else, and puts no space
-// between paragraphs. This narrows quotes to `indent` per level on the left
-// only, puts `gap` (QuoteBars: a line of the text) above each paragraph, list, quote, heading, and code
+// block quotes 40 px on both sides and draws nothing else, indents lists
+// 40 px a level, and puts no space between paragraphs. This narrows quotes
+// to `indent` per level on the left only, lists to `listIndent` a level
+// (further where a list's widest marker, "10.", needs the room: Qt draws
+// markers right-aligned a space before the text, and one past the left edge
+// is cut off), puts `gap` (QuoteBars: a line of the text) above each paragraph, list, quote, heading, and code
 // block (not between a paragraph's lines, a list's items, or a code block's
 // lines), and reports where each quote level's bar goes ({x, y, height,
 // level} in document coordinates) for QuoteBars.qml. Qt keeps no trace of
@@ -24,6 +27,7 @@ class MarkdownQuotes : public QObject
     Q_OBJECT
     Q_PROPERTY(QQuickTextDocument *document READ document WRITE setDocument NOTIFY documentChanged)
     Q_PROPERTY(qreal indent READ indent WRITE setIndent NOTIFY indentChanged)
+    Q_PROPERTY(qreal listIndent READ listIndent WRITE setListIndent NOTIFY listIndentChanged)
     Q_PROPERTY(qreal gap READ gap WRITE setGap NOTIFY gapChanged)
     Q_PROPERTY(QVariantList bars READ bars NOTIFY barsChanged)
 public:
@@ -32,20 +36,26 @@ public:
     void setDocument(QQuickTextDocument *target);
     qreal indent() const { return m_indent; }
     void setIndent(qreal indent);
+    qreal listIndent() const { return m_listIndent; }
+    void setListIndent(qreal indent);
     qreal gap() const { return m_gap; }
     void setGap(qreal gap);
     QVariantList bars() const { return m_bars; }
 signals:
     void documentChanged();
     void indentChanged();
+    void listIndentChanged();
     void gapChanged();
     void barsChanged();
 private:
     void narrow();
     void measure();
+    // The room a list's markers take before its text: the widest one and a space.
+    static qreal markerRoom(const class QTextList *list);
     QPointer<QQuickTextDocument> m_target;
     QPointer<QTextDocument> m_document;
     qreal m_indent = 14;
+    qreal m_listIndent = 24;
     qreal m_gap = 9;
     bool m_narrowing = false;
     QVariantList m_bars;

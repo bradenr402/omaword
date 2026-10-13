@@ -3,9 +3,10 @@ import OmaWord.Reader 1.0
 
 // A Markdown preview's layout (TextEdit.MarkdownText, MarkdownQuotes): one
 // line of the text's height between paragraphs, lists, and quotes, as a blank
-// line reads, and for block quotes a small indent per level and a muted bar
-// beside each, the way quotes are usually drawn. A child of the TextEdit, so
-// the bars scroll with its text.
+// line reads; lists indented 1.6 em a level, room for a bullet or "10." (Qt's
+// own 40 px reads as a deep step); and for block quotes a small indent per level
+// and a muted bar beside each, the way quotes are usually drawn. A child of
+// the TextEdit, so the bars scroll with its text.
 Item {
     id: root
     required property TextEdit target
@@ -17,6 +18,7 @@ Item {
         id: quotes
         document: root.target.textDocument
         indent: Math.round(14 * root.uiScale)
+        listIndent: Math.round(1.6 * root.target.font.pixelSize)
         gap: Math.round(line.lineSpacing)
     }
     Repeater {

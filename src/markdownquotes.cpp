@@ -5,9 +5,11 @@
 #include <QCoreApplication>
 #include <QQmlEngine>
 #include <QQuickTextDocument>
+#include <QFontMetricsF>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextList>
 
 static void registerMarkdownQuotes()
 {
@@ -65,6 +67,14 @@ void MarkdownQuotes::setIndent(qreal indent)
     emit indentChanged();
 }
 
+void MarkdownQuotes::setListIndent(qreal indent)
+{
+    if (qFuzzyCompare(indent, m_listIndent)) return;
+    m_listIndent = indent;
+    narrow();
+    emit listIndentChanged();
+}
+
 namespace {
 enum Flag { StartsQuote = 1, Continues = 2 };
 enum Kind { Paragraph, List, Code, Heading };
@@ -78,17 +88,49 @@ Kind kind(const QTextBlock &block)
 }
 }
 
+qreal MarkdownQuotes::markerRoom(const QTextList *list)
+{
+    // As QTextDocumentLayout draws them: a bullet a third of a line wide, a
+    // number as wide as its text ("10."), a task's box about a line high.
+    const int style = list->format().style();
+    const bool bullet = style == QTextListFormat::ListDisc || style == QTextListFormat::ListCircle || style == QTextListFormat::ListSquare;
+    qreal room = 0;
+    for (int i = 0; i < list->count(); ++i) {
+        const QTextBlock item = list->item(i);
+        const QFontMetricsF metrics(item.charFormat().font());
+        const qreal width = item.blockFormat().marker() != QTextBlockFormat::MarkerType::NoMarker ? metrics.height()
+            : bullet ? metrics.lineSpacing() / 3 : metrics.horizontalAdvance(list->itemText(item));
+        room = std::max(room, std::ceil(metrics.horizontalAdvance(QLatin1Char(' ')) + width));
+    }
+    return room;
+}
+
 void MarkdownQuotes::narrow()
 {
     if (!m_document || m_narrowing) return;
     m_narrowing = true;
+    // A list level's indent (its bullet or number sits a space before its text).
+    if (!qFuzzyCompare(m_document->indentWidth(), m_listIndent)) m_document->setIndentWidth(m_listIndent);
     QTextCursor cursor(m_document);
     cursor.beginEditBlock();
     const QChar marker(0x200b);
     QTextBlock previous;
+    // How much further in each list stands than its levels' indent, its
+    // markers' room beyond them added to its parent's (nested: the latest
+    // list at each depth).
+    QHash<const QTextList *, qreal> shifts;
+    QHash<int, qreal> depths;
     for (auto block = m_document->begin(); block.isValid(); block = block.next()) {
         const auto format = block.blockFormat();
         const int level = std::max(0, format.intProperty(QTextFormat::BlockQuoteLevel));
+        const QTextList *list = block.textList();
+        const bool resumed = list && shifts.contains(list);
+        qreal shift = 0;
+        if (list) {
+            const int depth = list->format().indent();
+            if (!resumed) shifts.insert(list, depths.value(depth - 1) + std::max<qreal>(0, markerRoom(list) - m_listIndent));
+            shift = depths[depth] = shifts.value(list);
+        }
         // Fresh text (previewMarkdown's): read its markers into the block, then drop them.
         if (block.userState() < 0) {
             const QString text = block.text();
@@ -114,13 +156,17 @@ void MarkdownQuotes::narrow()
             if (before == Paragraph && now == Paragraph && (previous.userState() & Continues) && previousLevel == level
                 && !(block.userState() & StartsQuote)) top = 0;
             else if (before == Code && now == Code) top = 0;
-            else if (before == List && now == List && previous.textList() == block.textList()) top = 0;
+            // A list's items run on, into a list nested in one and back out
+            // to it; a new list beside them starts after a gap.
+            else if (before == List && now == List && (previous.textList() == list || resumed
+                     || list->format().indent() > previous.textList()->format().indent())) top = 0;
         }
-        const qreal left = level > 0 ? level * m_indent : format.leftMargin();
+        const qreal left = (level > 0 ? level * m_indent : list ? 0 : format.leftMargin()) + shift;
         if (!qFuzzyCompare(format.leftMargin() + 1, left + 1) || !qFuzzyIsNull(format.rightMargin())
             || !qFuzzyCompare(format.topMargin() + 1, top + 1) || !qFuzzyIsNull(format.bottomMargin())) {
             QTextBlockFormat spaced;
-            if (level > 0) { spaced.setLeftMargin(left); spaced.setRightMargin(0); }
+            if (level > 0) spaced.setRightMargin(0);
+            if (level > 0 || list) spaced.setLeftMargin(left);
             spaced.setTopMargin(top);
             spaced.setBottomMargin(0);
             cursor.setPosition(block.position());

@@ -411,9 +411,46 @@ private slots:
         const double gap = qRound(QFontMetricsF(item("deskPreview")->property("font").value<QFont>()).lineSpacing());
         QVERIFY(gap >= 15);
         QCOMPARE(tops, (QList<double>{0, 0, gap, gap, 0, gap, 0, gap, gap, gap}));
+        // A list stands 1.6 em in (Qt's own 40 px a level reads as a deep
+        // step), room for its bullet before the text.
+        const double em = item("deskPreview")->property("font").value<QFont>().pixelSize();
+        QCOMPARE(document->indentWidth(), double(qRound(1.6 * em)));
+        int listed = -1;
+        for (auto block = document->begin(); block.isValid(); block = block.next()) if (block.text() == "a") listed = block.position();
+        const QRectF paragraph = caret(item("deskPreview"), document->find("Next paragraph").selectionStart()), entry = caret(item("deskPreview"), listed);
+        QCOMPARE(qRound(entry.x() - paragraph.x()), qRound(1.6 * em));
         // Two quotes in a row keep separate bars; q1–q3 is one quote.
         QTRY_VERIFY(item("deskQuoteBars:1")); QVERIFY(!item("deskQuoteBars:2"));
         key(Qt::Key_Escape); QTRY_VERIFY(!object("notesDrawer")->property("visible").toBool());
+    }
+    // Lists stand a little in: 1.6 em a level (Qt's own 40 px reads as a
+    // deep step), further only where a list's widest marker ("10.") would
+    // not fit before its text; a list's items run on into a nested list and
+    // back out, and a new list starts after a gap.
+    void listsStandALittleIn() {
+        QVERIFY(bible->setDeskPage("Para\n\n- a\n  - nested\n- b\n\n9. nine\n10. ten\n\n- [ ] task", desk()));
+        openDesk(); key(Qt::Key_V, Qt::AltModifier); QTRY_VERIFY(item("deskPreview")->hasActiveFocus());
+        auto preview = item("deskPreview");
+        const auto document = preview->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        QTRY_VERIFY(!document->toPlainText().contains(QChar(0x200b)));
+        QStringList texts; QList<double> tops; QHash<QString, double> xs;
+        for (auto block = document->begin(); block.isValid(); block = block.next()) {
+            texts << block.text(); tops << block.blockFormat().topMargin();
+            xs[block.text()] = caret(preview, block.position()).x();
+        }
+        QCOMPARE(texts, (QStringList{"Para", "a", "nested", "b", "nine", "ten", "task"}));
+        const double gap = qRound(QFontMetricsF(preview->property("font").value<QFont>()).lineSpacing());
+        QCOMPARE(tops, (QList<double>{0, gap, 0, 0, gap, 0, gap}));
+        const QFontMetricsF metrics(preview->property("font").value<QFont>());
+        const double level = qRound(1.6 * preview->property("font").value<QFont>().pixelSize());
+        const double numbers = std::max(level, std::ceil(metrics.horizontalAdvance(' ') + metrics.horizontalAdvance("10.")));
+        QCOMPARE(xs["a"] - xs["Para"], level);
+        QCOMPARE(xs["nested"] - xs["Para"], 2 * level);
+        QCOMPARE(xs["b"], xs["a"]);
+        QCOMPARE(xs["nine"] - xs["Para"], numbers);
+        QCOMPARE(xs["ten"], xs["nine"]);
+        QVERIFY(xs["task"] - xs["Para"] >= level);
+        QVERIFY(level < 40);
     }
     void cleanDeskAsksFirstAndUndoes() {
         navigate("John 1:4"); key(Qt::Key_D); navigate("John 1:5"); key(Qt::Key_D);
