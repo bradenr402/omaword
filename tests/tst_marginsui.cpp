@@ -1313,6 +1313,40 @@ private slots:
         QVERIFY(std::abs((verse["top"].toDouble() + verse["bottom"].toDouble()) / 2 - (top + bottom) / 2) < 2);
     }
 
+    void panelOpeningCentersClippedSelection_data() {
+        QTest::addColumn<QString>("panel");
+        QTest::addColumn<int>("width");
+        QTest::addColumn<bool>("clippedAbove");
+        for (const QString panel : {"notes", "desk", "marks"})
+            for (int width : {1000, 1800})
+                for (bool above : {false, true})
+                    QTest::newRow(qPrintable(panel + QString("-%1-%2").arg(width).arg(above ? "above" : "below"))) << panel << width << above;
+    }
+    void panelOpeningCentersClippedSelection() {
+        QFETCH(QString, panel); QFETCH(int, width); QFETCH(bool, clippedAbove);
+        resize(width, 900); navigate("John 3:16");
+        const auto verse = js("measureVerse", {16}).toMap();
+        const double available = item("reading")->height() - prop("floatingSafety").toDouble();
+        // Only eight pixels are clipped: partially visible must count too.
+        js("setReaderY", {clippedAbove ? verse["top"].toDouble() + 8 : verse["bottom"].toDouble() - available - 8});
+        if (panel == "notes") key(Qt::Key_W);
+        else key(panel == "desk" ? Qt::Key_D : Qt::Key_M, Qt::ShiftModifier);
+        QTRY_VERIFY(object("notesDrawer")->property("opened").toBool());
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
+        const auto centered = [&] {
+            const auto now = js("measureVerse", {16}).toMap();
+            const double middle = item("reading")->property("contentY").toDouble()
+                + (item("reading")->height() - prop("floatingSafety").toDouble()) / 2;
+            return std::abs((now["top"].toDouble() + now["bottom"].toDouble()) / 2 - middle) < 2;
+        };
+        QTRY_VERIFY(centered());
+        // Switching panels also checks visibility, without a drawer resize.
+        js("setReaderY", {js("measureVerse", {16}).toMap()["top"].toDouble() + 8});
+        if (panel == "notes") QVERIFY(QMetaObject::invokeMethod(window, "openDesk"));
+        else QVERIFY(QMetaObject::invokeMethod(window, "openNotes", Q_ARG(QVariant, true)));
+        QTRY_VERIFY(centered());
+    }
+
     // ---- Focus mode with margins ----------------------------------------------
     // Entering and leaving focus mode with margin notes and the outline on:
     // frame by frame (verifyTransition), with rapid retargeting toggles and

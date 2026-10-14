@@ -1186,7 +1186,6 @@ private slots:
         reference("John 3:16-18");
         const auto width = item("reading")->width();
         const auto height = item("verseBody16")->height();
-        const auto position = prop("reading","contentY");
         key(Qt::Key_W);
         QVERIFY(prop("notesDrawer","visible").toBool());
         QVERIFY(prop("notesDrawer","position").toDouble() < 1);
@@ -1194,7 +1193,15 @@ private slots:
         QCOMPARE(prop("notesDrawer","edge").toInt(),int(Qt::RightEdge));
         QCOMPARE(item("reading")->width(),width);
         QCOMPARE(item("verseBody16")->height(),height);
-        QCOMPARE(prop("reading","contentY"),position);
+        // An overlay doesn't reflow the text, but opening it still brings
+        // a clipped selection into view.
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
+        QVariant first, last;
+        QVERIFY(QMetaObject::invokeMethod(window,"measureVerse",Q_RETURN_ARG(QVariant,first),Q_ARG(QVariant,16)));
+        QVERIFY(QMetaObject::invokeMethod(window,"measureVerse",Q_RETURN_ARG(QVariant,last),Q_ARG(QVariant,18)));
+        const double top = prop("reading","contentY").toDouble();
+        QVERIFY(first.value<QJSValue>().property("top").toNumber() >= top);
+        QVERIFY(last.value<QJSValue>().property("bottom").toNumber() <= top + item("reading")->height() - window->property("floatingSafety").toDouble());
         type("A guarded draft");
         capture("phase-b-notes-editor");
         // ctrl w saves and hands the keyboard to the reader, Notes still open;

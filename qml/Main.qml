@@ -3844,6 +3844,7 @@ ApplicationWindow {
         notesDrawer.focusEditor = focusEditor
         notesDrawer.open()
         if (loadedNoteReference !== bible.selectionReference) syncNote()
+        Qt.callLater(app.keepSelectionInView)
         if (focusEditor && hasSelection) {
             notePreview = false
             if (notesDrawer.shown) focusNoteEnd()
@@ -3975,6 +3976,7 @@ ApplicationWindow {
         notesDrawer.focusEditor = true
         notesDrawer.open()
         if (shown) focusDesk()
+        Qt.callLater(app.keepSelectionInView)
     }
     // Marks in the Margin: opened afresh (not turned to from itself), it
     // starts unfiltered at the first row here.
@@ -3991,6 +3993,7 @@ ApplicationWindow {
         }
         notesDrawer.open()
         if (shown) focusSavedList()
+        Qt.callLater(app.keepSelectionInView)
     }
     // See also in the Margin (TagsPanel roots it first).
     function openRelatedPanel() {

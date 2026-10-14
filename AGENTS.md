@@ -2,7 +2,7 @@
 
 Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Omarchy (C++17, Qt 6 Quick/QML, qmake): only what costs time when you don't know it. `ARCHITECTURE.md` has the internals, `tests/README.md` the suites. These are defaults: the engineer directing you can override anything here.
 
-**Keep this file current.** When a change makes anything here wrong or incomplete, update it in the same change. Tell the user every time you edit this file, and show EXACTLY what changed: the diff, or each line removed or replaced with its replacement. Never edit it silently.
+**Keep this file current.** Update it when a change makes it wrong or incomplete, and show the user the diff.
 
 ## Hard rules
 
@@ -17,6 +17,7 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 - Write the least code that solves the problem: no speculative abstractions, no handling for impossible cases.
 - Touch only what you must, in the file's own style, with no drive-by reformatting. Remove code your change leaves unused; mention older dead code instead of deleting it.
 - Update the docs your change makes wrong. `README.md` stays short, in the spirit of [Omawrite's](https://github.com/omacom/omawrite/blob/master/README.md): a sentence for what a new user needs, the details left to the app. Internal contracts go in `ARCHITECTURE.md`, suites in `tests/README.md`.
+- Keep agent docs concise: record durable contracts, non-obvious traps, and where to look. Replace outdated text instead of appending history. Don't duplicate code, key lists, test cases, UI walkthroughs, or benchmarks; link to their source. Suite descriptions stay one short sentence each.
 - If evidence contradicts something you said, retract it plainly.
 
 ## Dev environment
