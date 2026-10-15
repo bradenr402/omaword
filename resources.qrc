@@ -41,7 +41,6 @@
     <file>qml/SidePanelHeader.qml</file>
     <file>qml/KeyNotation.js</file>
     <file>qml/RowMenu.js</file>
-    <file>resources/catalog.json</file>
     <file>resources/cell.png</file>
     <file alias="branding/icon.svg">assets/app.svg</file>
   </qresource>

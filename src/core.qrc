@@ -1,6 +1,7 @@
 <RCC>
   <qresource prefix="/resources">
     <file alias="crossrefs.bin">../resources/crossrefs.bin</file>
+    <file alias="catalog.json">../resources/catalog.json</file>
   </qresource>
   <qresource prefix="/completions">
     <file alias="omaword.bash">../assets/completions/omaword.bash</file>

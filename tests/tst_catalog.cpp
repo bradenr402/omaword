@@ -2,6 +2,7 @@
 #include <QtTest>
 
 #include "versioncatalog.h"
+#include "aofixture.h"
 
 #include <QDir>
 #include <QFile>
@@ -15,63 +16,10 @@
 #include <cstring>
 
 namespace {
-void append16(QByteArray &bytes, quint16 value)
-{
-    char data[2];
-    qToLittleEndian(value, data);
-    bytes.append(data, 2);
-}
-
-void append32(QByteArray &bytes, quint32 value)
-{
-    char data[4];
-    qToLittleEndian(value, data);
-    bytes.append(data, 4);
-}
-
-// A complete stored ZIP containing only original test text.
 QByteArray fixture()
 {
-    const QByteArray name("01GENtest.usfm");
-    const QByteArray text("\\id GEN\n\\h Test\n\\c 1\n\\p\n\\v 1 Original fixture verse.\n");
-    quint32 crc = 0xffffffff;
-    for (unsigned char ch : text) {
-        crc ^= ch;
-        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-    }
-    crc ^= 0xffffffff;
-    QByteArray zip("PK\x03\x04", 4);
-    append16(zip, 20);
-    for (int i = 0; i < 4; ++i) append16(zip, 0);
-    append32(zip, crc);
-    append32(zip, text.size());
-    append32(zip, text.size());
-    append16(zip, name.size());
-    append16(zip, 0);
-    zip += name + text;
-    const quint32 offset = zip.size();
-    zip.append("PK\x01\x02", 4);
-    append16(zip, 20);
-    append16(zip, 20);
-    for (int i = 0; i < 4; ++i) append16(zip, 0);
-    append32(zip, crc);
-    append32(zip, text.size());
-    append32(zip, text.size());
-    append16(zip, name.size());
-    for (int i = 0; i < 4; ++i) append16(zip, 0);
-    append32(zip, 0);
-    append32(zip, 0);
-    zip += name;
-    const quint32 directorySize = zip.size() - offset;
-    zip.append("PK\x05\x06", 4);
-    append16(zip, 0);
-    append16(zip, 0);
-    append16(zip, 1);
-    append16(zip, 1);
-    append32(zip, directorySize);
-    append32(zip, offset);
-    append16(zip, 0);
-    return zip;
+    return QJsonDocument(AoFixture::complete("eng_net", {AoFixture::book("GEN", 1,
+        {AoFixture::chapter(1, {AoFixture::verse(1, {"Original fixture verse."})})})})).toJson(QJsonDocument::Compact);
 }
 
 struct Script {
@@ -173,6 +121,7 @@ VersionCatalog::Dependencies dependencies(FakeManager &manager, const QTemporary
     VersionCatalog::Dependencies result;
     result.manager = &manager;
     result.cacheDirectory = directory.path();
+    result.dataDirectory = directory.path();
     result.stallTimeoutMs = 500;
     result.totalTimeoutMs = 1500;
     return result;
@@ -180,7 +129,7 @@ VersionCatalog::Dependencies dependencies(FakeManager &manager, const QTemporary
 
 QString destination(const QTemporaryDir &directory)
 {
-    return directory.filePath("catalog/engnet_usfm.zip");
+    return directory.filePath("catalog/eng_net_complete.json");
 }
 
 QByteArray readFile(const QString &path)
@@ -201,37 +150,60 @@ class CatalogTest : public QObject
 {
     Q_OBJECT
 private slots:
+    void malformedTranslationDoesNotReplaceCache()
+    {
+        QTemporaryDir directory; QVERIFY(seedCache(directory));
+        FakeManager manager;
+        auto root = QJsonDocument::fromJson(fixture()).object();
+        auto books = root["books"].toArray(); auto book = books[0].toObject(); book["id"] = "XYZ"; books[0] = book; root["books"] = books;
+        manager.script.body = QJsonDocument(root).toJson(QJsonDocument::Compact);
+        VersionCatalog catalog(dependencies(manager, directory)); QSignalSpy finished(&catalog, &VersionCatalog::downloadFinished);
+        catalog.download("eng_net"); QTRY_VERIFY(!catalog.busy());
+        QVERIFY(catalog.error().contains("Unsupported AO book")); QCOMPARE(finished.size(), 0);
+        QCOMPARE(readFile(destination(directory)), QByteArray("previous cache"));
+    }
+    void persistedRefreshAndFailure()
+    {
+        QTemporaryDir directory;
+        FakeManager manager;
+        auto config = dependencies(manager, directory);
+        auto translation = AoFixture::complete("Case_ID", {}).value("translation").toObject();
+        translation["completeTranslationApiLink"] = "/api/Case_ID/complete.json";
+        manager.script.body = QJsonDocument(QJsonObject{{"translations", QJsonArray{translation}}}).toJson(QJsonDocument::Compact);
+        VersionCatalog catalog(config);
+        QCOMPARE(manager.requests, 0);
+        QSignalSpy changed(&catalog, &VersionCatalog::entriesChanged);
+        catalog.refresh();
+        QTRY_COMPARE(changed.size(), 1);
+        QCOMPARE(catalog.entries().size(), 1);
+        QCOMPARE(catalog.entries().first().toMap()["id"].toString(), "Case_ID");
+        QVERIFY(!readFile(directory.filePath("ao-catalog.json")).isEmpty());
+        VersionCatalog restarted(config);
+        QCOMPARE(restarted.entries(), catalog.entries());
+        const auto previous = readFile(directory.filePath("ao-catalog.json"));
+        manager.script.body = "{\"error\":\"no catalog\"}";
+        catalog.refresh(); QTRY_VERIFY(!catalog.busy()); QVERIFY(!catalog.error().isEmpty());
+        QCOMPARE(catalog.entries(), restarted.entries());
+        QCOMPARE(readFile(directory.filePath("ao-catalog.json")), previous);
+        translation["completeTranslationApiLink"] = "https://foreign.example/complete.json";
+        manager.script.body = QJsonDocument(QJsonObject{{"translations", QJsonArray{translation}}}).toJson();
+        catalog.refresh(); QTRY_VERIFY(!catalog.busy()); QVERIFY(!catalog.error().isEmpty());
+        QCOMPARE(readFile(directory.filePath("ao-catalog.json")), previous);
+        QFile corrupt(directory.filePath("ao-catalog.json")); QVERIFY(corrupt.open(QIODevice::WriteOnly)); corrupt.write("broken"); corrupt.close();
+        VersionCatalog fallback(config);
+        QVERIFY(fallback.entries().size() > 1000); QVERIFY(fallback.error().contains("Saved AO"));
+        QCOMPARE(readFile(directory.filePath("ao-catalog.json")), QByteArray("broken"));
+    }
     void metadataAndAllowlist()
     {
         QObject parent;
         VersionCatalog bundled(&parent);
         QCOMPARE(bundled.parent(), &parent);
         QVERIFY2(bundled.error().isEmpty(), qPrintable(bundled.error()));
-        QCOMPARE(bundled.entries().size(), 7);
-        const QStringList ids = {"engnet", "eng-kjv2006", "eng-kjv", "engojb", "engylt", "eng-asv", "engbsb"};
-        const QStringList abbreviations = {"NET", "KJV", "KJV+", "OJB", "YLT", "ASV", "BSB"};
-        for (int i = 0; i < ids.size(); ++i) {
-            const auto entry = bundled.entries()[i].toMap();
-            QCOMPARE(entry.size(), 11);
-            QCOMPARE(entry.value("id").toString(), ids[i]);
-            QCOMPARE(entry.value("abbreviation").toString(), abbreviations[i]);
-            QCOMPARE(entry.value("url").toString(), "https://ebible.org/Scriptures/" + ids[i] + "_usfm.zip");
-            QCOMPARE(entry.value("detailsUrl").toString(), "https://ebible.org/find/details.php?id=" + ids[i] + "&all=1");
-            QVERIFY(!entry.value("name").toString().isEmpty());
-            QVERIFY(!entry.value("copyright").toString().isEmpty());
-            for (const char *key : {"description", "year", "license"}) QVERIFY2(!entry.value(key).toString().isEmpty(), key);
-            QVERIFY(entry.value("size").toDouble() > 1000000);
-            QVERIFY(entry.value("features").canConvert<QVariantList>());
-        }
-        // What each edition carries, as measured from its source.
-        auto features = [&](int index) { return bundled.entries()[index].toMap()["features"].toStringList(); };
-        QCOMPARE(features(0), QStringList({"headings"}));
-        QCOMPARE(features(2), QStringList({"footnotes", "wordsOfJesus", "apocrypha"}));
-        QVERIFY(features(4).isEmpty());
-        QCOMPARE(bundled.entries()[3].toMap()["license"].toString(), QString("CC BY 4.0"));
-        QVERIFY(bundled.entries()[0].toMap()["copyright"].toString().contains("© 1996-2016 Biblical Studies Press, L. L. C."));
-        QVERIFY(bundled.entries()[3].toMap()["copyright"].toString().contains("CC BY 4.0"));
-        QCOMPARE(bundled.entries()[6].toMap()["name"].toString(), "Berean Standard Bible");
+        QVERIFY(bundled.entries().size() > 1000);
+        QSet<QString> ids;
+        for (const auto &value : bundled.entries()) ids.insert(value.toMap().value("id").toString());
+        for (const auto &id : {"eng_net", "BSB", "eng_kjv", "eng_kja", "eng_asv", "eng_ylt", "eng_ojb"}) QVERIFY(ids.contains(id));
 
         QTemporaryDir directory;
         FakeManager manager;
@@ -263,13 +235,13 @@ private slots:
                 QCOMPARE(readFile(destination(directory)), QByteArray("previous cache"));
             }
         });
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QVERIFY(catalog.busy());
-        catalog.download("engbsb");
+        catalog.download("BSB");
         QCOMPARE(manager.requests, 1);
-        QCOMPARE(manager.lastRequest.url(), QUrl("https://ebible.org/Scriptures/engnet_usfm.zip"));
+        QCOMPARE(manager.lastRequest.url(), QUrl("https://bible.helloao.org/api/eng_net/complete.json"));
         QCOMPARE(manager.lastRequest.attribute(QNetworkRequest::RedirectPolicyAttribute).toInt(),
-                 int(QNetworkRequest::NoLessSafeRedirectPolicy));
+                 int(QNetworkRequest::SameOriginRedirectPolicy));
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 1000);
         QVERIFY(partialProgress);
         QVERIFY(progress.size() > 1);
@@ -288,10 +260,10 @@ private slots:
         QTest::addColumn<QString>("message");
         QTest::newRow("404") << 0 << "HTTP 404";
         QTest::newRow("network") << 1 << "connection failure";
-        QTest::newRow("html") << 2 << "ZIP";
-        QTest::newRow("empty") << 3 << "ZIP";
-        QTest::newRow("truncated-zip") << 4 << "ZIP";
-        QTest::newRow("empty-zip") << 5 << "ZIP";
+        QTest::newRow("html") << 2 << "requested AO";
+        QTest::newRow("empty") << 3 << "requested AO";
+        QTest::newRow("truncated-json") << 4 << "requested AO";
+        QTest::newRow("error-json") << 5 << "requested AO";
         QTest::newRow("oversize-header") << 6 << "size limit";
         QTest::newRow("oversize-stream") << 7 << "size limit";
         QTest::newRow("length-mismatch") << 8 << "incomplete";
@@ -314,7 +286,7 @@ private slots:
         case 2: manager.script.body = "<html>Download unavailable</html>"; break;
         case 3: manager.script.body.clear(); break;
         case 4: manager.script.body.chop(22); break;
-        case 5: manager.script.body = QByteArray("PK\x05\x06", 4) + QByteArray(18, '\0'); break;
+        case 5: manager.script.body = "{\"error\":\"unavailable\"}"; break;
         case 6: manager.script.length = 1025; break;
         case 7: manager.script.body += QByteArray(1025, 'x'); manager.script.chunkSize = 200; break;
         case 8: manager.script.length = manager.script.body.size() + 1; break;
@@ -323,7 +295,7 @@ private slots:
         }
         VersionCatalog catalog(config);
         QSignalSpy finished(&catalog, &VersionCatalog::downloadFinished);
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QTRY_VERIFY_WITH_TIMEOUT(!catalog.busy(), 1000);
         QVERIFY2(catalog.error().contains(message), qPrintable(catalog.error()));
         QCOMPARE(finished.size(), 0);
@@ -331,7 +303,7 @@ private slots:
         QCOMPARE(catalog.progress(), 0.0);
         QCOMPARE(QDir(directory.filePath("catalog")).entryList(QDir::Files | QDir::Hidden).size(), 1);
         manager.script = Script{};
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QVERIFY(catalog.error().isEmpty());
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 1000);
         QCOMPARE(readFile(destination(directory)), fixture());
@@ -346,7 +318,7 @@ private slots:
         manager.script.length = manager.script.body.size();
         VersionCatalog catalog(dependencies(manager, directory));
         QSignalSpy finished(&catalog, &VersionCatalog::downloadFinished);
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QTRY_VERIFY_WITH_TIMEOUT(catalog.progress() > 0, 300);
         QPointer<FakeReply> canceled = manager.lastReply;
         catalog.cancel();
@@ -358,7 +330,7 @@ private slots:
         QCOMPARE(finished.size(), 0);
         catalog.cancel();
         manager.script = Script{};
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 1000);
         QCOMPARE(readFile(destination(directory)), fixture());
     }
@@ -384,13 +356,13 @@ private slots:
         config.totalTimeoutMs = stall ? 500 : 80;
         VersionCatalog catalog(config);
         QSignalSpy finished(&catalog, &VersionCatalog::downloadFinished);
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QTRY_VERIFY_WITH_TIMEOUT(!catalog.busy(), 500);
         QVERIFY2(catalog.error().contains(stall ? "stalled" : "timed out"), qPrintable(catalog.error()));
         QCOMPARE(finished.size(), 0);
         QCOMPARE(readFile(destination(directory)), QByteArray("previous cache"));
         manager.script = Script{};
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QVERIFY(catalog.error().isEmpty());
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 500);
     }
@@ -404,7 +376,7 @@ private slots:
         QVERIFY(obstruction.open(QIODevice::WriteOnly));
         obstruction.close();
         VersionCatalog catalog(config);
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QVERIFY(!catalog.busy());
         QVERIFY(catalog.error().contains("cache"));
         QCOMPARE(manager.requests, 0);
@@ -413,7 +385,7 @@ private slots:
         manager.script.hold = true;
         {
             VersionCatalog active(config);
-            active.download("engnet");
+            active.download("eng_net");
             QVERIFY(active.busy());
         }
         QVERIFY(manager.lastReply && manager.lastReply->aborted);
@@ -427,14 +399,14 @@ private slots:
         FakeManager manager;
         VersionCatalog catalog(dependencies(manager, directory));
         QSignalSpy finished(&catalog, &VersionCatalog::downloadFinished);
-        catalog.download("engnet");
+        catalog.download("eng_net");
         // Force atomic rename to fail after the staging file was opened.
         QVERIFY(QDir().mkdir(destination(directory)));
         QTRY_VERIFY_WITH_TIMEOUT(!catalog.busy(), 500);
         QVERIFY(catalog.error().contains("Cannot save"));
         QCOMPARE(finished.size(), 0);
         QVERIFY(QDir().rmdir(destination(directory)));
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 500);
         QCOMPARE(readFile(destination(directory)), fixture());
     }
@@ -451,10 +423,10 @@ private slots:
             if (!canceled && catalog.progress() > 0) {
                 canceled = true;
                 catalog.cancel();
-                catalog.download("engnet");
+                catalog.download("eng_net");
             }
         });
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 500);
         QCOMPARE(manager.requests, 2);
         QCOMPARE(readFile(destination(directory)), fixture());
@@ -496,12 +468,12 @@ private slots:
         VersionCatalog::Dependencies config;
         config.cacheDirectory = directory.path();
         config.urlTransform = [&](const QUrl &source) {
-            if (source.scheme() != "https" || source.host() != "ebible.org") return QUrl();
+            if (source.scheme() != "https" || source.host() != "bible.helloao.org") return QUrl();
             return QUrl(QString("http://127.0.0.1:%1/start").arg(server.serverPort()));
         };
         VersionCatalog catalog(config);
         QSignalSpy finished(&catalog, &VersionCatalog::downloadFinished);
-        catalog.download("engnet");
+        catalog.download("eng_net");
         QTRY_VERIFY_WITH_TIMEOUT(!catalog.busy(), 1000);
         QVERIFY2(catalog.error().isEmpty(), qPrintable(catalog.error()));
         QCOMPARE(requests, 2);
