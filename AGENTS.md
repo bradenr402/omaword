@@ -9,7 +9,7 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 1. **No GitHub writes** (`git push`, PRs, issues, comments, by any channel) without an explicit instruction. Reads are fine.
 2. **Never touch the user's real data** in `~/.local/share/omaword/`. Tests sandbox `HOME` and every `XDG_*`; keep it so, and launch the app yourself only with throwaway ones. Offscreen, also unset `QT_QPA_PLATFORMTHEME` (Omarchy's `gtk3` theme quits without a display).
 3. **Never kill OmaWord by name**; stop only a PID you started. The user may be reading in it.
-4. **Never commit Bible text or local data** (USFM ZIPs, `*.sqlite`, backups, exported notes; see `.gitignore`).
+4. **Never commit Bible text or local data** (AO complete downloads, `*.sqlite`, backups, exported notes; see `.gitignore`).
 
 ## Behavior
 
@@ -34,7 +34,7 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 - `bin/test` builds the libraries once, then runs every suite offscreen in a sandboxed home, logging to `build/test-logs/<suite>.log`. `--suite <name>` (repeatable) selects; test function names need exactly one suite (`bin/test --suite ranges noteConfirmationAndDestinationDrift`). While it runs, build elsewhere (`BUILD_DIR=/tmp/...`).
 - Run the suites your change touches, then all of them before calling work done: CI runs only on GitHub (`.github/workflows/ci.yml`).
 - A new suite needs `tests/<name>.pro` (with `../src/core.pri`, and `../qml/qml.pri` for QML), entries in `bin/test` and in both project lists of `tests/test-runner.sh`, a CI shard, and rows in `tests/README.md`.
-- Fixtures are small, original USFM made in temporary directories: never real Bible text or the network.
+- Fixtures are small, original AO standard JSON made in temporary directories: never real Bible text or the network.
 - Never fix a flaky test with a longer sleep: find the condition it should wait for (motion tests step their animations).
 
 ## Keybindings

@@ -25,7 +25,7 @@ run offscreen with software rendering. Logs: `$BUILD_DIR/test-logs/<suite>.log`
 | `searchrender` | Rendered match geometry and source/document mapping |
 | `deskui` | Shared Desk editing, conflicts, quotations, and Notes/Desk Markdown previews |
 | `historyui` | Jump stack, persisted History, ribbon, and multi-window behavior |
-| `studyui` | Comparison, See also, footnote peeks, source features, and re-import |
+| `studyui` | Comparison, OpenBible See also, footnote peeks, words of Jesus, and explicit replacement |
 | `a11yui` | Keyboard/mouse parity, focus hand-off, hints, and character selection |
 | `marginsui` | Outline, margin geometry, dock/focus transitions, and panel-open selection centering |
 | `motion` | Stepped animations, pulses, dimming, repeat keys, and reduced motion |
@@ -35,7 +35,7 @@ run offscreen with software rendering. Logs: `$BUILD_DIR/test-logs/<suite>.log`
 | `ranges` | Atomic range moves, collision confirmation, stale tokens, rollback, and undo |
 | `sound` | Sound cues, throttling, and preferences |
 | `desktop` | Theme/font events, compositor settings, colors, and tooltips |
-| `importer` | USFM parsing, metadata, validation, limits, and staged publication (`tst_usfm.cpp`, `usfm.pro`) |
+| `importer` | AO standard JSON, metadata, offsets, validation, and staged publication (`tst_ao.cpp`, `usfm.pro`) |
 | `catalog` | Catalog validation, streamed downloads, cancellation, timeout, and retry |
 | `annotations` | Flowing annotation paint, geometry, hit tests, and copy mapping (`tst_blockannotations.cpp`, `blockannotations.pro`) |
 | `instance` | Lock/IPC bounds, hand-off, stale recovery, and executable replacement (`tst_singleinstance.cpp`, `singleinstance.pro`) |
@@ -51,14 +51,14 @@ Other suites use `tests/<selector>.pro` and `tests/tst_<selector>.cpp`.
   concurrent suites (default 2, bounded by selected suites and `JOBS`). Avoid
   heavy parallel work during motion/UI tests.
 - The runner sandboxes `HOME` and XDG paths and unsets `QT_QPA_PLATFORMTHEME`.
-  Never run against the user's app data. Fixtures are small original USFM in
+  Never run against the user's app data. Fixtures are small original AO JSON in
   temporary directories; network behavior uses fake replies/local servers.
 - `OMAWORD_TEST_APP=<built executable>` enables real-launch IPC/CLI checks.
-- Optional source checks: `OMAWORD_TEST_USFM_DIR` must contain every catalog ZIP
-  (`<id>_usfm.zip`, IDs in `resources/catalog.json`). Without it those checks
-  skip. Backend single-file overrides: `OMAWORD_TEST_NET_ZIP`,
-  `OMAWORD_TEST_KJV_ZIP`; UI: `OMAWORD_TEST_KJV`. Archives are copied into the
-  sandbox, never modified or committed.
+- Optional source checks: `OMAWORD_TEST_AO_DIR` contains explicitly supplied
+  `<id>_complete.json` files for the seven migration targets; ordinary runs use
+  only synthetic text, never the network.
+- `OMAWORD_TEST_AO_MIGRATION_SCRIPT=<explicit path>` enables the backend's
+  synthetic one-off conversion/install/backup scenario; the script stays outside runtime.
 - Offscreen tests never open audio devices; `OMAWORD_SOUND=0` also disables sound.
 - Visual diagnostics: `OMAWORD_A11Y_SHOTS=<dir>` saves accessibility screenshots;
   `OMAWORD_FOCUS_TIMELINE=<dir>` saves focus-transition timelines/frames.

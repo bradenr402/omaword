@@ -7,7 +7,7 @@ the app and README, not here.
 
 ## Code map
 
-C++17, Qt 6 Quick/QML, SQLite, libarchive, PipeWire; qmake builds two static
+C++17, Qt 6 Quick/QML, SQLite, PipeWire; qmake builds two static
 libraries shared by the app and tests:
 
 - `src/src.pro`: C++ core except `main.cpp` and QML types. Core resources are
@@ -18,7 +18,7 @@ libraries shared by the app and tests:
 
 | Area | Start here |
 | --- | --- |
-| Import, text validation | `src/usfmimporter.*`, `src/biblebooks.*` |
+| Import, text validation | `src/aoimporter.*`, `src/biblebooks.*` |
 | Downloads | `src/versioncatalog.*`, `resources/catalog.json` |
 | Persistence, references, annotations, library | `src/biblebackend.*` |
 | Search | `src/scripturesearch.*`, `src/searchdocument.*` |
@@ -41,7 +41,7 @@ user's real data for development or tests.
 | Format | Current | Compatibility |
 | --- | --- | --- |
 | `personal.sqlite` | `PRAGMA user_version = 10` | Transactional migrations; newer schemas refuse to open |
-| Text generations (`bible-<UUID>.sqlite`) | Schema 6 | Schemas 3–5 still validate with their own digests; missing features degrade gracefully |
+| Text generations (`bible-<UUID>.sqlite`) | Schema 7 (`ao-standard`) | Superseded USFM generations reject; replace through an explicit AO installation |
 | JSON backup | `format: "omaword-backup"`, version 7 | Imports versions 3–7; maximum 32 MiB |
 
 - Personal DB uses WAL and `synchronous=FULL`. Schema 9 migrated bookmarks to
@@ -52,12 +52,11 @@ user's real data for development or tests.
   `history`, `recent_queries`, `ribbon`, `preferences`, `installed`, `library`.
   Reading positions are per version; Desk, tags, preferences, History, and
   ribbon are global.
-- Text schema 4 added notes; 5 poetry indents; 6 parallel passages. Tables:
+- AO text tables:
   `metadata`, `books`, `book_aliases`, `source_chapters`, `source_keys`, `verses`,
-  `notes`, `words_of_jesus`, `indents`, `parallels`. Note offsets and text spans
+  `notes`, `words_of_jesus`, `indents`. Note offsets and text spans
   are UTF-16 into plain verse text. `source_keys` records omitted verses too.
-- Re-import is offered below schema 5, or for schema 5 when its catalog entry
-  advertises parallel passages. Never silently rewrite a text generation.
+- Re-download is explicit in Versions. Never silently rewrite a text generation.
 - Backup 7 includes installed versions' annotations, tag assignments, reading
   places, used tag definitions, and `deskPage`. It excludes Bible text,
   preferences, History, and ribbon. Restore validates every range against its
@@ -74,19 +73,23 @@ user's real data for development or tests.
 
 ## Import and library lifecycle
 
-- Identity comes from numbered internal filename suffixes, checked against
-  `copr.htm`; fallback is `usfm-` plus 32 SHA-256 hex digits of the title.
-  The outer archive filename has no meaning. Same-ID re-import reconnects marks.
+- Identity is AO's case-sensitive provider ID, a bounded safe path component.
+  The input filename has no meaning. Same-ID replacement reconnects marks.
 - Book IDs are stable (1–66 GEN–REV; 67–80 deuterocanon), but navigation follows
-  source order. `FRT`/`INT` are ignored. Chapters/verses are increasing integers
-  1–999; gaps remain gaps. Bridges and suffix labels explicitly fail.
-- Imported text is HTML-escaped; only supported emphasis is generated. Footnotes
-  and cross-references leave verse text and retain their UTF-16 anchor. Notes
-  before a verse anchor to the next verse at offset zero. Unknown markers and
-  invalid UTF-8 fail rather than disappearing silently.
-- Limits: 2,048 archive entries, 32 MiB per entry, 256 MiB total, nesting 32,
-  65,536 UTF-16 units per verse/heading. Reject unsafe/duplicate paths, links,
-  encrypted entries, and NUL. `copr.htm` is decoded without an HTML engine.
+  source `order`. Chapters/verses are increasing integers 1–999; gaps remain gaps.
+  Unknown book codes and content types explicitly fail.
+- Standard AO complete JSON imports English LTR editions. Other catalog languages
+  remain discoverable with compatibility reasons; no RTL or numbering conversion.
+- Text is escaped; words-of-Jesus markup is generated locally. Plain fragments
+  retain source whitespace; structural edge whitespace is trimmed with UTF-16
+  offsets remapped. Poetry pieces start lines; trailing line breaks do not create
+  prose paragraphs. Chapter separators establish paragraph starts.
+- Superscriptions and inline headings use the existing heading model; subtitle
+  notes anchor at the following retained verse's offset zero, outside copied text.
+  Empty verses retain source keys but have no reader rows. Empty chapters reject.
+- Limits: 64 MiB input/download, nesting 32, 80 known books, 65,536 UTF-16 units
+  per text field. Counts include omitted verses and exclude apocryphal books at
+  translation level. Source revision metadata is not a raw JSON-byte checksum.
 - Imports stage and validate a fresh immutable generation, then atomically
   commit its registry pointer. Refresh readers before removing old generations.
   Ownership checks reject symlink, hardlink, or foreign cleanup targets.
@@ -99,7 +102,14 @@ user's real data for development or tests.
   Global tag definitions and Desk survive either way.
 - Downloads use a separate `VersionCatalog` network manager: HTTPS only, no
   downgrade, 64 MiB, 30-second stall and five-minute total limits. Validate the
-  HTTP response and ZIP envelope before publishing to cache; import is separate.
+  HTTP response and AO JSON identity, then worker-side full import validation before
+  publishing to cache; library installation is separate and revalidates its input.
+- Catalog precedence is a valid app-data `ao-catalog.json`, then the bundled
+  metadata snapshot (`bin/ao-catalog`). Manual refresh validates and atomically
+  saves before activation. Failed/corrupt overrides remain recoverable; updates
+  never overwrite them. Browsing and ordinary startup make no network request.
+- Personal ID conversion is a one-off explicit-path SQLite backup transformation
+  outside runtime; orphan marks remain until matching AO editions are installed.
 
 ## Scopes, writes, and multi-window state
 
@@ -228,8 +238,8 @@ user's real data for development or tests.
   Passage links are narrower: capitalized names/recognized abbreviations plus
   existing chapter/verse ranges; no compact or cross-chapter links. Display
   references must never substitute for canonical scope identity.
-- See also orders source cross-references, parallel passages, then OpenBible.info
-  references. Exact ranges dedupe, source wins; absent/self targets hide.
+- See also retains bundled OpenBible.info references and tagged related passages;
+  AO source cross-references and parallel passages are not imported. Absent/self targets hide.
   OpenBible uses KJV numbering, not automatic versification conversion.
 - `resources/crossrefs.bin` is **CC BY 4.0, not MIT**. `bin/crossrefs` converts
   OpenBible.info data; About, README, and packaging retain attribution/license.
