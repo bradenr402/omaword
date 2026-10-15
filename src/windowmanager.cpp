@@ -28,7 +28,7 @@ static QString palettePassage(const BibleBackend *bible, const QString &text)
 
 namespace {
 // The interface reads nothing from the network: nothing QML would fetch (an
-// image a label's text names, as a book name in an imported USFM file could)
+// image a label's text names, as an imported book name could)
 // leaves the computer. Version downloads have their own connection
 // (VersionCatalog). Each request fails at once, its address replaced with
 // one of a scheme no handler knows, so nothing is sent.
@@ -312,9 +312,9 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
         else {
             QMetaObject::invokeMethod(root, "savePosition");
             if (!request.importPath.isEmpty()) {
-                if (bible->busy()) action = {false, QStringLiteral("A USFM import is already running.")};
+                if (bible->busy()) action = {false, QStringLiteral("An AO import is already running.")};
                 else {
-                    bible->importUsfm(QUrl::fromLocalFile(request.importPath));
+                    bible->importAo(QUrl::fromLocalFile(request.importPath));
                     if (!bible->busy()) action = {false, bible->error()};
                     else if (!request.reference.isEmpty()) {
                         auto connection = std::make_shared<QMetaObject::Connection>();

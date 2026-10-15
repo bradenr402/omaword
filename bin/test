@@ -64,17 +64,17 @@ build_dir=$(realpath -m -- "${BUILD_DIR:-$root/build}")
 log_dir="$build_dir/test-logs"
 
 # Normalize caller-relative fixture paths before any worker changes directory.
-if [[ -n ${OMAWORD_TEST_USFM_DIR:-} ]]; then
-    if [[ ! -d $OMAWORD_TEST_USFM_DIR || ! -r $OMAWORD_TEST_USFM_DIR || ! -x $OMAWORD_TEST_USFM_DIR ]]; then
-        printf 'OMAWORD_TEST_USFM_DIR must name a readable directory.\n' >&2
+if [[ -n ${OMAWORD_TEST_AO_DIR:-} ]]; then
+    if [[ ! -d $OMAWORD_TEST_AO_DIR || ! -r $OMAWORD_TEST_AO_DIR || ! -x $OMAWORD_TEST_AO_DIR ]]; then
+        printf 'OMAWORD_TEST_AO_DIR must name a readable directory.\n' >&2
         exit 1
     fi
-    export OMAWORD_TEST_USFM_DIR="$(realpath -- "$OMAWORD_TEST_USFM_DIR")"
+    export OMAWORD_TEST_AO_DIR="$(realpath -- "$OMAWORD_TEST_AO_DIR")"
 fi
-for variable in OMAWORD_TEST_NET_ZIP OMAWORD_TEST_KJV_ZIP OMAWORD_TEST_KJV; do
+for variable in OMAWORD_TEST_KJV_JSON OMAWORD_TEST_AO_MIGRATION_SCRIPT; do
     if [[ -n ${!variable:-} ]]; then
         if [[ ! -f ${!variable} || ! -r ${!variable} ]]; then
-            printf '%s must name a readable USFM ZIP file.\n' "$variable" >&2
+            printf '%s must name a readable file.\n' "$variable" >&2
             exit 1
         fi
         printf -v "$variable" '%s' "$(realpath -- "${!variable}")"
@@ -101,6 +101,7 @@ run_suite() {
         "$real_home"/.local/*|"$real_home"/.config/*|"$real_home"/.cache/*)
             printf 'Refusing to run %s: XDG_STATE_HOME reaches the real user state.\n' "$suite" >&2; return 1 ;;
     esac
+    unset QT_QPA_PLATFORMTHEME
     OMAWORD_SOUND=0 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software "./tst_${projects[$suite]}" "$@"
 }
 

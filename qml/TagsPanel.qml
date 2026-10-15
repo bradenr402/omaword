@@ -34,9 +34,8 @@ Item {
     readonly property string passageSubtitle: (bible.selectedStart > 0 && bible.selectionReference
         ? bible.selectionReference : bible.passage) + (bible.versionAbbreviation ? " · " + bible.versionAbbreviation : "")
     // See also (the Study drawer; internal id "related"): one list, in
-    // sections, of what goes with the reader's passage: the version's own
-    // cross references, its parallel passages, the passages tagged alike in
-    // every version, and last OpenBible.info's community cross references.
+    // Sections of passages tagged alike in every version, then bundled
+    // OpenBible.info community cross references.
     // The filter (/) narrows every section, and #name keeps a tag's passages.
     property var crossRows: []
     property var tagRows: []
@@ -46,10 +45,8 @@ Item {
     property bool studySearchOpen: false
     readonly property var studyRows: seeAlsoRows()
     function seeAlsoRows() {
-        const own = [], parallel = [], openBible = []
-        crossRows.forEach(function(row) { (row.source === "parallel" ? parallel : row.openBible ? openBible : own).push(row) })
         const rows = []
-        for (const section of [["own", own], ["parallel", parallel], ["tags", tagRows], ["openBible", openBible]]) {
+        for (const section of [["tags", tagRows], ["openBible", crossRows]]) {
             const matching = section[1].filter(function(row) { return panel.rowMatches(row) })
             matching.forEach(function(row, index) {
                 rows.push(Object.assign({}, row, { section: section[0], firstOfSection: index === 0, sectionCount: matching.length }))
@@ -58,8 +55,7 @@ Item {
         return rows
     }
     function sectionTitle(section) {
-        return section === "own" ? "Cross-references in " + bible.versionAbbreviation
-            : section === "parallel" ? "Parallel passages" : section === "openBible" ? "OpenBible.info" : "Tagged alike"
+        return section === "openBible" ? "OpenBible.info" : "Tagged alike"
     }
     // Every word must match: #gr a tag starting "gr", others the reference,
     // version, tags, or verse text, ignoring case.

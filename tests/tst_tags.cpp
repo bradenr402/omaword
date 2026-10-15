@@ -13,8 +13,7 @@
 #include <QSignalSpy>
 #include <QSqlQuery>
 #include <QTemporaryDir>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 
 class TagsTest : public QObject
 {
@@ -29,28 +28,20 @@ class TagsTest : public QObject
     static bool fixture(const QString &path, const QString &id,
                         const QStringList &codes = {"GEN","MAL","TOB","MAT"},
                         int verseCount = 4, bool ambiguousNames = false) {
-        archive *a = archive_write_new();
-        const auto guard = qScopeGuard([&] { archive_write_free(a); });
-        if (archive_write_set_format_zip(a) != ARCHIVE_OK || archive_write_open_filename(a,QFile::encodeName(path)) != ARCHIVE_OK) return false;
+        QJsonArray books;
         for (int i = 0; i < codes.size(); ++i) {
-            const QByteArray filename = QString("%1-%2%3.usfm").arg(i+1,2,10,QChar('0')).arg(codes[i],id).toUtf8();
-            QString text = "\\id " + codes[i] + " Original Tag Test Bible\n";
-            if (ambiguousNames && codes[i] == "GEN") text += "\\toc2 John\n";
+            QJsonArray chapters;
             for (int c = 1; c <= 2; ++c) {
-                text += QString("\\c %1\n\\p\n").arg(c);
-                for (int v = 1; v <= verseCount; ++v) text += QString("\\v %1 Original %2 %3:%1 edition %4 words.\n").arg(v).arg(codes[i]).arg(c).arg(id);
+                QJsonArray content;
+                for (int v = 1; v <= verseCount; ++v) content.append(AoFixture::verse(v, {QString("Original %1 %2:%3 edition %4 words.").arg(codes[i]).arg(c).arg(v).arg(id)}));
+                chapters.append(AoFixture::chapter(c, content));
             }
-            const QByteArray bytes = text.toUtf8();
-            archive_entry *entry = archive_entry_new();
-            const auto entryGuard = qScopeGuard([&] { archive_entry_free(entry); });
-            archive_entry_set_pathname(entry,filename); archive_entry_set_size(entry,bytes.size());
-            archive_entry_set_filetype(entry,AE_IFREG); archive_entry_set_perm(entry,0600);
-            if (archive_write_header(a,entry) != ARCHIVE_OK || archive_write_data(a,bytes.data(),bytes.size()) != bytes.size()) return false;
+            books.append(AoFixture::book(codes[i], i + 1, chapters, ambiguousNames && codes[i] == "GEN" ? "John" : QString()));
         }
-        return archive_write_close(a) == ARCHIVE_OK;
+        return AoFixture::write(path, AoFixture::complete(id, books));
     }
     void install(const QString &path) {
-        bible->importUsfm(QUrl::fromLocalFile(path));
+        bible->importAo(QUrl::fromLocalFile(path));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),10000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(),qPrintable(bible->error()));
     }
@@ -439,7 +430,7 @@ private slots:
         QSignalSpy committed(bible.get(),&BibleBackend::sharedCommitted), changed(&peer,&BibleBackend::tagsChanged);
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
         QVERIFY(fixture(path,"engnet",reversed ? QStringList{"GEN","MAT","TOB"} : codes,reversed ? 4 : 3));
-        bible->importUsfm(QUrl::fromLocalFile(path)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),10000);
+        bible->importAo(QUrl::fromLocalFile(path)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),10000);
         QVERIFY2(bible->error().contains("retained tagged passage"),qPrintable(bible->error()));
         QCOMPARE(registry(),oldRegistry); QCOMPARE(QDir(bible->dataDirectory()).entryList({"bible-*.sqlite"},QDir::Files),oldFiles);
         QVERIFY(original.open(QIODevice::ReadOnly)); QCOMPARE(original.readAll(),originalBytes); original.close();

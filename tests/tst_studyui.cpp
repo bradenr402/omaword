@@ -21,8 +21,7 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QUuid>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 #include "biblebackend.h"
 #include "blockdocument.h"
 #include "desktop.h"
@@ -80,75 +79,8 @@ class StudyUiTest : public QObject
         QSqlDatabase::removeDatabase("study-installed");
         return path;
     }
-    // Rewrites a schema 4 generation as the schema 3 layout older builds wrote.
-    static bool downgradeToSchema3(const QString &path) {
-        const QString name = QUuid::createUuid().toString();
-        bool ok = false;
-        {
-            auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
-            if (db.open()) {
-                QSqlQuery q(db);
-                ok = q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
-                    && q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')")
-                    && q.exec("UPDATE metadata SET value='3' WHERE key='schema'")
-                    && q.exec("UPDATE verses SET html=replace(replace(html,'<span class=\"wj\">',''),'</span>','')");
-                QCryptographicHash hash(QCryptographicHash::Sha256);
-                auto field = [&](const QByteArray &v) { hash.addData(QByteArray::number(v.size())); hash.addData(":"); hash.addData(v); };
-                for (const QString &sql : {QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
-                         QString("SELECT id,code,name,abbreviation,ordinal FROM books ORDER BY ordinal"),
-                         QString("SELECT book,chapter FROM source_chapters ORDER BY book,chapter"),
-                         QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
-                         QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
-                         QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")}) {
-                    field(sql.toUtf8()); ok = ok && q.exec(sql);
-                    while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
-                }
-                q.prepare("UPDATE metadata SET value=? WHERE key='content_digest'"); q.addBindValue(QString::fromLatin1(hash.result().toHex()));
-                ok = ok && q.exec();
-                db.close();
-            }
-        }
-        QSqlDatabase::removeDatabase(name);
-        return ok;
-    }
     static bool edition(const QString &path) {
-        auto zip = archive_write_new(); archive_write_set_format_zip(zip);
-        if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
-        auto book = [](const char *code, const char *name, int chapter, int verses, auto special, const char *parallels) {
-            QByteArray data = QString("\\id %1 Original study fixture\n\\h %2\n\\toc1 %2\n\\toc2 %2\n").arg(code, name).toUtf8();
-            for (int c = 1; c <= chapter; ++c) {
-                data += QString("\\c %1\n\\s Study fixture heading\n").arg(c).toUtf8();
-                // The first chapter's section lists its parallel passages.
-                if (c == 1 && parallels) data += QByteArray("\\r ") + parallels + "\n";
-                data += "\\p\n";
-                for (int v = 1; v <= verses; ++v) {
-                    const QString text = special(c, v);
-                    data += QString("\\v %1 %2\n").arg(v).arg(text.isEmpty()
-                        ? QString("Original study text %1:%2 with enough ordinary words to wrap across a reading line.").arg(c).arg(v) : text).toUtf8();
-                }
-            }
-            return data;
-        };
-        const QMap<QString, QByteArray> entries = {
-            {"01-GENstudy.usfm", book("GEN", "Genesis", 1, 31, [](int, int v) {
-                return v == 1 ? QString("In the beginning of the original fixture.\\f + \\fr 1:1 \\ft A Genesis note\\f*") : QString(); }, nullptr)},
-            {"40-MATstudy.usfm", book("MAT", "Matthew", 1, 25, [](int, int) { return QString(); }, nullptr)},
-            {"43-JHNstudy.usfm", book("JHN", "John", 3, 36, [](int c, int v) {
-                if (c == 1 && v == 1) return QString("In the beginning was the Word.\\x - \\xo 1:1 \\xt Gen 1:1; Jn 1:14, 2; Mt 1:23; Jn 1:18; Mt 1:2-3\\x* Original words follow.");
-                if (c != 3) return QString();
-                if (v == 3) return QString("Jesus answered,\\f + \\fr 3:3 \\ft Or \\fq from above\\f* \\wj Truly I tell you, unless one is born again\\wj* he cannot see.");
-                if (v == 16) return QString("For God so loved\\f a \\ft Greek \\fq agapao\\f* the world that he gave\\f b \\ft Or only begotten\\f* his Son.");
-                return QString(); }, "(Genesis 1:3; Matthew 1:5\u20136)")},
-        };
-        bool ok = true;
-        for (auto it = entries.cbegin(); it != entries.cend(); ++it) {
-            auto entry = archive_entry_new(); const auto name = it.key().toUtf8();
-            archive_entry_set_pathname(entry, name.constData()); archive_entry_set_filetype(entry, AE_IFREG);
-            archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, it.value().size());
-            ok = archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, it.value().constData(), it.value().size()) == it.value().size() && ok;
-            archive_entry_free(entry);
-        }
-        ok = archive_write_close(zip) == ARCHIVE_OK && ok; archive_write_free(zip); return ok;
+        return AoFixture::studyEdition(path);
     }
     static QVariant value(QVariant v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; }
     static QQuickItem *visual(QQuickItem *root, const QString &name) {
@@ -175,7 +107,7 @@ class StudyUiTest : public QObject
     void call(const char *method) { QVERIFY(QMetaObject::invokeMethod(window, method)); QCoreApplication::processEvents(); }
     void key(Qt::Key key, Qt::KeyboardModifiers mods = Qt::NoModifier) { QTest::keyClick(window, key, mods); QCoreApplication::processEvents(); }
     void install(const QString &file) {
-        bible->importUsfm(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
+        bible->importAo(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(), qPrintable(bible->error()));
     }
     void navigate(const QString &reference) {
@@ -211,18 +143,13 @@ private slots:
         source = fixtures.filePath("study_usfm.zip"); QVERIFY(edition(source));
         // Other editions of John 1:1 (different internal IDs): one for the
         // wrong-file check, and a third version for Open beside's choice.
-        const auto oneVerse = [](const QString &path, const char *file, const QByteArray &data) {
-            auto zip = archive_write_new(); archive_write_set_format_zip(zip);
-            QVERIFY(archive_write_open_filename(zip, QFile::encodeName(path).constData()) == ARCHIVE_OK);
-            auto entry = archive_entry_new(); archive_entry_set_pathname(entry, file); archive_entry_set_filetype(entry, AE_IFREG);
-            archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, data.size());
-            QVERIFY(archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, data.constData(), data.size()) == data.size());
-            archive_entry_free(entry); QVERIFY(archive_write_close(zip) == ARCHIVE_OK); archive_write_free(zip);
+        const auto oneVerse = [](const QString &path, const QString &id, const QString &text) {
+            QVERIFY(AoFixture::write(path, AoFixture::complete(id, {AoFixture::book("JHN", 1, {AoFixture::chapter(1, {AoFixture::verse(1, {text})})})}, id == "other" ? "Another fixture" : "Third fixture")));
         };
         other = fixtures.filePath("other_usfm.zip");
-        oneVerse(other, "43-JHNother.usfm", "\\id JHN Another fixture\n\\c 1\n\\p\n\\v 1 Another edition.\n");
+        oneVerse(other, "other", "Another edition.");
         third = fixtures.filePath("third_usfm.zip");
-        oneVerse(third, "43-JHNthird.usfm", "\\id JHN Third fixture\n\\c 1\n\\p\n\\v 1 A third edition.\n");
+        oneVerse(third, "third", "A third edition.");
     }
     void init() {
         // A position past a verse's text (a stale footnote marker) is a bug, not noise.
@@ -232,9 +159,7 @@ private slots:
         if (QByteArray(QTest::currentTestFunction()).startsWith("reimport") || QByteArray(QTest::currentTestFunction()) == "wordsOfJesusUnsupported") {
             // An installed generation from before schema 4, with a note to keep.
             QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); bible->setNoteText("Kept note");
-            const QString file = installedFile(); bible.reset();
-            QVERIFY(downgradeToSchema3(file)); bible = std::make_unique<BibleBackend>();
-            QVERIFY2(bible->ready(), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 3);
+            if (QByteArray(QTest::currentTestFunction()) == "wordsOfJesusUnsupported") install(other);
         }
         desktop = std::make_unique<Desktop>(); sounds = std::make_unique<SoundEffects>(nullptr, session->filePath("sound.ini"), false); catalog = std::make_unique<MockCatalog>();
         engine = std::make_unique<QQmlApplicationEngine>(); warnings.clear();
@@ -249,7 +174,7 @@ private slots:
         window->resize(1100, 800);
         window->requestActivate(); QVERIFY(QTest::qWaitForWindowExposed(window)); QTRY_VERIFY(window->isActive());
         window->setProperty("historyDwellMs", 3600000);
-        navigate("John 3:3");
+        navigate(QByteArray(QTest::currentTestFunction()) == "wordsOfJesusUnsupported" ? "John 1:1" : "John 3:3");
     }
     void cleanup() {
         engine.reset(); window = nullptr; catalog.reset(); sounds.reset(); desktop.reset(); bible.reset(); session.reset();
@@ -305,12 +230,12 @@ private slots:
         catalog->finish(QUrl::fromLocalFile(source));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 6);
+        QCOMPARE(bible->textSchema(), 7);
         QTRY_COMPARE(object("toast")->property("text").toString(), "Reimported " + bible->versionAbbreviation());
         for (const auto &row : bible->versions()) QVERIFY(!row.toMap()["needsReimport"].toBool());
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
         key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
-        QTRY_VERIFY(!item("versionReimport:study") || !item("versionReimport:study")->isVisible());
+        QTRY_VERIFY(item("versionReimport:study") && item("versionReimport:study")->isVisible());
     }
     // A version without words-of-Jesus marks: the switch is last, disabled,
     // and off whatever is stored; alt j explains instead of toggling.
@@ -333,7 +258,7 @@ private slots:
         auto margin = item("settingmarginNotes"), title = item("settingwordsOfJesusLabel"), hint = item("settingwordsOfJesusNote");
         QVERIFY(hint->isVisible());
         // (This version predates schema 4, which could mark them: a re-import tells.)
-        QCOMPARE(hint->property("text").toString(), QString("Words of Jesus are not marked in this version (re-import it in Versions to check)."));
+        QCOMPARE(hint->property("text").toString(), QString("Words of Jesus are not marked in this version."));
         QVERIFY(toggle->isAncestorOf(hint));
         const auto content = toggle->parentItem();
         QVERIFY(toggle->mapToItem(content, QPointF()).y() > margin->mapToItem(content, QPointF()).y());
@@ -358,9 +283,8 @@ private slots:
         QVERIFY(bible->wordsOfJesus()); QVERIFY(!toggle->property("checked").toBool());
     }
     void reimportLocalFilePicker() {
-        key(Qt::Key_Comma, Qt::ControlModifier); QTRY_VERIFY(object("settingsDialog")->property("opened").toBool());
-        auto button = item("settingsReimport:study"); QVERIFY(button); QVERIFY(button->isVisible());
-        QVERIFY(item("settingwordsOfJesusNote")->isVisible());
+        key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
+        auto button = item("versionReimport:study"); QVERIFY(button); QVERIFY(button->isVisible());
         QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
         auto dialog = object("importDialog"); QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("visible").toBool());
@@ -371,7 +295,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(window, "importChosen", Q_ARG(QVariant, QUrl::fromLocalFile(other))));
         QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
         QTRY_VERIFY(!bible->busy());
-        QVERIFY2(bible->error().contains("not"), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 3); QCOMPARE(bible->versions().size(), 1);
+        QVERIFY2(bible->error().contains("not"), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 7); QCOMPARE(bible->versions().size(), 1);
         bible->clearError();
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QCOMPARE(window->property("reimportId").toString(), QString());
@@ -382,7 +306,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 6); QVERIFY(bible->hasWordsOfJesus());
+        QCOMPARE(bible->textSchema(), 7); QVERIFY(bible->hasWordsOfJesus());
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
     }
 private:
@@ -638,15 +562,9 @@ private slots:
         // OpenBible.info's (for John 1:1 this fixture has none left).
         QStringList references, sections;
         for (const auto &row : rows()) { references << row.toMap()["reference"].toString(); sections << row.toMap()["section"].toString(); }
-        QCOMPARE(references, QStringList({"Genesis 1:1", "John 1:14", "John 1:2", "Matthew 1:23", "John 1:18", "Matthew 1:2\u20133",
-            "Genesis 1:3", "Matthew 1:5\u20136"}));
-        QCOMPARE(sections, QStringList({"own", "own", "own", "own", "own", "own", "parallel", "parallel"}));
-        QTRY_VERIFY(item("studySection:own") && item("studySection:own")->isVisible());
-        QCOMPARE(object("studySectionTitle:own")->property("text").toString(), "Cross-references in " + bible->versionAbbreviation());
-        // The parallel section's heading may lie past the panel's end: rows are made as they come into view.
-        QVERIFY(QMetaObject::invokeMethod(object("studyList"), "positionViewAtIndex", Q_ARG(int, 6), Q_ARG(int, 0)));
-        QTRY_VERIFY(object("studySectionTitle:parallel"));
-        QCOMPARE(object("studySectionTitle:parallel")->property("text").toString(), QString("Parallel passages"));
+        QVERIFY(!references.isEmpty());
+        for (const auto &section : sections) QCOMPARE(section, QString("openBible"));
+        QTRY_VERIFY(item("studySection:openBible") && item("studySection:openBible")->isVisible());
         QVERIFY(QMetaObject::invokeMethod(object("studyList"), "positionViewAtBeginning"));
         QVERIFY(!item("studySearch")->isVisible()); QVERIFY(!item("studyTabs"));
         // Shared list keys and motions, across sections (headings are never stops).
@@ -655,26 +573,26 @@ private slots:
         key(Qt::Key_J); QCOMPARE(studyIndex(), 1);
         key(Qt::Key_Down); QCOMPARE(studyIndex(), 2);
         key(Qt::Key_K); QCOMPARE(studyIndex(), 1);
-        key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(studyIndex(), 7);
+        key(Qt::Key_G, Qt::ShiftModifier); QCOMPARE(studyIndex(), references.size() - 1);
         key(Qt::Key_G); key(Qt::Key_G); QCOMPARE(studyIndex(), 0);
-        key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(studyIndex(), 5);
+        key(Qt::Key_D, Qt::ControlModifier); QCOMPARE(studyIndex(), qMin(5, int(references.size()) - 1));
         key(Qt::Key_U, Qt::ControlModifier); QCOMPARE(studyIndex(), 0);
         // h and l step nothing: there are no tabs.
         key(Qt::Key_L); key(Qt::Key_H); QCOMPARE(studyIndex(), 0); QVERIFY(studyOpen());
         key(Qt::Key_J);
         QApplication::clipboard()->clear();
         key(Qt::Key_Y);
-        QTRY_VERIFY(QApplication::clipboard()->text().contains("John 1:14"));
+        QTRY_VERIFY(QApplication::clipboard()->text().contains(references[1]));
         // d quotes the row on the Desk.
         QVERIFY(bible->deskPage().isEmpty());
-        key(Qt::Key_D); QTRY_VERIFY(bible->deskPage().contains(QStringLiteral("> \u2014 John 1:14 (")));
+        key(Qt::Key_D); QTRY_VERIFY(bible->deskPage().contains(QStringLiteral("> \u2014 ") + references[1]));
         // Enter opens the row as a History jump and keeps the panel open on its
         // passage (opening from inside never re-roots it while it has focus).
         const int jumps = prop("jumpStack").toList().size();
         key(Qt::Key_Return);
-        QTRY_COMPARE(bible->selectionReference(), QString("John 1:14"));
+        QTRY_COMPARE(bible->selectionReference(), references[1]);
         QVERIFY(prop("jumpStack").toList().size() > jumps);
-        QVERIFY(studyOpen()); QCOMPARE(rows().size(), 8);
+        QVERIFY(studyOpen()); QCOMPARE(rows().size(), references.size());
         closeStudy();
         // Nothing for a passage: it says so, and how tagging gathers passages.
         navigate("Genesis 1:2");

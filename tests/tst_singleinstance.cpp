@@ -398,7 +398,7 @@ private slots:
         primary.start(executable, {"--import", dir.path() + "/missing-initial.zip"});
         QVERIFY(primary.waitForStarted());
         QByteArray errors;
-        QTRY_VERIFY_WITH_TIMEOUT((errors += primary.readAllStandardError()).contains("Cannot read the selected USFM file."), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT((errors += primary.readAllStandardError()).contains("Cannot read the selected AO JSON file."), 5000);
         QCOMPARE(primary.state(), QProcess::Running);
         // An empty relaunch must not repeat the original failing import.
         Child secondary;
@@ -409,7 +409,7 @@ private slots:
         secondary.start(executable, {"--import", dir.path() + QString::fromUtf8("/不存在.zip")});
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 1);
-        QVERIFY(secondary.readAllStandardError().contains("Cannot read the selected USFM file."));
+        QVERIFY(secondary.readAllStandardError().contains("Cannot read the selected AO JSON file."));
         secondary.start(executable, {"John 3:16"});
         QVERIFY(secondary.waitForFinished(5000));
         QCOMPARE(secondary.exitCode(), 1); // No Bible installed: cannot claim navigation succeeded.

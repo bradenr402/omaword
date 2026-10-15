@@ -20,8 +20,7 @@
 #include <QTextDocument>
 #include <QTextBlock>
 #include <QTextFragment>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 #include "biblebackend.h"
 #include "blockdocument.h"
 #include "desktop.h"
@@ -52,26 +51,7 @@ class MotionTest : public QObject
         void step(int ms) { now += ms; advance(); }
     };
     static bool edition(const QString &path, const QString &id, bool alternate) {
-        auto zip = archive_write_new(); archive_write_set_format_zip(zip);
-        if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
-        QByteArray data = "\\id JHN Original search UI fixture\n\\h John\n\\toc1 John\n\\toc2 John\n";
-        for (int chapter = 1; chapter <= 2; ++chapter) {
-            data += QString("\\c %1\n\\s First source heading\n\\p\n").arg(chapter).toUtf8();
-            for (int verse = 1; verse <= 65; ++verse) {
-                if (verse > 1 && verse % 4 == 1) data += "\\p\n";
-                QString text = QString("Common original fixture %1:%2. ").arg(chapter).arg(verse);
-                if (verse == 2) text += alternate ? "Changed edition without the word." : "ALPHA and beta with alphabet soup. A bridge begins";
-                else if (verse == 3) text = "here across verses. Common original text. Blue & <bright> original text.";
-                else if (verse == 8 || verse == 20 || verse == 50) text += alternate ? "Different words." : "Alpha beta and another alpha.";
-                else text += QString("Ordinary words for a long scrolling chapter. ").repeated(4);
-                data += QString("\\v %1 %2\n").arg(verse).arg(text).toUtf8();
-            }
-        }
-        auto entry = archive_entry_new(); const auto name = ("01-JHN" + id + ".usfm").toUtf8();
-        archive_entry_set_pathname(entry, name.constData()); archive_entry_set_filetype(entry, AE_IFREG);
-        archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, data.size());
-        bool ok = archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, data.constData(), data.size()) == data.size();
-        archive_entry_free(entry); ok = archive_write_close(zip) == ARCHIVE_OK && ok; archive_write_free(zip); return ok;
+        return AoFixture::searchEdition(path, id, alternate, true);
     }
     static QVariant value(QVariant v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; }
     static QQuickItem *visual(QQuickItem *root, const QString &name) {
@@ -107,7 +87,7 @@ class MotionTest : public QObject
     void key(Qt::Key key, Qt::KeyboardModifiers mods = Qt::NoModifier) { QTest::keyClick(window, key, mods); QCoreApplication::processEvents(); }
     void type(const QString &text) { for (const auto c : text) QTest::keyClick(window, c.toLatin1()); QCoreApplication::processEvents(); }
     void install(const QString &file) {
-        bible->importUsfm(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
+        bible->importAo(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(), qPrintable(bible->error()));
     }
     void navigate(const QString &reference) {

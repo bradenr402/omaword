@@ -10,6 +10,7 @@
 #include <QUuid>
 #include <QDateTime>
 #include <QGuiApplication>
+#include <QProcess>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -19,8 +20,7 @@
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QTemporaryDir>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 #include <limits>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -35,36 +35,22 @@ class BackendTest : public QObject
     static bool write(const QString &path, const QByteArray &bytes) {
         QSaveFile f(path); return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size() && f.commit();
     }
-    static bool zip(const QString &path, const QMap<QString,QByteArray> &entries) {
-        archive *a = archive_write_new();
-        const auto cleanup = qScopeGuard([&] { archive_write_free(a); });
-        if (archive_write_set_format_zip(a) != ARCHIVE_OK
-            || archive_write_open_filename(a,QFile::encodeName(path).constData()) != ARCHIVE_OK) return false;
-        for (auto it = entries.cbegin(); it != entries.cend(); ++it) {
-            archive_entry *entry = archive_entry_new();
-            const auto cleanupEntry = qScopeGuard([&] { archive_entry_free(entry); });
-            archive_entry_set_pathname(entry,it.key().toUtf8().constData());
-            archive_entry_set_size(entry,it.value().size());
-            archive_entry_set_filetype(entry,AE_IFREG); archive_entry_set_perm(entry,0600);
-            if (archive_write_header(a,entry) != ARCHIVE_OK
-                || archive_write_data(a,it.value().constData(),it.value().size()) != it.value().size()) return false;
-        }
-        return archive_write_close(a) == ARCHIVE_OK;
-    }
     static bool fixture(const QString &path, const QString &id, bool extras = false, bool sourceNames = false) {
-        QMap<QString,QByteArray> entries;
+        QJsonArray books;
         auto book = [&](int ordinal, QString code, QList<int> chapters, QString name = {}, QString shortName = {}) {
-            QString body = "\\id " + code + " Original Backend Bible\n";
-            if (!name.isEmpty()) body += "\\toc1 " + name + "\n\\toc2 " + shortName + "\n\\toc3 " + shortName.left(3) + "\n";
+            QJsonArray chapterList;
             for (int c : chapters) {
-                body += QString("\\c %1\n\\s1 Original heading\n\\p\n").arg(c);
+                QJsonArray content{QJsonObject{{"type", "heading"}, {"content", QJsonArray{"Original heading"}}}};
                 for (int v = 1; v <= 36; ++v) {
                     if (code == "MRK" && v == 16 && !extras) continue;
-                    body += QString("\\v %1 Original %2 %3:%1 words with \\it emphasis\\it*.\n").arg(v).arg(code).arg(c);
-                    if (v == 5) body += "\\p\n";
+                    content.append(AoFixture::verse(v, {QString("Original %1 %2:%3 words with emphasis.").arg(code).arg(c).arg(v)}));
+                    if (v == 5) content.append(QJsonObject{{"type", "line_break"}});
                 }
+                chapterList.append(AoFixture::chapter(c, content));
             }
-            entries[QString("%1-%2%3.usfm").arg(ordinal,2,10,QChar('0')).arg(code,id)] = body.toUtf8();
+            auto entry = AoFixture::book(code, ordinal, chapterList, name.isEmpty() ? QString() : shortName);
+            if (!name.isEmpty()) { entry["commonName"] = name; entry["title"] = shortName.left(3); }
+            books.append(entry);
         };
         book(1,"GEN",{1,2},sourceNames ? "Bereshis" : QString(),"Bereishis");
         book(2,"MAL",{4});
@@ -72,9 +58,9 @@ class BackendTest : public QObject
         book(5,"MAT",{1}); book(6,"MRK",{7}); book(7,"JHN",{3,4});
         book(8,"JUD",{1}); book(9,"REV",{22});
         if (extras) {
-            entries["10-2ES"+id+".usfm"] = "\\id 2ES Original Backend Bible\n\\c 999\n\\p\n\\v 999 Original upper-bound verse.\n";
+            books.append(AoFixture::book("2ES", 10, {AoFixture::chapter(999, {AoFixture::verse(999, {"Original upper-bound verse."})})}));
         }
-        return zip(path,entries);
+        return AoFixture::write(path, AoFixture::complete(id, books, "Original Backend Bible"));
     }
     QSqlDatabase store() const {
         for (const auto &name : QSqlDatabase::connectionNames()) {
@@ -128,7 +114,7 @@ class BackendTest : public QObject
         return q.exec() && q.next() ? bible->dataDirectory()+'/'+q.value(0).toString() : QString();
     }
     void install(const QString &path) {
-        bible->importUsfm(QUrl::fromLocalFile(path));
+        bible->importAo(QUrl::fromLocalFile(path));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(),qPrintable(bible->error()));
     }
@@ -172,54 +158,63 @@ class BackendTest : public QObject
         verify(nextBook,chapter,{first,second}); verify(previousBook,previousChapter,{previousVerse});
         QVERIFY(bible->deleteAnnotation(reference)); verify(nextBook,chapter,{}); verify(previousBook,previousChapter,{});
     }
-    static QMap<QString,QByteArray> studyEntries() {
-        return {{"01-GENstudy.usfm", "\\id GEN Study Test Bible\n\\c 1\n\\p\n\\v 1 In the beginning.\\f + \\fr 1:1 \\ft First note\\f*\\x - \\xo 1:1 \\xt Jn 1:1-3; John 1:1-3\\x*\n"
-                    "\\v 2 Formless.\\x - \\xo 1:2 \\xt Jn 1:3; Mt 1:2-3, 1; Zz 9:9\\x*\n\\v 3 Light.\\f b \\ft Second note\\f*\n\\c 2\n\\p\n\\v 1 Finished.\n"},
-                {"02-MATstudy.usfm", "\\id MAT Study Test Bible\n\\c 1\n\\s1 The record\n\\r (Jn 1:1–3; Luke 3:23; Gen 1:2)\n\\p\n\\v 1 Book.\n\\v 2 Abraham.\n\\v 3 Judah.\n"},
-                {"03-JHNstudy.usfm", "\\id JHN Study Test Bible\n\\c 1\n\\p\n\\v 1 Word.\n\\v 2 Same.\n\\v 3 Made.\n"
-                    "\\c 3\n\\p\n\\v 16 For God so loved. He said, \\wj Truly I say\\wj* again.\n"}};
-    }
-    // Rewrites a current generation as the schema 3 (4, or 5) layout older builds wrote.
-    static bool downgradeToSchema3(const QString &path, int schema = 3) {
-        const QString name = QUuid::createUuid().toString();
-        bool ok = false;
-        {
-            auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
-            if (db.open()) {
-                QSqlQuery q(db);
-                ok = q.exec("DROP TABLE parallels") && q.exec(QString("UPDATE metadata SET value='%1' WHERE key='schema'").arg(schema));
-                if (schema < 5) ok = ok && q.exec("DROP TABLE indents");
-                if (schema == 3) ok = ok && q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
-                    && q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')")
-                    && q.exec("UPDATE verses SET html=replace(replace(html,'<span class=\"wj\">',''),'</span>','')");
-                QCryptographicHash hash(QCryptographicHash::Sha256);
-                auto field = [&](const QByteArray &v) { hash.addData(QByteArray::number(v.size())); hash.addData(":"); hash.addData(v); };
-                QStringList queries{QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
-                         QString("SELECT id,code,name,abbreviation,ordinal FROM books ORDER BY ordinal"),
-                         QString("SELECT book,chapter FROM source_chapters ORDER BY book,chapter"),
-                         QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
-                         QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
-                         QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")};
-                if (schema >= 4) queries << "SELECT book,chapter,verse,seq,kind,caller,offset,text,targets FROM notes ORDER BY book,chapter,verse,seq"
-                                         << "SELECT book,chapter,verse,start,end FROM words_of_jesus ORDER BY book,chapter,verse,start";
-                if (schema == 5) queries << "SELECT book,chapter,verse,levels FROM indents ORDER BY book,chapter,verse";
-                for (const QString &sql : queries) {
-                    field(sql.toUtf8()); ok = ok && q.exec(sql);
-                    while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
-                }
-                q.prepare("UPDATE metadata SET value=? WHERE key='content_digest'"); q.addBindValue(QString::fromLatin1(hash.result().toHex()));
-                ok = ok && q.exec();
-                db.close();
-            }
-        }
-        QSqlDatabase::removeDatabase(name);
-        return ok;
+    static bool study(const QString &path) {
+        using namespace AoFixture;
+        return AoFixture::write(path, complete("study", {
+            book("GEN", 1, {chapter(1, {verse(1, {"In the beginning.", QJsonObject{{"noteId", 0}}}), verse(2, {"Formless."}), verse(3, {"Light.", QJsonObject{{"noteId", 1}}})},
+                {QJsonObject{{"noteId", 0}, {"caller", "+"}, {"text", "1:1 First note"}}, QJsonObject{{"noteId", 1}, {"caller", "b"}, {"text", "Second note"}}}), chapter(2, {verse(1, {"Finished."})})}),
+            book("MAT", 2, {chapter(1, {QJsonObject{{"type", "heading"}, {"content", QJsonArray{"The record"}}}, verse(1, {"Book."}), verse(2, {"Abraham."}), verse(3, {"Judah."})})}),
+            book("JHN", 3, {chapter(1, {verse(1, {"Word."}), verse(2, {"Same."}), verse(3, {"Made."})}), chapter(3, {verse(16, {"For God so loved. He said, ", QJsonObject{{"text", "Truly I say"}, {"wordsOfJesus", true}}, " again."})})})
+        }));
     }
     static QVariantMap versionRow(BibleBackend *b, const QString &id) {
         for (const auto &row : b->versions()) if (row.toMap()["id"] == id) return row.toMap();
         return {};
     }
 private slots:
+    void explicitOneOffMigration() {
+        const QString script = qEnvironmentVariable("OMAWORD_TEST_AO_MIGRATION_SCRIPT");
+        if (script.isEmpty()) QSKIP("Supply the explicit one-off script path to verify the migration handoff.");
+        install(net); QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("One-off note"); QVERIFY(bible->toggleHighlight());
+        QVERIFY(!bible->createAndAssignTag(bible->tagScope(), "One-off tag").isEmpty());
+        bible->setReadingPosition(0.37); QVERIFY(bible->recordHistory()); QVERIFY(bible->placeRibbon());
+        QVERIFY(bible->setDeskPage("Original Markdown with engnet kept literally", bible->deskPage()));
+        { QSqlQuery q(store()); QVERIFY(q.exec("DELETE FROM reading WHERE version_id='net-2.1'")); }
+        const QString directory = bible->dataDirectory(), source = directory + "/personal.sqlite";
+        bible.reset();
+        const QString output = session->filePath("migrated.sqlite");
+        QProcess process; process.start("python3", {script, "migrate", "--source", source, "--output", output});
+        QVERIFY(process.waitForFinished()); QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+        QVERIFY(QFile::rename(source, directory + "/original-personal.sqlite"));
+        QVERIFY(QFile::rename(output, source));
+        bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->ready()); QVERIFY(bible->versions().isEmpty());
+        QCOMPARE(bible->deskPage(), QString("Original Markdown with engnet kept literally"));
+        const QString ao = fixtures.filePath("one-off.json"); QVERIFY(fixture(ao, "eng_net")); install(ao);
+        QCOMPARE(bible->selectionReference(), QString("John 3:16")); QCOMPARE(bible->noteText(), QString("One-off note"));
+        QCOMPARE(bible->readingPosition(), 0.37); QVERIFY(bible->selectionHighlighted());
+        QVERIFY(!bible->tagsForScope(bible->tagScope()).isEmpty());
+        QVERIFY(!bible->history().isEmpty()); QCOMPARE(bible->history().first().toMap()["versionId"].toString(), QString("eng_net"));
+        const auto backup = QUrl::fromLocalFile(session->filePath("one-off-backup.json"));
+        QVERIFY(bible->exportBackup(backup)); QVERIFY2(bible->importBackup(backup), qPrintable(bible->error()));
+        process.start("python3", {script, "verify", "--personal", source, "--texts", directory});
+        QVERIFY(process.waitForFinished()); QCOMPARE(process.exitCode(), 0);
+        QVERIFY(process.readAllStandardOutput().contains("\"unmatched\": []"));
+    }
+    void orphanAoStateReconnectsOnInstallation() {
+        const auto source = fixtures.filePath("mapped.json");
+        QVERIFY(fixture(source, "eng_net"));
+        QSqlQuery q(store());
+        QVERIFY(q.exec("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,highlight,note,created,updated) VALUES('eng_net',43,3,16,43,3,16,1,'Migrated note','2026-01-01T00:00:00.000Z','2026-01-02T00:00:00.000Z')"));
+        QVERIFY(q.exec("INSERT INTO reading VALUES(1,43,3,16,16,0.37,43,3,43,3,'eng_net')"));
+        install(source);
+        QCOMPARE(bible->selectionReference(), QString("John 3:16"));
+        QCOMPARE(bible->noteText(), QString("Migrated note")); QCOMPARE(bible->readingPosition(), 0.37);
+        const auto backup = QUrl::fromLocalFile(session->filePath("mapped-backup.json"));
+        QVERIFY(bible->exportBackup(backup)); bible->setNoteText("Changed");
+        QVERIFY2(bible->importBackup(backup), qPrintable(bible->error())); QCOMPARE(bible->noteText(), QString("Migrated note"));
+        QVERIFY(q.exec("SELECT created,updated FROM annotations WHERE version_id='eng_net'")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toString(), QString("2026-01-01T00:00:00.000Z")); QCOMPARE(q.value(1).toString(), QString("2026-01-02T00:00:00.000Z"));
+    }
     void initTestCase() {
         QVERIFY(fixtures.isValid());
         QCoreApplication::setOrganizationName("OmaWordTests");
@@ -587,10 +582,10 @@ private slots:
     void quotationReferenceTypography() {
         QFETCH(QString,input); QFETCH(QString,label);
         const QString path = fixtures.filePath("quotation-engnet_usfm.zip");
-        QVERIFY(zip(path,{
-            {"01-GENengnet.usfm","\\id GEN Copy Bible\n\\toc2 First-Book\n\\c 1\n\\p\n\\v 1 First-word.\n\\v 2 Last-word.\n"},
-            {"02-REVengnet.usfm","\\id REV Copy Bible\n\\c 3\n\\p\n\\v 14 First-word.\n\\v 15 Middle-word.\n\\v 22 Last-word.\n\\c 4\n\\p\n\\v 1 Next-word.\n"}
-        }));
+        QVERIFY(AoFixture::write(path, AoFixture::complete("engnet", {
+            AoFixture::book("GEN", 1, {AoFixture::chapter(1, {AoFixture::verse(1, {"First-word."}), AoFixture::verse(2, {"Last-word."})})}, "First-Book"),
+            AoFixture::book("REV", 2, {AoFixture::chapter(3, {AoFixture::verse(14, {"First-word."}), AoFixture::verse(15, {"Middle-word."}), AoFixture::verse(22, {"Last-word."})}), AoFixture::chapter(4, {AoFixture::verse(1, {"Next-word."})})})
+        })));
         install(path); QVERIFY2(bible->navigate(input),qPrintable(bible->error()));
         const QString quotation = bible->copySelection();
         QVERIFY2(quotation.endsWith(QStringLiteral("”\n\n— ")+label),qPrintable(quotation));
@@ -606,12 +601,11 @@ private slots:
     }
     void chapterOpeningHeadingsSurviveReload() {
         const QString path = fixtures.filePath("headings-engnet_usfm.zip");
-        QVERIFY(zip(path,{{"01-REVengnet.usfm",
-            "\\id REV Heading Bible\n\\is1 Introduction\n\\ip Introductory text.\n"
-            "\\c 3\n\\s1 To the Church in Sardis\n\\p\n\\v 1 First.\n"
-            "\\s1 To the Church in Philadelphia\n\\p\n\\v 7 Later.\n"
-            "\\c 4\n\\s1 Revelation 4\n\\p\n\\v 1 Next chapter.\n"
-            "\\c 5\n\\p\n\\v 1 No source heading.\n"}}));
+        QVERIFY(AoFixture::write(path, AoFixture::complete("engnet", {AoFixture::book("REV", 1, {
+            AoFixture::chapter(3, {QJsonObject{{"type", "heading"}, {"content", QJsonArray{"To the Church in Sardis"}}}, AoFixture::verse(1, {"First."}),
+                QJsonObject{{"type", "heading"}, {"content", QJsonArray{"To the Church in Philadelphia"}}}, AoFixture::verse(7, {"Later."})}),
+            AoFixture::chapter(4, {QJsonObject{{"type", "heading"}, {"content", QJsonArray{"Revelation 4"}}}, AoFixture::verse(1, {"Next chapter."})}),
+            AoFixture::chapter(5, {AoFixture::verse(1, {"No source heading."})})})})));
         install(path);
         for (int pass = 0; pass < 2; ++pass) {
             QVERIFY(bible->navigate("REV 3"));
@@ -629,15 +623,12 @@ private slots:
     }
     void copyPreservesSourceLayoutAndUnicode() {
         const QString path = fixtures.filePath("copy-engojb_usfm.zip");
-        QVERIFY(zip(path,{{"01-GENengojb.usfm",QStringLiteral(
-            "\\id GEN Copy Bible\n\\toc1 Bereshis\n\\toc2 Bereishis\n\\c 1\n\\p\n"
-            "\\v 1 Shalom   café 😀 é.\n"
-            "\\v 2 Same\t paragraph.\n\\p\n"
-            "\\v 3 New paragraph.\n\\q1\n"
-            "\\v 4 First   poetry line\n\\q2 Second line\n"
-            "\\v 5 Poetry continuation.\n\\p\n"
-            "\\v 6 Last paragraph.\n\\c 2\n\\p\n"
-            "\\v 1 Next chapter.\n").toUtf8()}}));
+        QVERIFY(AoFixture::write(path, AoFixture::complete("engojb", {AoFixture::book("GEN", 1, {
+            AoFixture::chapter(1, {AoFixture::verse(1, {QStringLiteral("Shalom   café 😀 é.")}), AoFixture::verse(2, {"Same\t paragraph."}),
+                QJsonObject{{"type", "line_break"}}, AoFixture::verse(3, {"New paragraph."}), QJsonObject{{"type", "line_break"}},
+                AoFixture::verse(4, {QJsonObject{{"text", "First   poetry line"}, {"poem", 1}}, QJsonObject{{"text", "Second line"}, {"poem", 2}}}),
+                AoFixture::verse(5, {QJsonObject{{"text", "Poetry continuation."}, {"poem", 2}}}), QJsonObject{{"type", "line_break"}}, AoFixture::verse(6, {"Last paragraph."})}),
+            AoFixture::chapter(2, {AoFixture::verse(1, {"Next chapter."})})}, "Bereishis")})));
         install(path);
         QVERIFY(bible->navigate("GEN 1"));
         const auto rows = bible->verses(); QCOMPARE(rows.size(),6);
@@ -678,7 +669,7 @@ private slots:
         QCOMPARE(bible->deskPage(),deskQuotation + "\n");
         // A fixture with a paragraph before every verse must copy paragraph breaks.
         const QString paragraphs = fixtures.filePath("copy-engnet_usfm.zip");
-        QVERIFY(zip(paragraphs,{{"01-GENengnet.usfm","\\id GEN Paragraph Bible\n\\c 1\n\\p\n\\v 1 One.\n\\p\n\\v 2 Two.\n"}}));
+        QVERIFY(AoFixture::write(paragraphs, AoFixture::complete("engnet", {AoFixture::book("GEN", 1, {AoFixture::chapter(1, {AoFixture::verse(1, {"One."}), QJsonObject{{"type", "line_break"}}, AoFixture::verse(2, {"Two."})})})})));
         install(paragraphs); QVERIFY(bible->navigate("GEN 1:1-2"));
         QCOMPARE(bible->copySelection(true),QString("One.\n\nTwo."));
         // The page keeps its text whatever is installed since.
@@ -1544,7 +1535,7 @@ private slots:
         bible->setFlushCallback({}); peer.setFlushCallback({});
         peer.setNoteText("Resolved draft"); QCOMPARE(bible->noteText(),QString("Resolved draft"));
         int flushes = 0; peer.setFlushCallback([&] { return ++flushes == 1; });
-        bible->importUsfm(QUrl::fromLocalFile(net)); QVERIFY(bible->busy()); QVERIFY(peer.busy());
+        bible->importAo(QUrl::fromLocalFile(net)); QVERIFY(bible->busy()); QVERIFY(peer.busy());
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),30000);
         QCOMPARE(flushes,2); QCOMPARE(installedPath(),path); QVERIFY(bible->error().contains("unsaved note"));
         peer.setFlushCallback({});
@@ -1558,7 +1549,7 @@ private slots:
         const auto rows = bible->collection(), books = bible->books();
         QSqlQuery q(store());
         QVERIFY(q.exec("CREATE TRIGGER reject_library BEFORE UPDATE ON library BEGIN SELECT RAISE(ABORT,'library disk failure'); END"));
-        bible->importUsfm(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),30000);
+        bible->importAo(QUrl::fromLocalFile(kjv)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),30000);
         QVERIFY(bible->error().contains("library disk failure")); QCOMPARE(bible->versionId(),QString("engnet"));
         QCOMPARE(installedPath(),original); QCOMPARE(bible->collection(),rows); QCOMPARE(bible->books(),books);
         QVERIFY(!bible->removeVersion("engnet",true)); QVERIFY(QFile::exists(original));
@@ -1607,9 +1598,9 @@ private slots:
     void invalidImportPreservesTarget() {
         const auto target = session->filePath("target.sqlite"), invalid = session->filePath("bad.zip");
         QVERIFY(write(target,"Original target")); QVERIFY(write(invalid,"Not a ZIP"));
-        const auto result = UsfmImporter::importFile(invalid,target); QVERIFY(!result.ok); QVERIFY(!result.error.isEmpty());
+        const auto result = AoImporter::importFile(invalid,target); QVERIFY(!result.ok); QVERIFY(!result.error.isEmpty());
         QFile file(target); QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(),QByteArray("Original target"));
-        install(net); const auto path = installedPath(); bible->importUsfm(QUrl::fromLocalFile(invalid));
+        install(net); const auto path = installedPath(); bible->importAo(QUrl::fromLocalFile(invalid));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),30000); QVERIFY(!bible->error().isEmpty()); QCOMPARE(installedPath(),path);
     }
     void navigationAndRestoreReadFailureAreAtomic() {
@@ -1646,7 +1637,7 @@ private slots:
             QVERIFY(q.exec("UPDATE verses SET chapter=2,number=37 WHERE book=1 AND chapter=1 AND number=36"));
         }
         QSqlDatabase::removeDatabase("corruption");
-        QString error; QVERIFY(!UsfmImporter::validateDatabase(path,&error)); QVERIFY(!error.isEmpty());
+        QString error; QVERIFY(!AoImporter::validateDatabase(path,&error)); QVERIFY(!error.isEmpty());
     }
     void unchangedGenerationsOpenWithoutRevalidation() {
         install(net);
@@ -1684,33 +1675,12 @@ private slots:
         bible = std::make_unique<BibleBackend>();
         QVERIFY2(bible->ready() && bible->error().isEmpty(),qPrintable(bible->error()));
     }
-    void textSchemaFootnotesAndReimportFlag() {
-        const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
+    void textSchemaFootnotesAndReplacement() {
+        const QString path = fixtures.filePath("study.json"); QVERIFY(study(path));
         install(path);
-        QCOMPARE(bible->versionId(), QString("study")); QCOMPARE(bible->textSchema(), 6); QVERIFY(bible->hasWordsOfJesus());
+        QCOMPARE(bible->versionId(), QString("study")); QCOMPARE(bible->textSchema(), 7); QVERIFY(bible->hasWordsOfJesus());
         QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
-        QCOMPARE(versionRow(bible.get(),"study")["textSchema"].toInt(), 6);
-        {
-            // A schema 5 generation (before parallel passages) reads as before; it is
-            // not flagged, as few sources have parallel passages (the catalog says which).
-            const QString file = installedPath();
-            bible.reset(); QVERIFY(downgradeToSchema3(file, 5)); bible = std::make_unique<BibleBackend>();
-            QVERIFY2(bible->ready(), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 5);
-            QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
-            QVERIFY(bible->navigate("Matthew 1:2")); QVERIFY(bible->crossReferences().isEmpty());
-            bible->importUsfm(QUrl::fromLocalFile(path), "study");
-            QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QCOMPARE(bible->textSchema(), 6);
-        }
-        {
-            // A schema 4 generation (before poetry levels) keeps its notes and is flagged.
-            const QString file = installedPath();
-            bible.reset(); QVERIFY(downgradeToSchema3(file, 4)); bible = std::make_unique<BibleBackend>();
-            QVERIFY2(bible->ready(), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 4);
-            QVERIFY(bible->hasWordsOfJesus()); QVERIFY(versionRow(bible.get(),"study")["needsReimport"].toBool());
-            QVERIFY(bible->navigate("Genesis 1")); QCOMPARE(bible->footnotes().size(), 2);
-            bible->importUsfm(QUrl::fromLocalFile(path), "study");
-            QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QCOMPARE(bible->textSchema(), 6);
-        }
+        QCOMPARE(versionRow(bible.get(),"study")["textSchema"].toInt(), 7);
         QVERIFY(bible->navigate("Genesis 1"));
         const auto notes = bible->footnotes();
         QCOMPARE(notes.size(), 2);
@@ -1724,58 +1694,22 @@ private slots:
         const QString text = row["text"].toString();
         QCOMPARE(text.mid(spans[0].toMap()["start"].toInt(), spans[0].toMap()["end"].toInt() - spans[0].toMap()["start"].toInt()), QString("Truly I say"));
         bible->selectVerses(16,16); bible->setNoteText("Kept across re-import"); QVERIFY(bible->error().isEmpty());
-        // An older generation stays readable and is flagged for re-import.
         const QString file = installedPath();
-        bible.reset(); QVERIFY(downgradeToSchema3(file)); bible = std::make_unique<BibleBackend>();
-        QVERIFY2(bible->ready(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 3); QVERIFY(!bible->hasWordsOfJesus()); QVERIFY(!bible->hasCrossReferences()); QVERIFY(bible->footnotes().isEmpty());
-        QVERIFY(versionRow(bible.get(),"study")["needsReimport"].toBool());
-        QVERIFY(bible->navigate("John 3:16")); QVERIFY(bible->verses()[0].toMap()["wordsOfJesus"].toList().isEmpty());
         // Re-import pins the edition: another edition's file is refused.
-        bible->importUsfm(QUrl::fromLocalFile(net), "study");
+        bible->importAo(QUrl::fromLocalFile(net), "study");
         QVERIFY(!bible->busy()); QVERIFY(bible->error().contains("not")); QCOMPARE(bible->versions().size(), 1);
         bible->clearError();
         // Re-import through the ordinary install/replace flow keeps annotations.
-        bible->importUsfm(QUrl::fromLocalFile(path), "study");
+        bible->importAo(QUrl::fromLocalFile(path), "study");
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 6); QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
+        QCOMPARE(bible->textSchema(), 7);
         QVERIFY(installedPath() != file); QVERIFY(!QFile::exists(file));
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16,16);
         QCOMPARE(bible->noteText(), QString("Kept across re-import"));
     }
-    void parallelPassagesFollowTheirSection() {
-        const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
+    void crossReferencesComeFromOpenBible() {
+        const QString path = fixtures.filePath("study.json"); QVERIFY(study(path));
         install(path);
-        const auto parallels = [&](const QString &reference) {
-            QStringList out;
-            if (!bible->navigate(reference)) return QStringList{"cannot open " + reference};
-            QStringList order{"own","parallel","openBible"};
-            int stage = 0;
-            for (const auto &value : bible->crossReferences()) {
-                const auto row = value.toMap();
-                const int at = order.indexOf(row["source"].toString());
-                if (at < stage) return QStringList{"out of order"};
-                stage = at;
-                if (at == 1) out << row["reference"].toString();
-                if (row["openBible"].toBool() != (at == 2)) return QStringList{"openBible mismatch"};
-            }
-            return out;
-        };
-        // The section's parallel passages, from anywhere in it; Luke is not in
-        // this version, so it is hidden.
-        const QStringList section{QString::fromUtf8("John 1:1–3"),"Genesis 1:2"};
-        QCOMPARE(parallels("Matthew 1:1"),section);
-        QCOMPARE(parallels("Matthew 1:3"),section);
-        QCOMPARE(parallels("Matthew 1:2-3"),section);
-        // A section never reaches into the next book, and a passage among the
-        // parallels is not its own.
-        QCOMPARE(parallels("John 1:2"),QStringList());
-        QCOMPARE(parallels("Genesis 1:2"),QStringList());
-    }
-    void crossReferencesComeFromTheSourceThenOpenBible() {
-        const QString path = fixtures.filePath("study_usfm.zip"); QVERIFY(zip(path, studyEntries()));
-        install(path);
-        QVERIFY(bible->hasCrossReferences());
         QVERIFY(bible->crossReferences().isEmpty()); // No verse selected.
         // The source's own come first, in source order; OpenBible.info's follow,
         // by votes, without the ranges the source already gave.
@@ -1801,21 +1735,21 @@ private slots:
         // The source lists John 1:1-3 twice ("Jn" and "John"), and so does
         // OpenBible (heavily voted): one row, the source's.
         auto rows = bible->crossReferences();
-        QCOMPARE(own(rows), QStringList({"John 1:1\u20133"}));
+        QVERIFY(own(rows).isEmpty());
         QCOMPARE(all(rows).count("John 1:1\u20133"), 1);
         auto row = rows[0].toMap();
-        QVERIFY(!row["openBible"].toBool()); QCOMPARE(row["votes"].toInt(), 0);
+        QVERIFY(row["openBible"].toBool()); QVERIFY(row["votes"].toInt() > 0);
         QCOMPARE(row["book"].toInt(), 43); QCOMPARE(row["start"].toInt(), 1); QCOMPARE(row["end"].toInt(), 3);
         QVERIFY(row["excerpt"].toString().startsWith("Word. Same."));
         QCOMPARE(row["versionId"].toString(), QString("study"));
         // Source order, not canonical order: a bare number continues the
         // previous chapter; unknown books are skipped.
         QVERIFY(bible->navigate("Genesis 1:2"));
-        QCOMPARE(own(bible->crossReferences()), QStringList({"John 1:3", "Matthew 1:2\u20133", "Matthew 1:1"}));
+        QVERIFY(own(bible->crossReferences()).isEmpty());
         // A range unions its verses in verse order; the passage itself is never listed.
         QVERIFY(bible->navigate("Genesis 1:1-2"));
         rows = bible->crossReferences();
-        QCOMPARE(own(rows), QStringList({"John 1:1\u20133", "John 1:3", "Matthew 1:2\u20133", "Matthew 1:1"}));
+        QVERIFY(own(rows).isEmpty());
         QVERIFY(!all(rows).contains("Genesis 1:1")); QVERIFY(!all(rows).contains("Genesis 1:2"));
         // A verse without \\x of its own still has OpenBible.info's (KJV verse
         // numbers): John 1:1 points back to Genesis 1:1.
@@ -1832,57 +1766,17 @@ private slots:
     }
     void optionalSourceArchives_data() {
         QTest::addColumn<QString>("id"); QTest::addColumn<QString>("path");
-        const auto directory = qEnvironmentVariable("OMAWORD_TEST_USFM_DIR");
-        for (const QString id : {"engnet","eng-kjv2006","eng-kjv","engojb","engylt","eng-asv","engbsb"}) {
-            QString path;
-            if (id == "engnet") path = qEnvironmentVariable("OMAWORD_TEST_NET_ZIP");
-            if (id == "eng-kjv2006") path = qEnvironmentVariable("OMAWORD_TEST_KJV_ZIP");
-            if (path.isEmpty() && !directory.isEmpty()) path = QDir(directory).filePath(id+"_usfm.zip");
+        const auto directory = qEnvironmentVariable("OMAWORD_TEST_AO_DIR");
+        for (const QString id : {"eng_net","eng_kjv","eng_kja","eng_ojb","eng_ylt","eng_asv","BSB"}) {
+            const QString path = directory.isEmpty() ? QString() : QDir(directory).filePath(id+"_complete.json");
             QTest::newRow(qPrintable(id)) << id << path;
         }
     }
     void optionalSourceArchives() {
         QFETCH(QString,id); QFETCH(QString,path);
-        if (path.isEmpty()) QSKIP("Set OMAWORD_TEST_USFM_DIR or OMAWORD_TEST_NET_ZIP / OMAWORD_TEST_KJV_ZIP for source archive checks.");
+        if (path.isEmpty()) QSKIP("Set OMAWORD_TEST_AO_DIR for optional source checks.");
         QVERIFY2(QFileInfo::exists(path),qPrintable(path)); install(path); QCOMPARE(bible->versionId(),id);
-        QString error; QVERIFY2(UsfmImporter::validateDatabase(installedPath(),&error),qPrintable(error));
-        if (id == "eng-kjv") {
-            QCOMPARE(bible->books().size(),80);
-            QCOMPARE(bible->chaptersForBook(69),QVariantList({10,11,12,13,14,15,16}));
-            const int first = bible->chapterVerses(69,10).first().toMap()["number"].toInt();
-            QVERIFY(bible->navigate(QString("ESG 10:%1").arg(first)));
-            QVERIFY(!bible->copySelection().isEmpty());
-            checkSourceOrderedNote(40,80);
-        }
-        if (id == "engojb") {
-            QVERIFY(bible->navigate("Bereshis 1:1")); QCOMPARE(bible->book(),1);
-            QVERIFY(bible->navigate("Genesis 1:1"));
-            QVERIFY(bible->passage().contains("Bereshis"));
-            const auto books = bible->books();
-            int acts = -1;
-            for (int i = 0; i < books.size(); ++i) if (books[i].toMap()["id"].toInt() == 44) acts = i;
-            QVERIFY(acts >= 0 && acts + 1 < books.size());
-            const int next = books[acts+1].toMap()["id"].toInt();
-            QVERIFY(next != 45); // This source does not place Romans after Acts.
-            checkSourceOrderedNote(next,44);
-            // OJB's own \\x "Ps 33:6,9" lists both verses.
-            QVERIFY(bible->navigate("Genesis 1:3"));
-            bool psalm6 = false, psalm9 = false;
-            for (const auto &value : bible->crossReferences()) {
-                const auto row = value.toMap();
-                if (row["book"].toInt() == 19 && row["chapter"].toInt() == 33 && row["start"].toInt() == 6) psalm6 = !row["openBible"].toBool();
-                if (row["book"].toInt() == 19 && row["chapter"].toInt() == 33 && row["start"].toInt() == 9) psalm9 = !row["openBible"].toBool();
-            }
-            QVERIFY(psalm6); QVERIFY(psalm9);
-        }
-        if (id == "eng-kjv2006") {
-            QVERIFY(bible->navigate("Matthew 1")); QVERIFY(!bible->footnotes().isEmpty() || bible->hasWordsOfJesus());
-            // KJV versification matches OpenBible: John 3:16 has many of its cross references.
-            QVERIFY(bible->navigate("John 3:16"));
-            int community = 0;
-            for (const auto &value : bible->crossReferences()) community += value.toMap()["openBible"].toBool();
-            QVERIFY(community >= 20);
-        }
+        QString error; QVERIFY2(AoImporter::validateDatabase(installedPath(),&error),qPrintable(error));
         for (const auto &row : bible->books()) {
             const auto book = row.toMap();
             QCOMPARE(book["chapters"].toInt(),book["chapterNumbers"].toList().size());

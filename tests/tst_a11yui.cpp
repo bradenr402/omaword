@@ -23,8 +23,7 @@
 #include <QTemporaryDir>
 #include <QUuid>
 #include <functional>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 #include "biblebackend.h"
 #include "blockdocument.h"
 #include "desktop.h"
@@ -82,70 +81,26 @@ class A11yUiTest : public QObject
         QSqlDatabase::removeDatabase("access-installed");
         return path;
     }
-    // Rewrites a schema 4 generation as the schema 3 layout older builds wrote.
-    static bool downgradeToSchema3(const QString &path) {
-        const QString name = QUuid::createUuid().toString();
-        bool ok = false;
-        {
-            auto db = QSqlDatabase::addDatabase("QSQLITE", name); db.setDatabaseName(path);
-            if (db.open()) {
-                QSqlQuery q(db);
-                ok = q.exec("DROP TABLE notes") && q.exec("DROP TABLE words_of_jesus")
-                    && q.exec("DELETE FROM metadata WHERE key IN ('note_count','words_of_jesus')")
-                    && q.exec("UPDATE metadata SET value='3' WHERE key='schema'")
-                    && q.exec("UPDATE verses SET html=replace(replace(html,'<span class=\"wj\">',''),'</span>','')");
-                QCryptographicHash hash(QCryptographicHash::Sha256);
-                auto field = [&](const QByteArray &v) { hash.addData(QByteArray::number(v.size())); hash.addData(":"); hash.addData(v); };
-                for (const QString &sql : {QString("SELECT key,value FROM metadata WHERE key<>'content_digest' ORDER BY key"),
-                         QString("SELECT id,code,name,abbreviation,ordinal FROM books ORDER BY ordinal"),
-                         QString("SELECT book,chapter FROM source_chapters ORDER BY book,chapter"),
-                         QString("SELECT book,name FROM book_aliases ORDER BY book,name"),
-                         QString("SELECT book,chapter,number,retained FROM source_keys ORDER BY book,chapter,number"),
-                         QString("SELECT book,chapter,number,text,html,heading,poetry,paragraphStart FROM verses ORDER BY book,chapter,number")}) {
-                    field(sql.toUtf8()); ok = ok && q.exec(sql);
-                    while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
-                }
-                q.prepare("UPDATE metadata SET value=? WHERE key='content_digest'"); q.addBindValue(QString::fromLatin1(hash.result().toHex()));
-                ok = ok && q.exec();
-                db.close();
-            }
-        }
-        QSqlDatabase::removeDatabase(name);
-        return ok;
-    }
     static bool edition(const QString &path) {
-        auto zip = archive_write_new(); archive_write_set_format_zip(zip);
-        if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(zip); return false; }
-        auto book = [](const char *code, const char *name, int chapters, int verses, auto special) {
-            QByteArray data = QString("\\id %1 Original access fixture\n\\h %2\n\\toc1 %2\n\\toc2 %2\n").arg(code, name).toUtf8();
-            for (int c = 1; c <= chapters; ++c) {
-                data += QString("\\c %1\n\\s Access fixture heading\n\\p\n").arg(c).toUtf8();
+        auto book = [](const char *code, const char *name, int chapterCount, int verses) {
+            QJsonArray chapters;
+            for (int c = 1; c <= chapterCount; ++c) {
+                QJsonArray content{QJsonObject{{"type", "heading"}, {"content", QJsonArray{"Access fixture heading"}}}}, notes;
                 for (int v = 1; v <= verses; ++v) {
-                    if (v == 20) data += "\\s A later heading\n\\p\n";
-                    const QString text = special(c, v);
-                    data += QString("\\v %1 %2\n").arg(v).arg(text.isEmpty()
-                        ? QString("Original access text %1:%2 with enough ordinary words to wrap across a reading line.").arg(c).arg(v) : text).toUtf8();
+                    if (v == 20) content.append(QJsonObject{{"type", "heading"}, {"content", QJsonArray{"A later heading"}}});
+                    QJsonArray pieces{QString("Original access text %1:%2 with enough ordinary words to wrap across a reading line.").arg(c).arg(v)};
+                    if (QString(code) == "JHN" && c == 1 && v == 1) pieces = {"In the beginning was the Word. Original words follow."};
+                    if (QString(code) == "JHN" && c == 3 && (v == 3 || v == 16)) {
+                        pieces = {v == 3 ? "Jesus answered," : "For God so loved", QJsonObject{{"noteId", v}}, v == 3 ? " truly unless one is born again." : " the world that he gave his Son."};
+                        notes.append(QJsonObject{{"noteId", v}, {"caller", v == 3 ? "+" : "a"}, {"text", v == 3 ? "3:3 Or from above" : "Greek agapao"}});
+                    }
+                    content.append(AoFixture::verse(v, pieces));
                 }
+                chapters.append(AoFixture::chapter(c, content, notes));
             }
-            return data;
+            return AoFixture::book(code, QString(code) == "GEN" ? 1 : 2, chapters, name);
         };
-        const QMap<QString, QByteArray> entries = {
-            {"01-GENaccess.usfm", book("GEN", "Genesis", 2, 31, [](int, int) { return QString(); })},
-            {"43-JHNaccess.usfm", book("JHN", "John", 3, 36, [](int c, int v) {
-                if (c == 1 && v == 1) return QString("In the beginning was the Word.\\x - \\xo 1:1 \\xt Gen 1:1; Jn 1:14; Gen 2:3\\x* Original words follow.");
-                if (c == 3 && v == 3) return QString("Jesus answered,\\f + \\fr 3:3 \\ft Or \\fq from above\\f* truly unless one is born again.");
-                if (c == 3 && v == 16) return QString("For God so loved\\f a \\ft Greek \\fq agapao\\f* the world that he gave his Son.");
-                return QString(); })},
-        };
-        bool ok = true;
-        for (auto it = entries.cbegin(); it != entries.cend(); ++it) {
-            auto entry = archive_entry_new(); const auto name = it.key().toUtf8();
-            archive_entry_set_pathname(entry, name.constData()); archive_entry_set_filetype(entry, AE_IFREG);
-            archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, it.value().size());
-            ok = archive_write_header(zip, entry) == ARCHIVE_OK && archive_write_data(zip, it.value().constData(), it.value().size()) == it.value().size() && ok;
-            archive_entry_free(entry);
-        }
-        ok = archive_write_close(zip) == ARCHIVE_OK && ok; archive_write_free(zip); return ok;
+        return AoFixture::write(path, AoFixture::complete("access", {book("GEN", "Genesis", 2, 31), book("JHN", "John", 3, 36)}));
     }
     static QVariant value(QVariant v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; }
     static QQuickItem *visual(QQuickItem *root, const QString &name) {
@@ -180,7 +135,7 @@ class A11yUiTest : public QObject
     }
     void clickAt(const QPoint &point, Qt::MouseButton button = Qt::LeftButton) { QTest::mouseClick(window, button, {}, point); QCoreApplication::processEvents(); }
     void install(const QString &file) {
-        bible->importUsfm(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
+        bible->importAo(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(), qPrintable(bible->error()));
     }
     void navigate(const QString &reference) {
@@ -341,12 +296,6 @@ private slots:
     void init() {
         session = std::make_unique<QTemporaryDir>(); qputenv("XDG_DATA_HOME", session->path().toUtf8());
         bible = std::make_unique<BibleBackend>(); install(source); bible->setReadingMode("verse");
-        if (QByteArray(QTest::currentTestFunction()).startsWith("reimport")) {
-            // An installed generation from before schema 4: Versions offers Re-import.
-            const QString file = installedFile(); bible.reset();
-            QVERIFY(downgradeToSchema3(file)); bible = std::make_unique<BibleBackend>();
-            QVERIFY2(bible->ready(), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 3);
-        }
         desktop = std::make_unique<Desktop>(); sounds = std::make_unique<SoundEffects>(nullptr, session->filePath("sound.ini"), false);
         sounds->setReduceMotion(true);
         catalog = std::make_unique<MockCatalog>();
@@ -619,17 +568,17 @@ private slots:
         // Details & Attribution takes focus and scrolls by key.
         QVariantList entries;
         for (int i = 0; i < 12; ++i) entries << QVariantMap{{"id", QString("v%1").arg(i)}, {"name", QString("Version %1 with a long descriptive name").arg(i)},
-            {"abbreviation", QString("V%1").arg(i)}, {"copyright", QString("A long copyright notice. ").repeated(40)}, {"detailsUrl", "https://example.invalid"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}};
+            {"abbreviation", QString("V%1").arg(i)}, {"language", "eng"}, {"copyright", QString("A long copyright notice. ").repeated(40)}, {"detailsUrl", "https://example.invalid"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}};
         catalog->entries = entries; emit catalog->changed();
         bible->setFontSize(26); window->resize(900, 480); QTRY_COMPARE(window->width(), 900);
         run("import"); QTRY_VERIFY(opened("importGuide")); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
-        QTRY_VERIFY(travel("importGuideScroll") > 20);
-        key(Qt::Key_PageDown); QTRY_VERIFY(contentY("importGuideScroll") > 0);
+        QTRY_VERIFY(object("catalogResults")->property("contentHeight").toDouble() > item("catalogResults")->height() + 20);
+        key(Qt::Key_PageDown); QTRY_VERIFY(object("catalogResults")->property("contentY").toDouble() > 0);
         QVERIFY(item("catalogSearch")->hasActiveFocus());
-        key(Qt::Key_PageUp); QTRY_COMPARE(contentY("importGuideScroll"), 0.0);
+        key(Qt::Key_PageUp); QTRY_VERIFY(qAbs(object("catalogResults")->property("contentY").toDouble() - object("catalogResults")->property("originY").toDouble()) < 1);
         // A card (name, description, facts, buttons) can be taller than this short
         // window's viewport: scroll its Details button into view, then click it.
-        auto guideFlick = qvariant_cast<QQuickItem *>(object("importGuideScroll")->property("contentItem"));
+        auto guideFlick = item("catalogResults");
         auto details = item("catalogDetails:v0");
         const qreal buttonY = details->mapToItem(guideFlick->property("contentItem").value<QQuickItem *>(), QPointF()).y();
         guideFlick->setProperty("contentY", qMax(0.0, buttonY + details->height() - guideFlick->height()));
@@ -1639,12 +1588,12 @@ private slots:
         QDesktopServices::unsetUrlHandler("https");
     }
     void addVersionGuideKeys() {
-        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"name", "King James Version"}, {"abbreviation", "KJV"}, {"copyright", "Public domain"}, {"detailsUrl", "https://ebible.org/kjv"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}},
-                            QVariantMap{{"id", "engweb"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}, {"copyright", "Public domain"}, {"detailsUrl", "https://ebible.org/web"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}}};
+        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"language", "eng"}, {"name", "King James Version"}, {"abbreviation", "KJV"}, {"copyright", "Public domain"}, {"detailsUrl", "https://example.invalid/kjv"}, {"description", "A fixture edition."}},
+                            QVariantMap{{"id", "engweb"}, {"language", "eng"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}, {"copyright", "Public domain"}, {"detailsUrl", "https://example.invalid/web"}, {"description", "A fixture edition."}}};
         emit catalog->changed();
         run("import"); QTRY_VERIFY(opened("importGuide")); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
         auto guide = object("importGuide");
-        QCOMPARE(guide->property("catalogIndex").toInt(), 0); QVERIFY(item("catalogRowTint:engkjv")->isVisible());
+        QCOMPARE(guide->property("catalogIndex").toInt(), 0); QTRY_VERIFY(item("catalogRowTint:engkjv") && item("catalogRowTint:engkjv")->isVisible());
         // Keyboard: ↑ ↓ choose (stopping at the ends), enter installs.
         key(Qt::Key_Down); QCOMPARE(guide->property("catalogIndex").toInt(), 1); QVERIFY(item("catalogRowTint:engweb")->isVisible());
         key(Qt::Key_Down); QCOMPARE(guide->property("catalogIndex").toInt(), 1); QCOMPARE(lastSound(), QString("boundary"));
@@ -1664,12 +1613,14 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(object("importDialog"), "close"));
         QTRY_VERIFY(!object("importDialog")->property("visible").toBool());
         // Mouse: a click chooses a row; the hint parts act on it.
+        window->requestActivate(); QTRY_COMPARE(QGuiApplication::focusWindow(), window);
         run("import"); QTRY_VERIFY(opened("importGuide"));
         auto row = item("catalogRow:engweb"); shot("add-version-guide"); clickAt(row->mapToScene(QPointF(row->width() - 20, 6)).toPoint());
         QCOMPARE(guide->property("catalogIndex").toInt(), 1); QVERIFY(!shown("catalogDetails"));
         clickHint("importGuideHintsPart:install"); QCOMPARE(catalog->requests, QStringList({"engkjv", "engweb"}));
         catalog->busy = false; emit catalog->changed();
         clickHint("importGuideHintsPart:details"); QTRY_VERIFY(opened("catalogDetails"));
+        QTRY_VERIFY(item("detailsScroll")->hasActiveFocus());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("catalogDetails"));
         clickHint("importGuideHintsPart:close"); QTRY_VERIFY(!shown("importGuide"));
     }
@@ -2082,12 +2033,16 @@ private slots:
         // Keyboard: esc cancels the restore file dialog; the reader has the keyboard again.
         run("restore"); QTRY_VERIFY(object("restoreDialog")->property("visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(object("restoreDialog"), "reject"));
-        QTRY_VERIFY(!object("restoreDialog")->property("visible").toBool()); QTRY_VERIFY(readerFocused());
+        QTRY_VERIFY(!object("restoreDialog")->property("visible").toBool());
+        window->requestActivate(); QTRY_COMPARE(QGuiApplication::focusWindow(), window);
+        call("restorePanelFocus"); QTRY_VERIFY(readerFocused());
         // From an open panel, the panel gets it back.
         run("annotations"); QTRY_VERIFY(panelOpened("marks"));
         QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, "restore")));
         QTRY_VERIFY(object("restoreDialog")->property("visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(object("restoreDialog"), "reject"));
+        window->requestActivate(); QTRY_COMPARE(QGuiApplication::focusWindow(), window);
+        call("restorePanelFocus");
         QTRY_VERIFY(!readerFocused() && window->activeFocusItem() && (focusWithin("collectionList") || focusWithin("savedSearch") || focusName() == "collectionList"));
         closeMargin();
         // A note conflict puts the keyboard on its choices, unless the editor has it.
@@ -2163,7 +2118,12 @@ private slots:
         QQuickItem *row = nullptr;
         QTRY_VERIFY((row = item("keybindingFilter the list, #name for a tag (Marks with more than 10 items, See also)")) != nullptr);
         // Mouse: hovering the row names its scope.
-        QTest::qWait(50); QTest::mouseMove(window, center(row)); QTRY_VERIFY(toolTipOf(row)->property("visible").toBool());
+        QTest::mouseMove(window, QPoint(1, 1));
+        QTRY_VERIFY(!toolTipOf(row)->property("visible").toBool());
+        QVERIFY(QMetaObject::invokeMethod(object("keybindingResults"), "positionViewAtIndex", Q_ARG(int, 0), Q_ARG(int, 0)));
+        QPoint previous(-1, -1);
+        QTRY_VERIFY([&] { QCoreApplication::processEvents(); const auto at = center(row); const bool settled = at == previous; previous = at; return settled; }());
+        QTest::mouseMove(window, row->mapToScene(QPointF(row->width() / 2, row->height() - 4)).toPoint()); QTRY_VERIFY(toolTipOf(row)->property("visible").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!shown("helpDialog"));
     }
     void paletteHintsCycleModesWithTab() {
@@ -2599,8 +2559,8 @@ private slots:
         item("catalogCancel")->forceActiveFocus(); key(Qt::Key_Space);
         QTRY_VERIFY(!item("catalogCancel")->isVisible()); QTRY_VERIFY(item("catalogSearch")->hasActiveFocus());
         // The guide's keys work from anywhere in it: from Close, ↓ chooses, ctrl i imports.
-        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"name", "King James Version"}, {"abbreviation", "KJV"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}},
-                            QVariantMap{{"id", "engweb"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}}};
+        catalog->entries = {QVariantMap{{"id", "engkjv"}, {"language", "eng"}, {"name", "King James Version"}, {"abbreviation", "KJV"}, {"description", "A fixture edition."}},
+                            QVariantMap{{"id", "engweb"}, {"language", "eng"}, {"name", "World English Bible"}, {"abbreviation", "WEB"}, {"description", "A fixture edition."}}};
         emit catalog->changed();
         item("importCancel")->forceActiveFocus(); key(Qt::Key_Down);
         QCOMPARE(object("importGuide")->property("catalogIndex").toInt(), 1); QVERIFY(item("importCancel")->hasActiveFocus());
@@ -2608,6 +2568,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(object("importDialog"), "close"));
         QTRY_VERIFY(!object("importDialog")->property("visible").toBool());
         // Mouse: hovering a catalog row tints it under a pointing hand.
+        window->requestActivate(); QTRY_COMPARE(QGuiApplication::focusWindow(), window);
         run("import"); QTRY_VERIFY(opened("importGuide"));
         auto row = item("catalogRow:engweb"); QTRY_VERIFY(row && row->isVisible());
         QCOMPARE(item("catalogRowMouse:engweb")->cursor().shape(), Qt::PointingHandCursor);
@@ -2789,7 +2750,7 @@ private slots:
         run("switchVersion"); QTRY_VERIFY(opened("versionDialog")); QTRY_VERIFY(item("versionEntry0"));
         QTest::qWait(50); click(item("versionEntry0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menu()->property("target").toString(), QString("version"));
-        QCOMPARE(menuIds(), QStringList({"switch", "details", "|", "removeVersion"}));
+        QCOMPARE(menuIds(), QStringList({"switch", "reimport", "details", "|", "removeVersion"}));
         QVERIFY(!menuEnabled("switch")); // the current version
         chooseMenu("removeVersion"); QTRY_COMPARE(object("versionDialog")->property("step").toInt(), 1);
         // Mouse back steps back, then closes the dialog.
@@ -2906,6 +2867,7 @@ private slots:
 };
 
 int main(int argc, char **argv) {
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QQuickStyle::setStyle("Basic"); QApplication app(argc, argv);
     A11yUiTest test; return QTest::qExec(&test, argc, argv);
 }

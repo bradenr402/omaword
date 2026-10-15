@@ -249,7 +249,7 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
         QTextDocument source;
         const auto html = verse.value("html").toString();
         if (html.isEmpty()) source.setPlainText(verse.value("text").toString());
-        else source.setHtml(html); // Already sanitized by the USFM importer.
+        else source.setHtml(html); // Already escaped by the AO importer.
         // Flatten source paragraph wrappers, preserving internal poetry breaks
         // and inline formats. Source verse-boundary paragraphs are handled above.
         // A line break inside a poetry verse starts the next line's block

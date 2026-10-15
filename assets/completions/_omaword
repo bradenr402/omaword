@@ -17,7 +17,7 @@ _omaword() {
         'search:search the Bible'
         'translations:list the installed translations'
         'link:print an omaword: link to a passage'
-        'import:install a translation from a USFM ZIP or file'
+        'import:install a translation from AO complete JSON'
         'completion:print a shell completion script'
         'help:show help for OmaWord or a command'
     )

@@ -131,7 +131,7 @@ bool bibleIdentity(const QString &path, const QString &id)
                 QVariantMap metadata;
                 while (q.next()) metadata.insert(q.value(0).toString(),q.value(1));
                 QString actual = metadata["version_id"].toString();
-                matches = !q.lastError().isValid() && metadata["source_format"] == "usfm" && actual == id;
+                matches = !q.lastError().isValid() && metadata["source_format"] == "ao-standard" && actual == id;
             }
         }
     }
@@ -159,7 +159,7 @@ bool validateGeneration(const QString &path, QString *error)
     if (file.open(QIODevice::ReadOnly) && file.size() < 65536) validated = QJsonDocument::fromJson(file.readAll()).object();
     file.close();
     if (!identity.isEmpty() && validated.value(path).toString() == identity) return true;
-    if (!UsfmImporter::validateDatabase(path,error)) return false;
+    if (!AoImporter::validateDatabase(path,error)) return false;
     if (identity.isEmpty() || fileIdentity(path) != identity) return true;
     for (const QString &known : validated.keys()) if (!QFileInfo::exists(known)) validated.remove(known);
     validated.insert(path,identity);
@@ -428,7 +428,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         const double value = m_importProgress ? m_importProgress->load() : 0;
         if (value != m_progress) { m_progress = value; emit importProgressChanged(); }
     });
-    connect(&m_importWatcher, &QFutureWatcher<UsfmImporter::Result>::finished, this, [this] {
+    connect(&m_importWatcher, &QFutureWatcher<AoImporter::Result>::finished, this, [this] {
         m_progressTimer.stop();
         const auto result = m_importWatcher.result();
         if (result.ok) {
@@ -437,7 +437,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         } else {
             removeOwnedBibleFiles(m_importTarget);
             setError(result.error);
-            setStatus(m_ready ? "Import failed. Your existing Bible is available." : "Import failed. Choose a USFM ZIP or local USFM file.");
+            setStatus(m_ready ? "Import failed. Your existing Bible is available." : "Import failed. Choose an AO complete JSON file.");
         }
         m_importTarget.clear();
         m_busy = false;
@@ -460,7 +460,7 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
     reloadDesk();
     reloadHistory();
     reloadRibbon();
-    if (!m_ready) setStatus("Import a USFM Bible to begin.");
+    if (!m_ready) setStatus("Install an AO Bible to begin.");
 }
 
 BibleBackend::~BibleBackend()
@@ -2121,7 +2121,6 @@ QPair<int, bool> BibleBackend::textInfo(const QString &id, const QString &path) 
             }
         }
         QSqlDatabase::removeDatabase(name);
-        if (info.first < 4) info.second = false;
         m_textInfo.insert(path, info);
     }
     return info;
@@ -2144,7 +2143,7 @@ bool BibleBackend::readVersions(QVariantList *result)
         const auto info = textInfo(q.value(0).toString(), m_directory + '/' + q.value(4).toString());
         rows.append(QVariantMap{{"id",q.value(0)},{"abbreviation",q.value(1)},
             {"name",q.value(2)},{"active",q.value(3).toBool()},{"textSchema",info.first},
-            {"needsReimport",info.first > 0 && info.first < ReimportTextSchema},{"wordsOfJesus",info.second}});
+            {"wordsOfJesus",info.second}});
     }
     if (q.lastError().isValid()) return setError("Cannot read installed versions: " + q.lastError().text());
     *result = rows; return true;
@@ -2168,7 +2167,7 @@ bool BibleBackend::readVersion(const QString &id)
 
 bool BibleBackend::switchVersion(QString id)
 {
-    if (m_busy) return setError("Wait for the USFM import to finish before switching versions.");
+    if (m_busy) return setError("Wait for the AO import to finish before switching versions.");
     if (id.isEmpty() || installedPath(id).isEmpty()) return setError("That Bible version is not installed.");
     if (id == m_versionId && m_ready) { clearError(); return true; }
     return changeVersion(id);
@@ -2196,6 +2195,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
 {
     if (!m_storeReady) return setError("Your notes database is unavailable.");
     const QString path = importPath.isEmpty() ? installedPath(id) : importPath;
+    const bool firstInstallation = !importPath.isEmpty() && installedPath(id).isEmpty();
     if (!id.isEmpty() && path.isEmpty()) return setError("That Bible version is not installed.");
     if (!id.isEmpty() && !ownedBiblePath(path,id)) return setError("Unsafe Bible database path.");
     QString obsolete;
@@ -2227,7 +2227,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     const auto oldConnection = m_bibleConnection;
     const auto oldId = m_versionId, oldEdition = m_edition, oldAbbreviation = m_abbreviation, oldCopyright = m_copyright;
     const auto oldKeys = m_keys;
-    const bool oldParagraphs = m_hasParagraphs, oldWordsOfJesus = m_hasWordsOfJesus, oldHeadings = m_hasHeadings, oldCrossReferences = m_hasCrossReferences;
+    const bool oldParagraphs = m_hasParagraphs, oldWordsOfJesus = m_hasWordsOfJesus, oldHeadings = m_hasHeadings;
     const int oldSchema = m_textSchema;
     const auto oldBooks = m_books;
     const auto oldChapters = m_chapters;
@@ -2246,14 +2246,13 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_anchor = oldA; m_cursor = oldC; m_position = oldPosition;
         m_hasParagraphs = oldParagraphs; m_books = oldBooks; m_chapters = oldChapters;
         m_hasWordsOfJesus = oldWordsOfJesus; m_textSchema = oldSchema; m_hasHeadings = oldHeadings;
-        m_hasCrossReferences = oldCrossReferences;
         m_bookAliases = oldAliases; m_keyIndices = oldIndices;
         blocker.unblock(); emit errorChanged();
     });
     m_bible = QSqlDatabase(); m_bibleConnection.clear();
     m_versionId = id; m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_keys = {{0,0,0}};
     m_hasParagraphs = false; m_books.clear(); m_chapters.clear(); m_bookAliases.clear(); m_keyIndices.clear();
-    m_hasWordsOfJesus = false; m_textSchema = 0; m_hasHeadings = false; m_hasCrossReferences = false;
+    m_hasWordsOfJesus = false; m_textSchema = 0; m_hasHeadings = false;
     if (!id.isEmpty()) {
         m_bibleConnection = connectionName(); m_bible = QSqlDatabase::addDatabase("QSQLITE",m_bibleConnection);
         m_bible.setDatabaseName(path); m_bible.setConnectOptions("QSQLITE_OPEN_READONLY;QSQLITE_BUSY_TIMEOUT=5000");
@@ -2269,15 +2268,10 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_copyright = metadata["copyright"].toString();
         m_hasParagraphs = metadata["paragraph_layout"] == "1";
         m_textSchema = metadata["schema"].toInt();
-        m_hasWordsOfJesus = m_textSchema >= 4 && metadata["words_of_jesus"].toInt() > 0;
+        m_hasWordsOfJesus = metadata["words_of_jesus"].toInt() > 0;
         if (!text.exec("SELECT EXISTS(SELECT 1 FROM verses WHERE heading IS NOT NULL AND heading<>'')") || !text.next())
             return setError("Cannot read Bible headings.");
         m_hasHeadings = text.value(0).toBool();
-        if (m_textSchema >= 4) {
-            if (!text.exec("SELECT EXISTS(SELECT 1 FROM notes WHERE kind='x' AND targets<>'')") || !text.next())
-                return setError("Cannot read Bible cross references.");
-            m_hasCrossReferences = text.value(0).toBool();
-        }
         if (!text.exec("SELECT v.book,v.chapter,v.number,v.paragraphStart FROM verses v JOIN books b ON b.id=v.book ORDER BY b.ordinal,v.chapter,v.number")) return setError("Cannot read Bible verse keys.");
         while (text.next()) {
             const int b = text.value(0).toInt(), c = text.value(1).toInt(), v = text.value(2).toInt();
@@ -2368,11 +2362,14 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     QVariantList rows, versions;
     QVector<Annotation> annotations;
     if (!id.isEmpty()) {
+        q.prepare("SELECT EXISTS(SELECT 1 FROM reading WHERE version_id=?)"); q.addBindValue(id);
+        if (!q.exec() || !q.next()) return setError("Cannot inspect saved reading location.");
+        const bool savedReading = q.value(0).toBool(); q.finish();
         q.prepare("INSERT OR IGNORE INTO reading VALUES(1,1,1,0,0,0,0,0,0,0,?)"); q.addBindValue(id);
         if (!q.exec()) return setError("Cannot initialize version reading location: " + q.lastError().text());
         m_anchor = absoluteVerse(oldAnchor.book,oldAnchor.chapter,oldAnchor.verse);
         m_cursor = absoluteVerse(oldCursor.book,oldCursor.chapter,oldCursor.verse);
-        if (startup) {
+        if (startup || (firstInstallation && savedReading)) {
             q.prepare("SELECT book,chapter,start,end,position,anchorBook,anchorChapter,cursorBook,cursorChapter FROM reading WHERE version_id=?"); q.addBindValue(id);
             if (!q.exec() || !q.next()) return setError("Cannot read your saved reading location: " + q.lastError().text());
             m_book = q.value(0).toInt(); m_chapter = q.value(1).toInt(); m_position = q.value(4).toDouble();
@@ -2435,7 +2432,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     }
     clearError();
     setStatus(fallback ? "The selected endpoint is absent in " + edition() + "; opened " + passage() + " instead."
-        : m_ready ? "Ready · " + edition() : "Import a USFM Bible to begin.");
+        : m_ready ? "Ready · " + edition() : "Install an AO Bible to begin.");
     updateAnnotations();
     emit versionChanged(); emit versionsChanged(); emit booksChanged(); emit readyChanged(); emit collectionChanged();
     emit passageChanged(); emit selectionChanged(); emit readingPositionChanged(); emit navigationChanged();
@@ -2450,7 +2447,7 @@ void BibleBackend::closeBible()
 }
 bool BibleBackend::requireReady()
 {
-    return m_ready || setError("Import a USFM Bible first.");
+    return m_ready || setError("Install an AO Bible first.");
 }
 
 void BibleBackend::cancelScriptureSearch()
@@ -2467,7 +2464,7 @@ void BibleBackend::searchScripture(QString query)
 {
     cancelScriptureSearch();
     if (query.trimmed().isEmpty()) return;
-    if (!m_ready) { m_searchError = "Import a USFM Bible first."; emit searchChanged(); return; }
+    if (!m_ready) { m_searchError = "Install an AO Bible first."; emit searchChanged(); return; }
     const quint64 request = m_searchRequest;
     const QString generation = m_textGeneration, id = m_versionId;
     const auto editions = searchEditions(m_searchAllVersions);
@@ -2565,20 +2562,20 @@ QString BibleBackend::localPath(const QUrl &url)
     if (path.isEmpty() || !QFileInfo(path).isAbsolute()) { setError("Please choose an absolute local file path."); return {}; }
     return path;
 }
-void BibleBackend::importUsfm(QUrl file, QString expectedId)
+void BibleBackend::importAo(QUrl file, QString expectedId)
 {
     if (sharedMutationBusy()) { setError("A shared library operation is already running."); return; }
     if (!m_storeReady || !m_store.isOpen()) { setError("Your notes database is unavailable. Check the data directory permissions."); return; }
     const QString path = localPath(file);
     if (path.isEmpty()) return;
-    if (!QFileInfo(path).isFile() || !QFileInfo(path).isReadable()) { setError("Cannot read the selected USFM file."); return; }
+    if (!QFileInfo(path).isFile() || !QFileInfo(path).isReadable()) { setError("Cannot read the selected AO JSON file."); return; }
     QString error;
-    const auto edition = UsfmImporter::inspectFile(path,&error);
+    const auto edition = AoImporter::inspectFile(path,&error);
     if (edition.id.isEmpty()) { setError(error); return; }
     if (!expectedId.isEmpty() && edition.id != expectedId) {
         QString expected = expectedId;
         for (const auto &row : m_versions) if (row.toMap()["id"] == expectedId) expected = row.toMap()["name"].toString();
-        setError("That file is " + edition.name + ", not " + expected + ". Choose the USFM file for " + expected + " to re-import it.");
+        setError("That file is " + edition.name + ", not " + expected + ". Choose the AO complete JSON for " + expected + " to replace it.");
         return;
     }
     if (!flushDrafts()) return;
@@ -2590,7 +2587,14 @@ void BibleBackend::importUsfm(QUrl file, QString expectedId)
     const QString target = m_directory + "/bible-" + connectionName() + ".sqlite";
     m_importTarget = target;
     const auto progress = m_importProgress;
-    m_importWatcher.setFuture(QtConcurrent::run([path, target, progress] { return UsfmImporter::importFile(path, target, progress); }));
+    m_importWatcher.setFuture(QtConcurrent::run([path, target, progress, id = edition.id] {
+        auto result = AoImporter::importFile(path, target, progress);
+        if (result.ok && result.edition.id != id) {
+            result.ok = false;
+            result.error = QStringLiteral("The AO input changed translation identity during import.");
+        }
+        return result;
+    }));
     m_progressTimer.start();
 }
 
@@ -2678,9 +2682,8 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
             {"paragraphStart",endpoint(absoluteVerse(book,chapter,q.value(0).toInt())).paragraphStart},
             {"heading",q.value(3)}, {"poetry",q.value(4).toBool()}, {"highlighted",false}, {"hasNote",false}});
     }
-    if (m_textSchema >= 4) {
-        // Schema 4: footnotes (\f, \fe) and words-of-Jesus ranges, both as
-        // UTF-16 offsets into each verse's plain text.
+    {
+        // Footnotes and words-of-Jesus ranges are UTF-16 into plain text.
         QHash<int, QVariantList> notes, spans;
         QSqlQuery extra(m_bible);
         extra.prepare("SELECT verse,seq,kind,caller,offset,text FROM notes WHERE book=? AND chapter=? AND kind IN ('f','fe') ORDER BY verse,seq");
@@ -2699,10 +2702,9 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
             row = map;
         }
     }
-    // Each text line's poetry level (0 prose); before schema 5 every line of
-    // a poetry verse is at the first level.
+    // Each text line's poetry level (0 prose).
     QHash<int, QString> levels;
-    if (m_textSchema >= 5) {
+    {
         QSqlQuery extra(m_bible);
         extra.prepare("SELECT verse,levels FROM indents WHERE book=? AND chapter=?");
         extra.addBindValue(book); extra.addBindValue(chapter);
@@ -2715,20 +2717,20 @@ bool BibleBackend::readChapter(int book, int chapter, QVariantList *result)
         const QString saved = levels.value(map.value("number").toInt());
         QVariantList indents;
         for (int i = 0; i < lines; ++i)
-            indents.append(m_textSchema >= 5 ? (i < saved.size() ? saved[i].digitValue() : 0) : int(map.value("poetry").toBool()));
+            indents.append(i < saved.size() ? saved[i].digitValue() : 0);
         map["indents"] = indents;
         row = map;
     }
     QVector<int> expected;
     for (const auto &key : m_keys) if (key.book == book && key.chapter == chapter) expected.append(key.verse);
     if (q.lastError().isValid() || rows.isEmpty() || rows.size() != expected.size())
-        return setError("The requested chapter could not be read completely. Please re-import your USFM Bible.");
+        return setError("The requested chapter could not be read completely. Please replace this AO edition.");
     int index = 0;
     for (const auto &row : rows) {
         const auto map = row.toMap();
         if (map.value("number").toInt() != expected[index++] || map.value("text").toString().trimmed().isEmpty()
             || map.value("html").toString().trimmed().isEmpty())
-            return setError("The requested chapter contains invalid verses. Please re-import your USFM Bible.");
+            return setError("The requested chapter contains invalid verses. Please replace this AO edition.");
     }
     *result = rows;
     return true;
@@ -3015,7 +3017,7 @@ QVariantList BibleBackend::linkedNotes() const
 bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *first, int *last, QString *error) const
 {
     auto fail = [error](const QString &message) { *error = message; return false; };
-    if (!m_ready) return fail("Import a USFM Bible first.");
+    if (!m_ready) return fail("Install an AO Bible first.");
     input = input.simplified();
     input.replace(QChar(0x2013), '-'); input.replace(QChar(0x2014), '-'); input.replace(QChar(0x2212), '-');
     if (input.size() > 200 || input.isEmpty()) return fail("Enter a reference such as John 3:16–18.");
@@ -3849,7 +3851,7 @@ QString BibleBackend::copySelection(bool plainText)
 
 QVariantMap BibleBackend::readPassage(const QString &text, bool strict)
 {
-    if (!m_ready) return {{"error","Import a USFM Bible first."}};
+    if (!m_ready) return {{"error","Install an AO Bible first."}};
     int b = 0, c = 0, start = 0, end = 0;
     QString error;
     if (!parseReference(text,&b,&c,&start,&end,&error)) {
@@ -3864,7 +3866,7 @@ QVariantMap BibleBackend::readPassage(const QString &text, bool strict)
 
 QVariantMap BibleBackend::readScope(const QVariantMap &scope)
 {
-    if (!m_ready) return {{"error","Import a USFM Bible first."}};
+    if (!m_ready) return {{"error","Install an AO Bible first."}};
     const int b = scope.value("book").toInt(), c = scope.value("chapter").toInt();
     int start = 0, end = 0;
     if (!scope.value("start").toInt()) {
@@ -4689,47 +4691,6 @@ const CrossData &crossData()
 }
 }
 
-QVector<QPair<int, int>> BibleBackend::sourceTargets(const QString &text, int book, int chapter) const
-{
-    // Source \xt lists: "Ps 33:6,9; Mk 16:2", "1 Cor 13", "Gen 1:1-2:3". A
-    // bare number continues the previous book and chapter (a verse after a
-    // verse, otherwise a chapter). Unresolvable or absent targets are skipped.
-    static const QRegularExpression item(
-        "^(?:((?:[1-3]\\s*)?[^\\d\\s:,;.][^\\d:,;]*?)\\.?\\s*)?(\\d+)(?:[:.](\\d+))?(?:\\s*[-\\x{2013}\\x{2014}]\\s*(\\d+)(?:[:.](\\d+))?)?$");
-    QVector<QPair<int, int>> result;
-    int currentBook = book, currentChapter = chapter;
-    bool verseContext = false;
-    for (const QString &group : text.split(';', Qt::SkipEmptyParts)) {
-        for (QString part : group.split(',', Qt::SkipEmptyParts)) {
-            part = part.trimmed();
-            while (part.endsWith('.')) part.chop(1);
-            const auto m = item.match(part);
-            if (!m.hasMatch()) { verseContext = false; continue; }
-            if (!m.captured(1).trimmed().isEmpty()) {
-                currentBook = resolveBook(m.captured(1).trimmed());
-                verseContext = false;
-            }
-            if (!currentBook) continue;
-            int c = currentChapter, v = 0;
-            if (m.capturedLength(3)) { c = m.captured(2).toInt(); v = m.captured(3).toInt(); }
-            else if (verseContext && m.captured(1).trimmed().isEmpty()) v = m.captured(2).toInt();
-            else c = m.captured(2).toInt();
-            int first = 0, last = 0;
-            if (v) first = last = absoluteVerse(currentBook,c,v);
-            else chapterBounds(currentBook,c,&first,&last);
-            if (m.capturedLength(4)) {
-                if (m.capturedLength(5)) last = absoluteVerse(currentBook,m.captured(4).toInt(),m.captured(5).toInt());
-                else if (v) last = absoluteVerse(currentBook,c,m.captured(4).toInt());
-                else { int unused = 0; chapterBounds(currentBook,m.captured(4).toInt(),&unused,&last); }
-            }
-            currentChapter = m.capturedLength(5) ? m.captured(4).toInt() : c;
-            verseContext = v > 0;
-            if (first && last >= first) result.append({first,last});
-        }
-    }
-    return result;
-}
-
 QVariantList BibleBackend::crossReferences(QVariantMap scope) const
 {
     if (!m_ready) return {};
@@ -4738,63 +4699,10 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
     const int first = absoluteVerse(scope.value("book").toInt(),scope.value("chapter").toInt(),scope.value("start").toInt());
     const int last = absoluteVerse(scope.value("endBook").toInt(),scope.value("endChapter").toInt(),scope.value("end").toInt());
     if (!first || last < first) return {};
-    // The source's own \x targets first, in source order (verse, note, list
-    // order); exact duplicates keep their first position. Then its parallel
-    // passages, then OpenBible.info's community cross references by votes,
-    // minus any already given.
-    enum Source { Own, Parallel, OpenBible };
-    struct Entry { int first = 0, last = 0, votes = 0; Source source = Own; };
+    enum Source { OpenBible };
+    struct Entry { int first = 0, last = 0, votes = 0; Source source = OpenBible; };
     QVector<Entry> entries;
     QSet<QPair<int, int>> seen;
-    if (m_textSchema >= 4) {
-        QSqlQuery notes(m_bible);
-        notes.prepare("SELECT targets FROM notes WHERE book=? AND chapter=? AND verse=? AND kind='x' ORDER BY seq");
-        for (int index = first; index <= last && index < first + 50; ++index) {
-            const auto verse = endpoint(index);
-            notes.bindValue(0,verse.book); notes.bindValue(1,verse.chapter); notes.bindValue(2,verse.verse);
-            if (!notes.exec()) continue;
-            while (notes.next()) {
-                for (const auto &range : sourceTargets(notes.value(0).toString(),verse.book,verse.chapter)) {
-                    // Hide targets absent from the active version, and the passage itself.
-                    const int a = range.first, z = range.second;
-                    if (!a || z < a || (a >= first && z <= last) || seen.contains(range)) continue;
-                    seen.insert(range); entries.append({a,z});
-                }
-            }
-        }
-    }
-    // Parallel passages (schema 6): the \r lines under the heading of the
-    // section the passage starts in, and of any section starting inside it.
-    if (m_textSchema >= 6) {
-        QSqlQuery heading(m_bible), lines(m_bible);
-        heading.prepare("SELECT heading<>'' FROM verses WHERE book=? AND chapter=? AND number=?");
-        lines.prepare("SELECT text FROM parallels WHERE book=? AND chapter=? AND verse=? ORDER BY seq");
-        const auto opens = [&](int index) {
-            const auto verse = endpoint(index);
-            heading.bindValue(0,verse.book); heading.bindValue(1,verse.chapter); heading.bindValue(2,verse.verse);
-            return heading.exec() && heading.next() && heading.value(0).toBool();
-        };
-        QVector<int> sections;
-        // Back to the start of the section, within the passage's book.
-        for (int index = first; index >= 1 && index > first - 400 && endpoint(index).book == endpoint(first).book; --index)
-            if (opens(index)) { sections.append(index); break; }
-        for (int index = first + 1; index <= last && index < first + 50; ++index)
-            if (opens(index)) sections.append(index);
-        for (int index : std::as_const(sections)) {
-            const auto verse = endpoint(index);
-            lines.bindValue(0,verse.book); lines.bindValue(1,verse.chapter); lines.bindValue(2,verse.verse);
-            if (!lines.exec()) continue;
-            while (lines.next()) {
-                // "(Mark 1:1–8; Luke 3:1–18)": the same lists as \xt targets.
-                const QString text = lines.value(0).toString().remove('(').remove(')');
-                for (const auto &range : sourceTargets(text,verse.book,verse.chapter)) {
-                    const int a = range.first, z = range.second;
-                    if (!a || z < a || (a >= first && z <= last) || seen.contains(range)) continue;
-                    seen.insert(range); entries.append({a,z,0,Parallel});
-                }
-            }
-        }
-    }
     // OpenBible numbers verses as the KJV does; other versifications are looked
     // up by the same numbers, and targets absent from this version are hidden.
     const auto &data = crossData();
@@ -4830,7 +4738,7 @@ QVariantList BibleBackend::crossReferences(QVariantMap scope) const
         rows.append(QVariantMap{{"versionId",m_versionId},{"versionAbbreviation",m_abbreviation},
             {"reference",rangeReference(entry.first,entry.last)},{"book",a.book},{"chapter",a.chapter},{"start",a.verse},
             {"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse},{"excerpt",excerpt},
-            {"openBible",entry.source == OpenBible},{"source",entry.source == Own ? "own" : entry.source == Parallel ? "parallel" : "openBible"},
+            {"openBible",true},{"source","openBible"},
             {"votes",entry.votes}});
     }
     return rows;

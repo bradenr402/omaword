@@ -49,10 +49,10 @@ flock -u 9
 trap 'rm -f "$STATE/active-$BASHPID"' EXIT
 if [[ $phase == test ]]; then
     printf '%s\n' "$@" > "$STATE/$project.args"
-    for variable in OMAWORD_TEST_NET_ZIP OMAWORD_TEST_KJV_ZIP OMAWORD_TEST_KJV; do
-        [[ -z ${!variable:-} || ${!variable} == "$USFM_FIXTURE" ]]
+    for variable in OMAWORD_TEST_KJV_JSON OMAWORD_TEST_AO_MIGRATION_SCRIPT; do
+        [[ -z ${!variable:-} || ${!variable} == "$AO_FIXTURE" ]]
     done
-    [[ -z ${OMAWORD_TEST_USFM_DIR:-} || $OMAWORD_TEST_USFM_DIR == "$USFM_DIRECTORY" ]]
+    [[ -z ${OMAWORD_TEST_AO_DIR:-} || $OMAWORD_TEST_AO_DIR == "$AO_DIRECTORY" ]]
     [[ $QT_QPA_PLATFORM == offscreen && $QT_QUICK_BACKEND == software && $OMAWORD_SOUND == 0 ]]
     # The suite's user directories are its own sandbox, never the real home's state.
     for variable in HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_STATE_HOME XDG_RUNTIME_DIR; do
@@ -75,12 +75,11 @@ export TOOLS="$workspace/tools" PATH="$workspace/tools:$PATH"
 mkdir -p "$workspace/source archives/nested"
 ln -s 'source archives' "$workspace/source alias"
 touch "$workspace/source archives/input book.zip"
-export USFM_FIXTURE="$workspace/source archives/input book.zip"
-export USFM_DIRECTORY="$workspace/source archives"
-export OMAWORD_TEST_USFM_DIR='source alias/nested/..'
-export OMAWORD_TEST_NET_ZIP='source alias/nested/../input book.zip'
-export OMAWORD_TEST_KJV_ZIP='source alias/nested/../input book.zip'
-export OMAWORD_TEST_KJV='source alias/nested/../input book.zip'
+export AO_FIXTURE="$workspace/source archives/input book.zip"
+export AO_DIRECTORY="$workspace/source archives"
+export OMAWORD_TEST_AO_DIR='source alias/nested/..'
+export OMAWORD_TEST_KJV_JSON='source alias/nested/../input book.zip'
+export OMAWORD_TEST_AO_MIGRATION_SCRIPT='source alias/nested/../input book.zip'
 export BUILD_DIR='output tree/../output tree' JOBS=3 TEST_JOBS=2 EXPECTED_JOBS=1
 cd "$workspace"
 runner="$workspace/checkout/bin/test"
@@ -140,23 +139,23 @@ done
 printf 'PASS importer and catalog selectors map to their projects and executables\n'
 
 for invalid in 'missing directory' 'source archives/input book.zip'; do
-    OMAWORD_TEST_USFM_DIR="$invalid" run_status --suite importer
+    OMAWORD_TEST_AO_DIR="$invalid" run_status --suite importer
     [[ $status == 1 ]]
-    assert_output 'OMAWORD_TEST_USFM_DIR must name a readable directory.'
+    assert_output 'OMAWORD_TEST_AO_DIR must name a readable directory.'
 done
-for variable in OMAWORD_TEST_NET_ZIP OMAWORD_TEST_KJV_ZIP OMAWORD_TEST_KJV; do
+for variable in OMAWORD_TEST_KJV_JSON OMAWORD_TEST_AO_MIGRATION_SCRIPT; do
     for invalid in 'missing.zip' 'source archives'; do
         saved=${!variable}
         printf -v "$variable" '%s' "$invalid"
         run_status --suite importer
         printf -v "$variable" '%s' "$saved"
         [[ $status == 1 ]]
-        assert_output "$variable must name a readable USFM ZIP file."
+        assert_output "$variable must name a readable file."
     done
 done
-printf 'PASS fixture directory and ZIP paths reject missing or wrong-type inputs\n'
+printf 'PASS explicit fixture paths reject missing or wrong-type inputs\n'
 
-unset OMAWORD_TEST_USFM_DIR OMAWORD_TEST_NET_ZIP OMAWORD_TEST_KJV_ZIP OMAWORD_TEST_KJV
+unset OMAWORD_TEST_AO_DIR OMAWORD_TEST_KJV_JSON OMAWORD_TEST_AO_MIGRATION_SCRIPT
 rm -f "$STATE"/*.test "$STATE"/*.build
 export JOBS=1 TEST_JOBS=8 EXPECTED_JOBS=1
 run_status

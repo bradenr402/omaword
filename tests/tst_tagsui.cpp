@@ -13,8 +13,7 @@
 #include <QSignalSpy>
 #include <QSqlQuery>
 #include <QTemporaryDir>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 #include "biblebackend.h"
 #include "desktop.h"
 #include "soundeffects.h"
@@ -37,32 +36,17 @@ class TagsUiTest : public QObject
     QString net, kjv;
 
     static bool edition(const QString &path, const QString &id) {
-        archive *zip = archive_write_new();
-        archive_write_set_format_zip(zip);
-        if (archive_write_open_filename(zip, QFile::encodeName(path).constData()) != ARCHIVE_OK) {
-            archive_write_free(zip); return false;
-        }
-        QByteArray data = "\\id JHN Original Tags UI Fixture\n\\h John\n\\toc1 John\n\\toc2 John\n";
+        QJsonArray chapters;
         for (int chapter = 3; chapter <= 4; ++chapter) {
-            data += QString("\\c %1\n\\p\n").arg(chapter).toUtf8();
+            QJsonArray content;
             for (int verse = 1; verse <= 12; ++verse)
-                data += QString("\\v %1 Original tag fixture %2:%1, literal <b>words</b> and café.\n").arg(verse).arg(chapter).toUtf8();
+                content.append(AoFixture::verse(verse, {QString("Original tag fixture %1:%2, literal <b>words</b> and café.").arg(chapter).arg(verse)}));
+            chapters.append(AoFixture::chapter(chapter, content));
         }
-        archive_entry *entry = archive_entry_new();
-        const auto name = ("01-JHN" + id + ".usfm").toUtf8();
-        archive_entry_set_pathname(entry, name.constData());
-        archive_entry_set_filetype(entry, AE_IFREG);
-        archive_entry_set_perm(entry, 0600);
-        archive_entry_set_size(entry, data.size());
-        bool ok = archive_write_header(zip, entry) == ARCHIVE_OK
-            && archive_write_data(zip, data.constData(), data.size()) == data.size();
-        archive_entry_free(entry);
-        ok = archive_write_close(zip) == ARCHIVE_OK && ok;
-        archive_write_free(zip);
-        return ok;
+        return AoFixture::write(path, AoFixture::complete(id, {AoFixture::book("JHN", 1, chapters, "John")}));
     }
     void install(const QString &path) {
-        bible->importUsfm(QUrl::fromLocalFile(path));
+        bible->importAo(QUrl::fromLocalFile(path));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(), qPrintable(bible->error()));
     }

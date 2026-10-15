@@ -24,8 +24,7 @@
 #include <QQmlEngine>
 #include <QTimer>
 #include <QWindow>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 
 class WindowsTest : public QObject
 {
@@ -54,33 +53,24 @@ class WindowsTest : public QObject
     // Small original USFM content covers only references used by these tests.
     // names: a book's own name in this edition (\h, \toc), by code; verses: John 3's count.
     static bool writeStructuredUsfm(const QString &path, const QString &id, const QMap<QString,QString> &names = {}, int verses = 36) {
-        QMap<QString,QByteArray> entries;
+        QJsonArray books;
         const QStringList codes{"GEN","MRK","JHN","ROM"};
         for (int b = 0; b < codes.size(); ++b) {
-            QString body = "\\id " + codes[b] + " Original Window Bible\n";
-            if (names.contains(codes[b])) body += QString("\\h %1\n\\toc1 %1\n\\toc2 %1\n").arg(names[codes[b]]);
-            const QList<int> chapters = b == 0 ? QList<int>{1,2} : b == 1 ? QList<int>{7} : b == 2 ? QList<int>{3,4} : QList<int>{8};
-            for (int c : chapters) {
-                body += QString("\\c %1\n\\p\n").arg(c);
+            QJsonArray chapters;
+            const QList<int> numbers = b == 0 ? QList<int>{1,2} : b == 1 ? QList<int>{7} : b == 2 ? QList<int>{3,4} : QList<int>{8};
+            for (int c : numbers) {
+                QJsonArray content;
                 for (int v = 1; v <= (codes[b] == "JHN" && c == 3 ? verses : 36); ++v)
-                    body += QString("\\v %1 Original window fixture words %2:%3:%1.\n").arg(v).arg(codes[b]).arg(c);
+                    content.append(AoFixture::verse(v, {QString("Original window fixture words %1:%2:%3.").arg(codes[b]).arg(c).arg(v)}));
+                chapters.append(AoFixture::chapter(c, content));
             }
-            entries[QString("%1-%2%3.usfm").arg(b+1,2,10,QChar('0')).arg(codes[b],id)] = body.toUtf8();
+            books.append(AoFixture::book(codes[b], b + 1, chapters, names.value(codes[b])));
         }
-        archive *zip = archive_write_new();
-        const auto cleanup = qScopeGuard([&] { archive_write_free(zip); });
-        if (archive_write_set_format_zip(zip) != ARCHIVE_OK
-            || archive_write_open_filename(zip,QFile::encodeName(path).constData()) != ARCHIVE_OK) return false;
-        for (auto it = entries.cbegin(); it != entries.cend(); ++it) {
-            archive_entry *entry = archive_entry_new();
-            const auto cleanupEntry = qScopeGuard([&] { archive_entry_free(entry); });
-            archive_entry_set_pathname(entry,it.key().toUtf8().constData());
-            archive_entry_set_size(entry,it.value().size());
-            archive_entry_set_filetype(entry,AE_IFREG); archive_entry_set_perm(entry,0600);
-            if (archive_write_header(zip,entry) != ARCHIVE_OK
-                || archive_write_data(zip,it.value().constData(),it.value().size()) != it.value().size()) return false;
-        }
-        return archive_write_close(zip) == ARCHIVE_OK;
+        auto root = AoFixture::complete(id, books, "Original Window Bible");
+        auto translation = root["translation"].toObject();
+        if (id == "window-original") translation["shortName"] = "OWB";
+        root["translation"] = translation;
+        return AoFixture::write(path, root);
     }
     QString installedPath(BibleBackend *bible) {
         const QString connection = "windows-inspect";
@@ -112,7 +102,7 @@ private slots:
         QVERIFY(QDir().mkpath(data));
         {
             BibleBackend seed;
-            seed.importUsfm(QUrl::fromLocalFile(fixture));
+            seed.importAo(QUrl::fromLocalFile(fixture));
             QTRY_VERIFY_WITH_TIMEOUT(!seed.busy(),30000);
             QVERIFY2(seed.ready(),qPrintable(seed.error()));
         }
@@ -199,7 +189,7 @@ private slots:
         QFETCH(bool,saveDraft);
         auto *a = windows->backendAt(0), *b = windows->backendAt(1);
         auto *first = windows->windowAt(0), *second = windows->windowAt(1);
-        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
+        a->importAo(QUrl::fromLocalFile(structuredUsfm));
         QVERIFY2(a->busy(),qPrintable(a->error()));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),30000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
@@ -240,7 +230,7 @@ private slots:
         // Use the manager's real root callbacks, without replacing them with test lambdas.
         QVERIFY(!a->importBackup(backup));
         QVERIFY(!a->removeVersion(id,true));
-        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
+        a->importAo(QUrl::fromLocalFile(structuredUsfm));
         QVERIFY(!a->busy()); QVERIFY(a->error().contains("unsaved note"));
         QVERIFY(!second->close());
         QCOMPARE(windows->count(),2); QVERIFY(first->isVisible()); QVERIFY(second->isVisible());
@@ -261,7 +251,7 @@ private slots:
         QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),resolved); q.finish();
         QVERIFY(a->importBackup(backup));
         QCOMPARE(editorB->property("text").toString(),QString("Initial shared note"));
-        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
+        a->importAo(QUrl::fromLocalFile(structuredUsfm));
         QVERIFY2(a->busy(),qPrintable(a->error()));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),30000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
@@ -277,7 +267,7 @@ private slots:
     void genericStructuredEditionAcrossWindows() {
         auto *a = windows->backendAt(0), *b = windows->backendAt(1);
         QVERIFY(b->navigate("John 3:16"));
-        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
+        a->importAo(QUrl::fromLocalFile(structuredUsfm));
         QVERIFY2(a->busy(),qPrintable(a->error()));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),30000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
@@ -286,7 +276,7 @@ private slots:
         QVERIFY(!a->edition().isEmpty());
         QVERIFY(!a->versionAbbreviation().isEmpty());
         QString error;
-        QVERIFY2(UsfmImporter::validateDatabase(installedPath(a),&error),qPrintable(error));
+        QVERIFY2(AoImporter::validateDatabase(installedPath(a),&error),qPrintable(error));
         QCOMPARE(b->versionId(),QString("engnet")); QCOMPARE(b->versions().size(),2);
         QCOMPARE(b->selectionReference(),QString("John 3:16"));
         QVERIFY(a->navigate("Mark 7:16")); QVERIFY(b->switchVersion(id));
@@ -297,14 +287,14 @@ private slots:
         QCOMPARE(b->noteText(),QString("Source-numbered shared note"));
         QCOMPARE(windowObject(windows->windowAt(1),"noteEditor")->property("text").toString(),b->noteText());
         const auto obsolete = installedPath(a);
-        a->importUsfm(QUrl::fromLocalFile(structuredUsfm));
+        a->importAo(QUrl::fromLocalFile(structuredUsfm));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),30000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
         QCOMPARE(a->versionId(),id); QCOMPARE(b->versionId(),id);
         QCOMPARE(b->selectionReference(),QString("Mark 7:16"));
         QCOMPARE(b->noteText(),QString("Source-numbered shared note"));
         QVERIFY(installedPath(b) != obsolete); QVERIFY(!QFile::exists(obsolete));
-        QVERIFY2(UsfmImporter::validateDatabase(installedPath(b),&error),qPrintable(error));
+        QVERIFY2(AoImporter::validateDatabase(installedPath(b),&error),qPrintable(error));
         QVERIFY(a->removeVersion(id,true));
         QCOMPARE(a->versionId(),QString("engnet")); QCOMPARE(b->versionId(),QString("engnet"));
         QVERIFY(a->ready()); QVERIFY(b->ready()); QCOMPARE(b->versions().size(),1);
@@ -365,7 +355,7 @@ private slots:
             // Real WindowManager callbacks flush A then B, withholding A's peer
             // notification until B has tried to save against its old baseline.
             if (import) {
-                third->importUsfm(QUrl::fromLocalFile(structuredUsfm));
+                third->importAo(QUrl::fromLocalFile(structuredUsfm));
                 QVERIFY(!third->busy());
             } else QVERIFY(!third->removeVersion("engnet",true));
             disconnect(observer);
@@ -405,9 +395,9 @@ private slots:
         QVERIFY(a->navigate("John 3:16")); QVERIFY(b->navigate("John 4:3"));
         b->moveSelection(-1,true); b->setReadingPosition(0.37);
         const auto selection = b->selectionReference();
-        a->importUsfm(QUrl::fromLocalFile(kjv)); QVERIFY(a->busy()); QVERIFY(b->busy());
+        a->importAo(QUrl::fromLocalFile(kjv)); QVERIFY(a->busy()); QVERIFY(b->busy());
         QVERIFY(!b->removeVersion("engnet",true));
-        b->importUsfm(QUrl::fromLocalFile(net)); QVERIFY(!b->error().isEmpty());
+        b->importAo(QUrl::fromLocalFile(net)); QVERIFY(!b->error().isEmpty());
         QVERIFY(b->navigate("John 4:3")); // Reading remains usable during import.
         b->moveSelection(-1,true); b->setReadingPosition(0.37);
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),60000);
@@ -427,7 +417,7 @@ private slots:
         const auto observer = connect(a,&BibleBackend::sharedCommitted,this,[&](const QString &id, bool library, bool) {
             if (library && id == "engnet") positionAfterReplacement = b->readingPosition();
         });
-        a->importUsfm(QUrl::fromLocalFile(net));
+        a->importAo(QUrl::fromLocalFile(net));
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),60000);
         QVERIFY2(a->error().isEmpty(),qPrintable(a->error()));
         QVERIFY(installedPath(b) != obsolete); QVERIFY(!QFile::exists(obsolete));
@@ -457,7 +447,7 @@ private slots:
         const auto original = installedPath(a);
         int flushes = 0;
         b->setFlushCallback([&] { return ++flushes == 1; });
-        a->importUsfm(QUrl::fromLocalFile(net)); QVERIFY(a->busy());
+        a->importAo(QUrl::fromLocalFile(net)); QVERIFY(a->busy());
         QTRY_VERIFY_WITH_TIMEOUT(!a->busy(),60000);
         QCOMPARE(flushes,2); QVERIFY(a->error().contains("unsaved note"));
         QCOMPARE(installedPath(a),original); QCOMPARE(installedPath(b),original);
@@ -488,7 +478,7 @@ private slots:
         // the palette reads it (compact).
         {
             BibleBackend other;
-            other.importUsfm(QUrl::fromLocalFile(structuredUsfm));
+            other.importAo(QUrl::fromLocalFile(structuredUsfm));
             QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000);
             QVERIFY2(other.ready(),qPrintable(other.error()));
         }
@@ -511,7 +501,7 @@ private slots:
     void openBesideFollowsBothWays() {
         {
             BibleBackend other;
-            other.importUsfm(QUrl::fromLocalFile(structuredUsfm));
+            other.importAo(QUrl::fromLocalFile(structuredUsfm));
             QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000);
             QVERIFY2(other.ready(),qPrintable(other.error()));
         }
@@ -621,7 +611,7 @@ private slots:
         // shift tab step through them, as its menu chooses, the passage shown
         // following at once; enter opens it in the reader in that version.
         {
-            BibleBackend other; other.importUsfm(QUrl::fromLocalFile(structuredUsfm));
+            BibleBackend other; other.importAo(QUrl::fromLocalFile(structuredUsfm));
             QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000); QVERIFY2(other.ready(),qPrintable(other.error()));
             QVERIFY(other.switchVersion("engnet")); // The import made it the version you read.
         }
@@ -687,7 +677,7 @@ private slots:
                  std::pair{QString("fourth"), QMap<QString,QString>{}}}) {
             const QString path = fixtures.filePath(id + "_usfm.zip");
             QVERIFY(writeStructuredUsfm(path, id, names));
-            BibleBackend other; other.importUsfm(QUrl::fromLocalFile(path));
+            BibleBackend other; other.importAo(QUrl::fromLocalFile(path));
             QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000); QVERIFY2(other.ready(),qPrintable(other.error()));
         }
         { BibleBackend reading; QVERIFY(reading.switchVersion("engnet")); }
@@ -781,7 +771,7 @@ private slots:
         {
             const QString path = fixtures.filePath("shorter_usfm.zip");
             QVERIFY(writeStructuredUsfm(path, "shorter", {}, 30));
-            BibleBackend other; other.importUsfm(QUrl::fromLocalFile(path));
+            BibleBackend other; other.importAo(QUrl::fromLocalFile(path));
             QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000); QVERIFY2(other.ready(),qPrintable(other.error()));
             QVERIFY(other.switchVersion("engnet"));
         }
@@ -864,7 +854,7 @@ private slots:
     }
     void verseStepsCrossChaptersWithAWindowBeside() {
         QFETCH(QString, mode);
-        BibleBackend other; other.importUsfm(QUrl::fromLocalFile(structuredUsfm));
+        BibleBackend other; other.importAo(QUrl::fromLocalFile(structuredUsfm));
         QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000); QVERIFY(other.switchVersion("engnet"));
         auto *leader = windows->windowAt(0); auto *bible = windows->backendAt(0);
         bible->setReadingMode(mode);

@@ -8,8 +8,7 @@
 #include <QJsonObject>
 #include <QScopeGuard>
 #include <QTemporaryDir>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 
 // The command line in process: the commands that print (CommandLine::run)
 // and the requests the running OmaWord takes (CommandLine::request).
@@ -21,23 +20,17 @@ class CliTest : public QObject
     struct Output { int status; QString out, err; };
     static bool archiveFile(const QString &path, const QByteArray &id, const QByteArray &john, const QByteArray &genesis,
                             const QByteArray &title = "Fixture", const QByteArray &johnName = "John") {
-        archive *a = archive_write_new();
-        const auto cleanup = qScopeGuard([&] { archive_write_free(a); });
-        if (archive_write_set_format_zip(a) != ARCHIVE_OK || archive_write_open_filename(a, QFile::encodeName(path).constData()) != ARCHIVE_OK) return false;
-        const QList<QPair<QByteArray, QByteArray>> files{{"01-GEN" + id + ".usfm", "\\id GEN " + title + "\n\\h Genesis\n\\c 1\n\\p\n\\v 1 " + genesis + "\n\\v 2 The earth was empty.\n"},
-            {"44-JHN" + id + ".usfm", "\\id JHN " + title + "\n\\h " + johnName + "\n\\c 3\n\\p\n\\v 16 " + john + "\n\\v 17 He came to save the world.\n"}};
-        for (const auto &[name, body] : files) {
-            archive_entry *entry = archive_entry_new();
-            archive_entry_set_pathname(entry, name.constData()); archive_entry_set_size(entry, body.size());
-            archive_entry_set_filetype(entry, AE_IFREG); archive_entry_set_perm(entry, 0600);
-            const bool ok = archive_write_header(a, entry) == ARCHIVE_OK && archive_write_data(a, body.constData(), body.size()) == body.size();
-            archive_entry_free(entry);
-            if (!ok) return false;
+        auto root = AoFixture::complete(QString::fromUtf8(id), {
+            AoFixture::book("GEN", 1, {AoFixture::chapter(1, {AoFixture::verse(1, {QString::fromUtf8(genesis)}), AoFixture::verse(2, {"The earth was empty."})})}),
+            AoFixture::book("JHN", 2, {AoFixture::chapter(3, {AoFixture::verse(16, {QString::fromUtf8(john)}), AoFixture::verse(17, {"He came to save the world."})})}, QString::fromUtf8(johnName))
+        }, QString::fromUtf8(title));
+        if (id == "evil") {
+            auto translation = root["translation"].toObject(); translation["shortName"] = "EB"; root["translation"] = translation;
         }
-        return archive_write_close(a) == ARCHIVE_OK;
+        return AoFixture::write(path, root);
     }
     static void install(const QString &path) {
-        BibleBackend bible; bible.importUsfm(QUrl::fromLocalFile(path));
+        BibleBackend bible; bible.importAo(QUrl::fromLocalFile(path));
         QTRY_VERIFY_WITH_TIMEOUT(!bible.busy(), 30000);
         QVERIFY2(bible.ready() && bible.error().isEmpty(), qPrintable(bible.error()));
     }

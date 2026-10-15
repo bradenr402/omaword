@@ -10,8 +10,7 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrentRun>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 
 using namespace ScriptureSearch;
 class SearchTest : public QObject
@@ -23,17 +22,14 @@ class SearchTest : public QObject
         for (const auto &text : texts) c.verses.append({number++,text});
         return c;
     }
-    static bool archiveFile(const QString &path, const QByteArray &body, const QByteArray &id = "engnet") {
-        archive *a = archive_write_new();
-        const auto cleanup = qScopeGuard([&] { archive_write_free(a); });
-        if (archive_write_set_format_zip(a) != ARCHIVE_OK
-            || archive_write_open_filename(a,QFile::encodeName(path).constData()) != ARCHIVE_OK) return false;
-        archive_entry *entry = archive_entry_new();
-        const auto cleanupEntry = qScopeGuard([&] { archive_entry_free(entry); });
-        archive_entry_set_pathname(entry,("01-GEN"+id+".usfm").constData());
-        archive_entry_set_size(entry,body.size()); archive_entry_set_filetype(entry,AE_IFREG); archive_entry_set_perm(entry,0600);
-        return archive_write_header(a,entry) == ARCHIVE_OK
-            && archive_write_data(a,body.constData(),body.size()) == body.size() && archive_write_close(a) == ARCHIVE_OK;
+    static bool archiveFile(const QString &path, const QString &word, const QString &id = "engnet") {
+        QJsonArray content{QJsonObject{{"type", "heading"}, {"content", QJsonArray{"headingOnly"}}}}, notes;
+        for (int i = 1; i <= 230; ++i) {
+            content.append(AoFixture::verse(i, {word + " light repeated repeated.", QJsonObject{{"noteId", i}}}));
+            notes.append(QJsonObject{{"noteId", i}, {"caller", "+"}, {"text", "noteOnly"}});
+        }
+        return AoFixture::write(path, AoFixture::complete(id, {AoFixture::book("GEN", 1,
+            {AoFixture::chapter(1, content, notes), AoFixture::chapter(2, {AoFixture::verse(1, {"second chapter."})})})}));
     }
     static QString sourceSegment(const Chapter &c, const QVariant &segment) {
         const auto map = segment.toMap();
@@ -223,12 +219,10 @@ private slots:
         QTemporaryDir directory; QVERIFY(directory.isValid());
         qputenv("XDG_DATA_HOME",directory.path().toUtf8());
         const QString path = directory.filePath("engnet_usfm.zip");
-        QByteArray body = "\\id GEN Search Bible\n\\c 1\n\\s1 headingOnly\n\\p\n";
-        for (int i = 1; i <= 230; ++i) body += "\\v " + QByteArray::number(i) + " mercy light repeated repeated.\\f + \\ft noteOnly\\f*\n";
-        body += "\\c 2\n\\p\n\\v 1 second chapter.\n";
+        QString body = "mercy";
         QVERIFY(archiveFile(path,body));
         BibleBackend backend;
-        backend.importUsfm(QUrl::fromLocalFile(path));
+        backend.importAo(QUrl::fromLocalFile(path));
         QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),10000);
         QVERIFY2(backend.ready(),qPrintable(backend.error()));
         const QString generation = backend.textGeneration(); QVERIFY(!generation.isEmpty());
@@ -270,7 +264,7 @@ private slots:
         QSignalSpy peerChanged(&peer,&BibleBackend::searchChanged), versionChanged(&peer,&BibleBackend::versionChanged);
         backend.searchScripture("mercy");
         body.replace("mercy","grace"); QVERIFY(archiveFile(path,body));
-        backend.importUsfm(QUrl::fromLocalFile(path)); QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),10000);
+        backend.importAo(QUrl::fromLocalFile(path)); QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),10000);
         QVERIFY2(backend.error().isEmpty(),qPrintable(backend.error()));
         QVERIFY(backend.textGeneration() != generation); QCOMPARE(peer.textGeneration(),backend.textGeneration());
         QVERIFY(!versionChanged.isEmpty()); QVERIFY(!peerChanged.isEmpty());
@@ -280,7 +274,7 @@ private slots:
         const QString replacementGeneration = backend.textGeneration();
         const QString otherPath = directory.filePath("eng-kjv_usfm.zip");
         QVERIFY(archiveFile(otherPath,body,"eng-kjv"));
-        backend.importUsfm(QUrl::fromLocalFile(otherPath)); QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),10000);
+        backend.importAo(QUrl::fromLocalFile(otherPath)); QTRY_VERIFY_WITH_TIMEOUT(!backend.busy(),10000);
         QCOMPARE(backend.versionId(),QString("eng-kjv"));
         QCOMPARE(peer.versionId(),QString("engnet")); QCOMPARE(peer.searchResultCount(),230);
         backend.searchScripture("\"unfinished");

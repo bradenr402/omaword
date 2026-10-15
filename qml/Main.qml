@@ -124,7 +124,7 @@ ApplicationWindow {
         const expected = reimportId
         reimportId = ""
         if (closingWindow || bible.busy || catalog.busy || !flushNote()) return
-        bible.clearError(); bible.importUsfm(file, expected)
+        bible.clearError(); bible.importAo(file, expected)
     }
     function cancelDownload() {
         downloadId = ""
@@ -145,7 +145,7 @@ ApplicationWindow {
         replacingCatalogVersion = installedVersion(downloadId)
         downloadMessage = ""
         bible.clearError()
-        bible.importUsfm(file)
+        bible.importAo(file, downloadId)
         if (bible.busy) {
             pendingDownload = ""
             downloadId = ""
@@ -2400,25 +2400,7 @@ ApplicationWindow {
     // A key or row that cannot act: the error sound, and a short toast saying
     // why when there is a reason a reader can act on.
     // "2.9 MB"; the bytes are a catalog snapshot, so approximate.
-    function downloadSize(bytes) { return "≈" + (bytes / 1000000).toFixed(1) + " MB" }
-    // What re-importing a version of an older text schema adds.
-    // A version's text predates what it would show now: footnotes and poetry
-    // indents (every version), or the parallel passages its source has (the
-    // catalog says which, schema 6).
-    function hasParallels(version) {
-        const details = catalogEntry(version.id)
-        return !!details && Array.from(details.features).indexOf("parallels") >= 0
-    }
-    function wantsReimport(version) { return !!version && (version.needsReimport || (version.textSchema > 0 && version.textSchema < 6 && hasParallels(version))) }
-    function reimportGains(version) {
-        const gains = version.textSchema < 4 ? ["footnotes", "cross references", "words of Jesus", "poetry indents"]
-            : version.textSchema < 5 ? ["poetry indents"] : []
-        if (version.textSchema < 6 && hasParallels(version)) gains.push("parallel passages")
-        return gains.length > 1 ? gains.slice(0, -1).join(", ") + " and " + gains[gains.length - 1] : gains.join("")
-    }
-    function featureName(feature) {
-        return ({ footnotes: "Footnotes", headings: "Section headings", wordsOfJesus: "Words of Jesus", apocrypha: "Apocrypha", parallels: "Parallel passages" })[feature] || feature
-    }
+    function wantsReimport(version) { return !!version }
     function rejected(reason) {
         if (reason) notify(reason, true)
         sounds.play("error")
@@ -5013,7 +4995,8 @@ ApplicationWindow {
         // Bound by the Add version guide itself.
         { id: "guideInstall", group: "Palettes and windows", title: "Add version: install the highlighted version", sequences: ["Return"], scope: "importGuide", explanation: true },
         { id: "guideDetails", group: "Palettes and windows", title: "Add version: its Details & Attribution", sequences: ["Shift+Return"], scope: "importGuide", explanation: true },
-        { id: "guideImport", group: "Palettes and windows", title: "Add version: import a USFM ZIP", sequences: ["Ctrl+I"], scope: "importGuide", explanation: true },
+        { id: "guideImport", group: "Palettes and windows", title: "Add version: import AO complete JSON", sequences: ["Ctrl+I"], scope: "importGuide", explanation: true },
+        { id: "refreshCatalog", group: "Palettes and windows", title: "Refresh the AO catalog (Add version)", sequences: ["Ctrl+R"], scope: "importGuide", explanation: true },
         { id: "versionBackKey", group: "Palettes and windows", title: "Back a step in Remove version (Versions)", sequences: ["Backspace"], scope: "versions", explanation: true },
         { id: "reimportVersion", group: "Palettes and windows", title: "Re-import the highlighted version (Versions)", sequences: ["Ctrl+Shift+I"], scope: "versions", explanation: true },
         { id: "focus", group: "Reading", title: "Focus mode", sequences: ["F"], setting: "focusMode", command: true },
@@ -5895,7 +5878,6 @@ ApplicationWindow {
     function settingsControls() {
         const list = []
         for (let i = 0; i < settingSwitches.count; ++i) list.push(settingSwitches.itemAt(i))
-        for (let i = 0; i < settingsReimports.count; ++i) { const row = settingsReimports.itemAt(i); if (row) list.push(row.button) }
         for (let i = 0; i < readingModeChoices.count; ++i) list.push(readingModeChoices.itemAt(i))
         list.push(fontSizeSliderItem, lineHeightSlider)
         return list.filter(function(control) { return !!control && control.visible && control.enabled })
@@ -6853,7 +6835,7 @@ ApplicationWindow {
                 Label { objectName: "setupTitle"; text: desktop.appName; font.pixelSize: 30 * app.scale; font.weight: Font.Medium; font.letterSpacing: -0.8; color: desktop.foreground; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label {
                     objectName: "setupDescription"
-                    text: "Add a version to begin. Install from the catalog or import a USFM ZIP.\nRead offline, highlight and tag passages, and keep your notes alongside the text."
+                    text: "Add a version to begin. Install from the catalog or import AO complete JSON.\nRead offline, highlight and tag passages, and keep your notes alongside the text."
                     color: desktop.muted
                     font.pixelSize: 15 * app.scale
                     horizontalAlignment: Text.AlignHCenter
@@ -8311,7 +8293,7 @@ ApplicationWindow {
         readonly property bool comparing: !removing && step === 0 && compareReference.length > 0
         property bool removeAnnotations: false
         property bool addPending: false
-        readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 240))
+        readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 320))
         height: Math.min(540 * app.scale, app.height - 48)
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { versionSearch.forceActiveFocus() }
@@ -8424,7 +8406,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Label {
                                 text: versionEntry.modelData.hint || ((versionEntry.modelData.active ? "Current version" : "Installed locally")
-                                    + (app.wantsReimport(versionEntry.modelData) ? " · older text format: re-import for " + app.reimportGains(versionEntry.modelData) : ""))
+                                    )
                                 color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
                                 Layout.fillWidth: true; wrapMode: Text.Wrap
                             }
@@ -8435,8 +8417,8 @@ ApplicationWindow {
                                 compact: true
                                 font.pixelSize: 12 * versionDialog.uiScale
                                 enabled: !bible.busy && !catalog.busy
-                                tip: (app.catalogEntry(versionEntry.modelData.id) ? "Download " + versionEntry.modelData.abbreviation + " again from eBible.org and replace its text; annotations are kept"
-                                    : "Choose " + versionEntry.modelData.abbreviation + "'s USFM file again and replace its text; annotations are kept") + " · " + app.keyText("reimportVersion")
+                                tip: (app.catalogEntry(versionEntry.modelData.id) ? "Download " + versionEntry.modelData.abbreviation + " again from AO Lab and replace its text; annotations are kept"
+                                    : "Choose " + versionEntry.modelData.abbreviation + "'s AO JSON again and replace its text; annotations are kept") + " · " + app.keyText("reimportVersion")
                                 onClicked: app.reimportVersion(versionEntry.modelData)
                             }
                         }
@@ -8467,7 +8449,7 @@ ApplicationWindow {
                         + (versionDialog.removeAnnotations ? "Delete its notes, highlights, and tags. This cannot be undone."
                             : "Keep its notes, highlights, and tags. They will reconnect when the same version is reimported.")
                         + "\n\n" + (bible.versions.length === 1 ? "The library will be empty. You can add a version again at any time." : "Other installed versions remain available.")
-                        + " Your settings and source USFM files are kept." : ""
+                        + " Your settings and source JSON files are kept." : ""
                     textFormat: Text.PlainText
                     color: desktop.foreground; font.pixelSize: 14 * versionDialog.uiScale; wrapMode: Text.Wrap
                 }
@@ -9196,6 +9178,7 @@ ApplicationWindow {
                 ScrollBar.vertical: OverlayScrollbar { id: keybindingScrollbar; objectName: "keybindingScrollbar" }
                 delegate: ItemDelegate {
                     id: keybindingRow
+                    hoverEnabled: true
                     required property var modelData
                     objectName: "keybinding" + modelData.title
                     // Clear of the scrollbar while it shows.
@@ -9290,27 +9273,6 @@ ApplicationWindow {
                     required property var modelData
                     catalogAction: modelData
                     Layout.fillWidth: true
-                }
-            }
-            Repeater {
-                id: settingsReimports
-                model: Array.from(bible.versions).filter(function(version) { return app.wantsReimport(version) })
-                delegate: RowLayout {
-                    id: reimportRow
-                    required property var modelData
-                    readonly property Item button: reimportButton
-                    Layout.fillWidth: true
-                    Label {
-                        text: reimportRow.modelData.abbreviation + " uses an older text format: re-import for " + app.reimportGains(reimportRow.modelData) + "."
-                        color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
-                    }
-                    QuietButton {
-                        id: reimportButton
-                        objectName: "settingsReimport:" + reimportRow.modelData.id
-                        text: "Re-import"; compact: true
-                        enabled: !bible.busy && !catalog.busy
-                        onClicked: app.reimportVersion(reimportRow.modelData)
-                    }
                 }
             }
             // The on/off switches above; the layout and sliders below.
@@ -9490,7 +9452,7 @@ ApplicationWindow {
                     FineRule { Layout.fillWidth: true }
                     Label { objectName: "aboutEdition"; text: bible.ready ? bible.edition : "No version installed"; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 14 * app.scale }
                     Label { objectName: "aboutCopyright"; text: bible.versionCopyright; textFormat: Text.PlainText; visible: text.length > 0; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale; lineHeight: 1.4 }
-                    Label { objectName: "aboutSources"; text: "Install versions directly from eBible.org or import your own local USFM ZIP. Bible text is stored in this app's local library. No connection is needed to read, highlight, tag, or write notes after import."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
+                    Label { objectName: "aboutSources"; text: "Install versions from AO Lab or import standard AO complete JSON. Bible text is stored locally. No connection is needed to read, highlight, tag, or write notes after import."; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 * app.scale }
                     QuietButton {
                         readonly property var entry: Array.from(catalog.entries).find(function(version) { return version.id === bible.versionId })
                         text: "Version details & permissions ↗"; visible: !!entry; compact: true
@@ -9524,15 +9486,11 @@ ApplicationWindow {
             const next = Math.max(0, Math.min(catalogResults.count - 1, catalogIndex + delta))
             if (next === catalogIndex) sounds.play("boundary")
             catalogIndex = next
-            const row = catalogResults.itemAt(catalogIndex)
-            const flick = importGuideScroll.contentItem as Flickable
-            if (!row || !flick) return
-            const y = row.mapToItem(flick.contentItem, 0, 0).y
-            if (y < flick.contentY) flick.contentY = y
-            else if (y + row.height > flick.contentY + flick.height) flick.contentY = y + row.height - flick.height
+            catalogResults.positionViewAtIndex(catalogIndex, ListView.Contain)
         }
         function installCurrent() {
             if (!catalogEntry || bible.busy || catalog.busy) { app.rejected(); return }
+            if (catalogEntry.compatibilityReason) { app.rejected(catalogEntry.compatibilityReason); return }
             app.installVersion(catalogEntry.id)
         }
         function showCurrentDetails() {
@@ -9553,9 +9511,15 @@ ApplicationWindow {
             else if (mods === Qt.NoModifier && enter) installCurrent()
             else if (mods === Qt.ShiftModifier && enter) showCurrentDetails()
             else if (mods === Qt.ControlModifier && event.key === Qt.Key_I) chooseZip()
+            else if (mods === Qt.ControlModifier && event.key === Qt.Key_R) refreshCatalog()
             else return false
             event.accepted = true
             return true
+        }
+        function refreshCatalog() {
+            if (bible.busy || catalog.busy) { app.rejected("Wait for the current library operation."); return }
+            app.downloadId = ""
+            catalog.refresh()
         }
         readonly property real uiScale: Math.min(app.scale, Math.max(1, (app.height - 48) / 360))
         height: Math.min(650 * app.scale, app.height - 48)
@@ -9604,31 +9568,54 @@ ApplicationWindow {
                     if (importGuide.guideKey(event)) return
                     const paging = [Qt.Key_PageUp, Qt.Key_PageDown].includes(event.key)
                         || (event.modifiers === Qt.ControlModifier && [Qt.Key_D, Qt.Key_U].includes(event.key))
-                    if (paging) app.scrollKey(importGuideScroll.contentItem as Flickable, event)
+                    if (paging) app.scrollKey(catalogResults, event)
                 }
             }
-            KeyScrollView {
-                id: importGuideScroll
-                objectName: "importGuideScroll"
+            RowLayout {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
-                contentWidth: availableWidth
-                clip: true
-                ColumnLayout {
-                    width: importGuideScroll.availableWidth
-                    spacing: 16 * app.scale
-                    Label { objectName: "importSupported"; text: "Install a USFM ZIP directly from eBible.org, or import a local file. The catalog is available offline; installing requires a connection."; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    Repeater {
+                ComboBox {
+                    id: catalogLanguage
+                    objectName: "catalogLanguage"
+                    Accessible.name: "Catalog language"
+                    textRole: "name"; valueRole: "id"
+                    model: {
+                        const languages = { eng: "English" }
+                        Array.from(catalog.entries).forEach(function(e) { languages[e.language] = e.languageEnglishName || e.languageName || e.language })
+                        return [{id: "eng", name: "English"}, {id: "", name: "All languages"}].concat(Object.keys(languages).filter(function(id) { return id !== "eng" }).sort(function(a,b) { return languages[a].localeCompare(languages[b]) }).map(function(id) { return {id: id, name: languages[id]} }))
+                    }
+                    onCurrentIndexChanged: importGuide.catalogIndex = 0
+                    Layout.fillWidth: true
+                }
+                QuietButton { objectName: "catalogRefresh"; text: "Refresh"; compact: true; enabled: !bible.busy && !catalog.busy; onClicked: importGuide.refreshCatalog() }
+            }
+            ComboBox {
+                id: catalogCoverage
+                objectName: "catalogCoverage"
+                Accessible.name: "Catalog coverage"
+                Layout.fillWidth: true
+                textRole: "name"; valueRole: "id"
+                model: [{id: "", name: "All coverage"}, {id: "portion", name: "Portions (fewer than 27 books)"}, {id: "apocrypha", name: "Includes apocrypha"}]
+                onCurrentIndexChanged: importGuide.catalogIndex = 0
+            }
+            Label { objectName: "importSupported"; visible: importGuide.height >= 520 * importGuide.uiScale; text: "AO Lab catalog · available offline. English LTR editions are supported subject to book/numbering validation; other languages remain discoverable."; color: desktop.muted; font.pixelSize: 13 * importGuide.uiScale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                    ListView {
                         id: catalogResults
                         objectName: "catalogResults"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        spacing: 12 * importGuide.uiScale
+                        reuseItems: true
                         // Versions already installed are not offered (Versions re-imports
                         // them), save one downloading again, which shows its progress.
                         model: {
                             const query = catalogSearch.text.trim().toLowerCase()
                             const installed = Array.from(bible.versions).map(function(version) { return version.id })
                             return Array.from(catalog.entries).filter(function(entry) {
-                                return (!installed.includes(entry.id) || entry.id === app.downloadId)
-                                    && (!query || (entry.name + " " + entry.abbreviation).toLowerCase().includes(query))
+                                 return (!installed.includes(entry.id) || entry.id === app.downloadId)
+                                    && (!catalogLanguage.currentValue || entry.language === catalogLanguage.currentValue)
+                                    && (!catalogCoverage.currentValue || (catalogCoverage.currentValue === "apocrypha" ? entry.numberOfApocryphalBooks > 0 : entry.coverage === catalogCoverage.currentValue))
+                                    && (!query || (entry.name + " " + entry.englishName + " " + entry.id + " " + entry.abbreviation).toLowerCase().includes(query))
                             })
                         }
                         delegate: Item {
@@ -9638,9 +9625,9 @@ ApplicationWindow {
                             readonly property bool current: index === importGuide.catalogIndex
                             // The card's room around its text, inside its tint, in whole
                             // pixels so the text stays on them (the guide scrolls by pixels).
-                            readonly property real padding: Math.round(12 * app.scale)
+                             readonly property real padding: Math.round(12 * importGuide.uiScale)
                             objectName: "catalogRow:" + modelData.id
-                            Layout.fillWidth: true
+                             width: catalogResults.width
                             implicitWidth: catalogRowContent.implicitWidth + 2 * padding
                             implicitHeight: catalogRowContent.implicitHeight + 2 * padding
                             Rectangle {
@@ -9664,15 +9651,14 @@ ApplicationWindow {
                             id: catalogRowContent
                             x: catalogRow.padding; y: catalogRow.padding
                             width: parent.width - 2 * catalogRow.padding
-                            spacing: 6 * app.scale
+                            spacing: 6 * importGuide.uiScale
                             readonly property bool downloading: catalog.busy && app.downloadId === catalogRow.modelData.id
-                            Label { text: catalogRow.modelData.abbreviation + " · " + catalogRow.modelData.name; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            Label { text: catalogRow.modelData.abbreviation + " · " + catalogRow.modelData.name; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 14 * importGuide.uiScale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                             // What it is, when, how big, under what terms, and what it carries.
-                            Label { objectName: "catalogDescription:" + catalogRow.modelData.id; text: catalogRow.modelData.description; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                            Label { objectName: "catalogDescription:" + catalogRow.modelData.id; text: catalogRow.modelData.description; textFormat: Text.PlainText; color: desktop.foreground; font.pixelSize: 13 * importGuide.uiScale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                             Label {
                                 objectName: "catalogFacts:" + catalogRow.modelData.id
-                                text: [catalogRow.modelData.year, app.downloadSize(catalogRow.modelData.size), catalogRow.modelData.license]
-                                    .concat(Array.from(catalogRow.modelData.features).map(app.featureName)).join(" · ")
+                                text: catalogRow.modelData.compatibilityReason || (catalogRow.modelData.languageEnglishName || catalogRow.modelData.language)
                                 textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
                             }
                             // The download's progress, in its own card.
@@ -9688,28 +9674,18 @@ ApplicationWindow {
                                     text: "Install"; compact: true; emphasized: true
                                     font.pixelSize: 12 * importGuide.uiScale
                                     enabled: !bible.busy && !catalog.busy
-                                    onClicked: { importGuide.catalogIndex = catalogRow.index; app.installVersion(catalogRow.modelData.id) }
+                                    onClicked: { importGuide.catalogIndex = catalogRow.index; importGuide.installCurrent() }
                                 }
                             }
                         }
                         }
                     }
-                    Label {
+            Label {
                         objectName: "catalogEmpty"
                         visible: catalogResults.count === 0
                         text: catalogSearch.text.trim().length || !catalog.entries.length ? "No matching versions" : "Every version in the catalog is installed"
                         color: desktop.muted; Layout.fillWidth: true; wrapMode: Text.Wrap
                     }
-                    Label {
-                        objectName: "importReplacement"
-                        visible: bible.ready
-                        text: "Importing the same edition replaces its Bible data and preserves your notes, highlights, tags, and settings. Adding another supported version keeps the installed editions. Marks belong to their own version."
-                        color: desktop.accent; font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true
-                    }
-                    Label { objectName: "importDataPath"; text: bible.dataDirectory(); textFormat: Text.PlainText; color: desktop.muted; font.pixelSize: 12 * app.scale; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
-                    Label { objectName: "importOffline"; text: "After a successful import, you can move or delete the source USFM ZIP. No connection is needed to read or use your annotations."; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                }
-            }
             Label { objectName: "catalogError"; text: catalog.error || app.downloadMessage || bible.error; visible: text.length > 0; textFormat: Text.PlainText; color: desktop.error; Layout.fillWidth: true; wrapMode: Text.Wrap; Accessible.role: Accessible.AlertMessage }
             RowLayout {
                 visible: catalog.busy || ((catalog.error.length > 0 || app.downloadMessage.length > 0) && app.downloadId.length > 0)
@@ -9725,11 +9701,11 @@ ApplicationWindow {
                 QuietButton {
                     id: importChoose
                     objectName: "importChoose"
-                    text: "Import USFM ZIP…"
+                    text: "Import AO JSON…"
                     font.pixelSize: 13 * importGuide.uiScale
                     compact: true
                     enabled: !bible.busy && !catalog.busy
-                    tip: "Import a local USFM ZIP · " + KeyNotation.format("Ctrl+I")
+                    tip: "Import local AO complete JSON · " + KeyNotation.format("Ctrl+I")
                     onClicked: { if (bible.busy || catalog.busy || !app.flushNote()) return; importGuide.choosePending = true; importGuide.close() }
                 }
                 Item { Layout.fillWidth: true }
@@ -9745,7 +9721,8 @@ ApplicationWindow {
                 parts: [[["Up", "Down"], "choose"],
                     ["Return", "install", function() { importGuide.installCurrent() }, !!importGuide.catalogEntry && !bible.busy && !catalog.busy],
                     ["Shift+Return", "details", function() { importGuide.showCurrentDetails() }, !!importGuide.catalogEntry],
-                    ["Ctrl+I", "import ZIP…", function() { importGuide.chooseZip() }, !bible.busy && !catalog.busy],
+                    ["Ctrl+I", "import JSON…", function() { importGuide.chooseZip() }, !bible.busy && !catalog.busy],
+                    ["Ctrl+R", "refresh", function() { importGuide.refreshCatalog() }, !bible.busy && !catalog.busy],
                     ["Escape", "close", function() { importGuide.close() }]]
             }
         }
@@ -9773,7 +9750,7 @@ ApplicationWindow {
                     Label { text: "Details & Attribution"; color: desktop.foreground; font.pixelSize: 22 * app.scale; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { text: catalogDetails.entry ? catalogDetails.entry.name : ""; textFormat: Text.PlainText; color: desktop.foreground; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { objectName: "catalogCopyright"; text: catalogDetails.entry ? catalogDetails.entry.copyright : ""; textFormat: Text.PlainText; color: desktop.muted; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    QuietButton { objectName: "catalogProvider"; text: "eBible.org version & permissions ↗"; compact: true; onClicked: desktop.openExternal(catalogDetails.entry.detailsUrl) }
+                    QuietButton { objectName: "catalogProvider"; text: "Version permissions ↗"; visible: !!catalogDetails.entry && !!catalogDetails.entry.detailsUrl; compact: true; onClicked: desktop.openExternal(catalogDetails.entry.detailsUrl) }
                     QuietButton { text: "Close"; Layout.alignment: Qt.AlignRight; onClicked: catalogDetails.close() }
                 }
             }
@@ -9792,7 +9769,7 @@ ApplicationWindow {
         objectName: "importDialog"
         title: app.reimportId ? "Re-import " + (Array.from(bible.versions).find(function(v) { return v.id === app.reimportId }) || { name: app.reimportId }).name : "Add version"
         fileMode: FileDialog.OpenFile
-        nameFilters: ["USFM ZIP (*.zip)", "USFM files (*.usfm *.sfm)"]
+        nameFilters: ["AO complete JSON (*.json)"]
         onAccepted: app.importChosen(selectedFile)
         onRejected: app.reimportId = ""
         onVisibleChanged: { if (!visible) app.restorePanelFocus() }
@@ -9848,7 +9825,7 @@ ApplicationWindow {
                     width: backupScopeScroll.availableWidth
                     text: "This backup holds the highlights, notes, and tags of every installed version, with the Desk and each version's reading place.\n\n"
                         + "Marks kept for a removed version are not included: reimport it first.\n\n"
-                        + "Bible text, source USFM files, History, the ribbon, and preferences are not included."
+                        + "Bible text, source JSON files, History, the ribbon, and preferences are not included."
                     textFormat: Text.PlainText; color: desktop.foreground
                     font.pixelSize: 14 * app.scale; wrapMode: Text.Wrap
                 }
@@ -9901,6 +9878,7 @@ ApplicationWindow {
         onAccepted: app.requestRestore(selectedFile)
         // Cancelled: the keyboard returns to the panel or reader it came from.
         onRejected: app.restorePanelFocus()
+        onVisibleChanged: if (!visible) app.restorePanelFocus()
     }
 
     ModalCard {
@@ -10090,7 +10068,7 @@ ApplicationWindow {
             spacing: 20
             BusyIndicator { running: bible.busy; Layout.alignment: Qt.AlignHCenter; implicitWidth: 36; implicitHeight: 36 }
             Label { text: "Preparing your library"; color: desktop.foreground; font.pixelSize: 21 * app.scale; font.weight: Font.Medium; Layout.alignment: Qt.AlignHCenter }
-            Label { text: bible.status || "Reading and validating your USFM…"; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
+            Label { text: bible.status || "Reading and validating AO JSON…"; color: desktop.muted; font.pixelSize: 13 * app.scale; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
             ProgressBar {
                 id: importProgressBar
                 Layout.fillWidth: true

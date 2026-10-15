@@ -77,10 +77,10 @@ const QList<Command> &commands()
          "elsewhere, or a script. Links look like omaword:John%203:16, or omaword:John%203:16?translation=KJV for a "
          "translation.",
          {translationOption, helpOption}, {"omaword link jn316", "xdg-open \"$(omaword link ps23 -t KJV)\""}, true},
-        {"import", "<file>", "Install a translation from a USFM ZIP or file",
-         "Installs a translation, or replaces it with a newer copy, from a USFM ZIP archive or a single USFM file. "
+        {"import", "<file>", "Install a translation from AO complete JSON",
+         "Installs a translation, or replaces it with a newer copy, from AO standard complete JSON. "
          "Add version in OmaWord installs the catalog's translations directly.",
-         {helpOption}, {"omaword import ~/Downloads/engwebp_usfm.zip"}, false},
+         {helpOption}, {"omaword import ~/Downloads/eng_net_complete.json"}, false},
         {"completion", "<bash|zsh|fish>", "Print a shell completion script",
          "Prints the completion script for a shell; bin/install installs bash's. For zsh, save it in a directory on "
          "$fpath, such as ~/.zfunc (with fpath+=(~/.zfunc) before compinit in ~/.zshrc):\n"
@@ -538,7 +538,7 @@ bool request(const QStringList &arguments, SingleInstance::Request *request, QSt
         request->lookup = true;
         request->newWindow = false;
     } else if (command == QStringLiteral("import")) {
-        if (positional.size() != 1) return fail("name one USFM ZIP or file, such as: omaword import engwebp_usfm.zip");
+        if (positional.size() != 1) return fail("name one AO complete JSON file, such as: omaword import eng_net_complete.json");
         request->importPath = QFileInfo(positional.first()).absoluteFilePath();
         request->newWindow = false;
     } else if (positional.size() == 1 && parseLink(positional.first(), &request->reference, &request->translation)) {

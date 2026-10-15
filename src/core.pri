@@ -5,4 +5,4 @@ core_library = $$OUT_PWD/../src/libomawordcore.a
 LIBS = $$core_library $$LIBS
 PRE_TARGETDEPS += $$core_library
 CONFIG += link_pkgconfig
-PKGCONFIG += libarchive fontconfig libpipewire-0.3
+PKGCONFIG += fontconfig libpipewire-0.3

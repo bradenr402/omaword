@@ -23,14 +23,14 @@ Screenshots show the [NET](https://netbible.org) Bible®, quoted by permission (
 OmaWord is built for [Omarchy](https://omarchy.org) and assumes its Hyprland session, theme, and fonts.
 
 ```sh
-sudo pacman -S --needed base-devel qt6-declarative libarchive libpipewire
+sudo pacman -S --needed base-devel qt6-declarative libpipewire
 git clone https://github.com/bradenr402/omaword.git
 cd omaword
 bin/build
 bin/install
 ```
 
-Launch **OmaWord** from the application launcher, or run `omaword`. Choose **Add version** to install a Bible from eBible.org (NET, KJV, BSB, and more) or import a USFM ZIP; after that, everything works offline.
+Launch **OmaWord** from the application launcher, or run `omaword`. Choose **Add version** to install an English Bible from AO Lab (NET, KJV, BSB, and more) or import AO standard complete JSON; after that, everything works offline. The searchable catalog is bundled; manual refreshes persist across restarts and updates. Other languages are discoverable but not yet supported.
 
 To update, `git pull`, run `bin/build` and `bin/install` again, and close every OmaWord window. To install it as an Arch package instead, run `makepkg -si` in `packaging/`.
 
@@ -184,7 +184,8 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `ctrl enter`: Open the highlighted version beside this window (Versions)
 - `enter`: Add version: install the highlighted version
 - `shift enter`: Add version: its Details & Attribution
-- `ctrl i`: Add version: import a USFM ZIP
+- `ctrl i`: Add version: import AO complete JSON
+- `ctrl r`: Refresh the AO catalog (Add version)
 - `backspace`: Back a step in Remove version (Versions)
 - `ctrl shift I`: Re-import the highlighted version (Versions)
 - `delete`: History: remove a passage
@@ -291,7 +292,7 @@ o.window({ class = "^omaword$", title = "^Look up · OmaWord$" }, { float = true
 - Omarchy (Hyprland on Arch Linux)
 - `base-devel` (C++17 compiler, `make`, `pkg-config`) and `qmake6`, provided by `qt6-base`
 - Qt 6: `qt6-base`, `qt6-declarative`, and `qt6-wayland`
-- `libarchive`, `fontconfig`, and `libpipewire` (sound effects)
+- `fontconfig` and `libpipewire` (sound effects)
 
 Omarchy already provides most of these; the install command above adds the rest.
 

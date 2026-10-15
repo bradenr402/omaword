@@ -16,8 +16,7 @@
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QTextStream>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 #include "biblebackend.h"
 #include "blockdocument.h"
 #include "desktop.h"
@@ -64,31 +63,29 @@ class MarginsUiTest : public QObject
     // John 1 (headings at 4, 10, 19, 29, 35), John 2 (none), John 3 (1, 16,
     // 22, 31), John 4 (a heading every three verses, for a tall outline).
     static bool zip(const QString &path, const QMap<QString, QByteArray> &entries) {
-        auto archive = archive_write_new(); archive_write_set_format_zip(archive);
-        if (archive_write_open_filename(archive, QFile::encodeName(path).constData()) != ARCHIVE_OK) { archive_write_free(archive); return false; }
-        bool ok = true;
+        QJsonArray books;
+        QString id;
         for (auto it = entries.cbegin(); it != entries.cend(); ++it) {
-            auto entry = archive_entry_new(); const auto name = it.key().toUtf8();
-            archive_entry_set_pathname(entry, name.constData()); archive_entry_set_filetype(entry, AE_IFREG);
-            archive_entry_set_perm(entry, 0600); archive_entry_set_size(entry, it.value().size());
-            ok = archive_write_header(archive, entry) == ARCHIVE_OK && archive_write_data(archive, it.value().constData(), it.value().size()) == it.value().size() && ok;
-            archive_entry_free(entry);
+            id = it.key().mid(6); id.chop(5);
+            books.append(QJsonDocument::fromJson(it.value()).object());
         }
-        ok = archive_write_close(archive) == ARCHIVE_OK && ok; archive_write_free(archive); return ok;
+        return AoFixture::write(path, AoFixture::complete(id, books));
     }
     static QByteArray john(const QString &title, bool headings) {
         const QMap<int, QList<int>> sections = {{1, {4, 10, 19, 29, 35}}, {2, {}}, {3, {1, 16, 22, 31}},
             {4, {1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52}}};
         const QMap<int, int> counts = {{1, 51}, {2, 25}, {3, 36}, {4, 54}};
-        QByteArray data = QString("\\id JHN %1\n\\h John\n\\toc1 John\n\\toc2 John\n\\toc3 Jn\n").arg(title).toUtf8();
+        Q_UNUSED(title)
+        QJsonArray chapters;
         for (int c = 1; c <= 4; ++c) {
-            data += QString("\\c %1\n\\p\n").arg(c).toUtf8();
+            QJsonArray content;
             for (int v = 1; v <= counts[c]; ++v) {
-                if (headings && sections[c].contains(v)) data += QString("\\s Section %1.%2 of the margins fixture\n\\p\n").arg(c).arg(v).toUtf8();
-                data += QString("\\v %1 Original margins text %2:%1 with enough ordinary words to wrap across one reading line.\n").arg(v).arg(c).toUtf8();
+                if (headings && sections[c].contains(v)) content.append(QJsonObject{{"type", "heading"}, {"content", QJsonArray{QString("Section %1.%2 of the margins fixture").arg(c).arg(v)}}});
+                content.append(AoFixture::verse(v, {QString("Original margins text %1:%2 with enough ordinary words to wrap across one reading line.").arg(c).arg(v)}));
             }
+            chapters.append(AoFixture::chapter(c, content));
         }
-        return data;
+        return QJsonDocument(AoFixture::book("JHN", 1, chapters)).toJson(QJsonDocument::Compact);
     }
     static QVariant value(QVariant v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; }
     static QQuickItem *visual(QQuickItem *root, const QString &name) {
@@ -116,7 +113,7 @@ class MarginsUiTest : public QObject
     void key(Qt::Key key, Qt::KeyboardModifiers mods = Qt::NoModifier) { QTest::keyClick(window, key, mods); QCoreApplication::processEvents(); }
     void type(const QString &text) { for (QChar c : text) { QTest::keyClick(window, c.toLatin1()); QCoreApplication::processEvents(); } }
     void install(const QString &file) {
-        bible->importUsfm(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
+        bible->importAo(QUrl::fromLocalFile(file)); QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(), qPrintable(bible->error()));
     }
     void navigate(const QString &reference) {

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "scripturesearch.h"
-#include "usfmimporter.h"
+#include "aoimporter.h"
 #include <QObject>
 #include <QFutureWatcher>
 #include <QHash>
@@ -63,11 +63,9 @@ class BibleBackend : public QObject
     Q_PROPERTY(QString readingMode READ readingMode WRITE setReadingMode NOTIFY preferencesChanged)
     Q_PROPERTY(int fontSize READ fontSize WRITE setFontSize NOTIFY preferencesChanged)
     Q_PROPERTY(bool hasParagraphs READ hasParagraphs NOTIFY versionChanged)
-    // Text DB schema of the active version (4 = notes and words of Jesus kept,
-    // 5 = poetry line levels, 6 = parallel passage lines).
+    // AO standard text-store schema of the active version.
     Q_PROPERTY(int textSchema READ textSchema NOTIFY versionChanged)
     Q_PROPERTY(bool hasWordsOfJesus READ hasWordsOfJesus NOTIFY versionChanged)
-    Q_PROPERTY(bool hasCrossReferences READ hasCrossReferences NOTIFY versionChanged)
     // Any section heading anywhere in the active version.
     Q_PROPERTY(bool hasHeadings READ hasHeadings NOTIFY versionChanged)
     // Current chapter's footnotes {verse,seq,kind,caller,offset,text}, source order.
@@ -202,14 +200,9 @@ public:
     QString readingMode() const { return m_readingMode; }
     int fontSize() const { return m_fontSize; }
     bool hasParagraphs() const { return m_hasParagraphs; }
-    static constexpr int CurrentTextSchema = 6;
-    // Below this the text lacks what every version shows (footnotes, poetry
-    // indents), so Versions offers a re-import; schema 6 adds only parallel
-    // passages, which few sources have (the catalog says which).
-    static constexpr int ReimportTextSchema = 5;
+    static constexpr int CurrentTextSchema = 7;
     int textSchema() const { return m_textSchema; }
     bool hasWordsOfJesus() const { return m_hasWordsOfJesus; }
-    bool hasCrossReferences() const { return m_hasCrossReferences; }
     bool hasHeadings() const { return m_hasHeadings; }
     QVariantList footnotes() const;
     // Records: versionId/versionAbbreviation, book/chapter/start/endBook/
@@ -338,7 +331,7 @@ public:
     Q_INVOKABLE void closeUndoGroup() { m_undoGroup.clear(); }
 
     // expectedId (Re-import) rejects a file of another edition before importing.
-    Q_INVOKABLE void importUsfm(QUrl file, QString expectedId = QString());
+    Q_INVOKABLE void importAo(QUrl file, QString expectedId = QString());
     Q_INVOKABLE bool switchVersion(QString id);
     Q_INVOKABLE bool removeVersion(QString id, bool removeAnnotations);
     Q_INVOKABLE void clearError();
@@ -357,13 +350,10 @@ public:
     // current selection, or the chapter without one. Collection-shaped rows.
     Q_INVOKABLE QVariantList linkedNotes() const;
     // Cross references for a scope in the active version (empty: the current
-    // selection; none without a verse): the source's own \x targets (schema 4)
-    // in source order, then its parallel passages (schema 6: the \r lines of
-    // the section the passage is in), then bundled OpenBible.info ones by
+    // selection; none without a verse): bundled OpenBible.info references by
     // votes (KJV verse numbers), each range once, targets absent from this
     // version and the passage itself hidden.
-    // Rows: canonical scope fields + reference, excerpt, source ("own",
-    // "parallel", "openBible"), openBible, votes.
+    // Rows: canonical scope fields + reference, excerpt, source ("openBible"), openBible, votes.
     Q_INVOKABLE QVariantList crossReferences(QVariantMap scope = QVariantMap()) const;
     // Every installed version's text for a scope's endpoints (empty: the
     // selection), in library order: {versionId, abbreviation, name, active,
@@ -551,7 +541,6 @@ private:
     bool parseReference(QString input, int *book, int *chapter, int *start, int *end, QString *error) const;
     struct Link { int start = 0, length = 0, first = 0, last = 0; QString text, reference; };
     QVector<Link> findLinks(const QString &text) const;
-    QVector<QPair<int, int>> sourceTargets(const QString &text, int book, int chapter) const;
     bool chapterBounds(int book, int chapter, int *first, int *last) const;
     void intersectSelection();
     bool commitAnnotations(const QVector<Annotation> &annotations, const QVector<Annotation> &before, const QString &label);
@@ -664,7 +653,7 @@ private:
     bool m_chapterOutline = false, m_wholeBook = false, m_marginNotes = false, m_searchAllVersions = false;
     QString m_readingMode = "paragraph";
     int m_fontSize = 18;
-    bool m_hasParagraphs = false, m_hasWordsOfJesus = false, m_hasHeadings = false, m_hasCrossReferences = false;
+    bool m_hasParagraphs = false, m_hasWordsOfJesus = false, m_hasHeadings = false;
     int m_textSchema = 0;
     double m_lineHeight = 1.5;
     QVariantList m_verses, m_collection, m_history;
@@ -674,7 +663,7 @@ private:
     bool m_historyEnabled = true;
     QVector<Annotation> m_annotations;
     std::shared_ptr<std::atomic<double>> m_importProgress;
-    QFutureWatcher<UsfmImporter::Result> m_importWatcher;
+    QFutureWatcher<AoImporter::Result> m_importWatcher;
     QTimer m_progressTimer;
     QString m_textGeneration, m_searchError;
     QVariantList m_searchResults, m_allSearchResults, m_searchBooks;

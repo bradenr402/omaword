@@ -7,8 +7,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTemporaryDir>
-#include <archive.h>
-#include <archive_entry.h>
+#include "aofixture.h"
 
 class RangesTest : public QObject
 {
@@ -18,29 +17,22 @@ class RangesTest : public QObject
     std::unique_ptr<BibleBackend> bible;
     QString net, kjv;
     static bool fixture(const QString &path, const QString &id) {
-        archive *a = archive_write_new();
-        const auto guard = qScopeGuard([&] { archive_write_free(a); });
-        if (archive_write_set_format_zip(a) != ARCHIVE_OK || archive_write_open_filename(a,QFile::encodeName(path)) != ARCHIVE_OK) return false;
         // Deliberately noncanonical source order; omitted verses and chapter 2.
         const QStringList codes{"ESG","GEN","TOB"};
+        QJsonArray books;
         for (int i = 0; i < codes.size(); ++i) {
-            const QByteArray filename = QString("%1-%2%3.usfm").arg(i+1,2,10,QChar('0')).arg(codes[i],id).toUtf8();
-            QString text = "\\id " + codes[i] + " Original Range Test Bible\n";
+            QJsonArray chapters;
             for (int c : {1,3}) {
-                text += QString("\\c %1\n\\p\n").arg(c);
-                for (int v : {1,3,4,6}) text += QString("\\v %1 Original %2 %3:%1 edition %4 words.\n").arg(v).arg(codes[i]).arg(c).arg(id);
+                QJsonArray content;
+                for (int v : {1,3,4,6}) content.append(AoFixture::verse(v, {QString("Original %1 %2:%3 edition %4 words.").arg(codes[i]).arg(c).arg(v).arg(id)}));
+                chapters.append(AoFixture::chapter(c, content));
             }
-            const QByteArray bytes = text.toUtf8();
-            archive_entry *entry = archive_entry_new();
-            const auto entryGuard = qScopeGuard([&] { archive_entry_free(entry); });
-            archive_entry_set_pathname(entry,filename); archive_entry_set_size(entry,bytes.size());
-            archive_entry_set_filetype(entry,AE_IFREG); archive_entry_set_perm(entry,0600);
-            if (archive_write_header(a,entry) != ARCHIVE_OK || archive_write_data(a,bytes.data(),bytes.size()) != bytes.size()) return false;
+            books.append(AoFixture::book(codes[i], i + 1, chapters));
         }
-        return archive_write_close(a) == ARCHIVE_OK;
+        return AoFixture::write(path, AoFixture::complete(id, books));
     }
     void install(const QString &path) {
-        bible->importUsfm(QUrl::fromLocalFile(path));
+        bible->importAo(QUrl::fromLocalFile(path));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),10000);
         QVERIFY2(bible->ready() && bible->error().isEmpty(),qPrintable(bible->error()));
     }
