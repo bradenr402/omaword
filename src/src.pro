@@ -8,6 +8,8 @@ TEMPLATE = lib
 TARGET = omawordcore
 SOURCES += singleinstance.cpp windowmanager.cpp desktop.cpp biblebackend.cpp usfmimporter.cpp biblebooks.cpp versioncatalog.cpp
 HEADERS += singleinstance.h windowmanager.h desktop.h biblebackend.h usfmimporter.h biblebooks.h versioncatalog.h
+SOURCES += aoimporter.cpp
+HEADERS += aoimporter.h
 SOURCES += soundeffects.cpp scripturesearch.cpp textselection.cpp commandline.cpp executablewatch.cpp
 HEADERS += soundeffects.h scripturesearch.h textselection.h commandline.h executablewatch.h
 # Data the core reads itself (BibleBackend and `omaword completion` register it: Q_INIT_RESOURCE(core)).

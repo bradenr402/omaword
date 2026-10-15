@@ -5,5 +5,5 @@ CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = tst_usfm
 include(../src/core.pri)
-SOURCES += tst_usfm.cpp
+SOURCES += tst_ao.cpp
 HEADERS += testenvironment.h
