@@ -75,7 +75,7 @@ inline bool psalm(const QString &path)
         verse(3, {QString::fromUtf8("ב Beth begins with Hebrew too.")})
     })}, "Psalms")}, "Acrostic fixture"));
 }
-inline bool studyEdition(const QString &path)
+inline bool studyEdition(const QString &path, const QString &revision = {})
 {
     QJsonArray books;
     const QStringList codes{"GEN", "MAT", "JHN"};
@@ -100,7 +100,9 @@ inline bool studyEdition(const QString &path)
         books.append(book(code, books.size() + 1, chapters));
     }
     auto root = complete("study", books, "Original study fixture");
-    auto translation = root["translation"].toObject(); translation["shortName"] = "OSF"; root["translation"] = translation;
+    auto translation = root["translation"].toObject(); translation["shortName"] = "OSF";
+    if (!revision.isEmpty()) translation["sha256"] = revision;
+    root["translation"] = translation;
     return write(path, root);
 }
 }

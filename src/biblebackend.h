@@ -520,8 +520,9 @@ private:
     bool ownedBiblePath(const QString &path, const QString &id = {}) const;
     void removeOwnedBibleFiles(const QString &path, const QString &id = {});
     bool readVersions(QVariantList *versions);
-    QPair<int, bool> textInfo(const QString &id, const QString &path) const;
-    mutable QHash<QString, QPair<int, bool>> m_textInfo;
+    struct TextInfo { int schema = 0; bool wordsOfJesus = false; QString revision; };
+    TextInfo textInfo(const QString &id, const QString &path) const;
+    mutable QHash<QString, TextInfo> m_textInfo;
     void closeBible();
     bool loadChapter();
     bool readChapter(int book, int chapter, QVariantList *rows);

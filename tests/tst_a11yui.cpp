@@ -753,7 +753,7 @@ private slots:
     }
     void reimportFromVersionsByKeyAndButton() {
         const QString id = bible->versionId();
-        catalog->entries = {QVariantMap{{"id", id}, {"name", "Access fixture"}, {"abbreviation", "OAF"}, {"copyright", "Original"}, {"detailsUrl", "https://example.invalid"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}}};
+        catalog->entries = {QVariantMap{{"id", id}, {"name", "Access fixture"}, {"abbreviation", "OAF"}, {"copyright", "Original"}, {"detailsUrl", "https://example.invalid"}, {"description", "A fixture edition."}, {"year", "2026"}, {"license", "Public domain"}, {"size", 1500000}, {"features", QVariantList{}}, {"sha256", "revision-2"}}};
         emit catalog->changed();
         // Keyboard: ctrl shift I re-imports the highlighted row; the hint names the key.
         run("switchVersion"); QTRY_VERIFY(opened("versionDialog"));
@@ -2750,7 +2750,7 @@ private slots:
         run("switchVersion"); QTRY_VERIFY(opened("versionDialog")); QTRY_VERIFY(item("versionEntry0"));
         QTest::qWait(50); click(item("versionEntry0"), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         QCOMPARE(menu()->property("target").toString(), QString("version"));
-        QCOMPARE(menuIds(), QStringList({"switch", "reimport", "details", "|", "removeVersion"}));
+        QCOMPARE(menuIds(), QStringList({"switch", "details", "|", "removeVersion"}));
         QVERIFY(!menuEnabled("switch")); // the current version
         chooseMenu("removeVersion"); QTRY_COMPARE(object("versionDialog")->property("step").toInt(), 1);
         // Mouse back steps back, then closes the dialog.

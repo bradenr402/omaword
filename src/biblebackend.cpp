@@ -2097,13 +2097,13 @@ void BibleBackend::removeOwnedBibleFiles(const QString &path, const QString &id)
         QFile::remove(path+suffix);
 }
 
-QPair<int, bool> BibleBackend::textInfo(const QString &id, const QString &path) const
+BibleBackend::TextInfo BibleBackend::textInfo(const QString &id, const QString &path) const
 {
     // Generations are immutable files: cache by path. Unreadable or foreign
-    // files report schema 0 (never offered re-import from here).
+    // files report schema 0 and no revision.
     const auto cached = m_textInfo.constFind(path);
     if (cached != m_textInfo.cend()) return *cached;
-    QPair<int, bool> info{0, false};
+    TextInfo info;
     if (ownedBiblePath(path, id) && QFileInfo::exists(path)) {
         const QString name = connectionName();
         {
@@ -2111,10 +2111,13 @@ QPair<int, bool> BibleBackend::textInfo(const QString &id, const QString &path) 
             db.setDatabaseName(path); db.setConnectOptions("QSQLITE_OPEN_READONLY");
             if (db.open()) {
                 QSqlQuery q(db);
-                if (q.exec("SELECT key,value FROM metadata WHERE key IN ('schema','words_of_jesus')")) {
+                if (q.exec("SELECT key,value FROM metadata WHERE key IN ('schema','words_of_jesus','ao_translation')")) {
                     while (q.next()) {
-                        if (q.value(0).toString() == "schema") info.first = q.value(1).toInt();
-                        else info.second = q.value(1).toInt() > 0;
+                        const QString key = q.value(0).toString();
+                        if (key == "schema") info.schema = q.value(1).toInt();
+                        else if (key == "words_of_jesus") info.wordsOfJesus = q.value(1).toInt() > 0;
+                        // AO's revision of the source, as its catalog lists it.
+                        else info.revision = QJsonDocument::fromJson(q.value(1).toString().toUtf8()).object().value("sha256").toString();
                     }
                 }
                 db.close();
@@ -2142,8 +2145,8 @@ bool BibleBackend::readVersions(QVariantList *result)
     while (q.next()) {
         const auto info = textInfo(q.value(0).toString(), m_directory + '/' + q.value(4).toString());
         rows.append(QVariantMap{{"id",q.value(0)},{"abbreviation",q.value(1)},
-            {"name",q.value(2)},{"active",q.value(3).toBool()},{"textSchema",info.first},
-            {"wordsOfJesus",info.second}});
+            {"name",q.value(2)},{"active",q.value(3).toBool()},{"textSchema",info.schema},
+            {"wordsOfJesus",info.wordsOfJesus},{"revision",info.revision}});
     }
     if (q.lastError().isValid()) return setError("Cannot read installed versions: " + q.lastError().text());
     *result = rows; return true;

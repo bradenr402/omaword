@@ -111,6 +111,9 @@ user's real data for development or tests.
   never overwrite them. Browsing and ordinary startup make no network request.
 - Personal ID conversion is a one-off explicit-path SQLite backup transformation
   outside runtime; orphan marks remain until matching AO editions are installed.
+- Versions offers Re-import only while the catalog's `sha256` for an edition
+  differs from the one its installed `ao_translation` metadata records
+  (`revision`). A stale catalog keeps offering it until refreshed.
 
 ## Scopes, writes, and multi-window state
 

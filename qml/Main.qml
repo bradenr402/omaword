@@ -102,29 +102,20 @@ ApplicationWindow {
         catalog.clearError()
         catalog.download(id)
     }
-    // Re-import an installed version whose text predates the current schema:
-    // catalog versions download again; local imports ask for their file. Both
-    // reuse the install/replace flow, so annotations (keyed by version) stay.
-    property string reimportId: ""
+    // Re-import an installed version AO's catalog lists another revision of:
+    // it downloads again through the install/replace flow, so annotations
+    // (keyed by version) stay.
     function catalogEntry(id) { return Array.from(catalog.entries).find(function(entry) { return entry.id === id }) || null }
     function reimportVersion(entry) {
         if (!entry || closingWindow || bible.busy || catalog.busy || !flushNote()) return
         versionDialog.close()
         settingsDialog.close()
-        if (catalogEntry(entry.id)) {
-            importGuide.open()
-            installVersion(entry.id)
-        } else {
-            reimportId = entry.id
-            importDialog.open()
-        }
+        importGuide.open()
+        installVersion(entry.id)
     }
-    // The file picker's choice; a pending Re-import pins the expected edition.
     function importChosen(file) {
-        const expected = reimportId
-        reimportId = ""
         if (closingWindow || bible.busy || catalog.busy || !flushNote()) return
-        bible.clearError(); bible.importAo(file, expected)
+        bible.clearError(); bible.importAo(file)
     }
     function cancelDownload() {
         downloadId = ""
@@ -2400,7 +2391,10 @@ ApplicationWindow {
     // A key or row that cannot act: the error sound, and a short toast saying
     // why when there is a reason a reader can act on.
     // "2.9 MB"; the bytes are a catalog snapshot, so approximate.
-    function wantsReimport(version) { return !!version }
+    function wantsReimport(version) {
+        const details = version ? catalogEntry(version.id) : null
+        return !!details && !!details.sha256 && details.sha256 !== version.revision
+    }
     function rejected(reason) {
         if (reason) notify(reason, true)
         sounds.play("error")
@@ -4746,7 +4740,7 @@ ApplicationWindow {
         versionResults.currentIndex = versionResults.count ? Math.max(0, Math.min(versionResults.count - 1, versionResults.currentIndex + delta)) : -1
         if (versionResults.count) versionResults.positionViewAtIndex(versionResults.currentIndex, ListView.Contain)
     }
-    // The highlighted Versions row, when its text predates the current schema.
+    // The highlighted Versions row, when AO's catalog lists another revision of it.
     function reimportableVersion() {
         const entry = versionResults.model[versionResults.currentIndex]
         return !versionDialog.removing && versionDialog.step === 0 && wantsReimport(entry) ? entry : null
@@ -4756,7 +4750,7 @@ ApplicationWindow {
             event.accepted = true
             const entry = reimportableVersion()
             if (entry && !bible.busy && !catalog.busy) reimportVersion(entry)
-            else sounds.play("error")
+            else rejected(entry ? "Wait for the current import to finish" : "AO Lab lists no other revision of this version")
             return
         }
         if (event.key === Qt.Key_I && event.modifiers === Qt.ControlModifier) {
@@ -8406,7 +8400,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Label {
                                 text: versionEntry.modelData.hint || ((versionEntry.modelData.active ? "Current version" : "Installed locally")
-                                    )
+                                    + (app.wantsReimport(versionEntry.modelData) ? " · AO Lab has another revision" : ""))
                                 color: desktop.muted; font.pixelSize: 11 * versionDialog.uiScale
                                 Layout.fillWidth: true; wrapMode: Text.Wrap
                             }
@@ -8417,8 +8411,7 @@ ApplicationWindow {
                                 compact: true
                                 font.pixelSize: 12 * versionDialog.uiScale
                                 enabled: !bible.busy && !catalog.busy
-                                tip: (app.catalogEntry(versionEntry.modelData.id) ? "Download " + versionEntry.modelData.abbreviation + " again from AO Lab and replace its text; annotations are kept"
-                                    : "Choose " + versionEntry.modelData.abbreviation + "'s AO JSON again and replace its text; annotations are kept") + " · " + app.keyText("reimportVersion")
+                                tip: "Download " + versionEntry.modelData.abbreviation + " again from AO Lab and replace its text; annotations are kept · " + app.keyText("reimportVersion")
                                 onClicked: app.reimportVersion(versionEntry.modelData)
                             }
                         }
@@ -9767,11 +9760,10 @@ ApplicationWindow {
     FileDialog {
         id: importDialog
         objectName: "importDialog"
-        title: app.reimportId ? "Re-import " + (Array.from(bible.versions).find(function(v) { return v.id === app.reimportId }) || { name: app.reimportId }).name : "Add version"
+        title: "Add version"
         fileMode: FileDialog.OpenFile
         nameFilters: ["AO complete JSON (*.json)"]
         onAccepted: app.importChosen(selectedFile)
-        onRejected: app.reimportId = ""
         onVisibleChanged: { if (!visible) app.restorePanelFocus() }
     }
     FolderDialog {

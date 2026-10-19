@@ -65,7 +65,7 @@ class StudyUiTest : public QObject
     std::unique_ptr<QQmlApplicationEngine> engine;
     QQuickWindow *window = nullptr;
     QStringList warnings;
-    QString source, other, third;
+    QString source, revised, other, third;
     QString installedFile() const {
         QString path;
         {
@@ -79,8 +79,8 @@ class StudyUiTest : public QObject
         QSqlDatabase::removeDatabase("study-installed");
         return path;
     }
-    static bool edition(const QString &path) {
-        return AoFixture::studyEdition(path);
+    static bool edition(const QString &path, const QString &revision = {}) {
+        return AoFixture::studyEdition(path, revision);
     }
     static QVariant value(QVariant v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant() : v; }
     static QQuickItem *visual(QQuickItem *root, const QString &name) {
@@ -141,6 +141,7 @@ class StudyUiTest : public QObject
 private slots:
     void initTestCase() {
         source = fixtures.filePath("study_usfm.zip"); QVERIFY(edition(source));
+        revised = fixtures.filePath("study_revised.json"); QVERIFY(edition(revised, "revision-2"));
         // Other editions of John 1:1 (different internal IDs): one for the
         // wrong-file check, and a third version for Open beside's choice.
         const auto oneVerse = [](const QString &path, const QString &id, const QString &text) {
@@ -215,27 +216,33 @@ private slots:
         QVERIFY(item("settingwordsOfJesus") && item("settingwordsOfJesus")->isVisible());
         QVERIFY(!item("settingwordsOfJesusNote")->isVisible());
     }
+    // Re-import is offered only while AO's catalog lists another revision of
+    // the installed text: re-importing it settles the offer.
     void reimportFromCatalog() {
         catalog->entries = {QVariantMap{{"id","study"},{"name","Study fixture"},{"abbreviation","SF"},{"url","https://example.invalid/study.zip"},
             {"detailsUrl","https://example.invalid"},{"copyright",""},{"description","A fixture edition."},{"year","2026"},
-            {"license","Public domain"},{"size",1500000},{"features",QVariantList{}}}};
+            {"license","Public domain"},{"size",1500000},{"features",QVariantList{}},{"sha256","revision-2"}}};
         emit catalog->changed();
         key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
         auto button = item("versionReimport:study"); QVERIFY(button); QTRY_VERIFY(button->isVisible());
-        // Settings offers it too.
         QSignalSpy requests(catalog.get(), &MockCatalog::requested);
         QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
         QCOMPARE(requests.count(), 1); QCOMPARE(requests.first().first().toString(), QString("study"));
         QTRY_VERIFY(object("importGuide")->property("visible").toBool());
-        catalog->finish(QUrl::fromLocalFile(source));
+        catalog->finish(QUrl::fromLocalFile(revised));
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
         QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
         QCOMPARE(bible->textSchema(), 7);
         QTRY_COMPARE(object("toast")->property("text").toString(), "Reimported " + bible->versionAbbreviation());
-        for (const auto &row : bible->versions()) QVERIFY(!row.toMap()["needsReimport"].toBool());
+        QCOMPARE(bible->versions().first().toMap()["revision"].toString(), QString("revision-2"));
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
         key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
-        QTRY_VERIFY(item("versionReimport:study") && item("versionReimport:study")->isVisible());
+        QTRY_VERIFY(item("versionEntry0"));
+        QVERIFY(!item("versionReimport:study") || !item("versionReimport:study")->isVisible());
+        // Its key explains instead.
+        key(Qt::Key_I, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(object("toast")->property("text").toString(), QString("AO Lab lists no other revision of this version"));
+        QCOMPARE(requests.count(), 1);
     }
     // A version without words-of-Jesus marks: the switch is last, disabled,
     // and off whatever is stored; alt j explains instead of toggling.
@@ -282,32 +289,12 @@ private slots:
         QCoreApplication::processEvents();
         QVERIFY(bible->wordsOfJesus()); QVERIFY(!toggle->property("checked").toBool());
     }
-    void reimportLocalFilePicker() {
+    // A version AO's catalog doesn't list has nothing to re-import from.
+    void reimportNeedsACatalogRevision() {
         key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
-        auto button = item("versionReimport:study"); QVERIFY(button); QVERIFY(button->isVisible());
-        QVERIFY(QMetaObject::invokeMethod(button, "clicked"));
-        auto dialog = object("importDialog"); QVERIFY(dialog);
-        QTRY_VERIFY(dialog->property("visible").toBool());
-        QCOMPARE(window->property("reimportId").toString(), QString("study"));
-        QVERIFY(dialog->property("title").toString().startsWith("Re-import"));
-        // Another edition's file is refused, leaving the old text in place.
-        // The picker's accepted file goes through importChosen.
-        QVERIFY(QMetaObject::invokeMethod(window, "importChosen", Q_ARG(QVariant, QUrl::fromLocalFile(other))));
-        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
-        QTRY_VERIFY(!bible->busy());
-        QVERIFY2(bible->error().contains("not"), qPrintable(bible->error())); QCOMPARE(bible->textSchema(), 7); QCOMPARE(bible->versions().size(), 1);
-        bible->clearError();
-        QTRY_VERIFY(!dialog->property("visible").toBool());
-        QCOMPARE(window->property("reimportId").toString(), QString());
-        key(Qt::Key_V, Qt::ControlModifier); QTRY_VERIFY(object("versionDialog")->property("opened").toBool());
-        QVERIFY(QMetaObject::invokeMethod(item("versionReimport:study"), "clicked"));
-        QTRY_VERIFY(dialog->property("visible").toBool());
-        QVERIFY(QMetaObject::invokeMethod(window, "importChosen", Q_ARG(QVariant, QUrl::fromLocalFile(source))));
-        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
-        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(), 30000);
-        QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
-        QCOMPARE(bible->textSchema(), 7); QVERIFY(bible->hasWordsOfJesus());
-        QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16, 16); QCOMPARE(bible->noteText(), QString("Kept note"));
+        QTRY_VERIFY(item("versionEntry0"));
+        QVERIFY(!item("versionReimport:study") || !item("versionReimport:study")->isVisible());
+        QVERIFY(!object("versionHints")->property("text").toString().contains("re-import"));
     }
 private:
     bool studyOpen() const { return window->property("relatedOpen").toBool(); }

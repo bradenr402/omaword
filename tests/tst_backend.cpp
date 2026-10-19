@@ -1679,7 +1679,7 @@ private slots:
         const QString path = fixtures.filePath("study.json"); QVERIFY(study(path));
         install(path);
         QCOMPARE(bible->versionId(), QString("study")); QCOMPARE(bible->textSchema(), 7); QVERIFY(bible->hasWordsOfJesus());
-        QVERIFY(!versionRow(bible.get(),"study")["needsReimport"].toBool());
+        QCOMPARE(versionRow(bible.get(),"study")["revision"].toString(), QString());
         QCOMPARE(versionRow(bible.get(),"study")["textSchema"].toInt(), 7);
         QVERIFY(bible->navigate("Genesis 1"));
         const auto notes = bible->footnotes();
@@ -1699,10 +1699,18 @@ private slots:
         bible->importAo(QUrl::fromLocalFile(net), "study");
         QVERIFY(!bible->busy()); QVERIFY(bible->error().contains("not")); QCOMPARE(bible->versions().size(), 1);
         bible->clearError();
-        // Re-import through the ordinary install/replace flow keeps annotations.
-        bible->importAo(QUrl::fromLocalFile(path), "study");
+        // Re-import through the ordinary install/replace flow keeps annotations;
+        // the versions list reports the AO revision now installed.
+        const QString revised = fixtures.filePath("study-revised.json");
+        {
+            QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
+            auto root = QJsonDocument::fromJson(file.readAll()).object(); auto translation = root["translation"].toObject();
+            translation["sha256"] = "revision-2"; root["translation"] = translation; QVERIFY(AoFixture::write(revised, root));
+        }
+        bible->importAo(QUrl::fromLocalFile(revised), "study");
         QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000); QVERIFY2(bible->error().isEmpty(), qPrintable(bible->error()));
         QCOMPARE(bible->textSchema(), 7);
+        QCOMPARE(versionRow(bible.get(),"study")["revision"].toString(), QString("revision-2"));
         QVERIFY(installedPath() != file); QVERIFY(!QFile::exists(file));
         QVERIFY(bible->navigate("John 3:16")); bible->selectVerses(16,16);
         QCOMPARE(bible->noteText(), QString("Kept across re-import"));
