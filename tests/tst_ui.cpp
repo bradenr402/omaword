@@ -3533,6 +3533,67 @@ private slots:
         }
         QSqlDatabase::removeDatabase("ui-block-copy-failure");
     }
+    // The focused verse is tinted; the other verses of a range, and text
+    // selected by character, are underlined with dots instead, below their
+    // text, which keeps its look (no native selection paint).
+    void selectionRangesAreUnderlined_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("block") << "block";
+    }
+    void selectionRangesAreUnderlined() {
+        QFETCH(QString, mode);
+        const bool block = mode == "block";
+        bible->setReadingMode(mode);
+        reference("John 3:16"); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        QTRY_VERIFY(block ? !!object("blockReader") : !!item("verseBody16"));
+        const auto list = [](const QVariant &v) { return v.metaType() == QMetaType::fromType<QJSValue>() ? v.value<QJSValue>().toVariant().toList() : v.toList(); };
+        const auto tinted = [&](int verse) {
+            if (!block) { auto segment = item(qPrintable(QString("selectionSegment%1").arg(verse))); return segment && segment->isVisible(); }
+            QVariant rects; QMetaObject::invokeMethod(object("blockReader"), "verseRangeRects", Q_RETURN_ARG(QVariant, rects), Q_ARG(QVariant, verse), Q_ARG(QVariant, verse));
+            const auto shown = list(prop("blockSelectionBackground", "rects"));
+            return !shown.isEmpty() && shown == list(rects);
+        };
+        // Underlined lines (row or body coordinates), per verse in the Verse layout.
+        const auto lines = [&](int verse) -> QVariantList {
+            auto underline = item(qPrintable(block ? QString("blockSelectionUnderline") : QString("selectionUnderline%1").arg(verse)));
+            return underline ? list(underline->property("lines")) : QVariantList();
+        };
+        const auto body = [&] { return block ? item("blockBody") : item("verseBody18"); };
+        // One verse: its tint alone.
+        QTRY_VERIFY(tinted(16)); QVERIFY(lines(16).isEmpty());
+        // A range: the cursor's verse tinted, all of it underlined, under the
+        // baseline of each line and within the text's width.
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_J);
+        QCOMPARE(bible->selectionReference(), QString("John 3:16–18")); QCOMPARE(bible->cursorVerse(), 18);
+        QTRY_VERIFY(tinted(18)); QVERIFY(!tinted(16)); QVERIFY(!tinted(17));
+        if (block) QTRY_VERIFY(lines(0).size() >= 3);
+        else for (int v = 15; v <= 19; ++v) QTRY_COMPARE(lines(v).isEmpty(), v < 16 || v > 18);
+        const auto last = lines(18).last().toMap();
+        auto under = item(qPrintable(block ? QString("blockSelectionUnderline") : QString("selectionUnderline18")));
+        int end = body()->property("length").toInt() - 1;
+        if (block) for (const auto &span : blockMapping()->spans()) if (span.toMap()["number"].toInt() == 18) end = span.toMap()["textEnd"].toInt() - 1;
+        QRectF caret; QMetaObject::invokeMethod(body(), "positionToRectangle", Q_RETURN_ARG(QRectF, caret), Q_ARG(int, end));
+        const double baseline = body()->mapToItem(under, caret.topLeft()).y() + QFontMetricsF(body()->property("font").value<QFont>()).ascent();
+        QVERIFY2(last["y"].toDouble() > baseline && last["y"].toDouble() < baseline + caret.height() / 2,
+            qPrintable(QString("%1 vs baseline %2").arg(last["y"].toDouble()).arg(baseline)));
+        QVERIFY(last["x"].toDouble() >= under->mapFromItem(body(), QPointF()).x() - (block ? 5 : 0));
+        QTRY_VERIFY(!window->property("pulseActive").toBool());
+        capture(mode + "-range-underlined");
+        // Characters (v, then l): no tint; only what is selected is underlined,
+        // its text drawn as it is.
+        key(Qt::Key_Escape); key(Qt::Key_V); for (int i = 0; i < 5; ++i) key(Qt::Key_L);
+        QVERIFY(window->property("charMode").toBool());
+        QTRY_VERIFY(!tinted(18));
+        QTRY_COMPARE(lines(18).size(), 1);
+        QVERIFY(lines(18).first().toMap()["width"].toDouble() < body()->width() / 3);
+        if (!block) QVERIFY(lines(17).isEmpty());
+        QCOMPARE(body()->property("selectionColor").value<QColor>().alpha(), 0);
+        QCOMPARE(body()->property("selectedTextColor").value<QColor>().alpha(), 0);
+        capture(mode + "-characters-underlined");
+        key(Qt::Key_Escape); QVERIFY(!window->property("charMode").toBool());
+        key(Qt::Key_Escape); QTRY_VERIFY(lines(18).isEmpty());
+        bible->setReadingMode("verse");
+    }
     void continuousHighlightGeometry() {
         installDragFixture();
         // Put a visible heading inside the range, not only at its beginning.
@@ -3557,9 +3618,6 @@ private slots:
             QVERIFY(!item(qPrintable(QString("highlightAccent%1:").arg(v) + range)));
             QVERIFY(item(qPrintable(QString("highlightPaint%1:").arg(v) + range)));
             QCOMPARE(a->property("radius").toDouble(),0.0);
-            const auto selection = item(qPrintable(QString("selectionSegment%1").arg(v)));
-            const auto next = item(qPrintable(QString("selectionSegment%1").arg(v+1)));
-            QCOMPARE(selection->mapToScene(QPointF(0,selection->height())).y(),next->mapToScene(QPointF()).y());
         }
         bible->toggleHighlight();
         bible->selectVerses(1,1); bible->toggleHighlight();

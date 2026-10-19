@@ -199,6 +199,11 @@ user's real data for development or tests.
   Mouse entry is quiet, keeps the pointer's end as cursor, and offers no selection
   bar. Escape returns to the underlying verse selection. Gutter drags and plain
   heading selections retain the verse action bar.
+- Selection paint: only the cursor's verse is tinted (`cursorTinted`); a range's
+  verses (`rangeUnderlined`) and text selected by character get
+  `DottedUnderline` dots under the highlight band. The native TextEdit selection
+  stays as state (copy, PRIMARY) but paints nothing: its color is the background
+  at alpha 0, since Qt veils selected inline cells with it at half alpha.
 - PRIMARY gets dragged text as shown before character conversion. Character
   plain-copy uses source text; quotation adds cut-verse ellipses, numbers only
   for included verse starts (never a single verse), and an em-dash reference.

@@ -32,6 +32,14 @@ Item {
     property int chapterNumber: backend.chapter
     property int selectedFirst: controller.charMode ? 0 : backend.selectedStart
     property int selectedLast: backend.selectedEnd
+    // The focused verse is tinted (beside: none, it is the chapter read's);
+    // a range's verses, and text selected by character, are underlined with
+    // dots (Main's cursorTinted and rangeUnderlined; controllers without
+    // them, tests: a selection of several verses is a range).
+    readonly property int tintedVerse: beside || controller.cursorTinted === false ? 0 : backend.cursorVerse || 0
+    readonly property bool rangeUnderlined: controller.rangeUnderlined === undefined ? selectedLast > selectedFirst : !!controller.rangeUnderlined
+    onTintedVerseChanged: if (!destroying) selectionTimer.restart()
+    onRangeUnderlinedChanged: if (!destroying) selectionTimer.restart()
     // Names its items apart from the chapter read's ("context:John 3:").
     property string namePrefix: ""
     property var annotationRanges: []
@@ -314,17 +322,36 @@ Item {
             selectionPaint.refresh()
         }
     }
-    // The selection's tint, above the marks and below search and the text.
+    // The selection, above the marks and below search and the text: the
+    // focused verse's tint, and the dotted underlines.
     Item {
         id: selectionPaint
         objectName: root.namePrefix + "blockSelectionBackground"
         x: paint.x; y: paint.y
         width: paint.width; height: paint.height
         property var rects: []
+        property var lines: []
         function refresh() {
-            const spans = Array.from(document.spans).filter(function(span) {
-                return paint.first > 0 && span.number >= paint.first && span.number <= paint.last })
-            rects = spans.length ? document.rectangles(spans[0].start, spans[spans.length - 1].end) : []
+            const tinted = paint.first > 0 && root.tintedVerse >= paint.first && root.tintedVerse <= paint.last ? root.tintedVerse : 0
+            rects = root.verseRangeRects(tinted, tinted)
+            lines = underlineLines()
+        }
+        // Text selected by character, else a range's verses (their own
+        // lines, not the headings among them), one run per line.
+        function underlineLines() {
+            let rects = []
+            if (body.selectionStart !== body.selectionEnd) rects = Array.from(document.rectangles(body.selectionStart, body.selectionEnd))
+            else if (root.rangeUnderlined && paint.first > 0)
+                for (const span of Array.from(document.spans))
+                    if (span.number >= paint.first && span.number <= paint.last) rects = rects.concat(Array.from(document.rectangles(span.start, span.end)))
+            const top = HandDrawn.underlineTop(bandMetrics.ascent, bandMetrics.descent, bandMetrics.xHeight, underline.dot)
+            const out = []
+            for (const r of rects) {
+                const last = out.length ? out[out.length - 1] : null
+                if (last && last.top === r.y && r.x <= last.x + last.width + 0.5) last.width = Math.max(last.width, r.x + r.width - last.x)
+                else out.push({ top: r.y, x: r.x, width: r.width })
+            }
+            return out.map(function(line) { return { x: line.x + paint.leftInset, y: line.top + top, width: line.width } })
         }
         Repeater {
             model: selectionPaint.rects
@@ -334,6 +361,13 @@ Item {
                 width: modelData.width + paint.leftInset; height: modelData.height
                 color: root.controller.tint(paint.accent, 0.22)
             }
+        }
+        DottedUnderline {
+            id: underline
+            objectName: root.namePrefix + "blockSelectionUnderline"
+            lines: selectionPaint.lines
+            ink: paint.accent
+            dot: HandDrawn.underlineDot(root.readerScale)
         }
     }
     // Search is a separate background above annotations and below native text.
@@ -413,8 +447,11 @@ Item {
         onFontChanged: if (!root.destroying) geometryTimer.restart()
         onWidthChanged: if (!root.destroying) geometryTimer.restart()
         color: root.theme.foreground
-        selectionColor: root.theme.selection
-        selectedTextColor: root.theme.foreground
+        // Selected text keeps its look: a dotted underline marks it (the
+        // background at no alpha: Qt veils selected inline cells with this
+        // color at half).
+        selectionColor: Qt.rgba(root.theme.background.r, root.theme.background.g, root.theme.background.b, 0)
+        selectedTextColor: "transparent"
         readOnly: true
         persistentSelection: true
         activeFocusOnTab: false
@@ -424,6 +461,7 @@ Item {
         function syncSelection() {
             document.trackSelection(selectionStart, selectionEnd)
             root.controller.freeSelectedText = document.selectionText(selectionStart, selectionEnd)
+            if (!root.destroying) selectionTimer.restart()
         }
         onSelectedTextChanged: syncSelection()
         onSelectionStartChanged: syncSelection()

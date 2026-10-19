@@ -7,7 +7,7 @@ import "TypeScale.js" as TypeScale
 // A chapter a selection reaches into, shown whole above or below the chapter
 // read while the selection spans them (Main's context chapters): its title,
 // its text in the layout chosen, with its marks and footnotes, and its
-// selected verses tinted, as the reader shows them. A click on a verse
+// selected verses underlined, as the reader shows them. A click on a verse
 // selects it there (shift: extends the selection to it), its chapter
 // becoming the one read (Main.besideClick).
 Column {
@@ -206,14 +206,21 @@ Column {
                 body: rowBody
                 lines: rowLines
             }
-            Rectangle {
-                x: chapter.controller.verseGutter - 9 * chapter.readerScale
-                readonly property var previous: row.index > 0 ? chapter.rows[row.index - 1] : null
-                y: previous && chapter.selected(previous.number) ? 0 : heading.height
-                width: parent.width - x
-                height: (row.modelData.number < chapter.last ? row.height : heading.height + rowBody.height + 3) - y
-                visible: row.chosen
-                color: chapter.controller.tint(chapter.theme.accent, 0.22)
+            // Its selected verses: a range's (the focused verse is the chapter
+            // read's), underlined with dots.
+            Loader {
+                active: row.chosen && chapter.controller.rangeUnderlined
+                sourceComponent: DottedUnderline {
+                    objectName: chapter.namePrefix + "selectionUnderline" + row.modelData.number
+                    ink: chapter.theme.accent
+                    dot: chapter.controller.underlineDot
+                    lines: {
+                        const watch = [rowBody.width, rowBody.height, rowBody.y, rowBody.text, chapter.controller.underlineTop]
+                        return !watch ? [] : Array.from(rowLines.lineRects(0, String(row.modelData.text || "").length)).map(function(r) {
+                            return { x: rowBody.x + r.x, y: rowBody.y + r.y + chapter.controller.underlineTop, width: r.width }
+                        })
+                    }
+                }
             }
             Label {
                 id: numberLabel

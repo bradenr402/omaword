@@ -891,6 +891,13 @@ ApplicationWindow {
     readonly property real highlightAlpha: desktop.dark ? 0.34 : 0.36
     readonly property var highlightBand: highlightBandFor(readerMetrics)
     function highlightBandFor(metrics) { return HandDrawn.highlightBand(metrics.ascent, metrics.descent, metrics.xHeight) }
+    // The selection: the focused (cursor's) verse is tinted; the verses of a
+    // range (several, or reaching into other chapters) are underlined with
+    // dots, as is text selected by character, which no tint marks.
+    readonly property bool cursorTinted: hasSelection && !charMode && !freeSelectedText.length
+    readonly property bool rangeUnderlined: cursorTinted && (bible.selectedStart !== bible.selectedEnd || bible.crossChapterSelection)
+    readonly property real underlineDot: HandDrawn.underlineDot(readerScale)
+    readonly property real underlineTop: HandDrawn.underlineTop(readerMetrics.ascent, readerMetrics.descent, readerMetrics.xHeight, underlineDot)
     // The Verse layout's rows, one per verse, each reading bible.verses[index]
     // in place: marks (which change bible.verses) and another chapter update
     // the rows rather than making them again (only the rows a longer
@@ -5941,6 +5948,7 @@ ApplicationWindow {
     component ContextChapter: Shared.ContextChapter { controller: app; theme: desktop; backend: bible; viewport: reading; rangeMenu: verseTagMenu }
     component VerseTint: Shared.VerseTint { controller: app; theme: desktop }
     component VerseHighlights: Shared.VerseHighlights { controller: app }
+    component DottedUnderline: Shared.DottedUnderline { ink: desktop.accent; dot: app.underlineDot }
     component FootnoteMarks: Shared.FootnoteMarks { controller: app; theme: desktop }
     // A step beside a Reading settings slider: − or + runs its action. Not a
     // tab stop: the slider's arrows and the actions' keys do the same by key.
@@ -6328,6 +6336,23 @@ ApplicationWindow {
                                 // (A row of a longer chapter reads nothing for the moment before it goes.)
                                 readonly property var modelData: bible.verses[index] || app.noVerse
                                 readonly property bool selected: modelData.number >= bible.selectedStart && modelData.number <= bible.selectedEnd && bible.selectedStart > 0
+                                readonly property bool textSelected: verseBody.selectionStart !== verseBody.selectionEnd
+                                readonly property bool underlined: textSelected || (selected && app.rangeUnderlined)
+                                // Its underlined lines (row coordinates): the text selected by
+                                // character, else all of its text.
+                                readonly property var underlineLines: {
+                                    if (!underlined) return []
+                                    const watch = [verseBody.width, verseBody.height, verseBody.y, bodyHtml, app.underlineTop]
+                                    let start = 0, end = String(modelData.text || "").length
+                                    if (textSelected) {
+                                        start = verseSearch.sourceAt(verseBody.selectionStart, true)
+                                        end = verseSearch.sourceAt(verseBody.selectionEnd, false)
+                                    }
+                                    if (!watch || start < 0 || end <= start) return []
+                                    return Array.from(verseSearch.lineRects(start, end - start)).map(function(r) {
+                                        return { x: verseBody.x + r.x, y: verseBody.y + r.y + app.underlineTop, width: r.width }
+                                    })
+                                }
                                 readonly property real gutter: app.verseGutter
                                 // What a change of marks leaves alone, as values (a string or a
                                 // number changes only when its value does): the text and the
@@ -6439,18 +6464,25 @@ ApplicationWindow {
                                     body: verseBody
                                     lines: verseRow.searchOverlay
                                 }
+                                // The focused verse's tint (no verse row is read here: every
+                                // row reevaluates this on each verse step).
                                 Rectangle {
                                     objectName: "selectionSegment" + verseRow.modelData.number
                                     x: verseRow.gutter - 9 * app.readerScale
-                                    // Rows are in order and a selection is contiguous: a selected row
-                                    // after the first selected one joins the row above (no verse row is
-                                    // read here: every row reevaluates this on each verse step).
-                                    y: verseRow.selected && verseRow.modelData.number > bible.selectedStart ? 0 : verseHeading.height
+                                    y: verseHeading.height
                                     width: parent.width - x
-                                    height: (verseRow.modelData.number < bible.selectedEnd ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
-                                    visible: verseRow.selected && !app.charMode
+                                    height: verseBody.height + 3
+                                    visible: verseRow.selected && verseRow.modelData.number === bible.cursorVerse && app.cursorTinted
                                     radius: 0
                                     color: app.tint(desktop.accent, 0.22)
+                                }
+                                // A range's verses, or text selected by character: dotted underlines.
+                                Loader {
+                                    active: verseRow.underlined
+                                    sourceComponent: DottedUnderline {
+                                        objectName: "selectionUnderline" + verseRow.modelData.number
+                                        lines: verseRow.underlineLines
+                                    }
                                 }
                                 Item {
                                     id: verseNumber
@@ -6545,8 +6577,11 @@ ApplicationWindow {
                                     font.family: desktop.fontFamily
                                     font.pixelSize: app.readerSize * app.readerScale
                                     color: desktop.foreground
-                                    selectionColor: desktop.selection
-                                    selectedTextColor: desktop.foreground
+                                    // Selected text keeps its look: a dotted underline marks it
+                                    // (the background at no alpha: Qt veils selected inline cells
+                                    // with this color at half).
+                                    selectionColor: Qt.rgba(desktop.background.r, desktop.background.g, desktop.background.b, 0)
+                                    selectedTextColor: "transparent"
                                     readOnly: true
                                     selectByMouse: true
                                     wrapMode: TextEdit.Wrap

@@ -821,11 +821,18 @@ ApplicationWindow {
         // A selection move repaints only the selection's own layer.
         const int paints = paint->property("paintCount").toInt();
         QVERIFY(paints > 0);
+        // The cursor's verse (3) alone is tinted; the range is underlined.
+        const auto shown = [&](const char *property) {
+            const auto value = item("blockSelectionBackground")->property(property);
+            return value.metaType() == QMetaType::fromType<QJSValue>() ? value.value<QJSValue>().toVariant().toList() : value.toList();
+        };
         backend->setProperty("selectedStart",2); backend->setProperty("selectedEnd",5);
-        QTRY_VERIFY(item("blockSelectionBackground")->childItems().size() > 1);
+        QTRY_VERIFY(shown("lines").size() >= 4);
+        const auto cursor = mapping->spans()[2].toMap();
+        QCOMPARE(shown("rects").size(), mapping->rectangles(cursor["start"].toInt(),cursor["end"].toInt()).size());
         QTest::qWait(50); QCOMPARE(paint->property("paintCount").toInt(),paints);
         backend->setProperty("selectedStart",0); backend->setProperty("selectedEnd",0);
-        QTRY_COMPARE(item("blockSelectionBackground")->childItems().size(),1); // Its Repeater alone.
+        QTRY_VERIFY(shown("lines").isEmpty()); QVERIFY(shown("rects").isEmpty());
         QTest::qWait(50); QCOMPARE(paint->property("paintCount").toInt(),paints);
         const int one = alphaAt(1), two = alphaAt(2), three = alphaAt(3), six = alphaAt(6);
         QVERIFY2(one > 0 && two > one && three > two, qPrintable(QString("%1 %2 %3").arg(one).arg(two).arg(three)));

@@ -2854,14 +2854,15 @@ private slots:
             QCOMPARE(accessible->property("name").toString(), label);
             QCOMPARE(accessible->property("description").toString(), action);
         }
-        // Errors take the theme's error color; selected text its selection color.
+        // Errors take the theme's error color; selected text keeps its look (dots underline it).
         QVERIFY(!bible->navigate("Nowhere 99")); QTRY_VERIFY(shown("errorBanner"));
         QVariant tinted;
         QVERIFY(QMetaObject::invokeMethod(window, "tint", Q_RETURN_ARG(QVariant, tinted),
             Q_ARG(QVariant, desktop->property("error")), Q_ARG(QVariant, 0.12)));
         QCOMPARE(object("errorBanner")->property("color").value<QColor>(), tinted.value<QColor>());
         auto body = item("verseBody1") ? item("verseBody1") : item("blockBody"); QVERIFY(body);
-        QCOMPARE(body->property("selectionColor").value<QColor>(), desktop->property("selection").value<QColor>());
+        QCOMPARE(body->property("selectionColor").value<QColor>().alpha(), 0);
+        QCOMPARE(body->property("selectedTextColor").value<QColor>().alpha(), 0);
         bible->clearError();
     }
 };

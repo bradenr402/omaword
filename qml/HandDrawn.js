@@ -282,6 +282,15 @@ function highlightBand(ascent, descent, xHeight) {
     return { top: top, height: ascent + 0.45 * descent - top, xHeight: x }
 }
 
+// A selection's dotted underline (DottedUnderline): the dots' size at a
+// scale, and their top below a line's top, just under the highlighter band,
+// crossing the descenders as an underline does.
+function underlineDot(scale) { return Math.max(1, Math.round(1.5 * (scale > 0 ? scale : 1))) }
+function underlineTop(ascent, descent, xHeight, dot) {
+    const band = highlightBand(ascent, descent, xHeight)
+    return Math.round(band.top + band.height + 0.5 * dot)
+}
+
 // Highlighter pen (paint only). One stroke per line of text, inside `rect`
 // (the band about the x-height, see Main's highlightBand): a faint feathered
 // pass, the core pass with a chisel tip (slanted ends) that tapers slightly
