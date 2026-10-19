@@ -786,6 +786,33 @@ private slots:
         QCOMPARE(bible->noteText(),QString("Peer revision"));
         QVERIFY(QFile::exists(syntheticSource));
     }
+    // The Passage palette's books: a thin rule, unlabelled, between the
+    // Testaments (under Malachi, above Matthew), filtered or not.
+    void passagePaletteDividesTheTestaments() {
+        key(Qt::Key_K, Qt::ControlModifier); QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        const auto rows = [&] {
+            QVariant entries; QMetaObject::invokeMethod(window, "paletteEntries", Q_RETURN_ARG(QVariant, entries));
+            return entries.value<QJSValue>().toVariant().toList();
+        };
+        const auto marked = [&] {
+            QStringList out; for (const auto &row : rows()) if (row.toMap()["beforeNew"].toBool()) out << row.toMap()["title"].toString();
+            return out;
+        };
+        QCOMPARE(marked(), QStringList{"Malachi"});
+        type("ma");
+        QTRY_COMPARE(marked(), QStringList{"Malachi"});
+        QList<QQuickItem *> rules; std::function<void(QQuickItem *)> walk = [&](QQuickItem *node) {
+            if (node->objectName() == "paletteTestamentRule" && node->isVisible()) rules << node;
+            for (auto child : node->childItems()) walk(child);
+        };
+        QTRY_VERIFY((rules.clear(), walk(item("paletteResults")), rules.size() == 1));
+        const auto row = rules.first()->parentItem();
+        const auto data = row->property("modelData");
+        QCOMPARE((data.metaType() == QMetaType::fromType<QJSValue>() ? data.value<QJSValue>().toVariant() : data).toMap()["title"].toString(), QString("Malachi"));
+        QCOMPARE(rules.first()->height(), 1.0);
+        QVERIFY(rules.first()->mapToItem(row, QPointF()).y() >= row->height());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette", "visible").toBool());
+    }
     void sourceOrderedChaptersAndNames() {
         const auto source = session->filePath("source-order.zip");
         QVERIFY(writeSyntheticUsfm(source,"engojb",true));

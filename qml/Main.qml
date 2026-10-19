@@ -5970,12 +5970,16 @@ ApplicationWindow {
         })
         // Resolve exact canonical/source aliases without changing the displayed source name.
         const resolved = query && !/\d\s*$/.test(query) ? bible.resolveReference(query) : null
-        return (query ? [] : recentPassages()).concat(Array.from(bible.books).filter(function(b) {
+        const books = Array.from(bible.books).filter(function(b) {
             return !query || b.name.toLowerCase().indexOf(query) >= 0
                 || b.code.toLowerCase().indexOf(query) >= 0 || b.abbreviation.toLowerCase().indexOf(query) >= 0
                 || (resolved && resolved.valid && resolved.reference === b.name + " " + b.chapterNumbers[0])
         })
-            .map(function(b) { return { title: b.name, hint: b.chapters + " chapters", book: b.id, chapter: 0 } }))
+        // A rule between the Testaments: under the book before the New's first (Matthew, as a rule).
+        const firstNew = books.findIndex(function(b) { return b.id >= 40 && b.id <= 66 })
+        return (query ? [] : recentPassages()).concat(books.map(function(b, i) {
+            return { title: b.name, hint: b.chapters + " chapters", book: b.id, chapter: 0, beforeNew: i === firstNew - 1 }
+        }))
     }
     // "Continue" at the ribbon, up to five History passages, never the one
     // being read, then "All History". The last row carries a rule that
@@ -9297,6 +9301,14 @@ ApplicationWindow {
                     FineRule {
                         objectName: "paletteRecentRule"
                         visible: !!paletteEntry.modelData.lastRecent && paletteEntry.index < paletteResults.count - 1
+                        parent: paletteEntry
+                        x: 0; width: paletteEntry.width
+                        y: paletteEntry.height + Math.floor(paletteResults.spacing / 2)
+                    }
+                    // And one between the Testaments' books, unlabelled.
+                    FineRule {
+                        objectName: "paletteTestamentRule"
+                        visible: !!paletteEntry.modelData.beforeNew && paletteEntry.index < paletteResults.count - 1
                         parent: paletteEntry
                         x: 0; width: paletteEntry.width
                         y: paletteEntry.height + Math.floor(paletteResults.spacing / 2)
