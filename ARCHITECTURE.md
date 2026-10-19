@@ -180,7 +180,14 @@ user's real data for development or tests.
 - Whole-book view reuses context chapters. `bookWindow` loads nearby chapters;
   `bookParked` preserves distant chapters' heights without laying them out.
   `captureViewAnchor`/`restoreViewAnchor` keep retained text stable as chapters
-  enter/leave. Saved positions remain relative to the chapter read.
+  enter/leave; measure only after `settleReaderLayout()` (a chapter back from
+  parked has a stale height until its own `settle()`). Saved positions remain
+  relative to the chapter read.
+- Verse-layout rows read `bible.verses[index]` in place and survive chapter
+  changes (`verseRowModel` only grows or shrinks), so a crossing is cheap.
+- The outline's current section is the cursor's while a step places itself
+  (`viewAnchor`) or while the cursor shows at `readerTargetY()`, never a section
+  a slide only passes. Its own scrolling glides (`slideMs`).
 - `readerSlide` owns programmatic scrolling; `readerTargetY()` is its logical
   destination. User scrolling stops it. Focus layout keeps the cursor 40% down.
 - Opening Notes, Desk, or Marks always checks selection visibility, including

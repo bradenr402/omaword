@@ -814,6 +814,71 @@ private slots:
     // The whole book's outline: the book over its chapters, each with its
     // headings under it; the section read is current, in whichever chapter
     // shown it is; an entry of another chapter goes there, as a jump.
+    // Whole book: verse steps across chapters, down and back up past a
+    // chapter far above that parked and comes back, move all the text one
+    // way, together, frame by frame; the outline's current section is the
+    // cursor's throughout, never one the view only passes on its way there.
+    void wholeBookStepsKeepTextAndOutlineSteady_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("block") << "block";
+    }
+    void wholeBookStepsKeepTextAndOutlineSteady() {
+        QFETCH(QString, mode);
+        bible->setChapterOutline(true); bible->setWholeBook(true); setMode(mode);
+        resize(1400, 500);
+        // The whole of John loaded (scrolled through from John 1), John 1
+        // parks once the chapter read is far below it.
+        navigate("John 1:40");
+        auto reading = item("reading");
+        for (int i = 0; i < 40 && !item("contextChapter:John 4"); ++i) {
+            reading->setProperty("contentY", reading->property("contentHeight").toDouble() - reading->height());
+            QTest::qWait(30);
+        }
+        QTRY_VERIFY(item("contextChapter:John 4"));
+        navigate("John 3:30");
+        const auto john1 = [&] { return item("contextChapter:John 1"); };
+        QTRY_VERIFY(john1() && john1()->property("parked").toBool()); settle();
+        sounds->setProperty("reduceMotion", false); settle();
+        const QMap<int, QList<int>> sections = {{1, {4, 10, 19, 29, 35}}, {2, {}}, {3, {1, 16, 22, 31}},
+            {4, {1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52}}};
+        const auto section = [&](int chapter, int verse) {
+            int at = 0;
+            for (int heading : sections[chapter]) if (heading <= verse) at = heading;
+            return QString("%1:%2").arg(chapter).arg(at);
+        };
+        QMap<QString, double> previous; int direction = 1;
+        const auto check = [&](const QString &at) {
+            const QString where = at + " at " + bible->selectionReference();
+            QCOMPARE(prop("outlineCurrent").toString(), section(bible->chapter(), bible->cursorVerse()));
+            QMap<QString, double> now;
+            const double top = reading->property("contentY").toDouble() - prop("columnHold").toDouble();
+            for (const auto &span : js("shownVerseSpans", {js("measureVerses")}).toList())
+                now[span.toMap()["key"].toString()] = span.toMap()["top"].toDouble() - top;
+            double low = 1e9, high = -1e9;
+            for (auto it = now.cbegin(); it != now.cend(); ++it)
+                if (previous.contains(it.key())) { low = std::min(low, it.value() - previous[it.key()]); high = std::max(high, it.value() - previous[it.key()]); }
+            if (high >= low) {
+                QVERIFY2(high - low <= 1, qPrintable(QString("text shifted apart by %1..%2, %3").arg(low).arg(high).arg(where)));
+                QVERIFY2(direction > 0 ? high <= 1 : low >= -1, qPrintable(QString("text moved back by %1..%2, %3").arg(low).arg(high).arg(where)));
+            }
+            previous = now;
+        };
+        StepDriver driver; driver.install(); driver.step(1000); QCoreApplication::processEvents();
+        const auto step = [&](Qt::Key key) {
+            QTest::keyClick(window, key); check("key");
+            for (int i = 0; i < 6; ++i) { driver.step(16); QCoreApplication::processEvents(); check("frame"); }
+        };
+        check("start");
+        for (int i = 0; i < 10; ++i) step(Qt::Key_J);
+        QCOMPARE(bible->selectionReference(), QString("John 4:4"));
+        direction = -1;
+        for (int i = 0; i < 70 && bible->selectionReference() != "John 2:10"; ++i) step(Qt::Key_K);
+        QCOMPARE(bible->selectionReference(), QString("John 2:10"));
+        QVERIFY(!john1()->property("parked").toBool());
+        driver.uninstall();
+        sounds->setProperty("reduceMotion", true);
+        bible->setWholeBook(false); bible->setChapterOutline(false);
+    }
     void wholeBookOutline() {
         bible->setChapterOutline(true);
         // Reading settings has its switch, and Commands has it too.

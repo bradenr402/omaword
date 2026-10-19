@@ -56,8 +56,10 @@ Column {
         const point = item.mapToItem(null, mouse.x, mouse.y)
         controller.besideClick(book, chapterNumber, number, mouse.button, mouse.modifiers, point.x, point.y)
     }
-    // The flowing layouts' reader, settled now (Main measures beside it).
-    function settle() { if (flowing.item) (flowing.item as BlockReader).settle() }
+    // Its layout settled now (Main measures beside it): the flowing layouts'
+    // reader, and its own rows and height (a chapter coming back from parked
+    // would otherwise keep a stale height until the next polish).
+    function settle() { if (flowing.item) (flowing.item as BlockReader).settle(); forceLayout() }
     // Where each verse's text is: {number, top, bottom}, in this item.
     function verseExtents() {
         const out = []

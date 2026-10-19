@@ -16,6 +16,8 @@ Item {
     // The current entry's key (an entry's key, else its verse); 0: the title.
     property var current: 0
     property real uiScale: 1
+    // How long the list glides to an entry it brings into view (0: at once).
+    property int slideMs: 0
     // Tooltips naming the keyboard equivalents (the app fills in its keys).
     property string titleTip: ""
     property string entryTip: ""
@@ -42,6 +44,7 @@ Item {
         const next = Math.max(0, Math.min(headings.length, keyIndex + delta))
         if (next === keyIndex) return false
         keyIndex = next
+        listSlide.stop()
         const entry = next === 0 ? titleEntry : entries.itemAt(next - 1)
         if (entry && entry.y < list.contentY) list.contentY = entry.y
         else if (entry && entry.y + entry.height > list.contentY + list.height) list.contentY = Math.min(list.contentHeight - list.height, entry.y + entry.height - list.height)
@@ -81,15 +84,23 @@ Item {
     function revealCurrent() { if (current !== revealed) reveal() }
     function reveal() {
         revealed = current
-        if (current === 0) { list.contentY = 0; return }
+        if (current === 0) { scrollList(0); return }
         for (let i = 0; i < entries.count; ++i) {
             const entry = entries.itemAt(i)
             if (!entry || !root.headings[i] || root.entryKey(root.headings[i]) !== current) continue
-            if (entry.y < list.contentY || entry.y + entry.height > list.contentY + list.height)
-                list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, entry.y - (list.height - entry.height) / 2))
+            const top = listSlide.running ? listSlide.to : list.contentY
+            if (entry.y < top || entry.y + entry.height > top + list.height)
+                scrollList(Math.max(0, Math.min(list.contentHeight - list.height, entry.y - (list.height - entry.height) / 2)))
             return
         }
     }
+    function scrollList(y) {
+        listSlide.stop()
+        if (!slideMs || !visible || Math.abs(y - list.contentY) < 1) { list.contentY = y; return }
+        listSlide.to = y
+        listSlide.start()
+    }
+    NumberAnimation { id: listSlide; objectName: "outlineSlide"; target: list; property: "contentY"; duration: root.slideMs; easing.type: Easing.OutCubic }
     onCurrentChanged: Qt.callLater(root.revealCurrent)
     onHeightChanged: Qt.callLater(root.reveal)
 
@@ -102,6 +113,7 @@ Item {
         contentHeight: column.height
         interactive: contentHeight > height
         boundsBehavior: Flickable.StopAtBounds
+        onMovementStarted: listSlide.stop()
         Column {
             id: column
             width: list.width

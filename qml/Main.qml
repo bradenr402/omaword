@@ -891,9 +891,10 @@ ApplicationWindow {
     readonly property real highlightAlpha: desktop.dark ? 0.34 : 0.36
     readonly property var highlightBand: highlightBandFor(readerMetrics)
     function highlightBandFor(metrics) { return HandDrawn.highlightBand(metrics.ascent, metrics.descent, metrics.xHeight) }
-    // The Verse layout's rows, one per verse: made again only when the
-    // chapter or its text changes, so marks (which change bible.verses)
-    // update rows in place (each reads bible.verses[index]).
+    // The Verse layout's rows, one per verse, each reading bible.verses[index]
+    // in place: marks (which change bible.verses) and another chapter update
+    // the rows rather than making them again (only the rows a longer
+    // chapter adds are made).
     property var verseRows: []
     property string verseRowsKey: ""
     readonly property var noVerse: ({ number: 0, text: "", html: "", heading: "", footnotes: [], indents: [],
@@ -905,7 +906,13 @@ ApplicationWindow {
         if (key === verseRowsKey) return
         verseRowsKey = key
         verseRows = Array.from(verses).map(function(verse) { return verse.number })
+        const count = verseRows.length
+        if (verseRowModel.count > count) verseRowModel.remove(count, verseRowModel.count - count)
+        const added = []
+        for (let i = verseRowModel.count; i < count; ++i) added.push({ row: i })
+        if (added.length) verseRowModel.append(added)
     }
+    ListModel { id: verseRowModel }
     Connections { target: bible; function onVersesChanged() { app.syncVerseRows() } }
     // Repaints every highlight (tests: paint is deterministic).
     signal highlightsRepaint()
@@ -2886,16 +2893,23 @@ ApplicationWindow {
         if (link.startsWith("omaword-passage:")) jump(decodeURIComponent(link.substring(16)))
         else desktop.openExternal(link)
     }
-    // The section being read: the cursor's while it is on screen, otherwise
-    // the one at a reading line a quarter down the viewport.
+    // Whether the cursor's verse is being read: on screen where the view is
+    // going (a slide's end, not the frames on its way), or a step still
+    // placing itself (moveVerse brings it into view), so the outline never
+    // flicks back to a section the view only passes.
+    function cursorRead(extents, top, available) {
+        if (!hasSelection || bible.crossChapterSelection) return false
+        if (viewAnchor !== null) return true
+        const cursor = extents.find(function(e) { return e.number === bible.cursorVerse })
+        return !!cursor && cursor.bottom > top && cursor.top < top + available
+    }
+    // The section being read: the cursor's while it is read, otherwise the
+    // one at a reading line a quarter down the viewport.
     function readingVerse() {
         const available = Math.max(1, reading.height - floatingSafety)
-        const top = reading.contentY, bottom = top + available
+        const top = readerTargetY()
         const extents = verseExtents
-        if (hasSelection && !bible.crossChapterSelection) {
-            const cursor = extents.find(function(e) { return e.number === bible.cursorVerse })
-            if (cursor && cursor.bottom > top && cursor.top < bottom) return bible.cursorVerse
-        }
+        if (cursorRead(extents, top, available)) return bible.cursorVerse
         const line = top + 0.25 * available
         let verse = bible.verses.length ? bible.verses[0].number : 0
         for (const extent of extents) if (extent.top <= line) verse = extent.number
@@ -2918,9 +2932,8 @@ ApplicationWindow {
     // Where the whole book is being read: {chapter, verse}, as readingVerse().
     function bookReadingPlace() {
         const available = Math.max(1, reading.height - floatingSafety)
-        const top = reading.contentY, line = top + 0.25 * available
-        const cursor = hasSelection && !bible.crossChapterSelection ? verseExtents.find(function(e) { return e.number === bible.cursorVerse }) : null
-        if (cursor && cursor.bottom > top && cursor.top < top + available) return { chapter: bible.chapter, verse: bible.cursorVerse }
+        const top = readerTargetY(), line = top + 0.25 * available
+        if (cursorRead(verseExtents, top, available)) return { chapter: bible.chapter, verse: bible.cursorVerse }
         const tops = shownChapterTops()
         let at = tops[0]
         for (const entry of tops) if (entry.y <= line) at = entry
@@ -6307,7 +6320,7 @@ ApplicationWindow {
                         }
                         Repeater {
                             id: verseRepeater
-                            model: app.continuousReader ? [] : app.verseRows
+                            model: app.continuousReader ? 0 : verseRowModel
                             delegate: VerseItem {
                                 id: verseRow
                                 required property int index
@@ -6760,6 +6773,7 @@ ApplicationWindow {
                     current: app.outlineCurrent
                     theme: desktop
                     uiScale: app.readerScale
+                    slideMs: 2 * app.slideMs
                     onActivated: function(entry) { app.outlineJump(entry) }
                     onActivatedTop: app.outlineTop()
                     scrollKey: app.scrollKey
