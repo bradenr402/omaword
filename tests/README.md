@@ -27,7 +27,7 @@ run offscreen with software rendering. Logs: `$BUILD_DIR/test-logs/<suite>.log`
 | `historyui` | Jump stack, persisted History, ribbon, and multi-window behavior |
 | `studyui` | Comparison, OpenBible See also, footnote peeks, words of Jesus, and explicit replacement |
 | `a11yui` | Keyboard/mouse parity, focus hand-off, hints, and character selection |
-| `marginsui` | Outline, margin geometry, dock/focus transitions, Whole book steps, and panel-open selection centering |
+| `marginsui` | Outline, margin geometry, dock/focus transitions, Whole book steps, chapter views moved across chapters, and panel-open selection centering |
 | `motion` | Stepped animations, pulses, dimming, repeat keys, and reduced motion |
 | `contextmenu` | Shared menus, actions, keyboard navigation, and verse selection bar |
 | `tags` | Tag identity, queries, persistence, backups, and rollback |

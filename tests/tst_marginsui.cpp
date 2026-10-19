@@ -860,6 +860,41 @@ private slots:
         cross(Qt::Key_K, "John 4", 1, "John 3", 36);
         bible->setWholeBook(false);
     }
+    // Without Whole book, the chapters either side of the one read are made
+    // ahead: a step into one moves its view into the reader, and the one left
+    // stays made, for a step back; neither is laid out again.
+    void chapterCrossingsMovePreparedViews_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("block") << "block";
+    }
+    void chapterCrossingsMovePreparedViews() {
+        QFETCH(QString, mode);
+        const bool verse = mode == "verse";
+        setMode(mode);
+        navigate("John 3:36");
+        const auto body = [&](const QString &prefix, int number) {
+            return item(prefix + (verse ? "verseBody" + QString::number(number) : QString("blockBody")));
+        };
+        // A Verse view's rows sit in it; a flowing view's text is its own.
+        const auto view = [&](QQuickItem *text) { return verse ? text->parentItem()->parentItem() : text->parentItem(); };
+        const auto rebuilds = [&](QQuickItem *text) { return verse ? 0 : view(text)->property("rebuildCount").toInt(); };
+        const QString john3 = QString("prepared:%1:3:").arg(bible->book()), john4 = QString("prepared:%1:4:").arg(bible->book());
+        QTRY_VERIFY(body(john4, 1));
+        auto arriving = body(john4, 1), leaving = body("", 36);
+        QTRY_VERIFY(!view(arriving)->property("building").toBool());
+        const int arrived = rebuilds(arriving), left = rebuilds(leaving);
+        key(Qt::Key_J);
+        QTRY_COMPARE(bible->passage(), QString("John 4"));
+        QTRY_VERIFY(!prop("restoringPosition").toBool()); settle();
+        QCOMPARE(body("", 1), arriving);
+        QCOMPARE(body(john3, 36), leaving);
+        key(Qt::Key_K);
+        QTRY_COMPARE(bible->passage(), QString("John 3"));
+        QTRY_VERIFY(!prop("restoringPosition").toBool()); settle();
+        QCOMPARE(body("", 36), leaving);
+        QCOMPARE(body(john4, 1), arriving);
+        QCOMPARE(rebuilds(arriving), arrived); QCOMPARE(rebuilds(leaving), left);
+    }
     // Whole book: verse steps across chapters, down and back up past a
     // chapter far above that parked and comes back, move all the text one
     // way, together, frame by frame; the outline's current section is the

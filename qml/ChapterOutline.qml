@@ -227,11 +227,17 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.activated(entry.modelData)
                     }
-                    AppToolTip {
-                        theme: root.theme
-                        uiScale: root.uiScale
-                        visible: mouse.containsMouse && root.entryTip.length > 0
-                        text: root.entryTip
+                    // Made while hovered: a tooltip per entry is costly to make,
+                    // and a chapter's entries are made again with each chapter.
+                    Loader {
+                        active: mouse.containsMouse && root.entryTip.length > 0
+                        sourceComponent: AppToolTip {
+                            parent: entry
+                            theme: root.theme
+                            uiScale: root.uiScale
+                            visible: true
+                            text: root.entryTip
+                        }
                     }
                 }
             }

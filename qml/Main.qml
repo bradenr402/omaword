@@ -918,11 +918,16 @@ ApplicationWindow {
     // its marks); its text shows in its chapter view (showChapterRead).
     property var verseRows: []
     property string verseRowsKey: ""
+    // The chapter read's rows as its view holds them, as values: every read
+    // of bible.verses converts each row again (a long chapter's take a while,
+    // and leave the collector much to do).
+    readonly property var chapterRows: continuousReader ? (blockLoader.item ? blockLoader.item.verses : [])
+        : verseHost.item ? verseHost.item.verses : []
     readonly property var noVerse: ({ number: 0, text: "", html: "", heading: "", footnotes: [], indents: [],
         highlightRanges: [], tagRanges: [], noteRanges: [], hasNote: false, hasTags: false })
     function syncVerseRows() {
         showChapterRead()
-        const verses = bible.verses
+        const verses = chapterRows
         const key = [bible.textGeneration, bible.book, bible.chapter, verses.length,
             verses.length ? verses[0].number + "-" + verses[verses.length - 1].number : ""].join(":")
         if (key === verseRowsKey) return
@@ -958,16 +963,21 @@ ApplicationWindow {
         let view = host.item
         if (!view || view.viewKey !== key) {
             const kept = takeChapterView(key)
-            if (kept) { if (view) shelveChapterView(view); view = kept }
-            else if (!view) view = newChapterView({})
+            if (kept) {
+                // Beside it in the whole book (a chapter shown beside takes it); else made, for a step back.
+                if (view && bible.wholeBook) shelveChapterView(view)
+                else if (view) keepPrepared(view)
+                view = kept
+            } else if (!view) view = newChapterView({})
             placeChapterView(view, host, null)
             host.item = view
+            neighbourTimer.restart()
         }
-        // Copies: bible.verses is a live reference, which kept rows would read
-        // again later (another chapter's). A view of this chapter (shown
-        // beside until now) has an equal copy, but for marks.
-        const verses = JSON.parse(JSON.stringify(bible.verses))
-        if (view.viewKey !== key || marksKey(verses) !== marksKey(view.verses)) view.verses = verses
+        // A view of this chapter (shown beside or made until now) has an equal
+        // copy, but for marks (compared without copying a long chapter).
+        // Copies, as bible.verses is a live reference, which kept rows would
+        // read again later (another chapter's).
+        if (view.viewKey !== key || marksKey(bible.verses) !== marksKey(view.verses)) view.verses = JSON.parse(JSON.stringify(bible.verses))
         view.viewKey = key
         view.book = bible.book; view.chapterNumber = bible.chapter
     }
@@ -3168,7 +3178,7 @@ ApplicationWindow {
         }
         const beside = function(keys) { for (const key of keys) { const entry = app.contextData[key]; if (entry) add(entry.book, entry.chapter, entry.rows) } }
         beside(contextBefore)
-        add(bible.book, bible.chapter, bible.verses)
+        add(bible.book, bible.chapter, chapterRows)
         beside(contextAfter)
         return list
     }
@@ -3177,7 +3187,7 @@ ApplicationWindow {
     property bool outlineOn: false // set from bible.chapterOutline on completion, then by applyOutline
     readonly property var outlineHeadings: !marginsAllowed || !outlineOn ? []
         : bookWindow ? bookOutline
-        : Array.from(bible.verses).filter(function(row) { return (row.heading || "").length > 0 })
+        : Array.from(chapterRows).filter(function(row) { return (row.heading || "").length > 0 })
             .map(function(row) { return { verse: row.number, text: row.heading } })
     // The whole book's outline: its chapters, each followed by its headings
     // (keys "chapter:verse", a chapter's verse 0), read once per book shown.
@@ -3370,7 +3380,6 @@ ApplicationWindow {
         if (charMode) charReapplyTimer.restart()
     }
     function measureVerses() {
-        const rows = Array.from(bible.verses)
         const block = blockLoader.item as BlockReader
         const out = []
         if (block) {
@@ -3378,10 +3387,10 @@ ApplicationWindow {
             for (const extent of block.verseExtents())
                 out.push({ number: extent.number, top: offset + extent.top, bottom: offset + extent.bottom })
         } else {
-            for (let i = 0; i < rows.length; ++i) {
+            for (let i = 0; i < verseRows.length; ++i) {
                 const item = verseRepeater.itemAt(i) as VerseItem
                 if (!item) continue
-                out.push({ number: rows[i].number, top: verseHost.y + item.y + item.textOffset, bottom: verseHost.y + item.y + item.textOffset + item.textHeight })
+                out.push({ number: verseRows[i], top: verseHost.y + item.y + item.textOffset, bottom: verseHost.y + item.y + item.textOffset + item.textHeight })
             }
         }
         return out
@@ -3936,9 +3945,10 @@ ApplicationWindow {
             if (!window || window.book !== bible.book || bible.chapter < window.first || bible.chapter > window.last) {
                 bookWindow = { book: bible.book, first: bible.chapter, last: bible.chapter }
                 bookParked = ({})
-                clearPreparedViews()
+                // (Entering it, the chapters made either side are its next ones.)
+                if (window) clearPreparedViews()
             }
-        } else { bookWindow = null; bookParked = ({}); clearPreparedViews() }
+        } else if (bookWindow) { bookWindow = null; bookParked = ({}); clearPreparedViews() }
         const chapters = bible.ready ? Array.from(bible.contextChapters(bookWindow ? bookWindow.first : 0, bookWindow ? bookWindow.last : 0)) : []
         const here = bible.versionId + ":" + bible.book + ":" + bible.chapter
         // Unchanged (most steps): nothing to do. Rows are compared by their chapter.
@@ -4112,7 +4122,7 @@ ApplicationWindow {
     property var bookWindow: null
     property var bookParked: ({})
     readonly property bool observedWholeBook: bible.wholeBook
-    onObservedWholeBookChanged: { updateContextChapters(); Qt.callLater(app.extendBook) }
+    onObservedWholeBookChanged: { updateContextChapters(); Qt.callLater(app.extendBook); neighbourTimer.restart() }
     // One more chapter where the view comes within a screen and a half of
     // either end of those loaded (above first), then again a turn later,
     // until it has that room both ways or the book ends. Chapters more than
@@ -4162,11 +4172,11 @@ ApplicationWindow {
         updateContextChapters()
         Qt.callLater(app.extendBook)
     }
-    // The whole book's chapters coming to show beside get their views made
-    // ahead on the shelf, a few verses a turn, so that no turn lays out a
-    // whole chapter (a key pressed meanwhile waits for none of it). Kept by
-    // key until shown, or until the book, version, or layout changes.
-    // Whether `chapter`'s is ready.
+    // Chapters coming to show (the whole book's, beside the one read; without
+    // it, the one read's neighbours) get their views made ahead on the shelf,
+    // a few verses a turn, so that no turn lays out a whole chapter (a key
+    // pressed meanwhile waits for none of it). Kept by key until shown, or
+    // until the book, version, or layout changes. Whether `chapter`'s is ready.
     property var preparedViews: ({})
     function prepareChapterView(book, chapter) {
         const key = chapterViewKey(book, chapter)
@@ -4187,7 +4197,42 @@ ApplicationWindow {
         for (const key in preparedViews) preparedViews[key].destroy()
         preparedViews = ({})
         // Those still wanted are made again.
-        if (any) Qt.callLater(app.extendBook)
+        if (any) { Qt.callLater(app.extendBook); neighbourTimer.restart() }
+    }
+    // Without Whole book, the chapters before and after the one read (across
+    // books too) are made ahead, a moment after it changes: a step into one
+    // moves its view into the reader, and the one left stays made, for a step
+    // back. Others go.
+    Timer { id: neighbourTimer; interval: 150; onTriggered: app.prepareNeighbours() }
+    function neighbourChapters() {
+        const books = Array.from(bible.books), at = books.findIndex(function(b) { return b.id === bible.book })
+        if (at < 0) return []
+        const chapters = Array.from(books[at].chapterNumbers), index = chapters.indexOf(bible.chapter), out = []
+        if (index > 0) out.push({ book: bible.book, chapter: chapters[index - 1] })
+        else if (index === 0 && at > 0) out.push({ book: books[at - 1].id, chapter: Array.from(books[at - 1].chapterNumbers).pop() })
+        if (index >= 0 && index < chapters.length - 1) out.push({ book: bible.book, chapter: chapters[index + 1] })
+        else if (index >= 0 && at < books.length - 1) out.push({ book: books[at + 1].id, chapter: Array.from(books[at + 1].chapterNumbers)[0] })
+        return out
+    }
+    function prepareNeighbours() {
+        if (!bible.ready || bible.busy || bible.wholeBook || closingWindow) return
+        const wanted = {}
+        for (const entry of neighbourChapters()) {
+            wanted[chapterViewKey(entry.book, entry.chapter)] = true
+            prepareChapterView(entry.book, entry.chapter)
+        }
+        for (const key in preparedViews) if (!wanted[key]) { preparedViews[key].destroy(); delete preparedViews[key] }
+    }
+    // The chapter read until now, kept made (without Whole book: maybe a neighbour).
+    function keepPrepared(view) {
+        const old = preparedViews[view.viewKey]
+        if (old && old !== view) old.destroy()
+        view.parent = viewShelf
+        view.beside = true
+        view.namePrefix = "prepared:" + view.book + ":" + view.chapterNumber + ":"
+        view.objectName = ""
+        view.selectedFirst = 0; view.selectedLast = 0
+        preparedViews[view.viewKey] = view
     }
     // A prepared view, taken to show (its remaining rows made now, if any).
     function takePreparedView(key) {

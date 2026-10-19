@@ -188,15 +188,19 @@ user's real data for development or tests.
   view its chapter's own rows after, or showing it beside reads every row again.
   All views of a layout share one width, and a view keeps its rows unless marks
   differ (`marksKey`): rows kept from `bible.verses` are JSON copies (live
-  reference).
+  reference), and code a crossing runs reads the chapter read's from its view
+  (`chapterRows`), as each read of `bible.verses` converts every row.
   Paint keyed on lists compares values, so a moved view repaints nothing.
   Nested Columns don't lay out with the column: use `layOutReader()`/`settle()`.
 - Views not yet shown are made ahead on the shelf (`prepareChapterView`), a few
   verses a turn (`VerseView` rows; `BlockDocument::beginBuild`/`buildMore`),
   each turn rescheduling with `Qt.callLater` (an interval-0 `Timer` waits for an
   animation frame), so no turn lays out a whole chapter; taking one finishes it.
-  Views not shown are named apart (`namePrefix`), as tests find the reader's
-  items by bare names.
+  Without Whole book, `prepareNeighbours` makes the chapters either side of the
+  one read, across books, a moment after it changes; a step into one moves its
+  view into the reader, and the one left is kept (`keepPrepared`) for a step
+  back. Views not shown are named apart (`namePrefix`), as tests find the
+  reader's items by bare names.
 - Whole-book view reuses context chapters. `bookWindow` loads nearby chapters;
   `bookParked` preserves distant chapters' heights without laying them out, but
   never the chapters either side of the one read. A chapter is added (or
