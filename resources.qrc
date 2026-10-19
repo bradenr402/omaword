@@ -34,7 +34,7 @@
     <file>qml/RangeMarker.qml</file>
     <file>qml/VerseTint.qml</file>
     <file>qml/VerseHighlights.qml</file>
-    <file>qml/DottedUnderline.qml</file>
+    <file>qml/SelectionMarks.qml</file>
     <file>qml/FootnoteMarks.qml</file>
     <file>qml/ModalCard.qml</file>
     <file>qml/SidePanel.qml</file>

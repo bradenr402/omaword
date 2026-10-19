@@ -908,6 +908,10 @@ ApplicationWindow {
     // dots, as is text selected by character, which no tint marks.
     readonly property bool cursorTinted: hasSelection && !charMode && !freeSelectedText.length
     readonly property bool rangeUnderlined: cursorTinted && (bible.selectedStart !== bible.selectedEnd || bible.crossChapterSelection)
+    // The focused verse's tint (and the focused character's), and a range's
+    // or a character selection's faint wash under its dots.
+    readonly property color focusTint: tint(desktop.accent, 0.22)
+    readonly property color rangeTint: tint(desktop.accent, 0.08)
     readonly property real underlineDot: HandDrawn.underlineDot(readerScale)
     readonly property real underlineTop: HandDrawn.underlineTop(readerMetrics.ascent, readerMetrics.descent, readerMetrics.xHeight, underlineDot)
     // The chapter read's verse numbers, changing only with its verses (not
@@ -1113,12 +1117,13 @@ ApplicationWindow {
                 readonly property bool selected: modelData.number >= view.selectedFirst && modelData.number <= view.selectedLast && view.selectedFirst > 0
                 objectName: view.beside ? "contextVerse:" + view.title + ":" + modelData.number : ""
                 readonly property bool textSelected: verseBody.selectionStart !== verseBody.selectionEnd
-                readonly property bool underlined: textSelected || (selected && app.rangeUnderlined)
-                // Its underlined lines (row coordinates): the text selected by
+                readonly property bool inRange: selected && app.rangeUnderlined
+                readonly property bool underlined: textSelected || inRange
+                // Its marked line boxes (row coordinates): the text selected by
                 // character, else all of its text.
-                readonly property var underlineLines: {
+                readonly property var markLines: {
                     if (!underlined) return []
-                    const watch = [verseBody.width, verseBody.height, verseBody.y, bodyHtml, app.underlineTop]
+                    const watch = [verseBody.width, verseBody.height, verseBody.y, bodyHtml]
                     let start = 0, end = String(modelData.text || "").length
                     if (textSelected) {
                         start = verseSearch.sourceAt(verseBody.selectionStart, true)
@@ -1126,8 +1131,17 @@ ApplicationWindow {
                     }
                     if (!watch || start < 0 || end <= start) return []
                     return Array.from(verseSearch.lineRects(start, end - start)).map(function(r) {
-                        return { x: verseBody.x + r.x, y: verseBody.y + r.y + app.underlineTop, width: r.width }
+                        return { x: verseBody.x + r.x, y: verseBody.y + r.y, width: r.width, height: r.height }
                     })
+                }
+                // Character selection's focused character, when it is in this
+                // verse: its box (body coordinates), tinted as a focused verse.
+                readonly property var cursorBox: {
+                    const cursor = app.charMode && !view.beside ? app.charCursor : null
+                    if (!cursor || cursor.verse !== modelData.number) return null
+                    const watch = [verseBody.width, verseBody.height, bodyHtml]
+                    const rects = !watch ? [] : Array.from(verseSearch.lineRects(cursor.offset, app.charLength(cursor)))
+                    return rects.length ? rects[0] : null
                 }
                 readonly property real gutter: app.verseGutter
                 // What a change of marks leaves alone, as values (a string or a
@@ -1266,8 +1280,19 @@ ApplicationWindow {
                     body: verseBody
                     lines: verseRow.searchOverlay
                 }
-                // The focused verse's tint (no verse row is read here: every
-                // row reevaluates this on each verse step); beside, none.
+                // A range's faint wash: a selected row after the first joins
+                // the row above, as the range is one (no verse row is read here:
+                // every row reevaluates this on each verse step).
+                Rectangle {
+                    objectName: view.namePrefix + "selectionRange" + verseRow.modelData.number
+                    x: verseRow.gutter - 9 * app.readerScale
+                    y: verseRow.inRange && verseRow.modelData.number > view.selectedFirst ? 0 : verseHeading.height
+                    width: parent.width - x
+                    height: (verseRow.modelData.number < view.selectedLast ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
+                    visible: verseRow.inRange
+                    color: app.rangeTint
+                }
+                // The focused verse's tint; beside, none.
                 Rectangle {
                     objectName: view.namePrefix + "selectionSegment" + verseRow.modelData.number
                     x: verseRow.gutter - 9 * app.readerScale
@@ -1276,15 +1301,26 @@ ApplicationWindow {
                     height: verseBody.height + 3
                     visible: verseRow.selected && !view.beside && verseRow.modelData.number === bible.cursorVerse && app.cursorTinted
                     radius: 0
-                    color: app.tint(desktop.accent, 0.22)
+                    color: app.focusTint
                 }
-                // A range's verses, or text selected by character: dotted underlines.
+                // A range's verses, or text selected by character (washed line
+                // by line, a range having its band): dotted underlines.
                 Loader {
                     active: verseRow.underlined
-                    sourceComponent: DottedUnderline {
+                    sourceComponent: SelectionMarks {
                         objectName: view.namePrefix + "selectionUnderline" + verseRow.modelData.number
-                        lines: verseRow.underlineLines
+                        lines: verseRow.markLines
+                        fill: verseRow.textSelected ? app.rangeTint : "transparent"
                     }
+                }
+                Rectangle {
+                    objectName: view.namePrefix + "charCursorTint" + verseRow.modelData.number
+                    visible: !!verseRow.cursorBox
+                    x: verseBody.x + (verseRow.cursorBox ? verseRow.cursorBox.x : 0)
+                    y: verseBody.y + (verseRow.cursorBox ? verseRow.cursorBox.y : 0)
+                    width: verseRow.cursorBox ? verseRow.cursorBox.width : 0
+                    height: verseRow.cursorBox ? verseRow.cursorBox.height : 0
+                    color: app.focusTint
                 }
                 Item {
                     id: verseNumber
@@ -6577,7 +6613,7 @@ ApplicationWindow {
     component ContextChapter: Shared.ContextChapter { controller: app; theme: desktop }
     component VerseTint: Shared.VerseTint { controller: app; theme: desktop }
     component VerseHighlights: Shared.VerseHighlights { controller: app }
-    component DottedUnderline: Shared.DottedUnderline { ink: desktop.accent; dot: app.underlineDot }
+    component SelectionMarks: Shared.SelectionMarks { ink: desktop.accent; dot: app.underlineDot; dotTop: app.underlineTop }
     component FootnoteMarks: Shared.FootnoteMarks { controller: app; theme: desktop }
     // A step beside a Reading settings slider: − or + runs its action. Not a
     // tab stop: the slider's arrows and the actions' keys do the same by key.

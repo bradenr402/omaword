@@ -36,12 +36,18 @@ Item {
     property int selectedLast: backend.selectedEnd
     // The focused verse is tinted (beside: none, it is the chapter read's);
     // a range's verses, and text selected by character, are underlined with
-    // dots (Main's cursorTinted and rangeUnderlined; controllers without
-    // them, tests: a selection of several verses is a range).
+    // dots over a faint wash, and character selection's focused character is
+    // tinted as a focused verse (Main's cursorTinted, rangeUnderlined, and
+    // charCursor; controllers without them, tests: a selection of several
+    // verses is a range).
     readonly property int tintedVerse: beside || controller.cursorTinted === false ? 0 : backend.cursorVerse || 0
     readonly property bool rangeUnderlined: controller.rangeUnderlined === undefined ? selectedLast > selectedFirst : !!controller.rangeUnderlined
+    readonly property var charCursor: beside || !controller.charMode ? null : controller.charCursor
+    readonly property color focusTint: controller.focusTint !== undefined ? controller.focusTint : controller.tint(theme.accent, 0.22)
+    readonly property color rangeTint: controller.rangeTint !== undefined ? controller.rangeTint : controller.tint(theme.accent, 0.08)
     onTintedVerseChanged: if (!destroying) selectionTimer.restart()
     onRangeUnderlinedChanged: if (!destroying) selectionTimer.restart()
+    onCharCursorChanged: if (!destroying) selectionTimer.restart()
     // Names its items apart from the chapter read's ("context:John 3:").
     property string namePrefix: ""
     property var annotationRanges: []
@@ -332,7 +338,7 @@ Item {
         }
     }
     // The selection, above the marks and below search and the text: the
-    // focused verse's tint, and the dotted underlines.
+    // focused verse's tint, the marks (wash and dots), the focused character.
     Item {
         id: selectionPaint
         objectName: root.namePrefix + "blockSelectionBackground"
@@ -340,27 +346,37 @@ Item {
         width: paint.width; height: paint.height
         property var rects: []
         property var lines: []
+        property bool characters: false
+        property var cursorRects: []
         function refresh() {
             const tinted = paint.first > 0 && root.tintedVerse >= paint.first && root.tintedVerse <= paint.last ? root.tintedVerse : 0
             rects = root.verseRangeRects(tinted, tinted)
-            lines = underlineLines()
+            characters = body.selectionStart !== body.selectionEnd
+            lines = markLines()
+            cursorRects = focusedCharacter()
         }
         // Text selected by character, else a range's verses (their own
-        // lines, not the headings among them), one run per line.
-        function underlineLines() {
+        // lines, not the headings among them), one box per line.
+        function markLines() {
             let rects = []
-            if (body.selectionStart !== body.selectionEnd) rects = Array.from(document.rectangles(body.selectionStart, body.selectionEnd))
+            if (characters) rects = Array.from(document.rectangles(body.selectionStart, body.selectionEnd))
             else if (root.rangeUnderlined && paint.first > 0)
                 for (const span of Array.from(document.spans))
                     if (span.number >= paint.first && span.number <= paint.last) rects = rects.concat(Array.from(document.rectangles(span.start, span.end)))
-            const top = HandDrawn.underlineTop(bandMetrics.ascent, bandMetrics.descent, bandMetrics.xHeight, underline.dot)
             const out = []
             for (const r of rects) {
                 const last = out.length ? out[out.length - 1] : null
-                if (last && last.top === r.y && r.x <= last.x + last.width + 0.5) last.width = Math.max(last.width, r.x + r.width - last.x)
-                else out.push({ top: r.y, x: r.x, width: r.width })
+                if (last && last.y === r.y && r.x <= last.x + last.width + 0.5) {
+                    last.width = Math.max(last.width, r.x + r.width - last.x); last.height = Math.max(last.height, r.height)
+                } else out.push({ x: r.x, y: r.y, width: r.width, height: r.height })
             }
-            return out.map(function(line) { return { x: line.x + paint.leftInset, y: line.top + top, width: line.width } })
+            return out.map(function(line) { return { x: line.x + paint.leftInset, y: line.y, width: line.width, height: line.height } })
+        }
+        function focusedCharacter() {
+            const cursor = root.charCursor
+            if (!cursor || typeof root.controller.charLength !== "function") return []
+            const range = Array.from(document.documentRange(cursor.verse, cursor.offset, root.controller.charLength(cursor)))
+            return range.length === 2 ? Array.from(document.rectangles(range[0], range[1])).slice(0, 1) : []
         }
         Repeater {
             model: selectionPaint.rects
@@ -368,15 +384,28 @@ Item {
                 required property var modelData
                 x: modelData.x; y: modelData.y
                 width: modelData.width + paint.leftInset; height: modelData.height
-                color: root.controller.tint(paint.accent, 0.22)
+                color: root.focusTint
             }
         }
-        DottedUnderline {
+        SelectionMarks {
             id: underline
             objectName: root.namePrefix + "blockSelectionUnderline"
             lines: selectionPaint.lines
             ink: paint.accent
+            fill: root.rangeTint
+            washInset: selectionPaint.characters ? 0 : paint.leftInset
             dot: HandDrawn.underlineDot(root.readerScale)
+            dotTop: HandDrawn.underlineTop(bandMetrics.ascent, bandMetrics.descent, bandMetrics.xHeight, dot)
+        }
+        Repeater {
+            model: selectionPaint.cursorRects
+            delegate: Rectangle {
+                required property var modelData
+                objectName: root.namePrefix + "blockCharCursorTint"
+                x: modelData.x + paint.leftInset; y: modelData.y
+                width: modelData.width; height: modelData.height
+                color: root.focusTint
+            }
         }
     }
     // Search is a separate background above annotations and below native text.
