@@ -61,7 +61,13 @@ Item {
     }
     onBodyChanged: { leftToRight(); refresh() }
     onSourceTextChanged: refresh()
-    onSegmentsChanged: refresh()
+    // As a value: an equal list (a row moving beside the chapter read, or
+    // back) repaints nothing.
+    property string segmentsKey: ""
+    onSegmentsChanged: {
+        const key = JSON.stringify(segments || [])
+        if (key !== segmentsKey) { segmentsKey = key; refresh() }
+    }
     onXChanged: refresh()
     onYChanged: refresh()
     onWidthChanged: refresh()
@@ -90,6 +96,9 @@ Item {
         id: paint
         objectName: "searchHighlightsCanvas"
         anchors.fill: parent
+        // Marks painted: a canvas with none to paint or erase paints nothing
+        // (most rows, made a chapter at a time, have no matches).
+        property bool inked: false
         property color accent: root.theme ? root.theme.accent : "#80aaff" // fallback: a test without a theme
         onAccentChanged: root.refresh()
         onPaint: {
@@ -102,6 +111,7 @@ Item {
             const rects = document.rectangles(root.segments || [])
             HandDrawn.searchMarks(ctx, rects, accent, root.outlined,
                 root.markScale, root.sourceText)
+            inked = rects.length > 0
         }
     }
     Timer {
@@ -109,7 +119,7 @@ Item {
         interval: 0
         onTriggered: {
             document.attach(root.body.textDocument, root.sourceText)
-            paint.requestPaint()
+            if (paint.inked || (root.segments || []).length) paint.requestPaint()
         }
     }
     Component.onCompleted: { leftToRight(); refresh() }

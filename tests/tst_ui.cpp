@@ -2525,7 +2525,9 @@ private slots:
         }
         // The chapter read has none of them (its own verses 30 to 33 are unmarked).
         QVERIFY(!item(qPrintable("highlightSegment30:" + range)));
-        QVERIFY(verse ? !item("verseNoteMarker30")->isVisible() : !item(qPrintable("blockInlineMarker:note:open:" + range)));
+        // (A row's rails are made only where they mark.)
+        if (verse) { auto rail = item("verseNoteMarker30"); QVERIFY(!rail || !rail->isVisible()); }
+        else QVERIFY(!item(qPrintable("blockInlineMarker:note:open:" + range)));
         // A new mark there shows at once; what is on screen stays where it was.
         const auto title = [&] { return item("chapterTitle")->mapToItem(item("reading"), QPointF()).y(); };
         const double before = title();
@@ -6272,11 +6274,11 @@ private slots:
         };
         tag("John 3:16-18");
         reference("John 3:16");
+        // (A row's rails are made only where they mark.)
         int glyphs = 0;
         for (int verse = 1; verse <= 36; ++verse) {
             auto glyph = item(qPrintable("tagGlyph" + QString::number(verse)));
-            QVERIFY(glyph);
-            if (glyph->isVisible()) ++glyphs;
+            if (glyph && glyph->isVisible()) ++glyphs;
         }
         QCOMPARE(glyphs,1);
         QVERIFY(item("tagGlyph16")->isVisible());
@@ -6311,7 +6313,8 @@ private slots:
         QVERIFY(item("tagGlyph1")->isVisible());
         QCOMPARE(item("tagLine1")->y(),0.0);
         QVERIFY(prop("verseTagMarker2","ends").toBool());
-        QVERIFY(!item("verseTagMarker3")->isVisible());
+        // (A row's rails are made only where they mark.)
+        QVERIFY(!item("verseTagMarker3") || !item("verseTagMarker3")->isVisible());
         capture("tag-rail-continuation");
         opensTags("verseTagMarker1",36,2);
     }

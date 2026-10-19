@@ -31,9 +31,8 @@ ToolButton {
     width: 16 * marker.controller.readerScale
     // Mouse only: the passage menu's Open note / tags reach the same ranges by key.
     focusPolicy: Qt.NoFocus
-    // Each row's rail lanes (Main.packAnnotationLanes): the chapter read's,
-    // unless a chapter shown beside gives its own.
-    property var lanes: marker.controller.annotationLanes
+    // Each row's rail lanes (Main.packAnnotationLanes), its chapter view's.
+    required property var lanes
     readonly property int lane: (marker.lanes[rowIndex] || {})[kind] || 0
     x: (36 - lane * 18) * marker.controller.readerScale
     padding: 0

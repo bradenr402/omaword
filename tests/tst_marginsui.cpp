@@ -42,6 +42,20 @@ signals:
     void downloadFinished(const QUrl &url);
 };
 
+// Counts the paints of the canvases it watches (paint is emitted as one paints).
+class PaintCounter : public QObject
+{
+    Q_OBJECT
+public:
+    int count = 0;
+    void watch(QQuickItem *root) {
+        if (root->inherits("QQuickCanvasItem")) connect(root, SIGNAL(paint(QRect)), this, SLOT(painted()));
+        for (auto child : root->childItems()) watch(child);
+    }
+public slots:
+    void painted() { ++count; }
+};
+
 // Margins: the chapter outline (left), `{`/`}` heading motions, and margin
 // notes (right) with their hand-drawn connectors; plus the pure placement,
 // space, and tip functions of Margins.js and the HandDrawn.js connector paths.
@@ -811,9 +825,41 @@ private slots:
             QVERIFY(!item("outlineTitle")->property("isCurrent").toBool());
         }
     }
-    // The whole book's outline: the book over its chapters, each with its
-    // headings under it; the section read is current, in whichever chapter
-    // shown it is; an entry of another chapter goes there, as a jump.
+    // Whole book: a step into a chapter shown beside brings its view to the
+    // reader, and the chapter left keeps its own beside: its text is not
+    // laid out again, nor any of its paint repainted, either way.
+    void wholeBookCrossingsMoveChapterViews_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("verse") << "verse"; QTest::newRow("block") << "block";
+    }
+    void wholeBookCrossingsMoveChapterViews() {
+        QFETCH(QString, mode);
+        const bool verse = mode == "verse";
+        bible->setWholeBook(true); setMode(mode);
+        navigate("John 3:36"); QTRY_VERIFY(item("contextChapter:John 4")); settle();
+        // A chapter's text: the verse's row (Verse) or the chapter's document.
+        const auto body = [&](const QString &prefix, int number) {
+            return item(prefix + (verse ? "verseBody" + QString::number(number) : QString("blockBody")));
+        };
+        const auto rebuilds = [&](QQuickItem *text) { return verse ? 0 : text->parentItem()->property("rebuildCount").toInt(); };
+        const auto cross = [&](Qt::Key step, const QString &from, int last, const QString &to, int first) {
+            auto leaving = body("", last), arriving = body("context:" + to + ":", first);
+            QVERIFY(leaving && arriving);
+            const int left = rebuilds(leaving), arrived = rebuilds(arriving);
+            PaintCounter paints;
+            paints.watch(item("readerColumn"));
+            key(step);
+            QTRY_COMPARE(bible->passage(), to);
+            QTRY_VERIFY(!prop("restoringPosition").toBool()); settle();
+            QCOMPARE(body("", first), arriving);
+            QCOMPARE(body("context:" + from + ":", last), leaving);
+            QCOMPARE(rebuilds(arriving), arrived); QCOMPARE(rebuilds(leaving), left);
+            QCOMPARE(paints.count, 0);
+        };
+        cross(Qt::Key_J, "John 3", 36, "John 4", 1);
+        cross(Qt::Key_K, "John 4", 1, "John 3", 36);
+        bible->setWholeBook(false);
+    }
     // Whole book: verse steps across chapters, down and back up past a
     // chapter far above that parked and comes back, move all the text one
     // way, together, frame by frame; the outline's current section is the
@@ -879,6 +925,9 @@ private slots:
         sounds->setProperty("reduceMotion", true);
         bible->setWholeBook(false); bible->setChapterOutline(false);
     }
+    // The whole book's outline: the book over its chapters, each with its
+    // headings under it; the section read is current, in whichever chapter
+    // shown it is; an entry of another chapter goes there, as a jump.
     void wholeBookOutline() {
         bible->setChapterOutline(true);
         // Reading settings has its switch, and Commands has it too.

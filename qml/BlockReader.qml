@@ -27,6 +27,8 @@ Item {
     // the reader's motion, search, and focus state (all of its own chapter)
     // stay off.
     property bool beside: false
+    // Main's chapter views: the chapter this view shows (Main.chapterViewKey).
+    property string viewKey: ""
     property var verses: backend.verses
     property int book: backend.book
     property int chapterNumber: backend.chapter
@@ -45,7 +47,10 @@ Item {
     property var annotationRanges: []
     property var inlineMarkers: []
     readonly property var searchSegments: beside ? [] : controller.searchSegments || []
-    onSearchSegmentsChanged: if (!destroying) searchPaint.requestPaint()
+    // As a value: an equal list (the view moving beside the chapter read, or
+    // back) repaints nothing.
+    readonly property string searchKey: JSON.stringify(searchSegments)
+    onSearchKeyChanged: if (!destroying) searchPaint.requestPaint()
     readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
     // Source callers that are letters or digits show as-is; "+"/"-" become a dagger.
     function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
@@ -111,8 +116,12 @@ Item {
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
     // Document builds so far (tests: one reflow per toggle).
     property int rebuildCount: 0
+    // The content last built: a view given the same content again (moving
+    // between the chapter read and beside it) builds nothing.
+    property string builtKey: ""
     function rebuild() {
-        if (destroying) return
+        if (destroying || builtKey === contentKey) return
+        builtKey = contentKey
         ++rebuildCount
         // A character selection survives (text size, line height): the
         // controller reselects it from source positions after the build.

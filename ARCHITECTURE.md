@@ -174,17 +174,35 @@ user's real data for development or tests.
   Annotation changes update existing rows/paint; avoid rebuilding all documents
   or repainting a chapter-sized focus veil for a cursor move.
 - Cross-chapter selections show whole context chapters around the cursor's
-  chapter, using `chapterRows` with marks. `ContextChapter` uses `beside` readers
-  without the active chapter's search/motion/character state. Refresh their marks
-  on peer changes while preserving the visible top verse.
+  chapter, using `chapterRows` with marks. Refresh their marks on peer changes
+  while preserving the visible top verse.
+- Chapter views (Verse: Main's `VerseView`; Paragraph/Block: `BlockReader`) hold a
+  chapter's laid-out text. The chapter read's shows in `verseHost`/`blockLoader`;
+  a `ContextChapter`'s is `beside`, without the active chapter's
+  search/motion/character state. Moving into a chapter shown beside moves views
+  between them (`showChapterRead`, `adoptChapterView`) instead of laying either
+  out again; keep crossings that way, as their cost must not grow with chapters.
+  Views are created on `viewShelf`, their QObject owner: `createObject(parent)`
+  would make a `ContextChapter` destroy the view it gave away. All views of a
+  layout share one width, and a view keeps its rows unless marks differ
+  (`marksKey`): rows kept from `bible.verses` are JSON copies (live reference).
+  Paint keyed on lists compares values, so a moved view repaints nothing.
+  Nested Columns don't lay out with the column: use `layOutReader()`/`settle()`.
 - Whole-book view reuses context chapters. `bookWindow` loads nearby chapters;
-  `bookParked` preserves distant chapters' heights without laying them out.
+  `bookParked` preserves distant chapters' heights without laying them out, but
+  never the chapters either side of the one read. A chapter is added (or
+  unparked) only once its view is ready: `prepareChapterView` makes it ahead on
+  the shelf, a Verse view a few rows a turn (the next one each way as soon as its
+  neighbour loads), so no turn lays out a whole chapter. A Paragraph/Block view
+  builds in one turn of its own: still ~100–150 ms for a 176-verse chapter.
   `captureViewAnchor`/`restoreViewAnchor` keep retained text stable as chapters
   enter/leave; measure only after `settleReaderLayout()` (a chapter back from
   parked has a stale height until its own `settle()`). Saved positions remain
   relative to the chapter read.
-- Verse-layout rows read `bible.verses[index]` in place and survive chapter
-  changes (`verseRowModel` only grows or shrinks), so a crossing is cheap.
+- Verse-layout rows read their view's `verses[index]` in place, so marks and
+  another chapter update rows; a view's row model only grows or shrinks. A row
+  costs ~1.5 ms to make: rails and the number's tooltip are made only where
+  needed, and search canvases paint only when they have marks to paint or erase.
 - The outline's current section is the cursor's while a step places itself
   (`viewAnchor`) or while the cursor shows at `readerTargetY()`, never a section
   a slide only passes. Its own scrolling glides (`slideMs`).
