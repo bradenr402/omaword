@@ -183,18 +183,25 @@ user's real data for development or tests.
   between them (`showChapterRead`, `adoptChapterView`) instead of laying either
   out again; keep crossings that way, as their cost must not grow with chapters.
   Views are created on `viewShelf`, their QObject owner: `createObject(parent)`
-  would make a `ContextChapter` destroy the view it gave away. All views of a
-  layout share one width, and a view keeps its rows unless marks differ
-  (`marksKey`): rows kept from `bible.verses` are JSON copies (live reference).
+  would make a `ContextChapter` destroy the view it gave away. `createObject`
+  also copies a list it is given: `newChapterView(properties, verses)` gives a
+  view its chapter's own rows after, or showing it beside reads every row again.
+  All views of a layout share one width, and a view keeps its rows unless marks
+  differ (`marksKey`): rows kept from `bible.verses` are JSON copies (live
+  reference).
   Paint keyed on lists compares values, so a moved view repaints nothing.
   Nested Columns don't lay out with the column: use `layOutReader()`/`settle()`.
+- Views not yet shown are made ahead on the shelf (`prepareChapterView`), a few
+  verses a turn (`VerseView` rows; `BlockDocument::beginBuild`/`buildMore`),
+  each turn rescheduling with `Qt.callLater` (an interval-0 `Timer` waits for an
+  animation frame), so no turn lays out a whole chapter; taking one finishes it.
+  Views not shown are named apart (`namePrefix`), as tests find the reader's
+  items by bare names.
 - Whole-book view reuses context chapters. `bookWindow` loads nearby chapters;
   `bookParked` preserves distant chapters' heights without laying them out, but
   never the chapters either side of the one read. A chapter is added (or
-  unparked) only once its view is ready: `prepareChapterView` makes it ahead on
-  the shelf, a Verse view a few rows a turn (the next one each way as soon as its
-  neighbour loads), so no turn lays out a whole chapter. A Paragraph/Block view
-  builds in one turn of its own: still ~100–150 ms for a 176-verse chapter.
+  unparked) only once its view is ready, the next one each way made as soon as
+  its neighbour loads.
   `captureViewAnchor`/`restoreViewAnchor` keep retained text stable as chapters
   enter/leave; measure only after `settleReaderLayout()` (a chapter back from
   parked has a stale height until its own `settle()`). Saved positions remain

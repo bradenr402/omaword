@@ -125,6 +125,12 @@ Item {
     // The content last built: a view given the same content again (moving
     // between the chapter read and beside it) builds nothing.
     property string builtKey: ""
+    // Made ahead (Main.prepareChapterView): its document builds a few verses
+    // a turn, each turn within a few milliseconds, so no turn lays out a whole
+    // chapter; its geometry refreshes once it is built.
+    property bool incremental: false
+    property bool building: false
+    signal built()
     function rebuild() {
         if (destroying || builtKey === contentKey) return
         builtKey = contentKey
@@ -134,11 +140,37 @@ Item {
         if (controller.relayoutTextSelection) controller.relayoutTextSelection(); else controller.clearTextSelection()
         cancelDrag()
         const em = controller.readerSize * root.readerScale
-        document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode,
-                       !focusLayout, em, noteMarks, { headingAbove: TypeScale.size(em, TypeScale.headingAbove),
-                           headingBelow: TypeScale.size(em, TypeScale.headingBelow), poetryIndent: em * TypeScale.poetryIndent })
+        const spacing = { headingAbove: TypeScale.size(em, TypeScale.headingAbove),
+            headingBelow: TypeScale.size(em, TypeScale.headingBelow), poetryIndent: em * TypeScale.poetryIndent }
+        building = incremental
+        if (incremental) {
+            document.beginBuild(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode, !focusLayout, em, noteMarks, spacing)
+            Qt.callLater(root.buildSome)
+            return
+        }
+        document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode, !focusLayout, em, noteMarks, spacing)
         layoutDirty = true
         geometryTimer.restart()
+    }
+    function builtAll() {
+        building = false
+        layoutDirty = true
+        geometryTimer.restart()
+        built()
+    }
+    // Shown before it was done: the rest now; built at once from then on.
+    function finish() {
+        incremental = false
+        if (!building) return
+        document.buildMore(-1)
+        builtAll()
+    }
+    // A few verses (a few milliseconds) a turn, the next as soon as the event
+    // loop is free (an animation-paced Timer would take a long chapter a second).
+    function buildSome() {
+        if (destroying || !building) return
+        if (document.buildMore(6)) builtAll()
+        else Qt.callLater(root.buildSome)
     }
     // Runs a pending rebuild and geometry refresh now rather than on the
     // timers' next turn: a transition measures the new layout before the
@@ -146,12 +178,13 @@ Item {
     function settle() {
         if (destroying) return
         if (rebuildTimer.running) { rebuildTimer.stop(); rebuild() }
+        if (building) finish()
         if (geometryTimer.running) { geometryTimer.stop(); refreshGeometry() }
         if (shapesTimer.running) { shapesTimer.stop(); paint.layOut() }
         if (selectionTimer.running) { selectionTimer.stop(); selectionPaint.refresh() }
     }
     function refreshGeometry() {
-        if (!destroying) {
+        if (!destroying && !building) {
             paint.requestPaint()
             searchPaint.requestPaint()
             // Motion geometry is computed only while it can be seen, keeping
@@ -298,7 +331,7 @@ Item {
         Timer { id: shapesTimer; interval: 0; onTriggered: paint.layOut() }
         Timer { id: selectionTimer; interval: 0; onTriggered: selectionPaint.refresh() }
         function layOut() {
-            if (root.destroying) return
+            if (root.destroying || root.building) return
             const spans = document.spans
             const ranges = {}
             for (let i = 0; i < spans.length; ++i) {

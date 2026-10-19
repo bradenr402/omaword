@@ -3,6 +3,7 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QQmlEngine>
 #include <QTextBlock>
 #include <QTextCursor>
@@ -81,7 +82,19 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
                           bool annotationsVisible, double decorationSize, bool noteMarks,
                           const QVariantMap &spacing)
 {
-    if (!target || !target->textDocument()) return;
+    // One edit: the document (and the TextEdit showing it) lays out once,
+    // not after every insertion.
+    if (beginBuild(target, verses, numbers, headings, lineHeight, mode, annotationsVisible, decorationSize, noteMarks, spacing))
+        buildMore(-1);
+}
+
+bool BlockDocument::beginBuild(QQuickTextDocument *target, const QVariantList &verses,
+                               bool numbers, bool headings, double lineHeight, const QString &mode,
+                               bool annotationsVisible, double decorationSize, bool noteMarks,
+                               const QVariantMap &spacing)
+{
+    m_build.reset();
+    if (!target || !target->textDocument()) return false;
     QScopedValueRollback<bool> building(m_building, true);
     if (m_document != target->textDocument()) {
         if (m_document) {
@@ -106,232 +119,262 @@ void BlockDocument::build(QQuickTextDocument *target, const QVariantList &verses
     m_sourceMaps.clear();
     // Qt Quick lays out image objects with their explicit dimensions. Painting
     // is done by the reader over these transparent cells, never over verse text.
-    const QUrl cellUrl(m_cellName);
     QImage cell(1, 1, QImage::Format_ARGB32_Premultiplied);
     cell.fill(Qt::transparent);
-    m_document->addResource(QTextDocument::ImageResource, cellUrl, cell);
+    m_document->addResource(QTextDocument::ImageResource, QUrl(m_cellName), cell);
+    Build b;
+    b.verses = verses; b.numbers = numbers; b.headings = headings; b.mode = mode;
+    b.annotationsVisible = annotationsVisible; b.noteMarks = noteMarks; b.spacing = spacing;
     const QFontMetricsF bodyMetrics(m_document->defaultFont());
-    const double em = decorationSize > 0 ? decorationSize : bodyMetrics.height();
+    b.em = decorationSize > 0 ? decorationSize : bodyMetrics.height();
+    // Qt's baseline image box includes the font descent. Reserve the font
+    // height plus two pixels, not an extra em of ascent.
+    b.cellHeight = bodyMetrics.height() + 2;
     // Paragraph layout sets poetry lines as indented blocks; Block stays
     // dense, running a poem's lines on as prose.
-    const bool poetry = mode == QStringLiteral("paragraph");
-    const bool dense = mode == QStringLiteral("block");
-    const double indentUnit = poetry ? spacing.value("poetryIndent").toDouble() : 0;
-    QTextCursor cursor(m_document);
-    // One edit: the document (and the TextEdit showing it) lays out once,
-    // not after every insertion.
-    cursor.beginEditBlock();
-    QTextBlockFormat paragraph;
-    paragraph.setLineHeight(lineHeight * 100, QTextBlockFormat::ProportionalHeight);
+    b.poetry = mode == QStringLiteral("paragraph");
+    b.dense = mode == QStringLiteral("block");
+    b.indentUnit = b.poetry ? spacing.value("poetryIndent").toDouble() : 0;
+    b.paragraph.setLineHeight(lineHeight * 100, QTextBlockFormat::ProportionalHeight);
     // Hebrew-first paragraphs and headings stay in an LTR paragraph.
-    paragraph.setLayoutDirection(Qt::LeftToRight);
-    paragraph.setAlignment(Qt::AlignLeft | Qt::AlignAbsolute);
-    cursor.setBlockFormat(paragraph);
-    const QTextCharFormat normal;
+    b.paragraph.setLayoutDirection(Qt::LeftToRight);
+    b.paragraph.setAlignment(Qt::AlignLeft | Qt::AlignAbsolute);
+    b.cursor = QTextCursor(m_document);
+    b.cursor.setBlockFormat(b.paragraph);
     // Keep the original separator (and native copy offsets), but permanently
     // reserve room for a two-pixel accent plus three pixels of breathing room.
     // Highlight/cursor/selection state must never participate in text layout.
-    QTextCharFormat separator;
-    separator.setFontLetterSpacingType(QFont::AbsoluteSpacing);
-    separator.setFontLetterSpacing(5);
+    b.separator.setFontLetterSpacingType(QFont::AbsoluteSpacing);
+    b.separator.setFontLetterSpacing(5);
     // Invisible word joiners must not select a taller fallback font, which
     // would enlarge every annotated line despite the image fitting its ascent.
-    QTextCharFormat joiner;
     QFont joinerFont = m_document->defaultFont();
     joinerFont.setStyleStrategy(QFont::NoFontMerging);
-    joiner.setFont(joinerFont);
+    b.joiner.setFont(joinerFont);
     // Derive nesting from source-order membership, not reference spelling or
     // numeric book IDs (which need not follow the edition's book order).
-    QMap<QString, QPair<int, int>> extents;
     for (int i = 0; annotationsVisible && i < verses.size(); ++i) {
         const auto verse = verses[i].toMap();
         for (const QString &kind : {QStringLiteral("note"), QStringLiteral("tag")}) {
             for (const auto &entry : verse.value(kind + "Ranges").toList()) {
                 const auto range = entry.toMap();
                 const QString key = kind + ':' + range.value("reference").toString();
-                if (!extents.contains(key)) extents[key] = {i, i};
-                extents[key].second = i;
+                if (!b.extents.contains(key)) b.extents[key] = {i, i};
+                b.extents[key].second = i;
             }
         }
     }
-    for (int verseIndex = 0; verseIndex < verses.size(); ++verseIndex) {
-        const auto &value = verses[verseIndex];
-        const auto verse = value.toMap();
-        const auto levels = verse.value("indents").toList();
-        const bool indented = poetry && std::any_of(levels.cbegin(), levels.cend(), [](const QVariant &level) { return level.toInt() > 0; });
-        int line = 0;
-        const auto lineFormat = [&](int index) {
-            return indented ? SearchGeometry::poetryFormat(paragraph, levels.value(qMin(index, int(levels.size()) - 1)).toInt(), indentUnit)
-                            : paragraph;
-        };
-        const QString heading = verse.value("heading").toString();
-        if (headings && !heading.isEmpty()) {
-            if (cursor.position()) cursor.insertBlock(paragraph, normal);
-            QTextBlockFormat section = paragraph;
-            section.setTopMargin(spacing.value("headingAbove", 18).toDouble());
-            section.setBottomMargin(spacing.value("headingBelow", 12).toDouble());
-            cursor.setBlockFormat(section);
-            QTextCharFormat title;
-            title.setFontWeight(QFont::DemiBold);
-            cursor.insertText(heading, title);
-            cursor.insertBlock(lineFormat(0), normal);
-        } else if (cursor.position()) {
-            if (mode == QStringLiteral("paragraph") && verse.value("paragraphStart").toBool())
-                cursor.insertBlock(lineFormat(0), normal);
-            else cursor.insertText(" ", separator);
-        } else cursor.setBlockFormat(lineFormat(0));
-        const int start = cursor.position();
-        if (numbers) {
-            QTextCharFormat number;
-            number.setVerticalAlignment(QTextCharFormat::AlignSuperScript);
-            cursor.insertText(verse.value("number").toString(), number);
-            cursor.insertText(QString(QChar(0x00a0)), normal);
-        }
-        auto decorate = [&](bool opening) {
-            if (!annotationsVisible) return;
-            QVariantList entries;
-            for (const QString &kind : {QStringLiteral("note"), QStringLiteral("tag")}) {
-                if (kind == QStringLiteral("note") && !noteMarks) continue;
-                QSet<QString> seen;
-                for (const auto &entry : verse.value(kind + "Ranges").toList()) {
-                    auto range = entry.toMap();
-                    const auto reference = range.value("reference").toString();
-                    if (seen.contains(reference)) continue;
-                    seen.insert(reference);
-                    const bool before = range.value("continuesBefore").toBool();
-                    const bool after = range.value("continuesAfter").toBool();
-                    if (opening ? (before && verseIndex != 0) : after) continue;
-                    range["kind"] = kind;
-                    range["scope"] = range.value("scope", entry);
-                    range["continuesBefore"] = before;
-                    range["edge"] = opening ? (before ? "continuation" : "open") : "close";
-                    entries.append(range);
-                }
-            }
-            std::sort(entries.begin(), entries.end(), [&](const QVariant &a, const QVariant &b) {
-                const auto x = a.toMap(), y = b.toMap();
-                const QString xKey = x.value("kind").toString() + ':' + x.value("reference").toString();
-                const QString yKey = y.value("kind").toString() + ':' + y.value("reference").toString();
-                const auto xExtent = extents.value(xKey), yExtent = extents.value(yKey);
-                const int xEdge = opening ? xExtent.second : xExtent.first;
-                const int yEdge = opening ? yExtent.second : yExtent.first;
-                if (xEdge != yEdge) return xEdge > yEdge; // Outer opens first; inner closes first.
-                return opening ? xKey < yKey : xKey > yKey; // Equal ranges close in reverse order.
-            });
-            for (auto entry : entries) {
-                auto marker = entry.toMap();
-                const int segmentStart = cursor.position();
-                if (!opening) cursor.insertText(QString(QChar(0x2060)), joiner);
-                marker["position"] = cursor.position();
-                marker["verse"] = verse.value("number");
-                marker["paintWidth"] = qMax(1, qRound(em * (opening ? 0.92 : 0.32)));
-                // Reserve breathing room inside the image, not as text or as
-                // extra height. Joiners and clipboard offsets stay identical.
-                marker["textGap"] = qMax(1, qRound(em * 0.15));
-                marker["cellWidth"] = marker.value("paintWidth").toInt() + marker.value("textGap").toInt();
-                // Qt's baseline image box includes the font descent. Reserve
-                // the font height plus two pixels, not an extra em of ascent.
-                marker["cellHeight"] = bodyMetrics.height() + 2;
-                QTextImageFormat format;
-                format.setFont(m_document->defaultFont());
-                format.setName(cellUrl.toString());
-                format.setWidth(marker.value("cellWidth").toDouble());
-                format.setHeight(marker.value("cellHeight").toDouble());
-                format.setVerticalAlignment(QTextCharFormat::AlignBaseline);
-                cursor.insertImage(format);
-                if (opening) cursor.insertText(QString(QChar(0x2060)), joiner);
-                m_decorationSegments.append({segmentStart, cursor.position()});
-                m_decorations.append(marker);
-            }
-        };
-        decorate(true);
-        const int textStart = cursor.position();
-        QTextDocument source;
-        const auto html = verse.value("html").toString();
-        if (html.isEmpty()) source.setPlainText(verse.value("text").toString());
-        else source.setHtml(html); // Already escaped by the AO importer.
-        // Flatten source paragraph wrappers, preserving internal poetry breaks
-        // and inline formats. Source verse-boundary paragraphs are handled above.
-        // A line break inside a poetry verse starts the next line's block
-        // (one position, like the separator it replaces). In Block it is a
-        // space (one position too): kept as a break, each verse would start
-        // mid-line, after the last line of the one before.
-        const auto lineBreak = [&](const QTextCharFormat &format) {
-            if (indented) cursor.insertBlock(lineFormat(++line), format);
-            else cursor.insertText(QString(dense ? QChar(' ') : QChar::LineSeparator), format);
-        };
-        for (auto block = source.begin(); block.isValid(); block = block.next()) {
-            if (block != source.begin()) lineBreak(normal);
-            for (auto it = block.begin(); !it.atEnd(); ++it) {
-                const auto fragment = it.fragment();
-                if (!fragment.isValid()) continue;
-                const auto parts = fragment.text().split(QChar::LineSeparator);
-                for (int i = 0; i < parts.size(); ++i) {
-                    if (i) lineBreak(fragment.charFormat());
-                    if (!parts[i].isEmpty()) cursor.insertText(parts[i], fragment.charFormat());
-                }
-            }
-        }
-        int textEnd = cursor.position();
-        // Footnote markers: transparent cells at their anchors inside the
-        // verse (word joiner + image), painted by the reader. They are
-        // decoration segments, so copy and search offsets skip them.
-        const QString plain = verse.value("text").toString();
-        const auto notes = annotationsVisible ? verse.value("footnotes").toList() : QVariantList();
-        if (!notes.isEmpty()) {
-            QTextCursor rendered(m_document);
-            rendered.setPosition(textStart);
-            rendered.setPosition(textEnd, QTextCursor::KeepAnchor);
-            SourcePositionMap anchors;
-            anchors.build(plain, rendered.selectedText(), textStart);
-            QVector<QPair<int, QVariantMap>> cells;
-            for (const auto &value : notes) {
-                const auto note = value.toMap();
-                const int offset = note.value("offset").toInt();
-                const int position = offset >= plain.size() ? textEnd : offset <= 0 ? textStart : anchors.range(offset, 1).first;
-                if (position >= textStart && position <= textEnd) cells.append({position, note});
-            }
-            std::stable_sort(cells.begin(), cells.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
-            int shift = 0;
-            for (const auto &cell : cells) {
-                QTextCursor at(m_document);
-                at.setPosition(cell.first + shift);
-                const int segmentStart = at.position();
-                at.insertText(QString(QChar(0x2060)), joiner);
-                QVariantMap marker{{"kind", "footnote"}, {"edge", "footnote"}, {"verse", verse.value("number")},
-                    {"seq", cell.second.value("seq")}, {"caller", cell.second.value("caller")}, {"text", cell.second.value("text")},
-                    {"reference", QString("%1.%2").arg(verse.value("number").toInt()).arg(cell.second.value("seq").toInt())}};
-                marker["position"] = at.position();
-                marker["paintWidth"] = qMax(1, qRound(em * 0.5));
-                marker["textGap"] = 0;
-                marker["cellWidth"] = marker.value("paintWidth");
-                marker["cellHeight"] = bodyMetrics.height() + 2;
-                QTextImageFormat format;
-                format.setFont(m_document->defaultFont());
-                format.setName(cellUrl.toString());
-                format.setWidth(marker.value("cellWidth").toDouble());
-                format.setHeight(marker.value("cellHeight").toDouble());
-                format.setVerticalAlignment(QTextCharFormat::AlignBaseline);
-                at.insertImage(format);
-                shift += at.position() - segmentStart;
-                m_decorationSegments.append({segmentStart, at.position()});
-                m_decorations.append(marker);
-            }
-            cursor.setPosition(textEnd + shift);
-            textEnd = cursor.position();
-        }
-        QTextCursor content(m_document);
-        content.setPosition(textStart);
-        content.setPosition(textEnd, QTextCursor::KeepAnchor);
-        m_sourceMaps[verse.value("number").toInt()].build(verse.value("text").toString(),
-                                                       content.selectedText(), textStart);
-        decorate(false);
-        m_spans.append(QVariantMap{{"number",verse.value("number")}, {"start",start},
-                                  {"textStart",textStart}, {"textEnd",textEnd}, {"end",cursor.position()}});
+    m_build = b;
+    return true;
+}
+
+bool BlockDocument::buildMore(int budgetMs)
+{
+    if (!m_build) return true;
+    if (!m_document) { m_build.reset(); return true; }
+    QScopedValueRollback<bool> building(m_building, true);
+    QElapsedTimer clock;
+    clock.start();
+    auto &b = *m_build;
+    b.cursor.beginEditBlock();
+    while (b.next < b.verses.size()) {
+        buildVerse(b.next++);
+        if (budgetMs >= 0 && clock.elapsed() >= budgetMs) break;
     }
-    cursor.endEditBlock();
+    b.cursor.endEditBlock();
+    if (b.next < b.verses.size()) return false;
+    m_build.reset();
     emit spansChanged();
     emit geometryChanged();
+    return true;
+}
+
+void BlockDocument::buildVerse(int verseIndex)
+{
+    auto &b = *m_build;
+    QTextCursor &cursor = b.cursor;
+    const QTextBlockFormat &paragraph = b.paragraph;
+    const QTextCharFormat &separator = b.separator, &joiner = b.joiner;
+    const QTextCharFormat normal;
+    const QUrl cellUrl(m_cellName);
+    const bool numbers = b.numbers, headings = b.headings, annotationsVisible = b.annotationsVisible, noteMarks = b.noteMarks;
+    const bool poetry = b.poetry, dense = b.dense;
+    const double indentUnit = b.indentUnit, em = b.em;
+    const QString &mode = b.mode;
+    const QVariantMap &spacing = b.spacing;
+    const auto &extents = b.extents;
+    const auto &value = b.verses[verseIndex];
+    const auto verse = value.toMap();
+    const auto levels = verse.value("indents").toList();
+    const bool indented = poetry && std::any_of(levels.cbegin(), levels.cend(), [](const QVariant &level) { return level.toInt() > 0; });
+    int line = 0;
+    const auto lineFormat = [&](int index) {
+        return indented ? SearchGeometry::poetryFormat(paragraph, levels.value(qMin(index, int(levels.size()) - 1)).toInt(), indentUnit)
+                        : paragraph;
+    };
+    const QString heading = verse.value("heading").toString();
+    if (headings && !heading.isEmpty()) {
+        if (cursor.position()) cursor.insertBlock(paragraph, normal);
+        QTextBlockFormat section = paragraph;
+        section.setTopMargin(spacing.value("headingAbove", 18).toDouble());
+        section.setBottomMargin(spacing.value("headingBelow", 12).toDouble());
+        cursor.setBlockFormat(section);
+        QTextCharFormat title;
+        title.setFontWeight(QFont::DemiBold);
+        cursor.insertText(heading, title);
+        cursor.insertBlock(lineFormat(0), normal);
+    } else if (cursor.position()) {
+        if (mode == QStringLiteral("paragraph") && verse.value("paragraphStart").toBool())
+            cursor.insertBlock(lineFormat(0), normal);
+        else cursor.insertText(" ", separator);
+    } else cursor.setBlockFormat(lineFormat(0));
+    const int start = cursor.position();
+    if (numbers) {
+        QTextCharFormat number;
+        number.setVerticalAlignment(QTextCharFormat::AlignSuperScript);
+        cursor.insertText(verse.value("number").toString(), number);
+        cursor.insertText(QString(QChar(0x00a0)), normal);
+    }
+    auto decorate = [&](bool opening) {
+        if (!annotationsVisible) return;
+        QVariantList entries;
+        for (const QString &kind : {QStringLiteral("note"), QStringLiteral("tag")}) {
+            if (kind == QStringLiteral("note") && !noteMarks) continue;
+            QSet<QString> seen;
+            for (const auto &entry : verse.value(kind + "Ranges").toList()) {
+                auto range = entry.toMap();
+                const auto reference = range.value("reference").toString();
+                if (seen.contains(reference)) continue;
+                seen.insert(reference);
+                const bool before = range.value("continuesBefore").toBool();
+                const bool after = range.value("continuesAfter").toBool();
+                if (opening ? (before && verseIndex != 0) : after) continue;
+                range["kind"] = kind;
+                range["scope"] = range.value("scope", entry);
+                range["continuesBefore"] = before;
+                range["edge"] = opening ? (before ? "continuation" : "open") : "close";
+                entries.append(range);
+            }
+        }
+        std::sort(entries.begin(), entries.end(), [&](const QVariant &a, const QVariant &b) {
+            const auto x = a.toMap(), y = b.toMap();
+            const QString xKey = x.value("kind").toString() + ':' + x.value("reference").toString();
+            const QString yKey = y.value("kind").toString() + ':' + y.value("reference").toString();
+            const auto xExtent = extents.value(xKey), yExtent = extents.value(yKey);
+            const int xEdge = opening ? xExtent.second : xExtent.first;
+            const int yEdge = opening ? yExtent.second : yExtent.first;
+            if (xEdge != yEdge) return xEdge > yEdge; // Outer opens first; inner closes first.
+            return opening ? xKey < yKey : xKey > yKey; // Equal ranges close in reverse order.
+        });
+        for (auto entry : entries) {
+            auto marker = entry.toMap();
+            const int segmentStart = cursor.position();
+            if (!opening) cursor.insertText(QString(QChar(0x2060)), joiner);
+            marker["position"] = cursor.position();
+            marker["verse"] = verse.value("number");
+            marker["paintWidth"] = qMax(1, qRound(em * (opening ? 0.92 : 0.32)));
+            // Reserve breathing room inside the image, not as text or as
+            // extra height. Joiners and clipboard offsets stay identical.
+            marker["textGap"] = qMax(1, qRound(em * 0.15));
+            marker["cellWidth"] = marker.value("paintWidth").toInt() + marker.value("textGap").toInt();
+            // The font height plus two pixels (see beginBuild).
+            marker["cellHeight"] = b.cellHeight;
+            QTextImageFormat format;
+            format.setFont(m_document->defaultFont());
+            format.setName(cellUrl.toString());
+            format.setWidth(marker.value("cellWidth").toDouble());
+            format.setHeight(marker.value("cellHeight").toDouble());
+            format.setVerticalAlignment(QTextCharFormat::AlignBaseline);
+            cursor.insertImage(format);
+            if (opening) cursor.insertText(QString(QChar(0x2060)), joiner);
+            m_decorationSegments.append({segmentStart, cursor.position()});
+            m_decorations.append(marker);
+        }
+    };
+    decorate(true);
+    const int textStart = cursor.position();
+    QTextDocument source;
+    const auto html = verse.value("html").toString();
+    if (html.isEmpty()) source.setPlainText(verse.value("text").toString());
+    else source.setHtml(html); // Already escaped by the AO importer.
+    // Flatten source paragraph wrappers, preserving internal poetry breaks
+    // and inline formats. Source verse-boundary paragraphs are handled above.
+    // A line break inside a poetry verse starts the next line's block
+    // (one position, like the separator it replaces). In Block it is a
+    // space (one position too): kept as a break, each verse would start
+    // mid-line, after the last line of the one before.
+    const auto lineBreak = [&](const QTextCharFormat &format) {
+        if (indented) cursor.insertBlock(lineFormat(++line), format);
+        else cursor.insertText(QString(dense ? QChar(' ') : QChar::LineSeparator), format);
+    };
+    for (auto block = source.begin(); block.isValid(); block = block.next()) {
+        if (block != source.begin()) lineBreak(normal);
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+            const auto fragment = it.fragment();
+            if (!fragment.isValid()) continue;
+            const auto parts = fragment.text().split(QChar::LineSeparator);
+            for (int i = 0; i < parts.size(); ++i) {
+                if (i) lineBreak(fragment.charFormat());
+                if (!parts[i].isEmpty()) cursor.insertText(parts[i], fragment.charFormat());
+            }
+        }
+    }
+    int textEnd = cursor.position();
+    // Footnote markers: transparent cells at their anchors inside the
+    // verse (word joiner + image), painted by the reader. They are
+    // decoration segments, so copy and search offsets skip them.
+    const QString plain = verse.value("text").toString();
+    const auto notes = annotationsVisible ? verse.value("footnotes").toList() : QVariantList();
+    if (!notes.isEmpty()) {
+        QTextCursor rendered(m_document);
+        rendered.setPosition(textStart);
+        rendered.setPosition(textEnd, QTextCursor::KeepAnchor);
+        SourcePositionMap anchors;
+        anchors.build(plain, rendered.selectedText(), textStart);
+        QVector<QPair<int, QVariantMap>> cells;
+        for (const auto &value : notes) {
+            const auto note = value.toMap();
+            const int offset = note.value("offset").toInt();
+            const int position = offset >= plain.size() ? textEnd : offset <= 0 ? textStart : anchors.range(offset, 1).first;
+            if (position >= textStart && position <= textEnd) cells.append({position, note});
+        }
+        std::stable_sort(cells.begin(), cells.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+        int shift = 0;
+        for (const auto &cell : cells) {
+            QTextCursor at(m_document);
+            at.setPosition(cell.first + shift);
+            const int segmentStart = at.position();
+            at.insertText(QString(QChar(0x2060)), joiner);
+            QVariantMap marker{{"kind", "footnote"}, {"edge", "footnote"}, {"verse", verse.value("number")},
+                {"seq", cell.second.value("seq")}, {"caller", cell.second.value("caller")}, {"text", cell.second.value("text")},
+                {"reference", QString("%1.%2").arg(verse.value("number").toInt()).arg(cell.second.value("seq").toInt())}};
+            marker["position"] = at.position();
+            marker["paintWidth"] = qMax(1, qRound(em * 0.5));
+            marker["textGap"] = 0;
+            marker["cellWidth"] = marker.value("paintWidth");
+            marker["cellHeight"] = b.cellHeight;
+            QTextImageFormat format;
+            format.setFont(m_document->defaultFont());
+            format.setName(cellUrl.toString());
+            format.setWidth(marker.value("cellWidth").toDouble());
+            format.setHeight(marker.value("cellHeight").toDouble());
+            format.setVerticalAlignment(QTextCharFormat::AlignBaseline);
+            at.insertImage(format);
+            shift += at.position() - segmentStart;
+            m_decorationSegments.append({segmentStart, at.position()});
+            m_decorations.append(marker);
+        }
+        cursor.setPosition(textEnd + shift);
+        textEnd = cursor.position();
+    }
+    QTextCursor content(m_document);
+    content.setPosition(textStart);
+    content.setPosition(textEnd, QTextCursor::KeepAnchor);
+    m_sourceMaps[verse.value("number").toInt()].build(verse.value("text").toString(),
+                                                   content.selectedText(), textStart);
+    decorate(false);
+    m_spans.append(QVariantMap{{"number",verse.value("number")}, {"start",start},
+                              {"textStart",textStart}, {"textEnd",textEnd}, {"end",cursor.position()}});
 }
 
 QVariantList BlockDocument::searchRectangles(const QVariantList &segments) const

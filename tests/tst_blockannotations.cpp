@@ -591,6 +591,49 @@ ApplicationWindow {
         QCOMPARE(mapped.first().toMap().value("x").toDouble(),rendered.first().toMap().value("x").toDouble());
         QCOMPARE(mapped.first().toMap().value("y").toDouble(),rendered.first().toMap().value("y").toDouble());
     }
+    // A view made ahead builds its chapter a verse at a time (beginBuild,
+    // buildMore): the document and its mapping are those built at once.
+    void buildingInStepsMatchesBuildingAtOnce_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("block") << QString("block");
+        QTest::newRow("paragraph") << QString("paragraph");
+    }
+    void buildingInStepsMatchesBuildingAtOnce() {
+        QFETCH(QString,mode);
+        QQmlComponent component(engine.get());
+        component.setData("import QtQuick\nTextEdit { width: 260; textFormat: TextEdit.RichText }",QUrl());
+        std::unique_ptr<QObject> edit(component.create());
+        QVERIFY2(edit,qPrintable(component.errorString()));
+        auto quick = edit->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(quick);
+        populate(true);
+        auto verses = backend->property("verses").toList();
+        auto poem = verses[3].toMap();
+        poem["text"] = "Poetry sings.\nA second line.";
+        poem["html"] = "Poetry sings.<br>A second line.";
+        poem["indents"] = QVariantList{1,2};
+        verses[3] = poem;
+        auto noted = verses[1].toMap();
+        noted["footnotes"] = QVariantList{QVariantMap{{"seq",1},{"offset",5},{"caller","a"},{"text","A footnote."}}};
+        verses[1] = noted;
+        auto opening = verses[4].toMap();
+        opening["paragraphStart"] = true;
+        verses[4] = opening;
+        const QVariantMap spacing{{"headingAbove",18},{"headingBelow",12},{"poetryIndent",16}};
+        BlockDocument document;
+        auto doc = quick->textDocument();
+        document.build(quick,verses,true,true,1.5,mode,true,0,true,spacing);
+        const auto html = doc->toHtml(), copied = document.selectionText(0,doc->characterCount() - 1);
+        const auto spans = document.spans(), decorations = document.inlineDecorations();
+        QVERIFY(document.beginBuild(quick,verses,true,true,1.5,mode,true,0,true,spacing));
+        int steps = 1;
+        while (!document.buildMore(0)) ++steps;
+        QCOMPARE(steps,int(verses.size())); // A verse a step.
+        QCOMPARE(doc->toHtml(),html);
+        QCOMPARE(document.selectionText(0,doc->characterCount() - 1),copied);
+        QCOMPARE(document.spans(),spans);
+        QCOMPARE(document.inlineDecorations(),decorations);
+    }
     void overlappingTagScopes_data() {
         QTest::addColumn<QString>("mode");
         QTest::newRow("block") << QString("block");

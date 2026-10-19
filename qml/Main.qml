@@ -971,9 +971,16 @@ ApplicationWindow {
         view.viewKey = key
         view.book = bible.book; view.chapterNumber = bible.chapter
     }
-    function newChapterView(properties) {
-        const view = (continuousReader ? blockViewComponent : verseViewComponent).createObject(viewShelf, properties)
-        if (continuousReader)
+    // `verses`: its chapter's rows, kept as that very list (createObject
+    // copies one given it, and rows holding an equal copy read the chapter's
+    // own all again where placeChapterView binds them); a flowing view also
+    // gets them as it is made, to build them rather than the chapter read's.
+    function newChapterView(properties, verses) {
+        const flowing = continuousReader
+        const view = (flowing ? blockViewComponent : verseViewComponent).createObject(viewShelf,
+            flowing && verses ? Object.assign({ verses: verses }, properties) : properties)
+        if (verses) view.verses = verses
+        if (flowing)
             view.layoutRefreshed.connect(function() { if (blockLoader.item === view) { app.scheduleMargins(); app.placeSelectionBar() } })
         return view
     }
@@ -1035,8 +1042,8 @@ ApplicationWindow {
         let view = shelvedViews[key]
         if (view) delete shelvedViews[key]
         else view = takePreparedView(key)
-        if (!view) view = newChapterView({ beside: true, namePrefix: chapter.namePrefix, verses: chapter.rows, book: chapter.book, chapterNumber: chapter.chapterNumber,
-            selectedFirst: chapter.first, selectedLast: chapter.last })
+        if (!view) view = newChapterView({ beside: true, namePrefix: chapter.namePrefix, book: chapter.book, chapterNumber: chapter.chapterNumber,
+            selectedFirst: chapter.first, selectedLast: chapter.last }, chapter.rows)
         view.viewKey = key
         placeChapterView(view, host, chapter)
         return view
@@ -1066,33 +1073,33 @@ ApplicationWindow {
         onVersesChanged: syncRows()
         Component.onCompleted: syncRows()
         // Prepared ahead (prepareChapterView): its rows are made a few a
-        // turn, each turn within a few milliseconds; built once all are.
+        // turn, each turn within a few milliseconds, the next as soon as the
+        // event loop is free (not on an animation-paced Timer, which would
+        // take a long chapter a second); built once all are.
         property bool incremental: false
         readonly property bool building: rowModel.count < verses.length
         signal built()
         function syncRows() {
             const count = verses.length
             if (rowModel.count > count) rowModel.remove(count, rowModel.count - count)
-            if (incremental) { if (building) buildTimer.start(); else built() }
+            // (Counted here: `building` may not have followed new verses yet.)
+            if (incremental) { if (rowModel.count < count) Qt.callLater(view.buildSome); else built() }
             else appendRows()
+        }
+        function buildSome() {
+            if (!incremental || !building) return
+            const started = Date.now()
+            while (building && Date.now() - started < 6) rowModel.append({ row: rowModel.count })
+            if (building) Qt.callLater(view.buildSome)
+            else built()
         }
         function appendRows() {
             const added = []
             for (let i = rowModel.count; i < verses.length; ++i) added.push({ row: i })
             if (added.length) rowModel.append(added)
         }
-        // Shown before it was done: the rest now.
-        function finishRows() { buildTimer.stop(); incremental = false; appendRows() }
-        Timer {
-            id: buildTimer
-            interval: 0
-            onTriggered: {
-                const started = Date.now()
-                while (view.building && Date.now() - started < 6) rowModel.append({ row: rowModel.count })
-                if (view.building) start()
-                else view.built()
-            }
-        }
+        // Shown before it was done: the rest now; made at once from then on.
+        function finish() { incremental = false; appendRows() }
         // Where each verse's text is: {number, top, bottom}, in this view
         // as laid out (Main settles it first where that matters).
         function verseExtents() {
@@ -4116,11 +4123,10 @@ ApplicationWindow {
         const room = 1.5 * reading.height, near = 2 * reading.height, far = 5 * reading.height
         const top = reading.contentY, bottom = top + reading.height
         const at = chapters.indexOf(bookWindow.first), to = chapters.indexOf(bookWindow.last)
-        // Verse views are made a few rows a turn: the next chapter each way
-        // starts long before the view nears it, so it is ready (a held key
-        // can reach a long chapter within a second).
-        if (!continuousReader)
-            for (const chapter of [chapters[at - 1], chapters[to + 1]]) if (chapter) prepareChapterView(bookWindow.book, chapter)
+        // Views are made a few verses a turn: the next chapter each way starts
+        // long before the view nears it, so it is ready (a held key can reach
+        // a long chapter within a second).
+        for (const chapter of [chapters[at - 1], chapters[to + 1]]) if (chapter) prepareChapterView(bookWindow.book, chapter)
         let first = bookWindow.first, last = bookWindow.last
         if (top < room && at > 0) first = chapters[at - 1]
         else if (bottom > reading.contentHeight - room && to >= 0 && to < chapters.length - 1) last = chapters[to + 1]
@@ -4157,10 +4163,10 @@ ApplicationWindow {
         Qt.callLater(app.extendBook)
     }
     // The whole book's chapters coming to show beside get their views made
-    // ahead on the shelf, a Verse view a few rows a turn, so that no turn
-    // lays out a whole chapter (a key pressed meanwhile waits for none of
-    // it). Kept by key until shown, or until the book, version, or layout
-    // changes. Whether `chapter`'s is ready.
+    // ahead on the shelf, a few verses a turn, so that no turn lays out a
+    // whole chapter (a key pressed meanwhile waits for none of it). Kept by
+    // key until shown, or until the book, version, or layout changes.
+    // Whether `chapter`'s is ready.
     property var preparedViews: ({})
     function prepareChapterView(book, chapter) {
         const key = chapterViewKey(book, chapter)
@@ -4169,13 +4175,11 @@ ApplicationWindow {
         const rowsKey = book + ":" + chapter
         if (!contextRows[rowsKey]) contextRows[rowsKey] = Array.from(bible.chapterRows([{ book: book, chapter: chapter }])[0] || [])
         // Named apart until shown (the reader's names belong to the chapter read).
-        const view = newChapterView(Object.assign({ beside: true, namePrefix: "prepared:" + book + ":" + chapter + ":", verses: contextRows[rowsKey],
-            book: book, chapterNumber: chapter }, continuousReader ? {} : { incremental: true }))
+        const view = newChapterView({ beside: true, namePrefix: "prepared:" + book + ":" + chapter + ":",
+            book: book, chapterNumber: chapter, incremental: true }, contextRows[rowsKey])
         view.viewKey = key
         preparedViews[key] = view
-        // Shown a turn later at the soonest: never in the turn that made it.
-        if (continuousReader) Qt.callLater(app.extendBook)
-        else view.built.connect(function() { Qt.callLater(app.extendBook) })
+        view.built.connect(function() { Qt.callLater(app.extendBook) })
         return false
     }
     function clearPreparedViews() {
@@ -4190,7 +4194,7 @@ ApplicationWindow {
         const view = preparedViews[key]
         if (!view) return null
         delete preparedViews[key]
-        if (!continuousReader) view.finishRows()
+        view.finish()
         return view
     }
     // Marks changed (here or in another window): the chapters shown beside

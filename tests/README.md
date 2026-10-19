@@ -37,7 +37,7 @@ run offscreen with software rendering. Logs: `$BUILD_DIR/test-logs/<suite>.log`
 | `desktop` | Theme/font events, compositor settings, colors, and tooltips |
 | `importer` | AO standard JSON, metadata, offsets, validation, and staged publication (`tst_ao.cpp`, `usfm.pro`) |
 | `catalog` | Catalog validation, streamed downloads, cancellation, timeout, and retry |
-| `annotations` | Flowing annotation paint, geometry, hit tests, and copy mapping (`tst_blockannotations.cpp`, `blockannotations.pro`) |
+| `annotations` | Flowing documents built at once or in steps, annotation paint, geometry, hit tests, and copy mapping (`tst_blockannotations.cpp`, `blockannotations.pro`) |
 | `instance` | Lock/IPC bounds, hand-off, stale recovery, and executable replacement (`tst_singleinstance.cpp`, `singleinstance.pro`) |
 | `windows` | Reader isolation, peer changes, Follow, lookup, request routing, and offline QML engine |
 | `cli` | Headless commands, output/JSON, terminal escaping, and GUI request parsing |

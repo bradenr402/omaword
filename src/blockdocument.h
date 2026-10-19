@@ -3,8 +3,12 @@
 #include <QObject>
 #include <QPointer>
 #include <QQuickTextDocument>
+#include <QTextBlockFormat>
+#include <QTextCharFormat>
+#include <QTextCursor>
 #include <QVariantList>
 #include <QClipboard>
+#include <optional>
 #include "searchdocument.h"
 
 // All offsets refer to the actual TextEdit QTextDocument, in UTF-16 units.
@@ -26,6 +30,16 @@ public:
                           const QString &mode = QStringLiteral("block"),
                           bool annotationsVisible = false, double decorationSize = 0,
                           bool noteMarks = true, const QVariantMap &spacing = {});
+    // The same build a few verses at a time (a view made ahead): beginBuild
+    // clears the document; each buildMore adds verses for about `budgetMs`
+    // (all, when negative), as one edit, so only they are laid out, and says
+    // whether the build is done (spans and geometry then change).
+    Q_INVOKABLE bool beginBuild(QQuickTextDocument *target, const QVariantList &verses,
+                                bool numbers, bool headings, double lineHeight,
+                                const QString &mode = QStringLiteral("block"),
+                                bool annotationsVisible = false, double decorationSize = 0,
+                                bool noteMarks = true, const QVariantMap &spacing = {});
+    Q_INVOKABLE bool buildMore(int budgetMs);
     // Plain clipboard text for actual TextEdit selection offsets (either order).
     // start/end include decorations; textStart/textEnd delimit original verse text.
     Q_INVOKABLE QString selectionText(int start, int end) const;
@@ -60,6 +74,22 @@ signals:
     void geometryChanged();
 private:
     void filterClipboard(QClipboard::Mode mode);
+    // A build under way: its verses and options, and how far it has come.
+    struct Build {
+        QVariantList verses;
+        int next = 0;
+        bool numbers = false, headings = false, annotationsVisible = false, noteMarks = true;
+        bool poetry = false, dense = false;
+        QString mode;
+        QVariantMap spacing;
+        double indentUnit = 0, em = 0, cellHeight = 0;
+        QTextBlockFormat paragraph;
+        QTextCharFormat separator, joiner;
+        QMap<QString, QPair<int, int>> extents;
+        QTextCursor cursor;
+    };
+    std::optional<Build> m_build;
+    void buildVerse(int verseIndex);
     QString m_cellName;
     int m_selectionStart = 0;
     int m_selectionEnd = 0;
