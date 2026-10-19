@@ -3623,6 +3623,51 @@ private slots:
         key(Qt::Key_Escape); QTRY_VERIFY(lines(18).isEmpty());
         bible->setReadingMode("verse");
     }
+    // o: the cursor goes to the selection's other end in Visual mode, a
+    // plain range, a range across chapters, and characters, each time
+    // saying so; with no other end, it explains instead.
+    void swapEndsInEverySelection() {
+        const auto toast = [&] { return prop("toast", "text").toString(); };
+        const auto offset = [&](const char *end) { return window->property(end).value<QJSValue>().property("offset").toInt(); };
+        reference("John 3:16"); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        key(Qt::Key_O);
+        QCOMPARE(toast(), QString("Nothing to swap: select a range first · shift V starts one"));
+        // Visual mode: the range stays, the cursor changes ends, the motions grow it from there.
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_J);
+        QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:16–18")); QCOMPARE(bible->cursorVerse(), 18);
+        key(Qt::Key_O);
+        QCOMPARE(bible->cursorVerse(), 16); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:16–18"));
+        QVERIFY(window->property("verseMode").toBool());
+        QCOMPARE(toast(), QString("Cursor at the selection's start"));
+        key(Qt::Key_K); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:15–18"));
+        key(Qt::Key_O); QCOMPARE(bible->cursorVerse(), 18); QCOMPARE(toast(), QString("Cursor at the selection's end"));
+        key(Qt::Key_Escape); QVERIFY(!window->property("verseMode").toBool());
+        // A plain range (a mouse's): the same, without Visual mode.
+        bible->selectVerses(20, 22); key(Qt::Key_O);
+        QCOMPARE(bible->cursorVerse(), 20); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:20–22"));
+        QVERIFY(!window->property("verseMode").toBool());
+        // Across chapters: the cursor's end becomes the chapter read.
+        reference("John 3:35"); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_J);
+        QTRY_COMPARE(bible->passage(), QString("John 4")); QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:35–4:1"));
+        key(Qt::Key_O);
+        QTRY_COMPARE(bible->passage(), QString("John 3")); QCOMPARE(bible->cursorVerse(), 35);
+        QCOMPARE(bible->selectionReference(), QString::fromUtf8("John 3:35–4:1")); QCOMPARE(toast(), QString("Cursor at the selection's start"));
+        QTRY_VERIFY(!window->property("restoringPosition").toBool());
+        key(Qt::Key_O); QTRY_COMPARE(bible->passage(), QString("John 4")); QCOMPARE(bible->cursorVerse(), 1);
+        key(Qt::Key_Escape); key(Qt::Key_Escape);
+        // Characters.
+        reference("John 3:16"); QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        key(Qt::Key_V); QTRY_VERIFY(window->property("charMode").toBool());
+        key(Qt::Key_O); QCOMPARE(toast(), QString("Nothing to swap: the selection is one character"));
+        for (int i = 0; i < 3; ++i) key(Qt::Key_L);
+        const int start = offset("charAnchor"), end = offset("charCursor");
+        QCOMPARE(end, start + 3);
+        key(Qt::Key_O); QCOMPARE(offset("charCursor"), start); QCOMPARE(offset("charAnchor"), end);
+        QCOMPARE(toast(), QString("Cursor at the selection's start"));
+        key(Qt::Key_O); QCOMPARE(offset("charCursor"), end); QCOMPARE(toast(), QString("Cursor at the selection's end"));
+        key(Qt::Key_Escape); QVERIFY(!window->property("charMode").toBool());
+    }
     void continuousHighlightGeometry() {
         installDragFixture();
         // Put a visible heading inside the range, not only at its beginning.

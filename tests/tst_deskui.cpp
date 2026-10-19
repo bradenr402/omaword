@@ -586,7 +586,7 @@ private slots:
         };
         QCOMPARE(where("noteLeave"), QString("Writing a note or on the Desk"));
         QCOMPARE(where("noteLinkClick"), QString("Writing a note or on the Desk"));
-        QVERIFY(where("charSwap").startsWith("Character selection · "));
+        QVERIFY(where("charCopy").startsWith("Character selection · "));
         QCOMPARE(where("guideInstall"), QString("Add version guide"));
         QVERIFY(where("manageRename").startsWith("Tag picker"));
         QCOMPARE(where("clickMenu"), QString("Reader gesture"));

@@ -106,12 +106,12 @@ Generated from the action catalog by `bin/shortcuts`; alternatives are separated
 - `0` · `^` · `$`: Characters: line start, first ink, end
 - `gg` · `shift G`: Characters: chapter start, end
 - `iw` · `aw` · `is` · `as`: Characters: word, sentence objects
-- `o`: Characters: swap ends
 - `y` · `ctrl c`: Characters: copy quotation
 - `shift Y` · `ctrl shift C`: Characters: copy plain text
 - `esc`: Characters: leave
 - `shift J` · `shift ↓`: Extend to next verse
 - `shift K` · `shift ↑`: Extend to previous verse
+- `o`: Swap the selection's ends
 - `m`: Select the whole mark around the selection
 - `gv`: Select the earlier range of verses again
 

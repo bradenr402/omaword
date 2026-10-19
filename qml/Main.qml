@@ -1912,11 +1912,28 @@ ApplicationWindow {
         charAnchor = { verse: range.anchor.verse, offset: range.anchor.offset }
         setCharCursor(range.cursor)
     }
-    function charSwap() {
+    // o: the cursor goes to the selection's other end (Visual mode, any range
+    // of verses, or characters), where motions then grow or shrink it from.
+    function swapEnds() {
         clearCount()
-        const anchor = charAnchor
-        charAnchor = charCursor
-        setCharCursor(anchor)
+        if (charMode) {
+            if (!charCompare(charAnchor, charCursor)) { rejected("Nothing to swap: the selection is one character"); return }
+            const toStart = charCompare(charCursor, charAnchor) > 0, anchor = charAnchor
+            charAnchor = charCursor
+            setCharCursor(anchor)
+            notify(toStart ? "Cursor at the selection's start" : "Cursor at the selection's end", true)
+            return
+        }
+        if (!actionAvailable("swapEnds")) { rejected(unavailableReason("swapEnds")); return }
+        if (!flushNote()) return
+        const scope = bible.tagScope()
+        const toStart = bible.book === scope.endBook && bible.chapter === scope.endChapter && bible.cursorVerse === scope.end
+        // The other end may lie in another chapter: the cursor goes there as a step would.
+        changeSelection(function() {
+            if (bible.crossChapterSelection) bible.restoreSelection(scope, toStart)
+            else bible.selectVerses(bible.cursorVerse, toStart ? bible.selectedStart : bible.selectedEnd)
+        })
+        notify(toStart ? "Cursor at the selection's start" : "Cursor at the selection's end", true)
     }
     // The character under a readerColumn point, on that point's line.
     function charAtPoint(x, y) {
@@ -2072,7 +2089,7 @@ ApplicationWindow {
         case "$": charLineEdge("end"); break
         case "G": charMotion("G", false); break
         case "g": case "i": case "a": charPending = text; break
-        case "o": charSwap(); break
+        case "o": swapEnds(); break
         case "y": copyCharSelection(false); break
         case "Y": copyCharSelection(true); break
         case "u": clearCount(); runCommand("undo"); break
@@ -2086,7 +2103,7 @@ ApplicationWindow {
     readonly property string charKeyReason: "Not a key in character selection · " + KeyNotation.format("Escape") + " leaves it"
     function characterHintParts() {
         const ready = charMode && !bible.busy
-        return [[["H", "L", "W", "B", "E", "J", "K"], "move"], ["O", "swap", app.charSwap, ready],
+        return [[["H", "L", "W", "B", "E", "J", "K"], "move"], ["O", "swap", app.swapEnds, ready],
             ["Y", "quotation", function() { app.copyCharSelection(false) }, ready],
             ["Shift+Y", "plain text", function() { app.copyCharSelection(true) }, ready],
             ["Escape", "exit", function() { app.endCharMode(); app.readerFocus() }, charMode]]
@@ -2936,6 +2953,7 @@ ApplicationWindow {
         if (["highlight", "tags", "toggleDesk", "notes", "copy", "copyPlain", "compare", "peek"].includes(action.id) && !hasSelection)
             return "Select a verse first"
         if (action.id === "selectMark" && !hasSelection) return "Select a verse in a mark first"
+        if (action.id === "swapEnds" && bible.ready) return "Nothing to swap: select a range first · " + keyText("visual") + " starts one"
         if (["noteLinkSuggest", "openNoteLink", "notePreview", "noteKeepDraft", "noteUseSaved", "noteLinkedFrom"].includes(action.id) && !notesOpen && !deskOpen)
             return "Open a note first · " + keyText("notes")
         if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
@@ -3824,13 +3842,16 @@ ApplicationWindow {
         clearCount()
         if (!flushNote()) return
         clearTextSelection()
+        changeSelection(function() { if (bulk) bible.moveByVerses(delta, extend); else bible.moveSelection(delta, extend) })
+    }
+    // A selection change that may cross chapters (a step, o).
+    function changeSelection(change) {
         positionTimer.stop()
         restoringPosition = true
         movingSelection = true
         const fromChapter = bible.book + ":" + bible.chapter
         captureViewAnchor()
-        if (bulk) bible.moveByVerses(delta, extend)
-        else bible.moveSelection(delta, extend)
+        change()
         movingSelection = false
         syncNote()
         selectionAnchor = bible.crossChapterSelection ? 0
@@ -3842,7 +3863,7 @@ ApplicationWindow {
             // verse comes into view from there.
             const kept = app.restoreViewAnchor()
             if (app.selectionIdentity !== movedIdentity) return
-            layOutReader()
+            app.layOutReader()
             // Crossing into another chapter has nothing to slide from, unless it was on screen.
             app.placeVerse(bible.cursorVerse, false, bible.book + ":" + bible.chapter !== fromChapter && !kept)
             app.restoringPosition = false
@@ -5525,12 +5546,13 @@ ApplicationWindow {
         { id: "charLineEdges", group: "Select", title: "Characters: line start, first ink, end", sequences: ["0", "^", "$"], scope: "characters", explanation: true },
         { id: "charEdges", group: "Select", title: "Characters: chapter start, end", sequences: ["G, G", "Shift+G"], scope: "characters", explanation: true },
         { id: "charObjects", group: "Select", title: "Characters: word, sentence objects", sequences: ["I, W", "A, W", "I, S", "A, S"], scope: "characters", explanation: true },
-        { id: "charSwap", group: "Select", title: "Characters: swap ends", sequences: ["O"], scope: "characters", explanation: true },
         { id: "charCopy", group: "Select", title: "Characters: copy quotation", sequences: ["Y", "Ctrl+C"], scope: "characters", explanation: true },
         { id: "charCopyPlain", group: "Select", title: "Characters: copy plain text", sequences: ["Shift+Y", "Ctrl+Shift+C"], scope: "characters", explanation: true },
         { id: "charExit", group: "Select", title: "Characters: leave", sequences: ["Escape"], scope: "characters", explanation: true },
         { id: "extendNext", group: "Select", title: "Extend to next verse", sequences: ["Shift+J", "Shift+Down"] },
         { id: "extendPrevious", group: "Select", title: "Extend to previous verse", sequences: ["Shift+K", "Shift+Up"] },
+        // Visual mode, any range of verses, or characters (charKey runs it there too).
+        { id: "swapEnds", group: "Select", title: "Swap the selection's ends", sequences: ["O"], command: true },
         // The smallest highlight, note, or tag range around the selection; again, the next larger.
         { id: "selectMark", group: "Select", title: "Select the whole mark around the selection", sequences: ["M"], command: true },
         { id: "reselect", group: "Select", title: "Select the earlier range of verses again", sequences: ["G, V"], command: true },
@@ -5870,6 +5892,7 @@ ApplicationWindow {
         if (action.id === "copyText" || action.id === "copyTextPlain") return bible.ready
         if (action.id === "related") return bible.ready && bible.verses.length > 0
         if (["highlight", "tags", "toggleDesk", "selectMark"].includes(action.id)) return hasSelection
+        if (action.id === "swapEnds") return hasSelection && (bible.selectedStart !== bible.selectedEnd || bible.crossChapterSelection)
         if (action.id === "compare") return hasSelection && bible.versions.length > 1
         if (action.id === "openBeside") return bible.ready && bible.versions.length > 1
         if (action.id === "switchPane") return bible.ready && sidePanel.length > 0
@@ -6376,6 +6399,7 @@ ApplicationWindow {
         case "ribbon": openRibbon(); break
         case "removeRibbon": removeRibbon(); break
         case "selectMark": selectMarkAround(); break
+        case "swapEnds": swapEnds(); break
         case "clearHistory": requestClearHistory(); break
         case "unfollow": unfollowRequested(); notify("Stopped following the window beside", true); break
         case "toggleHistory": toggleHistoryEnabled(); break
