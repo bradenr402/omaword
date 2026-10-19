@@ -234,8 +234,8 @@ void validate(QSqlDatabase db)
     const QStringList invalid = {
         QStringLiteral("SELECT 1 FROM source_keys WHERE book NOT IN (SELECT id FROM books) OR chapter NOT BETWEEN 1 AND 999 OR number NOT BETWEEN 1 AND 999 OR retained NOT IN (0,1) LIMIT 1"),
         QStringLiteral("SELECT 1 FROM source_keys s LEFT JOIN source_chapters c ON c.book=s.book AND c.chapter=s.chapter WHERE c.book IS NULL LIMIT 1"),
-        QStringLiteral("SELECT 1 FROM source_chapters c WHERE c.book NOT IN (SELECT id FROM books) OR NOT EXISTS(SELECT 1 FROM verses v WHERE v.book=c.book AND v.chapter=c.chapter) LIMIT 1"),
-        QStringLiteral("SELECT 1 FROM books b WHERE NOT EXISTS(SELECT 1 FROM source_chapters c WHERE c.book=b.id) LIMIT 1"),
+        QStringLiteral("SELECT 1 FROM source_chapters c WHERE c.book NOT IN (SELECT id FROM books) OR c.chapter NOT BETWEEN 1 AND 999 OR (EXISTS(SELECT 1 FROM source_keys s WHERE s.book=c.book AND s.chapter=c.chapter) AND NOT EXISTS(SELECT 1 FROM verses v WHERE v.book=c.book AND v.chapter=c.chapter)) LIMIT 1"),
+        QStringLiteral("SELECT 1 FROM books b WHERE NOT EXISTS(SELECT 1 FROM verses v WHERE v.book=b.id) LIMIT 1"),
         QStringLiteral("SELECT 1 FROM source_keys s LEFT JOIN verses v ON v.book=s.book AND v.chapter=s.chapter AND v.number=s.number WHERE (s.retained=1 AND v.book IS NULL) OR (s.retained=0 AND v.book IS NOT NULL) LIMIT 1"),
         QStringLiteral("SELECT 1 FROM verses v LEFT JOIN source_keys s ON v.book=s.book AND v.chapter=s.chapter AND v.number=s.number WHERE s.book IS NULL OR length(trim(v.text))=0 OR length(v.html)>262144 OR v.poetry NOT IN (0,1) OR v.paragraphStart NOT IN (0,1) LIMIT 1"),
         QStringLiteral("SELECT 1 FROM book_aliases WHERE book NOT IN (SELECT id FROM books) OR length(trim(name))=0 LIMIT 1")
@@ -330,7 +330,8 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                         if (n.contains(QStringLiteral("reference"))) {
                             const auto ref = n.value(QStringLiteral("reference")).toObject();
                             if (integer(ref.value(QStringLiteral("chapter"))) != number) fail(QStringLiteral("AO footnote chapter mismatch."));
-                            references.insert(noteId, integer(ref.value(QStringLiteral("verse"))));
+                            // AO uses zero for subtitle notes, not a Scripture verse.
+                            references.insert(noteId, integer(ref.value(QStringLiteral("verse")), 0));
                         }
                     }
                     QVector<Verse> verses; QString heading; QVector<Note> subtitleNotes; bool paragraph = true; int previousVerse = 0;

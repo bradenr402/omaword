@@ -16,10 +16,24 @@ class AoTest : public QObject
             QJsonObject{{"type", "hebrew_subtitle"}, {"content", QJsonArray{"A subtitle", QJsonObject{{"noteId", 0}}}}},
             AoFixture::verse(1, {"  ¶ 😀 <one>", QJsonObject{{"noteId", 1}}, ", two ", QJsonObject{{"text", "said"}, {"wordsOfJesus", true}}, QJsonObject{{"lineBreak", true}}, QJsonObject{{"text", "poem"}, {"poem", 2}, {"descriptive", true}}, QJsonObject{{"lineBreak", true}}}),
             AoFixture::verse(2, {}), QJsonObject{{"type", "line_break"}}, AoFixture::verse(4, {"Next paragraph."})
-        }, {QJsonObject{{"noteId", 0}, {"caller", QJsonValue::Null}, {"text", "Subtitle note"}},
+        }, {QJsonObject{{"noteId", 0}, {"caller", QJsonValue::Null}, {"text", "Subtitle note"}, {"reference", QJsonObject{{"chapter", 3}, {"verse", 0}}}},
             QJsonObject{{"noteId", 1}, {"caller", "+"}, {"text", "Verse note"}}})})});
     }
 private slots:
+    void explicitEmptyChapterRetainsSourceMetadata() {
+        const auto source = directory.filePath("empty-chapter.json"), target = directory.filePath("empty-chapter.sqlite");
+        QVERIFY(AoFixture::write(source, AoFixture::complete("eng_ojb", {AoFixture::book("MAL", 1, {
+            AoFixture::chapter(3, {AoFixture::verse(1, {"Original retained text."})}), AoFixture::chapter(4, {})})})));
+        const auto result = AoImporter::importFile(source, target); QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.verseCount, 1);
+        QString error; QVERIFY2(AoImporter::validateDatabase(target, &error), qPrintable(error));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "ao-empty"); db.setDatabaseName(target); QVERIFY(db.open()); QSqlQuery q(db);
+            QVERIFY(q.exec("SELECT count(*) FROM source_chapters")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 2);
+            QVERIFY(q.exec("SELECT count(*) FROM source_keys WHERE chapter=4")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 0);
+        }
+        QSqlDatabase::removeDatabase("ao-empty");
+    }
     void rejectsBrokenContent_data() {
         QTest::addColumn<QString>("scenario");
         for (const auto &name : {"unknown-book", "duplicate-book", "duplicate-order", "duplicate-chapter", "duplicate-verse", "unknown-type", "missing-note", "duplicate-note", "wrong-count", "empty-chapter", "indent-bound", "invalid-number", "deep-json", "oversized-text"})

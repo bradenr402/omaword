@@ -86,7 +86,8 @@ user's real data for development or tests.
   prose paragraphs. Chapter separators establish paragraph starts.
 - Superscriptions and inline headings use the existing heading model; subtitle
   notes anchor at the following retained verse's offset zero, outside copied text.
-  Empty verses retain source keys but have no reader rows. Empty chapters reject.
+  Empty verses retain source keys but have no reader rows. Explicit zero-verse
+  chapters retain source metadata but stay out of navigation; empty books reject.
 - Limits: 64 MiB input/download, nesting 32, 80 known books, 65,536 UTF-16 units
   per text field. Counts include omitted verses and exclude apocryphal books at
   translation level. Source revision metadata is not a raw JSON-byte checksum.
