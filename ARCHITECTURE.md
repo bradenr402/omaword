@@ -201,10 +201,25 @@ user's real data for development or tests.
   each turn rescheduling with `Qt.callLater` (an interval-0 `Timer` waits for an
   animation frame), so no turn lays out a whole chapter; taking one finishes it.
   Without Whole book, `prepareNeighbours` makes the chapters either side of the
-  one read, across books, a moment after it changes; a step into one moves its
-  view into the reader, and the one left is kept (`keepPrepared`) for a step
-  back. Views not shown are named apart (`namePrefix`), as tests find the
-  reader's items by bare names.
+  one read, across books, a moment after it changes, then those `[`, `]`, and
+  `r` would go to (`jumpTargets`); a step into one moves its view into the
+  reader, and the one left is kept (`keepPrepared`) for a step back. Views not
+  shown are named apart (`namePrefix`), as tests find the reader's items by bare
+  names; tests find the reader's `BlockDocument` through `blockReader`. Views
+  wait in the window, invisible (out of it, their text would be laid out only
+  once shown), so making them renders frames: `preparing()` says whether any is
+  still being made. A Verse view waiting keeps the text size, spacing, and width
+  it was made with (`freeze`, `thaw`); any change to them (`viewLayoutKey`)
+  drops the views waiting. Only the chapter read's `BlockReader` reports
+  selected text or relays out a selection (`beside` ones never do).
+- A long chapter jumped into in the Verse layout (over `windowRows` verses) gets
+  a view of its own whose rows are made about the verse read first
+  (`windowTarget`, `makeWindow`), then the rest a few a turn, below then above
+  (`growSome`, `makeAbove`), the reader shifted as rows come above so the text
+  stays put (`growingRows`: no Follow is sent for it). Rows are verse indexes
+  [`rowsFirst`, `rowsEnd`); `rowItem(i)` is verse index i's, if made; `makeTo`
+  makes those up to one now. A place as a share of the chapter's height, saved
+  or restored, waits for or makes all of its rows.
 - Whole-book view reuses context chapters. `bookWindow` loads nearby chapters;
   `bookParked` preserves distant chapters' heights without laying them out, but
   never the chapters either side of the one read. A chapter is added (or
@@ -214,10 +229,12 @@ user's real data for development or tests.
   enter/leave; measure only after `settleReaderLayout()` (a chapter back from
   parked has a stale height until its own `settle()`). Saved positions remain
   relative to the chapter read.
-- Verse-layout rows read their view's `verses[index]` in place, so marks and
+- Verse-layout rows read their view's `verses[row]` in place, so marks and
   another chapter update rows; a view's row model only grows or shrinks. A row
-  costs ~1.5 ms to make: rails and the number's tooltip are made only where
-  needed, and search canvases paint only when they have marks to paint or erase.
+  costs ~2.5 ms to make: its tint, rails, motion and selection rectangles,
+  search canvas, and number tooltip are made (Loaders) only where and while
+  they show. A restore places the chapter before the next frame
+  (`runRestore`), never after one showing it at the old scroll.
 - The outline's current section is the cursor's while a step places itself
   (`viewAnchor`) or while the cursor shows at `readerTargetY()`, never a section
   a slide only passes. Its own scrolling glides (`slideMs`).

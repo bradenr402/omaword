@@ -103,7 +103,8 @@ class StudyUiTest : public QObject
         QMetaObject::invokeMethod(body, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, position));
         return rect;
     }
-    BlockDocument *blockMapping() const { return window->findChild<BlockDocument *>(); }
+    // The chapter read's (views beside, or made ahead, have their own).
+    BlockDocument *blockMapping() const { auto reader = window->findChild<QObject *>("blockReader"); return reader ? reader->findChild<BlockDocument *>() : nullptr; }
     void call(const char *method) { QVERIFY(QMetaObject::invokeMethod(window, method)); QCoreApplication::processEvents(); }
     void key(Qt::Key key, Qt::KeyboardModifiers mods = Qt::NoModifier) { QTest::keyClick(window, key, mods); QCoreApplication::processEvents(); }
     void install(const QString &file) {

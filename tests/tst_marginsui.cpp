@@ -213,7 +213,8 @@ class MarginsUiTest : public QObject
         int rebuilds = 0; bool sliding = false;
         bool sync = false; // sampled outside a frame (right after the trigger)
     };
-    BlockDocument *blockMapping() const { return window->findChild<BlockDocument *>(); }
+    // The chapter read's (views beside, or made ahead, have their own).
+    BlockDocument *blockMapping() const { auto reader = window->findChild<QObject *>("blockReader"); return reader ? reader->findChild<BlockDocument *>() : nullptr; }
     static QRectF caret(QObject *body, int position) {
         QRectF rect; QMetaObject::invokeMethod(body, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, position));
         return rect;
@@ -315,6 +316,8 @@ class MarginsUiTest : public QObject
     QList<Frame> stepped(const QString &name, const QList<std::function<void()>> &actions, const QList<int> &steps, int ms = 8) {
         const auto directory = qEnvironmentVariable("OMAWORD_FOCUS_TIMELINE");
         if (!directory.isEmpty()) QDir().mkpath(directory + "/focus-frames");
+        // Views made ahead render frames as they are made: none is, first.
+        if (!QTest::qWaitFor([&] { return !js("preparing").toBool(); }, 5000)) qWarning("views still being made ahead");
         StepDriver driver; driver.install();
         // Whatever still animates (a scrollbar fading, a toast) ends first, so
         // the transition's first step is exactly `ms`, not `ms` plus the time
@@ -894,6 +897,26 @@ private slots:
         QCOMPARE(body("", 36), leaving);
         QCOMPARE(body(john4, 1), arriving);
         QCOMPARE(rebuilds(arriving), arrived); QCOMPARE(rebuilds(leaving), left);
+    }
+    // A jump into a long chapter (Verse) makes the rows about the verse read
+    // first, shown at once, then the rest a few a turn, the text held still.
+    void longChapterJumpsMakeTheirRowsAboutTheVerse() {
+        setMode("verse"); navigate("John 3:3");
+        // (Not made ahead: not one of John 3's neighbours, nor left just now.)
+        QVERIFY(QMetaObject::invokeMethod(window, "clearPreparedViews"));
+        QVERIFY(QMetaObject::invokeMethod(window, "goToReference", Q_ARG(QVariant, "John 1:40"), Q_ARG(QVariant, false)));
+        auto view = object("verseView");
+        QVERIFY(view->property("building").toBool());
+        QVERIFY(item("verseBody40")); QVERIFY(!item("verseBody1"));
+        QTRY_VERIFY(!prop("restoringPosition").toBool());
+        const auto at = [&] { return item("verseBody40")->mapToItem(item("reading"), QPointF()).y(); };
+        const double shown = at();
+        QVERIFY(shown >= 0 && shown < item("reading")->height() / 2);
+        QTRY_VERIFY(!view->property("building").toBool());
+        QVERIFY(item("verseBody1"));
+        QVERIFY2(qAbs(at() - shown) <= 1, qPrintable(QString("%1 → %2").arg(shown).arg(at())));
+        // All made, a share of its height saves and restores as any chapter's.
+        QTRY_VERIFY(bible->readingPosition() > 0);
     }
     // Whole book: verse steps across chapters, down and back up past a
     // chapter far above that parked and comes back, move all the text one

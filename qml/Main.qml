@@ -455,7 +455,7 @@ ApplicationWindow {
         layOutReader()
         const block = blockLoader.item as BlockReader
         const index = Array.from(bible.verses).findIndex(function(row) { return row.number === segment.verse })
-        const row = verseRepeater.itemAt(index) as VerseItem
+        const row = rowItem(index) as VerseItem
         const rect = block ? block.searchRect(segment) : row ? row.searchOverlay.rectFor(segment.start, segment.length) : null
         if (!rect || rect.height <= 0 || focusLayout) { scrollToVerse(segment.verse, false); return }
         const y = block ? blockLoader.mapToItem(readerColumn, rect.x, rect.y).y
@@ -941,8 +941,9 @@ ApplicationWindow {
     // one read (a step or a click into it) brings its view along, and the one
     // it leaves keeps its own beside: a crossing lays nothing out again.
     // Views belong to the window (viewShelf, where those between owners wait
-    // for the turn to end), and every view of a layout is as wide, wherever
-    // it shows.
+    // for the turn to end, and those made ahead to be shown: out of the
+    // window, text would wait to be laid out until shown), and every view of
+    // a layout is as wide, wherever it shows.
     Component { id: verseViewComponent; VerseView {} }
     Component {
         id: blockViewComponent
@@ -956,6 +957,13 @@ ApplicationWindow {
     }
     // The chapter read's rows, as shown (Verse) or laid out (Paragraph and Block).
     readonly property Repeater verseRepeater: verseHost.item ? verseHost.item.repeater : noVerseRows
+    // Its rows are verse indexes [rowsFirst, rowsEnd) (a long chapter jumped
+    // into makes them over a few turns); rowItem(i): verse index i's, if made.
+    readonly property int rowsFirst: verseHost.item ? verseHost.item.firstRow : 0
+    readonly property int rowsEnd: rowsFirst + verseRepeater.count
+    // A chapter longer than this (verses) gets its rows a window at a time.
+    readonly property int windowRows: 40
+    function rowItem(i) { return verseHost.item ? verseHost.item.rowAt(i) : null }
     function showChapterRead() {
         const host = continuousReader ? blockLoader : verseHost, other = continuousReader ? verseHost : blockLoader
         if (other.item) { other.item.destroy(); other.item = null }
@@ -966,9 +974,21 @@ ApplicationWindow {
             if (kept) {
                 // Beside it in the whole book (a chapter shown beside takes it); else made, for a step back.
                 if (view && bible.wholeBook) shelveChapterView(view)
-                else if (view) keepPrepared(view)
+                else if (view) { leftViewKey = view.viewKey; keepPrepared(view) }
                 view = kept
-            } else if (!view) view = newChapterView({})
+            } else if (!view || (!continuousReader && (bible.verses.length > windowRows || view.building))) {
+                // A long chapter (or one left before its rows were all made)
+                // gets a view of its own, its rows made about the verse read
+                // first (VerseView's window); the one left stays made, for a
+                // jump back.
+                if (view && bible.wholeBook) shelveChapterView(view)
+                else if (view) { leftViewKey = view.viewKey; keepPrepared(view) }
+                view = newChapterView(!continuousReader && bible.verses.length > windowRows ? { windowTarget: 0 } : {})
+                if (!continuousReader) {
+                    const made = view
+                    made.built.connect(function() { if (verseHost.item === made) app.savePosition() })
+                }
+            }
             placeChapterView(view, host, null)
             host.item = view
             neighbourTimer.restart()
@@ -977,7 +997,13 @@ ApplicationWindow {
         // copy, but for marks (compared without copying a long chapter).
         // Copies, as bible.verses is a live reference, which kept rows would
         // read again later (another chapter's).
-        if (view.viewKey !== key || marksKey(bible.verses) !== marksKey(view.verses)) view.verses = JSON.parse(JSON.stringify(bible.verses))
+        if (view.viewKey !== key || marksKey(bible.verses) !== marksKey(view.verses)) {
+            const verses = JSON.parse(JSON.stringify(bible.verses))
+            // A new view's window starts at the verse read.
+            if (view.windowTarget >= 0 && !view.verses.length)
+                view.windowTarget = Math.max(0, verses.findIndex(function(verse) { return verse.number === bible.cursorVerse }))
+            view.verses = verses
+        }
         view.viewKey = key
         view.book = bible.book; view.chapterNumber = bible.chapter
     }
@@ -996,6 +1022,7 @@ ApplicationWindow {
     }
     // Shows `view` in `host`: beside, for `chapter` (a ContextChapter), else as the chapter read's.
     function placeChapterView(view, host, chapter) {
+        if (!continuousReader) view.thaw()
         view.parent = host
         view.beside = !!chapter
         view.namePrefix = chapter ? chapter.namePrefix : ""
@@ -1050,7 +1077,8 @@ ApplicationWindow {
     function adoptChapterView(chapter, host) {
         const key = chapterViewKey(chapter.book, chapter.chapterNumber)
         let view = shelvedViews[key]
-        if (view) delete shelvedViews[key]
+        // (The chapter read's until now, all of its rows made: none come beside it later.)
+        if (view) { delete shelvedViews[key]; view.finish() }
         else view = takePreparedView(key)
         if (!view) view = newChapterView({ beside: true, namePrefix: chapter.namePrefix, book: chapter.book, chapterNumber: chapter.chapterNumber,
             selectedFirst: chapter.first, selectedLast: chapter.last }, chapter.rows)
@@ -1079,7 +1107,19 @@ ApplicationWindow {
         readonly property alias repeater: rowRepeater
         // Each row's rail lanes (packAnnotationLanes).
         readonly property var lanes: app.packAnnotationLanes(verses)
+        // What its rows are laid out with, the reader's while it shows: one
+        // waiting (made ahead, or left) keeps those it was made with
+        // (freeze), so a change of text size, spacing, or width lays out no
+        // waiting view (they go, to be made again: Main.viewLayoutKey).
+        property real bodySize: app.readerBodySize
+        property real lineHeight: bible.lineHeight
         width: readerColumn.width
+        function freeze() { bodySize = bodySize; lineHeight = lineHeight; width = width }
+        function thaw() {
+            bodySize = Qt.binding(function() { return app.readerBodySize })
+            lineHeight = Qt.binding(function() { return bible.lineHeight })
+            width = Qt.binding(function() { return readerColumn.width })
+        }
         onVersesChanged: syncRows()
         Component.onCompleted: syncRows()
         // Prepared ahead (prepareChapterView): its rows are made a few a
@@ -1089,11 +1129,22 @@ ApplicationWindow {
         property bool incremental: false
         readonly property bool building: rowModel.count < verses.length
         signal built()
+        // Its rows are those of verses [firstRow, firstRow + rowModel.count).
+        // A long chapter jumped into (windowTarget: a verse index) first has
+        // only those about that verse that fill the reader, then the rest a
+        // few a turn, below, then above (growSome), the reader kept in place.
+        property int firstRow: 0
+        property int windowTarget: -1
+        // The row of verse index `i`, when made.
+        function rowAt(i) { return i >= firstRow && i < firstRow + rowRepeater.count ? rowRepeater.itemAt(i - firstRow) as VerseItem : null }
         function syncRows() {
             const count = verses.length
-            if (rowModel.count > count) rowModel.remove(count, rowModel.count - count)
+            if (firstRow > 0 && firstRow >= count) { rowModel.clear(); firstRow = 0 }
+            if (firstRow + rowModel.count > count) rowModel.remove(count - firstRow, firstRow + rowModel.count - count)
             // (Counted here: `building` may not have followed new verses yet.)
             if (incremental) { if (rowModel.count < count) Qt.callLater(view.buildSome); else built() }
+            else if (windowTarget >= 0 && !rowModel.count && count) { makeWindow(Math.min(windowTarget, count - 1)); Qt.callLater(view.growSome) }
+            else if (firstRow > 0) Qt.callLater(view.growSome)
             else appendRows()
         }
         function buildSome() {
@@ -1103,20 +1154,66 @@ ApplicationWindow {
             if (building) Qt.callLater(view.buildSome)
             else built()
         }
+        // Rows from `target` down to fill the reader, and above it for the
+        // room a jump leaves there (its margin; focus mode's 40%).
+        function makeWindow(target) {
+            firstRow = target
+            let below = 0, above = 0
+            for (let i = target; i < verses.length && below < reading.height; ++i) {
+                rowModel.append({ row: i })
+                below += rowRepeater.itemAt(rowModel.count - 1).height
+            }
+            while (firstRow > 0 && above < (app.focusLayout ? 0.45 : 0.15) * reading.height) {
+                rowModel.insert(0, { row: firstRow - 1 })
+                firstRow -= 1
+                above += rowRepeater.itemAt(0).height
+            }
+        }
+        function growSome() {
+            if (incremental || !building) return
+            const started = Date.now()
+            while (firstRow + rowModel.count < verses.length && Date.now() - started < 6) rowModel.append({ row: firstRow + rowModel.count })
+            const left = 6 - (Date.now() - started)
+            if (left > 0) makeAbove(left)
+            // The margins place notes by the rows made.
+            if (verseHost.item === view) app.scheduleMargins()
+            if (building) Qt.callLater(view.growSome)
+            else built()
+        }
+        // Rows above those made, for `ms` (negative: to row `to`): shown,
+        // the reader keeps what it shows where it is.
+        function makeAbove(ms, to) {
+            const stop = to || 0
+            if (firstRow <= stop) return
+            const started = Date.now(), shown = verseHost.item === view, anchor = rowRepeater.itemAt(0) as VerseItem
+            if (shown) app.layOutReader()
+            const before = anchor ? anchor.y : 0
+            // (What shows stays put: no scroll for Follow to send.)
+            app.growingRows = true
+            while (firstRow > stop && (ms < 0 || Date.now() - started < ms)) { rowModel.insert(0, { row: firstRow - 1 }); firstRow -= 1 }
+            if (shown && anchor) { app.layOutReader(); app.shiftReader(anchor.y - before) }
+            app.growingRows = false
+        }
+        // Rows up to verse index `i` now (those still to come keep coming).
+        function makeTo(i) {
+            if (i < 0 || i >= verses.length) return
+            while (firstRow + rowModel.count <= i) rowModel.append({ row: firstRow + rowModel.count })
+            makeAbove(-1, i)
+        }
         function appendRows() {
             const added = []
-            for (let i = rowModel.count; i < verses.length; ++i) added.push({ row: i })
+            for (let i = firstRow + rowModel.count; i < verses.length; ++i) added.push({ row: i })
             if (added.length) rowModel.append(added)
         }
-        // Shown before it was done: the rest now; made at once from then on.
-        function finish() { incremental = false; appendRows() }
+        // Shown before it was done, or wanted whole: the rest now; made at once from then on.
+        function finish() { incremental = false; appendRows(); makeAbove(-1) }
         // Where each verse's text is: {number, top, bottom}, in this view
         // as laid out (Main settles it first where that matters).
         function verseExtents() {
             const out = []
             // (Rows the verses just left go once syncRows runs.)
-            for (let i = 0; i < Math.min(rowRepeater.count, view.verses.length); ++i) {
-                const row = rowRepeater.itemAt(i) as VerseItem
+            for (let i = firstRow; i < Math.min(firstRow + rowRepeater.count, view.verses.length); ++i) {
+                const row = rowAt(i)
                 if (row) out.push({ number: view.verses[i].number, top: row.y + row.textOffset, bottom: row.y + row.textOffset + row.textHeight })
             }
             return out
@@ -1127,10 +1224,11 @@ ApplicationWindow {
             model: rowModel
             delegate: VerseItem {
                 id: verseRow
-                required property int index
+                // Its verse's index in `verses` (not its place among the rows made).
+                required property int row
                 // Read in place: a change to marks updates the row rather than making it again.
                 // (A row of a longer chapter reads nothing for the moment before it goes.)
-                readonly property var modelData: view.verses[index] || app.noVerse
+                readonly property var modelData: view.verses[row] || app.noVerse
                 readonly property bool selected: modelData.number >= view.selectedFirst && modelData.number <= view.selectedLast && view.selectedFirst > 0
                 objectName: view.beside ? "contextVerse:" + view.title + ":" + modelData.number : ""
                 readonly property bool textSelected: verseBody.selectionStart !== verseBody.selectionEnd
@@ -1165,7 +1263,7 @@ ApplicationWindow {
                 // number changes only when its value does): the text and the
                 // number (VerseHighlights and FootnoteMarks keep their lists so).
                 readonly property int verseNumber: modelData.number || 0
-                readonly property string bodyHtml: '<div style="line-height:' + (bible.lineHeight * 100) + '%">'
+                readonly property string bodyHtml: '<div style="line-height:' + (view.lineHeight * 100) + '%">'
                     + (app.footnoteHtml(app.verseHtml(modelData.html), modelData.footnotes) || String(modelData.text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
                 body: verseBody
                 searchOverlay: verseSearch
@@ -1202,7 +1300,7 @@ ApplicationWindow {
                     // visibility. First import creates rows inside a hidden
                     // reader; Label height/implicitHeight/padding feedback
                     // otherwise re-enters when that ancestor becomes visible.
-                    height: hasHeading ? headingText.implicitHeight + headingText.y + TypeScale.size(app.readerBodySize, TypeScale.headingBelow) : 0
+                    height: hasHeading ? headingText.implicitHeight + headingText.y + TypeScale.size(view.bodySize, TypeScale.headingBelow) : 0
                     visible: hasHeading
                     Text {
                         id: headingText
@@ -1211,14 +1309,14 @@ ApplicationWindow {
                         // Under the chapter title, its own space suffices,
                         // as in the other layouts (a document's first block
                         // takes no top margin).
-                        y: verseRow.index === 0 ? 0 : TypeScale.size(app.readerBodySize, TypeScale.headingAbove)
+                        y: verseRow.row === 0 ? 0 : TypeScale.size(view.bodySize, TypeScale.headingAbove)
                         // An LRM keeps a Hebrew-first heading ("א Aleph")
                         // in an LTR paragraph; display only.
                         text: app.leftToRightText(verseRow.modelData.heading)
                         horizontalAlignment: Text.AlignLeft
                         textFormat: Text.PlainText
                         font.family: desktop.fontFamily
-                        font.pixelSize: TypeScale.size(app.readerBodySize, TypeScale.heading)
+                        font.pixelSize: TypeScale.size(view.bodySize, TypeScale.heading)
                         font.weight: Font.DemiBold
                         wrapMode: Text.Wrap
                         color: desktop.foreground
@@ -1232,7 +1330,7 @@ ApplicationWindow {
                     sourceComponent: RangeMarker {
                         objectName: view.namePrefix + "verseTagMarker" + verseRow.modelData.number
                         lanes: view.lanes
-                        kind: "tag"; number: verseRow.modelData.number; rowIndex: verseRow.index
+                        kind: "tag"; number: verseRow.modelData.number; rowIndex: verseRow.row
                         ranges: Array.from(verseRow.modelData.tagRanges || [])
                         headingHeight: verseHeading.height; bodyHeight: verseBody.height
                         height: verseRow.height
@@ -1244,7 +1342,7 @@ ApplicationWindow {
                     sourceComponent: RangeMarker {
                         objectName: view.namePrefix + "verseNoteMarker" + verseRow.modelData.number
                         lanes: view.lanes
-                        kind: "note"; number: verseRow.modelData.number; rowIndex: verseRow.index
+                        kind: "note"; number: verseRow.modelData.number; rowIndex: verseRow.row
                         ranges: Array.from(verseRow.modelData.noteRanges || [])
                         headingHeight: verseHeading.height; bodyHeight: verseBody.height
                         height: verseRow.height
@@ -1259,8 +1357,8 @@ ApplicationWindow {
                     sourceComponent: VerseTint {
                         objectName: view.namePrefix + "annotationTint" + verseRow.modelData.number
                         row: verseRow.modelData
-                        previous: verseRow.index > 0 ? view.verses[verseRow.index - 1] : null
-                        next: view.verses[verseRow.index + 1] || null
+                        previous: verseRow.row > 0 ? view.verses[verseRow.row - 1] : null
+                        next: view.verses[verseRow.row + 1] || null
                         headingHeight: verseHeading.height
                         bodyHeight: verseBody.height
                         versionId: bible.versionId
@@ -1382,7 +1480,7 @@ ApplicationWindow {
                         fontSizeMode: Text.HorizontalFit
                         minimumPixelSize: 1
                         text: verseRow.modelData.number
-                        font.pixelSize: TypeScale.size(app.readerBodySize, TypeScale.number)
+                        font.pixelSize: TypeScale.size(view.bodySize, TypeScale.number)
                         font.weight: verseRow.selected ? Font.Bold : Font.Normal
                         color: verseRow.selected ? desktop.accent : desktop.muted
                         FontMetrics { id: numberMetrics; font: numberLabel.font }
@@ -1396,7 +1494,7 @@ ApplicationWindow {
                         hoverEnabled: true
                         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                         preventStealing: true
-                        onPressed: function(mouse) { if (mouse.button === Qt.LeftButton) app.beginTextDrag(verseRow.index, numberMouse, mouse, true) }
+                        onPressed: function(mouse) { if (mouse.button === Qt.LeftButton) app.beginTextDrag(verseRow.row, numberMouse, mouse, true) }
                         onPositionChanged: function(mouse) { if (pressedButtons & Qt.LeftButton) app.updateTextDrag(numberMouse, mouse) }
                         onReleased: function(mouse) {
                             if (mouse.button === Qt.LeftButton) app.finishTextDrag(verseRow.modelData.number, mouse)
@@ -1441,7 +1539,7 @@ ApplicationWindow {
                     body: verseBody
                     sourceText: verseRow.modelData.text
                     lineIndents: verseRow.modelData.indents || []
-                    indentUnit: app.readerBodySize * TypeScale.poetryIndent
+                    indentUnit: view.bodySize * TypeScale.poetryIndent
                     theme: desktop
                     segments: view.beside ? [] : app.searchSegments.filter(function(segment) { return segment.verse === verseRow.verseNumber })
                 }
@@ -1457,7 +1555,7 @@ ApplicationWindow {
                     textFormat: Text.RichText
                     horizontalAlignment: TextEdit.AlignLeft
                     font.family: desktop.fontFamily
-                    font.pixelSize: app.readerSize * app.readerScale
+                    font.pixelSize: view.bodySize
                     color: desktop.foreground
                     // Selected text keeps its look: a dotted underline marks it
                     // (the background at no alpha: Qt veils selected inline cells
@@ -1488,7 +1586,7 @@ ApplicationWindow {
                         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                         cursorShape: Qt.IBeamCursor
                         preventStealing: true
-                        onPressed: function(mouse) { if (mouse.button === Qt.LeftButton) app.beginTextDrag(verseRow.index, bodyMouse, mouse, false) }
+                        onPressed: function(mouse) { if (mouse.button === Qt.LeftButton) app.beginTextDrag(verseRow.row, bodyMouse, mouse, false) }
                         onPositionChanged: function(mouse) { if (pressedButtons & Qt.LeftButton) app.updateTextDrag(bodyMouse, mouse) }
                         onReleased: function(mouse) {
                             if (mouse.button === Qt.LeftButton) app.finishTextDrag(verseRow.modelData.number, mouse)
@@ -1496,7 +1594,7 @@ ApplicationWindow {
                             else { const p = bodyMouse.mapToItem(null, mouse.x, mouse.y); app.openPassageMenu(verseRow.modelData.number, p.x, p.y) }
                         }
                         onCanceled: { app.draggingText = false; app.dragAnchorRow = -1 }
-                        onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) app.selectWordAt(verseRow.index, bodyMouse, mouse) }
+                        onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) app.selectWordAt(verseRow.row, bodyMouse, mouse) }
                     }
                 }
             }
@@ -1537,10 +1635,10 @@ ApplicationWindow {
         }
     }
     function textHit(point) {
-        for (let i = 0; i < verseRepeater.count; ++i) {
-            let row = verseRepeater.itemAt(i) as VerseItem
+        for (let i = rowsFirst; i < rowsEnd; ++i) {
+            let row = rowItem(i) as VerseItem
             let p = row.body.mapFromItem(reading, point.x, point.y)
-            if (p.y <= row.body.height || i === verseRepeater.count - 1) {
+            if (p.y <= row.body.height || i === rowsEnd - 1) {
                 let position = p.y < 0 ? 0 : p.y > row.body.height ? row.body.length
                     : row.body.positionAt(p.x, p.y)
                 return { row: i, position: position }
@@ -1552,7 +1650,7 @@ ApplicationWindow {
         dragOrigin = source.mapToItem(reading, mouse.x, mouse.y)
         dragPoint = dragOrigin
         dragAnchorRow = index
-        let body = (verseRepeater.itemAt(index) as VerseItem).body
+        let body = (rowItem(index) as VerseItem).body
         let p = body.mapFromItem(reading, dragPoint.x, dragPoint.y)
         dragAnchorPosition = body.positionAt(p.x, p.y)
         gutterDrag = gutter
@@ -1567,7 +1665,7 @@ ApplicationWindow {
         if (!draggingText) {
             clearTextSelection()
             draggingText = true
-            if (!gutterDrag) textDragFocus((verseRepeater.itemAt(dragAnchorRow) as VerseItem).body)
+            if (!gutterDrag) textDragFocus((rowItem(dragAnchorRow) as VerseItem).body)
         }
         applyTextDrag()
     }
@@ -1586,8 +1684,8 @@ ApplicationWindow {
         let start = forward ? dragAnchorPosition : hit.position
         let end = forward ? hit.position : dragAnchorPosition
         let pieces = []
-        for (let i = 0; i < verseRepeater.count; ++i) {
-            let body = (verseRepeater.itemAt(i) as VerseItem).body
+        for (let i = rowsFirst; i < rowsEnd; ++i) {
+            let body = (rowItem(i) as VerseItem).body
             if (i < first || i > last) body.deselect()
             else {
                 body.select(i === first ? start : 0, i === last ? end : body.length)
@@ -1613,7 +1711,7 @@ ApplicationWindow {
     // number opens Notes). The release that ends the double click keeps it.
     property bool wordClick: false
     function selectWordAt(index, source, mouse) {
-        const row = verseRepeater.itemAt(index) as VerseItem
+        const row = rowItem(index) as VerseItem
         if (!row || !row.body) return
         clearTextSelection()
         const p = row.body.mapFromItem(source, mouse.x, mouse.y)
@@ -1662,7 +1760,7 @@ ApplicationWindow {
         if (block) { const r = block.verseRect(number); at = block.body.mapToItem(readerColumn, r.x, r.y) }
         else {
             const index = Array.from(bible.verses).findIndex(function(v) { return v.number === number })
-            const row = index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
+            const row = index >= 0 ? rowItem(index) as VerseItem : null
             if (row && row.body) at = row.body.mapToItem(readerColumn, 0, 0)
         }
         selectionBarX = readerColumn.x + at.x
@@ -1803,7 +1901,7 @@ ApplicationWindow {
     }
     function verseRowFor(number) {
         const index = Array.from(bible.verses).findIndex(function(v) { return v.number === number })
-        return index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
+        return index >= 0 ? rowItem(index) as VerseItem : null
     }
     // A source range of one verse in its layout: {body, start, end} document positions.
     function charDocRange(verse, offset, length) {
@@ -1868,8 +1966,8 @@ ApplicationWindow {
             return start && end && charCompare(start, end) < 0 ? { start: start, end: end } : null
         }
         let start = null, end = null
-        for (let i = 0; i < verseRepeater.count; ++i) {
-            const row = verseRepeater.itemAt(i) as VerseItem
+        for (let i = rowsFirst; i < rowsEnd; ++i) {
+            const row = rowItem(i) as VerseItem
             if (!row || !row.body || row.body.selectionStart === row.body.selectionEnd) continue
             const number = bible.verses[i].number
             if (!start) start = charSourceAt(row.body, number, row.body.selectionStart, true) || { verse: number, offset: verseText(number).length }
@@ -1893,8 +1991,8 @@ ApplicationWindow {
             if (first && end) block.body.select(first.start, end.end)
         } else {
             const a = verseOrder(start.verse), z = verseOrder(last.verse)
-            for (let i = 0; i < verseRepeater.count; ++i) {
-                const row = verseRepeater.itemAt(i) as VerseItem
+            for (let i = rowsFirst; i < rowsEnd; ++i) {
+                const row = rowItem(i) as VerseItem
                 if (!row || !row.body) continue
                 if (i < a || i > z) { row.body.deselect(); continue }
                 row.body.select(i === a && first ? first.start : 0, i === z && end ? end.end : row.body.length)
@@ -1932,8 +2030,8 @@ ApplicationWindow {
                     if (a.length === 2 && z.length === 2) block.body.select(a[0], z[1])
                     else block.clearSelection()
                 } else {
-                    for (let j = 0; j < view.repeater.count; ++j) {
-                        const row = view.repeater.itemAt(j) as VerseItem
+                    for (let j = 0; j < rows.length; ++j) {
+                        const row = view.rowAt(j) as VerseItem
                         const number = j < rows.length ? rows[j].number : 0
                         if (!row || !row.body) continue
                         if (!inside || number < from.verse || number > to.verse) { row.body.deselect(); continue }
@@ -2110,8 +2208,8 @@ ApplicationWindow {
             position = body.positionAt(p.x, p.y)
         } else {
             // Only a point on a row's text: headings and row gaps hold none.
-            for (let i = 0; i < verseRepeater.count && !body; ++i) {
-                const row = verseRepeater.itemAt(i) as VerseItem
+            for (let i = rowsFirst; i < rowsEnd && !body; ++i) {
+                const row = rowItem(i) as VerseItem
                 const p = row && row.body ? row.body.mapFromItem(readerColumn, x, y) : null
                 if (!p || p.y < 0 || p.y > row.body.height) continue
                 body = row.body
@@ -2354,7 +2452,7 @@ ApplicationWindow {
             point = block.body.mapToItem(null, r.x, r.y + r.height)
         } else {
             const index = Array.from(bible.verses).findIndex(function(v) { return v.number === number })
-            const row = index >= 0 ? verseRepeater.itemAt(index) as VerseItem : null
+            const row = index >= 0 ? rowItem(index) as VerseItem : null
             if (row && row.body) point = row.body.mapToItem(null, 24 * readerScale, Math.min(row.body.height, readerLineHeight))
         }
         return Qt.point(point.x, Math.max(view.y, Math.min(view.y + reading.height - 24 * readerScale, point.y)))
@@ -3516,8 +3614,8 @@ ApplicationWindow {
             for (const extent of block.verseExtents())
                 out.push({ number: extent.number, top: offset + extent.top, bottom: offset + extent.bottom })
         } else {
-            for (let i = 0; i < verseRows.length; ++i) {
-                const item = verseRepeater.itemAt(i) as VerseItem
+            for (let i = rowsFirst; i < Math.min(rowsEnd, verseRows.length); ++i) {
+                const item = rowItem(i) as VerseItem
                 if (!item) continue
                 out.push({ number: verseRows[i], top: verseHost.y + item.y + item.textOffset, bottom: verseHost.y + item.y + item.textOffset + item.textHeight })
             }
@@ -3532,7 +3630,7 @@ ApplicationWindow {
             const offset = extent ? block.body.mapToItem(readerColumn, 0, 0).y : 0
             return extent ? { number: number, top: offset + extent.top, bottom: offset + extent.bottom } : null
         }
-        const item = verseRepeater.itemAt(verseOrder(number)) as VerseItem
+        const item = rowItem(verseOrder(number)) as VerseItem
         return item ? { number: number, top: verseHost.y + item.y + item.textOffset, bottom: verseHost.y + item.y + item.textOffset + item.textHeight } : null
     }
     // Margins measure only while one is shown; `{`/`}` measure on demand.
@@ -4316,14 +4414,34 @@ ApplicationWindow {
         // Named apart until shown (the reader's names belong to the chapter read).
         const view = newChapterView({ beside: true, namePrefix: "prepared:" + book + ":" + chapter + ":",
             book: book, chapterNumber: chapter, incremental: true }, contextRows[rowsKey])
+        if (!continuousReader) view.freeze()
         view.viewKey = key
         preparedViews[key] = view
-        view.built.connect(function() { Qt.callLater(app.extendBook) })
+        // (Made: the whole book's next, or the jumps' targets, may follow.)
+        view.built.connect(function() { Qt.callLater(app.extendBook); if (!bible.wholeBook) neighbourTimer.restart() })
+        return false
+    }
+    // A view waiting is laid out as the reader was when it began to wait (a
+    // Verse view frozen, a flowing one not rebuilt once going): another text
+    // size, spacing, width, or what the text shows (numbers, headings, focus
+    // mode, note marks, the words of Jesus) makes it stale, so it goes, to
+    // be made again.
+    readonly property string viewLayoutKey: [readerBodySize, bible.lineHeight, readerColumn.width, desktop.fontFamily,
+        bible.showVerseNumbers, bible.showHeadings, focusLayout, inlineNoteMarks, wordsOfJesusColor].join(":")
+    onViewLayoutKeyChanged: clearPreparedViews()
+    // Whether a view made ahead is still being made (tests: its turns render frames).
+    function preparing() {
+        for (const key in preparedViews) if (preparedViews[key].building) return true
         return false
     }
     function clearPreparedViews() {
         const any = Object.keys(preparedViews).length > 0
-        for (const key in preparedViews) preparedViews[key].destroy()
+        for (const key in preparedViews) {
+            const view = preparedViews[key]
+            // (A flowing view going rebuilds nothing meanwhile.)
+            if (view.destroying !== undefined) view.destroying = true
+            view.destroy()
+        }
         preparedViews = ({})
         // Those still wanted are made again.
         if (any) { Qt.callLater(app.extendBook); neighbourTimer.restart() }
@@ -4346,11 +4464,30 @@ ApplicationWindow {
     function prepareNeighbours() {
         if (!bible.ready || bible.busy || bible.wholeBook || closingWindow) return
         const wanted = {}
+        let ready = true
         for (const entry of neighbourChapters()) {
             wanted[chapterViewKey(entry.book, entry.chapter)] = true
+            if (!prepareChapterView(entry.book, entry.chapter)) ready = false
+        }
+        // The chapter left last stays made, for a jump back; once the
+        // neighbours are, so are those [ ] and r would go to.
+        if (preparedViews[leftViewKey]) wanted[leftViewKey] = true
+        for (const entry of jumpTargets()) {
+            const key = chapterViewKey(entry.book, entry.chapter)
+            if (!ready && !preparedViews[key]) continue
+            wanted[key] = true
             prepareChapterView(entry.book, entry.chapter)
         }
         for (const key in preparedViews) if (!wanted[key]) { preparedViews[key].destroy(); delete preparedViews[key] }
+    }
+    // The chapters of the jumps back and forward, and of the ribbon, in the version read.
+    property string leftViewKey: ""
+    function jumpTargets() {
+        const here = bible.book + ":" + bible.chapter, out = []
+        for (const location of [jumpStack[jumpIndex - 1], jumpStack[jumpIndex + 1], bible.ribbonLocation()])
+            if (location && location.versionId === bible.versionId && location.book && location.chapter && location.book + ":" + location.chapter !== here)
+                out.push({ book: location.book, chapter: location.chapter })
+        return out
     }
     // The chapter read until now, kept made (without Whole book: maybe a neighbour).
     function keepPrepared(view) {
@@ -4361,6 +4498,7 @@ ApplicationWindow {
         view.namePrefix = "prepared:" + view.book + ":" + view.chapterNumber + ":"
         view.objectName = ""
         view.selectedFirst = 0; view.selectedLast = 0
+        if (!continuousReader) view.freeze()
         preparedViews[view.viewKey] = view
     }
     // A prepared view, taken to show (its remaining rows made now, if any).
@@ -5160,7 +5298,8 @@ ApplicationWindow {
         return height
     }
     function savePosition() {
-        if (!restoringPosition && bible.ready) {
+        // (Not over a long chapter's rows still being made: its height is not yet its own.)
+        if (!restoringPosition && bible.ready && !(verseHost.item && verseHost.item.building)) {
             const travel = chapterTravel()
             bible.readingPosition = travel > 0 ? Math.max(0, Math.min(1, (readerTargetY() - chapterTopY()) / travel)) : 0
         }
@@ -5199,8 +5338,10 @@ ApplicationWindow {
     // instant: restoring a freshly opened chapter, where there is nothing to slide from.
     function placeVerse(number, alignTop, instant) {
         let index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === number })
-        let row = verseRepeater.itemAt(index) as VerseItem
+        let row = rowItem(index) as VerseItem
         let block = blockLoader.item as BlockReader
+        // A verse whose row is not made yet (a long chapter's, still growing): its now.
+        if (!row && !block && index >= 0 && verseHost.item) { verseHost.item.makeTo(index); layOutReader(); row = rowItem(index) as VerseItem }
         if (!row && !block) return
         if (index === 0 && !contextBeforeRepeater.count) { if (instant) setReaderY(0); else slideReader(0); return }
         let rect = block ? block.verseRect(number) : null
@@ -5244,7 +5385,8 @@ ApplicationWindow {
         restoringPosition = false
         layOutReader()
         const index = Array.from(bible.verses).findIndex(function(verse) { return verse.number === bible.cursorVerse })
-        const row = verseRepeater.itemAt(index) as VerseItem
+        if (index >= 0 && !rowItem(index) && verseHost.item && !continuousReader) { verseHost.item.makeTo(index); layOutReader() }
+        const row = rowItem(index) as VerseItem
         const block = blockLoader.item as BlockReader
         if (!row && !block) return
         const rect = block ? block.verseRect(bible.cursorVerse) : null
@@ -5268,7 +5410,12 @@ ApplicationWindow {
         restoringPosition = true
         positionJumpToSelection = !!jumpToSelection
         positionTimer.restart()
+        // Placed before the next frame, its layout settled first (the timer is
+        // its token, stopped by what cancels it): a frame showing the new
+        // chapter at the old one's scroll would come before the place.
+        Qt.callLater(app.runRestore)
     }
+    function runRestore() { if (positionTimer.running) { positionTimer.stop(); settleReaderLayout(); finishRestore() } }
     // Marks: every mark (highlight, note, tags) on an exact range, in every
     // version, one row each in passage order (bible.marks()). Read when the
     // panel opens and again after changes, but never while a row's note is
@@ -10711,21 +10858,28 @@ ApplicationWindow {
     Timer {
         id: positionTimer
         interval: 80
-        onTriggered: {
-            const reveal = app.revealIdentity === app.selectionIdentity && !app.focusLayout
-            app.revealIdentity = ""
-            if (app.positionJumpToSelection && bible.selectedStart > 0) app.placeVerse(reveal ? bible.selectedStart : bible.cursorVerse, true, !app.restoreSlides)
-            else app.setReaderY(app.chapterTopY() + app.chapterTravel() * Math.max(0, Math.min(1, bible.readingPosition)))
-            app.restoringPosition = false
-            app.followRestored()
+        onTriggered: app.finishRestore()
+    }
+    function finishRestore() {
+        const reveal = revealIdentity === selectionIdentity && !focusLayout
+        revealIdentity = ""
+        if (positionJumpToSelection && bible.selectedStart > 0) placeVerse(reveal ? bible.selectedStart : bible.cursorVerse, true, !restoreSlides)
+        else {
+            // A place as a share of the chapter's height wants all of its rows
+            // (a long chapter's still coming: made now; one made ahead has them).
+            if (verseHost.item && verseHost.item.building && bible.readingPosition > 0) { verseHost.item.finish(); layOutReader() }
+            setReaderY(chapterTopY() + chapterTravel() * Math.max(0, Math.min(1, bible.readingPosition)))
         }
+        restoringPosition = false
+        followRestored()
     }
     // Follow: what this window reads (the passage, and the verse at the top
     // with how far into it), sent to the window beside as it changes, at most
     // once a frame (Qt.callLater gathers a frame's changes), so the window
     // beside scrolls along with this one; and the window beside's, taken
     // without sending it back (followApplying).
-    function queueFollow() { if (following && !followApplying) Qt.callLater(app.emitFollow) }
+    property bool growingRows: false
+    function queueFollow() { if (following && !followApplying && !growingRows) Qt.callLater(app.emitFollow) }
     // Nothing is sent while this window restores or places a moved selection
     // (emitFollow): the place it ends at is (a j that scrolls nothing too).
     onRestoringPositionChanged: if (!restoringPosition) { queueFollow(); if (bookWindow) Qt.callLater(app.extendBook) }
@@ -10745,12 +10899,14 @@ ApplicationWindow {
     function verseStartAt(i) {
         const block = blockLoader.item as BlockReader
         if (block) return blockLoader.mapToItem(readerColumn, 0, block.verseRect(verseRows[i]).y).y
-        const row = verseRepeater.itemAt(i) as VerseItem
+        const row = rowItem(i) as VerseItem
         return row ? verseHost.y + row.y + row.textOffset : NaN
     }
     // Its top and the next verse's (the column's end after the last).
     function verseSpanAt(i) {
-        return { top: verseStartAt(i), bottom: i + 1 < verseRows.length ? verseStartAt(i + 1) : readerColumn.height }
+        // (The last row made, of a long chapter still making them: to the column's end.)
+        const next = i + 1 < verseRows.length ? verseStartAt(i + 1) : NaN
+        return { top: verseStartAt(i), bottom: isNaN(next) ? readerColumn.height : next }
     }
     // The verse at the top of the view and how far into it (0 to 1) the view
     // begins, as it is now (mid-slide too: the window beside slides along);
@@ -10758,10 +10914,12 @@ ApplicationWindow {
     function followTop() {
         const top = reading.contentY, count = verseRows.length
         if (!count) return { verse: 0, fraction: 0, above: 0 }
-        const first = verseStartAt(0)
-        if (!(first <= top)) return { verse: verseRows[0], fraction: 0, above: isNaN(first) ? 0 : first - top }
+        // (Among the rows made, in a long chapter still making them.)
+        const lowest = continuousReader ? 0 : Math.min(rowsFirst, count - 1), highest = continuousReader ? count - 1 : Math.max(lowest, Math.min(rowsEnd, count) - 1)
+        const first = verseStartAt(lowest)
+        if (!(first <= top)) return { verse: verseRows[lowest], fraction: 0, above: isNaN(first) ? 0 : first - top }
         // The last verse that begins at or above the top: verses begin in order.
-        let low = 0, high = count - 1
+        let low = lowest, high = highest
         while (low < high) {
             const middle = Math.ceil((low + high) / 2)
             if (verseStartAt(middle) <= top) low = middle
@@ -10922,6 +11080,8 @@ ApplicationWindow {
     }
     onClosing: function(close) {
         close.accepted = flushNote()
+        // A long chapter's rows still coming: all of them, to save where it is in it.
+        if (verseHost.item && verseHost.item.building) { verseHost.item.finish(); layOutReader() }
         savePosition()
         if (close.accepted) { closingWindow = true; cancelDownload() }
     }

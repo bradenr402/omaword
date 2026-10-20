@@ -59,7 +59,8 @@ class SearchUiTest : public QObject
         const auto quick = body->property("textDocument").value<QQuickTextDocument *>();
         return quick ? quick->textDocument() : nullptr;
     }
-    BlockDocument *blockMapping() const { return window->findChild<BlockDocument *>(); }
+    // The chapter read's (views beside, or made ahead, have their own).
+    BlockDocument *blockMapping() const { auto reader = window->findChild<QObject *>("blockReader"); return reader ? reader->findChild<BlockDocument *>() : nullptr; }
     QRectF verseViewportRect(int verse) const {
         if (prop("continuousReader").toBool()) {
             auto body = item("blockBody");
@@ -83,6 +84,8 @@ class SearchUiTest : public QObject
     }
     void navigate(const QString &reference) {
         QVERIFY(bible->navigate(reference)); call("readerFocus"); QTRY_VERIFY(!prop("restoringPosition").toBool());
+        // A long chapter's rows come over a few turns, the reader kept still: all made.
+        QTRY_VERIFY(!object("verseView") || !object("verseView")->property("building").toBool());
     }
     void find(const QString &query) {
         key(Qt::Key_Slash); QTRY_VERIFY(prop("findPromptOpen").toBool());

@@ -211,7 +211,8 @@ class UiTest : public QObject
         if (!body || !QMetaObject::invokeMethod(body,"positionToRectangle",Q_RETURN_ARG(QRectF,rect),Q_ARG(int,position))) return {};
         return body->mapToScene(QPointF(rect.x(),rect.y() + rect.height()/2)).toPoint();
     }
-    BlockDocument *blockMapping() const { return window->findChild<BlockDocument *>(); }
+    // The chapter read's (views beside, or made ahead, have their own).
+    BlockDocument *blockMapping() const { auto reader = window->findChild<QObject *>("blockReader"); return reader ? reader->findChild<BlockDocument *>() : nullptr; }
     QTextDocument *blockTextDocument() const {
         auto quick = prop("blockBody","textDocument").value<QQuickTextDocument *>();
         return quick ? quick->textDocument() : nullptr;
@@ -4798,9 +4799,9 @@ private slots:
     void positionWithSelectionSurvivesRestart() {
         reference("Psalm 119:16");
         QVERIFY(QMetaObject::invokeMethod(window,"scrollBy",Q_ARG(QVariant,900)));
-        QTest::qWait(450);
+        // (Saved once the chapter's rows are all made: a long one's come over a few turns.)
+        QTRY_VERIFY(bible->readingPosition() > 0);
         const double position = bible->readingPosition();
-        QVERIFY(position > 0);
         unloadUi(); loadUi();
         QCOMPARE(bible->selectedStart(),16);
         const double travel = prop("reading","contentHeight").toDouble() - item("reading")->height();

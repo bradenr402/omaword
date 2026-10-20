@@ -137,7 +137,11 @@ Item {
         ++rebuildCount
         // A character selection survives (text size, line height): the
         // controller reselects it from source positions after the build.
-        if (controller.relayoutTextSelection) controller.relayoutTextSelection(); else controller.clearTextSelection()
+        // (Only the chapter read's: a view beside, or made ahead, building
+        // must not end a selection or a drag under way in the reader.)
+        if (!beside) {
+            if (controller.relayoutTextSelection) controller.relayoutTextSelection(); else controller.clearTextSelection()
+        }
         cancelDrag()
         const em = controller.readerSize * root.readerScale
         const spacing = { headingAbove: TypeScale.size(em, TypeScale.headingAbove),
@@ -533,7 +537,9 @@ Item {
         onContentHeightChanged: paint.requestPaint()
         function syncSelection() {
             document.trackSelection(selectionStart, selectionEnd)
-            root.controller.freeSelectedText = document.selectionText(selectionStart, selectionEnd)
+            // The selected text is the chapter read's (a view beside, or one
+            // made ahead or going, has its part painted by the controller).
+            if (!root.beside && !root.destroying) root.controller.freeSelectedText = document.selectionText(selectionStart, selectionEnd)
             if (!root.destroying) selectionTimer.restart()
         }
         onSelectedTextChanged: syncSelection()

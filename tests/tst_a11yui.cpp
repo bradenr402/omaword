@@ -1195,7 +1195,7 @@ private slots:
             if (mode == "verse") { from = body->mapToScene(QPointF(10, 8)).toPoint(); to = body->mapToScene(QPointF(200, 8)).toPoint(); }
             else {
                 QRectF rect; auto blockBody = item("blockBody");
-                QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<BlockDocument *>()->positionFor(4) + 2));
+                QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<QObject *>("blockReader")->findChild<BlockDocument *>()->positionFor(4) + 2));
                 from = blockBody->mapToScene(rect.center()).toPoint(); to = QPoint(from.x() + 200, from.y());
             }
             // Mouse: drag over text (a character selection), then right-click on it.
@@ -1945,7 +1945,7 @@ private slots:
             if (mode == "verse") number = item("verseNumber17")->mapToScene(QPointF(8, 12)).toPoint();
             else {
                 QRectF rect; auto blockBody = item("blockBody");
-                QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<BlockDocument *>()->positionFor(17)));
+                QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<QObject *>("blockReader")->findChild<BlockDocument *>()->positionFor(17)));
                 number = blockBody->mapToScene(QPointF(rect.x() + 3, rect.center().y())).toPoint();
             }
             QTest::mouseDClick(window, Qt::LeftButton, {}, number);
@@ -2285,7 +2285,7 @@ private slots:
     void blockVerseNumbersExplainSelecting() {
         setMode("block"); navigate("John 3:16");
         QRectF rect; auto blockBody = item("blockBody");
-        QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<BlockDocument *>()->positionFor(17)));
+        QMetaObject::invokeMethod(blockBody, "positionToRectangle", Q_RETURN_ARG(QRectF, rect), Q_ARG(int, window->findChild<QObject *>("blockReader")->findChild<BlockDocument *>()->positionFor(17)));
         const QPoint number = blockBody->mapToScene(QPointF(rect.x() + 3, rect.center().y())).toPoint();
         auto tip = object("blockNumberTip"); QVERIFY(tip);
         // Mouse: hovering a verse number shows the tooltip and a pointing hand.
