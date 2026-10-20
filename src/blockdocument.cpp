@@ -460,6 +460,9 @@ QVariantList BlockDocument::inlineDecorations() const
 {
     QVariantList result;
     if (!m_document) return result;
+    // Each verse's span, read once (a long chapter has many markers).
+    QHash<int, QVariantMap> spans;
+    for (const auto &value : m_spans) { const auto span = value.toMap(); spans.insert(span.value("number").toInt(), span); }
     for (const auto &entry : m_decorations) {
         auto marker = entry.toMap();
         const int position = marker.value("position").toInt();
@@ -473,14 +476,10 @@ QVariantList BlockDocument::inlineDecorations() const
         // Use the original endpoint's font, not the image or superscript verse
         // number. Proportional line leading must never stretch these brackets.
         int neighbor = position;
-        for (const auto &value : m_spans) {
-            const auto span = value.toMap();
-            if (span.value("number") != marker.value("verse")) continue;
+        if (const auto span = spans.constFind(marker.value("verse").toInt()); span != spans.cend())
             neighbor = marker.value("edge") == "close"
-                ? qMax(span.value("textStart").toInt(), span.value("textEnd").toInt() - 1)
-                : span.value("textStart").toInt();
-            break;
-        }
+                ? qMax(span->value("textStart").toInt(), span->value("textEnd").toInt() - 1)
+                : span->value("textStart").toInt();
         QTextCursor cursor(m_document);
         cursor.setPosition(neighbor);
         cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
@@ -534,25 +533,29 @@ QVariantList BlockDocument::annotations(const QVariantList &verses, const QVaria
         ranges[key]["end"] = span.value("end");
         ranges[key]["continuesAfter"] = after;
     };
+    // Each verse's row, read once (a long chapter has many verses).
+    QHash<int, QVariantMap> rows;
+    for (const auto &row : verses) {
+        const auto verse = row.toMap();
+        const int number = verse.value("number").toInt();
+        if (!rows.contains(number)) rows.insert(number, verse);
+    }
     for (const auto &value : m_spans) {
         const auto span = value.toMap();
-        const int number = span.value("number").toInt();
-        for (const auto &row : verses) {
-            const auto verse = row.toMap();
-            if (verse.value("number").toInt() != number) continue;
-            for (const auto &entry : verse.value("noteRanges").toList()) {
-                const auto range = entry.toMap();
-                include("note",range.value("reference").toString(),span,
-                        range.value("continuesBefore").toBool(),
-                        range.value("continuesAfter").toBool(),range);
-            }
-            for (const auto &entry : verse.value("tagRanges").toList()) {
-                const auto range = entry.toMap();
-                include("tag",range.value("reference").toString(),span,
-                        range.value("continuesBefore").toBool(),
-                        range.value("continuesAfter").toBool(),range);
-            }
-            break;
+        const auto found = rows.constFind(span.value("number").toInt());
+        if (found == rows.cend()) continue;
+        const auto &verse = *found;
+        for (const auto &entry : verse.value("noteRanges").toList()) {
+            const auto range = entry.toMap();
+            include("note",range.value("reference").toString(),span,
+                    range.value("continuesBefore").toBool(),
+                    range.value("continuesAfter").toBool(),range);
+        }
+        for (const auto &entry : verse.value("tagRanges").toList()) {
+            const auto range = entry.toMap();
+            include("tag",range.value("reference").toString(),span,
+                    range.value("continuesBefore").toBool(),
+                    range.value("continuesAfter").toBool(),range);
         }
     }
     QVariantList result;

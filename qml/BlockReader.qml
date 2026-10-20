@@ -56,7 +56,7 @@ Item {
     // As a value: an equal list (the view moving beside the chapter read, or
     // back) repaints nothing.
     readonly property string searchKey: JSON.stringify(searchSegments)
-    onSearchKeyChanged: if (!destroying) searchPaint.requestPaint()
+    onSearchKeyChanged: if (!destroying && searchLoader.item) searchLoader.item.requestPaint()
     readonly property real cornerRadius: theme.cornerRadius === undefined ? 0 : theme.cornerRadius
     // Source callers that are letters or digits show as-is; "+"/"-" become a dagger.
     function footnoteMark(caller) { return /^[A-Za-z0-9]{1,3}$/.test(caller || "") ? caller : "\u2020" }
@@ -190,7 +190,7 @@ Item {
     function refreshGeometry() {
         if (!destroying && !building) {
             paint.requestPaint()
-            if (searchPaint.visible) searchPaint.requestPaint()
+            if (searchLoader.item) searchLoader.item.requestPaint()
             // Motion geometry is computed only while it can be seen, keeping
             // drag-autoscroll refreshes as cheap as before. The focus veil
             // still fading out after a rebuild keeps its holes on the text.
@@ -445,24 +445,27 @@ Item {
         }
     }
     // Search is a separate background above annotations and below native text.
-    Canvas {
-        id: searchPaint
-        objectName: root.namePrefix + "blockSearchBackground"
+    // Made only with marks to paint: as tall as the chapter, a canvas paints
+    // itself again whenever its size changes, which takes long.
+    Loader {
+        id: searchLoader
         x: body.x; y: body.y
         width: body.width; height: body.height
-        // Shown (a chapter's whole height of canvas made) only with marks to paint.
-        visible: root.searchSegments.length > 0
-        onVisibleChanged: if (visible) requestPaint()
-        property color accent: root.theme.accent
-        onAccentChanged: requestPaint()
-        onWidthChanged: if (!root.destroying) geometryTimer.restart()
-        onHeightChanged: if (!root.destroying) geometryTimer.restart()
-        onPaint: {
-            if (root.destroying) return
-            const ctx = getContext("2d")
-            ctx.reset()
-            const rects = document.searchRectangles(root.searchSegments)
-            HandDrawn.searchMarks(ctx, rects, accent, false, root.readerScale, "block")
+        active: root.searchSegments.length > 0
+        sourceComponent: Canvas {
+            id: searchPaint
+            objectName: root.namePrefix + "blockSearchBackground"
+            property color accent: root.theme.accent
+            onAccentChanged: requestPaint()
+            onWidthChanged: if (!root.destroying) geometryTimer.restart()
+            onHeightChanged: if (!root.destroying) geometryTimer.restart()
+            onPaint: {
+                if (root.destroying) return
+                const ctx = getContext("2d")
+                ctx.reset()
+                const rects = document.searchRectangles(root.searchSegments)
+                HandDrawn.searchMarks(ctx, rects, accent, false, root.readerScale, "block")
+            }
         }
     }
     // Jump pulse and copy flash: translucent accent behind the text. Plain
@@ -656,23 +659,26 @@ Item {
         Behavior on opacity { NumberAnimation { duration: root.fadeMs } }
         readonly property color veil: root.theme.background
         readonly property real full: 1 - root.dimOpacity
-        Canvas {
-            id: dimPaint
+        // Made only while shown: as tall as the chapter, a canvas paints
+        // itself again whenever its size changes, which takes long (and a
+        // view made ahead, or left, never shows it).
+        Loader {
             anchors.fill: parent
-            property var holes: root.dimRects
-            onHolesChanged: requestPaint()
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            onVisibleChanged: if (visible) requestPaint()
-            property color veil: dimLayer.veil
-            onVeilChanged: requestPaint()
-            onPaint: {
-                if (root.destroying) return
-                const ctx = getContext("2d")
-                ctx.reset()
-                ctx.fillStyle = Qt.rgba(veil.r, veil.g, veil.b, dimLayer.full)
-                ctx.fillRect(0, 0, width, height)
-                for (const r of holes) ctx.clearRect(r.x, r.y, r.width, r.height)
+            active: dimLayer.visible
+            sourceComponent: Canvas {
+                id: dimPaint
+                property var holes: root.dimRects
+                onHolesChanged: requestPaint()
+                property color veil: dimLayer.veil
+                onVeilChanged: requestPaint()
+                onPaint: {
+                    if (root.destroying) return
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.fillStyle = Qt.rgba(veil.r, veil.g, veil.b, dimLayer.full)
+                    ctx.fillRect(0, 0, width, height)
+                    for (const r of holes) ctx.clearRect(r.x, r.y, r.width, r.height)
+                }
             }
         }
     }
@@ -703,73 +709,82 @@ Item {
                     event.accepted = true
                 }
             }
-            Canvas {
-                id: inlinePaint
-                objectName: root.namePrefix + "blockInlinePaint:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
+            // Each part is made only where it shows (a footnote's caller; a
+            // range's bracket and glyph): a chapter's markers are many.
+            Loader {
                 anchors.fill: parent
-                visible: !inlineMarker.footnote
-                property color accent: root.theme.accent
-                property real bracketTop: inlineMarker.modelData.bracketTop
-                property real bracketHeight: inlineMarker.modelData.bracketHeight
-                property real bracketX: inlineMarker.modelData.bracketX
-                property real paintWidth: inlineMarker.modelData.paintWidth
-                property bool rtl: inlineMarker.modelData.rtl
-                onBracketTopChanged: requestPaint()
-                onBracketHeightChanged: requestPaint()
-                onBracketXChanged: requestPaint()
-                onPaintWidthChanged: requestPaint()
-                onRtlChanged: requestPaint()
-                onAccentChanged: requestPaint()
-                onWidthChanged: requestPaint()
-                onHeightChanged: requestPaint()
-                onPaint: {
-                    const ctx = getContext("2d")
-                    ctx.reset()
-                    ctx.fillStyle = accent
-                    const lineWidth = Math.max(1, height / 18)
-                    if (rtl) { ctx.translate(width, 0); ctx.scale(-1, 1) }
-                    ctx.translate(bracketX, 0)
-                    const opening = inlineMarker.opening
-                    const bx = opening ? paintWidth * 0.78 : paintWidth * 0.65
-                    const tip = opening ? paintWidth - lineWidth / 2 : lineWidth / 2
-                    const k = root.readerScale > 0 ? root.readerScale : 1
-                    // Fold the wobble inward so ink stays in the bracket box.
-                    const amp = Math.min(0.8 * k, Math.abs(tip - bx) / 3, bracketHeight / 8)
-                    const top = bracketTop + lineWidth / 2 + amp
-                    const bottom = bracketTop + bracketHeight - lineWidth / 2 - amp
-                    const data = inlineMarker.modelData
-                    const s = HandDrawn.seed(data.kind, root.backend.versionId || "", data.reference, data.edge, data.verse, data.position)
-                    const pen = { width: lineWidth, amp: amp }
-                    if (data.edge === "continuation") {
-                        // A chevron denotes a continued range, not a false start.
-                        HandDrawn.wavyPolyline(ctx, [Qt.point(bx, top), Qt.point(tip, (top + bottom) / 2), Qt.point(bx, bottom)], s, k, pen)
-                    } else {
-                        HandDrawn.wavyPolyline(ctx, [Qt.point(tip, top), Qt.point(bx, top), Qt.point(bx, bottom), Qt.point(tip, bottom)], s, k, pen)
+                active: !inlineMarker.footnote
+                sourceComponent: Canvas {
+                    id: inlinePaint
+                    objectName: root.namePrefix + "blockInlinePaint:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
+                    property color accent: root.theme.accent
+                    property real bracketTop: inlineMarker.modelData.bracketTop
+                    property real bracketHeight: inlineMarker.modelData.bracketHeight
+                    property real bracketX: inlineMarker.modelData.bracketX
+                    property real paintWidth: inlineMarker.modelData.paintWidth
+                    property bool rtl: inlineMarker.modelData.rtl
+                    onBracketTopChanged: requestPaint()
+                    onBracketHeightChanged: requestPaint()
+                    onBracketXChanged: requestPaint()
+                    onPaintWidthChanged: requestPaint()
+                    onRtlChanged: requestPaint()
+                    onAccentChanged: requestPaint()
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.fillStyle = accent
+                        const lineWidth = Math.max(1, height / 18)
+                        if (rtl) { ctx.translate(width, 0); ctx.scale(-1, 1) }
+                        ctx.translate(bracketX, 0)
+                        const opening = inlineMarker.opening
+                        const bx = opening ? paintWidth * 0.78 : paintWidth * 0.65
+                        const tip = opening ? paintWidth - lineWidth / 2 : lineWidth / 2
+                        const k = root.readerScale > 0 ? root.readerScale : 1
+                        // Fold the wobble inward so ink stays in the bracket box.
+                        const amp = Math.min(0.8 * k, Math.abs(tip - bx) / 3, bracketHeight / 8)
+                        const top = bracketTop + lineWidth / 2 + amp
+                        const bottom = bracketTop + bracketHeight - lineWidth / 2 - amp
+                        const data = inlineMarker.modelData
+                        const s = HandDrawn.seed(data.kind, root.backend.versionId || "", data.reference, data.edge, data.verse, data.position)
+                        const pen = { width: lineWidth, amp: amp }
+                        if (data.edge === "continuation") {
+                            // A chevron denotes a continued range, not a false start.
+                            HandDrawn.wavyPolyline(ctx, [Qt.point(bx, top), Qt.point(tip, (top + bottom) / 2), Qt.point(bx, bottom)], s, k, pen)
+                        } else {
+                            HandDrawn.wavyPolyline(ctx, [Qt.point(tip, top), Qt.point(bx, top), Qt.point(bx, bottom), Qt.point(tip, bottom)], s, k, pen)
+                        }
                     }
                 }
             }
             // A small superscript caller (or dagger) in the reserved cell.
-            Text {
-                objectName: root.namePrefix + "blockFootnoteMark:" + inlineMarker.modelData.reference
-                visible: inlineMarker.footnote
+            Loader {
                 anchors.horizontalCenter: parent.horizontalCenter
-                y: 0
-                text: root.footnoteMark(inlineMarker.modelData.caller)
-                color: root.theme.accent
-                font.family: root.theme.fontFamily
-                font.pixelSize: Math.max(6, TypeScale.size(root.controller.readerSize * root.readerScale, TypeScale.mark))
-                textFormat: Text.PlainText
+                active: inlineMarker.footnote
+                sourceComponent: Text {
+                    objectName: root.namePrefix + "blockFootnoteMark:" + inlineMarker.modelData.reference
+                    text: root.footnoteMark(inlineMarker.modelData.caller)
+                    color: root.theme.accent
+                    font.family: root.theme.fontFamily
+                    font.pixelSize: Math.max(6, TypeScale.size(root.controller.readerSize * root.readerScale, TypeScale.mark))
+                    textFormat: Text.PlainText
+                }
             }
-            AnnotationGlyph {
-                objectName: root.namePrefix + "blockInlineGlyph:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.reference
-                visible: inlineMarker.opening && !inlineMarker.footnote
-                kind: inlineMarker.modelData.kind
-                ink: root.theme.accent
+            Loader {
+                active: inlineMarker.opening && !inlineMarker.footnote
                 x: inlineMarker.modelData.rtl ? parent.width - inlineMarker.modelData.paintWidth * 0.05 - width
                                              : inlineMarker.modelData.paintWidth * 0.05
                 y: parent.height * 0.03
                 width: Math.min(inlineMarker.modelData.paintWidth * 0.64, parent.height * 0.64)
                 height: width
+                sourceComponent: AnnotationGlyph {
+                    objectName: root.namePrefix + "blockInlineGlyph:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.reference
+                    kind: inlineMarker.modelData.kind
+                    ink: root.theme.accent
+                    width: parent ? parent.width : 0
+                    height: width
+                }
             }
             MouseArea {
                 id: inlineMouse
@@ -801,11 +816,16 @@ Item {
             Accessible.role: Accessible.Button
             Accessible.name: hint
             Accessible.onPressAction: root.openAnnotation(modelData)
-            AppToolTip {
-                theme: root.theme
-                uiScale: root.controller.scale
-                visible: inlineMarker.visible && (inlineMouse.containsMouse || inlineMarker.activeFocus)
-                text: inlineMarker.hint
+            // Made while hovered or focused: a popup per marker is costly to make.
+            Loader {
+                active: inlineMarker.visible && (inlineMouse.containsMouse || inlineMarker.activeFocus)
+                sourceComponent: AppToolTip {
+                    parent: inlineMarker
+                    theme: root.theme
+                    uiScale: root.controller.scale
+                    visible: true
+                    text: inlineMarker.hint
+                }
             }
         }
     }

@@ -61,11 +61,16 @@ Repeater {
         }
         Accessible.role: Accessible.Button
         Accessible.name: "Footnote: " + footnoteMarker.modelData.text
-        AppToolTip {
-            theme: marks.theme
-            uiScale: marks.controller.scale
-            visible: footnoteMouse.containsMouse
-            text: "Footnote · " + footnoteMarker.modelData.text + "\n" + marks.controller.footnoteHint
+        // Made while hovered: a popup per mark is costly to make.
+        Loader {
+            active: footnoteMouse.containsMouse
+            sourceComponent: AppToolTip {
+                parent: footnoteMarker
+                theme: marks.theme
+                uiScale: marks.controller.scale
+                visible: true
+                text: "Footnote · " + footnoteMarker.modelData.text + "\n" + marks.controller.footnoteHint
+            }
         }
     }
 }

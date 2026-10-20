@@ -345,9 +345,9 @@ ApplicationWindow {
         controller->setProperty("searchSegments", QVariantList{segment(1, foldedStart, 6, true)});
         QTest::qWait(40);
         QVERIFY(grab(item("blockSearchBackground")) != painted);
+        // Without matches the canvas goes (it is made only to paint some).
         controller->setProperty("searchSegments", QVariantList{});
-        QTest::qWait(40);
-        QCOMPARE(ink(grab(item("blockSearchBackground"))), 0);
+        QTRY_VERIFY(!item("blockSearchBackground"));
         QCOMPARE(controller->property("clearCalls").toInt(), clears);
         QCOMPARE(doc->revision(), revision);
         QCOMPARE(doc->toRawText(), nativeText);

@@ -1716,10 +1716,11 @@ private slots:
             setMode(mode); navigate("John 3:3");
             auto marker = visualPrefix(window->contentItem(), mode == "verse" ? "verseFootnoteMark:3." : "blockInlineMarker:footnote:");
             QVERIFY2(marker, qPrintable(mode)); QVERIFY(!marker->activeFocusOnTab());
-            auto tip = toolTipOf(marker); QVERIFY(tip);
+            // Mouse: hovering shows its tooltip (made only then).
+            QVERIFY(!toolTipOf(marker));
+            QTest::mouseMove(window, center(marker)); QTRY_VERIFY(toolTipOf(marker));
+            auto tip = toolTipOf(marker); QTRY_VERIFY(tip->property("visible").toBool());
             QVERIFY2(tip->property("text").toString().endsWith(QStringLiteral("Click or i: peek")), qPrintable(tip->property("text").toString()));
-            // Mouse: hovering shows it.
-            QTest::mouseMove(window, center(marker)); QTRY_VERIFY(tip->property("visible").toBool());
             QTest::mouseMove(window, QPoint(5, window->height() / 2));
             // Keyboard: tab never stops on a footnote marker.
             call("readerFocus");
