@@ -253,10 +253,14 @@ user's real data for development or tests.
   (`textMotionAcross`) goes on into the next one, which the reader then reads
   (`crossChars`, as a verse step across), the anchor's chapter shown beside
   with its part selected (`paintBeside`); `characterTextAcross` copies across.
-  Visual mode and character selection share their header (`ModeHeader`).
+- Key headers (`ModeHeader`): one at a time (`headerMode`): keys waiting on
+  another (after 300 ms), character selection, Visual mode, a range outside it,
+  chapter find's matches, Follow. They float over the reader's top
+  (`modeHeaders`), moving nothing; what reveals a verse or character keeps it
+  below them (`topSafety`), and the ribbon hangs over them.
 - Selection paint: the cursor's verse is tinted (`focusTint`, when `cursorTinted`),
-  as is character selection's focused character; a range's verses
-  (`rangeUnderlined`) and text selected by character get `SelectionMarks`: a
+  as is character selection's focused character; a range's verses, and Visual
+  mode's from its first (`rangeUnderlined`), and text selected by character get `SelectionMarks`: a
   faint wash (`rangeTint`; Verse rows of a range have a joined band instead) and
   dots under the highlight band. The native TextEdit selection stays as state
   (copy, PRIMARY) but paints nothing: its color is the background at alpha 0,
