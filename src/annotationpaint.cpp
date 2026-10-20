@@ -156,6 +156,43 @@ QRectF shapeRect(const QVariant &value)
     return QRectF(shape.value("x").toDouble(), shape.value("y").toDouble(),
                   shape.value("width").toDouble(), shape.value("height").toDouble());
 }
+// Qt's antialiasing rasterizer keeps each scanline's cells in a sorted list,
+// so a long, nearly level edge (a mark's wobbly top, a line long) costs it
+// about the square of its length: a few lines' marks took some 40 ms. Filled
+// in slices 24 device pixels wide, cut on whole pixels so that they meet
+// without a seam, they take about an eighth of that.
+QPolygonF clipX(const QPolygonF &polygon, qreal edge, bool right)
+{
+    QPolygonF out;
+    if (polygon.isEmpty()) return out;
+    out.reserve(polygon.size() + 4);
+    QPointF previous = polygon.last();
+    bool previousIn = right ? previous.x() >= edge : previous.x() <= edge;
+    for (const QPointF &point : polygon) {
+        const bool in = right ? point.x() >= edge : point.x() <= edge;
+        if (in != previousIn)
+            out << QPointF(edge, previous.y() + (edge - previous.x()) / (point.x() - previous.x()) * (point.y() - previous.y()));
+        if (in) out << point;
+        previous = point;
+        previousIn = in;
+    }
+    return out;
+}
+void fillSliced(QPainter *painter, const QPolygonF &polygon)
+{
+    constexpr int slice = 24;
+    const QTransform device = painter->deviceTransform();
+    const QRectF bounds = polygon.boundingRect();
+    const qreal scale = device.m11(), offset = device.dx();
+    if (device.type() > QTransform::TxScale || scale <= 0 || bounds.width() * scale <= 2 * slice) {
+        painter->drawPolygon(polygon, Qt::WindingFill);
+        return;
+    }
+    for (qreal x = std::floor(bounds.left() * scale + offset); x < bounds.right() * scale + offset; x += slice) {
+        const QPolygonF piece = clipX(clipX(polygon, (x - offset) / scale, true), (x + slice - offset) / scale, false);
+        if (piece.size() >= 3) painter->drawPolygon(piece, Qt::WindingFill);
+    }
+}
 // The area that shapes added or removed between two lists cover (each grown
 // by what a stroke's feather and wobble may reach beyond its rect).
 QRectF changedArea(const QVariantList &before, const QVariantList &after, qreal margin)
@@ -238,8 +275,8 @@ void AnnotationPaint::paint(QPainter *painter)
         const QRectF rect = shapeRect(value);
         if (!shown(rect)) continue;
         const auto band = value.toMap();
-        painter->drawPolygon(HandDrawn::bandPolygon(rect, band.value("seed").toUInt(), m_penScale, true, true,
-                                                    band.value("left").toBool(), band.value("right").toBool()), Qt::WindingFill);
+        fillSliced(painter, HandDrawn::bandPolygon(rect, band.value("seed").toUInt(), m_penScale, true, true,
+                                                   band.value("left").toBool(), band.value("right").toBool()));
     }
     for (const auto &value : std::as_const(m_strokes)) {
         const QRectF rect = shapeRect(value);
@@ -248,7 +285,7 @@ void AnnotationPaint::paint(QPainter *painter)
             QColor ink = m_ink;
             ink.setAlphaF(float(m_inkAlpha * opacity));
             painter->setBrush(ink);
-            painter->drawPolygon(polygon, Qt::WindingFill);
+            fillSliced(painter, polygon);
         }
     }
     emit painted();
