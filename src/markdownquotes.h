@@ -1,11 +1,13 @@
 #pragma once
 
+#include <QColor>
 #include <QObject>
 #include <QPointer>
 #include <QQuickTextDocument>
 #include <QTimer>
 #include <QVariantList>
 
+class QTextCursor;
 class QTextDocument;
 
 // A Markdown TextEdit's preview layout (TextEdit.MarkdownText). Qt indents
@@ -24,6 +26,7 @@ class QTextDocument;
 // (Main.previewMarkdown) marks them with zero-width spaces (U+200B): one
 // opening a quote's first block, one closing a block whose paragraph goes
 // on in the next. They are read into each block's user state and removed.
+// Links take `linkColor` (the theme's), not the palette's Qt gives them.
 class MarkdownQuotes : public QObject
 {
     Q_OBJECT
@@ -31,6 +34,7 @@ class MarkdownQuotes : public QObject
     Q_PROPERTY(qreal indent READ indent WRITE setIndent NOTIFY indentChanged)
     Q_PROPERTY(qreal listIndent READ listIndent WRITE setListIndent NOTIFY listIndentChanged)
     Q_PROPERTY(qreal gap READ gap WRITE setGap NOTIFY gapChanged)
+    Q_PROPERTY(QColor linkColor READ linkColor WRITE setLinkColor NOTIFY linkColorChanged)
     Q_PROPERTY(QVariantList bars READ bars NOTIFY barsChanged)
 public:
     explicit MarkdownQuotes(QObject *parent = nullptr);
@@ -42,15 +46,19 @@ public:
     void setListIndent(qreal indent);
     qreal gap() const { return m_gap; }
     void setGap(qreal gap);
+    QColor linkColor() const { return m_linkColor; }
+    void setLinkColor(const QColor &color);
     QVariantList bars() const { return m_bars; }
 signals:
     void documentChanged();
     void indentChanged();
     void listIndentChanged();
     void gapChanged();
+    void linkColorChanged();
     void barsChanged();
 private:
     void narrow();
+    void colorLinks(QTextCursor &cursor);
     void measure();
     // The room a list's markers take before its text: the widest one and a space.
     static qreal markerRoom(const class QTextList *list);
@@ -59,6 +67,7 @@ private:
     qreal m_indent = 14;
     qreal m_listIndent = 24;
     qreal m_gap = 9;
+    QColor m_linkColor;
     bool m_narrowing = false;
     QVariantList m_bars;
     // Coalesces layout changes into one measurement per event loop pass.

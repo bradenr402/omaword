@@ -7591,7 +7591,7 @@ ApplicationWindow {
                                 background: Item {}
                                 onLinkActivated: function(link) { app.activateNoteLink(link) }
                                 Accessible.name: "Note preview"
-                                QuoteBars { objectName: "noteQuoteBars"; target: notePreviewText; color: app.quoteBarColor; uiScale: app.scale }
+                                QuoteBars { objectName: "noteQuoteBars"; target: notePreviewText; color: app.quoteBarColor; linkColor: desktop.accent; uiScale: app.scale }
                             }
                         }
                         Label {
@@ -7884,7 +7884,7 @@ ApplicationWindow {
                                 background: Item {}
                                 onLinkActivated: function(link) { app.activateNoteLink(link) }
                                 Accessible.name: "Desk preview"
-                                QuoteBars { objectName: "deskQuoteBars"; target: deskPreviewText; color: app.quoteBarColor; uiScale: app.scale }
+                                QuoteBars { objectName: "deskQuoteBars"; target: deskPreviewText; color: app.quoteBarColor; linkColor: desktop.accent; uiScale: app.scale }
                             }
                         }
                     }

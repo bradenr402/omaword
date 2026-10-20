@@ -277,6 +277,19 @@ private slots:
         const auto preview = item("deskPreview");
         const auto document = preview->property("textDocument").value<QQuickTextDocument *>()->textDocument();
         QVERIFY(document->toHtml().contains("omaword-passage:"));
+        // Its links take the theme's accent (not Qt's palette blue), and follow it.
+        const auto linkColors = [&] {
+            QSet<QRgb> colors;
+            for (auto block = document->begin(); block.isValid(); block = block.next())
+                for (auto it = block.begin(); !it.atEnd(); ++it)
+                    if (it.fragment().charFormat().isAnchor()) colors.insert(it.fragment().charFormat().foreground().color().rgba());
+            return colors;
+        };
+        const auto accent = desktop->property("accent").value<QColor>();
+        QCOMPARE(linkColors(), QSet<QRgb>{accent.rgba()});
+        QVERIFY(desktop->setProperty("accent", QColor("#b454ea")));
+        QTRY_COMPARE(linkColors(), QSet<QRgb>{QColor("#b454ea").rgba()});
+        QVERIFY(desktop->setProperty("accent", accent));
         const auto found = document->find("John 1:4"); QVERIFY(!found.isNull());
         const auto point = preview->mapToScene(caret(preview, found.selectionStart() + 2).center()).toPoint();
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point);

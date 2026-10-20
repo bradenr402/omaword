@@ -71,6 +71,14 @@ void MarkdownQuotes::setIndent(qreal indent)
     emit indentChanged();
 }
 
+void MarkdownQuotes::setLinkColor(const QColor &color)
+{
+    if (color == m_linkColor) return;
+    m_linkColor = color;
+    narrow();
+    emit linkColorChanged();
+}
+
 void MarkdownQuotes::setListIndent(qreal indent)
 {
     if (qFuzzyCompare(indent, m_listIndent)) return;
@@ -148,6 +156,7 @@ void MarkdownQuotes::narrow()
     if (!qFuzzyCompare(m_document->indentWidth(), m_listIndent)) m_document->setIndentWidth(m_listIndent);
     QTextCursor cursor(m_document);
     cursor.beginEditBlock();
+    colorLinks(cursor);
     const QChar marker(0x200b);
     QTextBlock previous;
     // How much further in each list stands than its levels' indent, its
@@ -256,6 +265,37 @@ void MarkdownQuotes::narrow()
     cursor.endEditBlock();
     m_narrowing = false;
     m_measure.start();
+}
+
+void MarkdownQuotes::colorLinks(QTextCursor &cursor)
+{
+    if (!m_linkColor.isValid()) return;
+    // Gathered first: a format merged splits and joins the fragments.
+    QList<QTextFragment> links;
+    for (auto block = m_document->begin(); block.isValid(); block = block.next())
+        for (auto it = block.begin(); !it.atEnd(); ++it)
+            if (it.fragment().isValid() && it.fragment().charFormat().isAnchor()
+                && it.fragment().charFormat().foreground().color() != m_linkColor) links.append(it.fragment());
+    for (const auto &fragment : links) {
+        QTextCharFormat ink;
+        ink.setForeground(m_linkColor);
+        // An image's glyph (narrow) is drawn again in it, as large.
+        const auto image = fragment.charFormat().toImageFormat();
+        const QString glyph = QStringLiteral("omaword-glyph:image/");
+        if (image.isValid() && image.name().startsWith(glyph)) {
+            const int em = image.name().section('/', -1).toInt();
+            const QUrl name(glyph + QStringLiteral("%1/%2").arg(m_linkColor.name(QColor::HexArgb).mid(1)).arg(em));
+            QSizeF size;
+            m_document->addResource(QTextDocument::ImageResource, name, imageGlyph(m_linkColor, em, &size));
+            QTextImageFormat redrawn;
+            redrawn.setName(name.toString());
+            redrawn.setForeground(m_linkColor);
+            ink = redrawn;
+        }
+        cursor.setPosition(fragment.position());
+        cursor.setPosition(fragment.position() + fragment.length(), QTextCursor::KeepAnchor);
+        cursor.mergeCharFormat(ink);
+    }
 }
 
 void MarkdownQuotes::measure()
