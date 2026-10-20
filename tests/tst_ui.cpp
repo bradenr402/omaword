@@ -3598,6 +3598,13 @@ private slots:
         // One verse: its tint alone.
         QTRY_VERIFY(tinted(16)); QVERIFY(lines(16).isEmpty());
         if (!block) QVERIFY(!banded(16));
+        // Visual mode marks its range from its first verse, as character
+        // selection marks its first character: tinted, washed, and underlined.
+        key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(window->property("verseMode").toBool());
+        QTRY_VERIFY(tinted(16)); QTRY_VERIFY(!lines(block ? 0 : 16).isEmpty());
+        if (!block) QVERIFY(banded(16));
+        key(Qt::Key_Escape); QTRY_VERIFY(!window->property("verseMode").toBool());
+        QTRY_VERIFY(lines(block ? 0 : 16).isEmpty());
         // A range: the cursor's verse tinted, all of it washed and underlined,
         // the dots under the baseline of each line and within the text's width.
         key(Qt::Key_V, Qt::ShiftModifier); key(Qt::Key_J); key(Qt::Key_J);

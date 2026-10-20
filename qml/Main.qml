@@ -907,7 +907,9 @@ ApplicationWindow {
     // range (several, or reaching into other chapters) are underlined with
     // dots, as is text selected by character, which no tint marks.
     readonly property bool cursorTinted: hasSelection && !charMode && !freeSelectedText.length
-    readonly property bool rangeUnderlined: cursorTinted && (bible.selectedStart !== bible.selectedEnd || bible.crossChapterSelection)
+    // Visual mode underlines its range from the first verse, as character
+    // selection marks its first character.
+    readonly property bool rangeUnderlined: cursorTinted && (verseMode || bible.selectedStart !== bible.selectedEnd || bible.crossChapterSelection)
     // The focused verse's tint (and the focused character's), and a range's
     // or a character selection's faint wash under its dots.
     readonly property color focusTint: tint(desktop.accent, 0.22)
