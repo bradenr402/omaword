@@ -64,7 +64,7 @@ Every action is in the `actions` catalog in `qml/Main.qml`, which feeds Keybindi
 ## Code style
 
 - C++17 with Qt idioms: `QStringLiteral`, `auto` for obvious types, `m_` members, early returns, function braces on their own line. QML: 4-space indent, logic in small functions or `.js` libraries (pure JS stays testable). Match the file.
-- A C++ list or map property is a live reference in QML: rows kept from it read it again later. Copy the values you keep.
+- A C++ list or map property is a live reference in QML: rows kept from it read it again later, and each element read reads the property again (`Array.from` over a list its getter builds rebuilds it once per element). Copy the values you keep.
 - Comments explain why, never what. Fail loudly at boundaries (import, catalog, backups); don't swallow errors.
 - Keep scratch scripts, notes, and screenshots out of the repo; `screenshots/` holds only README images.
 
