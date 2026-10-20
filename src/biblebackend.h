@@ -2,6 +2,7 @@
 
 #include "scripturesearch.h"
 #include "aoimporter.h"
+#include "textselection.h"
 #include <QObject>
 #include <QFutureWatcher>
 #include <QHash>
@@ -442,6 +443,14 @@ public:
                                       bool quotation = true) const;
     Q_INVOKABLE QString copyCharacters(int startVerse, int startOffset, int endVerse, int endOffset,
                                        bool plainText = false);
+    // The same past the chapter read (a selection reaching into others), at
+    // positions {book, chapter, verse, offset}: the motion goes from the
+    // chapter read over it and the chapters either side as one text, each
+    // chapter a paragraph (gg and G go to its own ends: use textMotion).
+    Q_INVOKABLE QVariantMap textMotionAcross(QString motion, int verse, int offset, int count = 1) const;
+    Q_INVOKABLE int characterEndAt(const QVariantMap &position) const;
+    Q_INVOKABLE QString characterTextAcross(const QVariantMap &start, const QVariantMap &end, bool quotation = true) const;
+    Q_INVOKABLE QString copyCharactersAcross(const QVariantMap &start, const QVariantMap &end, bool plainText = false);
     // The desktop's PRIMARY selection (middle-click paste), where supported.
     // lastPrimarySelection() is the last text offered (also where unsupported).
     Q_INVOKABLE void setPrimarySelection(QString text);
@@ -500,6 +509,8 @@ private:
     bool loadPreferences();
     bool savePreference(const QString &key, const QVariant &value);
     QString copyRange(int first, int last, const QString &reference, bool plainText);
+    // A chapter's verses for character selection (the chapter read's from its rows).
+    QList<TextSelection::Verse> selectionChapter(int book, int chapter) const;
     struct Verse { int book = 0, chapter = 0, verse = 0; bool paragraphStart = false; };
     const QVector<Verse> &canonVerses() const { return m_keys; }
     int absoluteVerse(int book, int chapter, int verse) const;

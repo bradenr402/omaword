@@ -1509,8 +1509,11 @@ ApplicationWindow {
         else clearTextSelection()
     }
     function clearTextSelection() {
+        // (A character selection going on into another chapter keeps it.)
+        if (charCrossing) return
         freeSelectedText = ""
         if (charMode) { charMode = false; charPending = ""; charAnchor = null; charCursor = null }
+        paintBeside(null)
         let block = blockLoader.item as BlockReader
         if (block) block.clearSelection()
         for (let i = 0; i < verseRepeater.count; ++i) {
@@ -1740,28 +1743,42 @@ ApplicationWindow {
         if (!freeSelectedText.length || bible.busy) { rejected(bible.busy ? unavailableReason("copy") : "Nothing selected to copy"); return false }
         // Plain text is the selection as shown (character selection: its source text).
         const range = plainText ? null : selectedSourceRange()
-        const text = range ? bible.copyCharacters(range.start.verse, range.start.offset, range.end.verse, range.end.offset, false) : ""
+        const across = !!range && charAcross(range)
+        const text = !range ? "" : across ? bible.copyCharactersAcross(range.start, range.end, false)
+            : bible.copyCharacters(range.start.verse, range.start.offset, range.end.verse, range.end.offset, false)
         if (!text.length) copyFreeText()
-        if (range && text.length) flashVerses(range.start.verse, range.end.verse)
+        // (Across chapters, the chapter read's part.)
+        if (range && text.length) flashVerses(inRead(range.start) ? range.start.verse : verseRows[0], inRead(range.end) ? range.end.verse : verseRows[verseRows.length - 1])
         notify(plainText || !text.length ? "Selected text copied as plain text" : "Selected text copied as quotation", true)
         sounds.play("chime")
         return true
     }
 
     // ── Character selection (v): Vim's charwise visual over the source
-    // text of the chapter. Positions are {verse, offset}: a verse number and a
+    // text. Positions are {book, chapter, verse, offset}: a verse number and a
     // UTF-16 offset into that verse's plain text, shared by all three layouts;
     // each layout maps them into its own document (SearchDocument per Verse
     // row, BlockDocument in Paragraph/Block) and paints the native selection.
     // Motions and copy text come from the backend (textselection.cpp); lines
-    // (j k 0 ^ $) come from the layout's geometry.
+    // (j k 0 ^ $) come from the layout's geometry. The cursor is always in the
+    // chapter read; past its ends it goes on into the next chapter, which the
+    // reader then reads (crossChars), the anchor staying where it was.
     property bool charMode: false
     property var charAnchor: null
     property var charCursor: null
     property real charColumn: -1
     property string charPending: ""
     readonly property string charChapterKey: bible.versionId + ":" + bible.book + ":" + bible.chapter + ":" + bible.readingMode
-    onCharChapterKeyChanged: if (charMode) endCharMode()
+    onCharChapterKeyChanged: if (charMode && !charCrossing) endCharMode()
+    function charPos(verse, offset) { return { book: bible.book, chapter: bible.chapter, verse: verse, offset: offset } }
+    // Whether a position is in the chapter read (one without a chapter is).
+    function inRead(pos) { return pos.book === undefined || (pos.book === bible.book && pos.chapter === bible.chapter) }
+    readonly property var bookOrder: {
+        const order = {}
+        Array.from(bible.books).forEach(function(book, i) { order[book.id] = i })
+        return order
+    }
+    function chapterOrder(pos) { return pos.book === undefined ? chapterOrder(charPos(0, 0)) : (bookOrder[pos.book] || 0) * 1000 + pos.chapter }
     // The passage menu opened from character selection keeps it (its copy
     // entries copy it); anything else that takes the reader ends it.
     onReaderBaseChanged: if (!readerBase && charMode && !(contextMenu.visible && contextMenu.target === "passage")) endCharMode()
@@ -1809,16 +1826,21 @@ ApplicationWindow {
         const p = range.body.mapToItem(readerColumn, r.x, r.y)
         return { x: p.x, y: p.y, height: r.height, body: range.body, verse: pos.verse, position: range.start }
     }
-    function charCompare(a, b) { return a.verse !== b.verse ? verseOrder(a.verse) - verseOrder(b.verse) : a.offset - b.offset }
+    function charCompare(a, b) {
+        const chapters = chapterOrder(a) - chapterOrder(b)
+        if (chapters) return chapters
+        return a.verse !== b.verse ? (inRead(a) ? verseOrder(a.verse) - verseOrder(b.verse) : a.verse - b.verse) : a.offset - b.offset
+    }
     function verseOrder(number) { return Array.from(bible.verses).findIndex(function(v) { return v.number === number }) }
     // [start, end) of the character selection, end exclusive.
     function charRange() {
         if (!charMode || !charAnchor || !charCursor) return null
         const forward = charCompare(charAnchor, charCursor) <= 0
         const first = forward ? charAnchor : charCursor, last = forward ? charCursor : charAnchor
-        return { start: { verse: first.verse, offset: first.offset },
-                 end: { verse: last.verse, offset: bible.characterEnd(last.verse, last.offset) } }
+        return { start: Object.assign({}, first),
+                 end: Object.assign({}, last, { offset: inRead(last) ? bible.characterEnd(last.verse, last.offset) : bible.characterEndAt(last) }) }
     }
+    function charAcross(range) { return !inRead(range.start) || !inRead(range.end) }
     // The mouse-dragged selection as source [start, end), or the character selection.
     function selectedSourceRange() {
         if (charMode) return charRange()
@@ -1844,14 +1866,18 @@ ApplicationWindow {
     function applyCharSelection(reveal) {
         const range = charRange()
         if (!range) return
-        const last = { verse: range.end.verse, offset: charCompare(charAnchor, charCursor) <= 0 ? charCursor.offset : charAnchor.offset }
-        const first = charDocRange(range.start.verse, range.start.offset, charLength(range.start))
-        const end = charDocRange(last.verse, last.offset, range.end.offset - last.offset)
+        // The chapter read's part: from its start, or to its end, where the
+        // selection reaches past them (paintBeside paints the rest).
+        const forward = charCompare(charAnchor, charCursor) <= 0
+        const start = inRead(range.start) ? range.start : bible.textMotion("gg", charCursor.verse, charCursor.offset)
+        const last = inRead(range.end) ? (forward ? charCursor : charAnchor) : bible.textMotion("G", charCursor.verse, charCursor.offset)
+        const first = charDocRange(start.verse, start.offset, charLength(start))
+        const end = charDocRange(last.verse, last.offset, charLength(last))
         const block = blockLoader.item as BlockReader
         if (block) {
             if (first && end) block.body.select(first.start, end.end)
         } else {
-            const a = verseOrder(range.start.verse), z = verseOrder(range.end.verse)
+            const a = verseOrder(start.verse), z = verseOrder(last.verse)
             for (let i = 0; i < verseRepeater.count; ++i) {
                 const row = verseRepeater.itemAt(i) as VerseItem
                 if (!row || !row.body) continue
@@ -1859,8 +1885,51 @@ ApplicationWindow {
                 row.body.select(i === a && first ? first.start : 0, i === z && end ? end.end : row.body.length)
             }
         }
-        freeSelectedText = bible.characterText(range.start.verse, range.start.offset, range.end.verse, range.end.offset, false)
+        paintBeside(range)
+        freeSelectedText = charAcross(range) ? bible.characterTextAcross(range.start, range.end, false)
+            : bible.characterText(range.start.verse, range.start.offset, range.end.verse, range.end.offset, false)
         if (reveal !== false) revealChar()
+    }
+    // A character selection's text in the chapters shown beside the one read
+    // that it reaches into, selected in their views as in the reader's (none
+    // without a selection, `range` null).
+    property bool charBeside: false
+    function paintBeside(range) {
+        if (!range && !charBeside) return
+        charBeside = false
+        for (const repeater of [contextBeforeRepeater, contextAfterRepeater]) {
+            for (let i = 0; i < repeater.count; ++i) {
+                const chapter = repeater.itemAt(i) as ContextChapter
+                const view = chapter ? chapter.view : null
+                if (!view) continue
+                const here = chapterOrder({ book: chapter.book, chapter: chapter.chapterNumber })
+                const rows = view.verses
+                const inside = !!range && rows.length > 0 && here >= chapterOrder(range.start) && here <= chapterOrder(range.end)
+                // Its part: from the selection's start, else its own; to the selection's end, else its own.
+                const lastRow = rows.length ? rows[rows.length - 1] : null
+                const from = inside && here === chapterOrder(range.start) ? range.start : { verse: rows.length ? rows[0].number : 0, offset: 0 }
+                const to = inside && here === chapterOrder(range.end) ? range.end : { verse: lastRow ? lastRow.number : 0, offset: lastRow ? String(lastRow.text || "").length : 0 }
+                if (chapter.continuous) {
+                    const block = view as BlockReader
+                    const fromRow = inside ? Array.from(rows).find(function(row) { return row.number === from.verse }) : null
+                    const a = fromRow ? Array.from(block.mapping.documentRange(from.verse, from.offset, Math.max(1, String(fromRow.text || "").length - from.offset))) : []
+                    const z = inside ? Array.from(block.mapping.documentRange(to.verse, 0, to.offset)) : []
+                    if (a.length === 2 && z.length === 2) block.body.select(a[0], z[1])
+                    else block.clearSelection()
+                } else {
+                    for (let j = 0; j < view.repeater.count; ++j) {
+                        const row = view.repeater.itemAt(j) as VerseItem
+                        const number = j < rows.length ? rows[j].number : 0
+                        if (!row || !row.body) continue
+                        if (!inside || number < from.verse || number > to.verse) { row.body.deselect(); continue }
+                        const a = number === from.verse ? Array.from(row.searchOverlay.documentRange(from.offset, Math.max(1, String(rows[j].text || "").length - from.offset))) : []
+                        const z = number === to.verse ? Array.from(row.searchOverlay.documentRange(0, to.offset)) : []
+                        row.body.select(a.length === 2 ? a[0] : 0, z.length === 2 ? z[1] : row.body.length)
+                    }
+                }
+                if (inside) charBeside = true
+            }
+        }
     }
     function revealChar() {
         const rect = charRect(charCursor)
@@ -1901,8 +1970,8 @@ ApplicationWindow {
         }
         if (!anchor || !anchor.verse || !cursor || !cursor.verse) { if (!fromMouse) rejected(); return false }
         if (verseMode) { verseMode = false }
-        charAnchor = { verse: anchor.verse, offset: anchor.offset }
-        charCursor = { verse: cursor.verse, offset: cursor.offset }
+        charAnchor = charPos(anchor.verse, anchor.offset)
+        charCursor = charPos(cursor.verse, cursor.offset)
         charColumn = -1
         charPending = ""
         charMode = true
@@ -1938,12 +2007,35 @@ ApplicationWindow {
         charCursor = null
         clearCount()
         clearTextSelection()
+        // Gone across chapters, the verses it ran over stay selected no more.
+        if (charSpanned && bible.crossChapterSelection) bible.selectVerses(bible.cursorVerse, bible.cursorVerse)
+        charSpanned = false
     }
     function setCharCursor(pos, keepColumn) {
         if (!pos || !pos.verse) { rejected(); return }
-        charCursor = { verse: pos.verse, offset: pos.offset }
+        if (!inRead(pos)) { crossChars(pos, keepColumn); return }
+        charCursor = charPos(pos.verse, pos.offset)
         if (!keepColumn) charColumn = -1
         applyCharSelection()
+    }
+    // The cursor going on past the chapter read into another: the reader
+    // reads that one, as a verse step across does, the selection's verses
+    // running from the anchor's to the cursor's (the chapters between, and
+    // the anchor's, shown beside it with their part of the text selected).
+    property bool charCrossing: false
+    property bool charSpanned: false
+    function crossChars(pos, keepColumn) {
+        if (!flushNote()) return
+        const anchor = charAnchor
+        charCrossing = true
+        if (inRead(anchor)) bible.selectVerses(anchor.verse, charCursor.verse)
+        changeSelection(function() { bible.selectThrough(pos.book, pos.chapter, pos.verse, true) })
+        charCrossing = false
+        if (!inRead(pos)) { endCharMode(); return }
+        charSpanned = true
+        charCursor = charPos(pos.verse, pos.offset)
+        if (!keepColumn) charColumn = -1
+        applyCharSelection(false)
     }
     function charCount() {
         const count = Math.max(1, Math.min(999999, Number(verseCount) || 1))
@@ -1954,15 +2046,20 @@ ApplicationWindow {
         let count = 1
         if (counted === false) clearCount()
         else count = charCount()
-        const next = bible.textMotion(motion, charCursor.verse, charCursor.offset, count)
-        if (next && next.verse === charCursor.verse && next.offset === charCursor.offset) sounds.play("boundary")
+        // gg and G keep to the chapter's ends; the others go on past them.
+        const next = motion === "gg" || motion === "G" ? bible.textMotion(motion, charCursor.verse, charCursor.offset, count)
+            : bible.textMotionAcross(motion, charCursor.verse, charCursor.offset, count)
+        if (next && inRead(next) && next.verse === charCursor.verse && next.offset === charCursor.offset) sounds.play("boundary")
         setCharCursor(next)
     }
     function charObject(object) {
         const count = charCount()
-        const range = bible.textObject(object, charAnchor.verse, charAnchor.offset, charCursor.verse, charCursor.offset, count)
+        // An anchor in another chapter stands, here, at this chapter's end toward it.
+        const anchor = inRead(charAnchor) ? charAnchor
+            : bible.textMotion(charCompare(charAnchor, charCursor) < 0 ? "gg" : "G", charCursor.verse, charCursor.offset)
+        const range = bible.textObject(object, anchor.verse, anchor.offset, charCursor.verse, charCursor.offset, count)
         if (!range || !range.anchor || !range.anchor.verse) { rejected(); return }
-        charAnchor = { verse: range.anchor.verse, offset: range.anchor.offset }
+        if (inRead(charAnchor)) charAnchor = charPos(range.anchor.verse, range.anchor.offset)
         setCharCursor(range.cursor)
     }
     // o: the cursor goes to the selection's other end (Visual mode, any range
@@ -2043,7 +2140,14 @@ ApplicationWindow {
             if (!next) break
             pos = next.pos; rect = next.rect; moved = true
         }
-        if (!moved) { sounds.play("boundary"); return }
+        if (!moved) {
+            // Past the chapter's last (first) line: on into the next (previous) chapter's text.
+            const edge = bible.textMotion(direction > 0 ? "G" : "gg", charCursor.verse, charCursor.offset)
+            const beyond = edge ? bible.textMotionAcross(direction > 0 ? "l" : "h", edge.verse, edge.offset, 1) : null
+            if (beyond && beyond.verse && !inRead(beyond)) setCharCursor(beyond, true)
+            else sounds.play("boundary")
+            return
+        }
         setCharCursor(pos, true)
     }
     // 0 ^ $: the cursor's visual line in the current layout.

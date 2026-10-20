@@ -4042,6 +4042,108 @@ QString BibleBackend::copyCharacters(int startVerse, int startOffset, int endVer
     copyText(text); clearError(); return text;
 }
 
+QList<TextSelection::Verse> BibleBackend::selectionChapter(int book, int chapter) const
+{
+    if (book == m_book && chapter == m_chapter) return selectionVerses(m_verses);
+    QList<TextSelection::Verse> verses;
+    QSqlQuery q(m_bible);
+    q.prepare("SELECT v.number,v.text,i.levels FROM verses v LEFT JOIN indents i ON i.book=v.book AND i.chapter=v.chapter AND i.verse=v.number "
+              "WHERE v.book=? AND v.chapter=? ORDER BY v.number");
+    q.addBindValue(book); q.addBindValue(chapter);
+    if (!q.exec()) return verses;
+    while (q.next()) {
+        const int number = q.value(0).toInt();
+        const QString levels = q.value(2).toString();
+        verses.append({number, q.value(1).toString(), endpoint(absoluteVerse(book,chapter,number)).paragraphStart,
+                       !levels.isEmpty() && levels.front() > '0', !levels.isEmpty() && levels.back() > '0'});
+    }
+    return verses;
+}
+
+namespace {
+// Chapters' verses as one text, each chapter after the first a paragraph;
+// `parts` holds each chapter's first index.
+struct Chapters {
+    struct Part { int book = 0, chapter = 0, first = 0; };
+    QList<TextSelection::Verse> verses;
+    QVector<Part> parts;
+    void add(int book, int chapter, QList<TextSelection::Verse> more)
+    {
+        if (more.isEmpty()) return;
+        if (!verses.isEmpty()) more[0].paragraphStart = true;
+        parts.append({book, chapter, int(verses.size())});
+        verses += more;
+    }
+    // A {book, chapter, verse, offset} position in the text (verse -1: not in it).
+    TextSelection::Position at(const QVariantMap &p) const
+    {
+        for (int i = 0; i < parts.size(); ++i) {
+            if (parts[i].book != p.value("book").toInt() || parts[i].chapter != p.value("chapter").toInt()) continue;
+            const int end = i + 1 < parts.size() ? parts[i + 1].first : int(verses.size());
+            for (int v = parts[i].first; v < end; ++v)
+                if (verses[v].number == p.value("verse").toInt()) return {v, p.value("offset").toInt()};
+        }
+        return {-1, 0};
+    }
+    QVariantMap position(TextSelection::Position p) const
+    {
+        if (p.verse < 0 || p.verse >= verses.size()) return {};
+        const auto part = std::find_if(parts.crbegin(), parts.crend(), [&](const Part &part) { return part.first <= p.verse; });
+        return {{"book", part->book}, {"chapter", part->chapter}, {"verse", verses[p.verse].number}, {"offset", p.offset}};
+    }
+};
+}
+
+QVariantMap BibleBackend::textMotionAcross(QString motion, int verse, int offset, int count) const
+{
+    if (m_verses.isEmpty()) return {};
+    const int first = absoluteVerse(m_book,m_chapter,m_verses.first().toMap().value("number").toInt());
+    const int last = absoluteVerse(m_book,m_chapter,m_verses.last().toMap().value("number").toInt());
+    Chapters text;
+    if (first > 1) { const auto v = endpoint(first - 1); text.add(v.book, v.chapter, selectionChapter(v.book, v.chapter)); }
+    text.add(m_book, m_chapter, selectionVerses(m_verses));
+    if (last > 0 && last + 1 < m_keys.size()) { const auto v = endpoint(last + 1); text.add(v.book, v.chapter, selectionChapter(v.book, v.chapter)); }
+    const auto from = text.at({{"book",m_book},{"chapter",m_chapter},{"verse",verse},{"offset",offset}});
+    if (from.verse < 0) return {};
+    return text.position(TextSelection::move(text.verses, from, motion, count));
+}
+
+int BibleBackend::characterEndAt(const QVariantMap &position) const
+{
+    Chapters text;
+    text.add(position.value("book").toInt(), position.value("chapter").toInt(),
+             selectionChapter(position.value("book").toInt(), position.value("chapter").toInt()));
+    const auto at = text.at(position);
+    return at.verse < 0 ? position.value("offset").toInt() + 1 : TextSelection::characterEnd(text.verses, at);
+}
+
+QString BibleBackend::characterTextAcross(const QVariantMap &start, const QVariantMap &end, bool quotation) const
+{
+    const auto key = [&](const QVariantMap &p) { return absoluteVerse(p.value("book").toInt(), p.value("chapter").toInt(), p.value("verse").toInt()); };
+    const int a = key(start), z = key(end);
+    if (!a || !z || a > z) return {};
+    Chapters text;
+    for (int i = a; i <= z;) {
+        const auto v = endpoint(i);
+        text.add(v.book, v.chapter, selectionChapter(v.book, v.chapter));
+        while (i <= z && endpoint(i).book == v.book && endpoint(i).chapter == v.chapter) ++i;
+    }
+    const auto s = text.at(start), e = text.at(end);
+    if (s.verse < 0 || e.verse < 0) return {};
+    const auto range = TextSelection::touched(text.verses, s, e);
+    if (range.first < 0) return {};
+    const QString reference = quotation ? rangeReference(key(text.position({range.first, 0})), key(text.position({range.second, 0}))) : QString();
+    return TextSelection::text(text.verses, s, e, quotation, reference);
+}
+
+QString BibleBackend::copyCharactersAcross(const QVariantMap &start, const QVariantMap &end, bool plainText)
+{
+    if (!requireReady()) return {};
+    const QString text = characterTextAcross(start, end, !plainText);
+    if (text.isEmpty()) { setError("Select some text to copy."); return {}; }
+    copyText(text); clearError(); return text;
+}
+
 bool BibleBackend::exportNotes(QUrl directory)
 {
     if (!requireReady()) return false;

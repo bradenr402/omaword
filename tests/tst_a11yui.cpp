@@ -1503,6 +1503,43 @@ private slots:
         clickHint("visualHintsPart:exit");
         QTRY_VERIFY(!prop("verseMode").toBool()); QVERIFY(!shown("visualStatus"));
     }
+    // Character selection goes on past a chapter's ends, as a range of verses
+    // does: the reader reads the cursor's chapter, and the anchor's shows
+    // beside it with its part selected; back again; a copy spans both.
+    void characterSelectionCrossesChapters() {
+        for (const QString mode : {"verse", "block"}) {
+            setMode(mode); navigate("John 2:36"); call("readerFocus");
+            const QString last = verseText(36);
+            const auto selected = [&](const QString &name) { return item(name)->property("selectedText").toString().remove(QChar(0x2060)).remove(QChar(0xFFFC)); };
+            keys("v"); QTRY_VERIFY(prop("charMode").toBool());
+            keys("G"); QVERIFY(charAt(charCursor(), 36, last.size() - 1));
+            keys("l");
+            QTRY_COMPARE(bible->passage(), QString("John 3")); QVERIFY2(prop("charMode").toBool(), qPrintable(mode));
+            QCOMPARE(charCursor()["chapter"].toInt(), 3); QVERIFY(charAt(charCursor(), 1, 0));
+            QCOMPARE(charAnchor()["chapter"].toInt(), 2); QVERIFY(charAt(charAnchor(), 36, 0));
+            QTRY_VERIFY(item("contextChapter:John 2"));
+            QTRY_COMPARE(selected(mode == "verse" ? "context:John 2:verseBody36" : "context:John 2:blockBody"), last);
+            QCOMPARE(selected(mode == "verse" ? "verseBody1" : "blockBody"), QString("O"));
+            QCOMPARE(prop("freeSelectedText").toString(), last + "\n\nO");
+            // Back over the division: one chapter again, none beside.
+            keys("h");
+            QTRY_COMPARE(bible->passage(), QString("John 2")); QVERIFY(prop("charMode").toBool());
+            QCOMPARE(charCursor()["chapter"].toInt(), 2); QVERIFY(charAt(charCursor(), 36, last.size() - 1));
+            QTRY_VERIFY(!item("contextChapter:John 3"));
+            QCOMPARE(prop("freeSelectedText").toString(), last);
+            // Lines go on too, either way.
+            keys("j"); QTRY_COMPARE(bible->passage(), QString("John 3")); QVERIFY(charAt(charCursor(), 1, 0));
+            keys("k"); QTRY_COMPARE(bible->passage(), QString("John 2")); QVERIFY(charAt(charCursor(), 36, last.size() - 1));
+            // A word on, and the copy spans both; leaving, no verses stay selected across.
+            keys("w"); QTRY_COMPARE(bible->passage(), QString("John 3")); QVERIFY(charAt(charCursor(), 1, 0));
+            QGuiApplication::clipboard()->clear();
+            keys("y"); QTRY_VERIFY(!prop("charMode").toBool());
+            const QString copied = QGuiApplication::clipboard()->text();
+            QVERIFY2(copied.contains(QStringLiteral("³⁶ ") + last + QStringLiteral("\n\n¹ O")), qPrintable(copied));
+            QVERIFY2(copied.endsWith(QStringLiteral("— John 2:36–3:1")), qPrintable(copied));
+            QVERIFY(!bible->crossChapterSelection());
+        }
+    }
     QString tagId(const QString &name) const {
         for (const auto &tag : bible->tags()) if (tag.toMap()["name"].toString() == name) return tag.toMap()["id"].toString();
         return {};
