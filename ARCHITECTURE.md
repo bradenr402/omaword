@@ -197,9 +197,10 @@ user's real data for development or tests.
   view its chapter's own rows after (a flowing one is made with none, not the
   chapter read's), or showing it beside reads every row again.
   All views of a layout share one width, and a view keeps its rows unless marks
-  differ (`marksKey`): rows kept from `bible.verses` are JSON copies (live
-  reference), and code a crossing runs reads the chapter read's from its view
-  (`chapterRows`), as each read of `bible.verses` converts every row.
+  differ (`marksKey`): rows kept from `bible.verses` (a live reference) are
+  copies parsed from `versesJson`, and code a crossing runs reads the chapter
+  read's from its view (`chapterRows`), as each read of `bible.verses` converts
+  every row.
   Paint keyed on lists compares values, so a moved view repaints nothing.
   Nested Columns don't lay out with the column: use `layOutReader()`/`settle()`.
 - Views not yet shown are made ahead on the shelf (`prepareChapterView`), a few
