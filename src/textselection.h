@@ -12,9 +12,17 @@ namespace TextSelection {
 struct Verse {
     int number = 0;
     QString text;
-    bool poetry = false;
     bool paragraphStart = false;
+    // Its first and last lines are poem lines.
+    bool poemStart = false, poemEnd = false;
 };
+// How a verse joins the one before it in copies, as the Paragraph layout
+// sets them: a paragraph after a blank line, a poem line (its first, or the
+// last before it) on a line of its own, otherwise after one space.
+inline QString verseJoin(bool paragraphStart, bool previousPoemEnd, bool poemStart)
+{
+    return paragraphStart ? QStringLiteral("\n\n") : previousPoemEnd || poemStart ? QStringLiteral("\n") : QStringLiteral(" ");
+}
 struct Position {
     int verse = 0;
     int offset = 0;
@@ -34,8 +42,7 @@ Position clamp(const QList<Verse> &verses, Position at);
 // The exclusive end offset of the character (grapheme) at `at`.
 int characterEnd(const QList<Verse> &verses, Position at);
 // Copy text for [start, end) (end exclusive, either verse may be partial).
-// Verse joins follow the source: paragraph starts get a blank line, adjacent
-// poetry a newline, otherwise one space. Plain text is the selection as is.
+// Verses join as verseJoin says. Plain text is the selection as is.
 // A quotation replaces omitted text with an ellipsis where the selection
 // starts after a verse's start or ends before its end (trimming whitespace and
 // punctuation at the cut; the ellipsis is spaced from the words but not from

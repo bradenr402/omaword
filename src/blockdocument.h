@@ -80,6 +80,8 @@ private:
         int next = 0;
         bool numbers = false, headings = false, annotationsVisible = false, noteMarks = true;
         bool poetry = false, dense = false;
+        // The verse built last ended on a poem line.
+        bool poemEnd = false;
         QString mode;
         QVariantMap spacing;
         double indentUnit = 0, em = 0, cellHeight = 0;

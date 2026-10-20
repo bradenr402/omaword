@@ -299,12 +299,13 @@ struct TagBible {
     }
 };
 // Same layout as BibleBackend::copyRange, for any installed generation:
-// source text verbatim, paragraph/chapter breaks as blank lines, adjacent
-// poetry verses on new lines, otherwise one space.
+// source text verbatim, chapter breaks as blank lines, verses otherwise
+// joined as TextSelection::verseJoin says.
 bool passageText(const TagBible &bible, const QVariantMap &scope, bool numbered, QString *out)
 {
     QSqlQuery q(bible.db);
-    q.prepare("SELECT v.book,v.chapter,v.number,v.text,v.poetry,v.paragraphStart FROM verses v JOIN books b ON b.id=v.book "
+    q.prepare("SELECT v.book,v.chapter,v.number,v.text,i.levels,v.paragraphStart FROM verses v JOIN books b ON b.id=v.book "
+              "LEFT JOIN indents i ON i.book=v.book AND i.chapter=v.chapter AND i.verse=v.number "
               "WHERE (b.ordinal,v.chapter,v.number)>=(?,?,?) AND (b.ordinal,v.chapter,v.number)<=(?,?,?) "
               "ORDER BY b.ordinal,v.chapter,v.number");
     q.addBindValue(scope.value("_order").toLongLong()/1000000);
@@ -315,23 +316,20 @@ bool passageText(const TagBible &bible, const QVariantMap &scope, bool numbered,
     const QString digits = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
     QString body;
     int previousBook = 0, previousChapter = 0;
-    bool previousPoetry = false;
+    bool previousPoemEnd = false;
     while (q.next()) {
         const int b = q.value(0).toInt(), c = q.value(1).toInt(), number = q.value(2).toInt();
-        const QString text = q.value(3).toString();
-        const bool poetry = q.value(4).toBool();
-        if (!body.isEmpty()) {
-            if (previousBook != b || previousChapter != c || q.value(5).toBool()) body += "\n\n";
-            else if (poetry && previousPoetry) body += '\n';
-            else body += ' ';
-        }
+        const QString text = q.value(3).toString(), levels = q.value(4).toString();
+        if (!body.isEmpty())
+            body += TextSelection::verseJoin(previousBook != b || previousChapter != c || q.value(5).toBool(),
+                                             previousPoemEnd, !levels.isEmpty() && levels.front() > '0');
         if (numbered) {
             QString superscript;
             for (const QChar digit : QString::number(number)) superscript += digits[digit.digitValue()];
             body += superscript + ' ';
         }
         body += text;
-        previousBook = b; previousChapter = c; previousPoetry = poetry;
+        previousBook = b; previousChapter = c; previousPoemEnd = !levels.isEmpty() && levels.back() > '0';
     }
     if (q.lastError().isValid() || body.isEmpty()) return false;
     *out = body; return true;
@@ -3934,7 +3932,7 @@ QString BibleBackend::copyRange(int first, int last, const QString &label, bool 
     const QString digits = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
     int b = 0, c = 0;
     int previousBook = 0, previousChapter = 0;
-    bool previousPoetry = false;
+    bool previousPoemEnd = false;
     QVariantList rows;
     for (int i = first; i <= last; ++i) {
         const auto v = endpoint(i);
@@ -3946,16 +3944,14 @@ QString BibleBackend::copyRange(int first, int last, const QString &label, bool 
                 const int index = absoluteVerse(b,c,number);
                 if (index >= first && index <= last) {
                     const QString text = map.value("text").toString();
-                    const bool poetry = map.value("poetry").toBool();
-                    if (!body.isEmpty()) {
-                        if (previousBook != b || previousChapter != c || map.value("paragraphStart").toBool()) body += "\n\n";
-                        else if (poetry && previousPoetry) body += '\n';
-                        else body += ' ';
-                    }
+                    const auto levels = map.value("indents").toList();
+                    if (!body.isEmpty())
+                        body += TextSelection::verseJoin(previousBook != b || previousChapter != c || map.value("paragraphStart").toBool(),
+                                                         previousPoemEnd, !levels.isEmpty() && levels.first().toInt() > 0);
                     QString superscript;
                     for (const QChar digit : QString::number(number)) superscript += digits[digit.digitValue()];
                     body += plainText ? text : superscript + ' ' + text;
-                    previousBook = b; previousChapter = c; previousPoetry = poetry;
+                    previousBook = b; previousChapter = c; previousPoemEnd = !levels.isEmpty() && levels.last().toInt() > 0;
                 }
             }
         }
@@ -3983,8 +3979,9 @@ QList<TextSelection::Verse> selectionVerses(const QVariantList &rows)
     QList<TextSelection::Verse> verses;
     for (const auto &row : rows) {
         const auto map = row.toMap();
-        verses.append({map.value("number").toInt(), map.value("text").toString(),
-                       map.value("poetry").toBool(), map.value("paragraphStart").toBool()});
+        const auto levels = map.value("indents").toList();
+        verses.append({map.value("number").toInt(), map.value("text").toString(), map.value("paragraphStart").toBool(),
+                       !levels.isEmpty() && levels.first().toInt() > 0, !levels.isEmpty() && levels.last().toInt() > 0});
     }
     return verses;
 }

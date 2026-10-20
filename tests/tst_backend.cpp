@@ -429,12 +429,12 @@ private slots:
     }
     // ── Character selection (TextSelection): motions, objects, copy text
     static QList<TextSelection::Verse> charVerses() {
-        return {{16, "For God so loved the world, that he gave his Son.", false, false},
-                {17, "God did not send his Son to condemn. He came to save!", false, false},
-                {18, "Whoever believes is not condemned.", false, true},
-                {19, "", false, false},
-                {20, "Light (came) into the world.", true, false},
-                {21, "Darkness hated it.", true, false}};
+        return {{16, "For God so loved the world, that he gave his Son.", false},
+                {17, "God did not send his Son to condemn. He came to save!", false},
+                {18, "Whoever believes is not condemned.", true},
+                {19, "", false},
+                {20, "Light (came) into the world.", false, true, true},
+                {21, "Darkness hated it.", false, true, true}};
     }
     static TextSelection::Position at(int verse, int offset) { return {verse, offset}; }
     void characterMotionsCrossVerseBreaks() {
@@ -543,6 +543,11 @@ private slots:
         const int he = b.indexOf("He came");
         QCOMPARE(text(v, at(1, he), at(2, 8), false), b.mid(he) + "\n\nWhoever ");
         QCOMPARE(text(v, at(4, 0), at(5, 8), true, "R"), QStringLiteral("“²⁰ ") + v[4].text + QStringLiteral("\n²¹ Darkness …”\n\n— R"));
+        // A poem line has a line of its own, after prose too, as prose after
+        // one has; a verse whose lines begin in prose runs on from prose.
+        const QList<TextSelection::Verse> poem = {{1, "Prose.", false}, {2, "A poem line.", false, true, true},
+            {3, "More prose.", false}, {4, "Prose, then\na poem line.", false, false, true}, {5, "Last.", false}};
+        QCOMPARE(text(poem, at(0, 0), at(4, 5), false), QStringLiteral("Prose.\nA poem line.\nMore prose. Prose, then\na poem line.\nLast."));
         // An end at a verse's start or a start at its end touches nothing there.
         QCOMPARE(touched(v, at(0, a.size()), at(2, 0)), qMakePair(1, 1));
         QCOMPARE(text(v, at(0, a.size()), at(2, 0), true, "R"), QStringLiteral("“") + b + QStringLiteral("”\n\n— R"));

@@ -207,6 +207,9 @@ void BlockDocument::buildVerse(int verseIndex)
     const auto verse = value.toMap();
     const auto levels = verse.value("indents").toList();
     const bool indented = poetry && std::any_of(levels.cbegin(), levels.cend(), [](const QVariant &level) { return level.toInt() > 0; });
+    // Paragraph layout gives each poem line one of its own: a verse whose
+    // first line is one, or that follows one, starts a line (copies too).
+    const bool poemStart = indented && levels.value(0).toInt() > 0;
     int line = 0;
     const auto lineFormat = [&](int index) {
         return indented ? SearchGeometry::poetryFormat(paragraph, levels.value(qMin(index, int(levels.size()) - 1)).toInt(), indentUnit)
@@ -224,7 +227,7 @@ void BlockDocument::buildVerse(int verseIndex)
         cursor.insertText(heading, title);
         cursor.insertBlock(lineFormat(0), normal);
     } else if (cursor.position()) {
-        if (mode == QStringLiteral("paragraph") && verse.value("paragraphStart").toBool())
+        if (mode == QStringLiteral("paragraph") && (verse.value("paragraphStart").toBool() || poemStart || b.poemEnd))
             cursor.insertBlock(lineFormat(0), normal);
         else cursor.insertText(" ", separator);
     } else cursor.setBlockFormat(lineFormat(0));
@@ -375,6 +378,7 @@ void BlockDocument::buildVerse(int verseIndex)
     decorate(false);
     m_spans.append(QVariantMap{{"number",verse.value("number")}, {"start",start},
                               {"textStart",textStart}, {"textEnd",textEnd}, {"end",cursor.position()}});
+    b.poemEnd = indented && levels.value(levels.size() - 1).toInt() > 0;
 }
 
 QVariantList BlockDocument::searchRectangles(const QVariantList &segments) const

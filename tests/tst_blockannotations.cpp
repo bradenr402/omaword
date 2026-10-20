@@ -591,6 +591,27 @@ ApplicationWindow {
         QCOMPARE(mapped.first().toMap().value("x").toDouble(),rendered.first().toMap().value("x").toDouble());
         QCOMPARE(mapped.first().toMap().value("y").toDouble(),rendered.first().toMap().value("y").toDouble());
     }
+    // Paragraph layout gives every poem line one of its own: a verse whose
+    // first line is a poem line, or that follows one, starts a line, while
+    // prose after prose runs on; Block runs all of it on.
+    void paragraphLayoutSetsPoemLinesApart() {
+        backend->setProperty("verses",QVariantList{
+            QVariantMap{{"number",1},{"text","Prose opens."}},
+            QVariantMap{{"number",2},{"text","A poem line,\nand its second."},{"indents",QVariantList{1,2}}},
+            QVariantMap{{"number",3},{"text","Another line."},{"indents",QVariantList{1}}},
+            QVariantMap{{"number",4},{"text","Prose again."}},
+            QVariantMap{{"number",5},{"text","And on."}}});
+        item("reader")->setProperty("mode","paragraph");
+        QTRY_COMPARE(mapping->spans().size(),5);
+        auto doc = item("blockBody")->property("textDocument").value<QQuickTextDocument *>()->textDocument();
+        const auto line = [&](int i) { return doc->findBlock(mapping->spans()[i].toMap().value("textStart").toInt()).blockNumber(); };
+        QCOMPARE(line(1),line(0) + 1);
+        QCOMPARE(line(2),line(1) + 2); // After its own two.
+        QCOMPARE(line(3),line(2) + 1);
+        QCOMPARE(line(4),line(3));
+        item("reader")->setProperty("mode","block");
+        QTRY_COMPARE(doc->blockCount(),1);
+    }
     // A view made ahead builds its chapter a verse at a time (beginBuild,
     // buildMore): the document and its mapping are those built at once.
     void buildingInStepsMatchesBuildingAtOnce_data() {

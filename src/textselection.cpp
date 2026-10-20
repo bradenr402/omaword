@@ -283,11 +283,7 @@ QString text(const QList<Verse> &verses, Position start, Position end, bool quot
         const int s = v == range.first && v == start.verse ? qBound(0, start.offset, int(whole.size())) : 0;
         const int e = v == range.second && v == end.verse ? qBound(s, end.offset, int(whole.size())) : int(whole.size());
         QString piece = whole.mid(s, e - s);
-        if (v > range.first) {
-            if (verses[v].paragraphStart) body += QStringLiteral("\n\n");
-            else if (verses[v].poetry && verses[v - 1].poetry) body += u'\n';
-            else body += u' ';
-        }
+        if (v > range.first) body += verseJoin(verses[v].paragraphStart, verses[v - 1].poemEnd, verses[v].poemStart);
         if (quotation) {
             const bool cutStart = s > firstInk(whole);
             const bool cutEnd = e < lastInkEnd(whole);
