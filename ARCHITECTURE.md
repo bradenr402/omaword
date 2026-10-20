@@ -174,9 +174,14 @@ user's real data for development or tests.
   Copies use source paragraph starts and poetry breaks regardless of layout.
 - Verse steps inside a chapter only move selection: no reload or `versesChanged`.
   Annotation changes update existing rows/paint; avoid rebuilding all documents
-  or repainting a chapter-sized focus veil for a cursor move. Paragraph/Block
-  marks (`AnnotationPaint`) cover only their own lines (`area`), and the search
-  layer shows only with matches: never a chapter-tall texture.
+  for a cursor move. Paragraph/Block marks (`AnnotationPaint`) cover only their
+  own lines (`area`), and the search layer shows only with matches: never a
+  chapter-tall texture. A `Canvas` paints itself whole on every size change,
+  even hidden: one as tall as a chapter lives in a Loader active only while it
+  paints, or is plain Rectangles (the focus veil, `veilRects`). Qt's
+  antialiasing rasterizer costs about the square of a long, nearly level edge,
+  so `AnnotationPaint` fills its marks in slices cut on whole device pixels
+  (`fillSliced`).
 - Cross-chapter selections show whole context chapters around the cursor's
   chapter, using `chapterRows` with marks. Refresh their marks on peer changes
   while preserving the visible top verse.
@@ -189,7 +194,8 @@ user's real data for development or tests.
   Views are created on `viewShelf`, their QObject owner: `createObject(parent)`
   would make a `ContextChapter` destroy the view it gave away. `createObject`
   also copies a list it is given: `newChapterView(properties, verses)` gives a
-  view its chapter's own rows after, or showing it beside reads every row again.
+  view its chapter's own rows after (a flowing one is made with none, not the
+  chapter read's), or showing it beside reads every row again.
   All views of a layout share one width, and a view keeps its rows unless marks
   differ (`marksKey`): rows kept from `bible.verses` are JSON copies (live
   reference), and code a crossing runs reads the chapter read's from its view
@@ -198,8 +204,11 @@ user's real data for development or tests.
   Nested Columns don't lay out with the column: use `layOutReader()`/`settle()`.
 - Views not yet shown are made ahead on the shelf (`prepareChapterView`), a few
   verses a turn (`VerseView` rows; `BlockDocument::beginBuild`/`buildMore`),
-  each turn rescheduling with `Qt.callLater` (an interval-0 `Timer` waits for an
-  animation frame), so no turn lays out a whole chapter; taking one finishes it.
+  one turn after each frame (`nextTurn`, on `frameSwapped`, which it requests:
+  turns chained with `Qt.callLater` run ahead of a key's frame), so no turn lays
+  out a whole chapter or holds a frame back; taking one finishes it. Views no
+  longer wanted go one a frame, after the frame showing what took their place
+  (`retireView`: frozen, named apart).
   Without Whole book, `prepareNeighbours` makes the chapters either side of the
   one read, across books, a moment after it changes, then those `[`, `]`, and
   `r` would go to (`jumpTargets`); a step into one moves its view into the
@@ -208,12 +217,34 @@ user's real data for development or tests.
   names; tests find the reader's `BlockDocument` through `blockReader`. Views
   wait in the window, invisible (out of it, their text would be laid out only
   once shown), so making them renders frames: `preparing()` says whether any is
-  still being made. A Verse view waiting keeps the text size, spacing, and width
-  it was made with (`freeze`, `thaw`); any change to them (`viewLayoutKey`)
-  drops the views waiting. Only the chapter read's `BlockReader` reports
-  selected text or relays out a selection (`beside` ones never do).
-- A long chapter jumped into in the Verse layout (over `windowRows` verses) gets
-  a view of its own whose rows are made about the verse read first
+  still being made. A Verse view waiting keeps the text size, spacing, width,
+  and focus layout it was made with (`freeze`, `thaw`); any change to them
+  (`viewLayoutKey`) drops the views waiting. Only the chapter read's
+  `BlockReader` reports selected text or relays out a selection (`beside` ones
+  never do).
+- A Verse row is laid out at the text size, spacing, width, and focus layout of
+  its model entry (`rowEntry`), not the view's: a change reaches the rows
+  showing before the next frame and the others a few each frame after
+  (`relaySome`, on `frameSwapped`), outward from them, the cursor verse (else
+  the first showing) kept in place. `layOutReader()` and `settle()` lay out the
+  rows showing first, so measure after them.
+- A `BlockReader`'s text takes a new size and width only with its rebuild,
+  its old text cleared first (`textSize`, `textWidth`; a width alone a turn
+  later), so a text size change lays the chapter out once. Its TextEdit makes
+  nodes only for the lines in view (`ItemObservesViewport`, set by
+  `BlockDocument`). Inline markers that only move keep their delegates
+  (`markerModel`, replaced only as markers come or go; `inlineMarkers` holds
+  their places); those of other verses, or where there were none, come a frame
+  after the text (`markersWaiting`). Its key splits the verses' part
+  (`versesKey`) from the settings', which a setting changing reads again.
+- A text size change (`setTextSize`) keeps the reading anchor and lays the
+  reader out before its first frame; the rest of the UI keeps its scale
+  (`heldTextSize`) until that frame is synced (`afterAnimating`), then follows.
+  Code timing frames hooks `afterRendering`: handlers on `frameSwapped` (the
+  relay, markers) run their work before later connections.
+- A long chapter jumped into in the Verse layout (over `windowRows` verses), or
+  any the layout switches to with a verse read, gets a view of its own whose
+  rows are made about the verse read first
   (`windowTarget`, `makeWindow`), then the rest a few a turn, below then above
   (`growSome`, `makeAbove`), the reader shifted as rows come above so the text
   stays put (`growingRows`: no Follow is sent for it). Rows are verse indexes
@@ -231,10 +262,11 @@ user's real data for development or tests.
   relative to the chapter read.
 - Verse-layout rows read their view's `verses[row]` in place, so marks and
   another chapter update rows; a view's row model only grows or shrinks. A row
-  costs ~2.5 ms to make: its tint, rails, motion and selection rectangles,
-  search canvas, and number tooltip are made (Loaders) only where and while
-  they show. A restore places the chapter before the next frame
-  (`runRestore`), never after one showing it at the old scroll.
+  costs ~1.5 ms to make: its heading, highlights, footnote marks, tint, rails,
+  motion and selection rectangles, search canvas, and number tooltip are made
+  (Loaders) only where and while they show. A restore places the chapter
+  before the next frame (`runRestore`), never after one showing it at the old
+  scroll.
 - The outline's current section is the cursor's while a step places itself
   (`viewAnchor`) or while the cursor shows at `readerTargetY()`, never a section
   a slide only passes. Its own scrolling glides (`slideMs`).
@@ -272,8 +304,9 @@ user's real data for development or tests.
   Cursor motions reveal explicitly. The character-status bar compensates scroll
   in `workspace.onYChanged`, in the same layout pass; changing scroll immediately
   on bar visibility creates mismatched geometry between events and polish.
-- Focus layout changes settle synchronously before the first frame. Preserve
-  the visible verse through reflow; dimming is paint-only. Respect reduced motion.
+- Focus layout changes settle the text shown synchronously before the first
+  frame (a Verse view's other rows follow, `relaySome`). Preserve the visible
+  verse through reflow; dimming is paint-only. Respect reduced motion.
 - Margin notes and outline use `Margins.space`/`place`: notes win space, outline
   takes the remainder. Keep reserved room stable between chapters. Measure after
   layout (`BlockReader.settle` where synchronous geometry is required).
