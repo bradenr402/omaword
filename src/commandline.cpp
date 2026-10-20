@@ -27,7 +27,7 @@ struct Command {
     bool headless;
 };
 const Option translationOption{QStringLiteral("-t, --translation <name>"),
-    QStringLiteral("Use this translation: its abbreviation (NET) or ID (engnet), in any case. Default: the one you read.")};
+    QStringLiteral("Use this translation: its abbreviation (NET) or ID (eng_net), in any case. Default: the one you read.")};
 const Option helpOption{QStringLiteral("-h, --help"), QStringLiteral("Show this help.")};
 
 const QList<Command> &commands()

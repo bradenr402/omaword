@@ -46,9 +46,9 @@ private slots:
     void initTestCase() {
         QCoreApplication::setOrganizationName("OmaWordTests");
         QCoreApplication::setApplicationName("omaword-cli-test");
-        net = fixtures.filePath("engnet_usfm.zip"); kjv = fixtures.filePath("eng-kjv2006_usfm.zip");
-        QVERIFY(archiveFile(net, "engnet", "For God so loved the world.", "In the beginning God created."));
-        QVERIFY(archiveFile(kjv, "eng-kjv2006", "For God so loved the world, that he gave.", "In the beginning God created the heaven."));
+        net = fixtures.filePath("eng_net_complete.json"); kjv = fixtures.filePath("eng_kjv_complete.json");
+        QVERIFY(archiveFile(net, "eng_net", "For God so loved the world.", "In the beginning God created."));
+        QVERIFY(archiveFile(kjv, "eng_kjv", "For God so loved the world, that he gave.", "In the beginning God created the heaven."));
     }
     void helpVersionAndUsage() {
         auto help = run({"--help"});
@@ -88,7 +88,7 @@ private slots:
         QCOMPARE(run({"quote", "jn316", "--plain"}).out, QString("For God so loved the world.\n"));
         auto kjvQuote = run({"quote", "jn316", "-t", "kjv"});
         QCOMPARE(kjvQuote.status, 0); QVERIFY(kjvQuote.out.contains("that he gave"));
-        QCOMPARE(run({"quote", "jn316", "--translation=ENG-KJV2006", "--plain"}).out, QString("For God so loved the world, that he gave.\n"));
+        QCOMPARE(run({"quote", "jn316", "--translation=ENG_KJV", "--plain"}).out, QString("For God so loved the world, that he gave.\n"));
         auto unknown = run({"quote", "jn316", "-t", "xyz"});
         QCOMPARE(unknown.status, 1); QVERIFY(unknown.err.contains("no installed translation")); QVERIFY(unknown.err.contains("NET"));
         // Several passages, a blank line apart; a bad one fails alone.
