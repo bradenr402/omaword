@@ -717,7 +717,7 @@ ApplicationWindow {
         return lanes
     }
     readonly property bool continuousReader: bible.readingMode === "block" || (bible.readingMode === "paragraph" && bible.hasParagraphs)
-    onContinuousReaderChanged: if (readerInitialized) { clearPreparedViews(); showChapterRead() }
+    onContinuousReaderChanged: if (readerInitialized) { clearPreparedViews(); showChapterRead(true) }
     property bool readerInitialized: false
     readonly property string observedReadingMode: bible.readingMode
     onObservedReadingModeChanged: {
@@ -944,6 +944,13 @@ ApplicationWindow {
     // and leave the collector much to do).
     readonly property var chapterRows: continuousReader ? (blockLoader.item ? blockLoader.item.verses : [])
         : verseHost.item ? verseHost.item.verses : []
+    // Its footnotes, in order, read from those rows (bible.footnotes is read
+    // again whole for each note an Array.from takes from it).
+    readonly property var chapterFootnotes: {
+        const notes = []
+        for (const row of chapterRows) for (const note of row.footnotes || []) notes.push(note)
+        return notes
+    }
     readonly property var noVerse: ({ number: 0, text: "", html: "", heading: "", footnotes: [], indents: [],
         highlightRanges: [], tagRanges: [], noteRanges: [], hasNote: false, hasTags: false })
     function syncVerseRows() {
@@ -982,14 +989,15 @@ ApplicationWindow {
     // into makes them over a few turns); rowItem(i): verse index i's, if made.
     readonly property int rowsFirst: verseHost.item ? verseHost.item.firstRow : 0
     readonly property int rowsEnd: rowsFirst + verseRepeater.count
-    // A chapter longer than this (verses) gets its rows a window at a time.
+    // A chapter longer than this (verses) gets its rows a window at a time,
+    // as does any the layout switches to (switching) with a verse read.
     readonly property int windowRows: 40
     function rowItem(i) { return verseHost.item ? verseHost.item.rowAt(i) : null }
-    function showChapterRead() {
+    function showChapterRead(switching) {
         const host = continuousReader ? blockLoader : verseHost, other = continuousReader ? verseHost : blockLoader
-        if (other.item) { other.item.destroy(); other.item = null }
+        if (other.item) { retireView(other.item); other.item = null }
         const key = chapterViewKey(bible.book, bible.chapter)
-        let view = host.item
+        let view = host.item, made = false
         if (!view || view.viewKey !== key) {
             const kept = takeChapterView(key)
             if (kept) {
@@ -1004,10 +1012,14 @@ ApplicationWindow {
                 // jump back.
                 if (view && bible.wholeBook) shelveChapterView(view)
                 else if (view) { leftViewKey = view.viewKey; keepPrepared(view) }
-                view = newChapterView(!continuousReader && bible.verses.length > windowRows ? { windowTarget: 0 } : {})
+                // Made with a copy of the rows (see below), its window starting at the verse read.
+                const verses = JSON.parse(JSON.stringify(bible.verses))
+                const windowed = !continuousReader && (verses.length > windowRows || (switching && hasSelection))
+                view = newChapterView(windowed ? { windowTarget: Math.max(0, verses.findIndex(function(verse) { return verse.number === bible.cursorVerse })) } : {}, verses)
+                made = true
                 if (!continuousReader) {
-                    const made = view
-                    made.built.connect(function() { if (verseHost.item === made) app.savePosition() })
+                    const fresh = view
+                    fresh.built.connect(function() { if (verseHost.item === fresh) app.savePosition() })
                 }
             }
             placeChapterView(view, host, null)
@@ -1018,24 +1030,19 @@ ApplicationWindow {
         // copy, but for marks (compared without copying a long chapter).
         // Copies, as bible.verses is a live reference, which kept rows would
         // read again later (another chapter's).
-        if (view.viewKey !== key || marksKey(bible.verses) !== marksKey(view.verses)) {
-            const verses = JSON.parse(JSON.stringify(bible.verses))
-            // A new view's window starts at the verse read.
-            if (view.windowTarget >= 0 && !view.verses.length)
-                view.windowTarget = Math.max(0, verses.findIndex(function(verse) { return verse.number === bible.cursorVerse }))
-            view.verses = verses
-        }
+        if (!made && (view.viewKey !== key || marksKey(bible.verses) !== marksKey(view.verses)))
+            view.verses = JSON.parse(JSON.stringify(bible.verses))
         view.viewKey = key
         view.book = bible.book; view.chapterNumber = bible.chapter
     }
     // `verses`: its chapter's rows, kept as that very list (createObject
     // copies one given it, and rows holding an equal copy read the chapter's
-    // own all again where placeChapterView binds them); a flowing view also
-    // gets them as it is made, to build them rather than the chapter read's.
+    // own all again where placeChapterView binds them); a flowing view is
+    // made with none, to build them rather than the chapter read's.
     function newChapterView(properties, verses) {
         const flowing = continuousReader
         const view = (flowing ? blockViewComponent : verseViewComponent).createObject(viewShelf,
-            flowing && verses ? Object.assign({ verses: verses }, properties) : properties)
+            flowing && verses ? Object.assign({ verses: [] }, properties) : properties)
         if (verses) view.verses = verses
         if (flowing)
             view.layoutRefreshed.connect(function() { if (blockLoader.item === view) { app.scheduleMargins(); app.placeSelectionBar() } })
@@ -1076,15 +1083,38 @@ ApplicationWindow {
     }
     function shelveChapterView(view) {
         const old = shelvedViews[view.viewKey]
-        if (old && old !== view) old.destroy()
+        if (old && old !== view) retireView(old)
         view.parent = viewShelf
         shelvedViews[view.viewKey] = view
         Qt.callLater(app.clearViewShelf)
     }
     // Views no chapter took by the end of the turn go.
     function clearViewShelf() {
-        for (const key in shelvedViews) shelvedViews[key].destroy()
+        for (const key in shelvedViews) retireView(shelvedViews[key])
         shelvedViews = ({})
+    }
+    // Views no longer wanted go one a frame, after the frame showing what
+    // took their place (a long chapter's take some 20 ms to destroy), named
+    // apart and rebuilding nothing meanwhile.
+    property var retiredViews: []
+    property bool retiring: false
+    function retireView(view) {
+        if (view.destroying !== undefined) view.destroying = true
+        else view.freeze()
+        view.parent = viewShelf
+        view.namePrefix = "retired:"
+        view.objectName = ""
+        retiredViews.push(view)
+        retiring = true
+    }
+    Connections {
+        target: app
+        enabled: app.retiring
+        function onFrameSwapped() {
+            const view = app.retiredViews.shift()
+            if (view) view.destroy()
+            app.retiring = app.retiredViews.length > 0
+        }
     }
     // The rows a chapter about to be shown beside already has: its shelved
     // view's (the chapter read's until now), or its prepared one's.
@@ -1208,10 +1238,17 @@ ApplicationWindow {
         onVersesChanged: syncRows()
         Component.onCompleted: syncRows()
         // Prepared ahead (prepareChapterView): its rows are made a few a
-        // turn, each turn within a few milliseconds, the next as soon as the
-        // event loop is free (not on an animation-paced Timer, which would
-        // take a long chapter a second); built once all are.
+        // turn, each turn within a few milliseconds, one after each frame
+        // (nextTurn: a turn queued for when the event loop is free can run
+        // ahead of a key's frame, holding it back); built once all are.
         property bool incremental: false
+        property bool turning: false
+        Connections {
+            target: app
+            enabled: view.turning
+            function onFrameSwapped() { view.turning = false; if (view.incremental) view.buildSome(); else view.growSome() }
+        }
+        function nextTurn() { turning = true; app.update() }
         readonly property bool building: rowModel.count < verses.length
         signal built()
         // Its rows are those of verses [firstRow, firstRow + rowModel.count).
@@ -1227,16 +1264,16 @@ ApplicationWindow {
             if (firstRow > 0 && firstRow >= count) { rowModel.clear(); firstRow = 0 }
             if (firstRow + rowModel.count > count) rowModel.remove(count - firstRow, firstRow + rowModel.count - count)
             // (Counted here: `building` may not have followed new verses yet.)
-            if (incremental) { if (rowModel.count < count) Qt.callLater(view.buildSome); else built() }
-            else if (windowTarget >= 0 && !rowModel.count && count) { makeWindow(Math.min(windowTarget, count - 1)); Qt.callLater(view.growSome) }
-            else if (firstRow > 0) Qt.callLater(view.growSome)
+            if (incremental) { if (rowModel.count < count) nextTurn(); else built() }
+            else if (windowTarget >= 0 && !rowModel.count && count) { makeWindow(Math.min(windowTarget, count - 1)); nextTurn() }
+            else if (firstRow > 0) nextTurn()
             else appendRows()
         }
         function buildSome() {
             if (!incremental || !building) return
             const started = Date.now()
             while (building && Date.now() - started < 6) rowModel.append(rowEntry(rowModel.count))
-            if (building) Qt.callLater(view.buildSome)
+            if (building) nextTurn()
             else built()
         }
         // Rows from `target` down to fill the reader, and above it for the
@@ -1262,7 +1299,7 @@ ApplicationWindow {
             if (left > 0) makeAbove(left)
             // The margins place notes by the rows made.
             if (verseHost.item === view) app.scheduleMargins()
-            if (building) Qt.callLater(view.growSome)
+            if (building) nextTurn()
             else built()
         }
         // Rows above those made, for `ms` (negative: to row `to`): shown,
@@ -1390,26 +1427,31 @@ ApplicationWindow {
                     // visibility. First import creates rows inside a hidden
                     // reader; Label height/implicitHeight/padding feedback
                     // otherwise re-enters when that ancestor becomes visible.
-                    height: hasHeading ? headingText.implicitHeight + headingText.y + TypeScale.size(verseRow.textSize, TypeScale.headingBelow) : 0
+                    height: hasHeading && headingText.item ? headingText.item.implicitHeight + headingText.item.y + TypeScale.size(verseRow.textSize, TypeScale.headingBelow) : 0
                     visible: hasHeading
-                    Text {
+                    // Made only for a row with a heading (most have none, and
+                    // a chapter's rows are made at once).
+                    Loader {
                         id: headingText
-                        objectName: view.namePrefix + "headingText" + verseRow.modelData.number
-                        width: parent.width
-                        // Under the chapter title, its own space suffices,
-                        // as in the other layouts (a document's first block
-                        // takes no top margin).
-                        y: verseRow.row === 0 ? 0 : TypeScale.size(verseRow.textSize, TypeScale.headingAbove)
-                        // An LRM keeps a Hebrew-first heading ("א Aleph")
-                        // in an LTR paragraph; display only.
-                        text: app.leftToRightText(verseRow.modelData.heading)
-                        horizontalAlignment: Text.AlignLeft
-                        textFormat: Text.PlainText
-                        font.family: desktop.fontFamily
-                        font.pixelSize: TypeScale.size(verseRow.textSize, TypeScale.heading)
-                        font.weight: Font.DemiBold
-                        wrapMode: Text.Wrap
-                        color: desktop.foreground
+                        active: verseHeading.hasHeading
+                        sourceComponent: Text {
+                            objectName: view.namePrefix + "headingText" + verseRow.modelData.number
+                            width: verseHeading.width
+                            // Under the chapter title, its own space suffices,
+                            // as in the other layouts (a document's first block
+                            // takes no top margin).
+                            y: verseRow.row === 0 ? 0 : TypeScale.size(verseRow.textSize, TypeScale.headingAbove)
+                            // An LRM keeps a Hebrew-first heading ("א Aleph")
+                            // in an LTR paragraph; display only.
+                            text: app.leftToRightText(verseRow.modelData.heading)
+                            horizontalAlignment: Text.AlignLeft
+                            textFormat: Text.PlainText
+                            font.family: desktop.fontFamily
+                            font.pixelSize: TypeScale.size(verseRow.textSize, TypeScale.heading)
+                            font.weight: Font.DemiBold
+                            wrapMode: Text.Wrap
+                            color: desktop.foreground
+                        }
                     }
                 }
                 // Tag and note rails, made only for rows they mark (most rows
@@ -1484,16 +1526,19 @@ ApplicationWindow {
                         visible: opacity > 0
                     }
                 }
-                VerseHighlights {
-                    namePrefix: view.namePrefix
-                    row: verseRow.modelData
-                    versionId: bible.versionId
-                    gutter: verseRow.gutter
-                    rowWidth: verseRow.width
-                    rowHeight: verseRow.height
-                    headingHeight: verseHeading.height
-                    body: verseBody
-                    lines: verseRow.searchOverlay
+                Loader {
+                    active: Array.from(verseRow.modelData.highlightRanges || []).length > 0
+                    sourceComponent: VerseHighlights {
+                        namePrefix: view.namePrefix
+                        row: verseRow.modelData
+                        versionId: bible.versionId
+                        gutter: verseRow.gutter
+                        rowWidth: verseRow.width
+                        rowHeight: verseRow.height
+                        headingHeight: verseHeading.height
+                        body: verseBody
+                        lines: verseRow.searchOverlay
+                    }
                 }
                 // A range's faint wash: a selected row after the first joins
                 // the row above, as the range is one (no verse row is read here:
@@ -1610,16 +1655,21 @@ ApplicationWindow {
                         }
                     }
                 }
-                FootnoteMarks {
-                    namePrefix: view.namePrefix
-                    row: verseRow.modelData
-                    body: verseBody
-                    size: verseRow.textSize
-                    bare: verseRow.textFocus
-                    // Beside, its verse is selected first, its chapter becoming the one read.
-                    onActivated: function(note, x, y, height) {
-                        if (view.beside) app.selectContextVerse(view.book, view.chapterNumber, verseRow.modelData.number, false)
-                        app.peekFootnote(verseRow.modelData.number, note.seq, x, y, height)
+                // Its notes' marks, made only for a row with notes.
+                Loader {
+                    z: 3
+                    active: Array.from(verseRow.modelData.footnotes || []).length > 0
+                    sourceComponent: FootnoteMarks {
+                        namePrefix: view.namePrefix
+                        row: verseRow.modelData
+                        body: verseBody
+                        size: verseRow.textSize
+                        bare: verseRow.textFocus
+                        // Beside, its verse is selected first, its chapter becoming the one read.
+                        onActivated: function(note, x, y, height) {
+                            if (view.beside) app.selectContextVerse(view.book, view.chapterNumber, verseRow.modelData.number, false)
+                            app.peekFootnote(verseRow.modelData.number, note.seq, x, y, height)
+                        }
                     }
                 }
                 SearchHighlights {
@@ -4000,10 +4050,10 @@ ApplicationWindow {
     // or the selection in every version (c, Compare).
     property string peekKind: "footnote"
     property int peekIndex: -1
-    readonly property var peekNote: peekIndex >= 0 ? bible.footnotes[peekIndex] || null : null
+    readonly property var peekNote: peekIndex >= 0 ? chapterFootnotes[peekIndex] || null : null
     function peekFootnote(verse, seq, sceneX, sceneY, lineHeight) {
         if (!bible.ready || bible.busy || modalOpen) return
-        const index = Array.from(bible.footnotes).findIndex(function(note) { return note.verse === verse && note.seq === seq })
+        const index = chapterFootnotes.findIndex(function(note) { return note.verse === verse && note.seq === seq })
         if (index < 0) { rejected(); return }
         const point = sceneX === undefined ? verseMenuPoint(verse) : Qt.point(sceneX, sceneY)
         peekKind = "footnote"
@@ -4012,12 +4062,12 @@ ApplicationWindow {
         peekCard.show(point.x, point.y, lineHeight || 0)
     }
     function peekVerseFootnotes() {
-        const note = Array.from(bible.footnotes).find(function(note) { return note.verse === bible.cursorVerse })
+        const note = chapterFootnotes.find(function(note) { return note.verse === bible.cursorVerse })
         if (!note) { rejected(unavailableReason("peek")); return }
         peekFootnote(note.verse, note.seq)
     }
     function showPeekNote(index) {
-        const notes = Array.from(bible.footnotes)
+        const notes = chapterFootnotes
         peekIndex = index
         const note = notes[index]
         peekCard.title = (note.kind === "fe" ? "Endnote " : "Footnote ") + footnoteMark(note.caller) + " · " + bible.passage + ":" + note.verse
@@ -4035,7 +4085,7 @@ ApplicationWindow {
         }
         const ready = peekCard.opened && !!peekNote && !bible.busy
         return [["Return", "see also", app.seeAlsoFromPeek, ready], ["Y", "copy", app.copyPeek, ready],
-            bible.footnotes.length > 1 ? [["Up", "Down"], "notes"] : null, close]
+            chapterFootnotes.length > 1 ? [["Up", "Down"], "notes"] : null, close]
     }
     // Compare (c): the selection's text in every installed version, in a peek
     // under it; j k choose a version, y copies it (shift Y plain), enter
@@ -4090,7 +4140,7 @@ ApplicationWindow {
     }
     function stepPeek(delta) {
         const next = peekIndex + delta
-        if (next < 0 || next >= bible.footnotes.length) { sounds.play("boundary"); return }
+        if (next < 0 || next >= chapterFootnotes.length) { sounds.play("boundary"); return }
         showPeekNote(next)
     }
     function seeAlsoFromPeek() {
@@ -4568,12 +4618,7 @@ ApplicationWindow {
     }
     function clearPreparedViews() {
         const any = Object.keys(preparedViews).length > 0
-        for (const key in preparedViews) {
-            const view = preparedViews[key]
-            // (A flowing view going rebuilds nothing meanwhile.)
-            if (view.destroying !== undefined) view.destroying = true
-            view.destroy()
-        }
+        for (const key in preparedViews) retireView(preparedViews[key])
         preparedViews = ({})
         // Those still wanted are made again.
         if (any) { Qt.callLater(app.extendBook); neighbourTimer.restart() }
@@ -4610,7 +4655,7 @@ ApplicationWindow {
             wanted[key] = true
             prepareChapterView(entry.book, entry.chapter)
         }
-        for (const key in preparedViews) if (!wanted[key]) { preparedViews[key].destroy(); delete preparedViews[key] }
+        for (const key in preparedViews) if (!wanted[key]) { retireView(preparedViews[key]); delete preparedViews[key] }
     }
     // The chapters of the jumps back and forward, and of the ribbon, in the version read.
     property string leftViewKey: ""
@@ -4624,7 +4669,7 @@ ApplicationWindow {
     // The chapter read until now, kept made (without Whole book: maybe a neighbour).
     function keepPrepared(view) {
         const old = preparedViews[view.viewKey]
-        if (old && old !== view) old.destroy()
+        if (old && old !== view) retireView(old)
         view.parent = viewShelf
         view.beside = true
         view.namePrefix = "prepared:" + view.book + ":" + view.chapterNumber + ":"
@@ -6391,7 +6436,7 @@ ApplicationWindow {
         if (action.id === "openBeside") return bible.ready && bible.versions.length > 1
         if (action.id === "switchPane") return bible.ready && sidePanel.length > 0
         if (action.id === "unfollow") return following
-        if (action.id === "peek") return hasSelection && Array.from(bible.footnotes).some(function(note) { return note.verse === bible.cursorVerse })
+        if (action.id === "peek") return hasSelection && chapterFootnotes.some(function(note) { return note.verse === bible.cursorVerse })
         if (action.id === "undo") return bible.canUndo
         if (action.id === "redo") return bible.canRedo
         if (action.id === "ribbon" || action.id === "removeRibbon") return bible.ready && !!bible.ribbon.versionId

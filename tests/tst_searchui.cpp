@@ -466,10 +466,9 @@ private slots:
         if (mode == "verse") {
             QTRY_VERIFY(item("verseHeading1") && item("verseHeading1")->height() > 0);
             QVERIFY(item("verseHeading1")->isVisible());
-            QQuickItem *text = nullptr;
-            for (auto child : item("verseHeading1")->childItems())
-                if (child->property("text").toString().remove(QChar(0x200e)) == heading) text = child;
-            QVERIFY(text); QVERIFY(text->isVisible()); QVERIFY(text->height() > 0);
+            QQuickItem *text = item("headingText1");
+            QVERIFY(text); QCOMPARE(text->property("text").toString().remove(QChar(0x200e)), heading);
+            QVERIFY(text->isVisible()); QVERIFY(text->height() > 0);
         } else {
             QTRY_VERIFY(blockMapping() && item("blockBody") && document(item("blockBody")));
             QTRY_VERIFY(document(item("blockBody"))->toPlainText().startsWith(heading));

@@ -103,13 +103,13 @@ Item {
         if (key !== markerKey) { markerKey = key; markerModel = markers }
     }
     property bool markersWaiting: false
+    // After each frame: a build's next turn, and markers waiting.
     Connections {
         target: root.Window.window
-        enabled: root.markersWaiting
+        enabled: root.turning || root.markersWaiting
         function onFrameSwapped() {
-            if (root.destroying || root.building) return
-            root.markersWaiting = false
-            root.updateMarkers()
+            if (root.turning) { root.turning = false; root.buildSome() }
+            if (root.markersWaiting && !root.destroying && !root.building) { root.markersWaiting = false; root.updateMarkers() }
         }
     }
     function openAnnotation(entry) {
@@ -201,7 +201,7 @@ Item {
         building = incremental
         if (incremental) {
             document.beginBuild(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode, !focusLayout, em, noteMarks, spacing)
-            Qt.callLater(root.buildSome)
+            nextTurn()
             return
         }
         document.build(body.textDocument, displayVerses(), numbers, headings, backend.lineHeight, mode, !focusLayout, em, noteMarks, spacing)
@@ -221,13 +221,16 @@ Item {
         document.buildMore(-1)
         builtAll()
     }
-    // A few verses (a few milliseconds) a turn, the next as soon as the event
-    // loop is free (an animation-paced Timer would take a long chapter a second).
+    // A few verses (a few milliseconds) a turn, one after each frame (a turn
+    // queued for when the event loop is free can run ahead of a key's frame,
+    // holding it back).
     function buildSome() {
         if (destroying || !building) return
         if (document.buildMore(6)) builtAll()
-        else Qt.callLater(root.buildSome)
+        else nextTurn()
     }
+    property bool turning: false
+    function nextTurn() { turning = true; if (root.Window.window) root.Window.window.update() }
     // Runs a pending rebuild and geometry refresh now rather than on the
     // timers' next turn: a transition measures the new layout before the
     // frame that first shows it.
