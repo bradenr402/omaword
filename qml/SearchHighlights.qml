@@ -92,26 +92,30 @@ Item {
         function onHorizontalAlignmentChanged() { root.refresh() }
         function onVerticalAlignmentChanged() { root.refresh() }
     }
-    Canvas {
-        id: paint
-        objectName: "searchHighlightsCanvas"
+    // Marks painted: a canvas is made only with marks to paint or erase
+    // (most rows, made a chapter at a time, have no matches).
+    property bool inked: false
+    Loader {
+        id: paintLoader
         anchors.fill: parent
-        // Marks painted: a canvas with none to paint or erase paints nothing
-        // (most rows, made a chapter at a time, have no matches).
-        property bool inked: false
-        property color accent: root.theme ? root.theme.accent : "#80aaff" // fallback: a test without a theme
-        onAccentChanged: root.refresh()
-        onPaint: {
-            if (root.destroying) return
-            const ctx = getContext("2d")
-            ctx.reset() // Also clears the last match when segments becomes empty.
-            const origin = root.bodyOrigin()
-            const offset = root.body.mapToItem(paint, origin.x, origin.y)
-            ctx.translate(offset.x, offset.y)
-            const rects = document.rectangles(root.segments || [])
-            HandDrawn.searchMarks(ctx, rects, accent, root.outlined,
-                root.markScale, root.sourceText)
-            inked = rects.length > 0
+        active: root.inked || (root.segments || []).length > 0
+        sourceComponent: Canvas {
+            id: paint
+            objectName: "searchHighlightsCanvas"
+            property color accent: root.theme ? root.theme.accent : "#80aaff" // fallback: a test without a theme
+            onAccentChanged: root.refresh()
+            onPaint: {
+                if (root.destroying) return
+                const ctx = getContext("2d")
+                ctx.reset() // Also clears the last match when segments becomes empty.
+                const origin = root.bodyOrigin()
+                const offset = root.body.mapToItem(paint, origin.x, origin.y)
+                ctx.translate(offset.x, offset.y)
+                const rects = document.rectangles(root.segments || [])
+                HandDrawn.searchMarks(ctx, rects, accent, root.outlined,
+                    root.markScale, root.sourceText)
+                root.inked = rects.length > 0
+            }
         }
     }
     Timer {
@@ -119,7 +123,7 @@ Item {
         interval: 0
         onTriggered: {
             document.attach(root.body.textDocument, root.sourceText)
-            if (paint.inked || (root.segments || []).length) paint.requestPaint()
+            if (paintLoader.item && (root.inked || (root.segments || []).length)) paintLoader.item.requestPaint()
         }
     }
     Component.onCompleted: { leftToRight(); refresh() }

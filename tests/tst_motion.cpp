@@ -64,6 +64,8 @@ class MotionTest : public QObject
         return visual(window->contentItem(), name);
     }
     QQuickItem *item(const QString &name) const { return qobject_cast<QQuickItem *>(object(name)); }
+    // Made only while it shows, a row's mark is shown when it is there and visible.
+    bool shown(const QString &name) const { auto found = item(name); return found && found->isVisible(); }
     QVariant prop(const char *name) const { return value(window->property(name)); }
     static QRectF caret(QObject *body, int position) {
         QRectF rect;
@@ -74,7 +76,8 @@ class MotionTest : public QObject
         const auto quick = body->property("textDocument").value<QQuickTextDocument *>();
         return quick ? quick->textDocument() : nullptr;
     }
-    BlockDocument *blockMapping() const { return window->findChild<BlockDocument *>(); }
+    // The chapter read's (views beside, or made ahead, have their own).
+    BlockDocument *blockMapping() const { auto reader = window->findChild<QObject *>("blockReader"); return reader ? reader->findChild<BlockDocument *>() : nullptr; }
     QRectF verseViewportRect(int verse) const {
         if (prop("continuousReader").toBool()) {
             auto body = item("blockBody");
@@ -170,10 +173,10 @@ class MotionTest : public QObject
     void expectPulse(int first, int last) {
         QTRY_VERIFY(prop("pulseActive").toBool());
         QCOMPARE(prop("pulseFirst").toInt(), first); QCOMPARE(prop("pulseLast").toInt(), last);
-        if (!prop("continuousReader").toBool()) QTRY_VERIFY(item("jumpPulse" + QString::number(first))->isVisible());
+        if (!prop("continuousReader").toBool()) QTRY_VERIFY(shown("jumpPulse" + QString::number(first)));
         else QTRY_VERIFY(item("blockMotionBackground")->isVisible());
         QTRY_VERIFY_WITH_TIMEOUT(!prop("pulseActive").toBool(), 3000);
-        if (!prop("continuousReader").toBool()) QVERIFY(!item("jumpPulse" + QString::number(first))->isVisible());
+        if (!prop("continuousReader").toBool()) QVERIFY(!shown("jumpPulse" + QString::number(first)));
         else QVERIFY(!item("blockMotionBackground")->isVisible());
     }
     void expectFlash(int first, int last) {
@@ -430,7 +433,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(menu(), "triggerId", Q_ARG(QVariant, "copy")));
         QTRY_VERIFY(!menu()->property("visible").toBool());
         expectFlash(bible->cursorVerse(), bible->cursorVerse());
-        if (mode == "verse") QVERIFY(!item("copyFlash6")->isVisible());
+        if (mode == "verse") QVERIFY(!shown("copyFlash6"));
     }
     void popupsFocusImmediatelyAndReopen() {
         auto ghost = [&](const char *name) { return object(name); };
@@ -700,9 +703,9 @@ private slots:
         QCOMPARE(object("passagePalette")->property("opacity").toDouble(), 1.0);
         type("John 1:9"); key(Qt::Key_Return);
         QTRY_COMPARE(bible->cursorVerse(), 9);
-        for (int i = 0; i < 6; ++i) { QTest::qWait(20); QVERIFY(!prop("pulseActive").toBool()); QVERIFY(!item("jumpPulse9")->isVisible()); }
+        for (int i = 0; i < 6; ++i) { QTest::qWait(20); QVERIFY(!prop("pulseActive").toBool()); QVERIFY(!shown("jumpPulse9")); }
         key(Qt::Key_Y);
-        for (int i = 0; i < 6; ++i) { QTest::qWait(20); QVERIFY(!prop("flashActive").toBool()); QVERIFY(!item("copyFlash9")->isVisible()); }
+        for (int i = 0; i < 6; ++i) { QTest::qWait(20); QVERIFY(!prop("flashActive").toBool()); QVERIFY(!shown("copyFlash9")); }
         // Modals and toasts appear at full strength at once.
         call("readerFocus"); QVERIFY(QMetaObject::invokeMethod(window, "runCommand", Q_ARG(QVariant, QString("help"))));
         QTRY_VERIFY(object("helpDialog")->property("opened").toBool());

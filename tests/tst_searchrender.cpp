@@ -264,9 +264,9 @@ ApplicationWindow {
         root->setProperty("rowSegments", QVariantList{segment(1, start, needle.size(), true)});
         QTest::qWait(40);
         QVERIFY(grab(item("searchHighlightsCanvas")) != painted);
+        // Without matches its marks are erased, and the canvas goes.
         root->setProperty("rowSegments", QVariantList{});
-        QTest::qWait(40);
-        QCOMPARE(ink(grab(item("searchHighlightsCanvas"))), 0);
+        QTRY_VERIFY(!item("searchHighlightsCanvas"));
         QCOMPARE(changed.count(), 0);
         QCOMPARE(doc->revision(), revision);
         QCOMPARE(doc->toHtml(), originalHtml);

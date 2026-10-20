@@ -309,7 +309,7 @@ private slots:
         auto row = object("paletteResults")->property("currentItem").value<QQuickItem *>();
         QTRY_VERIFY(visual(row, "searchHighlightsCanvas"));
         auto canvas = visual(row, "searchHighlightsCanvas");
-        auto overlay = canvas->parentItem();
+        auto overlay = canvas->parentItem()->parentItem(); // (Its canvas is made, by a loader, only with marks.)
         auto body = overlay->property("body").value<QQuickItem *>();
         QVERIFY(body); QVERIFY(document(body));
         const auto result = bible->searchResults().first().toMap();

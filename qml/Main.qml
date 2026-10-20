@@ -1251,40 +1251,50 @@ ApplicationWindow {
                         visible: ranges.length > 0 && !bible.focusMode && app.inlineNoteMarks
                     }
                 }
-                VerseTint {
-                    objectName: view.namePrefix + "annotationTint" + verseRow.modelData.number
-                    row: verseRow.modelData
-                    previous: verseRow.index > 0 ? view.verses[verseRow.index - 1] : null
-                    next: view.verses[verseRow.index + 1] || null
-                    headingHeight: verseHeading.height
-                    bodyHeight: verseBody.height
-                    versionId: bible.versionId
-                    focusMode: bible.focusMode
-                    x: verseRow.gutter - 9 * app.readerScale
-                    width: verseRow.width - x
-                    height: verseRow.height
+                // The marks below are made only where and while they show:
+                // most rows have none, and a long chapter's rows are many
+                // (each made costs a row's making several times over).
+                Loader {
+                    active: !bible.focusMode && HandDrawn.tintCount(verseRow.modelData) > 0
+                    sourceComponent: VerseTint {
+                        objectName: view.namePrefix + "annotationTint" + verseRow.modelData.number
+                        row: verseRow.modelData
+                        previous: verseRow.index > 0 ? view.verses[verseRow.index - 1] : null
+                        next: view.verses[verseRow.index + 1] || null
+                        headingHeight: verseHeading.height
+                        bodyHeight: verseBody.height
+                        versionId: bible.versionId
+                        focusMode: bible.focusMode
+                        x: verseRow.gutter - 9 * app.readerScale
+                        width: verseRow.width - x
+                        height: verseRow.height
+                    }
                 }
-                Rectangle {
-                    objectName: view.namePrefix + "jumpPulse" + verseRow.modelData.number
-                    readonly property bool target: !view.beside && verseRow.modelData.number >= app.pulseFirst && verseRow.modelData.number <= app.pulseLast
-                    x: verseRow.gutter - 9 * app.readerScale
-                    y: verseHeading.height
-                    width: verseRow.width - x
-                    height: verseBody.height + 3
-                    color: desktop.accent
-                    opacity: target && app.pulseActive ? 0.24 * app.pulseLevel : 0
-                    visible: opacity > 0
+                Loader {
+                    active: !view.beside && app.pulseActive && verseRow.verseNumber >= app.pulseFirst && verseRow.verseNumber <= app.pulseLast
+                    sourceComponent: Rectangle {
+                        objectName: view.namePrefix + "jumpPulse" + verseRow.modelData.number
+                        x: verseRow.gutter - 9 * app.readerScale
+                        y: verseHeading.height
+                        width: verseRow.width - x
+                        height: verseBody.height + 3
+                        color: desktop.accent
+                        opacity: 0.24 * app.pulseLevel
+                        visible: opacity > 0
+                    }
                 }
-                Rectangle {
-                    objectName: view.namePrefix + "copyFlash" + verseRow.modelData.number
-                    readonly property bool target: !view.beside && verseRow.modelData.number >= app.flashFirst && verseRow.modelData.number <= app.flashLast
-                    x: verseRow.gutter - 9 * app.readerScale
-                    y: verseHeading.height
-                    width: verseRow.width - x
-                    height: verseBody.height + 3
-                    color: desktop.accent
-                    opacity: target && app.flashActive ? 0.3 * app.flashLevel : 0
-                    visible: opacity > 0
+                Loader {
+                    active: !view.beside && app.flashActive && verseRow.verseNumber >= app.flashFirst && verseRow.verseNumber <= app.flashLast
+                    sourceComponent: Rectangle {
+                        objectName: view.namePrefix + "copyFlash" + verseRow.modelData.number
+                        x: verseRow.gutter - 9 * app.readerScale
+                        y: verseHeading.height
+                        width: verseRow.width - x
+                        height: verseBody.height + 3
+                        color: desktop.accent
+                        opacity: 0.3 * app.flashLevel
+                        visible: opacity > 0
+                    }
                 }
                 VerseHighlights {
                     namePrefix: view.namePrefix
@@ -1300,25 +1310,28 @@ ApplicationWindow {
                 // A range's faint wash: a selected row after the first joins
                 // the row above, as the range is one (no verse row is read here:
                 // every row reevaluates this on each verse step).
-                Rectangle {
-                    objectName: view.namePrefix + "selectionRange" + verseRow.modelData.number
-                    x: verseRow.gutter - 9 * app.readerScale
-                    y: verseRow.inRange && verseRow.modelData.number > view.selectedFirst ? 0 : verseHeading.height
-                    width: parent.width - x
-                    height: (verseRow.modelData.number < view.selectedLast ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
-                    visible: verseRow.inRange
-                    color: app.rangeTint
+                Loader {
+                    active: verseRow.inRange
+                    sourceComponent: Rectangle {
+                        objectName: view.namePrefix + "selectionRange" + verseRow.modelData.number
+                        x: verseRow.gutter - 9 * app.readerScale
+                        y: verseRow.modelData.number > view.selectedFirst ? 0 : verseHeading.height
+                        width: verseRow.width - x
+                        height: (verseRow.modelData.number < view.selectedLast ? verseRow.height : verseHeading.height + verseBody.height + 3) - y
+                        color: app.rangeTint
+                    }
                 }
                 // The focused verse's tint; beside, none.
-                Rectangle {
-                    objectName: view.namePrefix + "selectionSegment" + verseRow.modelData.number
-                    x: verseRow.gutter - 9 * app.readerScale
-                    y: verseHeading.height
-                    width: parent.width - x
-                    height: verseBody.height + 3
-                    visible: verseRow.selected && !view.beside && verseRow.modelData.number === bible.cursorVerse && app.cursorTinted
-                    radius: 0
-                    color: app.focusTint
+                Loader {
+                    active: verseRow.selected && !view.beside && verseRow.verseNumber === bible.cursorVerse && app.cursorTinted
+                    sourceComponent: Rectangle {
+                        objectName: view.namePrefix + "selectionSegment" + verseRow.modelData.number
+                        x: verseRow.gutter - 9 * app.readerScale
+                        y: verseHeading.height
+                        width: verseRow.width - x
+                        height: verseBody.height + 3
+                        color: app.focusTint
+                    }
                 }
                 // A range's verses, or text selected by character (washed line
                 // by line, a range having its band): dotted underlines.
@@ -1330,14 +1343,16 @@ ApplicationWindow {
                         fill: verseRow.textSelected ? app.rangeTint : "transparent"
                     }
                 }
-                Rectangle {
-                    objectName: view.namePrefix + "charCursorTint" + verseRow.modelData.number
-                    visible: !!verseRow.cursorBox
-                    x: verseBody.x + (verseRow.cursorBox ? verseRow.cursorBox.x : 0)
-                    y: verseBody.y + (verseRow.cursorBox ? verseRow.cursorBox.y : 0)
-                    width: verseRow.cursorBox ? verseRow.cursorBox.width : 0
-                    height: verseRow.cursorBox ? verseRow.cursorBox.height : 0
-                    color: app.focusTint
+                Loader {
+                    active: !!verseRow.cursorBox
+                    sourceComponent: Rectangle {
+                        objectName: view.namePrefix + "charCursorTint" + verseRow.modelData.number
+                        x: verseBody.x + (verseRow.cursorBox ? verseRow.cursorBox.x : 0)
+                        y: verseBody.y + (verseRow.cursorBox ? verseRow.cursorBox.y : 0)
+                        width: verseRow.cursorBox ? verseRow.cursorBox.width : 0
+                        height: verseRow.cursorBox ? verseRow.cursorBox.height : 0
+                        color: app.focusTint
+                    }
                 }
                 Item {
                     id: verseNumber
