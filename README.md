@@ -280,7 +280,7 @@ omaword link jn316               # print an omaword: link to a passage
 
 `quote`, `search`, and `link` print without opening a window. Links like `omaword:John%203:16` (or `omaword:jn316?translation=KJV`) open where you were reading, from `xdg-open` or a browser. `omaword help` lists every command and `man omaword` has the manual; `bin/install` adds bash completion, and `omaword completion zsh` (or `fish`) prints the others.
 
-`omaword lookup` suits a key binding; in Omarchy, add one, and a rule to center the window, to `~/.config/hypr/bindings.lua`:
+`omaword lookup` suits a key binding; in Omarchy, add one, and a rule to float and center the window (it can be resized), to `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + ALT + B", "Look up a passage", "omaword lookup")

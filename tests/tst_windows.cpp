@@ -558,7 +558,10 @@ private slots:
         QTRY_VERIFY(done); QCOMPARE(windows->count(),count); // Not a reader window.
         auto *lookup = windows->lookupWindow(); QVERIFY(lookup);
         QCOMPARE(lookup->title(),QString("Look up · OmaWord"));
-        QCOMPARE(lookup->minimumSize(),lookup->maximumSize()); // Fixed: Hyprland floats it.
+        // Resizable, above a size its parts fit in.
+        QVERIFY(lookup->maximumSize().width() > lookup->width() && lookup->maximumSize().height() > lookup->height());
+        QVERIFY(lookup->minimumSize().width() < lookup->width() && lookup->minimumSize().height() < lookup->height());
+        const QSize resized(lookup->width() + 120, lookup->height() + 90);
         QCOMPARE(windowObject(lookup,"lookupQuery")->property("text").toString(),QString("rom 8:2"));
         QTRY_VERIFY(lookup->property("candidates").value<QJSValue>().property("length").toInt() > 0);
         // One version: its name, nothing to choose (tab changes nothing).
@@ -595,10 +598,17 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(lookup,"copy",Q_ARG(QVariant,true)));
         QVERIFY(!QGuiApplication::clipboard()->text().contains(QStringLiteral("\u2014")));
         QCOMPARE(bible->selectionReference(),QString("John 3:2")); // Nothing moved.
-        // A second lookup replaces it, afresh.
+        // A second lookup replaces it, afresh, at the size the first was given.
+        {
+            // (Once the window has heard of it: its size changes before its signals arrive.)
+            QSignalSpy widths(lookup, &QWindow::widthChanged), heights(lookup, &QWindow::heightChanged);
+            lookup->resize(resized); QTRY_VERIFY(widths.count() && heights.count());
+            QCOMPARE(lookup->size(), resized);
+        }
         QPointer<QWindow> first(lookup);
         QVERIFY(windows->openLookup("jn316"));
         QTRY_VERIFY(!first); lookup = windows->lookupWindow(); QVERIFY(lookup);
+        QTRY_COMPARE(lookup->size(), resized);
         QVERIFY(QMetaObject::invokeMethod(lookup,"show",Q_ARG(QVariant,0)));
         // enter: the passage in the reader used last (here, none was active: the newest), and the lookup closes.
         QVERIFY(QMetaObject::invokeMethod(lookup,"openInReader"));

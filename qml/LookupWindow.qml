@@ -4,13 +4,15 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import QtCore
 import "KeyNotation.js" as KeyNotation
 
 // Look up (omaword lookup): a small window opened where you are, for a
 // passage without going to OmaWord. Type a reference (compact forms too:
 // jn316, ps23) and enter shows it; there y copies it (shift Y the plain
-// text) and enter opens it in your reading window. Its size is fixed, which
-// Hyprland floats. Its own backend reads the version you read, or the one
+// text) and enter opens it in your reading window. It can be resized, and
+// opens at the size it had last (a window rule floats it: Hyprland tiles a
+// window it may resize). Its own backend reads the version you read, or the one
 // asked for, and saves nothing; with others installed, tab and shift tab
 // (or the version button) read another, and enter opens the passage in
 // that version.
@@ -29,8 +31,23 @@ Window {
     readonly property real inset: Math.round(20 * controlScale)
     width: Math.round(560 * controlScale)
     height: Math.round(420 * controlScale)
-    minimumWidth: width; maximumWidth: width
-    minimumHeight: height; maximumHeight: height
+    minimumWidth: Math.round(360 * controlScale)
+    minimumHeight: Math.round(260 * controlScale)
+    // Its size, read and written straight through (no Settings properties:
+    // those would write their defaults back as a lookup closes).
+    Settings {
+        id: size
+        category: "lookup"
+        location: StandardPaths.writableLocation(StandardPaths.AppConfigLocation) + "/lookup.ini"
+    }
+    property bool sizeKept: false
+    function restoreSize() {
+        const width = Number(size.value("width", 0)), height = Number(size.value("height", 0))
+        if (width > 0 && height > 0) { lookup.width = width; lookup.height = height }
+        sizeKept = true
+    }
+    onWidthChanged: if (sizeKept) size.setValue("width", width)
+    onHeightChanged: if (sizeKept) size.setValue("height", height)
     title: "Look up · " + lookup.theme.appName
     color: lookup.theme.background
 
@@ -133,6 +150,7 @@ Window {
     }
 
     Component.onCompleted: {
+        restoreSize()
         // Copies of the rows: the list's own rows would read the backend's
         // list as it is later, which puts the version read first.
         versionOrder = Array.from(lookup.backend.versions).map(function(row) {

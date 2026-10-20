@@ -42,8 +42,8 @@ const QList<Command> &commands()
          "Opens a small window on the workspace you are on, with <text> typed into it if given: type a passage, enter "
          "shows it, y copies it (shift Y the plain text), enter opens it in the window you were reading, esc closes. "
          "With more than one version installed, tab and shift tab read it in another, which enter then opens. "
-         "Hyprland floats it. Suits a key binding; in Omarchy, in ~/.config/hypr/bindings.lua, with a rule that centers "
-         "it and shows and hides it at once, as Omarchy's menus do:\n"
+         "It can be resized and opens at its last size. Suits a key binding; in Omarchy, in ~/.config/hypr/bindings.lua, "
+         "with a rule that floats and centers it and shows and hides it at once, as Omarchy's menus do:\n"
          "  o.bind(\"SUPER + ALT + B\", \"Look up a passage\", \"omaword lookup\")\n"
          "  o.window({ class = \"^omaword$\", title = \"^Look up · OmaWord$\" }, { float = true, center = true, no_anim = true })",
          {translationOption, helpOption}, {"omaword lookup", "omaword lookup rom 8", "omaword lookup -t KJV"}, false},
