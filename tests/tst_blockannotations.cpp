@@ -332,10 +332,8 @@ ApplicationWindow {
             if (capture->image().isNull()) ready.wait(2000);
             return capture->image();
         };
-        const auto empty = grab(canvas);
-        QVERIFY(!empty.isNull());
-        for (int y = 0; y < empty.height(); ++y)
-            for (int x = 0; x < empty.width(); ++x) QCOMPARE(empty.pixelColor(x,y).alpha(),0);
+        // No marks, no paint: it covers only where its marks are (area).
+        QVERIFY(canvas->property("area").toRectF().isEmpty());
         QSignalSpy rebuilt(mapping,&BlockDocument::spansChanged);
         for (int state = 0; state < 5; ++state) {
             backend->setProperty("cursorVerse",state % 2 ? 31 : 119);
@@ -358,8 +356,13 @@ ApplicationWindow {
             QCOMPARE(body->height(),height);
             QCOMPARE(rebuilt.count(),0);
             if (state < 2) continue;
-            const auto image = grab(canvas);
-            QVERIFY(!image.isNull());
+            // Its pixels, where they lie over the text (they begin at its area's corner).
+            const QRect area = canvas->property("area").toRectF().toRect();
+            const QImage grabbed = grab(canvas);
+            QVERIFY(!grabbed.isNull());
+            QImage image(area.right() + 1, area.bottom() + 1, QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::transparent);
+            { QPainter onto(&image); onto.drawImage(area.topLeft(), grabbed); }
             const auto painted = state == 3 ? mapping->rectangles(0,spans.last().toMap()["end"].toInt()) : rects;
             for (const auto &entry : painted) {
                 const auto r = entry.toMap();
@@ -1351,9 +1354,9 @@ QtObject {
         backend->setProperty("cursorVerse",0);
         QTRY_VERIFY(list("inlineMarkers").isEmpty());
         QTest::qWait(60);
-        const auto cleared = grab(background);
-        for (int y = 0; y < cleared.height(); ++y)
-            for (int x = 0; x < cleared.width(); ++x) QCOMPARE(cleared.pixelColor(x,y).alpha(),0);
+        // (It covers only its marks: with none, nothing.)
+        QVERIFY(background->property("area").toRectF().isEmpty());
+        QCOMPARE(background->width(), 0.0);
     }
     void screenshot() {
         populate(true);

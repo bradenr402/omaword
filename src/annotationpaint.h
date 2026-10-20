@@ -11,7 +11,10 @@
 // selection move, and then only the area of the shapes that changed.
 //   strokes: [{x, y, width, height, seed}] highlighter strokes in `ink`
 //   bands:   [{x, y, width, height, seed, left, right}] tint bands in `tint`
-// Coordinates are the item's own, shifted right by `inset`.
+// Coordinates are those of the area the marks lie in (the text's, shifted
+// right by `inset`); the item covers only `area`, the part of it holding
+// marks, where QML places it: a long chapter's whole height of texture would
+// take long to make and to show, for marks a few lines tall.
 class AnnotationPaint : public QQuickPaintedItem
 {
     Q_OBJECT
@@ -23,6 +26,7 @@ class AnnotationPaint : public QQuickPaintedItem
     Q_PROPERTY(qreal penScale READ penScale WRITE setPenScale NOTIFY changed)
     Q_PROPERTY(qreal inset READ inset WRITE setInset NOTIFY changed)
     Q_PROPERTY(int paintCount READ paintCount NOTIFY painted)
+    Q_PROPERTY(QRectF area READ area NOTIFY areaChanged)
 public:
     explicit AnnotationPaint(QQuickItem *parent = nullptr);
     void paint(QPainter *painter) override;
@@ -45,18 +49,22 @@ public:
     void setInset(qreal inset);
     // Test hook: how many times it has painted.
     int paintCount() const { return m_paintCount; }
+    QRectF area() const { return m_area; }
 signals:
     void changed();
     void painted();
+    void areaChanged();
 private:
     void changedLook() { updateAll(); emit changed(); }
     void updateArea(const QRectF &area);
     void updateAll();
+    void measureArea();
     bool m_dirtyAll = false;
     QVariantList m_strokes, m_bands;
     QColor m_ink, m_tint;
     qreal m_inkAlpha = 0.35, m_penScale = 1, m_inset = 0;
     int m_paintCount = 0;
+    QRectF m_area;
 };
 
 // HandDrawn.js's deterministic shapes, for C++ painters.

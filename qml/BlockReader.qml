@@ -186,7 +186,7 @@ Item {
     function refreshGeometry() {
         if (!destroying && !building) {
             paint.requestPaint()
-            searchPaint.requestPaint()
+            if (searchPaint.visible) searchPaint.requestPaint()
             // Motion geometry is computed only while it can be seen, keeping
             // drag-autoscroll refreshes as cheap as before. The focus veil
             // still fading out after a rebuild keeps its holes on the text.
@@ -301,10 +301,11 @@ Item {
         // Paint outside the first/continuation line without changing body layout
         // or the right endpoint. The same inset is reserved at verse separators.
         readonly property real leftInset: 5
-        x: body.x - leftInset
-        y: body.y
-        width: body.width + leftInset
-        height: body.height
+        // Over the marks only (area: the marks' place in the text's, inset).
+        x: body.x - leftInset + area.x
+        y: body.y + area.y
+        width: area.width
+        height: area.height
         inset: leftInset
         penScale: root.readerScale > 0 ? root.readerScale : 1
         property var annotations: root.verses
@@ -323,8 +324,6 @@ Item {
         // A selection move repaints only the selection's own layer.
         onFirstChanged: if (!root.destroying) selectionTimer.restart()
         onLastChanged: if (!root.destroying) selectionTimer.restart()
-        onWidthChanged: if (!root.destroying) geometryTimer.restart()
-        onHeightChanged: if (!root.destroying) geometryTimer.restart()
         // Lays the marks out again (once per event loop turn, however many
         // changes asked); they repaint only if they moved or changed.
         function requestPaint() { if (!root.destroying) shapesTimer.restart() }
@@ -375,8 +374,8 @@ Item {
     Item {
         id: selectionPaint
         objectName: root.namePrefix + "blockSelectionBackground"
-        x: paint.x; y: paint.y
-        width: paint.width; height: paint.height
+        x: body.x - paint.leftInset; y: body.y
+        width: body.width + paint.leftInset; height: body.height
         property var rects: []
         property var lines: []
         property bool characters: false
@@ -447,6 +446,9 @@ Item {
         objectName: root.namePrefix + "blockSearchBackground"
         x: body.x; y: body.y
         width: body.width; height: body.height
+        // Shown (a chapter's whole height of canvas made) only with marks to paint.
+        visible: root.searchSegments.length > 0
+        onVisibleChanged: if (visible) requestPaint()
         property color accent: root.theme.accent
         onAccentChanged: requestPaint()
         onWidthChanged: if (!root.destroying) geometryTimer.restart()

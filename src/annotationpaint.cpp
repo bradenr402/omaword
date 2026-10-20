@@ -172,6 +172,7 @@ void AnnotationPaint::setStrokes(const QVariantList &strokes)
     if (strokes == m_strokes) return;
     updateArea(changedArea(m_strokes, strokes, 4 * m_penScale));
     m_strokes = strokes;
+    measureArea();
     emit changed();
 }
 void AnnotationPaint::setBands(const QVariantList &bands)
@@ -179,7 +180,21 @@ void AnnotationPaint::setBands(const QVariantList &bands)
     if (bands == m_bands) return;
     updateArea(changedArea(m_bands, bands, 4 * m_penScale));
     m_bands = bands;
+    measureArea();
     emit changed();
+}
+// The marks' extent, with what a stroke's feather and wobble may reach (a new
+// one resizes the item, which then repaints whole).
+void AnnotationPaint::measureArea()
+{
+    const qreal margin = 4 * m_penScale;
+    QRectF area;
+    for (const auto &value : std::as_const(m_bands)) area |= shapeRect(value).adjusted(-margin, -margin, margin, margin);
+    for (const auto &value : std::as_const(m_strokes)) area |= shapeRect(value).adjusted(-margin, -margin, margin, margin);
+    area = area.isEmpty() ? QRectF() : QRectF(area.translated(m_inset, 0).toAlignedRect());
+    if (area == m_area) return;
+    m_area = area;
+    emit areaChanged();
 }
 // A few shapes changed (a highlight toggled): only their area repaints. Many
 // (a new layout) repaint everything.
@@ -188,7 +203,7 @@ void AnnotationPaint::updateArea(const QRectF &area)
     if (area.isEmpty()) return;
     // A partial update after a full one would narrow it: keep the full one.
     if (m_dirtyAll || area.height() > height() / 2) { updateAll(); return; }
-    update(area.translated(m_inset, 0).toAlignedRect());
+    update(area.translated(m_inset - m_area.x(), -m_area.y()).toAlignedRect());
 }
 void AnnotationPaint::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
@@ -204,19 +219,19 @@ void AnnotationPaint::setInk(const QColor &ink) { if (ink != m_ink) { m_ink = in
 void AnnotationPaint::setInkAlpha(qreal alpha) { if (!qFuzzyCompare(alpha, m_inkAlpha)) { m_inkAlpha = alpha; changedLook(); } }
 void AnnotationPaint::setTint(const QColor &tint) { if (tint != m_tint) { m_tint = tint; changedLook(); } }
 void AnnotationPaint::setPenScale(qreal scale) { if (!qFuzzyCompare(scale, m_penScale)) { m_penScale = scale; changedLook(); } }
-void AnnotationPaint::setInset(qreal inset) { if (!qFuzzyCompare(inset, m_inset)) { m_inset = inset; changedLook(); } }
+void AnnotationPaint::setInset(qreal inset) { if (!qFuzzyCompare(inset, m_inset)) { m_inset = inset; measureArea(); changedLook(); } }
 
 void AnnotationPaint::paint(QPainter *painter)
 {
     ++m_paintCount;
     m_dirtyAll = false;
     // Only shapes reaching the area being repainted are drawn.
-    const QRectF clip = painter->hasClipping() ? painter->clipBoundingRect().translated(-m_inset, 0) : QRectF();
+    const QRectF clip = painter->hasClipping() ? painter->clipBoundingRect().translated(m_area.x() - m_inset, m_area.y()) : QRectF();
     const qreal margin = 4 * m_penScale;
     const auto shown = [&](const QRectF &rect) { return clip.isNull() || clip.intersects(rect.adjusted(-margin, -margin, margin, margin)); };
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setPen(Qt::NoPen);
-    painter->translate(m_inset, 0);
+    painter->translate(m_inset - m_area.x(), -m_area.y());
     // Tints first: each covering range adds a layer; highlights go on top.
     painter->setBrush(m_tint);
     for (const auto &value : std::as_const(m_bands)) {
