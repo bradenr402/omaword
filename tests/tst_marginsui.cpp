@@ -316,8 +316,8 @@ class MarginsUiTest : public QObject
     QList<Frame> stepped(const QString &name, const QList<std::function<void()>> &actions, const QList<int> &steps, int ms = 8) {
         const auto directory = qEnvironmentVariable("OMAWORD_FOCUS_TIMELINE");
         if (!directory.isEmpty()) QDir().mkpath(directory + "/focus-frames");
-        // Views made ahead render frames as they are made: none is, first.
-        if (!QTest::qWaitFor([&] { return !js("preparing").toBool(); }, 5000)) qWarning("views still being made ahead");
+        // Views made a few rows a frame render frames as they are made: none is, first.
+        if (!QTest::qWaitFor([&] { return !js("preparing").toBool(); }, 5000)) qWarning("views still being made");
         StepDriver driver; driver.install();
         // Whatever still animates (a scrollbar fading, a toast) ends first, so
         // the transition's first step is exactly `ms`, not `ms` plus the time

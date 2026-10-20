@@ -990,7 +990,8 @@ ApplicationWindow {
     readonly property int rowsFirst: verseHost.item ? verseHost.item.firstRow : 0
     readonly property int rowsEnd: rowsFirst + verseRepeater.count
     // A chapter longer than this (verses) gets its rows a window at a time,
-    // as does any the layout switches to (switching) with a verse read.
+    // as does any the layout switches to (switching) with a verse read, and
+    // any read after one (rather than unmaking its many rows).
     readonly property int windowRows: 40
     function rowItem(i) { return verseHost.item ? verseHost.item.rowAt(i) : null }
     function showChapterRead(switching) {
@@ -1005,16 +1006,17 @@ ApplicationWindow {
                 if (view && bible.wholeBook) shelveChapterView(view)
                 else if (view) { leftViewKey = view.viewKey; keepPrepared(view) }
                 view = kept
-            } else if (!view || (!continuousReader && (bible.verses.length > windowRows || view.building))) {
-                // A long chapter (or one left before its rows were all made)
-                // gets a view of its own, its rows made about the verse read
-                // first (VerseView's window); the one left stays made, for a
-                // jump back.
+            } else if (!view || (!continuousReader && (bible.verses.length > windowRows || view.building || view.repeater.count > windowRows))) {
+                // A long chapter (or one left before its rows were all made,
+                // or a long one left) gets a view of its own, its rows made
+                // about the verse read first (VerseView's window); the one
+                // left stays made, for a jump back.
+                const long = !!view && !continuousReader && view.repeater.count > windowRows
                 if (view && bible.wholeBook) shelveChapterView(view)
                 else if (view) { leftViewKey = view.viewKey; keepPrepared(view) }
                 // Made with a copy of the rows (see below), its window starting at the verse read.
                 const verses = JSON.parse(JSON.stringify(bible.verses))
-                const windowed = !continuousReader && (verses.length > windowRows || (switching && hasSelection))
+                const windowed = !continuousReader && (verses.length > windowRows || (switching && hasSelection) || long)
                 view = newChapterView(windowed ? { windowTarget: Math.max(0, verses.findIndex(function(verse) { return verse.number === bible.cursorVerse })) } : {}, verses)
                 made = true
                 if (!continuousReader) {
@@ -4611,10 +4613,12 @@ ApplicationWindow {
     readonly property string viewLayoutKey: [readerBodySize, bible.lineHeight, readerColumn.width, desktop.fontFamily,
         bible.showVerseNumbers, bible.showHeadings, focusLayout, inlineNoteMarks, wordsOfJesusColor].join(":")
     onViewLayoutKeyChanged: clearPreparedViews()
-    // Whether a view made ahead is still being made (tests: its turns render frames).
+    // Whether a view is still being made, or its rows relaid, a few a frame:
+    // one made ahead, or the chapter read's (tests: their turns render frames).
     function preparing() {
         for (const key in preparedViews) if (preparedViews[key].building) return true
-        return false
+        const view = verseHost.item
+        return !!view && (view.building || view.relaying)
     }
     function clearPreparedViews() {
         const any = Object.keys(preparedViews).length > 0

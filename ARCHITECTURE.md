@@ -217,7 +217,8 @@ user's real data for development or tests.
   names; tests find the reader's `BlockDocument` through `blockReader`. Views
   wait in the window, invisible (out of it, their text would be laid out only
   once shown), so making them renders frames: `preparing()` says whether any is
-  still being made. A Verse view waiting keeps the text size, spacing, width,
+  still being made, the chapter read's (its window, or its rows relaid)
+  included. A Verse view waiting keeps the text size, spacing, width,
   and focus layout it was made with (`freeze`, `thaw`); any change to them
   (`viewLayoutKey`) drops the views waiting. Only the chapter read's
   `BlockReader` reports selected text or relays out a selection (`beside` ones
@@ -242,9 +243,10 @@ user's real data for development or tests.
   (`heldTextSize`) until that frame is synced (`afterAnimating`), then follows.
   Code timing frames hooks `afterRendering`: handlers on `frameSwapped` (the
   relay, markers) run their work before later connections.
-- A long chapter jumped into in the Verse layout (over `windowRows` verses), or
-  any the layout switches to with a verse read, gets a view of its own whose
-  rows are made about the verse read first
+- A long chapter jumped into in the Verse layout (over `windowRows` verses),
+  any read after one (its many rows kept rather than unmade), or any the layout
+  switches to with a verse read, gets a view of its own whose rows are made
+  about the verse read first
   (`windowTarget`, `makeWindow`), then the rest a few a turn, below then above
   (`growSome`, `makeAbove`), the reader shifted as rows come above so the text
   stays put (`growingRows`: no Follow is sent for it). Rows are verse indexes
