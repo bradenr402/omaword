@@ -40,6 +40,7 @@
     <file>qml/SidePanel.qml</file>
     <file>qml/LookupWindow.qml</file>
     <file>qml/SidePanelHeader.qml</file>
+    <file>qml/ModeHeader.qml</file>
     <file>qml/KeyNotation.js</file>
     <file>qml/RowMenu.js</file>
     <file>resources/cell.png</file>

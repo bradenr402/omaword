@@ -1476,6 +1476,33 @@ private slots:
             QVERIFY(v16.size() > 0);
         }
     }
+    // Visual mode has a header of its keys, made as character selection's
+    // is (ModeHeader); its parts act by mouse as the keys do.
+    void visualModeHasAKeyHeaderAsCharactersDo() {
+        setMode("verse"); navigate("John 3:16"); call("readerFocus");
+        QVERIFY(!shown("visualStatus"));
+        key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("verseMode").toBool());
+        QVERIFY(shown("visualStatus")); QVERIFY(!shown("characterStatus"));
+        QCOMPARE(item("visualTitle")->property("text").toString(), QString("Visual"));
+        QCOMPARE(item("visualHints")->property("plainText").toString(),
+                 QString("j k extend    o swap    x highlight    w note    y quotation    shift Y plain text    esc exit"));
+        // Characters take the same header, theirs in place of Visual's.
+        const QByteArray shell = item("visualStatus")->metaObject()->className();
+        key(Qt::Key_V); QTRY_VERIFY(prop("charMode").toBool());
+        QVERIFY(!shown("visualStatus")); QVERIFY(shown("characterStatus"));
+        QCOMPARE(QByteArray(item("characterStatus")->metaObject()->className()), shell);
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("charMode").toBool());
+        // Mouse: quotation copies the range and leaves, as y does; exit leaves.
+        key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(prop("verseMode").toBool());
+        key(Qt::Key_J); QTRY_COMPARE(bible->selectionReference(), QString("John 3:16–17"));
+        QGuiApplication::clipboard()->clear();
+        clickHint("visualHintsPart:quotation");
+        QTRY_VERIFY(QGuiApplication::clipboard()->text().endsWith(QStringLiteral("— John 3:16–17")));
+        QTRY_VERIFY(!prop("verseMode").toBool()); QVERIFY(!shown("visualStatus"));
+        key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(shown("visualStatus"));
+        clickHint("visualHintsPart:exit");
+        QTRY_VERIFY(!prop("verseMode").toBool()); QVERIFY(!shown("visualStatus"));
+    }
     QString tagId(const QString &name) const {
         for (const auto &tag : bible->tags()) if (tag.toMap()["name"].toString() == name) return tag.toMap()["id"].toString();
         return {};

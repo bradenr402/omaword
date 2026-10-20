@@ -2154,6 +2154,16 @@ ApplicationWindow {
         return true
     }
     readonly property string charKeyReason: "Not a key in character selection · " + KeyNotation.format("Escape") + " leaves it"
+    // Visual mode's keys (its header): those the selection mode makes its own.
+    function visualHintParts() {
+        const ready = verseMode && !bible.busy
+        return [[["J", "K"], "extend"], ["O", "swap", app.swapEnds, ready],
+            ["X", bible.selectionHighlighted ? "unhighlight" : "highlight", function() { app.runCommand("highlight") }, ready],
+            ["W", "note", function() { app.runCommand("notes") }, ready],
+            ["Y", "quotation", function() { app.runCommand("copy") }, ready],
+            ["Shift+Y", "plain text", function() { app.runCommand("copyPlain") }, ready],
+            ["Escape", "exit", function() { if (app.setVisualMode(false)) app.readerFocus() }, verseMode]]
+    }
     function characterHintParts() {
         const ready = charMode && !bible.busy
         return [[["H", "L", "W", "B", "E", "J", "K"], "move"], ["O", "swap", app.swapEnds, ready],
@@ -6680,6 +6690,7 @@ ApplicationWindow {
     component RangeMarker: Shared.RangeMarker { controller: app; theme: desktop; backend: bible; rangeMenu: verseTagMenu }
     component SectionLabel: SectionTitle { theme: desktop; uiScale: app.scale }
     component SidePanelHeader: Shared.SidePanelHeader { controller: app; theme: desktop }
+    component ModeHeader: Shared.ModeHeader { controller: app; theme: desktop }
     component SidePanel: Shared.SidePanel { controller: app; theme: desktop }
     component ModalCard: Shared.ModalCard { controller: app; theme: desktop }
 
@@ -6687,41 +6698,27 @@ ApplicationWindow {
         anchors.fill: parent
         anchors.rightMargin: app.notesDock
         spacing: 0
-        // Character selection (v): the mode, its keys, and what is selected.
-        // Its room comes off the reader's top without moving the text
-        // (workspace.characterRoom).
-        Rectangle {
+        // The selection modes, Visual (shift V) and Characters (v): the mode,
+        // its keys, and what waits on it. Their room comes off the reader's
+        // top without moving the text (workspace.headerRoom).
+        ModeHeader {
+            id: visualStatus
+            objectName: "visualStatus"
+            names: "visual"
+            Layout.fillWidth: true
+            visible: app.verseMode && !app.charMode
+            title: "Visual" + (app.verseCount.length ? " · " + app.verseCount : "")
+            parts: visible ? app.visualHintParts() : []
+        }
+        ModeHeader {
             id: characterStatus
             objectName: "characterStatus"
+            names: "character"
             Layout.fillWidth: true
-            implicitHeight: characterStatusContent.implicitHeight + 16
             visible: app.charMode
-            color: desktop.surface
-            RowLayout {
-                id: characterStatusContent
-                anchors.fill: parent
-                anchors.margins: 8
-                anchors.leftMargin: 24
-                spacing: 16
-                Label {
-                    objectName: "characterTitle"
-                    Layout.alignment: Qt.AlignTop
-                    text: "Characters" + (app.charPending.length ? " · " + app.charPending : "")
-                        + (app.verseCount.length ? " · " + app.verseCount : "")
-                    textFormat: Text.PlainText
-                    color: desktop.accent
-                    font.pixelSize: 13 * app.scale
-                }
-                HintRow {
-                    objectName: "characterHints"
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 0
-                    Layout.alignment: Qt.AlignTop
-                    theme: desktop
-                    pixelSize: 13 * app.scale
-                    parts: app.characterHintParts()
-                }
-            }
+            title: "Characters" + (app.charPending.length ? " · " + app.charPending : "")
+                + (app.verseCount.length ? " · " + app.verseCount : "")
+            parts: app.characterHintParts()
         }
         Rectangle {
             objectName: "errorBanner"
@@ -6744,16 +6741,16 @@ ApplicationWindow {
             id: workspace
             Layout.fillWidth: true
             Layout.fillHeight: true
-            // As the layout moves the reader down for the character selection
-            // bar (or back up), the reader scrolls as far, in the same pass:
-            // the text holds still, and what a drag just selected stays under
-            // the pointer.
-            property real characterRoom: 0
+            // As the layout moves the reader down for a selection mode's
+            // header (or back up), the reader scrolls as far, in the same
+            // pass: the text holds still, and what a drag just selected stays
+            // under the pointer.
+            property real headerRoom: 0
             onYChanged: {
-                const room = characterStatus.visible ? characterStatus.height : 0
-                if (room === characterRoom) return
-                app.keepReaderText(room - characterRoom)
-                characterRoom = room
+                const room = (visualStatus.visible ? visualStatus.height : 0) + (characterStatus.visible ? characterStatus.height : 0)
+                if (room === headerRoom) return
+                app.keepReaderText(room - headerRoom)
+                headerRoom = room
             }
 
             Item {

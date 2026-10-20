@@ -2499,6 +2499,8 @@ private slots:
         QTRY_VERIFY(item("contextChapter:John 4"));
         QTRY_VERIFY(!window->property("restoringPosition").toBool() && !object("readerSlide")->property("running").toBool());
         QTRY_VERIFY(!object("columnSettle")->property("running").toBool());
+        // (Visual mode's header takes some of the room: 4:3 may need bringing up to click.)
+        if (!onScreen(screenY("John 4", 3))) { item("reading")->setProperty("contentY", prop("reading", "contentY").toDouble() + 80); QTest::qWait(60); }
         QVERIFY(onScreen(screenY("John 4", 3)));
         clickVerse("John 4", 3, Qt::ShiftModifier);
         QTRY_COMPARE(bible->selectionReference(), QString::fromUtf8("John 4:2–3"));
