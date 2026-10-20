@@ -169,10 +169,14 @@ user's real data for development or tests.
   forced LTR.
 - Poetry in Verse/Paragraph preserves per-line indentation with hanging wraps.
   Block runs lines together. Replacing a break with a space must preserve mapping.
+  In Paragraph, and in copies (`TextSelection::verseJoin`), a poem line always
+  has a line of its own: AO editions mark no paragraphs between poetry verses.
   Copies use source paragraph starts and poetry breaks regardless of layout.
 - Verse steps inside a chapter only move selection: no reload or `versesChanged`.
   Annotation changes update existing rows/paint; avoid rebuilding all documents
-  or repainting a chapter-sized focus veil for a cursor move.
+  or repainting a chapter-sized focus veil for a cursor move. Paragraph/Block
+  marks (`AnnotationPaint`) cover only their own lines (`area`), and the search
+  layer shows only with matches: never a chapter-tall texture.
 - Cross-chapter selections show whole context chapters around the cursor's
   chapter, using `chapterRows` with marks. Refresh their marks on peer changes
   while preserving the visible top verse.
@@ -227,7 +231,12 @@ user's real data for development or tests.
 - Character selection begins with `v`, a text drag, or a double-clicked word.
   Mouse entry is quiet, keeps the pointer's end as cursor, and offers no selection
   bar. Escape returns to the underlying verse selection. Gutter drags and plain
-  heading selections retain the verse action bar.
+  heading selections retain the verse action bar. Positions carry their book and
+  chapter; the cursor is always in the chapter read: a motion past its ends
+  (`textMotionAcross`) goes on into the next one, which the reader then reads
+  (`crossChars`, as a verse step across), the anchor's chapter shown beside
+  with its part selected (`paintBeside`); `characterTextAcross` copies across.
+  Visual mode and character selection share their header (`ModeHeader`).
 - Selection paint: the cursor's verse is tinted (`focusTint`, when `cursorTinted`),
   as is character selection's focused character; a range's verses
   (`rangeUnderlined`) and text selected by character get `SelectionMarks`: a

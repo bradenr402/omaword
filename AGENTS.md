@@ -57,7 +57,7 @@ Every action is in the `actions` catalog in `qml/Main.qml`, which feeds Keybindi
 ## UI conventions
 
 - Follow the live Omarchy theme, font, and corner radius (`src/desktop.*`); never hardcode colors, fonts, or radii.
-- Reuse the shared pieces: `HintRow`, `AppContextMenu` with `RowMenu.js` (every list row gets the same menu), `AppToolTip`, `ExitGhost`, `PanelHeader`, `PanelTabs`, and Main's controls (`QuietButton`, `ModalCard`, …). A side panel is a mode of the Margin (`marginMode`): a `SidePanel` under a `SidePanelHeader`; a modal is a `ModalCard`; each has a `HintRow`, and `tst_ui`'s `panelsAndModalsShareTheirShells` checks the details.
+- Reuse the shared pieces: `HintRow`, `AppContextMenu` with `RowMenu.js` (every list row gets the same menu), `AppToolTip`, `ExitGhost`, `PanelHeader`, `PanelTabs`, `ModeHeader` (a selection mode's keys), and Main's controls (`QuietButton`, `ModalCard`, …). A side panel is a mode of the Margin (`marginMode`): a `SidePanel` under a `SidePanelHeader`; a modal is a `ModalCard`; each has a `HintRow`, and `tst_ui`'s `panelsAndModalsShareTheirShells` checks the details.
 - A QML file that needs the window takes `controller` and `theme`, which Main binds once in a same-named inline component. Inside one, a property named like an outer id binds to itself (`app: app` is undefined): name it differently.
 - Everything works by keyboard and by mouse (`a11yui` checks), and respects Disable animations and Disable sound effects.
 
