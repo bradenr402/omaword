@@ -519,9 +519,12 @@ private slots:
         QCOMPARE(beside->versionId(),QString("window-original"));
         QTRY_COMPARE(beside->selectionReference(),QString("John 3:16"));
         { BibleBackend fresh; QCOMPARE(fresh.versionId(),version); }
-        // Each names the other's version.
+        // Each names the other's version, in its key header too.
         QCOMPARE(leader->property("followPartner").toString(),beside->versionAbbreviation());
         QCOMPARE(follower->property("followPartner").toString(),bible->versionAbbreviation());
+        QTRY_VERIFY(windowObject(leader,"followStatus")->property("visible").toBool());
+        QCOMPARE(windowObject(leader,"followTitle")->property("text").toString(),"Following " + beside->versionAbbreviation());
+        QCOMPARE(windowObject(follower,"followHints")->property("plainText").toString(),QString("stop following"));
         // The leader moves: the follower follows; and the other way.
         QVERIFY(bible->navigate("Romans 8:2"));
         QTRY_COMPARE(beside->selectionReference(),QString("Romans 8:2"));

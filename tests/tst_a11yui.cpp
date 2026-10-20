@@ -1503,6 +1503,24 @@ private slots:
         clickHint("visualHintsPart:exit");
         QTRY_VERIFY(!prop("verseMode").toBool()); QVERIFY(!shown("visualStatus"));
     }
+    // A range of verses outside Visual mode (from the palette, m, or the
+    // mouse) shows the keys that act on it; its parts act as they do.
+    void rangeHeaderNamesItsKeys() {
+        setMode("verse"); navigate("John 3:16"); call("readerFocus");
+        QVERIFY(!shown("rangeStatus"));
+        bible->selectVerses(16, 18); QTRY_VERIFY(shown("rangeStatus"));
+        QVERIFY(!prop("verseMode").toBool());
+        QCOMPARE(item("rangeTitle")->property("text").toString(), QString("Range"));
+        QCOMPARE(item("rangeHints")->property("plainText").toString(),
+                 QString("o swap    x highlight    w note    y quotation    shift Y plain text    esc collapse"));
+        clickHint("rangeHintsPart:swap"); QTRY_COMPARE(bible->cursorVerse(), 16);
+        clickHint("rangeHintsPart:collapse");
+        QTRY_COMPARE(bible->selectionReference(), QString("John 3:16")); QVERIFY(!shown("rangeStatus"));
+        // Visual mode's own header takes its place while it is on.
+        bible->selectVerses(16, 18); QTRY_VERIFY(shown("rangeStatus"));
+        key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(shown("visualStatus")); QVERIFY(!shown("rangeStatus"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!shown("visualStatus"));
+    }
     // Character selection goes on past a chapter's ends, as a range of verses
     // does: the reader reads the cursor's chapter, and the anchor's shows
     // beside it with its part selected; back again; a copy spans both.
@@ -1903,30 +1921,16 @@ private slots:
         clickAt(versePoint(5), Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
         for (const auto &id : {"previousChapter", "nextChapter", "previousHeading", "nextHeading"}) QVERIFY2(!menuIds().contains(id), id);
         key(Qt::Key_Escape); QTRY_VERIFY(!menu()->property("visible").toBool());
-        // The match counter: click next, shift click previous, right click for a menu.
+        // Chapter find's matches, in the key header: its parts act as n,
+        // shift N, and esc do.
         navigate("John 3:1"); key(Qt::Key_Slash); type("access"); key(Qt::Key_Return);
-        QTRY_VERIFY(shown("searchMatchCount"));
-        auto counter = item("searchMatchCount");
-        auto counterMouse = item("searchMatchCountMouse"); QCOMPARE(counterMouse->cursor().shape(), Qt::PointingHandCursor);
-        QTest::mouseMove(window, center(counter)); QTRY_VERIFY(toolTipOf(counter)->property("visible").toBool());
-        QVERIFY(toolTipOf(counter)->property("text").toString().contains("shift click"));
-        QTRY_VERIFY(prop("searchMatchIndex").toInt() >= 0); QTest::qWait(50);
-        QTest::mouseMove(window, QPoint(5, window->height() / 2)); QTRY_VERIFY(!toolTipOf(counter)->property("visible").toBool());
+        QTRY_VERIFY(shown("findStatus"));
+        QTRY_VERIFY(prop("searchMatchIndex").toInt() >= 0);
         const int first = prop("searchMatchIndex").toInt();
-        click(counter);
-        QTRY_VERIFY2(prop("searchMatchIndex").toInt() == first + 1, qPrintable(QString("index %1 chapter %2 query %3 matches %4 at %5,%6")
-            .arg(prop("searchMatchIndex").toInt()).arg(bible->chapter()).arg(prop("acceptedSearchQuery").toString())
-            .arg(value(prop("searchMatches")).toList().size()).arg(center(counter).x()).arg(center(counter).y())));
-        click(counter, Qt::LeftButton, Qt::ShiftModifier); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first);
-        click(counter, Qt::RightButton); QTRY_VERIFY(menu()->property("opened").toBool());
-        QCOMPARE(menuIds(), QStringList({"nextMatch", "previousMatch", "|", "clearSearch"}));
-        chooseMenu("nextMatch");
-        QTRY_VERIFY2(prop("searchMatchIndex").toInt() == first + 1, qPrintable(QString("index %1 chapter %2 query %3 matches %4 cursor %5")
-            .arg(prop("searchMatchIndex").toInt()).arg(bible->chapter()).arg(prop("acceptedSearchQuery").toString())
-            .arg(value(prop("searchMatches")).toList().size()).arg(bible->cursorVerse())));
-        // Keyboard: the same menu by keys.
-        click(counter, Qt::RightButton); menuKeyTo("clearSearch");
-        QTRY_VERIFY(prop("acceptedSearchQuery").toString().isEmpty()); QVERIFY(!shown("searchMatchCount"));
+        clickHint("findHintsPart:next"); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first + 1);
+        clickHint("findHintsPart:previous"); QTRY_COMPARE(prop("searchMatchIndex").toInt(), first);
+        clickHint("findHintsPart:clear");
+        QTRY_VERIFY(prop("acceptedSearchQuery").toString().isEmpty()); QVERIFY(!shown("findStatus"));
     }
     void doubleClickNumbersOpenNotesAndTextSelectsWords() {
         for (const QString mode : {"verse", "block", "paragraph"}) {

@@ -234,11 +234,12 @@ ApplicationWindow {
     // reader key is spent, as in Vim.
     property bool gPending: false
     // Which key: a key that waits for another (z, g, a count, character
-    // selection's g, i, a) shows what can follow after a moment.
+    // selection's g, i, a) shows what can follow after a moment, in the
+    // key header (headerMode "pending").
     readonly property bool keyPending: zPending || gPending || verseCount.length > 0 || (charMode && charPending.length > 0)
     property bool whichKeyShown: false
     onKeyPendingChanged: { whichKeyShown = false; if (keyPending) whichKeyTimer.restart(); else whichKeyTimer.stop() }
-    Timer { id: whichKeyTimer; objectName: "whichKeyTimer"; interval: 400; onTriggered: app.whichKeyShown = app.keyPending }
+    Timer { id: whichKeyTimer; objectName: "whichKeyTimer"; interval: 300; onTriggered: app.whichKeyShown = app.keyPending }
     function whichKeyParts() {
         if (charMode && charPending === "g") return [["G", "chapter start"], ["E", "previous word end"]]
         if (charMode && (charPending === "i" || charPending === "a")) return [["W", charPending === "i" ? "word" : "word and space"], ["S", "sentence"]]
@@ -2049,11 +2050,12 @@ ApplicationWindow {
     function revealChar() {
         const rect = charRect(charCursor)
         if (!rect) return
-        const available = Math.max(1, reading.height - floatingSafety)
+        // (Below a mode's key header.)
+        const available = Math.max(1, reading.height - floatingSafety - topSafety)
         const margin = Math.min(2 * readerLineHeight, available / 4)
-        const top = readerTargetY()
-        if (rect.y < top + margin) slideReader(rect.y - margin)
-        else if (rect.y + rect.height > top + available - margin) slideReader(rect.y + rect.height - available + margin)
+        const top = readerTargetY() + topSafety
+        if (rect.y < top + margin) slideReader(rect.y - margin - topSafety)
+        else if (rect.y + rect.height > top + available - margin) slideReader(rect.y + rect.height - available + margin - topSafety)
     }
     function firstInk(verse) {
         const text = verseText(verse)
@@ -2373,6 +2375,22 @@ ApplicationWindow {
         return true
     }
     readonly property string charKeyReason: "Not a key in character selection · " + KeyNotation.format("Escape") + " leaves it"
+    // The key header showing (modeHeaders), the most pressing: keys waiting
+    // on another (after a moment, as the which-key list did), a selection
+    // mode, a range of verses, chapter find's matches, or Follow.
+    readonly property bool rangeSelected: hasSelection && !verseMode && !charMode && !freeSelectedText.length
+        && (bible.selectedStart !== bible.selectedEnd || bible.crossChapterSelection)
+    readonly property string headerMode: !bible.ready ? ""
+        : whichKeyShown && keyPending ? "pending"
+        : charMode ? "characters" : verseMode ? "visual" : rangeSelected ? "range"
+        : acceptedSearchQuery.length > 0 && !findPromptOpen ? "find" : following ? "follow" : ""
+    // The room it takes over the reader's top: what reveals a verse or a
+    // character keeps below it.
+    readonly property real topSafety: {
+        const header = { pending: pendingStatus, characters: characterStatus, visual: visualStatus, range: rangeStatus,
+            find: findStatus, follow: followStatus }[headerMode]
+        return header ? header.implicitHeight : 0
+    }
     // Visual mode's keys (its header): those the selection mode makes its own.
     function visualHintParts() {
         const ready = verseMode && !bible.busy
@@ -2382,6 +2400,28 @@ ApplicationWindow {
             ["Y", "quotation", function() { app.runCommand("copy") }, ready],
             ["Shift+Y", "plain text", function() { app.runCommand("copyPlain") }, ready],
             ["Escape", "exit", function() { if (app.setVisualMode(false)) app.readerFocus() }, verseMode]]
+    }
+    // A range of verses outside Visual mode: the keys that act on it.
+    function rangeHintParts() {
+        const ready = rangeSelected && !bible.busy
+        return [["O", "swap", app.swapEnds, ready],
+            ["X", bible.selectionHighlighted ? "unhighlight" : "highlight", function() { app.runCommand("highlight") }, ready],
+            ["W", "note", function() { app.runCommand("notes") }, ready],
+            ["Y", "quotation", function() { app.runCommand("copy") }, ready],
+            ["Shift+Y", "plain text", function() { app.runCommand("copyPlain") }, ready],
+            ["Escape", "collapse", function() { if (app.setVisualMode(false)) app.readerFocus() }, rangeSelected]]
+    }
+    // Chapter find's matches: how many, which, and the keys between them.
+    readonly property string findCount: searchError || (searchMatches.length ? (searchMatchIndex < 0
+        ? searchMatches.length + " matches" : (searchMatchIndex + 1) + " / " + searchMatches.length) : "No matches")
+    function findHintParts() {
+        const ready = acceptedSearchQuery.length > 0
+        return [[[], findCount], ["N", "next", function() { app.runCommand("nextMatch") }, ready && searchMatches.length > 0],
+            ["Shift+N", "previous", function() { app.runCommand("previousMatch") }, ready && searchMatches.length > 0],
+            ["Escape", "clear", function() { app.clearSearch(); app.readerFocus() }, ready]]
+    }
+    function followHintParts() {
+        return [[[], "stop following", function() { app.runCommand("unfollow") }, following]]
     }
     function characterHintParts() {
         const ready = charMode && !bible.busy
@@ -2810,9 +2850,9 @@ ApplicationWindow {
         repeat: true
         running: app.draggingText
         onTriggered: {
-            let edge = 48 * app.readerScale
+            let edge = 48 * app.readerScale, top = app.topSafety + edge
             let bottom = reading.height - app.floatingSafety
-            let speed = app.dragPoint.y < edge ? -Math.min(edge, edge - app.dragPoint.y)
+            let speed = app.dragPoint.y < top ? -Math.min(edge, top - app.dragPoint.y)
                 : app.dragPoint.y > bottom - edge ? Math.min(edge, app.dragPoint.y - bottom + edge) : 0
             if (speed) { app.scrollBy(speed * 0.35); app.applyTextDrag() }
         }
@@ -5351,20 +5391,21 @@ ApplicationWindow {
         let textHeight = rect ? rect.height : row.textHeight
         // Below chapters shown beside it, the first verse keeps its chapter's title in view.
         if (index === 0) { textHeight += y - chapterTitle.y; y = chapterTitle.y }
-        let available = Math.max(1, reading.height - floatingSafety)
+        // The view below a mode's key header (topSafety) is what it reveals in.
+        let available = Math.max(1, reading.height - floatingSafety - topSafety)
         let margin = Math.min(3 * readerLineHeight, Math.max(12 * readerScale, (available - textHeight) / 2))
         // A very long verse cannot fit. Keep its beginning and a useful context
         // margin visible rather than jumping to its end on every movement.
         if (textHeight > available - 24 * readerScale)
             margin = Math.min(3 * readerLineHeight, available * 0.2)
         let extent = Math.min(textHeight, Math.max(1, available - 2 * margin))
-        let target = readerTargetY()
+        let top = readerTargetY() + topSafety
         // Focus mode is a typewriter: the cursor verse stays 40% down.
-        if (focusLayout) target = y - 0.4 * reading.height
-        else if (alignTop || y < target + margin) target = y - margin
-        else if (y + extent > target + available - margin) target = y + extent - available + margin
-        if (instant) setReaderY(target)
-        else slideReader(target)
+        if (focusLayout) top = y - 0.4 * reading.height + topSafety
+        else if (alignTop || y < top + margin) top = y - margin
+        else if (y + extent > top + available - margin) top = y + extent - available + margin
+        if (instant) setReaderY(top - topSafety)
+        else slideReader(top - topSafety)
     }
     // The reader's width changed (a panel docked or closed, the window
     // resized) and its text may have reflowed: a selection still wholly in
@@ -5377,10 +5418,10 @@ ApplicationWindow {
         layOutReader()
         const first = measureVerse(bible.selectedStart), last = measureVerse(bible.selectedEnd)
         if (!first || !last) return
-        const top = readerTargetY(), available = Math.max(1, reading.height - floatingSafety)
+        const top = readerTargetY() + topSafety, available = Math.max(1, reading.height - floatingSafety - topSafety)
         if (first.top >= top && last.bottom <= top + available) return
         const height = last.bottom - first.top, margin = Math.min(3 * readerLineHeight, available * 0.2)
-        slideReader(height > available - 2 * margin ? first.top - margin : first.top - (available - height) / 2)
+        slideReader((height > available - 2 * margin ? first.top - margin : first.top - (available - height) / 2) - topSafety)
     }
     function alignCurrentVerse(alignment) {
         positionTimer.stop()
@@ -5395,9 +5436,9 @@ ApplicationWindow {
         const y = block ? blockLoader.mapToItem(readerColumn, 0, rect.y).y
             : row.mapToItem(readerColumn, 0, row.textOffset).y
         const height = block ? rect.height : row.textHeight
-        const available = Math.max(1, reading.height - floatingSafety)
+        const available = Math.max(1, reading.height - floatingSafety - topSafety)
         const offset = alignment === "top" ? 0 : alignment === "bottom" ? available - height : (available - height) / 2
-        slideReader(y - Math.max(0, offset))
+        slideReader(y - Math.max(0, offset) - topSafety)
         savePosition()
     }
     // Navigation slides only within the chapter already on screen; other
@@ -6966,28 +7007,6 @@ ApplicationWindow {
         anchors.fill: parent
         anchors.rightMargin: app.notesDock
         spacing: 0
-        // The selection modes, Visual (shift V) and Characters (v): the mode,
-        // its keys, and what waits on it. Their room comes off the reader's
-        // top without moving the text (workspace.headerRoom).
-        ModeHeader {
-            id: visualStatus
-            objectName: "visualStatus"
-            names: "visual"
-            Layout.fillWidth: true
-            visible: app.verseMode && !app.charMode
-            title: "Visual" + (app.verseCount.length ? " · " + app.verseCount : "")
-            parts: visible ? app.visualHintParts() : []
-        }
-        ModeHeader {
-            id: characterStatus
-            objectName: "characterStatus"
-            names: "character"
-            Layout.fillWidth: true
-            visible: app.charMode
-            title: "Characters" + (app.charPending.length ? " · " + app.charPending : "")
-                + (app.verseCount.length ? " · " + app.verseCount : "")
-            parts: app.characterHintParts()
-        }
         Rectangle {
             objectName: "errorBanner"
             Layout.fillWidth: true
@@ -7009,17 +7028,6 @@ ApplicationWindow {
             id: workspace
             Layout.fillWidth: true
             Layout.fillHeight: true
-            // As the layout moves the reader down for a selection mode's
-            // header (or back up), the reader scrolls as far, in the same
-            // pass: the text holds still, and what a drag just selected stays
-            // under the pointer.
-            property real headerRoom: 0
-            onYChanged: {
-                const room = (visualStatus.visible ? visualStatus.height : 0) + (characterStatus.visible ? characterStatus.height : 0)
-                if (room === headerRoom) return
-                app.keepReaderText(room - headerRoom)
-                headerRoom = room
-            }
 
             Item {
                 id: readerSurface
@@ -7167,7 +7175,7 @@ ApplicationWindow {
                         width: selectionBarHints.implicitWidth + 2 * border.width
                         height: selectionBarHints.implicitHeight + 2 * border.width
                         x: Math.max(0, Math.min(reading.width - width, app.selectionBarX))
-                        y: app.selectionBarY - height - gap < reading.contentY ? app.selectionBarY + app.readerLineHeight + gap : app.selectionBarY - height - gap
+                        y: app.selectionBarY - height - gap < reading.contentY + app.topSafety ? app.selectionBarY + app.readerLineHeight + gap : app.selectionBarY - height - gap
                         z: 5
                         color: desktop.background
                         border.color: desktop.border
@@ -7183,58 +7191,6 @@ ApplicationWindow {
                             pixelSize: 12 * app.scale
                             partHeight: 30 * app.scale
                             partPadding: 10 * app.scale
-                        }
-                    }
-                    // In the ribbon's chapter an accent ribbon hangs from the
-                    // top of the view, just right of the column, wherever the
-                    // chapter is scrolled; a click returns to its place (r).
-                    Canvas {
-                        id: ribbonTab
-                        objectName: "ribbonTab"
-                        visible: app.ribbonHere
-                        opacity: app.focusDimmedOpacity
-                        width: 12 * app.readerScale
-                        height: 34 * app.readerScale
-                        x: readerColumn.x + readerColumn.width + 8 * app.readerScale
-                        // Placing it (shift R) lifts it out of the top and drops it
-                        // back in with a little settle (ribbonDrop).
-                        property real drop: 0
-                        y: reading.contentY + drop
-                        readonly property color fill: desktop.accent
-                        onFillChanged: requestPaint()
-                        onWidthChanged: requestPaint()
-                        onHeightChanged: requestPaint()
-                        onPaint: {
-                            const ctx = getContext("2d")
-                            ctx.reset()
-                            ctx.fillStyle = fill
-                            ctx.beginPath()
-                            ctx.moveTo(0, 0); ctx.lineTo(width, 0); ctx.lineTo(width, height)
-                            ctx.lineTo(width / 2, height - width / 2); ctx.lineTo(0, height)
-                            ctx.closePath()
-                            ctx.fill()
-                        }
-                        MouseArea {
-                            id: ribbonTabMouse
-                            objectName: "ribbonTabMouse"
-                            anchors.fill: parent
-                            anchors.margins: -6 * app.readerScale
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            acceptedButtons: Qt.LeftButton | Qt.RightButton
-                            onClicked: function(mouse) {
-                                if (mouse.button === Qt.RightButton) {
-                                    const p = ribbonTabMouse.mapToItem(null, mouse.x, mouse.y)
-                                    app.openRibbonMenu(p.x, p.y, true)
-                                } else app.runCommand("ribbon")
-                            }
-                        }
-                        AppToolTip {
-                            theme: desktop
-                            uiScale: app.scale
-                            visible: ribbonTabMouse.containsMouse
-                            text: "Ribbon · " + (bible.ribbon.reference || "") + " · " + app.keyText("ribbon") + " returns here, "
-                                + app.keyText("placeRibbon") + " moves it, " + app.keyText("removeRibbon") + " removes it"
                         }
                     }
                     Column {
@@ -7581,6 +7537,129 @@ ApplicationWindow {
                 Label { objectName: "setupPrivacy"; text: "All your Bible versions, highlights, tags, and notes stay on this device."; color: desktop.muted; font.pixelSize: 12 * app.scale; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 QuietButton { objectName: "setupAbout"; text: "About & Attribution"; compact: true; Layout.alignment: Qt.AlignHCenter; onClicked: aboutDialog.open() }
             }
+            }
+            // A mode's keys (ModeHeader), one at a time, the most pressing:
+            // over the reader's top, moving nothing (the reader keeps what it
+            // reveals below it: topSafety).
+            Item {
+                id: modeHeaders
+                objectName: "modeHeaders"
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                height: app.topSafety
+                visible: app.headerMode.length > 0
+                ModeHeader {
+                    id: pendingStatus
+                    objectName: "pendingStatus"
+                    names: "pending"
+                    width: parent.width
+                    visible: app.headerMode === "pending"
+                    title: app.zPending ? "z" : app.gPending ? app.verseCount + "g" : app.charMode && app.charPending.length ? app.charPending : app.verseCount
+                    parts: visible ? app.whichKeyParts() : []
+                }
+                ModeHeader {
+                    id: characterStatus
+                    objectName: "characterStatus"
+                    names: "character"
+                    width: parent.width
+                    visible: app.headerMode === "characters"
+                    title: "Characters" + (app.charPending.length ? " · " + app.charPending : "")
+                        + (app.verseCount.length ? " · " + app.verseCount : "")
+                    parts: visible ? app.characterHintParts() : []
+                }
+                ModeHeader {
+                    id: visualStatus
+                    objectName: "visualStatus"
+                    names: "visual"
+                    width: parent.width
+                    visible: app.headerMode === "visual"
+                    title: "Visual" + (app.verseCount.length ? " · " + app.verseCount : "")
+                    parts: visible ? app.visualHintParts() : []
+                }
+                ModeHeader {
+                    id: rangeStatus
+                    objectName: "rangeStatus"
+                    names: "range"
+                    width: parent.width
+                    visible: app.headerMode === "range"
+                    title: "Range"
+                    parts: visible ? app.rangeHintParts() : []
+                }
+                ModeHeader {
+                    id: findStatus
+                    objectName: "findStatus"
+                    names: "find"
+                    width: parent.width
+                    visible: app.headerMode === "find"
+                    title: "/" + app.acceptedSearchQuery
+                    parts: visible ? app.findHintParts() : []
+                }
+                ModeHeader {
+                    id: followStatus
+                    objectName: "followStatus"
+                    names: "follow"
+                    width: parent.width
+                    visible: app.headerMode === "follow"
+                    title: "Following " + app.followPartner
+                    parts: visible ? app.followHintParts() : []
+                }
+            }
+            // The ribbon hangs from the top of the view, over a mode's header too.
+            Item {
+                anchors.fill: parent
+                clip: true
+                visible: bible.ready
+                // In the ribbon's chapter an accent ribbon hangs from the
+                // top of the view, just right of the column, wherever the
+                // chapter is scrolled; a click returns to its place (r).
+                Canvas {
+                    id: ribbonTab
+                    objectName: "ribbonTab"
+                    visible: app.ribbonHere
+                    opacity: app.focusDimmedOpacity
+                    width: 12 * app.readerScale
+                    height: 34 * app.readerScale
+                    x: reading.x + readerColumn.x + readerColumn.width + 8 * app.readerScale
+                    // Placing it (shift R) lifts it out of the top and drops it
+                    // back in with a little settle (ribbonDrop).
+                    property real drop: 0
+                    y: reading.y + drop
+                    readonly property color fill: desktop.accent
+                    onFillChanged: requestPaint()
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.fillStyle = fill
+                        ctx.beginPath()
+                        ctx.moveTo(0, 0); ctx.lineTo(width, 0); ctx.lineTo(width, height)
+                        ctx.lineTo(width / 2, height - width / 2); ctx.lineTo(0, height)
+                        ctx.closePath()
+                        ctx.fill()
+                    }
+                    MouseArea {
+                        id: ribbonTabMouse
+                        objectName: "ribbonTabMouse"
+                        anchors.fill: parent
+                        anchors.margins: -6 * app.readerScale
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function(mouse) {
+                            if (mouse.button === Qt.RightButton) {
+                                const p = ribbonTabMouse.mapToItem(null, mouse.x, mouse.y)
+                                app.openRibbonMenu(p.x, p.y, true)
+                            } else app.runCommand("ribbon")
+                        }
+                    }
+                    AppToolTip {
+                        theme: desktop
+                        uiScale: app.scale
+                        visible: ribbonTabMouse.containsMouse
+                        text: "Ribbon · " + (bible.ribbon.reference || "") + " · " + app.keyText("ribbon") + " returns here, "
+                            + app.keyText("placeRibbon") + " moves it, " + app.keyText("removeRibbon") + " removes it"
+                    }
+                }
             }
 
         }
@@ -8958,63 +9037,6 @@ ApplicationWindow {
         onRejected: sounds.play("error")
         onTextMenu: function(field, position) { app.openTextMenu(field, position) }
     }
-    // The match counter acts like n / shift N: click the next match, shift
-    // click the previous; right click for Next / Previous / Clear search.
-    function searchCounterMenu(sceneX, sceneY) {
-        const ready = acceptedSearchQuery.length > 0
-        contextMenu.show("searchCount", [
-            menuAction("nextMatch", "Next match", "nextMatch"),
-            menuAction("previousMatch", "Previous match", "previousMatch"),
-            menuDivider,
-            { id: "clearSearch", text: "Clear search", shortcut: KeyNotation.format("Escape"), enabled: ready,
-                run: function() { app.clearSearch(); app.readerFocus() } }
-        ], sceneX, sceneY)
-    }
-    Label {
-        id: searchMatchCount
-        objectName: "searchMatchCount"
-        anchors.right: parent.right; anchors.bottom: parent.bottom
-        anchors.rightMargin: 20 * app.controlScale + app.footerRightInset + app.chromeDock
-        // Above the footer row, which focus mode keeps (quiet, revealed on hover).
-        anchors.bottomMargin: app.footerMargin + app.footerHeight + 6 * app.controlScale
-        visible: !app.findPromptOpen && app.acceptedSearchQuery.length > 0
-        text: app.searchError || (app.searchMatches.length ? (app.searchMatchIndex < 0
-            ? app.searchMatches.length + " matches" : (app.searchMatchIndex + 1) + " / " + app.searchMatches.length) : "No matches")
-        color: searchCountMouse.containsMouse ? desktop.foreground : desktop.muted; font.pixelSize: 12 * app.scale
-        MouseArea {
-            id: searchCountMouse
-            objectName: "searchMatchCountMouse"
-            anchors.fill: parent
-            anchors.margins: -6 * app.controlScale
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
-            onClicked: function(mouse) {
-                if (mouse.button === Qt.RightButton) {
-                    const p = mapToItem(null, mouse.x, mouse.y)
-                    app.searchCounterMenu(p.x, p.y)
-                } else app.runCommand((mouse.modifiers & Qt.ShiftModifier) ? "previousMatch" : "nextMatch")
-            }
-        }
-        AppToolTip {
-            theme: desktop
-            uiScale: app.scale
-            visible: searchCountMouse.containsMouse
-            text: "Click: next match · " + app.keyText("nextMatch") + "\n" + KeyNotation.format("Shift+Click") + ": previous · "
-                + app.keyText("previousMatch") + "\n" + KeyNotation.format("RightClick") + ": more"
-        }
-    }
-    Label {
-        objectName: "searchQueryLabel"
-        anchors.left: parent.left; anchors.right: searchMatchCount.left
-        anchors.leftMargin: 20 * app.controlScale; anchors.rightMargin: 16 * app.controlScale
-        anchors.baseline: searchMatchCount.baseline
-        visible: searchMatchCount.visible
-        text: "/ " + app.acceptedSearchQuery
-        textFormat: Text.PlainText; elide: Text.ElideRight
-        color: desktop.muted; font.pixelSize: 12 * app.scale
-    }
-
     ModalCard {
         id: versionDialog
         objectName: "versionDialog"
@@ -10698,8 +10720,8 @@ ApplicationWindow {
         }
     }
 
-    // Which key (what can follow a waiting key) and, once, the keys to start
-    // with: one strip above the footer, centered beside docked Notes.
+    // Once, the keys to start with: a strip above the footer, centered beside
+    // docked Notes (what can follow a waiting key shows in the key header).
     function introParts() {
         return [[["J", "K"], "verses"], [["H", "L"], "chapters"], [actionKeys("books")[0], "go to", function() { app.runCommand("books") }],
             [actionKeys("bibleSearch")[0], "search", function() { app.runCommand("bibleSearch") }], [actionKeys("notes")[0], "note", function() { app.runCommand("notes") }],
@@ -10709,8 +10731,7 @@ ApplicationWindow {
         id: keyStrip
         objectName: "keyStrip"
         parent: Overlay.overlay
-        readonly property bool whichKey: app.whichKeyShown && app.whichKeyParts().length > 0
-        visible: (whichKey || app.keyStripShown) && bible.ready && !app.modalOpen && !app.findPromptOpen
+        visible: app.keyStripShown && bible.ready && !app.modalOpen && !app.findPromptOpen
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.horizontalCenterOffset: -app.chromeDock / 2
         anchors.bottom: parent.bottom
@@ -10726,22 +10747,15 @@ ApplicationWindow {
             x: 16 * app.scale
             width: parent.width - 2 * x
             spacing: 12 * app.scale
-            Label {
-                objectName: "keyStripPending"
-                visible: keyStrip.whichKey
-                text: app.zPending ? "z" : app.gPending ? app.verseCount + "g" : app.charMode && app.charPending.length ? app.charPending : app.verseCount
-                color: desktop.accent; font.pixelSize: 13 * app.scale; font.weight: Font.DemiBold
-            }
             HintRow {
                 objectName: "keyStripHints"
                 theme: desktop
-                parts: keyStrip.whichKey ? app.whichKeyParts() : app.introParts()
+                parts: keyStrip.visible ? app.introParts() : []
                 pixelSize: 12 * app.scale
                 Layout.fillWidth: true
             }
             QuietButton {
                 objectName: "keyStripClose"
-                visible: !keyStrip.whichKey
                 glyph: "close-down"; compact: true
                 keys: KeyNotation.format("Escape"); tip: "Close · " + keys
                 Accessible.name: "Close the key strip"

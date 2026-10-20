@@ -376,24 +376,25 @@ private slots:
             QVERIFY2(alpha > pixel.alpha() + 50, "Every edge must have stronger accent ink than the fill");
         }
     }
+    // Chapter find's matches show in the key header: the query, as typed,
+    // which match of how many, and the keys between them, in focus mode too.
     void searchQueryStatus() {
         QVERIFY(!window->findChild<QQuickItem *>("editionLabel"));
-        QVERIFY(!item("searchQueryLabel")->isVisible());
+        QVERIFY(!item("findStatus")->isVisible());
         find("<bright>"); key(Qt::Key_Return);
-        QTRY_VERIFY(item("searchQueryLabel")->isVisible());
-        QCOMPARE(object("searchQueryLabel")->property("text").toString(), QString("/ <bright>"));
-        QCOMPARE(object("searchQueryLabel")->property("textFormat").toInt(), 0);
+        QTRY_VERIFY(item("findStatus")->isVisible());
+        QCOMPARE(object("findTitle")->property("text").toString(), QString("/<bright>"));
+        QCOMPARE(object("findTitle")->property("textFormat").toInt(), 0);
         for (bool focus : {false, true}) {
             bible->setFocusMode(focus); QCoreApplication::processEvents();
-            const auto query = item("searchQueryLabel")->mapRectToScene(item("searchQueryLabel")->boundingRect());
-            const auto count = item("searchMatchCount")->mapRectToScene(item("searchMatchCount")->boundingRect());
-            QVERIFY(query.left() < window->width() / 4);
-            QVERIFY(query.top() > window->height() / 2);
-            QVERIFY(query.right() < count.left());
-            QVERIFY(qAbs(query.top() - count.top()) <= 1);
+            QVERIFY(item("findStatus")->isVisible());
+            const auto header = item("findStatus")->mapRectToScene(item("findStatus")->boundingRect());
+            QVERIFY(header.top() < window->height() / 4);
+            QCOMPARE(object("findHints")->property("plainText").toString(),
+                     prop("findCount").toString() + "    n next    shift N previous    esc clear");
         }
         call("readerFocus"); key(Qt::Key_Escape);
-        QVERIFY(!item("searchQueryLabel")->isVisible()); QVERIFY(bible->focusMode());
+        QVERIFY(!item("findStatus")->isVisible()); QVERIFY(bible->focusMode());
     }
     void alignVerseChords_data() { rendererNavigation_data(); }
     void alignVerseChords() {
@@ -639,7 +640,7 @@ private slots:
         find("alpha"); key(Qt::Key_Return);
         navigate("John 1:60");
         const auto scope = bible->tagScope();
-        const auto acceptedCount = object("searchMatchCount")->property("text");
+        const auto acceptedCount = prop("findCount");
         const double y = settledY();
         key(Qt::Key_Slash); QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus());
         QCOMPARE(object("chapterFindInput")->property("selectedText").toString(), QString("alpha"));
@@ -673,7 +674,7 @@ private slots:
         QCOMPARE(prop("chapterQueryHistory").toString(), QString("alpha"));
         key(Qt::Key_Escape); QVERIFY(!prop("findPromptOpen").toBool());
         QCOMPARE(bible->tagScope(), scope); QCOMPARE(settledY(), y);
-        QCOMPARE(object("searchMatchCount")->property("text"), acceptedCount);
+        QCOMPARE(prop("findCount"), acceptedCount);
     }
     void chapterFindStartsAtOrAfterCursor_data() {
         QTest::addColumn<int>("cursor"); QTest::addColumn<int>("matchVerse"); QTest::addColumn<int>("nextVerse");
@@ -808,7 +809,7 @@ private slots:
     }
     void focusEscapeAndVersionInvalidation() {
         find("alpha"); key(Qt::Key_Return); bible->setFocusMode(true); call("readerFocus");
-        QTRY_VERIFY(item("searchMatchCount")->isVisible());
+        QTRY_VERIFY(item("findStatus")->isVisible());
         key(Qt::Key_Slash); QTRY_VERIFY(item("chapterFindInput")->hasActiveFocus()); key(Qt::Key_Escape);
         QVERIFY(bible->focusMode()); QVERIFY(!prop("acceptedSearchQuery").toString().isEmpty());
         key(Qt::Key_Escape); QVERIFY(bible->focusMode()); QVERIFY(prop("searchSegments").toList().isEmpty());
@@ -817,7 +818,7 @@ private slots:
         navigate("John 1:35"); install(second); QTRY_VERIFY(prop("searchSegments").toList().isEmpty());
         QVERIFY(bible->switchVersion(version)); QTRY_VERIFY(!prop("searchSegments").toList().isEmpty());
         QCOMPARE(bible->cursorVerse(), 35); QCOMPARE(prop("searchMatchIndex").toInt(), -1);
-        QCOMPARE(object("searchMatchCount")->property("text").toString(), QString("8 matches"));
+        QCOMPARE(prop("findCount").toString(), QString("8 matches"));
     }
     void rendererNavigation_data() {
         QTest::addColumn<QString>("mode");

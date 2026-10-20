@@ -510,22 +510,24 @@ private slots:
         click(item("essentialHintsPart:note")); QTRY_VERIFY(!prop("helpDialog","visible").toBool());
         QTRY_VERIFY(prop("notesDrawer","opened").toBool());
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("notesDrawer","visible").toBool());
-        // Which key: z waits for another; after a moment, what can follow.
-        key(Qt::Key_Z); QVERIFY(!item("keyStrip")->isVisible());
-        QTRY_VERIFY(item("keyStrip")->isVisible());
-        QVERIFY(prop("keyStripHints","plainText").toString().contains("z center"));
-        QCOMPARE(prop("keyStripPending","text").toString(),QString("z"));
-        key(Qt::Key_Z); QTRY_VERIFY(!item("keyStrip")->isVisible());
+        // Which key: z waits for another; after a moment (300 ms), the key
+        // header names what can follow.
+        QCOMPARE(prop("whichKeyTimer","interval").toInt(),300);
+        key(Qt::Key_Z); QVERIFY(!item("pendingStatus")->isVisible());
+        QTRY_VERIFY(item("pendingStatus")->isVisible()); QVERIFY(!item("keyStrip")->isVisible());
+        QVERIFY(prop("pendingHints","plainText").toString().contains("z center"));
+        QCOMPARE(prop("pendingTitle","text").toString(),QString("z"));
+        key(Qt::Key_Z); QTRY_VERIFY(!item("pendingStatus")->isVisible());
         // So does g; esc takes back only the g.
-        key(Qt::Key_G); QTRY_VERIFY(item("keyStrip")->isVisible());
-        QVERIFY(prop("keyStripHints","plainText").toString().contains("gb gB next, previous book"));
-        QCOMPARE(prop("keyStripPending","text").toString(),QString("g"));
-        key(Qt::Key_Escape); QTRY_VERIFY(!item("keyStrip")->isVisible());
+        key(Qt::Key_G); QTRY_VERIFY(item("pendingStatus")->isVisible());
+        QVERIFY(prop("pendingHints","plainText").toString().contains("gb gB next, previous book"));
+        QCOMPARE(prop("pendingTitle","text").toString(),QString("g"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("pendingStatus")->isVisible());
         QVERIFY(!window->property("gPending").toBool()); QCOMPARE(bible->cursorVerse(),16);
         // A count names what it would count.
-        key(Qt::Key_3); QTRY_VERIFY(item("keyStrip")->isVisible());
-        QVERIFY(prop("keyStripHints","plainText").toString().contains("j k 3 verses"));
-        key(Qt::Key_J); QTRY_VERIFY(!item("keyStrip")->isVisible()); QCOMPARE(bible->cursorVerse(),19);
+        key(Qt::Key_3); QTRY_VERIFY(item("pendingStatus")->isVisible());
+        QVERIFY(prop("pendingHints","plainText").toString().contains("j k 3 verses"));
+        key(Qt::Key_J); QTRY_VERIFY(!item("pendingStatus")->isVisible()); QCOMPARE(bible->cursorVerse(),19);
         // The mode pill names the selection mode.
         QVERIFY(!item("modePill")->isVisible());
         key(Qt::Key_V,Qt::ShiftModifier); QTRY_VERIFY(item("modePill")->isVisible());

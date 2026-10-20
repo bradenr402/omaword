@@ -898,6 +898,35 @@ private slots:
         QCOMPARE(body(john4, 1), arriving);
         QCOMPARE(rebuilds(arriving), arrived); QCOMPARE(rebuilds(leaving), left);
     }
+    // A mode's key header shows over the reader's top, moving nothing: not
+    // the outline, the text, or the column; what a key reveals (zt) stays
+    // below it.
+    void modeHeadersMoveNothing() {
+        bible->setChapterOutline(true); setMode("verse"); resize(1400, 700);
+        navigate("John 3:20"); QTRY_VERIFY(outlineShown()); settle();
+        const auto at = [&](const QString &name) { return item(name)->mapToScene(QPointF()); };
+        const QPointF outline = at("chapterOutline"), text = at("verseBody20"), column = at("readerColumn");
+        const auto still = [&](const QString &where) {
+            QVERIFY2(at("chapterOutline") == outline, qPrintable(where + ": outline"));
+            QVERIFY2(at("verseBody20") == text, qPrintable(where + ": text"));
+            QVERIFY2(at("readerColumn") == column, qPrintable(where + ": column"));
+        };
+        QVERIFY(QMetaObject::invokeMethod(window, "readerFocus"));
+        key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(item("visualStatus")->isVisible()); settle(); still("visual");
+        QVERIFY(prop("topSafety").toDouble() > 0);
+        key(Qt::Key_V); QTRY_VERIFY(item("characterStatus")->isVisible()); settle(); still("characters");
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("modeHeaders")->isVisible()); settle(); still("none");
+        QCOMPARE(prop("topSafety").toDouble(), 0.0);
+        key(Qt::Key_G); QTRY_VERIFY(item("pendingStatus")->isVisible()); settle(); still("pending");
+        key(Qt::Key_Escape); QTRY_VERIFY(!item("modeHeaders")->isVisible());
+        // zt under a header: the verse's top just below it.
+        key(Qt::Key_V, Qt::ShiftModifier); QTRY_VERIFY(item("visualStatus")->isVisible());
+        key(Qt::Key_Z); key(Qt::Key_T);
+        QTRY_VERIFY(!object("readerSlide")->property("running").toBool());
+        const double headerBottom = item("modeHeaders")->mapToScene(QPointF(0, item("modeHeaders")->height())).y();
+        QVERIFY2(qAbs(at("verseBody20").y() - headerBottom) <= 1, qPrintable(QString("%1 vs %2").arg(at("verseBody20").y()).arg(headerBottom)));
+        key(Qt::Key_Escape); bible->setChapterOutline(false);
+    }
     // A jump into a long chapter (Verse) makes the rows about the verse read
     // first, shown at once, then the rest a few a turn, the text held still.
     void longChapterJumpsMakeTheirRowsAboutTheVerse() {
