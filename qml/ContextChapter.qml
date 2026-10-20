@@ -42,8 +42,9 @@ Column {
     // Its view's rows and its own height laid out now: a Column lays out on
     // its own polish, which the reader's column does not reach (a chapter
     // given its view, or back from parked, would keep a stale height).
+    // (A Verse view's rows showing given a new text size or width first.)
     function layOut() {
-        if (viewHost.item && !chapter.continuous) viewHost.item.forceLayout()
+        if (viewHost.item && !chapter.continuous) { viewHost.item.settle(); viewHost.item.forceLayout() }
         forceLayout()
     }
     // That, and a flowing view's pending build (Main measures beside it).

@@ -2357,7 +2357,8 @@ private slots:
         const int base = size(); const double ratio = double(base) / verseSize(); const double pad = title->property("bottomPadding").toDouble();
         bible->setFontSize(27); QTRY_VERIFY(size() > base);
         QVERIFY(qAbs(size() - 1.5 * base) <= 1);
-        QVERIFY(qAbs(double(size()) / verseSize() - ratio) < 0.06);
+        // The verse shown takes the new size by the next frame (VerseView.relaySome).
+        QTRY_VERIFY(qAbs(double(size()) / verseSize() - ratio) < 0.06);
         QVERIFY(qAbs(title->property("bottomPadding").toDouble() - 1.5 * pad) <= 1);
         shot("chapter-title-large");
         // Keyboard: ctrl minus shrinks it again.

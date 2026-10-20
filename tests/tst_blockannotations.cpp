@@ -47,7 +47,12 @@ class BlockAnnotationsTest : public QObject
             if (auto match = find(child,name)) return match;
         return nullptr;
     }
-    QQuickItem *item(const QString &name) const { return find(window->contentItem(),name); }
+    // (Markers of new verses come a frame after their text: lookups wait for them.)
+    QQuickItem *item(const QString &name) const {
+        if (auto reader = find(window->contentItem(),"reader"))
+            QTest::qWaitFor([&] { return !reader->property("markersWaiting").toBool(); });
+        return find(window->contentItem(),name);
+    }
     bool menuOpen() const { return root->findChild<QObject *>("contextMenu")->property("visible").toBool(); }
     QVariantList list(const char *property) const {
         const auto value = item("reader")->property(property);

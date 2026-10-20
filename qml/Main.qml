@@ -572,10 +572,28 @@ ApplicationWindow {
     // The desktop text scale sizes the reader text. The Text size preference
     // (bible.fontSize, default 18) also scales every other piece of UI text
     // and its controls proportionally, so `scale` is the product of both.
+    // A new size (setTextSize) reaches the rest of the UI a frame after the
+    // reader's text: that first frame lays out the text alone (the whole UI,
+    // hidden dialogs too, takes some 30 ms more).
     readonly property real systemScale: desktop.textScale > 0 ? desktop.textScale : 1
     readonly property real readerScale: systemScale
     readonly property real fontScale: bible.fontSize > 0 ? bible.fontSize / 18 : 1
-    readonly property real scale: systemScale * fontScale
+    property int heldTextSize: 0
+    readonly property real scale: systemScale * (heldTextSize > 0 ? heldTextSize / 18 : fontScale)
+    function setTextSize(size) {
+        const previous = bible.fontSize, anchor = readingAnchor()
+        if (!heldTextSize) heldTextSize = previous
+        bible.setFontSize(size)
+        if (bible.fontSize === previous) return
+        // Laid out now, the text and its marks show at the new size in that
+        // frame, the verse read where it was.
+        settleReaderLayout()
+        if (anchor) { holdReadingAnchor(anchor); setReaderY(reading.contentY) }
+    }
+    // afterAnimating is the last step before a frame's sync: the UI follows once that frame is synced.
+    property bool textSizeSynced: false
+    onAfterAnimating: if (heldTextSize && !textSizeSynced) { textSizeSynced = true; Qt.callLater(app.releaseTextSize) }
+    function releaseTextSize() { heldTextSize = 0; textSizeSynced = false }
     readonly property bool hasSelection: bible.ready && bible.selectedStart > 0
     readonly property bool contextMenuOpen: contextMenu.visible
     readonly property bool modalOpen: dialogOpen || tagsUi.visibleModal
@@ -780,7 +798,7 @@ ApplicationWindow {
                 const item = repeater.itemAt(i) as ContextChapter
                 if (item) item.layOut()
             }
-        if (verseHost.item) verseHost.item.forceLayout()
+        if (verseHost.item) { verseHost.item.settle(); verseHost.item.forceLayout() }
         readerColumn.forceLayout()
     }
     // A layout change applied now rather than on the timers' next turn: the
@@ -1112,16 +1130,80 @@ ApplicationWindow {
         readonly property var lanes: app.packAnnotationLanes(verses)
         // What its rows are laid out with, the reader's while it shows: one
         // waiting (made ahead, or left) keeps those it was made with
-        // (freeze), so a change of text size, spacing, or width lays out no
-        // waiting view (they go, to be made again: Main.viewLayoutKey).
+        // (freeze), so a change of text size, spacing, width, or focus mode's
+        // layout lays out no waiting view (they go, to be made again:
+        // Main.viewLayoutKey).
         property real bodySize: app.readerBodySize
         property real lineHeight: bible.lineHeight
+        property bool focused: app.focusLayout
         width: readerColumn.width
-        function freeze() { bodySize = bodySize; lineHeight = lineHeight; width = width }
+        function freeze() { bodySize = bodySize; lineHeight = lineHeight; focused = focused; width = width }
         function thaw() {
             bodySize = Qt.binding(function() { return app.readerBodySize })
             lineHeight = Qt.binding(function() { return bible.lineHeight })
+            focused = Qt.binding(function() { return app.focusLayout })
             width = Qt.binding(function() { return readerColumn.width })
+        }
+        // A row is laid out at those it was made with (rowEntry) until it is
+        // given the view's new ones (relaySome): the rows showing before the
+        // next frame, the others a few each frame after, outward from them,
+        // what shows staying in place (a long chapter's rows all at once
+        // took some 200 ms).
+        function rowEntry(i) { return { row: i, textSize: bodySize, textSpacing: lineHeight, textWidth: width, textFocus: focused } }
+        onBodySizeChanged: if (!relayTimer.running) relayTimer.start()
+        onLineHeightChanged: if (!relayTimer.running) relayTimer.start()
+        onFocusedChanged: if (!relayTimer.running) relayTimer.start()
+        onWidthChanged: if (!relayTimer.running) relayTimer.start()
+        Timer { id: relayTimer; interval: 0; onTriggered: view.relaySome() }
+        property bool relaying: false
+        Connections { target: app; enabled: view.relaying; function onFrameSwapped() { view.relaySome() } }
+        // The rows showing given the view's values now (Main settles it before measuring).
+        function settle() { if (relayTimer.running) { relayTimer.stop(); relaySome() } }
+        function relaySome() {
+            relaying = false
+            const count = rowModel.count
+            if (!count) return
+            const started = Date.now(), values = { textSize: bodySize, textSpacing: lineHeight, textWidth: width, textFocus: focused }
+            let changed = false
+            const relay = function(i) {
+                const entry = rowModel.get(i)
+                if (entry.textSize === values.textSize && entry.textSpacing === values.textSpacing && entry.textWidth === values.textWidth
+                    && entry.textFocus === values.textFocus) return
+                rowModel.set(i, values)
+                changed = true
+            }
+            // The rows showing, a quarter screen about them too, and the one
+            // kept in place: the cursor verse's, else the first showing (or,
+            // the view all above them, its end), as Main.readingAnchor.
+            const top = view.mapToItem(reading.contentItem, 0, 0).y
+            const from = reading.contentY - reading.height / 4, to = reading.contentY + 1.25 * reading.height
+            const cursor = !beside && app.hasSelection ? bible.cursorVerse : 0
+            let first = count, last = -1, anchor = null
+            for (let i = 0; i < count; ++i) {
+                const row = rowRepeater.itemAt(i)
+                if (!row || top + row.y + row.height < from) continue
+                if (top + row.y > to) break
+                if (first === count) first = i
+                last = i
+                const showing = top + row.y + row.height > reading.contentY && top + row.y < reading.contentY + reading.height
+                if (showing && (!anchor || (verses[firstRow + i] || {}).number === cursor)) anchor = { row: row, y: top + row.y }
+            }
+            if (!anchor && top + view.height <= reading.contentY) anchor = { row: null, y: top + view.height }
+            for (let i = first; i <= last; ++i) relay(i)
+            let below = last + 1, above = Math.min(first, count) - 1
+            while ((below < count || above >= 0) && Date.now() - started < 8) {
+                if (below < count) relay(below++)
+                if (above >= 0) relay(above--)
+            }
+            if (changed && anchor) {
+                app.layOutReader()
+                const after = view.mapToItem(reading.contentItem, 0, 0).y + (anchor.row ? anchor.row.y : view.height)
+                // (What shows stays put: no scroll for Follow to send.)
+                app.growingRows = true
+                app.shiftReader(after - anchor.y)
+                app.growingRows = false
+            }
+            if (below < count || above >= 0) { relaying = true; app.update() }
         }
         onVersesChanged: syncRows()
         Component.onCompleted: syncRows()
@@ -1153,7 +1235,7 @@ ApplicationWindow {
         function buildSome() {
             if (!incremental || !building) return
             const started = Date.now()
-            while (building && Date.now() - started < 6) rowModel.append({ row: rowModel.count })
+            while (building && Date.now() - started < 6) rowModel.append(rowEntry(rowModel.count))
             if (building) Qt.callLater(view.buildSome)
             else built()
         }
@@ -1163,11 +1245,11 @@ ApplicationWindow {
             firstRow = target
             let below = 0, above = 0
             for (let i = target; i < verses.length && below < reading.height; ++i) {
-                rowModel.append({ row: i })
+                rowModel.append(rowEntry(i))
                 below += rowRepeater.itemAt(rowModel.count - 1).height
             }
             while (firstRow > 0 && above < (app.focusLayout ? 0.45 : 0.15) * reading.height) {
-                rowModel.insert(0, { row: firstRow - 1 })
+                rowModel.insert(0, rowEntry(firstRow - 1))
                 firstRow -= 1
                 above += rowRepeater.itemAt(0).height
             }
@@ -1175,7 +1257,7 @@ ApplicationWindow {
         function growSome() {
             if (incremental || !building) return
             const started = Date.now()
-            while (firstRow + rowModel.count < verses.length && Date.now() - started < 6) rowModel.append({ row: firstRow + rowModel.count })
+            while (firstRow + rowModel.count < verses.length && Date.now() - started < 6) rowModel.append(rowEntry(firstRow + rowModel.count))
             const left = 6 - (Date.now() - started)
             if (left > 0) makeAbove(left)
             // The margins place notes by the rows made.
@@ -1193,19 +1275,19 @@ ApplicationWindow {
             const before = anchor ? anchor.y : 0
             // (What shows stays put: no scroll for Follow to send.)
             app.growingRows = true
-            while (firstRow > stop && (ms < 0 || Date.now() - started < ms)) { rowModel.insert(0, { row: firstRow - 1 }); firstRow -= 1 }
+            while (firstRow > stop && (ms < 0 || Date.now() - started < ms)) { rowModel.insert(0, rowEntry(firstRow - 1)); firstRow -= 1 }
             if (shown && anchor) { app.layOutReader(); app.shiftReader(anchor.y - before) }
             app.growingRows = false
         }
         // Rows up to verse index `i` now (those still to come keep coming).
         function makeTo(i) {
             if (i < 0 || i >= verses.length) return
-            while (firstRow + rowModel.count <= i) rowModel.append({ row: firstRow + rowModel.count })
+            while (firstRow + rowModel.count <= i) rowModel.append(rowEntry(firstRow + rowModel.count))
             makeAbove(-1, i)
         }
         function appendRows() {
             const added = []
-            for (let i = firstRow + rowModel.count; i < verses.length; ++i) added.push({ row: i })
+            for (let i = firstRow + rowModel.count; i < verses.length; ++i) added.push(rowEntry(i))
             if (added.length) rowModel.append(added)
         }
         // Shown before it was done, or wanted whole: the rest now; made at once from then on.
@@ -1229,6 +1311,11 @@ ApplicationWindow {
                 id: verseRow
                 // Its verse's index in `verses` (not its place among the rows made).
                 required property int row
+                // The text size, line height, width, and focus mode's layout it is laid out at (relaySome).
+                required property real textSize
+                required property real textSpacing
+                required property real textWidth
+                required property bool textFocus
                 // Read in place: a change to marks updates the row rather than making it again.
                 // (A row of a longer chapter reads nothing for the moment before it goes.)
                 readonly property var modelData: view.verses[row] || app.noVerse
@@ -1266,13 +1353,13 @@ ApplicationWindow {
                 // number changes only when its value does): the text and the
                 // number (VerseHighlights and FootnoteMarks keep their lists so).
                 readonly property int verseNumber: modelData.number || 0
-                readonly property string bodyHtml: '<div style="line-height:' + (view.lineHeight * 100) + '%">'
-                    + (app.footnoteHtml(app.verseHtml(modelData.html), modelData.footnotes) || String(modelData.text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
+                readonly property string bodyHtml: '<div style="line-height:' + (textSpacing * 100) + '%">'
+                    + (app.footnoteHtml(app.verseHtml(modelData.html), modelData.footnotes, textSize, textFocus) || String(modelData.text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")) + '</div>'
                 body: verseBody
                 searchOverlay: verseSearch
                 textOffset: verseHeading.height
                 textHeight: verseBody.height
-                width: view.width
+                width: textWidth
                 height: verseHeading.height + verseBody.height + 7 * app.readerScale
                 // Focus-mode dimming: paint-only, so layout and hit-testing are unchanged.
                 readonly property bool dimmed: view.beside ? bible.focusMode && !selected : app.verseDimmed(modelData.number)
@@ -1296,14 +1383,14 @@ ApplicationWindow {
                 Item {
                     id: verseHeading
                     objectName: view.namePrefix + "verseHeading" + verseRow.modelData.number
-                    readonly property bool hasHeading: bible.showHeadings && !app.focusLayout && (verseRow.modelData.heading || "").length > 0
+                    readonly property bool hasHeading: bible.showHeadings && !verseRow.textFocus && (verseRow.modelData.heading || "").length > 0
                     width: parent.width - verseRow.gutter - 6
                     x: verseRow.gutter
                     // Measure text at a fixed width, independent of effective
                     // visibility. First import creates rows inside a hidden
                     // reader; Label height/implicitHeight/padding feedback
                     // otherwise re-enters when that ancestor becomes visible.
-                    height: hasHeading ? headingText.implicitHeight + headingText.y + TypeScale.size(view.bodySize, TypeScale.headingBelow) : 0
+                    height: hasHeading ? headingText.implicitHeight + headingText.y + TypeScale.size(verseRow.textSize, TypeScale.headingBelow) : 0
                     visible: hasHeading
                     Text {
                         id: headingText
@@ -1312,14 +1399,14 @@ ApplicationWindow {
                         // Under the chapter title, its own space suffices,
                         // as in the other layouts (a document's first block
                         // takes no top margin).
-                        y: verseRow.row === 0 ? 0 : TypeScale.size(view.bodySize, TypeScale.headingAbove)
+                        y: verseRow.row === 0 ? 0 : TypeScale.size(verseRow.textSize, TypeScale.headingAbove)
                         // An LRM keeps a Hebrew-first heading ("א Aleph")
                         // in an LTR paragraph; display only.
                         text: app.leftToRightText(verseRow.modelData.heading)
                         horizontalAlignment: Text.AlignLeft
                         textFormat: Text.PlainText
                         font.family: desktop.fontFamily
-                        font.pixelSize: TypeScale.size(view.bodySize, TypeScale.heading)
+                        font.pixelSize: TypeScale.size(verseRow.textSize, TypeScale.heading)
                         font.weight: Font.DemiBold
                         wrapMode: Text.Wrap
                         color: desktop.foreground
@@ -1483,7 +1570,7 @@ ApplicationWindow {
                         fontSizeMode: Text.HorizontalFit
                         minimumPixelSize: 1
                         text: verseRow.modelData.number
-                        font.pixelSize: TypeScale.size(view.bodySize, TypeScale.number)
+                        font.pixelSize: TypeScale.size(verseRow.textSize, TypeScale.number)
                         font.weight: verseRow.selected ? Font.Bold : Font.Normal
                         color: verseRow.selected ? desktop.accent : desktop.muted
                         FontMetrics { id: numberMetrics; font: numberLabel.font }
@@ -1527,6 +1614,8 @@ ApplicationWindow {
                     namePrefix: view.namePrefix
                     row: verseRow.modelData
                     body: verseBody
+                    size: verseRow.textSize
+                    bare: verseRow.textFocus
                     // Beside, its verse is selected first, its chapter becoming the one read.
                     onActivated: function(note, x, y, height) {
                         if (view.beside) app.selectContextVerse(view.book, view.chapterNumber, verseRow.modelData.number, false)
@@ -1542,7 +1631,7 @@ ApplicationWindow {
                     body: verseBody
                     sourceText: verseRow.modelData.text
                     lineIndents: verseRow.modelData.indents || []
-                    indentUnit: view.bodySize * TypeScale.poetryIndent
+                    indentUnit: verseRow.textSize * TypeScale.poetryIndent
                     theme: desktop
                     segments: view.beside ? [] : app.searchSegments.filter(function(segment) { return segment.verse === verseRow.verseNumber })
                 }
@@ -1558,7 +1647,7 @@ ApplicationWindow {
                     textFormat: Text.RichText
                     horizontalAlignment: TextEdit.AlignLeft
                     font.family: desktop.fontFamily
-                    font.pixelSize: view.bodySize
+                    font.pixelSize: verseRow.textSize
                     color: desktop.foreground
                     // Selected text keeps its look: a dotted underline marks it
                     // (the background at no alpha: Qt veils selected inline cells
@@ -4047,11 +4136,12 @@ ApplicationWindow {
     // Verse rows reserve footnote cells like BlockDocument: a word joiner and a
     // transparent image at each note's plain-text offset. Paint-only markers
     // sit over them; copy strips the cells, search maps around them.
-    readonly property real footnoteCellWidth: Math.max(1, Math.round(readerSize * readerScale * 0.5))
-    function footnoteHtml(html, notes) {
-        if (!notes || !notes.length || focusLayout) return html
+    function footnoteCellWidth(size) { return Math.max(1, Math.round(size * 0.5)) }
+    // (bare: focus mode's layout, which reserves no cells.)
+    function footnoteHtml(html, notes, size, bare) {
+        if (!notes || !notes.length || bare) return html
         const offsets = Array.from(notes).map(function(note) { return note.offset }).sort(function(a, b) { return a - b })
-        const cell = '&#8288;<img src="qrc:/resources/cell.png" width="' + footnoteCellWidth + '" height="1">'
+        const cell = '&#8288;<img src="qrc:/resources/cell.png" width="' + footnoteCellWidth(size) + '" height="1">'
         let out = "", count = 0, next = 0, i = 0
         while (i < html.length) {
             while (next < offsets.length && offsets[next] <= count) { out += cell; ++next }
@@ -6740,9 +6830,9 @@ ApplicationWindow {
         case "noteKeepDraft": if (deskOpen) { keepDeskDraft(); deskEditor.forceActiveFocus() } else { keepNoteDraft(); noteEditor.forceActiveFocus() } break
         case "noteUseSaved": if (deskOpen) { useSavedDesk(); deskEditor.forceActiveFocus() } else { useSavedNote(); noteEditor.forceActiveFocus() } break
         case "noteLinkedFrom": if (linkedList.activeFocus) noteEditor.forceActiveFocus(); else focusLinkedFrom(); break
-        case "larger": bible.setFontSize(readerSize + 1); break
-        case "smaller": bible.setFontSize(readerSize - 1); break
-        case "resetText": bible.setFontSize(18); break
+        case "larger": setTextSize(readerSize + 1); break
+        case "smaller": setTextSize(readerSize - 1); break
+        case "resetText": setTextSize(18); break
         case "numbers": bible.setShowVerseNumbers(!bible.showVerseNumbers); break
         case "headings": bible.setShowHeadings(!bible.showHeadings); break
         case "wordsOfJesus":
@@ -7135,7 +7225,7 @@ ApplicationWindow {
                         property real startScale: 1
                         property int startSize: 18
                         onActiveChanged: if (active) { startScale = activeScale; startSize = app.readerSize }
-                        onActiveScaleChanged: if (active) bible.setFontSize(Math.max(8, Math.min(40, Math.round(startSize * activeScale / startScale))))
+                        onActiveScaleChanged: if (active) app.setTextSize(Math.max(8, Math.min(40, Math.round(startSize * activeScale / startScale))))
                     }
                     ScrollBar.vertical: OverlayScrollbar {
                         id: readerScrollbar
@@ -10123,7 +10213,7 @@ ApplicationWindow {
                     from: 8; to: 40; stepSize: 1
                     snapMode: Slider.SnapAlways
                     value: bible.fontSize
-                    onMoved: bible.setFontSize(Math.round(value))
+                    onMoved: app.setTextSize(Math.round(value))
                     Accessible.name: "Text size"
                 }
                 SliderStep {

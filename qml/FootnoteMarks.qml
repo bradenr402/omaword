@@ -10,15 +10,18 @@ Repeater {
     required property var controller
     required property var theme
     required property var row
-    // The verse's text, its cells reserved.
+    // The verse's text, its cells reserved, and its text size (bare: focus
+    // mode's layout, which reserves none).
     required property TextEdit body
+    property real size: controller.readerBodySize
+    property bool bare: controller.focusLayout
     // Names its items apart from the chapter read's ("context:John 3:").
     property string namePrefix: ""
     // A note's mark clicked: where it is in the window (x, y, height).
     signal activated(var note, real x, real y, real height)
     // A value: rows made again for other marks rebuild only when these change.
     readonly property string notesKey: JSON.stringify(row.footnotes || [])
-    model: controller.focusLayout ? [] : JSON.parse(notesKey)
+    model: bare ? [] : JSON.parse(notesKey)
     delegate: Item {
         id: footnoteMarker
         required property var modelData
@@ -31,7 +34,7 @@ Repeater {
             ? marks.body.positionToRectangle(at) : Qt.rect(0, 0, 0, 0)
         x: marks.body.x + cell.x
         y: marks.body.y + cell.y
-        width: marks.controller.footnoteCellWidth
+        width: marks.controller.footnoteCellWidth(marks.size)
         height: cell.height
         z: 3
         // Out of the tab order: i peeks at the cursor verse's notes.
@@ -41,7 +44,7 @@ Repeater {
             text: marks.controller.footnoteMark(footnoteMarker.modelData.caller)
             color: marks.theme.accent
             font.family: marks.theme.fontFamily
-            font.pixelSize: Math.max(6, TypeScale.size(marks.controller.readerBodySize, TypeScale.mark))
+            font.pixelSize: Math.max(6, TypeScale.size(marks.size, TypeScale.mark))
             textFormat: Text.PlainText
         }
         MouseArea {

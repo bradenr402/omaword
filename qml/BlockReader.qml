@@ -52,6 +52,13 @@ Item {
     property string namePrefix: ""
     property var annotationRanges: []
     property var inlineMarkers: []
+    // The markers' Repeater model: replaced as markers come or go, not as
+    // they only move (a new text size or width), so a chapter's many stay
+    // and take their places from inlineMarkers.
+    property var markerModel: []
+    property string markerKey: ""
+    readonly property var markerPlaceKeys: ["position", "x", "y", "width", "height", "rtl", "bracketX", "bracketTop", "bracketHeight",
+        "textTop", "textBottom", "paintWidth", "textGap", "cellWidth", "cellHeight"]
     readonly property var searchSegments: beside ? [] : controller.searchSegments || []
     // As a value: an equal list (the view moving beside the chapter read, or
     // back) repaints nothing.
@@ -72,11 +79,38 @@ Item {
     function updateAnnotations() {
         if (destroying) return
         const ranges = document.annotations(verses, backend.collection, book, chapterNumber)
-        const markers = document.inlineDecorations()
-        if (JSON.stringify(markers) !== JSON.stringify(inlineMarkers)) inlineMarkers = markers
+        // Markers move with the text (a new text size or width); those of
+        // other verses (another chapter, or marks changed), or where there
+        // were none (leaving focus mode), come a frame after it, which
+        // placing and making a long chapter's would hold back some 25 ms
+        // (those there till then go now).
+        if (markerModel.length && markedVerses === versesKey) updateMarkers()
+        else {
+            if (markerModel.length) { inlineMarkers = []; markerKey = ""; markerModel = [] }
+            markersWaiting = true
+        }
         if (JSON.stringify(ranges) === JSON.stringify(annotationRanges) && annotationScale === root.readerScale) return
         annotationScale = root.readerScale
         annotationRanges = ranges
+    }
+    property string markedVerses: ""
+    function updateMarkers() {
+        markedVerses = versesKey
+        const markers = document.inlineDecorations()
+        if (JSON.stringify(markers) === JSON.stringify(inlineMarkers)) return
+        inlineMarkers = markers
+        const key = JSON.stringify(markers, function(key, value) { return root.markerPlaceKeys.includes(key) ? undefined : value })
+        if (key !== markerKey) { markerKey = key; markerModel = markers }
+    }
+    property bool markersWaiting: false
+    Connections {
+        target: root.Window.window
+        enabled: root.markersWaiting
+        function onFrameSwapped() {
+            if (root.destroying || root.building) return
+            root.markersWaiting = false
+            root.updateMarkers()
+        }
     }
     function openAnnotation(entry) {
         if (entry.kind === "footnote") { controller.peekFootnote(entry.verse, entry.seq); return }
@@ -113,13 +147,28 @@ Item {
         })
     }
     // Note text is not layout: a typed note repaints the marks, never rebuilds.
-    readonly property string contentKey: JSON.stringify(Array.from(verses).map(function(v) {
+    // (The verses' part apart: a setting changing reads no verse again.)
+    readonly property string versesKey: JSON.stringify(Array.from(verses).map(function(v) {
         return { number: v.number, html: v.html, text: v.text, heading: v.heading, paragraphStart: v.paragraphStart, indents: v.indents,
             tagRanges: v.tagRanges, footnotes: v.footnotes,
             noteRanges: Array.from(v.noteRanges || []).map(function(r) { return [r.reference, r.continuesBefore, r.continuesAfter] }) }
-    })) + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + focusLayout + noteMarks + controller.readerSize + root.readerScale + controller.scale
+    }))
+    readonly property string contentKey: versesKey + (controller.wordsOfJesusColor || "") + numbers + headings + backend.lineHeight + mode + focusLayout + noteMarks + controller.readerSize + root.readerScale
     height: body.height
     onContentKeyChanged: if (!destroying) rebuildTimer.restart()
+    // The text's size and width are those of its last build: a new text
+    // size (which widens the column too) reaches it with its rebuild, the
+    // old text cleared first, so the chapter is laid out once rather than
+    // again for each. A width alone follows a turn later (with a rebuild
+    // then due, by it).
+    property real textSize: controller.readerSize * readerScale
+    property real textWidth: width
+    onWidthChanged: if (!destroying) widthTimer.restart()
+    function applyWidth() {
+        if (destroying) return
+        if (rebuildTimer.running) { rebuildTimer.stop(); rebuild() }
+        textWidth = width
+    }
     // Document builds so far (tests: one reflow per toggle).
     property int rebuildCount: 0
     // The content last built: a view given the same content again (moving
@@ -144,6 +193,9 @@ Item {
         }
         cancelDrag()
         const em = controller.readerSize * root.readerScale
+        if (textSize !== em || textWidth !== width) body.clear()
+        textSize = em
+        textWidth = width
         const spacing = { headingAbove: TypeScale.size(em, TypeScale.headingAbove),
             headingBelow: TypeScale.size(em, TypeScale.headingBelow), poetryIndent: em * TypeScale.poetryIndent }
         building = incremental
@@ -181,6 +233,7 @@ Item {
     // frame that first shows it.
     function settle() {
         if (destroying) return
+        if (widthTimer.running) { widthTimer.stop(); applyWidth() }
         if (rebuildTimer.running) { rebuildTimer.stop(); rebuild() }
         if (building) finish()
         if (geometryTimer.running) { geometryTimer.stop(); refreshGeometry() }
@@ -517,13 +570,13 @@ Item {
     TextEdit {
         id: body
         objectName: root.namePrefix + "blockBody"
-        width: parent.width
+        width: root.textWidth
         height: contentHeight
         // Explicit, so Hebrew-first text cannot mirror the alignment.
         horizontalAlignment: TextEdit.AlignLeft
         textFormat: TextEdit.RichText
         font.family: root.theme.fontFamily
-        font.pixelSize: root.controller.readerSize * root.readerScale
+        font.pixelSize: root.textSize
         onFontChanged: if (!root.destroying) geometryTimer.restart()
         onWidthChanged: if (!root.destroying) geometryTimer.restart()
         color: root.theme.foreground
@@ -645,9 +698,31 @@ Item {
     }
     // Focus-mode dimming: a background-colored veil over unfocused text, above
     // the text but without input handling, so layout, copy, and hits are unchanged.
-    // The canvas repaints once per focus change, with no cross-fade.
+    // It changes once per focus change, with no cross-fade.
     property var dimRects: []
     function updateDimRects() { dimRects = verseRangeRects(dimFirst, dimLast) }
+    // The veil's rectangles: all but the holes (the focused verses' lines),
+    // band by band between their edges. (A canvas as tall as the chapter,
+    // painted whole on every change, took a long chapter's some 40 ms.)
+    function veilRects(holes, width, height) {
+        const edges = [0, height]
+        for (const r of holes) edges.push(Math.max(0, Math.min(height, r.y)), Math.max(0, Math.min(height, r.y + r.height)))
+        edges.sort(function(a, b) { return a - b })
+        const out = []
+        for (let i = 0; i + 1 < edges.length; ++i) {
+            const top = edges[i], bottom = edges[i + 1]
+            if (bottom <= top) continue
+            const spans = holes.filter(function(r) { return r.y <= top && r.y + r.height >= bottom })
+                .sort(function(a, b) { return a.x - b.x })
+            let x = 0
+            for (const r of spans) {
+                if (r.x > x) out.push({ x: x, y: top, width: r.x - x, height: bottom - top })
+                x = Math.max(x, r.x + r.width)
+            }
+            if (x < width) out.push({ x: x, y: top, width: width - x, height: bottom - top })
+        }
+        return out
+    }
     Item {
         id: dimLayer
         objectName: root.namePrefix + "blockFocusDim"
@@ -657,47 +732,37 @@ Item {
         opacity: root.backend.focusMode ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: root.fadeMs } }
-        readonly property color veil: root.theme.background
-        readonly property real full: 1 - root.dimOpacity
-        // Made only while shown: as tall as the chapter, a canvas paints
-        // itself again whenever its size changes, which takes long (and a
-        // view made ahead, or left, never shows it).
-        Loader {
-            anchors.fill: parent
-            active: dimLayer.visible
-            sourceComponent: Canvas {
-                id: dimPaint
-                property var holes: root.dimRects
-                onHolesChanged: requestPaint()
-                property color veil: dimLayer.veil
-                onVeilChanged: requestPaint()
-                onPaint: {
-                    if (root.destroying) return
-                    const ctx = getContext("2d")
-                    ctx.reset()
-                    ctx.fillStyle = Qt.rgba(veil.r, veil.g, veil.b, dimLayer.full)
-                    ctx.fillRect(0, 0, width, height)
-                    for (const r of holes) ctx.clearRect(r.x, r.y, r.width, r.height)
-                }
+        readonly property color veil: Qt.rgba(root.theme.background.r, root.theme.background.g, root.theme.background.b, 1 - root.dimOpacity)
+        // Made only while shown (a view made ahead, or left, never shows it).
+        Repeater {
+            model: dimLayer.visible ? root.veilRects(root.dimRects, dimLayer.width, dimLayer.height) : []
+            delegate: Rectangle {
+                required property var modelData
+                x: modelData.x; y: modelData.y
+                width: modelData.width; height: modelData.height
+                color: dimLayer.veil
             }
         }
     }
     // Each delegate occupies an image cell reserved by QTextDocument. The icon
     // sits outside the opening bracket, in the cell's superscript area.
     Repeater {
-        model: root.inlineMarkers
+        model: root.markerModel
         delegate: Item {
             id: inlineMarker
             required property var modelData
-            readonly property bool opening: modelData.edge !== "close"
-            readonly property bool footnote: modelData.kind === "footnote"
-            readonly property string hint: footnote ? "Footnote · " + (modelData.text || "") + "\n" + (root.controller.footnoteHint || "Click: peek")
-                : (modelData.kind === "note" ? "Note" : "Tag") + "\n"
-                + modelData.reference + (modelData.edge === "continuation" ? " (continued from previous chapter)" : "")
-                + (modelData.kind === "tag" ? " · " + root.tagsPlainText(modelData.tags) : "")
-            objectName: root.namePrefix + "blockInlineMarker:" + modelData.kind + ":" + modelData.edge + ":" + modelData.reference
-            x: modelData.x; y: modelData.y
-            width: modelData.width; height: modelData.height
+            required property int index
+            // Its marker as placed now (the model's moves with the text, not with it).
+            readonly property var marker: root.inlineMarkers[index] || modelData
+            readonly property bool opening: marker.edge !== "close"
+            readonly property bool footnote: marker.kind === "footnote"
+            readonly property string hint: footnote ? "Footnote · " + (marker.text || "") + "\n" + (root.controller.footnoteHint || "Click: peek")
+                : (marker.kind === "note" ? "Note" : "Tag") + "\n"
+                + marker.reference + (marker.edge === "continuation" ? " (continued from previous chapter)" : "")
+                + (marker.kind === "tag" ? " · " + root.tagsPlainText(marker.tags) : "")
+            objectName: root.namePrefix + "blockInlineMarker:" + marker.kind + ":" + marker.edge + ":" + marker.reference
+            x: marker.x; y: marker.y
+            width: marker.width; height: marker.height
             z: 2
             visible: !root.backend.focusMode
             // Out of the tab order, as in the Verse layout: the passage menu
@@ -705,7 +770,7 @@ Item {
             activeFocusOnTab: false
             Keys.onPressed: function(event) {
                 if (event.modifiers === Qt.NoModifier && (event.key === Qt.Key_Return || event.key === Qt.Key_Space)) {
-                    root.openAnnotation(modelData)
+                    root.openAnnotation(marker)
                     event.accepted = true
                 }
             }
@@ -716,18 +781,21 @@ Item {
                 active: !inlineMarker.footnote
                 sourceComponent: Canvas {
                     id: inlinePaint
-                    objectName: root.namePrefix + "blockInlinePaint:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
+                    objectName: root.namePrefix + "blockInlinePaint:" + inlineMarker.marker.kind + ":" + inlineMarker.marker.edge + ":" + inlineMarker.marker.reference
                     property color accent: root.theme.accent
-                    property real bracketTop: inlineMarker.modelData.bracketTop
-                    property real bracketHeight: inlineMarker.modelData.bracketHeight
-                    property real bracketX: inlineMarker.modelData.bracketX
-                    property real paintWidth: inlineMarker.modelData.paintWidth
-                    property bool rtl: inlineMarker.modelData.rtl
+                    property real bracketTop: inlineMarker.marker.bracketTop
+                    property real bracketHeight: inlineMarker.marker.bracketHeight
+                    property real bracketX: inlineMarker.marker.bracketX
+                    property real paintWidth: inlineMarker.marker.paintWidth
+                    property bool rtl: inlineMarker.marker.rtl
+                    // (Its wobble's seed.)
+                    property int position: inlineMarker.marker.position
                     onBracketTopChanged: requestPaint()
                     onBracketHeightChanged: requestPaint()
                     onBracketXChanged: requestPaint()
                     onPaintWidthChanged: requestPaint()
                     onRtlChanged: requestPaint()
+                    onPositionChanged: requestPaint()
                     onAccentChanged: requestPaint()
                     onWidthChanged: requestPaint()
                     onHeightChanged: requestPaint()
@@ -746,7 +814,7 @@ Item {
                         const amp = Math.min(0.8 * k, Math.abs(tip - bx) / 3, bracketHeight / 8)
                         const top = bracketTop + lineWidth / 2 + amp
                         const bottom = bracketTop + bracketHeight - lineWidth / 2 - amp
-                        const data = inlineMarker.modelData
+                        const data = inlineMarker.marker
                         const s = HandDrawn.seed(data.kind, root.backend.versionId || "", data.reference, data.edge, data.verse, data.position)
                         const pen = { width: lineWidth, amp: amp }
                         if (data.edge === "continuation") {
@@ -763,8 +831,8 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 active: inlineMarker.footnote
                 sourceComponent: Text {
-                    objectName: root.namePrefix + "blockFootnoteMark:" + inlineMarker.modelData.reference
-                    text: root.footnoteMark(inlineMarker.modelData.caller)
+                    objectName: root.namePrefix + "blockFootnoteMark:" + inlineMarker.marker.reference
+                    text: root.footnoteMark(inlineMarker.marker.caller)
                     color: root.theme.accent
                     font.family: root.theme.fontFamily
                     font.pixelSize: Math.max(6, TypeScale.size(root.controller.readerSize * root.readerScale, TypeScale.mark))
@@ -773,14 +841,14 @@ Item {
             }
             Loader {
                 active: inlineMarker.opening && !inlineMarker.footnote
-                x: inlineMarker.modelData.rtl ? parent.width - inlineMarker.modelData.paintWidth * 0.05 - width
-                                             : inlineMarker.modelData.paintWidth * 0.05
+                x: inlineMarker.marker.rtl ? parent.width - inlineMarker.marker.paintWidth * 0.05 - width
+                                             : inlineMarker.marker.paintWidth * 0.05
                 y: parent.height * 0.03
-                width: Math.min(inlineMarker.modelData.paintWidth * 0.64, parent.height * 0.64)
+                width: Math.min(inlineMarker.marker.paintWidth * 0.64, parent.height * 0.64)
                 height: width
                 sourceComponent: AnnotationGlyph {
-                    objectName: root.namePrefix + "blockInlineGlyph:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.reference
-                    kind: inlineMarker.modelData.kind
+                    objectName: root.namePrefix + "blockInlineGlyph:" + inlineMarker.marker.kind + ":" + inlineMarker.marker.reference
+                    kind: inlineMarker.marker.kind
                     ink: root.theme.accent
                     width: parent ? parent.width : 0
                     height: width
@@ -788,7 +856,7 @@ Item {
             }
             MouseArea {
                 id: inlineMouse
-                objectName: root.namePrefix + "blockInlineHit:" + inlineMarker.modelData.kind + ":" + inlineMarker.modelData.edge + ":" + inlineMarker.modelData.reference
+                objectName: root.namePrefix + "blockInlineHit:" + inlineMarker.marker.kind + ":" + inlineMarker.marker.edge + ":" + inlineMarker.marker.reference
                 // A taller, invisible target than the narrow cell (layout unchanged):
                 // it grows above and below only, so it never covers the next word.
                 anchors.fill: parent
@@ -799,23 +867,23 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: function(mouse) {
                     if (inlineMarker.footnote) {
-                        const note = inlineMarker.modelData, p = mapToItem(null, mouse.x, mouse.y)
+                        const note = inlineMarker.marker, p = mapToItem(null, mouse.x, mouse.y)
                         const at = inlineMarker.mapToItem(null, 0, 0), height = inlineMarker.height
                         // Beside, its verse is selected first (its chapter becoming the one read).
                         if (root.beside) root.controller.selectContextVerse(root.book, root.chapterNumber, note.verse, false)
                         if (mouse.button === Qt.RightButton) root.controller.openPassageMenu(note.verse, p.x, p.y)
                         else root.controller.peekFootnote(note.verse, note.seq, at.x, at.y, height)
                     } else if (mouse.button === Qt.RightButton) {
-                        const entry = inlineMarker.modelData
+                        const entry = inlineMarker.marker
                         const point = mapToItem(null, mouse.x, mouse.y)
                         root.controller.openMarkerMenu([entry.scope], entry.kind, function() { root.openAnnotation(entry) },
                                                        point.x, point.y)
-                    } else root.openAnnotation(inlineMarker.modelData)
+                    } else root.openAnnotation(inlineMarker.marker)
                 }
             }
             Accessible.role: Accessible.Button
             Accessible.name: hint
-            Accessible.onPressAction: root.openAnnotation(modelData)
+            Accessible.onPressAction: root.openAnnotation(marker)
             // Made while hovered or focused: a popup per marker is costly to make.
             Loader {
                 active: inlineMarker.visible && (inlineMouse.containsMouse || inlineMarker.activeFocus)
@@ -844,12 +912,14 @@ Item {
     // Owned timers coalesce layout work and are canceled with this reader. A
     // global callLater callback can outlive the QML context on window teardown.
     Timer { id: rebuildTimer; interval: 0; onTriggered: root.rebuild() }
+    Timer { id: widthTimer; interval: 0; onTriggered: root.applyWidth() }
     Timer { id: geometryTimer; interval: 0; onTriggered: root.refreshGeometry() }
     Timer { id: focusTimer; interval: 0; onTriggered: root.focusMoved() }
     Component.onCompleted: { dimFirst = focusFirst; dimLast = focusLast; rebuild() }
     Component.onDestruction: {
         destroying = true
         rebuildTimer.stop()
+        widthTimer.stop()
         geometryTimer.stop()
         focusTimer.stop()
         autoscroll.stop()

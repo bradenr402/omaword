@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextFragment>
@@ -108,6 +109,11 @@ bool BlockDocument::beginBuild(QQuickTextDocument *target, const QVariantList &v
         // TextEdit also requests geometry on font/width changes, including
         // reflows that keep the same size. Do not use layout::update here: it
         // fires for caret/selection repaints as well as actual layout changes.
+        // A chapter is long: its TextEdit (the document's parent) makes the
+        // nodes of the lines its viewport (the reader) shows, as a TextEdit
+        // given long text as a whole does, rather than every line's.
+        if (auto edit = qobject_cast<QQuickItem *>(target->parent()))
+            edit->setFlag(QQuickItem::ItemObservesViewport);
     }
     m_selectionStart = m_selectionEnd = 0;
     m_document->clear();
