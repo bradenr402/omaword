@@ -375,6 +375,10 @@ public:
     // their marks, as the chapter read has them, for showing them beside it;
     // the read-ahead is kept.
     Q_INVOKABLE QVariantList chapterRows(const QVariantList &chapters);
+    // The chapter read's rows as JSON: QML keeps its own copy of them
+    // (JSON.parse) for a fraction of what reading verses, a live reference
+    // whose rows convert one value at a time, would cost.
+    Q_INVOKABLE QString versesJson() const;
     // Selects a verse anywhere (with extend, from the anchor to it), opening
     // its chapter if it is another: a click on a chapter shown beside.
     Q_INVOKABLE void selectThrough(int book, int chapter, int verse, bool extend);

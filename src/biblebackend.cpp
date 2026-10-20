@@ -1361,6 +1361,11 @@ QVariantList BibleBackend::bookOutline(int book) const
     return outline;
 }
 
+QString BibleBackend::versesJson() const
+{
+    return QString::fromUtf8(QJsonDocument(QJsonArray::fromVariantList(m_verses)).toJson(QJsonDocument::Compact));
+}
+
 QVariantList BibleBackend::chapterRows(const QVariantList &chapters)
 {
     if (!m_ready) return {};

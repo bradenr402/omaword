@@ -1309,6 +1309,12 @@ private slots:
         QCOMPARE(row(4,1)["tagRanges"].toList().first().toMap()["tags"].toList().first().toMap()["name"].toString(),QString("Well"));
         QVERIFY(!row(4,3)["hasTags"].toBool());
         QCOMPARE(bible->book(),1); QCOMPARE(bible->chapter(),1); QCOMPARE(bible->selectionReference(),QString("Genesis 1:1"));
+        // The chapter read's rows as JSON (QML's copy of them) carry the same values, marks included.
+        QVERIFY(bible->navigate("John 3:16"));
+        QCOMPARE(QJsonDocument::fromJson(bible->versesJson().toUtf8()).array(), QJsonArray::fromVariantList(bible->verses()));
+        const auto copied = QJsonDocument::fromJson(bible->versesJson().toUtf8()).array().at(15).toObject();
+        QCOMPARE(copied["number"].toInt(),16); QVERIFY(copied["highlighted"].toBool());
+        QCOMPARE(copied["noteRanges"].toArray().first().toObject()["note"].toString(),QString("Loved"));
     }
     void undoAcrossWindowsAndVersions() {
         install(net); BibleBackend peer;

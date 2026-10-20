@@ -1015,7 +1015,7 @@ ApplicationWindow {
                 if (view && bible.wholeBook) shelveChapterView(view)
                 else if (view) { leftViewKey = view.viewKey; keepPrepared(view) }
                 // Made with a copy of the rows (see below), its window starting at the verse read.
-                const verses = JSON.parse(JSON.stringify(bible.verses))
+                const verses = JSON.parse(bible.versesJson())
                 const windowed = !continuousReader && (verses.length > windowRows || (switching && hasSelection) || long)
                 view = newChapterView(windowed ? { windowTarget: Math.max(0, verses.findIndex(function(verse) { return verse.number === bible.cursorVerse })) } : {}, verses)
                 made = true
@@ -1029,11 +1029,13 @@ ApplicationWindow {
             neighbourTimer.restart()
         }
         // A view of this chapter (shown beside or made until now) has an equal
-        // copy, but for marks (compared without copying a long chapter).
-        // Copies, as bible.verses is a live reference, which kept rows would
-        // read again later (another chapter's).
-        if (!made && (view.viewKey !== key || marksKey(bible.verses) !== marksKey(view.verses)))
-            view.verses = JSON.parse(JSON.stringify(bible.verses))
+        // copy, but for marks. Copies (versesJson), as bible.verses is a live
+        // reference, which kept rows would read again later (another
+        // chapter's), and which converts a value at a time.
+        if (!made) {
+            const rows = JSON.parse(bible.versesJson())
+            if (view.viewKey !== key || marksKey(rows) !== marksKey(view.verses)) view.verses = rows
+        }
         view.viewKey = key
         view.book = bible.book; view.chapterNumber = bible.chapter
     }
