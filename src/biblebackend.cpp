@@ -43,6 +43,8 @@ constexpr qint64 MaximumBackupSize = 32 * 1024 * 1024;
 QString connectionName() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 QString timestamp() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs); }
 int verseKey(int book, int chapter, int verse) { return (book * 1000 + chapter) * 1000 + verse; }
+// Book IDs run 1 to the last known book (BibleBooks).
+int lastBook() { return int(BibleBooks::canon().size()); }
 QString aliasKey(QString name) {
     name = name.toCaseFolded();
     name.remove(QRegularExpression("[\\s.]+"));
@@ -240,7 +242,7 @@ struct TagBible {
             || input.value("versionId").toString().isEmpty()) return false;
         for (const auto &key : scopeFields) {
             const auto value = QJsonValue::fromVariant(input.value(key));
-            if (!integer(value,1,key.endsWith("Book") || key == "book" ? 80 : 999)) return false;
+            if (!integer(value,1,key.endsWith("Book") || key == "book" ? lastBook() : 999)) return false;
         }
         QVariantMap out{{"versionId",input.value("versionId")}};
         for (const auto &key : scopeFields) out[key] = input.value(key).toInt();
@@ -401,7 +403,7 @@ QString markdownText(const QString &text)
 
 int BibleBackend::absoluteVerse(int b, int c, int v) const
 {
-    if (b < 1 || b > 80 || c < 1 || c > 999 || v < 1 || v > 999) return 0;
+    if (b < 1 || b > lastBook() || c < 1 || c > 999 || v < 1 || v > 999) return 0;
     return m_keyIndices.value(verseKey(b,c,v));
 }
 
@@ -1483,7 +1485,7 @@ bool BibleBackend::validLocation(const QVariantMap &location) const
     for (const auto &key : scopeFields) {
         const auto value = QJsonValue::fromVariant(location.value(key));
         const bool book = key == "book" || key == "endBook";
-        if (!integer(value,(key == "start" || key == "end") ? 0 : 1,book ? 80 : 999)) return false;
+        if (!integer(value,(key == "start" || key == "end") ? 0 : 1,book ? lastBook() : 999)) return false;
     }
     const double position = location.value("position",0).toDouble();
     return std::isfinite(position) && position >= 0 && position <= 1;
@@ -1796,7 +1798,7 @@ bool BibleBackend::initializeStore()
     QSqlQuery q(m_store);
     if (!q.exec("PRAGMA user_version") || !q.next()) return setError("Cannot read notes database version.");
     const int version = q.value(0).toInt();
-    if (version > 10) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
+    if (version > 11) { m_store.close(); return setError("Your notes database was created by a newer " + Brand::name() + " version."); }
     if (!q.exec("PRAGMA journal_mode=WAL") || !q.exec("PRAGMA synchronous=FULL"))
         return setError("Cannot configure reliable note saving: " + q.lastError().text());
     if (!m_store.transaction()) return setError(m_store.lastError().text());
@@ -1874,8 +1876,41 @@ bool BibleBackend::initializeStore()
     }
     if (version < 9 && !migrateBookmarks()) { m_store.rollback(); return false; }
     if (version < 10 && !migrateDeskPage()) { m_store.rollback(); return false; }
+    if (version < 11 && !migrateBookRange()) { m_store.rollback(); return false; }
     if (!m_store.commit()) { m_store.rollback(); return setError("Cannot save notes database schema: " + m_store.lastError().text()); }
     return loadPreferences();
+}
+
+// Schema 11: book IDs past 80 (BibleBooks). Their bound becomes 999, as
+// chapters' and verses' are, so a book added later needs no migration; the
+// app checks IDs against the books it knows. History keeps its AUTOINCREMENT
+// sequence, ids staying unique for the life of the store. Runs inside
+// initializeStore's transaction, after schema 10.
+bool BibleBackend::migrateBookRange()
+{
+    QSqlQuery q(m_store);
+    for (const QString &sql : {
+        QStringLiteral("ALTER TABLE annotations RENAME TO annotations_v10"),
+        QStringLiteral("CREATE TABLE annotations(version_id TEXT NOT NULL,book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 999),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 999),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),highlight INTEGER NOT NULL CHECK(highlight IN(0,1)),note TEXT NOT NULL,created TEXT NOT NULL DEFAULT '',updated TEXT NOT NULL DEFAULT '',PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(highlight OR length(note)>0)) WITHOUT ROWID"),
+        QStringLiteral("INSERT INTO annotations(version_id,book,chapter,start,endBook,endChapter,end,highlight,note,created,updated) "
+                       "SELECT version_id,book,chapter,start,endBook,endChapter,end,highlight,note,created,updated FROM annotations_v10"),
+        QStringLiteral("DROP TABLE annotations_v10"),
+        QStringLiteral("ALTER TABLE history RENAME TO history_v10"),
+        QStringLiteral("CREATE TABLE history(id INTEGER PRIMARY KEY AUTOINCREMENT,seq INTEGER NOT NULL UNIQUE CHECK(seq>=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 999),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 0 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 999),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 0 AND 999),position REAL NOT NULL CHECK(position BETWEEN 0 AND 1),visited TEXT NOT NULL,UNIQUE(version_id,book,chapter,start,endBook,endChapter,end))"),
+        QStringLiteral("INSERT INTO history(id,seq,version_id,book,chapter,start,endBook,endChapter,end,position,visited) "
+                       "SELECT id,seq,version_id,book,chapter,start,endBook,endChapter,end,position,visited FROM history_v10"),
+        // The renamed table took the sequence with it; it comes back.
+        QStringLiteral("DELETE FROM sqlite_sequence WHERE name='history'"),
+        QStringLiteral("UPDATE sqlite_sequence SET name='history' WHERE name='history_v10'"),
+        QStringLiteral("DROP TABLE history_v10"),
+        QStringLiteral("ALTER TABLE ribbon RENAME TO ribbon_v10"),
+        QStringLiteral("CREATE TABLE ribbon(id INTEGER PRIMARY KEY CHECK(id=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 999),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 0 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 999),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 0 AND 999),position REAL NOT NULL CHECK(position BETWEEN 0 AND 1),placed TEXT NOT NULL)"),
+        QStringLiteral("INSERT INTO ribbon(id,version_id,book,chapter,start,endBook,endChapter,end,position,placed) "
+                       "SELECT id,version_id,book,chapter,start,endBook,endChapter,end,position,placed FROM ribbon_v10"),
+        QStringLiteral("DROP TABLE ribbon_v10"),
+        QStringLiteral("PRAGMA user_version=11")})
+        if (!q.exec(sql)) return setError("Cannot make room for more books in your notes: " + q.lastError().text());
+    return true;
 }
 
 // Schema 10: the Desk becomes one Markdown page. Its passages become
@@ -3080,7 +3115,7 @@ bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *f
     if (endChapter < 0) endChapter = c;
     const int a = absoluteVerse(b,c,start), z = absoluteVerse(b,endChapter,end);
     if (!validRange(b,c,start,start) || !validRange(b,endChapter,end,end) || (start && (!a || !z || a > z))) {
-        if (b >= 1 && b <= 80 && start == end && start && !a)
+        if (b >= 1 && b <= lastBook() && start == end && start && !a)
             return fail(reference(b,c,start,end) + " is absent in " + edition() + '.');
         return fail("That chapter or verse range is not present in " + edition() + '.');
     }
@@ -4413,10 +4448,10 @@ bool BibleBackend::restoreEveryVersion(const QJsonObject &root)
             const auto reading = object.value("reading").toObject();
             Reading place;
             const auto number = [&](const char *key, int low, int high) { return integer(reading.value(key),low,high) ? reading.value(key).toInt() : -1; };
-            place.book = number("book",1,80); place.chapter = number("chapter",1,999);
+            place.book = number("book",1,lastBook()); place.chapter = number("chapter",1,999);
             place.start = number("start",0,999); place.end = number("end",0,999);
-            place.anchorBook = number("anchorBook",0,80); place.anchorChapter = number("anchorChapter",0,999);
-            place.cursorBook = number("cursorBook",0,80); place.cursorChapter = number("cursorChapter",0,999);
+            place.anchorBook = number("anchorBook",0,lastBook()); place.anchorChapter = number("anchorChapter",0,999);
+            place.cursorBook = number("cursorBook",0,lastBook()); place.cursorChapter = number("cursorChapter",0,999);
             place.position = reading.value("position").toDouble(-1);
             const auto verse = [&](int book, int chapter, int number) {
                 QVariantMap scope{{"versionId",version.id},{"book",book},{"chapter",chapter},{"start",number},
@@ -4577,7 +4612,7 @@ bool BibleBackend::importBackup(QUrl file)
     if (root.value("edition") != edition()) return setError("The backup edition does not match the active Bible version.");
     const auto reading = root.value("reading").toObject();
     auto verse = [this](const QJsonObject &object, const QString &b, const QString &c, const QString &v) {
-        if (!integer(object.value(b),1,80) || !integer(object.value(c),1,999) || !integer(object.value(v),1,999)) return 0;
+        if (!integer(object.value(b),1,lastBook()) || !integer(object.value(c),1,999) || !integer(object.value(v),1,999)) return 0;
         const int book = object.value(b).toInt(), chapter = object.value(c).toInt(), number = object.value(v).toInt();
         return verseExists(book,chapter,number) ? absoluteVerse(book,chapter,number) : 0;
     };
@@ -4589,9 +4624,9 @@ bool BibleBackend::importBackup(QUrl file)
     bool endpointsValid = none || (anchor && cursor && endpoint(cursor).book == b && endpoint(cursor).chapter == c);
     if (none) {
         for (const QString &key : {QString("anchorBook"),QString("anchorChapter"),QString("cursorBook"),QString("cursorChapter")})
-            endpointsValid &= integer(reading.value(key),0,key.endsWith("Book") ? 80 : 999);
+            endpointsValid &= integer(reading.value(key),0,key.endsWith("Book") ? lastBook() : 999);
     }
-    if (!exactKeys(reading,readingKeys) || !integer(reading.value("book"),1,80) || !integer(reading.value("chapter"),1,999)
+    if (!exactKeys(reading,readingKeys) || !integer(reading.value("book"),1,lastBook()) || !integer(reading.value("chapter"),1,999)
         || !validRange(b,c,0,0) || !endpointsValid
         || !reading.value("position").isDouble() || !std::isfinite(reading.value("position").toDouble())
         || reading.value("position").toDouble() < 0 || reading.value("position").toDouble() > 1)

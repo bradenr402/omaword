@@ -97,6 +97,26 @@ private slots:
         }
         QSqlDatabase::removeDatabase("ao-trailing");
     }
+    // Every known book imports by its exact code, past 80 too: PSS is the
+    // Psalms of Solomon, though "pss" is an alias of Psalms.
+    void everyKnownBookImports() {
+        QJsonArray books;
+        for (int i = 0; i < BibleBooks::canon().size(); ++i) {
+            const auto &book = BibleBooks::canon()[i];
+            books.append(AoFixture::book(book.code, i + 1, {AoFixture::chapter(1, {AoFixture::verse(1, {"Original text."})})}, book.name, i >= 66));
+        }
+        const auto source = directory.filePath("canon.json"), target = directory.filePath("canon.sqlite");
+        QVERIFY(AoFixture::write(source, AoFixture::complete("eng_web", books)));
+        const auto result = AoImporter::importFile(source, target); QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.verseCount, int(BibleBooks::canon().size()));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "ao-canon"); db.setDatabaseName(target); QVERIFY(db.open()); QSqlQuery q(db);
+            QVERIFY(q.exec("SELECT count(*),max(id) FROM books")); QVERIFY(q.next());
+            QCOMPARE(q.value(0).toInt(), 86); QCOMPARE(q.value(1).toInt(), 86);
+            QVERIFY(q.exec("SELECT id FROM books WHERE code='PSS'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 85);
+        }
+        QSqlDatabase::removeDatabase("ao-canon");
+    }
     void rejectsBrokenContent_data() {
         QTest::addColumn<QString>("scenario");
         for (const auto &name : {"unknown-book", "duplicate-book", "duplicate-order", "duplicate-chapter", "unknown-type", "missing-note", "duplicate-note", "wrong-count", "empty-chapter", "indent-bound", "invalid-number", "deep-json", "oversized-text"})

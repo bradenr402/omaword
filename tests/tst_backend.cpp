@@ -58,7 +58,7 @@ class BackendTest : public QObject
         book(5,"MAT",{1}); book(6,"MRK",{7}); book(7,"JHN",{3,4});
         book(8,"JUD",{1}); book(9,"REV",{22});
         if (extras) {
-            books.append(AoFixture::book("2ES", 10, {AoFixture::chapter(999, {AoFixture::verse(999, {"Original upper-bound verse."})})}));
+            books.append(AoFixture::book("DAG", 10, {AoFixture::chapter(999, {AoFixture::verse(999, {"Original upper-bound verse."})})}));
         }
         return AoFixture::write(path, AoFixture::complete(id, books, "Original Backend Bible"));
     }
@@ -69,9 +69,21 @@ class BackendTest : public QObject
         }
         return {};
     }
+    // A store as schema 10 left it: book IDs stopped at 80.
+    static bool schemaTen(QSqlQuery &q) {
+        for (const QString table : {
+                "annotations(version_id TEXT NOT NULL,book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),highlight INTEGER NOT NULL CHECK(highlight IN(0,1)),note TEXT NOT NULL,created TEXT NOT NULL DEFAULT '',updated TEXT NOT NULL DEFAULT '',PRIMARY KEY(version_id,book,chapter,start,endBook,endChapter,end),CHECK(highlight OR length(note)>0)) WITHOUT ROWID",
+                "history(id INTEGER PRIMARY KEY AUTOINCREMENT,seq INTEGER NOT NULL UNIQUE CHECK(seq>=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 0 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 0 AND 999),position REAL NOT NULL CHECK(position BETWEEN 0 AND 1),visited TEXT NOT NULL,UNIQUE(version_id,book,chapter,start,endBook,endChapter,end))",
+                "ribbon(id INTEGER PRIMARY KEY CHECK(id=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 0 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 0 AND 999),position REAL NOT NULL CHECK(position BETWEEN 0 AND 1),placed TEXT NOT NULL)"}) {
+            const QString name = table.section('(', 0, 0);
+            if (!q.exec("ALTER TABLE " + name + " RENAME TO " + name + "_v11") || !q.exec("CREATE TABLE " + table)
+                || !q.exec("INSERT INTO " + name + " SELECT * FROM " + name + "_v11") || !q.exec("DROP TABLE " + name + "_v11")) return false;
+        }
+        return q.exec("PRAGMA user_version=10");
+    }
     // A store as schema 9 left it: the Desk was a list of passages.
     static bool schemaNine(QSqlQuery &q) {
-        return q.exec("DROP TABLE desk_page")
+        return schemaTen(q) && q.exec("DROP TABLE desk_page")
             && q.exec("CREATE TABLE desk(id INTEGER PRIMARY KEY AUTOINCREMENT,position INTEGER NOT NULL UNIQUE CHECK(position>=1),version_id TEXT NOT NULL CHECK(length(version_id) BETWEEN 1 AND 128),book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80),chapter INTEGER NOT NULL CHECK(chapter BETWEEN 1 AND 999),start INTEGER NOT NULL CHECK(start BETWEEN 1 AND 999),endBook INTEGER NOT NULL CHECK(endBook BETWEEN 1 AND 80),endChapter INTEGER NOT NULL CHECK(endChapter BETWEEN 1 AND 999),end INTEGER NOT NULL CHECK(end BETWEEN 1 AND 999),created TEXT NOT NULL,UNIQUE(version_id,book,chapter,start,endBook,endChapter,end))")
             && q.exec("PRAGMA user_version=9");
     }
@@ -244,7 +256,7 @@ private slots:
         QVERIFY(bible->focusMode()); QCOMPARE(bible->readingMode(),QString("block"));
         QCOMPARE(bible->fontSize(),23); QCOMPARE(bible->lineHeight(),2.3);
         QSqlQuery q(store());
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),11); q.finish();
         QVERIFY(q.exec("CREATE TRIGGER reject_preferences BEFORE UPDATE ON preferences BEGIN SELECT RAISE(ABORT,'preference failure'); END"));
         bible->setFontSize(19); QCOMPARE(bible->fontSize(),23); QVERIFY(bible->error().contains("preference failure"));
     }
@@ -267,7 +279,7 @@ private slots:
         QVERIFY2(bible->ready(),qPrintable(bible->error())); QCOMPARE(bible->selectionReference(),range);
         QCOMPARE(bible->noteText(),QString("Across source ordinal boundary"));
         QVERIFY(bible->navigate("MAT 1")); bible->previousChapter(); QCOMPARE(bible->book(),69); QCOMPARE(bible->chapter(),16);
-        QVERIFY(bible->navigate("2ES 999:999")); bible->setNoteText("Upper bounds");
+        QVERIFY(bible->navigate("DAG 999:999")); bible->setNoteText("Upper bounds");
         QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
         QVERIFY(bible->copySelection().contains("⁹⁹⁹ Original upper-bound verse."));
         const auto backup = QUrl::fromLocalFile(session->filePath("bounds.json"));
@@ -705,7 +717,7 @@ private slots:
         QVERIFY(q.exec("SELECT note,version_id FROM annotations")); QVERIFY(q.next());
         QCOMPARE(q.value(0).toString(),QString("Archived note")); QCOMPARE(q.value(1).toString(),QString("net-2.1")); q.finish();
         QVERIFY(q.exec("SELECT position FROM reading WHERE version_id='net-2.1'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toDouble(),0.42); q.finish();
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),11); q.finish();
         // The archived bookmark became the Bookmarked tag, in its own version.
         QVERIFY(q.exec("SELECT t.name,a.version_id FROM tag_assignments a JOIN tags t ON t.id=a.tag_id")); QVERIFY(q.next());
         QCOMPARE(q.value(0).toString(),QString("Bookmarked")); QCOMPARE(q.value(1).toString(),QString("net-2.1"));
@@ -728,7 +740,7 @@ private slots:
         QVERIFY(q.exec("DROP VIEW desk"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
         QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-desk note"));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),11); q.finish();
         QVERIFY(bible->deskPage().isEmpty()); QCOMPARE(bible->appendToDesk(),QString("John 3:16"));
         QCOMPARE(bible->deskPage(),deskQuote("John 3:16") + "\n");
     }
@@ -752,7 +764,7 @@ private slots:
         QVERIFY(q.exec("DROP VIEW recent_queries"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
         QVERIFY(bible->ready()); QCOMPARE(bible->noteText(),QString("Pre-history note")); QCOMPARE(bible->deskPage(),quotation + "\n");
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),11); q.finish();
         QVERIFY(bible->historyEnabled()); QVERIFY(bible->history().isEmpty()); QVERIFY(bible->recentQueries().isEmpty());
         QVERIFY(bible->recordHistory()); QCOMPARE(bible->history().size(),1);
     }
@@ -769,7 +781,7 @@ private slots:
         QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),7); q.finish();
         QVERIFY(q.exec("DROP VIEW ribbon"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),11); q.finish();
         QCOMPARE(bible->history().size(),1); QVERIFY(bible->ribbon().isEmpty()); QVERIFY(bible->ribbonLocation().isEmpty());
         QVERIFY(bible->placeRibbon()); QCOMPARE(bible->ribbon()["reference"].toString(),QString("John 3:16"));
     }
@@ -796,7 +808,7 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*) FROM tag_assignments")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),1); q.finish();
         QVERIFY(q.exec("DROP VIEW annotations_v8"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),11); q.finish();
         QCOMPARE(bible->tags().size(),1); QCOMPARE(bible->tags().first().toMap()["name"].toString(),QString("bookmarked"));
         auto bookmarkedAt = [&](QVariantMap scope) {
             const auto tags = bible->tagsForScope(scope);
@@ -841,10 +853,49 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*) FROM desk")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),3); q.finish();
         QVERIFY(q.exec("DROP VIEW desk_page"));
         bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
-        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),11); q.finish();
         QVERIFY(q.exec("SELECT COUNT(*) FROM sqlite_master WHERE name='desk'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
         QCOMPARE(bible->deskPage(),john + "\n\n" + genesis + QStringLiteral("\n\n> \u2014 Psalms 23:1–2 (eng-gone)\n"));
         QVERIFY(bible->navigate("John 3:17")); QCOMPARE(bible->noteText(),QString("Kept note"));
+    }
+    // Schema 11 takes book IDs past 80 (DAG 999:999 in dynamicBooksAndSourceOrder
+    // proves one), keeping every mark, the ribbon, and History's ids.
+    void schemaTenWidensTheBookRange() {
+        install(net); QVERIFY(bible->navigate("John 3:16")); bible->setNoteText("Kept note");
+        QVERIFY(bible->recordHistory()); QVERIFY(bible->placeRibbon());
+        const QString path = bible->dataDirectory()+"/personal.sqlite";
+        bible.reset();
+        const auto cleanup = qScopeGuard([] { QSqlDatabase::removeDatabase("book-range-migration"); });
+        auto db = QSqlDatabase::addDatabase("QSQLITE","book-range-migration"); db.setDatabaseName(path); QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(schemaTen(q));
+        // History has used ids beyond its rows; none may be used again.
+        QVERIFY(q.exec("UPDATE sqlite_sequence SET seq=50 WHERE name='history'")); QCOMPARE(q.numRowsAffected(),1);
+        auto bounds = [&] {
+            QStringList found;
+            for (const QString table : {"annotations","history","ribbon"}) {
+                q.prepare("SELECT sql FROM sqlite_master WHERE name=?"); q.addBindValue(table);
+                if (!q.exec() || !q.next()) return QStringList{"missing " + table};
+                found << (q.value(0).toString().contains("book INTEGER NOT NULL CHECK(book BETWEEN 1 AND 80)") ? "80" : q.value(0).toString().contains("CHECK(book BETWEEN 1 AND 999)") && q.value(0).toString().contains("CHECK(endBook BETWEEN 1 AND 999)") ? "999" : "other");
+            }
+            q.finish();
+            return found;
+        };
+        QCOMPARE(bounds(),QStringList({"80","80","80"}));
+        // A failing step leaves schema 10 exactly as it was.
+        QVERIFY(q.exec("CREATE VIEW ribbon_v10 AS SELECT 1 AS id"));
+        bible = std::make_unique<BibleBackend>(); QVERIFY(!bible->error().isEmpty()); bible.reset();
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),10); q.finish();
+        QCOMPARE(bounds(),QStringList({"80","80","80"}));
+        QVERIFY(q.exec("DROP VIEW ribbon_v10"));
+        bible = std::make_unique<BibleBackend>(); QVERIFY2(bible->error().isEmpty(),qPrintable(bible->error()));
+        QVERIFY(q.exec("PRAGMA user_version")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),11); q.finish();
+        QCOMPARE(bounds(),QStringList({"999","999","999"}));
+        QVERIFY(q.exec("SELECT count(*) FROM sqlite_master WHERE name LIKE '%_v10'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
+        QVERIFY(bible->navigate("John 3:16")); QCOMPARE(bible->noteText(),QString("Kept note"));
+        QCOMPARE(bible->history().size(),1); QCOMPARE(bible->ribbon()["reference"].toString(),QString("John 3:16"));
+        QVERIFY(bible->navigate("John 3:17")); QVERIFY(bible->recordHistory());
+        QCOMPARE(bible->history().first().toMap()["id"].toInt(),51);
     }
     // The command line's passages and --translation: nothing moves the
     // reading place or changes the version you read.
@@ -958,7 +1009,7 @@ private slots:
         QCOMPARE(bible->readingPosition(),0.5);
         QVERIFY(bible->openLocation(chapter)); QCOMPARE(bible->selectedStart(),0); QCOMPARE(bible->passage(),QString("John 3"));
         // Invalid locations are rejected.
-        auto broken = genesis; broken["book"] = 81; QVERIFY(!bible->recordHistory(broken));
+        auto broken = genesis; broken["book"] = int(BibleBooks::canon().size()) + 1; QVERIFY(!bible->recordHistory(broken));
         broken = genesis; broken["position"] = 2; QVERIFY(!bible->recordHistory(broken));
         QCOMPARE(bible->history().size(),3); bible->clearError();
         // Removing one entry.

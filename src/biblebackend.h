@@ -629,6 +629,7 @@ private:
     void clearUndo();
     bool applyUndo(bool undo);
     bool migrateDeskPage();
+    bool migrateBookRange();
     // A scope's Desk quotation (see deskPage); a version that is not
     // installed, or no longer has the passage, gives just its reference.
     QString deskQuotation(const QVariantMap &scope) const;

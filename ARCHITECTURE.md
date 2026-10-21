@@ -40,14 +40,16 @@ user's real data for development or tests.
 
 | Format | Current | Compatibility |
 | --- | --- | --- |
-| `personal.sqlite` | `PRAGMA user_version = 10` | Transactional migrations; newer schemas refuse to open |
+| `personal.sqlite` | `PRAGMA user_version = 11` | Transactional migrations; newer schemas refuse to open |
 | Text generations (`bible-<UUID>.sqlite`) | Schema 7 (`ao-standard`) | Superseded USFM generations reject; replace through an explicit AO installation |
 | JSON backup | `format: "omaword-backup"`, version 7 | Imports versions 3–7; maximum 32 MiB |
 
 - Personal DB uses WAL and `synchronous=FULL`. Schema 9 migrated bookmarks to
   the global Bookmarked tag and added timestamps; schema 10 converted ordered
-  Desk passages into one Markdown `desk_page` row. Tag tables are created
-  independently before these migrations.
+  Desk passages into one Markdown `desk_page` row; schema 11 bounds book IDs at
+  999, as chapters and verses, so new books need no migration (the app checks
+  them against `BibleBooks`). Tag tables are created independently before these
+  migrations.
 - Main tables: `annotations`, `tags`, `tag_assignments`, `reading`, `desk_page`,
   `history`, `recent_queries`, `ribbon`, `preferences`, `installed`, `library`.
   Reading positions are per version; Desk, tags, preferences, History, and
@@ -75,9 +77,11 @@ user's real data for development or tests.
 
 - Identity is AO's case-sensitive provider ID, a bounded safe path component.
   The input filename has no meaning. Same-ID replacement reconnects marks.
-- Book IDs are stable (1–66 GEN–REV; 67–80 deuterocanon), but navigation follows
-  source `order`. Chapters/verses are increasing integers 1–999; gaps remain gaps.
-  Unknown book codes and content types explicitly fail.
+- Book IDs are stable (1–66 GEN–REV; 67–86 deuterocanon and apocrypha), but
+  navigation follows source `order`. Codes match exactly (`BibleBooks::codeId`:
+  PSS is the Psalms of Solomon, though "pss" is a Psalms alias). Chapters/verses
+  are increasing integers 1–999; gaps remain gaps. Unknown book codes and
+  content types explicitly fail.
 - A verse number that does not increase (Brenton's split verses, Onkelos's
   verse 0, a retelling's reordered verses) continues the verse before it, in
   reading order: after a space, or on a new line across a break or poetry. It
@@ -94,7 +98,7 @@ user's real data for development or tests.
   Empty verses retain source keys but have no reader rows. A chapter without a
   retained verse (none at all, or only a note, as Brenton's Proverbs 30) retains
   source metadata but stays out of navigation; empty books reject.
-- Limits: 64 MiB input/download, nesting 32, 80 known books, 65,536 UTF-16 units
+- Limits: 64 MiB input/download, nesting 32, 86 known books, 65,536 UTF-16 units
   per text field. Counts include omitted verses and continuing parts and exclude
   apocryphal books at translation level. Source revision metadata is not a raw
   JSON-byte checksum.

@@ -94,7 +94,7 @@ def varint(value):
 
 def main():
     ids = book_ids()
-    assert len(ids) == 80 and ids["GEN"] == 1 and ids["REV"] == 66, "unexpected src/biblebooks.cpp"
+    assert len(ids) == 86 and ids["GEN"] == 1 and ids["REV"] == 66, "unexpected src/biblebooks.cpp"
     mapping = {osis: ids[code] for osis, code in OSIS.items()}
 
     def verse(text):

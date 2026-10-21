@@ -44,9 +44,20 @@ const QVector<Book> &canon()
         {"SUS","Susanna","sus"}, {"BEL","Bel and the Dragon","bel"},
         {"1MA","1 Maccabees","1mac 1macc 1ma"}, {"2MA","2 Maccabees","2mac 2macc 2ma"},
         {"1ES","1 Esdras","1esd 1es"}, {"MAN","Prayer of Manasseh","man manasseh"},
-        {"2ES","2 Esdras","2esd 2es"}
+        {"2ES","2 Esdras","2esd 2es"},
+        {"LJE","Letter of Jeremiah","epistleofjeremiah epistleofjeremy letjer epjer lje"},
+        {"3MA","3 Maccabees","3mac 3macc 3ma"}, {"4MA","4 Maccabees","4mac 4macc 4ma"},
+        {"PS2","Psalm 151","ps151"}, {"PSS","Psalms of Solomon","pssol"},
+        {"DAG","Daniel (Greek)","greekdaniel danielgreek"}
     };
     return books;
+}
+
+int codeId(const QString &code)
+{
+    for (int i = 0; i < canon().size(); ++i)
+        if (code == QLatin1String(canon()[i].code)) return i + 1;
+    return 0;
 }
 
 int bookId(QString name)

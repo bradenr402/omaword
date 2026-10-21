@@ -22,7 +22,7 @@ inline QJsonObject book(const QString &code, int order, const QJsonArray &chapte
 {
     int count = 0;
     for (const auto &chapter : chapters) count += chapter.toObject().value("numberOfVerses").toInt();
-    const int id = BibleBooks::bookId(code);
+    const int id = BibleBooks::codeId(code);
     const QString display = !name.isEmpty() ? name : id ? QString::fromUtf8(BibleBooks::canon()[id - 1].name) : code;
     return {{"id", code}, {"name", display}, {"commonName", display},
         {"order", order}, {"numberOfChapters", chapters.size()}, {"totalNumberOfVerses", count},

@@ -90,7 +90,7 @@ Input load(const QString &path)
         else if (value.isObject()) notices.append(QString::fromUtf8(QJsonDocument(value.toObject()).toJson(QJsonDocument::Compact)));
     }
     input.edition.copyright = notices.isEmpty() ? QStringLiteral("") : notices.join(QStringLiteral("\n\n"));
-    input.books = array(document.object().value(QStringLiteral("books")), 80);
+    input.books = array(document.object().value(QStringLiteral("books")), int(BibleBooks::canon().size()));
     if (input.books.isEmpty()) fail(QStringLiteral("AO download contains no books."));
     input.fingerprint = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
     return input;
@@ -316,8 +316,8 @@ Result importFile(const QString &path, const QString &target, const std::shared_
             for (const auto &value : books) {
                 const auto book = QJsonObject::fromVariantMap(value.toMap());
                 const auto code = string(book.value(QStringLiteral("id")));
-                const int id = BibleBooks::bookId(code), order = integer(book.value(QStringLiteral("order")), 1, 1000);
-                if (!id || QString::fromLatin1(BibleBooks::canon()[id - 1].code) != code) fail(QStringLiteral("Unsupported AO book code: ") + code);
+                const int id = BibleBooks::codeId(code), order = integer(book.value(QStringLiteral("order")), 1, 1000);
+                if (!id) fail(QStringLiteral("Unsupported AO book code: ") + code);
                 if (bookIds.contains(id) || orders.contains(order)) fail(QStringLiteral("Duplicate AO book or order."));
                 bookIds.insert(id); orders.insert(order);
                 const auto name = string(book.value(QStringLiteral("name")));
@@ -431,7 +431,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                 if (progress) progress->store(0.9 * ordinal / books.size());
             }
             const auto &t = input.translation;
-            if (integer(t.value(QStringLiteral("numberOfBooks")), 1, 80) != canonicalBooks
+            if (integer(t.value(QStringLiteral("numberOfBooks")), 1, int(BibleBooks::canon().size())) != canonicalBooks
                 || integer(t.value(QStringLiteral("totalNumberOfChapters")), 1, 80000) != canonicalChapters
                 || integer(t.value(QStringLiteral("totalNumberOfVerses")), 1, 1000000) != canonicalVerses)
                 fail(QStringLiteral("AO translation coverage counts do not match its content."));
