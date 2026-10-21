@@ -286,6 +286,31 @@ private slots:
         QVERIFY(bible->exportBackup(backup)); bible->setNoteText("Changed");
         QVERIFY2(bible->importBackup(backup),qPrintable(bible->error())); QCOMPARE(bible->noteText(),QString("Upper bounds"));
     }
+    // Psalm 151 is a book of its own in some versions (the WEB) and Psalms'
+    // last chapter in others (LXX2012): each reads it as the one it has.
+    void psalmOneFiftyOne() {
+        auto verses = [](int count) {
+            QJsonArray content;
+            for (int v = 1; v <= count; ++v) content.append(AoFixture::verse(v, {QString("Original psalm verse %1.").arg(v)}));
+            return content;
+        };
+        const auto separate = session->filePath("separate.json"), numbered = session->filePath("numbered.json");
+        QVERIFY(AoFixture::write(separate, AoFixture::complete("engweb", {
+            AoFixture::book("PSA", 1, {AoFixture::chapter(23, verses(6)), AoFixture::chapter(150, verses(6))}),
+            AoFixture::book("PS2", 2, {AoFixture::chapter(1, verses(7))}, "Psalm 151", true)})));
+        QVERIFY(AoFixture::write(numbered, AoFixture::complete("englxx", {
+            AoFixture::book("PSA", 1, {AoFixture::chapter(23, verses(6)), AoFixture::chapter(151, verses(7))})})));
+        auto reads = [&](const QList<QPair<QString,QString>> &cases) {
+            for (const auto &[typed, read] : cases) QCOMPARE(bible->resolveReference(typed)["reference"].toString(), read);
+        };
+        install(separate);
+        reads({{"Psalm 151","Psalm 151 1"},{"Psalm 151:3","Psalm 151 1:3"},{"Psalm 151:3-5","Psalm 151 1:3–5"},{"Ps 151 3","Psalm 151 1:3"},
+               {"Psalms 151","Psalm 151 1"},{"Psalm 23","Psalms 23"},{"Psalm 150:2","Psalms 150:2"}});
+        QCOMPARE(bible->referenceCandidates("psalm 151:3").value(0).toMap()["reference"].toString(), QString("Psalm 151 1:3"));
+        install(numbered);
+        reads({{"Psalm 151","Psalms 151"},{"Psalm 151:3","Psalms 151:3"},{"Ps 151","Psalms 151"}});
+        QCOMPARE(bible->referenceCandidates("psalm 151").value(0).toMap()["reference"].toString(), QString("Psalms 151"));
+    }
     void aliasesAndPurePreview() {
         install(ojb);
         QVERIFY(bible->navigate("GEN 1:2")); QCOMPARE(bible->book(),1);

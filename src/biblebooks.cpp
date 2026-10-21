@@ -47,7 +47,7 @@ const QVector<Book> &canon()
         {"2ES","2 Esdras","2esd 2es"},
         {"LJE","Letter of Jeremiah","epistleofjeremiah epistleofjeremy letjer epjer lje"},
         {"3MA","3 Maccabees","3mac 3macc 3ma"}, {"4MA","4 Maccabees","4mac 4macc 4ma"},
-        {"PS2","Psalm 151","ps151"}, {"PSS","Psalms of Solomon","pssol"},
+        {"PS2","Psalm 151","ps151 psalms151"}, {"PSS","Psalms of Solomon","pssol"},
         {"DAG","Daniel (Greek)","greekdaniel danielgreek"}
     };
     return books;

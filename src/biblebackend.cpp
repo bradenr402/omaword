@@ -3077,14 +3077,33 @@ bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *f
     }
     // Try every split: this handles compact names (1Jn3:16), numbered books,
     // punctuation in aliases, and full multi-word names without fuzzy matches.
+    // A book this version has wins over one it lacks ("Psalm 151" is Psalms 151
+    // in a Septuagint without the book Psalm 151); one it lacks is still read,
+    // to say so.
     static const QRegularExpression suffix("^(\\d+)(?:\\s*:\\s*(\\d+)(?:\\s*-\\s*(?:(\\d+)\\s*:\\s*)?(\\d+))?)?$");
-    int b = resolveBook(input), c = chaptersForBook(b).value(0,1).toInt(), endChapter = -1, start = 0, end = 0;
-    bool matched = b != 0;
-    if (!matched) {
+    // A one-chapter book may take its verses after a colon (Psalm 151:3).
+    static const QRegularExpression colonVerses("^:\\s*(\\d+)(?:\\s*-\\s*(\\d+))?$");
+    static const QRegularExpression single("^(.+?)\\s+(\\d+)\\s*-\\s*(\\d+)$");
+    int b = 0, c = 1, endChapter = -1, start = 0, end = 0;
+    bool matched = false;
+    for (const bool lacking : {false, true}) {
+        const auto usable = [&](int book) { return book && (lacking || !chaptersForBook(book).isEmpty()); };
+        b = resolveBook(input);
+        if (usable(b)) { c = chaptersForBook(b).value(0,1).toInt(); matched = true; break; }
         for (qsizetype split = input.size() - 1; split >= 0; --split) {
             const int candidate = split == 0 ? m_book : resolveBook(input.left(split));
-            if (!candidate) continue;
-            const auto match = suffix.match(input.mid(split).trimmed());
+            if (!usable(candidate)) continue;
+            const QString rest = input.mid(split).trimmed();
+            const bool oneChapter = chaptersForBook(candidate) == QVariantList{1};
+            const auto colon = colonVerses.match(rest);
+            if (oneChapter && colon.hasMatch()) {
+                b = candidate; c = 1; start = colon.captured(1).toInt();
+                end = colon.captured(2).isEmpty() ? start : colon.captured(2).toInt();
+                if (start < 1 || end < 1) return fail("Verse numbers must be greater than zero.");
+                matched = true;
+                break;
+            }
+            const auto match = suffix.match(rest);
             if (!match.hasMatch()) continue;
             b = candidate; c = match.captured(1).toInt();
             if (!match.captured(2).isEmpty()) {
@@ -3093,23 +3112,23 @@ bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *f
                 if (start < 1 || end < 1) return fail("Verse numbers must be greater than zero.");
                 if (!match.captured(3).isEmpty()) endChapter = match.captured(3).toInt();
                 else endChapter = c;
-            } else if (chaptersForBook(b) == QVariantList{1} && c != 1) {
+            } else if (oneChapter && c != 1) {
                 if (c < 1) return fail("Verse numbers must be greater than zero.");
                 start = end = c; c = 1;
             }
             matched = true;
             break;
         }
-    }
-    // Single-chapter book shorthand, for example Jude 5–7.
-    if (!matched) {
-        static const QRegularExpression single("^(.+?)\\s+(\\d+)\\s*-\\s*(\\d+)$");
-        const auto match = single.match(input);
-        b = resolveBook(match.captured(1));
-        if (match.hasMatch() && b && chaptersForBook(b) == QVariantList{1}) {
-            c = 1; start = match.captured(2).toInt(); end = match.captured(3).toInt(); matched = true;
-            if (start < 1 || end < 1) return fail("Verse numbers must be greater than zero.");
+        // Single-chapter book shorthand, for example Jude 5–7.
+        if (!matched) {
+            const auto match = single.match(input);
+            b = resolveBook(match.captured(1));
+            if (match.hasMatch() && b && chaptersForBook(b) == QVariantList{1}) {
+                c = 1; start = match.captured(2).toInt(); end = match.captured(3).toInt(); matched = true;
+                if (start < 1 || end < 1) return fail("Verse numbers must be greater than zero.");
+            }
         }
+        if (matched) break;
     }
     if (!matched) return fail("Reference not recognized. Try John 3, Jn 3:16–18, or 1 Cor 13.");
     if (endChapter < 0) endChapter = c;
