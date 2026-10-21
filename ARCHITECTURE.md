@@ -310,6 +310,13 @@ user's real data for development or tests.
 - Focus layout changes settle the text shown synchronously before the first
   frame (a Verse view's other rows follow, `relaySome`). Preserve the visible
   verse through reflow; dimming is paint-only. Respect reduced motion.
+- Nothing of this window's own may sit in `Overlay.overlay` above the popups:
+  Qt offers a press to each overlay child in turn and counts the first pass as
+  the popup's one chance to close on a press outside it (6.12), so an item over
+  them leaves dialogs open on a click beside them. The mouse's Back and Forward
+  buttons, which must act over dialogs too, are watched by `MouseNavigation`
+  (an application event filter, scoped to this window) rather than caught by an
+  item.
 - Margin notes and outline use `Margins.space`/`place`: notes win space, outline
   takes the remainder. Keep reserved room stable between chapters. Measure after
   layout (`BlockReader.settle` where synchronous geometry is required).

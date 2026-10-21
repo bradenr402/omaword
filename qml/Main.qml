@@ -2952,14 +2952,15 @@ ApplicationWindow {
     // The mouse's back and forward buttons, anywhere in the window: a menu
     // closes; the palette steps back toward its book list; an open side panel
     // closes; the reader travels its jumps like [ and ].
-    MouseArea {
-        objectName: "mouseNavigation"
-        parent: Overlay.overlay
-        anchors.fill: parent
-        z: 2000
-        acceptedButtons: Qt.BackButton | Qt.ForwardButton
-        onPressed: function(mouse) { app.mouseNavigate(mouse.button === Qt.ForwardButton) }
-    }
+    // Back and forward anywhere, dialogs and panels included, so it lies over
+    // them; a MouseArea here would be an overlay child above every popup,
+    // which Qt counts as a popup's one chance to close on a press outside it
+    // (6.12), leaving dialogs open on a click beside them. A handler takes
+    // only the buttons it is given and leaves the press to them.
+    // Back and forward anywhere, dialogs and panels included (MouseNavigation:
+    // an item over them would stand above every popup, which Qt counts as a
+    // popup's one chance to close on a press beside it).
+    MouseNavigation { objectName: "mouseNavigation"; window: app; onNavigated: function(forward) { app.mouseNavigate(forward) } }
     MouseArea {
         objectName: "contextMenuOutside"
         parent: Overlay.overlay

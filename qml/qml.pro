@@ -8,8 +8,8 @@ include(../branding.pri)
 TEMPLATE = lib
 TARGET = omawordqml
 INCLUDEPATH += ../src
-SOURCES += ../src/blockdocument.cpp ../src/searchdocument.cpp ../src/keyhold.cpp ../src/exitsnapshot.cpp ../src/markdownquotes.cpp ../src/annotationpaint.cpp
-HEADERS += ../src/blockdocument.h ../src/searchdocument.h ../src/keyhold.h ../src/exitsnapshot.h ../src/markdownquotes.h ../src/annotationpaint.h
+SOURCES += ../src/blockdocument.cpp ../src/searchdocument.cpp ../src/keyhold.cpp ../src/exitsnapshot.cpp ../src/markdownquotes.cpp ../src/annotationpaint.cpp ../src/mousenavigation.cpp
+HEADERS += ../src/blockdocument.h ../src/searchdocument.h ../src/keyhold.h ../src/exitsnapshot.h ../src/markdownquotes.h ../src/annotationpaint.h ../src/mousenavigation.h
 RESOURCES += ../resources.qrc
 # qmake reads resources.qrc to set up the compiled QML and the filtered
 # resource list: an edited resources.qrc must regenerate this Makefile.
