@@ -169,6 +169,20 @@ Verse content(const QJsonArray &pieces, const QMap<int, Note> &notes, QSet<int> 
     return verse;
 }
 
+// Appends a further part of the verse, on a line of its own where the source
+// breaks between them or either side is poetry; its notes and spans follow it.
+void join(Verse &verse, const Verse &part, bool lineBreak)
+{
+    const bool line = lineBreak || verse.levels.back() != '0' || part.levels.front() != '0';
+    verse.text += line ? '\n' : ' ';
+    const int shift = verse.text.size();
+    verse.text += part.text;
+    if (verse.text.size() > MaxText) fail(QStringLiteral("AO verse text limit exceeded."));
+    verse.levels += line ? part.levels : part.levels.mid(1);
+    for (auto note : part.notes) { note.offset += shift; verse.notes.append(note); }
+    for (auto span : part.words) { span.start += shift; span.end += shift; verse.words.append(span); }
+}
+
 struct Connection {
     QString name = QUuid::createUuid().toString(QUuid::WithoutBraces);
     QSqlDatabase db;
@@ -234,7 +248,7 @@ void validate(QSqlDatabase db)
     const QStringList invalid = {
         QStringLiteral("SELECT 1 FROM source_keys WHERE book NOT IN (SELECT id FROM books) OR chapter NOT BETWEEN 1 AND 999 OR number NOT BETWEEN 1 AND 999 OR retained NOT IN (0,1) LIMIT 1"),
         QStringLiteral("SELECT 1 FROM source_keys s LEFT JOIN source_chapters c ON c.book=s.book AND c.chapter=s.chapter WHERE c.book IS NULL LIMIT 1"),
-        QStringLiteral("SELECT 1 FROM source_chapters c WHERE c.book NOT IN (SELECT id FROM books) OR c.chapter NOT BETWEEN 1 AND 999 OR (EXISTS(SELECT 1 FROM source_keys s WHERE s.book=c.book AND s.chapter=c.chapter) AND NOT EXISTS(SELECT 1 FROM verses v WHERE v.book=c.book AND v.chapter=c.chapter)) LIMIT 1"),
+        QStringLiteral("SELECT 1 FROM source_chapters c WHERE c.book NOT IN (SELECT id FROM books) OR c.chapter NOT BETWEEN 1 AND 999 LIMIT 1"),
         QStringLiteral("SELECT 1 FROM books b WHERE NOT EXISTS(SELECT 1 FROM verses v WHERE v.book=b.id) LIMIT 1"),
         QStringLiteral("SELECT 1 FROM source_keys s LEFT JOIN verses v ON v.book=s.book AND v.chapter=s.chapter AND v.number=s.number WHERE (s.retained=1 AND v.book IS NULL) OR (s.retained=0 AND v.book IS NOT NULL) LIMIT 1"),
         QStringLiteral("SELECT 1 FROM verses v LEFT JOIN source_keys s ON v.book=s.book AND v.chapter=s.chapter AND v.number=s.number WHERE s.book IS NULL OR length(trim(v.text))=0 OR length(v.html)>262144 OR v.poetry NOT IN (0,1) OR v.paragraphStart NOT IN (0,1) LIMIT 1"),
@@ -334,7 +348,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                             references.insert(noteId, integer(ref.value(QStringLiteral("verse")), 0));
                         }
                     }
-                    QVector<Verse> verses; QString heading; QVector<Note> subtitleNotes; bool paragraph = true; int previousVerse = 0;
+                    QVector<Verse> verses; QString heading; QVector<Note> subtitleNotes; bool paragraph = true; int previousVerse = 0, chapterVerses = 0;
                     for (const auto &itemValue : array(chapter.value(QStringLiteral("content")), 100000)) {
                         const auto item = itemValue.toObject(); const auto type = string(item.value(QStringLiteral("type")));
                         if (type == QStringLiteral("line_break")) { paragraph = true; continue; }
@@ -351,9 +365,27 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                             continue;
                         }
                         if (type != QStringLiteral("verse")) fail(QStringLiteral("Unsupported AO chapter content type: ") + type);
-                        verse.number = integer(item.value(QStringLiteral("number")));
-                        if (verse.number <= previousVerse) fail(QStringLiteral("Duplicate or unordered AO verse."));
-                        previousVerse = verse.number; ++bookVerses;
+                        verse.number = integer(item.value(QStringLiteral("number")), 0);
+                        ++bookVerses; ++chapterVerses;
+                        // A number that does not increase continues the verse before it, in the
+                        // source's reading order: Brenton's Septuagint repeats a split verse's
+                        // number, Onkelos numbers a second half 0, and a retelling may reorder
+                        // verses. Headings between the parts move up to the verse they continue.
+                        if (verse.number <= previousVerse) {
+                            if (verses.isEmpty()) fail(QStringLiteral("Duplicate or unordered AO verse."));
+                            if (verse.text.isEmpty()) continue;
+                            if (!verses.last().text.isEmpty()) {
+                                auto &whole = verses.last();
+                                join(whole, verse, paragraph);
+                                QStringList headings{whole.heading, heading, verse.heading};
+                                headings.removeAll(QString());
+                                whole.heading = headings.join('\n');
+                                whole.notes = subtitleNotes + whole.notes;
+                                heading.clear(); subtitleNotes.clear(); paragraph = false;
+                                continue;
+                            }
+                            verse.number = verses.takeLast().number;
+                        } else previousVerse = verse.number;
                         if (!verse.text.isEmpty()) {
                             if (!verse.heading.isEmpty() && !heading.isEmpty()) heading += '\n';
                             verse.heading = heading + verse.heading; heading.clear();
@@ -364,7 +396,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                     }
                     // A heading after the chapter's last verse (the KJV's subscriptions to
                     // Paul's letters) is dropped: headings stand above the verse they open.
-                    if (integer(wrapper.value(QStringLiteral("numberOfVerses")), 0, 999) != verses.size()) fail(QStringLiteral("AO chapter verse count mismatch."));
+                    if (integer(wrapper.value(QStringLiteral("numberOfVerses")), 0, 999) != chapterVerses) fail(QStringLiteral("AO chapter verse count mismatch."));
                     for (auto it = notes.cbegin(); it != notes.cend(); ++it) if (!used.contains(it.key())) {
                         auto found = std::find_if(verses.begin(), verses.end(), [&](const Verse &v) { return v.number == references.value(it.key()) && !v.text.isEmpty(); });
                         if (found == verses.end()) fail(QStringLiteral("Unanchored AO footnote."));

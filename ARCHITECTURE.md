@@ -78,6 +78,10 @@ user's real data for development or tests.
 - Book IDs are stable (1–66 GEN–REV; 67–80 deuterocanon), but navigation follows
   source `order`. Chapters/verses are increasing integers 1–999; gaps remain gaps.
   Unknown book codes and content types explicitly fail.
+- A verse number that does not increase (Brenton's split verses, Onkelos's
+  verse 0, a retelling's reordered verses) continues the verse before it, in
+  reading order: after a space, or on a new line across a break or poetry. It
+  has no source key of its own; headings between move up to the verse.
 - Standard AO complete JSON imports English LTR editions. Other catalog languages
   remain discoverable with compatibility reasons; no RTL or numbering conversion.
 - Text is escaped; words-of-Jesus markup is generated locally. Plain fragments
@@ -87,11 +91,13 @@ user's real data for development or tests.
 - Superscriptions and inline headings use the existing heading model; subtitle
   notes anchor at the following retained verse's offset zero, outside copied text.
   A heading after a chapter's last verse (the KJV's subscriptions) is dropped.
-  Empty verses retain source keys but have no reader rows. Explicit zero-verse
-  chapters retain source metadata but stay out of navigation; empty books reject.
+  Empty verses retain source keys but have no reader rows. A chapter without a
+  retained verse (none at all, or only a note, as Brenton's Proverbs 30) retains
+  source metadata but stays out of navigation; empty books reject.
 - Limits: 64 MiB input/download, nesting 32, 80 known books, 65,536 UTF-16 units
-  per text field. Counts include omitted verses and exclude apocryphal books at
-  translation level. Source revision metadata is not a raw JSON-byte checksum.
+  per text field. Counts include omitted verses and continuing parts and exclude
+  apocryphal books at translation level. Source revision metadata is not a raw
+  JSON-byte checksum.
 - Imports stage and validate a fresh immutable generation, then atomically
   commit its registry pointer. Refresh readers before removing old generations.
   Ownership checks reject symlink, hardlink, or foreign cleanup targets.

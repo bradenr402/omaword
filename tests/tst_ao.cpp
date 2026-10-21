@@ -22,17 +22,63 @@ class AoTest : public QObject
 private slots:
     void explicitEmptyChapterRetainsSourceMetadata() {
         const auto source = directory.filePath("empty-chapter.json"), target = directory.filePath("empty-chapter.sqlite");
+        // Chapter 5 has a verse but no text (Brenton's Proverbs 30 holds only a note).
         QVERIFY(AoFixture::write(source, AoFixture::complete("eng_ojb", {AoFixture::book("MAL", 1, {
-            AoFixture::chapter(3, {AoFixture::verse(1, {"Original retained text."})}), AoFixture::chapter(4, {})})})));
+            AoFixture::chapter(3, {AoFixture::verse(1, {"Original retained text."})}), AoFixture::chapter(4, {}),
+            AoFixture::chapter(5, {AoFixture::verse(1, {QJsonObject{{"noteId", 0}}})}, {QJsonObject{{"noteId", 0}, {"caller", "+"}, {"text", "See chapter 3."}}})})})));
         const auto result = AoImporter::importFile(source, target); QVERIFY2(result.ok, qPrintable(result.error));
         QCOMPARE(result.verseCount, 1);
         QString error; QVERIFY2(AoImporter::validateDatabase(target, &error), qPrintable(error));
         {
             auto db = QSqlDatabase::addDatabase("QSQLITE", "ao-empty"); db.setDatabaseName(target); QVERIFY(db.open()); QSqlQuery q(db);
-            QVERIFY(q.exec("SELECT count(*) FROM source_chapters")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 2);
+            QVERIFY(q.exec("SELECT count(*) FROM source_chapters")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 3);
             QVERIFY(q.exec("SELECT count(*) FROM source_keys WHERE chapter=4")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 0);
+            QVERIFY(q.exec("SELECT retained FROM source_keys WHERE chapter=5")); QVERIFY(q.next()); QVERIFY(!q.value(0).toBool());
+            QVERIFY(q.exec("SELECT count(*) FROM verses WHERE chapter=5")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 0);
         }
         QSqlDatabase::removeDatabase("ao-empty");
+    }
+    // A verse number that does not increase continues the verse before it, in
+    // reading order: Brenton repeats a split verse's number, Onkelos numbers a
+    // second half 0, a retelling reorders verses.
+    void continuedVersesJoinTheVerseBefore() {
+        const auto source = directory.filePath("continued.json"), target = directory.filePath("continued.sqlite");
+        QVERIFY(AoFixture::write(source, AoFixture::complete("eng_bre", {AoFixture::book("EXO", 1, {AoFixture::chapter(28, {
+            AoFixture::verse(1, {"Split once."}), AoFixture::verse(1, {"Then again."}),
+            AoFixture::verse(2, {"Before the heading."}), QJsonObject{{"type", "heading"}, {"content", QJsonArray{"Section"}}},
+            AoFixture::verse(0, {"Half ", QJsonObject{{"text", "spoken"}, {"wordsOfJesus", true}}, QJsonObject{{"noteId", 1}}, "."}),
+            AoFixture::verse(4, {"Four."}), AoFixture::verse(3, {"Three, read after four."}),
+            AoFixture::verse(5, {}), AoFixture::verse(5, {"Five, after an empty part."}),
+            AoFixture::verse(6, {QJsonObject{{"text", "A line"}, {"poem", 1}}}), AoFixture::verse(6, {QJsonObject{{"text", "and its pair"}, {"poem", 2}}})
+        }, {QJsonObject{{"noteId", 1}, {"caller", "a"}, {"text", "Original note"}}})})})));
+        const auto result = AoImporter::importFile(source, target); QVERIFY2(result.ok, qPrintable(result.error));
+        QCOMPARE(result.verseCount, 5);
+        QString error; QVERIFY2(AoImporter::validateDatabase(target, &error), qPrintable(error));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "ao-continued"); db.setDatabaseName(target); QVERIFY(db.open()); QSqlQuery q(db);
+            struct Row { int number; QString text, heading; bool paragraph; };
+            const QList<Row> expected{{1, "Split once. Then again.", "", true},
+                // The heading between moves up, the part going on a line of its own.
+                {2, "Before the heading.\nHalf spoken.", "Section", false},
+                {4, "Four. Three, read after four.", "", false},
+                {5, "Five, after an empty part.", "", false},
+                {6, "A line\nand its pair", "", false}};
+            QVERIFY(q.exec("SELECT number,text,heading,paragraphStart FROM verses ORDER BY number"));
+            for (const auto &row : expected) {
+                QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), row.number); QCOMPARE(q.value(1).toString(), row.text);
+                QCOMPARE(q.value(2).toString(), row.heading); QCOMPARE(q.value(3).toBool(), row.paragraph);
+            }
+            QVERIFY(!q.next());
+            QVERIFY(q.exec("SELECT group_concat(number) FROM (SELECT number FROM source_keys WHERE retained ORDER BY number)"));
+            QVERIFY(q.next()); QCOMPARE(q.value(0).toString(), "1,2,4,5,6");
+            QVERIFY(q.exec("SELECT count(*) FROM source_keys WHERE NOT retained")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 0);
+            // The part's note and words of Jesus follow it.
+            QVERIFY(q.exec("SELECT verse,offset FROM notes")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 2); QCOMPARE(q.value(1).toInt(), 31);
+            QVERIFY(q.exec("SELECT verse,start,end FROM words_of_jesus")); QVERIFY(q.next());
+            QCOMPARE(q.value(0).toInt(), 2); QCOMPARE(q.value(1).toInt(), 25); QCOMPARE(q.value(2).toInt(), 31);
+            QVERIFY(q.exec("SELECT verse,levels FROM indents")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 6); QCOMPARE(q.value(1).toString(), "12");
+        }
+        QSqlDatabase::removeDatabase("ao-continued");
     }
     // A heading after a chapter's last verse is dropped, its notes with it
     // (the KJV's subscriptions to Paul's letters).
@@ -53,7 +99,7 @@ private slots:
     }
     void rejectsBrokenContent_data() {
         QTest::addColumn<QString>("scenario");
-        for (const auto &name : {"unknown-book", "duplicate-book", "duplicate-order", "duplicate-chapter", "duplicate-verse", "unknown-type", "missing-note", "duplicate-note", "wrong-count", "empty-chapter", "indent-bound", "invalid-number", "deep-json", "oversized-text"})
+        for (const auto &name : {"unknown-book", "duplicate-book", "duplicate-order", "duplicate-chapter", "unknown-type", "missing-note", "duplicate-note", "wrong-count", "empty-chapter", "indent-bound", "invalid-number", "deep-json", "oversized-text"})
             QTest::newRow(name) << QString(name);
     }
     void rejectsBrokenContent() {
@@ -65,7 +111,6 @@ private slots:
         if (scenario == "duplicate-book") books.append(book);
         if (scenario == "duplicate-order") { auto other = book; other["id"] = "GEN"; books.append(other); }
         if (scenario == "duplicate-chapter") chapters.append(wrapper);
-        if (scenario == "duplicate-verse") items.append(items[2]);
         if (scenario == "unknown-type") items.append(QJsonObject{{"type", "unexpected"}, {"content", QJsonArray{"Do not lose me"}}});
         if (scenario == "missing-note") notes.removeAt(1);
         if (scenario == "duplicate-note") notes.append(notes[0]);
