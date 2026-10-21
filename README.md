@@ -4,15 +4,16 @@
 
 A minimal, keyboard-first Bible reader built with Qt Quick and C++ that follows your Omarchy theme, system font, and desktop corners. Read offline, highlight and tag passages, and keep Markdown notes alongside the text.
 
-![OmaWord reading John 1, with the chapter outline beside it, a highlighted passage, and a selected verse](screenshots/reader.png)
+![OmaWord reading John 1, with a highlighted passage, the verse read carrying a note, and the ribbon on Proverbs 6](screenshots/reader.png)
 
 <p>
-  <img src="screenshots/notes.png" alt="Notes beside the text, a note being written on John 1:6" width="49%">
+  <img src="screenshots/notes.png" alt="Notes beside the text, a note being written on John 1:6, with the chapter outline at the left" width="49%">
   <img src="screenshots/desk.png" alt="The Desk: a Markdown study page of quotations, headings, and lists beside Proverbs 6" width="49%">
   <img src="screenshots/marks.png" alt="Marks in a light theme: every highlight, tag, and note, one row per passage" width="49%">
   <img src="screenshots/palette.png" alt="The passage palette over the reader, with the ribbon and recent passages" width="49%">
 </p>
 <p align="center">
+  <img src="screenshots/focus.png" alt="Focus mode on Acts 2: the verse read at full strength, the rest of the chapter dimmed, and nothing else on screen" width="49%">
   <img src="screenshots/lookup.png" alt="The lookup window showing John 3:16 over the desktop" width="49%">
 </p>
 
