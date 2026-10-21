@@ -18,12 +18,25 @@
 #include <memory>
 
 // A requested passage as the passage palette reads it: an exact reference,
-// else its first suggestion (compact input such as jn316).
-static QString palettePassage(const BibleBackend *bible, const QString &text)
+// else its first suggestion (compact input such as jn316); note, where it
+// reads a verse the version joined to another, says so.
+static QString palettePassage(const BibleBackend *bible, const QString &text, QString *note)
 {
-    if (bible->resolveReference(text).value("valid").toBool()) return text;
+    const auto resolved = bible->resolveReference(text);
+    if (resolved.value("valid").toBool()) { *note = resolved.value("note").toString(); return text; }
     const auto candidates = bible->referenceCandidates(text, 1);
-    return candidates.isEmpty() ? text : candidates.first().toMap().value("reference").toString();
+    if (candidates.isEmpty()) return text;
+    *note = candidates.first().toMap().value("note").toString();
+    return candidates.first().toMap().value("reference").toString();
+}
+
+// Opens a requested passage in the reader, its note shown there.
+static bool openRequested(BibleBackend *bible, QWindow *root, const QString &text)
+{
+    QString note;
+    if (!bible->navigate(palettePassage(bible, text, &note))) return false;
+    if (!note.isEmpty() && root) QMetaObject::invokeMethod(root, "notify", Q_ARG(QVariant, note), Q_ARG(QVariant, true));
+    return true;
 }
 
 namespace {
@@ -322,7 +335,7 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
                             [bible, root, reference = request.reference, connection] {
                                 if (bible->busy()) return;
                                 QObject::disconnect(*connection);
-                                if (root && bible->ready() && bible->error().isEmpty() && flush(root)) bible->navigate(palettePassage(bible, reference));
+                                if (root && bible->ready() && bible->error().isEmpty() && flush(root)) openRequested(bible, root, reference);
                             });
                     }
                 }
@@ -333,7 +346,7 @@ void WindowManager::openRequest(const SingleInstance::Request &request, SingleIn
                     if (bible->versionId() != versionId)
                         action = {false, bible->error().isEmpty() ? QStringLiteral("Cannot switch to %1.").arg(request.translation) : bible->error()};
                 }
-                if (action.ok && !request.reference.isEmpty() && !bible->navigate(palettePassage(bible, request.reference)))
+                if (action.ok && !request.reference.isEmpty() && !openRequested(bible, root, request.reference))
                     action = {false, bible->error()};
             }
         }

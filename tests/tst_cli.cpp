@@ -198,6 +198,21 @@ private slots:
         QVERIFY(!CommandLine::request({"--bogus\x1b[2J"}, &request, &error)); QCOMPARE(controls(error), 0);
         QCOMPARE(CommandLine::printable(QStringLiteral("a\tb\nc\rd\u0085e\u00a0f")), QStringLiteral("a\tb\nc\uFFFDd\uFFFDe\u00a0f"));
     }
+    // A verse the translation joined to another is quoted as the verse holding
+    // it, which stderr names.
+    void joinedVerseNote() {
+        const QString retold = fixtures.filePath("eng_ret_complete.json");
+        QVERIFY(AoFixture::write(retold, AoFixture::complete("eng_ret", {AoFixture::book("GEN", 1, {AoFixture::chapter(6, {
+            AoFixture::verse(17, {"Seventeen."}), AoFixture::verse(14, {"Fourteen, told after seventeen."}), AoFixture::verse(18, {"Eighteen."})})})}, "Retold")));
+        install(retold);
+        const auto quoted = run({"quote", "Genesis 6:14", "-t", "eng_ret"});
+        QCOMPARE(quoted.status, 0); QVERIFY2(quoted.out.endsWith(QStringLiteral("\u2014 Genesis 6:17\n")), qPrintable(quoted.out));
+        QCOMPARE(quoted.err, QString("Genesis 6:14 is part of 6:17 in eng_ret.\n"));
+        const auto json = QJsonDocument::fromJson(run({"quote", "Genesis 6:14", "-t", "eng_ret", "--json"}).out.toUtf8()).array();
+        QCOMPARE(json.first().toObject()["note"].toString(), QString("Genesis 6:14 is part of 6:17 in eng_ret"));
+        QVERIFY(!QJsonDocument::fromJson(run({"quote", "Genesis 6:17", "-t", "eng_ret", "--json"}).out.toUtf8()).array().first().toObject().contains("note"));
+        QVERIFY(run({"quote", "Genesis 6:17", "-t", "eng_ret"}).err.isEmpty());
+    }
     void completionScripts() {
         QVERIFY(run({"completion", "bash"}).out.contains("complete -F _omaword omaword"));
         QVERIFY(run({"completion", "zsh"}).out.startsWith("#compdef omaword"));

@@ -338,6 +338,32 @@ private slots:
             links << row.toMap()["reference"].toString();
         QCOMPARE(links,(QStringList{"Jude 3–5","Jude 7","Jude 1"}));
     }
+    // A verse a version joined to another (a retelling's verse told after a
+    // later one): looking it up reads the verse holding it, and says so.
+    void joinedVerseLookups() {
+        const auto path = session->filePath("retold.json");
+        QVERIFY(AoFixture::write(path, AoFixture::complete("engret", {AoFixture::book("GEN", 1, {AoFixture::chapter(6, {
+            AoFixture::verse(8, {"Eight."}), AoFixture::verse(11, {"Eleven."}), AoFixture::verse(17, {"Seventeen."}),
+            AoFixture::verse(14, {"Fourteen, told after seventeen."}), AoFixture::verse(18, {"Eighteen."})})})}, "Retold")));
+        install(path); QCOMPARE(bible->textSchema(), 8);
+        const QString note("Genesis 6:14 is part of 6:17 in engret");
+        const auto resolved = bible->resolveReference("Genesis 6:14");
+        QVERIFY(resolved["valid"].toBool()); QCOMPARE(resolved["reference"].toString(), QString("Genesis 6:17")); QCOMPARE(resolved["note"].toString(), note);
+        QVERIFY(bible->navigate("Genesis 6:14")); QCOMPARE(bible->selectionReference(), QString("Genesis 6:17"));
+        QCOMPARE(bible->resolveReference("Genesis 6:14-18")["reference"].toString(), QString("Genesis 6:17–18"));
+        QCOMPARE(bible->resolveReference("Genesis 6:11-14")["reference"].toString(), QString("Genesis 6:11–17"));
+        QVERIFY(bible->resolveReference("Genesis 6:17")["note"].toString().isEmpty());
+        QVERIFY(!bible->resolveReference("Genesis 6:9")["valid"].toBool()); // Absent, not joined.
+        for (const QString typed : {"gen 6:14", "gen614"}) {
+            const auto candidate = bible->referenceCandidates(typed).value(0).toMap();
+            QCOMPARE(candidate["reference"].toString(), QString("Genesis 6:17")); QCOMPARE(candidate["note"].toString(), note);
+        }
+        const auto passage = bible->readPassage("Genesis 6:14");
+        QCOMPARE(passage["reference"].toString(), QString("Genesis 6:17")); QCOMPARE(passage["note"].toString(), note);
+        // A link keeps the reference as written, so following it says so too.
+        const auto links = bible->passageLinks("See Genesis 6:14.");
+        QCOMPARE(links.size(), 1); QCOMPARE(links.first().toMap()["reference"].toString(), QString("Genesis 6:14"));
+    }
     void aliasesAndPurePreview() {
         install(ojb);
         QVERIFY(bible->navigate("GEN 1:2")); QCOMPARE(bible->book(),1);

@@ -545,7 +545,7 @@ void BibleBackend::refreshShared(const QString &id, bool library, bool preferenc
                 closeBible(); m_ready = false; m_versionId.clear();
                 m_textGeneration.clear(); cancelScriptureSearch();
                 m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_hasParagraphs = false;
-                m_keys = {{0,0,0}}; m_keyIndices.clear(); m_books.clear(); m_chapters.clear(); m_bookAliases.clear();
+                m_keys = {{0,0,0}}; m_keyIndices.clear(); m_books.clear(); m_chapters.clear(); m_bookAliases.clear(); m_continued.clear();
                 m_anchor = m_cursor = m_start = m_end = 0;
                 m_verses.clear(); m_annotations.clear(); m_collection.clear();
                 updateAnnotations(); emit readyChanged(); emit versionChanged(); emit booksChanged(); emit passageChanged();
@@ -2263,6 +2263,7 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
     const auto oldChapters = m_chapters;
     const auto oldAliases = m_bookAliases;
     const auto oldIndices = m_keyIndices;
+    const auto oldContinued = m_continued;
     const int oldBook = m_book, oldChapter = m_chapter, oldStart = m_start, oldEnd = m_end, oldA = m_anchor, oldC = m_cursor;
     const double oldPosition = m_position;
     QSignalBlocker blocker(this);
@@ -2276,12 +2277,12 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
         m_anchor = oldA; m_cursor = oldC; m_position = oldPosition;
         m_hasParagraphs = oldParagraphs; m_books = oldBooks; m_chapters = oldChapters;
         m_hasWordsOfJesus = oldWordsOfJesus; m_textSchema = oldSchema; m_hasHeadings = oldHeadings;
-        m_bookAliases = oldAliases; m_keyIndices = oldIndices;
+        m_bookAliases = oldAliases; m_keyIndices = oldIndices; m_continued = oldContinued;
         blocker.unblock(); emit errorChanged();
     });
     m_bible = QSqlDatabase(); m_bibleConnection.clear();
     m_versionId = id; m_edition.clear(); m_abbreviation.clear(); m_copyright.clear(); m_keys = {{0,0,0}};
-    m_hasParagraphs = false; m_books.clear(); m_chapters.clear(); m_bookAliases.clear(); m_keyIndices.clear();
+    m_hasParagraphs = false; m_books.clear(); m_chapters.clear(); m_bookAliases.clear(); m_keyIndices.clear(); m_continued.clear();
     m_hasWordsOfJesus = false; m_textSchema = 0; m_hasHeadings = false;
     if (!id.isEmpty()) {
         m_bibleConnection = connectionName(); m_bible = QSqlDatabase::addDatabase("QSQLITE",m_bibleConnection);
@@ -2329,6 +2330,11 @@ bool BibleBackend::changeVersion(const QString &id, const QString &importPath,
             else m_bookAliases.insert(alias,b);
         }
         if (text.lastError().isValid()) return setError("Cannot read source book aliases.");
+        if (m_textSchema >= 8) {
+            if (!text.exec("SELECT book,chapter,number,verse FROM continued")) return setError("Cannot read joined verses.");
+            while (text.next()) m_continued.insert(verseKey(text.value(0).toInt(),text.value(1).toInt(),text.value(2).toInt()),text.value(3).toInt());
+            if (text.lastError().isValid()) return setError("Cannot read joined verses.");
+        }
     }
     if (!m_store.transaction()) return setError("Cannot start library update: " + m_store.lastError().text());
     QSqlQuery q(m_store);
@@ -2642,6 +2648,18 @@ bool BibleBackend::validRange(int b, int c, int start, int end) const
     if (start < 1 || end < start || end > 999) return false;
     return verseExists(b,c,start) && verseExists(b,c,end);
 }
+int BibleBackend::heldVerse(int b, int c, int v) const
+{
+    if (!v || absoluteVerse(b,c,v)) return v;
+    return m_continued.value(verseKey(b,c,v),v);
+}
+QString BibleBackend::joinedNote(int b, int c, int v) const
+{
+    const int held = heldVerse(b,c,v);
+    if (held == v) return {};
+    return reference(b,c,v) + " is part of " + (BibleBooks::oneChapter(b) && c == 1 ? QStringLiteral("verse ") : QString::number(c) + ':')
+        + QString::number(held) + " in " + (m_abbreviation.isEmpty() ? m_edition : m_abbreviation);
+}
 QVariantList BibleBackend::chapterVerses(int book, int chapter) const
 {
     if (!m_ready || !chaptersForBook(book).contains(chapter)) return {};
@@ -2824,9 +2842,9 @@ bool BibleBackend::navigate(QString input)
 QVariantMap BibleBackend::resolveReference(QString input) const
 {
     int b, c, start, end;
-    QString error;
-    const bool valid = parseReference(input,&b,&c,&start,&end,&error);
-    return {{"valid",valid},{"reference",valid ? (start ? rangeReference(start,end) : reference(b,c)) : QString()}, {"error",error}};
+    QString error, note;
+    const bool valid = parseReference(input,&b,&c,&start,&end,&error,&note);
+    return {{"valid",valid},{"reference",valid ? (start ? rangeReference(start,end) : reference(b,c)) : QString()}, {"error",error}, {"note",note}};
 }
 namespace {
 QString compactKey(QString text)
@@ -2858,25 +2876,29 @@ QVariantList BibleBackend::referenceCandidates(QString input, int limit) const
     struct Candidate { int score = 0; int order = 0; QVariantMap row; };
     QVector<Candidate> found;
     QSet<QString> seen;
-    auto addRow = [&](const QString &text, int b, int c, int start, int end, int score) {
+    auto addRow = [&](const QString &text, int b, int c, int start, int end, int score, const QString &note = {}) {
         if (text.isEmpty() || seen.contains(text)) return;
         seen.insert(text);
         found.append({score, int(found.size()), QVariantMap{{"reference",text},{"book",b},{"chapter",c},
-            {"start",start},{"end",end},{"score",score}}});
+            {"start",start},{"end",end},{"score",score},{"note",note}}});
     };
     auto add = [&](int b, int c, int start, int end, int score) {
-        if (c < 1 || c > 999 || start > 999 || end > 999 || !validRange(b,c,start,end)) return;
-        addRow(reference(b,c,start,end),b,c,start,end,score);
+        if (c < 1 || c > 999 || start > 999 || end > 999) return;
+        QString note = joinedNote(b,c,start);
+        if (note.isEmpty()) note = joinedNote(b,c,end);
+        start = heldVerse(b,c,start); end = heldVerse(b,c,end);
+        if (!validRange(b,c,start,end)) return;
+        addRow(reference(b,c,start,end),b,c,start,end,score,note);
     };
     // The exact parser wins outright, so typed references keep their meaning.
     {
         int b = 0, c = 0, first = 0, last = 0;
-        QString error;
-        if (parseReference(input,&b,&c,&first,&last,&error)) {
+        QString error, note;
+        if (parseReference(input,&b,&c,&first,&last,&error,&note)) {
             if (first) {
                 const auto a = endpoint(first), z = endpoint(last);
                 addRow(rangeReference(first,last),a.book,a.chapter,a.verse,
-                       a.book == z.book && a.chapter == z.chapter ? z.verse : a.verse,1000000);
+                       a.book == z.book && a.chapter == z.chapter ? z.verse : a.verse,1000000,note);
             } else addRow(reference(b,c),b,c,0,0,1000000);
         }
     }
@@ -3001,8 +3023,10 @@ QVector<BibleBackend::Link> BibleBackend::findLinks(const QString &text) const
             if (!start) { if (!chapterBounds(b,c,&first,&last)) break; }
             else {
                 end = ranged ? match.captured(4).toInt() : start;
-                if (!validRange(b,c,start,end)) break;
-                first = absoluteVerse(b,c,start); last = absoluteVerse(b,c,end);
+                // A joined verse links to the verse holding it, its reference kept as written.
+                const int from = heldVerse(b,c,start), to = heldVerse(b,c,end);
+                if (!validRange(b,c,from,to)) break;
+                first = absoluteVerse(b,c,from); last = absoluteVerse(b,c,to);
                 if (!first || !last || first > last) break;
             }
             Link link;
@@ -3050,7 +3074,7 @@ QVariantList BibleBackend::linkedNotes() const
     }
     return rows;
 }
-bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *first, int *last, QString *error) const
+bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *first, int *last, QString *error, QString *note) const
 {
     auto fail = [error](const QString &message) { *error = message; return false; };
     if (!m_ready) return fail("Install an AO Bible first.");
@@ -3064,8 +3088,8 @@ bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *f
         static const QRegularExpression qualified("[A-Za-z]");
         if (right.contains(qualified)) {
             int lb, lc, ls, le, rb, rc, rs, re;
-            if (!parseReference(input.left(dash),&lb,&lc,&ls,&le,error)
-                || !parseReference(right,&rb,&rc,&rs,&re,error)) return false;
+            if (!parseReference(input.left(dash),&lb,&lc,&ls,&le,error,note)
+                || !parseReference(right,&rb,&rc,&rs,&re,error,note && note->isEmpty() ? note : nullptr)) return false;
             if (!ls || !rs || ls != le || rs != re || ls > rs) return fail("Choose an ordered verse range.");
             *book = rb; *chapter = rc; *first = ls; *last = rs; return true;
         }
@@ -3129,12 +3153,17 @@ bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *f
     }
     if (!matched) return fail("Reference not recognized. Try John 3, Jn 3:16–18, or 1 Cor 13.");
     if (endChapter < 0) endChapter = c;
+    // A verse number the source joined to another verse reads as the verse holding it.
+    QString joined = joinedNote(b,c,start);
+    if (joined.isEmpty()) joined = joinedNote(b,endChapter,end);
+    start = heldVerse(b,c,start); end = heldVerse(b,endChapter,end);
     const int a = absoluteVerse(b,c,start), z = absoluteVerse(b,endChapter,end);
     if (!validRange(b,c,start,start) || !validRange(b,endChapter,end,end) || (start && (!a || !z || a > z))) {
         if (b >= 1 && b <= lastBook() && start == end && start && !a)
             return fail(reference(b,c,start,end) + " is absent in " + edition() + '.');
         return fail("That chapter or verse range is not present in " + edition() + '.');
     }
+    if (note && note->isEmpty()) *note = joined;
     *book = b; *chapter = endChapter; *first = a; *last = z;
     return true;
 }
@@ -3910,13 +3939,18 @@ QVariantMap BibleBackend::readPassage(const QString &text, bool strict)
 {
     if (!m_ready) return {{"error","Install an AO Bible first."}};
     int b = 0, c = 0, start = 0, end = 0;
-    QString error;
-    if (!parseReference(text,&b,&c,&start,&end,&error)) {
+    QString error, note;
+    if (!parseReference(text,&b,&c,&start,&end,&error,&note)) {
         const auto candidates = strict ? QVariantList() : referenceCandidates(text,1);
         if (candidates.isEmpty() || !parseReference(candidates.first().toMap().value("reference").toString(),&b,&c,&start,&end,&error))
             return {{"error",error}};
+        note = candidates.first().toMap().value("note").toString();
     }
-    if (start) return passageAt(start,end,rangeReference(start,end));
+    if (start) {
+        auto passage = passageAt(start,end,rangeReference(start,end));
+        if (!note.isEmpty()) passage.insert("note",note);
+        return passage;
+    }
     if (!chapterBounds(b,c,&start,&end)) return {{"error","That chapter is not in " + edition() + "."}};
     return passageAt(start,end,reference(b,c),true);
 }

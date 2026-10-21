@@ -314,12 +314,16 @@ int quote(const QStringList &arguments, QTextStream &out, QTextStream &err, QTex
     for (const auto &item : std::as_const(items)) {
         const auto passage = bible.readPassage(item);
         if (passage.contains("error")) { failure(err, "quote", item + ": " + passage.value("error").toString()); status = Failure; continue; }
+        // A verse the translation joined to another is quoted as the one holding it, and says so.
+        if (passage.contains("note")) err << printable(passage.value("note").toString()) << '.' << Qt::endl;
         texts << passage.value(p.parser.isSet(plain) ? "plain" : "quotation").toString();
         QJsonArray verses;
         for (const auto &verse : passage.value("verses").toList()) verses.append(QJsonObject::fromVariantMap(verse.toMap()));
-        array.append(QJsonObject{{"reference", passage.value("reference").toString()}, {"translation", passage.value("abbreviation").toString()},
-                                 {"translationId", passage.value("versionId").toString()}, {"translationName", passage.value("name").toString()},
-                                 {"text", passage.value("plain").toString()}, {"quotation", passage.value("quotation").toString()}, {"verses", verses}});
+        QJsonObject row{{"reference", passage.value("reference").toString()}, {"translation", passage.value("abbreviation").toString()},
+                        {"translationId", passage.value("versionId").toString()}, {"translationName", passage.value("name").toString()},
+                        {"text", passage.value("plain").toString()}, {"quotation", passage.value("quotation").toString()}, {"verses", verses}};
+        if (passage.contains("note")) row.insert("note", passage.value("note").toString());
+        array.append(row);
     }
     if (p.parser.isSet(json)) out << CommandLine::json(array);
     else if (!texts.isEmpty()) out << printable(texts.join(QStringLiteral("\n\n"))) << '\n';
@@ -465,6 +469,7 @@ int links(const QStringList &arguments, QTextStream &out, QTextStream &err, QTex
     for (const auto &item : std::as_const(items)) {
         const auto passage = bible.readPassage(item);
         if (passage.contains("error")) { failure(err, "link", item + ": " + passage.value("error").toString()); status = Failure; continue; }
+        if (passage.contains("note")) err << printable(passage.value("note").toString()) << '.' << Qt::endl;
         out << link(passage.value("reference").toString(), translation) << '\n';
     }
     out.flush();

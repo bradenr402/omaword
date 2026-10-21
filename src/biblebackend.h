@@ -559,7 +559,12 @@ private:
     bool goTo(int book, int chapter, int start, int end);
     bool goToSelection(int book, int chapter, int anchor, int cursor, double position);
     void stepSelection(int anchor, int cursor);
-    bool parseReference(QString input, int *book, int *chapter, int *start, int *end, QString *error) const;
+    bool parseReference(QString input, int *book, int *chapter, int *start, int *end, QString *error, QString *note = nullptr) const;
+    // A verse number the source joined to another verse (a retelling's
+    // reordered verse): the verse holding it; any other number as it is.
+    int heldVerse(int book, int chapter, int verse) const;
+    // "Genesis 6:14 is part of 6:17 in NEB" for such a number, else empty.
+    QString joinedNote(int book, int chapter, int verse) const;
     struct Link { int start = 0, length = 0, first = 0, last = 0; QString text, reference; };
     QVector<Link> findLinks(const QString &text) const;
     bool chapterBounds(int book, int chapter, int *first, int *last) const;
@@ -662,6 +667,8 @@ private:
     QHash<int, QVariantList> m_chapters;
     QHash<QString, int> m_bookAliases;
     QHash<int, int> m_keyIndices;
+    // Verse numbers the source joined to other verses (verseKey → the verse holding each).
+    QHash<int, int> m_continued;
     QVector<Verse> m_keys{{0,0,0}};
     QString m_bibleConnection, m_storeConnection;
     QSqlDatabase m_bible, m_store;

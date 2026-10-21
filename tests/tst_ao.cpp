@@ -77,8 +77,14 @@ private slots:
             QVERIFY(q.exec("SELECT verse,start,end FROM words_of_jesus")); QVERIFY(q.next());
             QCOMPARE(q.value(0).toInt(), 2); QCOMPARE(q.value(1).toInt(), 25); QCOMPARE(q.value(2).toInt(), 31);
             QVERIFY(q.exec("SELECT verse,levels FROM indents")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 6); QCOMPARE(q.value(1).toString(), "12");
+            // Verse 3, read after 4, is held by it (schema 8); 0 and the repeated numbers are no one's to look up.
+            QVERIFY(q.exec("SELECT value FROM metadata WHERE key='schema'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(), "8");
+            QVERIFY(q.exec("SELECT chapter,number,verse FROM continued")); QVERIFY(q.next());
+            QCOMPARE(q.value(0).toInt(), 28); QCOMPARE(q.value(1).toInt(), 3); QCOMPARE(q.value(2).toInt(), 4); QVERIFY(!q.next());
+            QVERIFY(q.exec("UPDATE continued SET verse=99"));
         }
         QSqlDatabase::removeDatabase("ao-continued");
+        QVERIFY(!AoImporter::validateDatabase(target, &error));
     }
     // A heading after a chapter's last verse is dropped, its notes with it
     // (the KJV's subscriptions to Paul's letters).
@@ -174,6 +180,9 @@ private slots:
             QVERIFY(q.exec("SELECT offset FROM notes ORDER BY seq")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 0); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 8);
             QVERIFY(q.exec("SELECT levels FROM indents")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(), "02");
             QVERIFY(q.exec("SELECT retained FROM source_keys WHERE number=2")); QVERIFY(q.next()); QVERIFY(!q.value(0).toBool());
+            // No verse joined to another: schema 7, as before there were any.
+            QVERIFY(q.exec("SELECT value FROM metadata WHERE key='schema'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(), "7");
+            QVERIFY(q.exec("SELECT count(*) FROM sqlite_master WHERE name='continued'")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 0);
             QVERIFY(q.exec("UPDATE verses SET text='corrupt' WHERE number=1"));
         }
         QSqlDatabase::removeDatabase("ao-inspect");

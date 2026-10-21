@@ -3279,11 +3279,13 @@ ApplicationWindow {
     // Opens a note's passage link as a History jump; Notes stays open on it.
     function followPassageLink(reference) {
         if (!flushNote()) return false
+        const joined = bible.resolveReference(reference).note
         const from = beginJump()
         if (!bible.navigate(reference)) return false
         endJump(from)
         syncNote()
         pulseDestination()
+        if (joined) notify(joined, true)
         return true
     }
     function openLinkedNote(row) {
@@ -4901,16 +4903,19 @@ ApplicationWindow {
     // firstVerse: a chapter (no verse given) opens on its first verse, as the
     // palette does: "Galatians 2" selects Galatians 2:1.
     function goToReference(reference, firstVerse) {
-        if (!flushNote()) return
+        if (!flushNote()) return false
+        // A verse the version joined to another reads as the one holding it, and says so.
+        const joined = bible.resolveReference(reference).note
         const from = beginJump()
-        if (bible.navigate(reference)) {
-            if (firstVerse) selectFirstVerse()
-            endJump(from)
-            passagePalette.navigated = true
-            passagePalette.close()
-            readerFocus()
-            pulseDestination()
-        }
+        if (!bible.navigate(reference)) return false
+        if (firstVerse) selectFirstVerse()
+        endJump(from)
+        passagePalette.navigated = true
+        passagePalette.close()
+        readerFocus()
+        pulseDestination()
+        if (joined) notify(joined, true)
+        return true
     }
     // The palette's chapters (its grid) open on their first verse too.
     function openChapter(book, chapter) {
@@ -6548,7 +6553,7 @@ ApplicationWindow {
         }
         // Typed numbers: the shared fuzzy parser's ranked candidates (jn316, ps23, …).
         if (/\d/.test(query.replace(/^[1-3]\s*/, ""))) return Array.from(bible.referenceCandidates(referenceInput.text.trim())).map(function(candidate) {
-            return { title: candidate.reference, hint: candidate.start ? "Passage" : "Chapter", candidate: true, reference: candidate.reference }
+            return { title: candidate.reference, hint: candidate.start ? "Passage" : "Chapter", candidate: true, reference: candidate.reference, note: candidate.note || "" }
         })
         // Resolve exact canonical/source aliases without changing the displayed source name.
         const resolved = query && !/\d\s*$/.test(query) ? bible.resolveReference(query) : null
@@ -6705,7 +6710,8 @@ ApplicationWindow {
             if (openRibbon()) { passagePalette.navigated = true; passagePalette.close(); readerFocus() }
             return
         }
-        if (entry.candidate) { goToReference(entry.reference, true); return }
+        // A candidate already reads a joined verse as the one holding it: its note says so.
+        if (entry.candidate) { if (goToReference(entry.reference, true) && entry.note) notify(entry.note, true); return }
         if (entry.action) {
             if (!actionAvailable(entry.action)) { rejected(unavailableReason(entry.action)); return }
             if (!flushNote()) return

@@ -79,7 +79,8 @@ Window {
         const passage = lookup.backend.readPassage(row.reference)
         if (passage.error) { status = passage.error; lookup.effects.play("error"); return }
         shown = passage
-        status = ""
+        // A verse the version joined to another is read as the one holding it, and says so.
+        status = row.note || passage.note || ""
         passageView.contentY = 0
         passageView.forceActiveFocus()
     }

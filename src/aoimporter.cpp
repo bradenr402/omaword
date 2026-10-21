@@ -212,12 +212,15 @@ const QStringList queries = {
     QStringLiteral("SELECT book,chapter,verse,start,end FROM words_of_jesus ORDER BY book,chapter,verse,start"),
     QStringLiteral("SELECT book,chapter,verse,levels FROM indents ORDER BY book,chapter,verse")
 };
-QString digest(QSqlDatabase db)
+// Schema 8 adds the verse numbers a source joined to other verses (continued),
+// written only where it has some; every other generation stays schema 7.
+const QString continuedQuery = QStringLiteral("SELECT book,chapter,number,verse FROM continued ORDER BY book,chapter,number");
+QString digest(QSqlDatabase db, bool continued)
 {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     auto field = [&](const QByteArray &bytes) { hash.addData(QByteArray::number(bytes.size())); hash.addData(":"); hash.addData(bytes); };
     QSqlQuery q(db);
-    for (const auto &sql : queries) {
+    for (const auto &sql : continued ? queries + QStringList{continuedQuery} : queries) {
         field(sql.toUtf8()); exec(q, sql);
         while (q.next()) for (int i = 0; i < q.record().count(); ++i) field(q.value(i).toString().toUtf8());
         if (q.lastError().isValid()) fail(q.lastError().text());
@@ -232,7 +235,8 @@ void validate(QSqlDatabase db)
     QMap<QString, QString> metadata;
     exec(q, QStringLiteral("SELECT key,value FROM metadata"));
     while (q.next()) metadata.insert(q.value(0).toString(), q.value(1).toString());
-    if (metadata.value(QStringLiteral("schema")) != QStringLiteral("7")
+    const bool continued = metadata.value(QStringLiteral("schema")) == QStringLiteral("8");
+    if ((!continued && metadata.value(QStringLiteral("schema")) != QStringLiteral("7"))
         || metadata.value(QStringLiteral("source_format")) != QStringLiteral("ao-standard")
         || !validId(metadata.value(QStringLiteral("version_id"))) || metadata.value(QStringLiteral("edition")).isEmpty()
         || metadata.value(QStringLiteral("abbreviation")).isEmpty()) fail(QStringLiteral("Unsupported AO text database metadata."));
@@ -255,6 +259,13 @@ void validate(QSqlDatabase db)
         QStringLiteral("SELECT 1 FROM book_aliases WHERE book NOT IN (SELECT id FROM books) OR length(trim(name))=0 LIMIT 1")
     };
     for (const auto &sql : invalid) { exec(q, sql); if (q.next()) fail(QStringLiteral("AO source-key integrity mismatch.")); }
+    // A joined number has no verse of its own, and is held by a verse in its chapter.
+    if (continued) {
+        exec(q, QStringLiteral("SELECT 1 FROM continued c LEFT JOIN verses v ON v.book=c.book AND v.chapter=c.chapter AND v.number=c.verse "
+                               "LEFT JOIN source_keys s ON s.book=c.book AND s.chapter=c.chapter AND s.number=c.number "
+                               "WHERE v.book IS NULL OR s.book IS NOT NULL OR c.number NOT BETWEEN 1 AND 999 LIMIT 1"));
+        if (q.next()) fail(QStringLiteral("AO joined-verse integrity mismatch."));
+    }
     // SQLite length() counts Unicode scalars; source offsets are UTF-16, so check them in QString.
     exec(q, QStringLiteral("SELECT n.offset,n.text,v.text,n.kind FROM notes n LEFT JOIN verses v ON v.book=n.book AND v.chapter=n.chapter AND v.number=n.verse"));
     while (q.next()) if (q.value(2).isNull() || q.value(0).toInt() < 0 || q.value(0).toInt() > q.value(2).toString().size()
@@ -269,7 +280,7 @@ void validate(QSqlDatabase db)
     int verses = 0;
     while (q.next()) { if (q.value(0).toString().size() > MaxText) fail(QStringLiteral("AO verse limit exceeded.")); ++verses; }
     if (!verses || verses != metadata.value(QStringLiteral("verse_count")).toInt()) fail(QStringLiteral("AO verse count mismatch."));
-    if (digest(db) != metadata.value(QStringLiteral("content_digest"))) fail(QStringLiteral("AO text database content digest mismatch."));
+    if (digest(db,continued) != metadata.value(QStringLiteral("content_digest"))) fail(QStringLiteral("AO text database content digest mismatch."));
 }
 }
 
@@ -313,6 +324,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
             auto books = input.books.toVariantList();
             std::sort(books.begin(), books.end(), [](const QVariant &a, const QVariant &b) { return a.toMap().value(QStringLiteral("order")).toInt() < b.toMap().value(QStringLiteral("order")).toInt(); });
             int ordinal = 0, noteCount = 0, words = 0, canonicalBooks = 0, canonicalChapters = 0, canonicalVerses = 0;
+            bool joined = false;
             for (const auto &value : books) {
                 const auto book = QJsonObject::fromVariantMap(value.toMap());
                 const auto code = string(book.value(QStringLiteral("id")));
@@ -349,6 +361,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                         }
                     }
                     QVector<Verse> verses; QString heading; QVector<Note> subtitleNotes; bool paragraph = true; int previousVerse = 0, chapterVerses = 0;
+                    QMap<int, int> continued;
                     for (const auto &itemValue : array(chapter.value(QStringLiteral("content")), 100000)) {
                         const auto item = itemValue.toObject(); const auto type = string(item.value(QStringLiteral("type")));
                         if (type == QStringLiteral("line_break")) { paragraph = true; continue; }
@@ -374,6 +387,8 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                         if (verse.number <= previousVerse) {
                             if (verses.isEmpty()) fail(QStringLiteral("Duplicate or unordered AO verse."));
                             if (verse.text.isEmpty()) continue;
+                            // Where its number is the part's alone, lookups go to the verse holding it.
+                            if (verse.number != verses.last().number) continued.insert(verse.number, verses.last().number);
                             if (!verses.last().text.isEmpty()) {
                                 auto &whole = verses.last();
                                 join(whole, verse, paragraph);
@@ -425,6 +440,12 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                             insert(db, QStringLiteral("INSERT INTO words_of_jesus VALUES(?,?,?,?,?)"), {id, number, verse.number, span.start, span.end}); ++words;
                         }
                     }
+                    for (const auto &verse : verses) continued.remove(verse.number);
+                    for (auto it = continued.cbegin(); it != continued.cend(); ++it) if (it.key() >= 1) {
+                        if (!joined) exec(q, QStringLiteral("CREATE TABLE continued(book INTEGER,chapter INTEGER,number INTEGER,verse INTEGER NOT NULL,PRIMARY KEY(book,chapter,number)) WITHOUT ROWID"));
+                        joined = true;
+                        insert(db, QStringLiteral("INSERT INTO continued VALUES(?,?,?,?)"), {id, number, it.key(), it.value()});
+                    }
                 }
                 if (integer(book.value(QStringLiteral("totalNumberOfVerses")), 0, 100000) != bookVerses) fail(QStringLiteral("AO book verse count mismatch."));
                 if (!book.value(QStringLiteral("isApocryphal")).toBool()) { ++canonicalBooks; canonicalChapters += chapters.size(); canonicalVerses += bookVerses; }
@@ -435,7 +456,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                 || integer(t.value(QStringLiteral("totalNumberOfChapters")), 1, 80000) != canonicalChapters
                 || integer(t.value(QStringLiteral("totalNumberOfVerses")), 1, 1000000) != canonicalVerses)
                 fail(QStringLiteral("AO translation coverage counts do not match its content."));
-            QMap<QString, QString> metadata = {{QStringLiteral("schema"), QStringLiteral("7")}, {QStringLiteral("source_format"), QStringLiteral("ao-standard")},
+            QMap<QString, QString> metadata = {{QStringLiteral("schema"), joined ? QStringLiteral("8") : QStringLiteral("7")}, {QStringLiteral("source_format"), QStringLiteral("ao-standard")},
                 {QStringLiteral("version_id"), input.edition.id}, {QStringLiteral("edition"), input.edition.name}, {QStringLiteral("abbreviation"), input.edition.abbreviation},
                 {QStringLiteral("copyright"), input.edition.copyright}, {QStringLiteral("paragraph_layout"), QStringLiteral("1")},
                 {QStringLiteral("book_count"), QString::number(ordinal)}, {QStringLiteral("verse_count"), QString::number(result.verseCount)},
@@ -443,7 +464,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                 {QStringLiteral("source_fingerprint"), QString::fromLatin1(input.fingerprint)},
                 {QStringLiteral("ao_translation"), QString::fromUtf8(QJsonDocument(t).toJson(QJsonDocument::Compact))}};
             for (auto it = metadata.cbegin(); it != metadata.cend(); ++it) insert(db, QStringLiteral("INSERT INTO metadata VALUES(?,?)"), {it.key(), it.value()});
-            insert(db, QStringLiteral("INSERT INTO metadata VALUES('content_digest',?)"), {digest(db)});
+            insert(db, QStringLiteral("INSERT INTO metadata VALUES('content_digest',?)"), {digest(db,joined)});
             exec(q, QStringLiteral("COMMIT")); validate(db);
         }
         QFile database(staging);

@@ -7286,6 +7286,25 @@ private slots:
         QCOMPARE(entries.value(prop("paletteResults","currentIndex").toInt()).toMap()["title"].toString(),QString("Jude"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
     }
+    // A verse the version joined to another: the palette goes to the verse
+    // holding it, and says so.
+    void joinedVerseToast() {
+        const auto path = session->filePath("retold.json");
+        QVERIFY(AoFixture::write(path, AoFixture::complete("engret", {AoFixture::book("GEN", 1, {AoFixture::chapter(6, {
+            AoFixture::verse(17, {"Seventeen."}), AoFixture::verse(14, {"Fourteen, told after seventeen."}), AoFixture::verse(18, {"Eighteen."})})})}, "Retold")));
+        bible->importAo(QUrl::fromLocalFile(path));
+        QTRY_VERIFY_WITH_TIMEOUT(!bible->busy(),60000);
+        QCOMPARE(bible->versionId(),QString("engret"));
+        key(Qt::Key_K,Qt::ControlModifier);
+        QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        type("gen 6:14");
+        QCOMPARE(paletteTitles().value(0),QString("Genesis 6:17"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("Genesis 6:17"));
+        QCOMPARE(prop("toast","text").toString(),QString("Genesis 6:14 is part of 6:17 in engret"));
+    }
     void openNotesOn(const QString &passage) {
         reference(passage);
         key(Qt::Key_W); QTRY_VERIFY(item("noteEditor")->hasActiveFocus());

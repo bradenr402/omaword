@@ -495,6 +495,24 @@ private slots:
         here.translation = "nothing"; done = false;
         windows->openRequest(here,[&](auto result) { QVERIFY(!result.ok); QVERIFY(result.error.contains("nothing")); done = true; },false);
         QTRY_VERIFY(done); QCOMPARE(bible->versionId(),first);
+        // A verse that translation joined to another: the one holding it, which the window names.
+        const auto retold = session->filePath("retold.json");
+        QVERIFY(AoFixture::write(retold, AoFixture::complete("eng_ret", {AoFixture::book("GEN", 1, {AoFixture::chapter(6, {
+            AoFixture::verse(17, {"Seventeen."}), AoFixture::verse(14, {"Fourteen, told after seventeen."}), AoFixture::verse(18, {"Eighteen."})})})}, "Retold")));
+        {
+            BibleBackend other;
+            other.importAo(QUrl::fromLocalFile(retold));
+            QTRY_VERIFY_WITH_TIMEOUT(!other.busy(),30000);
+            QVERIFY2(other.ready(),qPrintable(other.error()));
+        }
+        QTRY_VERIFY(!bible->versionIdFor("eng_ret").isEmpty());
+        here.reference = "Genesis 6:14"; here.translation = "eng_ret"; done = false;
+        windows->openRequest(here,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
+        QTRY_VERIFY(done); QCOMPARE(bible->selectionReference(),QString("Genesis 6:17"));
+        QCOMPARE(windows->windowAt(count - 1)->findChild<QObject *>("toast")->property("text").toString(),QString("Genesis 6:14 is part of 6:17 in eng_ret"));
+        here.reference.clear(); here.translation = first; done = false;
+        windows->openRequest(here,[&](auto result) { QVERIFY2(result.ok,qPrintable(result.error)); done = true; },false);
+        QTRY_VERIFY(done); QCOMPARE(bible->versionId(),first);
     }
     // Open beside: a window in another version that follows this one, and
     // that this one follows, until either closes.

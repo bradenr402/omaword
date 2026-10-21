@@ -41,7 +41,7 @@ user's real data for development or tests.
 | Format | Current | Compatibility |
 | --- | --- | --- |
 | `personal.sqlite` | `PRAGMA user_version = 11` | Transactional migrations; newer schemas refuse to open |
-| Text generations (`bible-<UUID>.sqlite`) | Schema 7 (`ao-standard`) | Superseded USFM generations reject; replace through an explicit AO installation |
+| Text generations (`bible-<UUID>.sqlite`) | Schema 8 (`ao-standard`), 7 where no verses are joined | Superseded USFM generations reject; replace through an explicit AO installation |
 | JSON backup | `format: "omaword-backup"`, version 7 | Imports versions 3–7; maximum 32 MiB |
 
 - Personal DB uses WAL and `synchronous=FULL`. Schema 9 migrated bookmarks to
@@ -56,8 +56,9 @@ user's real data for development or tests.
   ribbon are global.
 - AO text tables:
   `metadata`, `books`, `book_aliases`, `source_chapters`, `source_keys`, `verses`,
-  `notes`, `words_of_jesus`, `indents`. Note offsets and text spans
-  are UTF-16 into plain verse text. `source_keys` records omitted verses too.
+  `notes`, `words_of_jesus`, `indents`, and from schema 8 `continued`. Note
+  offsets and text spans are UTF-16 into plain verse text. `source_keys` records
+  omitted verses too.
 - Re-download is explicit in Versions. Never silently rewrite a text generation.
 - Backup 7 includes installed versions' annotations, tag assignments, reading
   places, used tag definitions, and `deskPage`. It excludes Bible text,
@@ -85,7 +86,11 @@ user's real data for development or tests.
 - A verse number that does not increase (Brenton's split verses, Onkelos's
   verse 0, a retelling's reordered verses) continues the verse before it, in
   reading order: after a space, or on a new line across a break or poetry. It
-  has no source key of its own; headings between move up to the verse.
+  has no source key of its own; headings between move up to the verse. A number
+  that is the part's alone goes in `continued` with the verse holding it (schema
+  8, written only then): references to it read as that verse and say so
+  (`joinedNote`: "Genesis 6:14 is part of 6:17 in NEB"), in the palette, links,
+  the lookup window, `omaword open`, and `quote`.
 - Standard AO complete JSON imports English LTR editions. Other catalog languages
   remain discoverable with compatibility reasons; no RTL or numbering conversion.
 - Text is escaped; words-of-Jesus markup is generated locally. Plain fragments
