@@ -757,6 +757,36 @@ private slots:
         QVERIFY(commits.count() > 0); QCOMPARE(downloads.count(),1);
         QVERIFY(QFile::exists(cached.toLocalFile()));
     }
+    // Closing Add version, or Cancel, ends a failed attempt and its alert; a
+    // download still running goes on, its failure waiting for the guide.
+    void catalogAlertEndsWithTheAttempt() {
+        auto openGuide = [&] {
+            QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"import")));
+            QTRY_VERIFY(prop("importGuide","opened").toBool());
+        };
+        auto alertShown = [&] { return item("catalogError")->isVisible() || item("catalogRetry")->isVisible(); };
+        openGuide();
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engojb")));
+        catalog->fail("Synthetic validation failure");
+        QCOMPARE(prop("catalogError","text").toString(),QString("Synthetic validation failure"));
+        QVERIFY(alertShown());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
+        openGuide();
+        QVERIFY(prop("catalogError","text").toString().isEmpty()); QVERIFY(!alertShown());
+        QVERIFY(window->property("downloadId").toString().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engojb")));
+        catalog->fail("Synthetic validation failure"); QVERIFY(alertShown());
+        QVERIFY(QMetaObject::invokeMethod(object("catalogCancel"),"clicked"));
+        QVERIFY(prop("catalogError","text").toString().isEmpty()); QVERIFY(!alertShown());
+        QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engojb")));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
+        QVERIFY(catalog->busy); QCOMPARE(window->property("downloadId").toString(),QString("engojb"));
+        catalog->fail("Synthetic late failure");
+        openGuide();
+        QCOMPARE(prop("catalogError","text").toString(),QString("Synthetic late failure")); QVERIFY(alertShown());
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("importGuide","visible").toBool());
+        openGuide(); QVERIFY(!alertShown());
+    }
     void catalogCompletionGuardsDraftAndSharedImport() {
         reference("John 3:16");
         QVERIFY(QMetaObject::invokeMethod(window,"installVersion",Q_ARG(QVariant,"engnet")));

@@ -118,10 +118,16 @@ ApplicationWindow {
         bible.clearError(); bible.importAo(file)
     }
     function cancelDownload() {
+        dismissDownload()
+        catalog.cancel()
+    }
+    // Forget a download attempt and the alert it left in Add version.
+    function dismissDownload() {
         downloadId = ""
         pendingDownload = ""
         downloadMessage = ""
-        catalog.cancel()
+        catalog.clearError()
+        bible.clearError()
     }
     function importDownloaded() {
         if (closingWindow || !pendingDownload.toString().length) return
@@ -10437,6 +10443,9 @@ ApplicationWindow {
         // Focus at once, while the modal is still fading in.
         onVisibleChanged: if (visible) { catalogSearch.text = ""; catalogIndex = 0; catalogSearch.forceActiveFocus() }
         onClosed: {
+            // Closing ends an attempt, alert and all; a download still running
+            // goes on, its outcome shown when the guide opens again.
+            if (!catalog.busy) app.dismissDownload()
             const choose = choosePending
             choosePending = false
             if (choose) Qt.callLater(function() {
