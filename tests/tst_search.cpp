@@ -42,6 +42,19 @@ private slots:
         QCoreApplication::setOrganizationName("OmaWordTests");
         QCoreApplication::setApplicationName("omaword-search-test");
     }
+    // Matches are written as references are: a one-chapter book's without its
+    // chapter (BibleBooks::reference).
+    void oneChapterReferences() {
+        const auto reference = [](int book, const QString &name, int number, const QString &query, bool pattern = false) {
+            const Chapter c{book,number,name,{{3,"first light"},{4,"second light"}}};
+            return (pattern ? findPattern(c,query) : find(c,query)).matches.value(0).toMap()["reference"].toString();
+        };
+        QCOMPARE(reference(65,"Jude",1,"first"),QString("Jude 3"));
+        QCOMPARE(reference(65,"Jude",1,"light second"),QString("Jude 3–4"));
+        QCOMPARE(reference(65,"Jude",1,"first",true),QString("Jude 3"));
+        QCOMPARE(reference(84,"Psalm 151",1,"first"),QString("Psalm 151:3"));
+        QCOMPARE(reference(43,"John",3,"first"),QString("John 3:3"));
+    }
     void literalUnicodeOffsets() {
         const auto ascii = chapter({"ONE\r\n\t  Two", "THREE"});
         const auto asciiRows = find(ascii,"one two three").matches;

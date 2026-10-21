@@ -303,13 +303,40 @@ private slots:
         auto reads = [&](const QList<QPair<QString,QString>> &cases) {
             for (const auto &[typed, read] : cases) QCOMPARE(bible->resolveReference(typed)["reference"].toString(), read);
         };
+        auto links = [&](const QString &text) {
+            QStringList found;
+            for (const auto &row : bible->passageLinks(text)) found << row.toMap()["reference"].toString();
+            return found;
+        };
         install(separate);
-        reads({{"Psalm 151","Psalm 151 1"},{"Psalm 151:3","Psalm 151 1:3"},{"Psalm 151:3-5","Psalm 151 1:3–5"},{"Ps 151 3","Psalm 151 1:3"},
-               {"Psalms 151","Psalm 151 1"},{"Psalm 23","Psalms 23"},{"Psalm 150:2","Psalms 150:2"}});
-        QCOMPARE(bible->referenceCandidates("psalm 151:3").value(0).toMap()["reference"].toString(), QString("Psalm 151 1:3"));
+        reads({{"Psalm 151","Psalm 151"},{"Psalm 151:3","Psalm 151:3"},{"Psalm 151:3-5","Psalm 151:3–5"},{"Ps 151 3","Psalm 151:3"},
+               {"Psalms 151","Psalm 151"},{"Psalm 23","Psalms 23"},{"Psalm 150:2","Psalms 150:2"}});
+        QCOMPARE(bible->referenceCandidates("psalm 151:3").value(0).toMap()["reference"].toString(), QString("Psalm 151:3"));
+        QCOMPARE(links("Sing Psalm 151:3, then Psalm 151."), (QStringList{"Psalm 151:3","Psalm 151"}));
         install(numbered);
         reads({{"Psalm 151","Psalms 151"},{"Psalm 151:3","Psalms 151:3"},{"Ps 151","Psalms 151"}});
         QCOMPARE(bible->referenceCandidates("psalm 151").value(0).toMap()["reference"].toString(), QString("Psalms 151"));
+        QCOMPARE(links("Sing Psalm 151:3, then Psalm 151."), (QStringList{"Psalms 151:3","Psalms 151"}));
+    }
+    // A one-chapter book's references leave its chapter out ("Jude 3–5"; the
+    // chapter is "Jude"), everywhere they are written, and read back the same:
+    // "Jude 1" is verse 1.
+    void oneChapterReferences() {
+        install(net);
+        QVERIFY(bible->navigate("Jude")); QCOMPARE(bible->passage(),QString("Jude")); QCOMPARE(bible->selectedStart(),0);
+        QVERIFY(bible->recordHistory()); QCOMPARE(bible->history().first().toMap()["reference"].toString(),QString("Jude"));
+        for (const auto &[typed, read] : QList<QPair<QString,QString>>{{"Jude 3","Jude 3"},{"Jude 1","Jude 1"},{"Jude 3-5","Jude 3–5"},
+                                                                       {"Jude 1:4","Jude 4"},{"jud5","Jude 5"},{"Jude 35–Revelation 22:2","Jude 35–Revelation 22:2"}}) {
+            QVERIFY2(bible->navigate(typed),qPrintable(typed + ": " + bible->error())); QCOMPARE(bible->selectionReference(),read);
+            QVERIFY(bible->navigate(read)); QCOMPARE(bible->selectionReference(),read);
+        }
+        QVERIFY(bible->navigate("Jude 3-5")); QVERIFY(bible->copySelection().endsWith(QStringLiteral("\u2014 Jude 3–5")));
+        bible->setNoteText("One chapter"); QCOMPARE(bible->collection().value(0).toMap()["reference"].toString(),QString("Jude 3–5"));
+        QCOMPARE(bible->readPassage("Jude 3").value("reference").toString(),QString("Jude 3"));
+        QStringList links;
+        for (const auto &row : bible->passageLinks("See Jude 3–5, Jude 7, and Jude 1; John 3–4 is a chapter range."))
+            links << row.toMap()["reference"].toString();
+        QCOMPARE(links,(QStringList{"Jude 3–5","Jude 7","Jude 1"}));
     }
     void aliasesAndPurePreview() {
         install(ojb);
@@ -323,7 +350,7 @@ private slots:
         const auto verses = bible->verses();
         QSignalSpy navigation(bible.get(),&BibleBackend::navigationChanged);
         const auto result = bible->resolveReference("Jude 5-7");
-        QVERIFY(result["valid"].toBool()); QCOMPARE(result["reference"].toString(),QString("Jude 1:5–7"));
+        QVERIFY(result["valid"].toBool()); QCOMPARE(result["reference"].toString(),QString("Jude 5–7"));
         for (const QString invalid : {"John 0", "John 3:0", "John 3:99", "John 4:2-3:35", "J 1", "MRK 7:16", "John;DROP TABLE"})
             QVERIFY2(!bible->resolveReference(invalid)["valid"].toBool(),qPrintable(invalid));
         QCOMPARE(bible->selectionReference(),reference); QCOMPARE(bible->verses(),verses);
@@ -350,14 +377,14 @@ private slots:
         QCOMPARE(first("rev 22 14-20"),QString("Revelation 22:14–20"));
         QCOMPARE(first("rev22"),QString("Revelation 22"));
         QCOMPARE(first("mk7"),QString("Mark 7"));
-        QCOMPARE(first("jud5"),QString("Jude 1:5"));
+        QCOMPARE(first("jud5"),QString("Jude 5"));
         // A digit run splits into chapter:verse only where that verse exists.
         QCOMPARE(refs("jn3"),QStringList{"John 3"});
         QCOMPARE(refs("jn336"),QStringList{"John 3:36"});
         QVERIFY(refs("jn337").isEmpty());
         QCOMPARE(first("gen12"),QString("Genesis 1:2"));
         // Ambiguity: ranked by book similarity, then canonical order.
-        QCOMPARE(refs("j4"),(QStringList{"John 4","Jude 1:4"}));
+        QCOMPARE(refs("j4"),(QStringList{"John 4","Jude 4"}));
         QCOMPARE(refs("jn4").value(0),QString("John 4"));
         QCOMPARE(first("mal4"),QString("Malachi 4"));
         QCOMPARE(first("ma4"),QString("Malachi 4"));

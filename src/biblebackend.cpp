@@ -45,6 +45,14 @@ QString timestamp() { return QDateTime::currentDateTimeUtc().toString(Qt::ISODat
 int verseKey(int book, int chapter, int verse) { return (book * 1000 + chapter) * 1000 + verse; }
 // Book IDs run 1 to the last known book (BibleBooks).
 int lastBook() { return int(BibleBooks::canon().size()); }
+// A passage from one verse to another: "John 3:16–18", "John 3:16–4:2",
+// "Philemon 25–Hebrews 1:2".
+QString rangeText(int b, const QString &name, int c, int v, int eb, const QString &endName, int ec, int ev)
+{
+    if (b == eb && c == ec) return BibleBooks::reference(b,name,c,v,ev);
+    return BibleBooks::reference(b,name,c,v) + QChar(0x2013)
+        + (b == eb ? QString("%1:%2").arg(ec).arg(ev) : BibleBooks::reference(eb,endName,ec,ev));
+}
 QString aliasKey(QString name) {
     name = name.toCaseFolded();
     name.remove(QRegularExpression("[\\s.]+"));
@@ -261,15 +269,8 @@ struct TagBible {
             q.finish();
         }
         if (out.value("_order").toLongLong() > out.value("_endOrder").toLongLong()) return false;
-        QString ref = QString("%1 %2:%3").arg(names[0]).arg(out["chapter"].toInt()).arg(out["start"].toInt());
-        if (out["_order"] != out["_endOrder"]) {
-            ref += QChar(0x2013);
-            if (out["book"] != out["endBook"]) ref += names[1] + ' ';
-            if (out["book"] != out["endBook"] || out["chapter"] != out["endChapter"])
-                ref += QString::number(out["endChapter"].toInt()) + ':';
-            ref += QString::number(out["end"].toInt());
-        }
-        out["reference"] = ref;
+        out["reference"] = rangeText(out["book"].toInt(),names[0],out["chapter"].toInt(),out["start"].toInt(),
+                                     out["endBook"].toInt(),names[1],out["endChapter"].toInt(),out["end"].toInt());
         *result = out; return true;
     }
     // The first verse's text, bounded: a one-line glimpse of the passage.
@@ -344,14 +345,7 @@ QString canonicalReference(const QVariantMap &s)
     };
     const int b = s.value("book").toInt(), c = s.value("chapter").toInt(), v = s.value("start").toInt();
     const int eb = s.value("endBook").toInt(), ec = s.value("endChapter").toInt(), ev = s.value("end").toInt();
-    QString ref = QString("%1 %2:%3").arg(name(b)).arg(c).arg(v);
-    if (b != eb || c != ec || v != ev) {
-        ref += QChar(0x2013);
-        if (b != eb) ref += name(eb) + ' ';
-        if (b != eb || c != ec) ref += QString::number(ec) + ':';
-        ref += QString::number(ev);
-    }
-    return ref;
+    return rangeText(b,name(b),c,v,eb,name(eb),ec,ev);
 }
 bool rangesOverlap(const QVariantMap &a, const QVariantMap &b)
 {
@@ -1512,7 +1506,7 @@ void BibleBackend::reloadHistory()
                 const bool chapterOnly = !row["start"].toInt();
                 const int book = row["book"].toInt(), chapter = row["chapter"].toInt();
                 QString reference = chapterOnly
-                    ? QString("%1 %2").arg(book <= BibleBooks::canon().size() ? QString::fromUtf8(BibleBooks::canon()[book - 1].name) : QString::number(book)).arg(chapter)
+                    ? BibleBooks::reference(book,book <= BibleBooks::canon().size() ? QString::fromUtf8(BibleBooks::canon()[book - 1].name) : QString::number(book),chapter)
                     : canonicalReference(row);
                 bool available = false;
                 if (abbreviations.contains(id)) {
@@ -1526,7 +1520,7 @@ void BibleBackend::reloadHistory()
                             v.addBindValue(book); v.addBindValue(chapter);
                             if (v.exec() && v.next() && !v.isNull(1)) {
                                 available = true;
-                                reference = QString("%1 %2").arg(v.value(0).toString()).arg(chapter);
+                                reference = BibleBooks::reference(book,v.value(0).toString(),chapter);
                                 row["firstVerse"] = v.value(1).toInt(); row["lastVerse"] = v.value(2).toInt();
                             }
                         } else {
@@ -1742,12 +1736,7 @@ QString BibleBackend::reference(int b, int c, int start, int end) const
     if (b < 1 || b > BibleBooks::canon().size()) return {};
     QString name = QString::fromUtf8(BibleBooks::canon()[b - 1].name);
     for (const auto &row : m_books) if (row.toMap()["id"].toInt() == b) { name = row.toMap()["name"].toString(); break; }
-    QString result = QString("%1 %2").arg(name).arg(c);
-    if (start) {
-        result += ':' + QString::number(start);
-        if (end > start) result += QChar(0x2013) + QString::number(end);
-    }
-    return result;
+    return BibleBooks::reference(b,name,c,start,end);
 }
 QString BibleBackend::passage() const { return reference(m_book, m_chapter); }
 QString BibleBackend::rangeReference(int start, int end) const
@@ -2982,11 +2971,12 @@ QVector<BibleBackend::Link> BibleBackend::findLinks(const QString &text) const
     QVector<Link> links;
     if (!m_ready || text.isEmpty()) return links;
     // Capitalized book words (a leading 1–3 allowed, "of"/"the" inside names),
-    // whitespace, then chapter or chapter:verse(-verse). Chapter ranges and
+    // whitespace, then chapter or chapter:verse(-verse), or a one-chapter
+    // book's verse(-verse) ("Jude 3–5"; "Psalm 151:3"). Chapter ranges and
     // cross-chapter ranges never link.
     static const QRegularExpression pattern(QStringLiteral(
         "(?<![\\p{L}\\p{N}])((?:[1-3]\\s?)?\\p{Lu}\\p{L}*\\.?(?:\\s+(?:of|the|\\p{Lu}\\p{L}*\\.?)){0,3})"
-        "\\s+(\\d{1,3})(?::(\\d{1,3})(?:\\s*[-\\x{2013}]\\s*(\\d{1,3}))?)?(?![\\p{L}\\p{N}]|:\\d|[-\\x{2013}]\\d)"));
+        "\\s+(\\d{1,3})(?::(\\d{1,3}))?(?:\\s*[-\\x{2013}]\\s*(\\d{1,3}))?(?![\\p{L}\\p{N}]|:\\d|[-\\x{2013}]\\d)"));
     static const QRegularExpression word("\\S+");
     auto matches = pattern.globalMatch(text);
     while (matches.hasNext()) {
@@ -2998,14 +2988,19 @@ QVector<BibleBackend::Link> BibleBackend::findLinks(const QString &text) const
         for (const qsizetype offset : starts) {
             const QString name = bookText.mid(offset);
             if (!name[0].isDigit() && !name[0].isUpper()) continue;
-            const int b = resolveBook(name);
+            int b = resolveBook(name), c = match.captured(2).toInt(), start = match.captured(3).toInt();
+            const bool ranged = !match.captured(4).isEmpty();
+            const QVariantList one{1};
+            // "Psalm 151:3": a one-chapter book named with a number, its verse after the colon.
+            if (const int numbered = resolveBook(name + ' ' + match.captured(2)); numbered && chaptersForBook(numbered) == one) { b = numbered; c = 1; }
+            // "Jude 3–5": a one-chapter book's number is its verse.
+            else if (b && !start && chaptersForBook(b) == one && (c != 1 || BibleBooks::oneChapter(b))) { start = c; c = 1; }
             if (!b) continue;
-            const int c = match.captured(2).toInt();
-            int first = 0, last = 0, start = 0, end = 0;
-            if (match.captured(3).isEmpty()) { if (!chapterBounds(b,c,&first,&last)) break; }
+            if (ranged && !start) break;
+            int first = 0, last = 0, end = 0;
+            if (!start) { if (!chapterBounds(b,c,&first,&last)) break; }
             else {
-                start = match.captured(3).toInt();
-                end = match.captured(4).isEmpty() ? start : match.captured(4).toInt();
+                end = ranged ? match.captured(4).toInt() : start;
                 if (!validRange(b,c,start,end)) break;
                 first = absoluteVerse(b,c,start); last = absoluteVerse(b,c,end);
                 if (!first || !last || first > last) break;
@@ -3112,7 +3107,9 @@ bool BibleBackend::parseReference(QString input, int *book, int *chapter, int *f
                 if (start < 1 || end < 1) return fail("Verse numbers must be greater than zero.");
                 if (!match.captured(3).isEmpty()) endChapter = match.captured(3).toInt();
                 else endChapter = c;
-            } else if (oneChapter && c != 1) {
+            } else if (oneChapter && (c != 1 || BibleBooks::oneChapter(b))) {
+                // A one-chapter book's number is its verse: "Jude 3", and
+                // "Jude 1" as references write verse 1.
                 if (c < 1) return fail("Verse numbers must be greater than zero.");
                 start = end = c; c = 1;
             }

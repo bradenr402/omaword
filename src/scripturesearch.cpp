@@ -1,4 +1,5 @@
 #include "scripturesearch.h"
+#include "biblebooks.h"
 
 #include <QMap>
 #include <QDir>
@@ -289,7 +290,7 @@ Result scanPattern(const PreparedChapter &prepared, const QRegularExpression &pa
         if (segments.isEmpty()) continue;
         result.matches.append(QVariantMap{{QStringLiteral("book"),chapter.book},{QStringLiteral("chapter"),chapter.number},{QStringLiteral("start"),number},
             {QStringLiteral("endBook"),chapter.book},{QStringLiteral("endChapter"),chapter.number},{QStringLiteral("end"),number},
-            {QStringLiteral("reference"),chapter.name + ' ' + QString::number(chapter.number) + ':' + QString::number(number)},
+            {QStringLiteral("reference"),BibleBooks::reference(chapter.book,chapter.name,chapter.number,number)},
             {QStringLiteral("segments"),segments},{QStringLiteral("text"),text.toString()},
             {QStringLiteral("displaySegments"),displaySegments},{QStringLiteral("bookName"),chapter.name}});
     }
@@ -373,8 +374,7 @@ Result scan(const PreparedChapter &prepared, const Query &query, bool syntax, co
             }
         }
         const int first = chapter.verses[range.start].number, last = chapter.verses[range.end].number;
-        QString reference = chapter.name + ' ' + QString::number(chapter.number) + ':' + QString::number(first);
-        if (first != last) reference += QChar(0x2013) + QString::number(last);
+        const QString reference = BibleBooks::reference(chapter.book,chapter.name,chapter.number,first,last);
         result.matches.append(QVariantMap{{QStringLiteral("book"),chapter.book},{QStringLiteral("chapter"),chapter.number},{QStringLiteral("start"),first},
             {QStringLiteral("endBook"),chapter.book},{QStringLiteral("endChapter"),chapter.number},{QStringLiteral("end"),last},{QStringLiteral("reference"),reference},
             {QStringLiteral("segments"),segments},{QStringLiteral("text"),source.mid(starts[range.start],ends[range.end]-starts[range.start])},
@@ -406,7 +406,7 @@ Result findPattern(const Chapter &chapter, const QString &input, const Cancellat
             const auto match = it.next();
             if (match.capturedLength() <= 0) continue;
             const int start = int(match.capturedStart()), length = int(match.capturedLength());
-            const QString reference = chapter.name + ' ' + QString::number(chapter.number) + ':' + QString::number(verse.number);
+            const QString reference = BibleBooks::reference(chapter.book,chapter.name,chapter.number,verse.number);
             result.matches.append(QVariantMap{{QStringLiteral("book"),chapter.book},{QStringLiteral("chapter"),chapter.number},
                 {QStringLiteral("start"),verse.number},{QStringLiteral("endBook"),chapter.book},{QStringLiteral("endChapter"),chapter.number},
                 {QStringLiteral("end"),verse.number},{QStringLiteral("reference"),reference},

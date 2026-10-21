@@ -339,6 +339,8 @@ public:
     Q_INVOKABLE bool navigate(QString reference);
     // Pure preview: {valid, reference, error}; uses the current book for relative input.
     Q_INVOKABLE QVariantMap resolveReference(QString reference) const;
+    // A place written as references are ("John 3:16", "Jude 3", "Jude").
+    Q_INVOKABLE QString passageReference(int book, int chapter, int start = 0, int end = 0) const { return reference(book,chapter,start,end); }
     // Shared fuzzy parser (palette, note [[ suggestions): ranked candidates
     // {reference, book, chapter, start, end, score}, most similar first. Accepts
     // compact input (jn316, 1co13, ps23, rev 3 14-22) besides every exact form.

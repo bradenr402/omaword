@@ -317,10 +317,11 @@ class UiTest : public QObject
         for (int id : order) {
             const auto &book = books[id - 1];
             // Only interaction-relevant boundaries are specialized. The remaining
-            // original chapters deliberately do not reproduce a numbering profile.
+            // original chapters deliberately do not reproduce a numbering profile;
+            // one-chapter books have one, as in every edition.
             const int chapters = qEnvironmentVariableIsSet("OMAWORD_UI_FAST_FIXTURE") && !sourceOrder ? 4 : id == 19 ? 150 : id == 40 ? 28 : id == 43 ? 21
                 : id == 46 ? 13 : id == 52 ? 5 : id == 53 ? 3 : id == 69 ? 16
-                : QString::fromLatin1(book.code) == "REV" ? 22 : 4;
+                : QString::fromLatin1(book.code) == "REV" ? 22 : BibleBooks::oneChapter(id) ? 1 : 4;
             QJsonArray chapterList;
             for (int chapter = id == 69 ? 10 : 1; chapter <= chapters; ++chapter) {
                 const int verses = id == 19 && chapter == 119 ? 176 : id == 40 && chapter == 17 ? 27
@@ -7236,7 +7237,7 @@ private slots:
         type("j4");
         const auto titles = paletteTitles();
         QVERIFY2(titles.size() >= 4,qPrintable(titles.join(", ")));
-        // Which J books have a chapter 4 depends on the fixture (NET: no Joel 4 or Jude 4).
+        // Which J books have a 4 depends on the fixture (NET: no Joel 4); Jude's is its verse 4.
         if (netSource().isEmpty()) QCOMPARE(titles.mid(0,4),(QStringList{"Job 4","Joel 4","John 4","Jude 4"}));
         QCOMPARE(titles.value(0),QString("Job 4"));
         for (const auto &title : titles.mid(0,4)) QVERIFY2(title.startsWith('J') && title.endsWith('4'),qPrintable(titles.join(", ")));
@@ -7257,6 +7258,38 @@ private slots:
         type("Rev 22:1-5"); QCOMPARE(paletteTitles().value(0),QString("Revelation 22:1–5"));
         key(Qt::Key_A,Qt::ControlModifier); type("1 co");
         QCOMPARE(paletteTitles().value(0),QString("1 Corinthians"));
+        key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+    }
+    // A one-chapter book: its verses without the chapter ("Philemon 7"), the
+    // chapter the book alone, and no grid to choose it from.
+    void oneChapterBooks() {
+        auto openPalette = [&] {
+            key(Qt::Key_K,Qt::ControlModifier);
+            QTRY_VERIFY(prop("passagePalette","opened").toBool());
+            QTRY_VERIFY(item("referenceInput")->hasActiveFocus());
+        };
+        openPalette();
+        type("phil 7");
+        QCOMPARE(paletteTitles().value(0),QString("Philemon 7"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->selectionReference(),QString("Philemon 7"));
+        QCOMPARE(prop("chapterTitle","text").toString(),QString("Philemon"));
+        // Choosing the book opens it.
+        openPalette();
+        type("jude");
+        const auto row = callJs("paletteEntries").toList().value(0).toMap();
+        QCOMPARE(row["title"].toString(),QString("Jude")); QCOMPARE(row["hint"].toString(),QString("1 chapter"));
+        QCOMPARE(prop("referencePreview","text").toString(),QString("Jude"));
+        key(Qt::Key_Return);
+        QTRY_VERIFY(!prop("passagePalette","visible").toBool());
+        QCOMPARE(bible->passage(),QString("Jude"));
+        // The chapter title's list is the books, Jude chosen.
+        QVERIFY(QMetaObject::invokeMethod(window,"runCommand",Q_ARG(QVariant,"chapterList")));
+        QTRY_VERIFY(prop("passagePalette","opened").toBool());
+        QVERIFY(!window->property("paletteChapterGrid").toBool());
+        const auto entries = callJs("paletteEntries").toList();
+        QCOMPARE(entries.value(prop("paletteResults","currentIndex").toInt()).toMap()["title"].toString(),QString("Jude"));
         key(Qt::Key_Escape); QTRY_VERIFY(!prop("passagePalette","visible").toBool());
     }
     void openNotesOn(const QString &passage) {

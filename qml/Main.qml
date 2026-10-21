@@ -2982,7 +2982,7 @@ ApplicationWindow {
         const scope = actionScope()
         const inside = hasSelection && number >= bible.selectedStart && number <= bible.selectedEnd
         const first = inside ? bible.selectedStart : number, last = inside ? bible.selectedEnd : number
-        const reference = inside ? bible.selectionReference : bible.passage + ":" + number
+        const reference = inside ? bible.selectionReference : bible.passageReference(bible.book, bible.chapter, number)
         // The selection API preserves an inside-hit range. copyVerse focuses an
         // outside hit only after the backend has successfully read/copied it.
         const copied = inside ? bible.copySelection(plainText) : bible.copyVerse(number, plainText)
@@ -3430,7 +3430,7 @@ ApplicationWindow {
             return "Open a note first · " + keyText("notes")
         if (action.id === "noteLinkedFrom" && !linkedFrom.length) return "No other notes link here"
         if (action.id === "compare" && hasSelection && bible.versions.length < 2) return "Add another version to compare"
-        if (action.id === "peek" && hasSelection) return "No footnotes on " + bible.passage + ":" + bible.cursorVerse
+        if (action.id === "peek" && hasSelection) return "No footnotes on " + bible.passageReference(bible.book, bible.chapter, bible.cursorVerse)
         if (action.id === "undo" && !bible.canUndo) return "Nothing to undo"
         if (action.id === "redo" && !bible.canRedo) return "Nothing to redo"
         if (action.id === "openBeside" && bible.ready && bible.versions.length < 2) return "Add another version to read beside"
@@ -3652,7 +3652,7 @@ ApplicationWindow {
         const books = Array.from(bible.books)
         const at = books.findIndex(function(book) { return book.id === bible.book })
         if (at < 0) return { previous: null, next: null }
-        function entry(book, chapter) { return { book: book.id, chapter: chapter, title: book.name + " " + chapter } }
+        function entry(book, chapter) { return { book: book.id, chapter: chapter, title: bible.passageReference(book.id, chapter) } }
         const chapters = Array.from(books[at].chapterNumbers || [])
         const index = chapters.indexOf(bible.chapter)
         let previous = null, next = null
@@ -4081,7 +4081,7 @@ ApplicationWindow {
         const notes = chapterFootnotes
         peekIndex = index
         const note = notes[index]
-        peekCard.title = (note.kind === "fe" ? "Endnote " : "Footnote ") + footnoteMark(note.caller) + " · " + bible.passage + ":" + note.verse
+        peekCard.title = (note.kind === "fe" ? "Endnote " : "Footnote ") + footnoteMark(note.caller) + " · " + bible.passageReference(bible.book, bible.chapter, note.verse)
             + (notes.length > 1 ? " · " + (index + 1) + " of " + notes.length : "")
         peekCard.body = note.text
     }
@@ -4964,13 +4964,20 @@ ApplicationWindow {
         referenceInput.forceActiveFocus()
     }
     // The Passage palette at the reader's book, its chapter grid with the
-    // current one chosen (clicking the chapter title).
+    // current one chosen (clicking the chapter title); a book of one chapter
+    // has no grid, so the books, it chosen.
     function openChapterList() {
         if (!bible.ready || bible.busy) { rejected(unavailableReason("books")); return }
         const book = Array.from(bible.books).find(function(b) { return b.id === bible.book })
         if (!book) { rejected(); return }
         openPalette(false)
         if (!passagePalette.visible) return
+        if (book.chapterNumbers.length === 1) {
+            paletteHistory = false
+            paletteBook = book.id
+            backToBooks()
+            return
+        }
         paletteBookName = book.name
         paletteBook = book.id
         referenceInput.text = ""
@@ -6548,12 +6555,15 @@ ApplicationWindow {
         const books = Array.from(bible.books).filter(function(b) {
             return !query || b.name.toLowerCase().indexOf(query) >= 0
                 || b.code.toLowerCase().indexOf(query) >= 0 || b.abbreviation.toLowerCase().indexOf(query) >= 0
-                || (resolved && resolved.valid && resolved.reference === b.name + " " + b.chapterNumbers[0])
+                || (resolved && resolved.valid && resolved.reference === bible.passageReference(b.id, b.chapterNumbers[0]))
         })
         // A rule between the Testaments: under the book before the New's first (Matthew, as a rule).
         const firstNew = books.findIndex(function(b) { return b.id >= 40 && b.id <= 66 })
+        // A book of one chapter opens it (Jude), with no grid to choose it from.
         return (query ? [] : recentPassages()).concat(books.map(function(b, i) {
-            return { title: b.name, hint: b.chapters + " chapters", book: b.id, chapter: 0, beforeNew: i === firstNew - 1 }
+            const one = b.chapterNumbers.length === 1
+            return { title: b.name, hint: one ? "1 chapter" : b.chapters + " chapters", book: b.id, chapter: one ? b.chapterNumbers[0] : 0,
+                oneChapter: one, beforeNew: i === firstNew - 1 }
         }))
     }
     // "Continue" at the ribbon, up to five History passages, never the one
@@ -6732,7 +6742,7 @@ ApplicationWindow {
         const book = paletteBook, history = paletteHistory
         resetBooks()
         const row = Array.from(paletteResults.model).findIndex(function(entry) {
-            return history ? !!entry.allHistory : entry.book === book && !entry.chapter && !entry.recent })
+            return history ? !!entry.allHistory : entry.book === book && (!entry.chapter || entry.oneChapter) && !entry.recent })
         if (row > 0) {
             paletteArrowUsed = true
             paletteResults.currentIndex = row

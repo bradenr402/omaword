@@ -1,5 +1,6 @@
 #include "biblebooks.h"
 #include <QRegularExpression>
+#include <QStringList>
 
 namespace BibleBooks {
 const QVector<Book> &canon()
@@ -58,6 +59,25 @@ int codeId(const QString &code)
     for (int i = 0; i < canon().size(); ++i)
         if (code == QLatin1String(canon()[i].code)) return i + 1;
     return 0;
+}
+
+bool oneChapter(int id)
+{
+    // As every edition in AO's catalog has them (Daniel's additions and the
+    // Letter of Jeremiah as books of their own).
+    static const QStringList codes{"OBA", "PHM", "2JN", "3JN", "JUD", "S3Y", "SUS", "BEL", "MAN", "LJE", "PS2"};
+    return id >= 1 && id <= canon().size() && codes.contains(QLatin1String(canon()[id - 1].code));
+}
+
+QString reference(int book, const QString &name, int chapter, int start, int end)
+{
+    const bool whole = chapter == 1 && oneChapter(book);
+    QString result = whole ? name : name + ' ' + QString::number(chapter);
+    if (!start) return result;
+    result += whole && !(name.isEmpty() || name.back().isDigit()) ? ' ' : ':';
+    result += QString::number(start);
+    if (end > start) result += QChar(0x2013) + QString::number(end);
+    return result;
 }
 
 int bookId(QString name)

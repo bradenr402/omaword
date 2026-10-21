@@ -369,6 +369,12 @@ user's real data for development or tests.
   Passage links are narrower: capitalized names/recognized abbreviations plus
   existing chapter/verse ranges; no compact or cross-chapter links. Display
   references must never substitute for canonical scope identity.
+- References are written through `BibleBooks::reference` (the backend, search,
+  QML by `passageReference`): the eleven books with one chapter in every
+  edition (`BibleBooks::oneChapter`) leave it out, "Jude 3–5", the chapter being
+  "Jude", and a name ending in a number keeps a colon, "Psalm 151:3". Parsing
+  and links read them back ("Jude 1" is verse 1). A book the version has wins
+  over one it lacks ("Psalm 151" is Psalms 151 in a Septuagint numbering it so).
 - See also retains bundled OpenBible.info references and tagged related passages;
   AO source cross-references and parallel passages are not imported. Absent/self targets hide.
   OpenBible uses KJV numbering, not automatic versification conversion.
