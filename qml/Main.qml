@@ -8310,6 +8310,9 @@ ApplicationWindow {
                             contentWidth: availableWidth
                             TextArea {
                                 id: deskEditor
+                                // Its placeholder must not widen it: in a Flickable whose
+                                // width it follows, that is a binding loop (Qt 6.12).
+                                implicitWidth: 0
                                 ContextMenu.menu: null
                                 ContextMenu.onRequested: function(position) { app.openTextMenu(deskEditor, position) }
                                 objectName: "deskEditor"
@@ -8622,6 +8625,9 @@ ApplicationWindow {
                                     // The note, written in place (w); saves as you type, esc is done.
                                     TextArea {
                                         id: markEditor
+                                        // Its placeholder must not widen it: in a Flickable
+                                        // whose width it follows, that is a binding loop (Qt 6.12).
+                                        implicitWidth: 0
                                         objectName: savedEntry.editing ? "markEditor" : ""
                                         visible: savedEntry.editing
                                         Layout.fillWidth: true
