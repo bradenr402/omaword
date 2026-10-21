@@ -73,8 +73,11 @@ Item {
     // readerScale (tests) falls back to its plain scale.
     readonly property real readerScale: controller.readerScale > 0 ? controller.readerScale
         : controller.scale > 0 ? controller.scale : 1
-    readonly property string annotationKey: JSON.stringify(verses) + JSON.stringify(backend.collection)
-        + book + ":" + chapterNumber
+    // The marks moved or changed (a change to the text rebuilds it): only
+    // the verses' ranges (stringifying whole rows, or the version's every
+    // mark, took a long chapter some 10 ms of each change).
+    readonly property string annotationKey: JSON.stringify(Array.from(verses).map(function(v) {
+        return [v.number, v.highlightRanges, v.noteRanges, v.tagRanges] })) + book + ":" + chapterNumber
     onAnnotationKeyChanged: if (!destroying) geometryTimer.restart()
     function updateAnnotations() {
         if (destroying) return
