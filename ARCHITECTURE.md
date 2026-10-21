@@ -86,6 +86,7 @@ user's real data for development or tests.
   prose paragraphs. Chapter separators establish paragraph starts.
 - Superscriptions and inline headings use the existing heading model; subtitle
   notes anchor at the following retained verse's offset zero, outside copied text.
+  A heading after a chapter's last verse (the KJV's subscriptions) is dropped.
   Empty verses retain source keys but have no reader rows. Explicit zero-verse
   chapters retain source metadata but stay out of navigation; empty books reject.
 - Limits: 64 MiB input/download, nesting 32, 80 known books, 65,536 UTF-16 units

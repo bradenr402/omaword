@@ -34,6 +34,23 @@ private slots:
         }
         QSqlDatabase::removeDatabase("ao-empty");
     }
+    // A heading after a chapter's last verse is dropped, its notes with it
+    // (the KJV's subscriptions to Paul's letters).
+    void trailingHeadingIsDropped() {
+        const auto source = directory.filePath("subscription.json"), target = directory.filePath("subscription.sqlite");
+        QVERIFY(AoFixture::write(source, AoFixture::complete("eng_kjv", {AoFixture::book("PHM", 1, {AoFixture::chapter(1, {
+            AoFixture::verse(1, {"The only verse."}), QJsonObject{{"type", "heading"}, {"content", QJsonArray{"Written from afar."}}},
+            QJsonObject{{"type", "hebrew_subtitle"}, {"content", QJsonArray{"A closing", QJsonObject{{"noteId", 0}}}}}
+        }, {QJsonObject{{"noteId", 0}, {"caller", "+"}, {"text", "Closing note"}}})})})));
+        const auto result = AoImporter::importFile(source, target); QVERIFY2(result.ok, qPrintable(result.error));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "ao-trailing"); db.setDatabaseName(target); QVERIFY(db.open()); QSqlQuery q(db);
+            QVERIFY(q.exec("SELECT text,heading FROM verses")); QVERIFY(q.next());
+            QCOMPARE(q.value(0).toString(), "The only verse."); QVERIFY(q.value(1).toString().isEmpty()); QVERIFY(!q.next());
+            QVERIFY(q.exec("SELECT count(*) FROM notes")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 0);
+        }
+        QSqlDatabase::removeDatabase("ao-trailing");
+    }
     void rejectsBrokenContent_data() {
         QTest::addColumn<QString>("scenario");
         for (const auto &name : {"unknown-book", "duplicate-book", "duplicate-order", "duplicate-chapter", "duplicate-verse", "unknown-type", "missing-note", "duplicate-note", "wrong-count", "empty-chapter", "indent-bound", "invalid-number", "deep-json", "oversized-text"})

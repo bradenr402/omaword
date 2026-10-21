@@ -362,13 +362,14 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                         }
                         verses.append(verse);
                     }
+                    // A heading after the chapter's last verse (the KJV's subscriptions to
+                    // Paul's letters) is dropped: headings stand above the verse they open.
                     if (integer(wrapper.value(QStringLiteral("numberOfVerses")), 0, 999) != verses.size()) fail(QStringLiteral("AO chapter verse count mismatch."));
                     for (auto it = notes.cbegin(); it != notes.cend(); ++it) if (!used.contains(it.key())) {
                         auto found = std::find_if(verses.begin(), verses.end(), [&](const Verse &v) { return v.number == references.value(it.key()) && !v.text.isEmpty(); });
                         if (found == verses.end()) fail(QStringLiteral("Unanchored AO footnote."));
                         auto note = it.value(); note.offset = found->text.size(); found->notes.append(note);
                     }
-                    if (!heading.isEmpty() || !subtitleNotes.isEmpty()) fail(QStringLiteral("AO heading has no following retained verse."));
                     for (const auto &verse : verses) {
                         insert(db, QStringLiteral("INSERT INTO source_keys VALUES(?,?,?,?)"), {id, number, verse.number, !verse.text.isEmpty()});
                         if (verse.text.isEmpty()) continue;
