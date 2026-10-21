@@ -18,6 +18,7 @@ complete -c omaword -n "__fish_seen_subcommand_from open" -l here -d 'In the win
 complete -c omaword -n "__fish_seen_subcommand_from quote" -l plain -d 'The text alone'
 complete -c omaword -n "__fish_seen_subcommand_from quote search translations" -l json -d 'JSON output'
 complete -c omaword -n "__fish_seen_subcommand_from search" -l all -d 'Every installed translation'
+complete -c omaword -n "__fish_seen_subcommand_from search" -l in -x -a 'ot nt apocrypha' -d 'Only these books: ot, nt, apocrypha, or a book'
 complete -c omaword -n "__fish_seen_subcommand_from search" -l limit -x -d 'At most this many matches (0: all)'
 complete -c omaword -n "__fish_seen_subcommand_from search" -l color -x -a 'auto always never' -d 'When to color matches'
 complete -c omaword -n "__fish_seen_subcommand_from translations" -l names -d 'Abbreviations only'

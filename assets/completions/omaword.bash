@@ -12,6 +12,9 @@ _omaword()
         --color)
             COMPREPLY=($(compgen -W "auto always never" -- "$cur"))
             return ;;
+        --in)
+            COMPREPLY=($(compgen -W "ot nt apocrypha" -- "$cur"))
+            return ;;
         --limit)
             return ;;
         --import | import)
@@ -28,7 +31,7 @@ _omaword()
         open) options="--here --translation --help" ;;
         lookup) options="--translation --help" ;;
         quote) options="--plain --json --translation --help" ;;
-        search) options="--all --limit --json --color --translation --help" ;;
+        search) options="--all --in --limit --json --color --translation --help" ;;
         translations | versions) options="--names --json --help" ;;
         link) options="--translation --help" ;;
         completion) ((COMP_CWORD == 2)) && options="bash zsh fish" ;;

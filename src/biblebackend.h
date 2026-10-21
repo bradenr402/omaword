@@ -341,6 +341,9 @@ public:
     Q_INVOKABLE QVariantMap resolveReference(QString reference) const;
     // A place written as references are ("John 3:16", "Jude 3", "Jude").
     Q_INVOKABLE QString passageReference(int book, int chapter, int start = 0, int end = 0) const { return reference(book,chapter,start,end); }
+    // The book a name means as references read it (John, jn, this version's
+    // own names), whether or not this version has it; 0 for none.
+    int resolveBook(QString name) const;
     // Shared fuzzy parser (palette, note [[ suggestions): ranked candidates
     // {reference, book, chapter, start, end, score}, most similar first. Accepts
     // compact input (jn316, 1co13, ps23, rev 3 14-22) besides every exact form.
@@ -650,7 +653,6 @@ private:
     void setStatus(const QString &status);
     QString localPath(const QUrl &url);
     QString reference(int book, int chapter, int start = 0, int end = 0) const;
-    int resolveBook(QString name) const;
 
     QString m_directory, m_error, m_status, m_note;
     QString m_versionId, m_edition, m_abbreviation, m_copyright, m_importTarget;

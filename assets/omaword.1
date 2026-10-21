@@ -27,6 +27,8 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .IR words ...
 .RB [ \-\-all " | " \-t
 .IR name ]
+.RB [ \-\-in
+.IR part ]...
 .RB [ \-\-limit
 .IR n ]
 .RB [ \-\-json ]
@@ -131,6 +133,16 @@ ignores it,
 keeps it). Matches print in Bible order.
 .B \-\-all
 searches every installed translation, the one you read first;
+.BI \-\-in " part"
+searches only the Old or New Testament
+.RB ( ot ", " nt ),
+the books after them
+.RB ( apocrypha ),
+or a book, such as
+.B John
+or
+.BR jn ,
+and may be repeated;
 .BI \-\-limit " n"
 prints at most
 .I n
@@ -207,6 +219,7 @@ omaword quote jn316
 omaword quote ps23 \-t KJV \-\-plain | wl\-copy
 omaword search '"living water"' \-\-all
 omaword search '/lov(e|ed) the world/'
+omaword search shepherd \-\-in ot \-\-in John
 omaword open "Romans 8" \-\-here
 xdg\-open "$(omaword link jn316)"
 .fi

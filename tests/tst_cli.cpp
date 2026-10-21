@@ -145,6 +145,18 @@ private slots:
         QCOMPARE(regexJson.first().toObject()["matches"].toArray().first().toObject()["length"].toInt(), 5);
         QCOMPARE(run({"search", "x", "--all", "-t", "KJV"}).status, 2);
         QCOMPARE(run({"search", "x", "--limit", "many"}).status, 2);
+        // --in: a Testament, the Apocrypha, or books, filtered before --limit counts.
+        QCOMPARE(run({"search", "the", "--in", "ot", "--limit", "0"}).out.count("\n  "), 2);
+        QCOMPARE(run({"search", "the", "--in", "NT", "--limit", "0"}).out.count("\n  "), 2);
+        QCOMPARE(run({"search", "the", "--in", "jn", "--in", "Genesis", "--limit", "0"}).out.count("\n  "), 4);
+        auto within = run({"search", "the", "--in", "John", "--limit", "1"});
+        QVERIFY(within.out.startsWith("John 3:16 (NET)")); QVERIFY2(within.err.contains("Showing 1 of 2"), qPrintable(within.err));
+        QCOMPARE(run({"search", "the", "--in", "apocrypha"}).status, 1);
+        QVERIFY(run({"search", "loved", "--all", "--in", "nt"}).out.contains("John 3:16 (KJV)"));
+        const auto inJson = QJsonDocument::fromJson(run({"search", "the", "--in", "ot", "--json"}).out.toUtf8()).array();
+        QCOMPARE(inJson.size(), 2); QCOMPARE(inJson.first().toObject()["book"].toString(), QString("Genesis"));
+        auto notABook = run({"search", "the", "--in", "Hezekiah"});
+        QCOMPARE(notABook.status, 2); QVERIFY2(notABook.err.contains("\u201cHezekiah\u201d"), qPrintable(notABook.err));
         const auto matches = QJsonDocument::fromJson(run({"search", "loved", "--json", "-t", "kjv"}).out.toUtf8()).array();
         QCOMPARE(matches.size(), 1); QCOMPARE(matches.first().toObject()["translation"].toString(), QString("KJV"));
         QCOMPARE(matches.first().toObject()["matches"].toArray().size(), 1);

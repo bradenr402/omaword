@@ -1,5 +1,6 @@
 #include "commandline.h"
 #include "biblebackend.h"
+#include "biblebooks.h"
 #include "brand.h"
 #include "scripturesearch.h"
 
@@ -10,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QSet>
 #include <QUrl>
 #include <QUrlQuery>
 #include <algorithm>
@@ -56,17 +58,19 @@ const QList<Command> &commands()
           {"    --json", "Print a JSON array: each passage's reference, translation, text, and verses."}, helpOption},
          {"omaword quote jn316", "omaword quote ps23 -t KJV --plain | wl-copy", "omaword quote \"Genesis 1:1-3\" \"John 1:1-5\"",
           "printf 'jn316\\nrom 8:28\\n' | omaword quote"}, true},
-        {"search", "<words>... [--all | -t <name>] [--limit <n>] [--json]", "Search the Bible",
+        {"search", "<words>... [--all | -t <name>] [--in <part>]... [--limit <n>]", "Search the Bible",
          "Searches as OmaWord's search does: every word in one verse, partial words included; a \"quoted phrase\" may "
          "run across verses. Words in slashes are a regular expression, as in chapter find, matched within one verse. "
          "Case is ignored unless a word (or the expression) has a capital letter: \\c ignores it, \\C keeps it. Matches "
          "print in Bible order, the matched words emphasized on a terminal. The exit status is 1 when nothing matches.",
          {translationOption, {"    --all", "Search every installed translation, the one you read first."},
+          {"    --in <part>", "Search only these books: ot, nt, apocrypha (the books after them), or a book, such as "
+                              "John or jn. Repeat it for more."},
           {"    --limit <n>", "Print at most n matches (0: all). Default: 20 on a terminal, all otherwise."},
           {"    --color <when>", "Emphasize matches: auto (on a terminal, unless NO_COLOR is set), always, or never."},
           {"    --json", "Print a JSON array: each match's reference, translation, text, and matched spans."}, helpOption},
          {"omaword search living water", "omaword search '\"the word became flesh\"' --all", "omaword search '/lov(e|ed) the world/'",
-          "omaword search grace --limit 0 | wc -l"}, true},
+          "omaword search shepherd --in ot --in John", "omaword search grace --limit 0 | wc -l"}, true},
         {"translations", "[--names] [--json]", "List the installed translations",
          "Lists the installed translations with their abbreviations and IDs; * marks the one you read. "
          "(omaword versions is the same.)",
@@ -342,7 +346,8 @@ int search(const QStringList &arguments, QTextStream &out, QTextStream &err, con
 {
     const QCommandLineOption all(QStringLiteral("all")), json(QStringLiteral("json"));
     const QCommandLineOption limit(QStringLiteral("limit"), {}, QStringLiteral("n")), colorOption(QStringLiteral("color"), {}, QStringLiteral("when"));
-    Parser p({all, json, limit, colorOption});
+    const QCommandLineOption in(QStringLiteral("in"), {}, QStringLiteral("part"));
+    Parser p({all, json, limit, colorOption, in});
     if (!p.parse(arguments)) return usage(err, "search", p.parser.errorText());
     if (p.parser.isSet(p.help)) { printHelp(out, *find("search")); return Success; }
     const QString query = p.parser.positionalArguments().join(' ').trimmed();
@@ -356,16 +361,33 @@ int search(const QStringList &arguments, QTextStream &out, QTextStream &err, con
     const bool color = when == QStringLiteral("always") || (when == QStringLiteral("auto") && terminal.color);
     BibleBackend bible;
     if (!useTranslation(bible, p.parser.value(p.translation), "search", err)) return Failure;
+    // --in: a Testament, the Apocrypha (the books after them), or a book as
+    // references name it; book IDs are the same in every translation.
+    QSet<int> books;
+    for (const QString &part : p.parser.values(in)) {
+        const QString key = part.trimmed().toLower();
+        const auto span = [&](int first, int last) { for (int book = first; book <= last; ++book) books.insert(book); };
+        if (key == QStringLiteral("ot")) span(1, 39);
+        else if (key == QStringLiteral("nt")) span(40, 66);
+        else if (key == QStringLiteral("apocrypha")) span(67, int(BibleBooks::canon().size()));
+        else if (const int book = bible.resolveBook(part.trimmed())) books.insert(book);
+        else return usage(err, "search", "--in takes ot, nt, apocrypha, or a book, such as John: \u201c" + part + "\u201d is none of these.");
+    }
     QStringList installed;
     for (const auto &value : bible.versions()) installed << value.toMap().value("id").toString();
     const auto result = ScriptureSearch::searchEditions(bible.searchEditions(p.parser.isSet(all)), query,
                                                         ScriptureSearch::defaultIndexPath(), installed);
     if (!result.error.isEmpty()) return usage(err, "search", result.error);
-    const qsizetype shown = count ? std::min<qsizetype>(count, result.matches.size()) : result.matches.size();
+    QVariantList matches = result.matches;
+    if (!books.isEmpty())
+        matches.erase(std::remove_if(matches.begin(), matches.end(), [&](const QVariant &match) {
+            return !books.contains(match.toMap().value("book").toInt());
+        }), matches.end());
+    const qsizetype shown = count ? std::min<qsizetype>(count, matches.size()) : matches.size();
     if (p.parser.isSet(json)) {
         QJsonArray array;
         for (qsizetype i = 0; i < shown; ++i) {
-            const auto row = result.matches[i].toMap();
+            const auto row = matches[i].toMap();
             QJsonArray spans;
             for (const auto &segment : row.value("displaySegments").toList()) spans.append(QJsonObject::fromVariantMap(segment.toMap()));
             array.append(QJsonObject{{"reference", row.value("reference").toString()}, {"translation", row.value("versionAbbreviation").toString()},
@@ -376,7 +398,7 @@ int search(const QStringList &arguments, QTextStream &out, QTextStream &err, con
         out << CommandLine::json(array);
     } else {
         for (qsizetype i = 0; i < shown; ++i) {
-            const auto row = result.matches[i].toMap();
+            const auto row = matches[i].toMap();
             const QString reference = printable(row.value("reference").toString() + " (" + row.value("versionAbbreviation").toString() + ")");
             // One line per match: the text's own breaks become spaces (each
             // replacement the same length, so spans hold).
@@ -387,9 +409,9 @@ int search(const QStringList &arguments, QTextStream &out, QTextStream &err, con
         }
     }
     out.flush();
-    if (result.matches.isEmpty()) { failure(err, "search", "no match for \u201c" + query + "\u201d."); return Failure; }
-    if (shown < result.matches.size())
-        err << "Showing " << shown << " of " << result.matches.size() << " matches; --limit 0 shows them all." << Qt::endl;
+    if (matches.isEmpty()) { failure(err, "search", "no match for \u201c" + query + "\u201d."); return Failure; }
+    if (shown < matches.size())
+        err << "Showing " << shown << " of " << matches.size() << " matches; --limit 0 shows them all." << Qt::endl;
     return Success;
 }
 
