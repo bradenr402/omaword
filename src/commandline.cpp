@@ -77,6 +77,17 @@ const QList<Command> &commands()
           {"    --json", "Print a JSON array: each passage's reference, translation, text, and verses."}, helpOption},
          {"omaword quote jn316", "omaword quote ps23 -t KJV --plain | wl-copy", "omaword quote \"Genesis 1:1-3\" \"John 1:1-5\"",
           "omaword quote rom828 --all", "printf 'jn316\\nrom 8:28\\n' | omaword quote"}, true},
+        {"refs", "<passage>... [--quote] [--limit <n>] [--json] [-t <name>]", "Print cross-references and passages tagged alike",
+         "Prints what OmaWord's See also gives for each passage: the passages tagged alike (sharing its tags, or those "
+         "of marks over it) in every translation, then OpenBible.info's cross-references, most voted first, each with "
+         "its opening words. See also follows verses, not whole chapters. The exit status is 1 when a passage has "
+         "neither.",
+         {translationOption, {"    --quote", "Print each passage in full, as a quotation."},
+          {"    --limit <n>", "Print at most n passages a section (0: all). Default: 20 on a terminal, all otherwise."},
+          {"    --color <when>", "Bold the references: auto (on a terminal, unless NO_COLOR is set), always, or never."},
+          {"    --json", "Print a JSON array: each passage's passages tagged alike and cross-references, with their text."},
+          helpOption},
+         {"omaword refs jn316", "omaword refs rom828 --quote --limit 5"}, true},
         {"search", "<words>... [--all | -t <name>] [--in <part>]... [--limit <n>]", "Search the Bible",
          "Searches as OmaWord's search does: every word in one verse, partial words included; a \"quoted phrase\" may "
          "run across verses. Words in slashes are a regular expression, as in chapter find, matched within one verse. "
@@ -170,7 +181,7 @@ void printHelp(QTextStream &out)
     for (const auto &command : commands())
         if (!command.name.contains(' ')) text += tableRow(command.name, command.summary, 16) + '\n';
     text += "\nOptions:\n"
-        + tableRow(translationOption.flags, "The translation for open, read, quote, search, and link: its abbreviation or ID. "
+        + tableRow(translationOption.flags, "The translation a command reads: its abbreviation or ID. "
                                             "Default: the one you read.", 28) + '\n'
         + tableRow("-h, --help", "Show help (omaword help <command>: a command's)", 28) + '\n'
         + tableRow("-v, --version", "Show OmaWord's version", 28) + "\n\n"
@@ -548,6 +559,88 @@ int read(const QStringList &arguments, QTextStream &out, QTextStream &err, QText
     return status;
 }
 
+int refs(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal)
+{
+    const QCommandLineOption quoteOption(QStringLiteral("quote")), json(QStringLiteral("json"));
+    const QCommandLineOption limit(QStringLiteral("limit"), {}, QStringLiteral("n")), colorOption(QStringLiteral("color"), {}, QStringLiteral("when"));
+    Parser p({quoteOption, json, limit, colorOption});
+    if (!p.parse(arguments)) return usage(err, "refs", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("refs")); return Success; }
+    if (p.parser.positionalArguments().isEmpty() && terminal.input) return usage(err, "refs", "name a passage, such as: omaword refs jn316");
+    bool number = true;
+    const int count = p.parser.isSet(limit) ? p.parser.value(limit).toInt(&number) : (terminal.output ? 20 : 0);
+    if (!number || count < 0) return usage(err, "refs", "--limit takes a number (0: every passage).");
+    bool color = false;
+    if (!colorWhen(p, colorOption, terminal, &color)) return usage(err, "refs", "--color takes auto, always, or never.");
+    const auto bold = [&](const QString &text) { return color ? QStringLiteral("\x1b[1m") + text + QStringLiteral("\x1b[22m") : text; };
+    BibleBackend bible;
+    if (!useTranslation(bible, p.parser.value(p.translation), "refs", err)) return Failure;
+    const QStringList items = passages(bible, p.parser.positionalArguments(), in, terminal);
+    if (items.isEmpty()) return usage(err, "refs", "name a passage, such as: omaword refs jn316");
+    QJsonArray array;
+    QStringList texts;
+    int status = Success;
+    bool limited = false;
+    for (const auto &item : std::as_const(items)) {
+        const auto passage = bible.readPassage(item);
+        if (passage.contains("error")) { failure(err, "refs", item + ": " + passage.value("error").toString()); status = Failure; continue; }
+        if (passage.contains("note")) err << printable(passage.value("note").toString()) << '.' << Qt::endl;
+        auto scope = passage.value("scope").toMap();
+        const QString reference = passage.value("reference").toString(), abbreviation = passage.value("abbreviation").toString();
+        if (!scope.value("start").toInt()) return usage(err, "refs", reference + " is a chapter; See also follows verses, such as John 3:16.");
+        scope.insert("versionId", passage.value("versionId"));
+        // As See also has them: passages tagged alike (with its tags, and
+        // those of marks over it) in every translation, then OpenBible.info's.
+        QVariantList ids;
+        for (const auto &tag : bible.tagsForScope(scope)) if (!ids.contains(tag.toMap().value("id"))) ids << tag.toMap().value("id");
+        for (const auto &range : bible.tagsForScope(scope, true))
+            for (const auto &tag : range.toMap().value("tags").toList()) if (!ids.contains(tag.toMap().value("id"))) ids << tag.toMap().value("id");
+        const QList<QPair<QString, QVariantList>> sections{{"Tagged alike", ids.isEmpty() ? QVariantList() : bible.relatedPassages(scope, ids, false, true)},
+                                                          {"OpenBible.info", bible.crossReferences(scope)}};
+        if (sections[0].second.isEmpty() && sections[1].second.isEmpty()) {
+            failure(err, "refs", "nothing for " + reference + ": no passage tagged alike and no cross-reference.");
+            status = Failure;
+            continue;
+        }
+        QString text = bold(printable(reference + " (" + abbreviation + ')')) + '\n';
+        QJsonObject row{{"reference", reference}, {"translation", abbreviation}, {"translationId", passage.value("versionId").toString()}};
+        for (const auto &[name, rows] : sections) {
+            const qsizetype shown = count ? std::min<qsizetype>(count, rows.size()) : rows.size();
+            limited = limited || shown < rows.size();
+            if (shown) text += '\n' + bold(name) + '\n';
+            QJsonArray found;
+            for (qsizetype i = 0; i < shown; ++i) {
+                const auto at = rows[i].toMap();
+                const bool tagged = name == QStringLiteral("Tagged alike");
+                const QString version = at.value("versionAbbreviation").toString();
+                QStringList tags;
+                for (const auto &tag : at.value("tags").toList()) tags << tag.toMap().value("name").toString();
+                if (p.parser.isSet(quoteOption)) text += '\n' + printable(bible.copyScope(at) + " (" + version + ')') + '\n';
+                else {
+                    QString excerpt = printable(at.value("excerpt").toString());
+                    excerpt.replace('\n', ' ');
+                    const QString label = at.value("reference").toString() + (tagged ? " (" + version + ") \u00b7 " + tags.join(" \u00b7 ") : QString());
+                    text += bold(printable(label)) + "\n  " + excerpt + '\n';
+                }
+                if (!p.parser.isSet(json)) continue;
+                QJsonObject entry{{"reference", at.value("reference").toString()}, {"translation", version},
+                                  {"translationId", at.value("versionId").toString()}, {"text", bible.copyScope(at, true)}};
+                if (tagged) entry.insert("tags", QJsonArray::fromStringList(tags));
+                else entry.insert("votes", at.value("votes").toInt());
+                found.append(entry);
+            }
+            row.insert(name == QStringLiteral("Tagged alike") ? "tagged" : "crossReferences", found);
+        }
+        texts << text;
+        array.append(row);
+    }
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    else if (!texts.isEmpty()) out << texts.join('\n');
+    out.flush();
+    if (limited) err << "Each section shows its first " << count << "; --limit 0 shows them all." << Qt::endl;
+    return status;
+}
+
 QString emphasized(const QString &text, const QVariantList &segments, bool color)
 {
     if (!color) return text;
@@ -757,6 +850,7 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     const QString &name = command->name;
     if (name == QStringLiteral("read")) return read(rest, out, err, in, terminal);
     if (name == QStringLiteral("quote")) return quote(rest, out, err, in, terminal);
+    if (name == QStringLiteral("refs")) return refs(rest, out, err, in, terminal);
     if (name == QStringLiteral("search")) return search(rest, out, err, terminal);
     if (name == QStringLiteral("translations list")) return translations(rest, out, err);
     if (name == QStringLiteral("link")) return links(rest, out, err, in, terminal);

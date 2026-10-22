@@ -30,6 +30,15 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .RB [ \-\-plain ]
 .RB [ \-\-json ]
 .br
+.B omaword refs
+.IR passage ...
+.RB [ \-\-quote ]
+.RB [ \-\-limit
+.IR n ]
+.RB [ \-\-json ]
+.RB [ \-t
+.IR name ]
+.br
 .B omaword search
 .IR words ...
 .RB [ \-\-all " | " \-t
@@ -150,6 +159,21 @@ a JSON array with each passage's verses. Given
 or no passage while input is piped in, it reads passages from standard input,
 one per line.
 .TP
+.BI refs " passage..."
+Prints what OmaWord's See also gives for each passage: the passages tagged
+alike (sharing its tags, or those of marks over it) in every translation, then
+OpenBible.info's cross-references, most voted first, each with its opening
+words. See also follows verses, not whole chapters.
+.B \-\-quote
+prints each passage in full, as a quotation;
+.BI \-\-limit " n"
+prints at most
+.I n
+a section (0: all; the default is 20 on a terminal and all otherwise);
+.B \-\-json
+prints a JSON array with each passage's text. The exit status is 1 when a
+passage has neither.
+.TP
 .BI search " words..."
 Searches as OmaWord does: every word in one verse, partial words included; a
 "quoted phrase" may run across verses. Words in slashes, such as
@@ -229,9 +253,10 @@ and browsers hand such links to OmaWord.
 .TP
 .B NO_COLOR
 When set,
-.B search
+.BR read ,
+.BR refs ,
 and
-.B read
+.B search
 color nothing unless asked with
 .BR "\-\-color always" .
 .SH FILES

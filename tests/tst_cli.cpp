@@ -318,6 +318,45 @@ private slots:
         QCOMPARE(run({"quote", "jn316", "--all", "-t", "KJV"}).status, 2);
         QCOMPARE(run({"quote", "jn316", "--all", "--plain"}).status, 2);
     }
+    // refs gives what See also does: passages tagged alike, then OpenBible.info's.
+    void refsFollowSeeAlso() {
+        const QString path = fixtures.filePath("study_complete.json");
+        QVERIFY(AoFixture::studyEdition(path)); install(path);
+        const auto scope = [](int book, int start, int end) {
+            return QVariantMap{{"versionId", "study"}, {"book", book}, {"chapter", 1}, {"start", start}, {"endBook", book}, {"endChapter", 1}, {"end", end}};
+        };
+        {
+            BibleBackend bible;
+            for (const auto &[at, name] : QList<QPair<QVariantMap, QString>>{{scope(1, 1, 1), "beginning"}, {scope(40, 1, 1), "beginning"},
+                                                                              {scope(1, 1, 2), "word"}, {scope(43, 1, 1), "word"}})
+                QVERIFY2(!bible.createAndAssignTag(at, name).isEmpty(), qPrintable(bible.error()));
+        }
+        // Its own tags and those of marks over it; never itself, nor a mark over it.
+        const auto found = run({"refs", "gen1:1", "-t", "OSF"});
+        QCOMPARE(found.status, 0);
+        QVERIFY2(found.out.startsWith(QStringLiteral("Genesis 1:1 (OSF)\n\nTagged alike\nMatthew 1:1 (OSF) \u00b7 beginning\n  Original study text 1:1 ")),
+                 qPrintable(found.out));
+        QVERIFY(found.out.contains(QStringLiteral("\nJohn 1:1 (OSF) \u00b7 word\n  In the beginning was the Word.")));
+        QVERIFY(found.out.contains(QStringLiteral("\n\nOpenBible.info\nJohn 1:1\u20133\n  In the beginning was the Word. Original words follow. ")));
+        QVERIFY(!found.out.contains("\nGenesis 1:"));
+        const auto quoted = run({"refs", "gen1:1", "-t", "OSF", "--quote"});
+        QVERIFY(quoted.out.contains(QStringLiteral("\n\u201c\u00b9 In the beginning was the Word. Original words follow. \u00b2 Original study text 1:2 ")));
+        QVERIFY(quoted.out.contains(QStringLiteral("\u201d\n\n\u2014 John 1:1\u20133 (OSF)\n")));
+        const auto limited = run({"refs", "gen1:1", "-t", "OSF", "--limit", "1"});
+        QCOMPARE(limited.out.count("\n  "), 2); QVERIFY(limited.err.contains("--limit 0"));
+        const auto json = QJsonDocument::fromJson(run({"refs", "gen1:1", "-t", "OSF", "--json"}).out.toUtf8()).array().first().toObject();
+        QCOMPARE(json["reference"].toString(), QString("Genesis 1:1"));
+        const auto tagged = json["tagged"].toArray();
+        QCOMPARE(tagged.size(), 2); QCOMPARE(tagged.first().toObject()["tags"].toArray(), QJsonArray({"beginning"}));
+        QVERIFY(tagged.first().toObject()["text"].toString().startsWith("Original study text 1:1 "));
+        const auto cross = json["crossReferences"].toArray();
+        QVERIFY(!cross.isEmpty()); QCOMPARE(cross.first().toObject()["reference"].toString(), QStringLiteral("John 1:1\u20133"));
+        QVERIFY(cross.first().toObject()["votes"].toInt() > 0);
+        // Verses only; nothing to give fails.
+        QCOMPARE(run({"refs", "Genesis 1", "-t", "OSF"}).status, 2);
+        const auto nothing = run({"refs", "jn317", "-t", "NET"});
+        QCOMPARE(nothing.status, 1); QVERIFY(nothing.out.isEmpty()); QVERIFY(nothing.err.contains("nothing for John 3:17"));
+    }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.
     void joinedVerseNote() {

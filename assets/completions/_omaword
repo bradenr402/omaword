@@ -23,6 +23,7 @@ _omaword() {
         'lookup:look up a passage in a small window'
         'read:print passages as the reader lays them out'
         'quote:print passages as quotations'
+        'refs:print cross-references and passages tagged alike'
         'search:search the Bible'
         'translations:list the installed translations'
         'link:print an omaword: link to a passage'
@@ -58,6 +59,8 @@ _omaword() {
         read) _arguments $translation '--footnotes[the footnotes after each passage]' '--json[JSON output]' \
                   '--color=[when to color]:when:(auto always never)' '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
         quote) _arguments $translation '--all[every installed translation]' '--plain[the text alone]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
+        refs) _arguments $translation '--quote[each passage in full]' '--limit=[at most this many a section]:count:' '--json[JSON output]' \
+                  '--color=[when to color]:when:(auto always never)' '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
         search) _arguments $translation '--all[every installed translation]' '*--in=[only these books: ot, nt, apocrypha, or a book]:part:(ot nt apocrypha)' \
                     '--limit=[at most this many matches]:count:' \
                     '--json[JSON output]' '--color=[when to color]:when:(auto always never)' '(- *)'{-h,--help}'[show help]' '*:words:' ;;

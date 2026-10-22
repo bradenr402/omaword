@@ -277,6 +277,7 @@ omaword lookup                   # look up a passage in a small window
 omaword read ps23                # read a passage as the reader lays it out
 omaword quote ps23 -t KJV        # print a passage as a quotation
 omaword quote rom828 --all       # in every version you installed
+omaword refs jn316               # its cross-references and passages tagged alike
 omaword search "living water"    # search the version you read
 omaword search grace --in nt     # only the New Testament (or ot, apocrypha, a book)
 omaword link jn316               # print an omaword: link to a passage
