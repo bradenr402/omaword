@@ -103,6 +103,25 @@ private slots:
         }
         QSqlDatabase::removeDatabase("ao-trailing");
     }
+    // A ¶ opening a verse (the KJV's paragraph mark) starts a paragraph, with
+    // a space after it or not (Luke 13:24's "¶" before words of Jesus).
+    void pilcrowStartsAParagraph() {
+        const auto source = directory.filePath("pilcrow.json"), target = directory.filePath("pilcrow.sqlite");
+        QVERIFY(AoFixture::write(source, AoFixture::complete("eng_kjv", {AoFixture::book("LUK", 1, {AoFixture::chapter(13, {
+            AoFixture::verse(1, {"Opening words."}), AoFixture::verse(2, {"¶ A new paragraph."}),
+            AoFixture::verse(3, {"¶", QJsonObject{{"text", "Spoken at once."}, {"wordsOfJesus", true}}}), AoFixture::verse(4, {"Running on."})})})})));
+        const auto result = AoImporter::importFile(source, target); QVERIFY2(result.ok, qPrintable(result.error));
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", "ao-pilcrow"); db.setDatabaseName(target); QVERIFY(db.open()); QSqlQuery q(db);
+            QVERIFY(q.exec("SELECT text,paragraphStart FROM verses ORDER BY number"));
+            for (const auto &[text, paragraph] : QList<QPair<QString, bool>>{{"Opening words.", true}, {"A new paragraph.", true}, {"Spoken at once.", true}, {"Running on.", false}}) {
+                QVERIFY(q.next()); QCOMPARE(q.value(0).toString(), text); QCOMPARE(q.value(1).toBool(), paragraph);
+            }
+            QVERIFY(q.exec("SELECT start,end FROM words_of_jesus WHERE verse=3")); QVERIFY(q.next());
+            QCOMPARE(q.value(0).toInt(), 0); QCOMPARE(q.value(1).toInt(), 15);
+        }
+        QSqlDatabase::removeDatabase("ao-pilcrow");
+    }
     // Every known book imports by its exact code, past 80 too: PSS is the
     // Psalms of Solomon, though "pss" is an alias of Psalms.
     void everyKnownBookImports() {

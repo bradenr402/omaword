@@ -156,7 +156,11 @@ Verse content(const QJsonArray &pieces, const QMap<int, Note> &notes, QSet<int> 
     }
     int first = 0, last = verse.text.size();
     while (first < last && verse.text[first].isSpace()) ++first;
-    if (verse.text.mid(first).startsWith(QStringLiteral("¶ "))) first += 2;
+    // A ¶ opening the verse (the KJV's paragraph mark) starts a paragraph.
+    if (first < last && verse.text[first] == QChar(0x00b6)) {
+        verse.paragraph = true;
+        for (++first; first < last && verse.text[first].isSpace(); ++first) {}
+    }
     while (last > first && verse.text[last - 1].isSpace()) --last;
     const int skippedLines = verse.text.left(first).count('\n');
     verse.text = verse.text.mid(first, last - first);
@@ -391,7 +395,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                             if (verse.number != verses.last().number) continued.insert(verse.number, verses.last().number);
                             if (!verses.last().text.isEmpty()) {
                                 auto &whole = verses.last();
-                                join(whole, verse, paragraph);
+                                join(whole, verse, paragraph || verse.paragraph);
                                 QStringList headings{whole.heading, heading, verse.heading};
                                 headings.removeAll(QString());
                                 whole.heading = headings.join('\n');
@@ -405,7 +409,7 @@ Result importFile(const QString &path, const QString &target, const std::shared_
                             if (!verse.heading.isEmpty() && !heading.isEmpty()) heading += '\n';
                             verse.heading = heading + verse.heading; heading.clear();
                             verse.notes = subtitleNotes + verse.notes; subtitleNotes.clear();
-                            verse.paragraph = paragraph; paragraph = false;
+                            verse.paragraph = paragraph || verse.paragraph; paragraph = false;
                         }
                         verses.append(verse);
                     }

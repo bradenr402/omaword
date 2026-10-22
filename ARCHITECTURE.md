@@ -96,7 +96,8 @@ user's real data for development or tests.
 - Text is escaped; words-of-Jesus markup is generated locally. Plain fragments
   retain source whitespace; structural edge whitespace is trimmed with UTF-16
   offsets remapped. Poetry pieces start lines; trailing line breaks do not create
-  prose paragraphs. Chapter separators establish paragraph starts.
+  prose paragraphs. Chapter separators establish paragraph starts, as does a ¶
+  opening a verse (the KJV's paragraph mark), which is dropped.
 - Superscriptions and inline headings use the existing heading model; subtitle
   notes anchor at the following retained verse's offset zero, outside copied text.
   A heading after a chapter's last verse (the KJV's subscriptions) is dropped.

@@ -973,13 +973,19 @@ private slots:
         key(Qt::Key_F); QTRY_VERIFY(bible->focusMode());
         QTRY_VERIFY(!item(noteMarker) || !item(noteMarker)->isVisible());
         QVERIFY(item("chapterTitle")->isVisible());
+        QVERIFY(doc->findBlock(blockOffset(6)) != doc->findBlock(blockOffset(5)));
         QVERIFY(doc->toPlainText().startsWith("In the beginning"));
-        // AO's KJV marks its paragraphs only by a ¶ opening a verse, which is
-        // dropped and starts none: either layout reads Genesis 1 as one.
         bible->setReadingMode("block");
         QTRY_COMPARE(doc->blockCount(),1);
         bible->setReadingMode("paragraph");
-        QTRY_COMPARE(doc->findBlock(blockOffset(31)),doc->findBlock(blockOffset(1)));
+        QTRY_VERIFY(doc->blockCount() > 1);
+        // The ¶ opening Genesis 1:6 and 1:9 starts paragraphs: 1:1–5, 1:6–8, 1:9 on.
+        const auto first = doc->findBlock(blockOffset(1));
+        for (int verse = 2; verse <= 5; ++verse) QCOMPARE(doc->findBlock(blockOffset(verse)),first);
+        const auto second = doc->findBlock(blockOffset(6));
+        QVERIFY(second != first);
+        QCOMPARE(doc->findBlock(blockOffset(8)),second);
+        QVERIFY(doc->findBlock(blockOffset(9)) != second);
         QVERIFY(!doc->toPlainText().contains(QChar(0x00b6)));
     }
     void emptyAndImportError() {
