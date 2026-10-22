@@ -54,6 +54,18 @@ const QList<Command> &commands()
          "  o.window({ class = \"^omaword$\", title = \"^Look up · OmaWord$\" },\n"
          "           { float = true, center = true, no_anim = true })",
          {translationOption, helpOption}, {"omaword lookup", "omaword lookup rom 8", "omaword lookup -t KJV"}, false},
+        {"read", "<passage>... [--footnotes] [--json] [-t <name>]", "Print passages as the reader lays them out",
+         "Prints each passage as OmaWord's reader shows it, under its reference and translation: section headings, "
+         "paragraphs, poem lines indented by their level, verse numbers, and a numbered marker where a footnote is. "
+         "Verse numbers, headings, and the words of Jesus in red follow OmaWord's settings. Lines wrap to the "
+         "terminal's width, piped into a pager too. Given \"-\" (or no passage while input is piped in), it reads "
+         "passages from standard input, one per line.",
+         {translationOption, {"    --footnotes", "Print the footnotes after each passage, numbered as their markers."},
+          {"    --color <when>", "Bold the titles and headings, and color the words of Jesus: auto (on a terminal, unless "
+                               "NO_COLOR is set), always, or never."},
+          {"    --json", "Print a JSON array: each passage's reference, translation, and verses, with their headings, "
+                         "paragraphs, poem levels, footnotes, and words of Jesus."}, helpOption},
+         {"omaword read ps23", "omaword read \"John 3\" --footnotes -t KJV", "omaword read \"Romans 8\" | less"}, true},
         {"quote", "<passage>... [--plain] [--json] [-t <name>]", "Print passages as quotations",
          "Prints each passage as OmaWord copies it: the text in quotation marks, a number before each verse, and the "
          "reference after an em dash, with a blank line between passages. Given \"-\" (or no passage while input is "
@@ -156,7 +168,7 @@ void printHelp(QTextStream &out)
     for (const auto &command : commands())
         if (!command.name.contains(' ')) text += tableRow(command.name, command.summary, 16) + '\n';
     text += "\nOptions:\n"
-        + tableRow(translationOption.flags, "The translation for open, quote, search, and link: its abbreviation or ID. "
+        + tableRow(translationOption.flags, "The translation for open, read, quote, search, and link: its abbreviation or ID. "
                                             "Default: the one you read.", 28) + '\n'
         + tableRow("-h, --help", "Show help (omaword help <command>: a command's)", 28) + '\n'
         + tableRow("-v, --version", "Show OmaWord's version", 28) + "\n\n"
@@ -165,6 +177,7 @@ void printHelp(QTextStream &out)
         + "Links:\n" + wrap("omaword:John%203:16 (or omaword:jn316?translation=KJV) opens the passage where you were "
                             "reading; omaword link prints one. xdg-open and browsers hand them to OmaWord.", 80, 2) + "\n\n"
         + "Examples:\n"
+        + "  omaword read ps23 --footnotes\n"
         + "  omaword quote jn316\n  omaword quote ps23 -t KJV --plain | wl-copy\n  omaword search \"living water\" --all\n"
         + "  omaword open \"Romans 8\" --here\n\n"
         + "Exit status:\n" + wrap("0 on success; 1 when it fails (an unknown passage or translation, no match, nothing "
@@ -330,6 +343,40 @@ QString json(const QJsonArray &array)
     return escaped;
 }
 
+// --color <when>: auto (a terminal, unless NO_COLOR is set), always, or
+// never; false for anything else.
+bool colorWhen(const Parser &p, const QCommandLineOption &option, const Terminal &terminal, bool *color)
+{
+    const QString when = p.parser.isSet(option) ? p.parser.value(option) : QStringLiteral("auto");
+    *color = when == QStringLiteral("always") || (when == QStringLiteral("auto") && terminal.color);
+    return QStringList{"auto", "always", "never"}.contains(when);
+}
+
+// Lines longer than `width` columns broken between words, a poem line's
+// parts indented two spaces past it; escape sequences take no room.
+QString wrapLines(const QString &text, int width)
+{
+    if (width <= 0) return text;
+    static const QRegularExpression escape(QStringLiteral("\x1b\\[[0-9;]*m"));
+    QStringList lines;
+    for (const QString &line : text.split('\n')) {
+        qsizetype indent = 0;
+        while (indent < line.size() && line[indent] == ' ') ++indent;
+        const qsizetype hanging = indent ? indent + 2 : 0;
+        QString current = line.left(indent);
+        qsizetype used = indent;
+        bool empty = true;
+        for (const QString &word : line.mid(indent).split(' ')) {
+            const qsizetype size = QString(word).remove(escape).size();
+            if (!empty && used + 1 + size > width) { lines << current; current = QString(hanging, ' '); used = hanging; empty = true; }
+            if (!empty) { current += ' '; ++used; }
+            current += word; used += size; empty = false;
+        }
+        lines << current;
+    }
+    return lines.join('\n');
+}
+
 int quote(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal)
 {
     const QCommandLineOption plain(QStringLiteral("plain")), json(QStringLiteral("json"));
@@ -351,7 +398,11 @@ int quote(const QStringList &arguments, QTextStream &out, QTextStream &err, QTex
         if (passage.contains("note")) err << printable(passage.value("note").toString()) << '.' << Qt::endl;
         texts << passage.value(p.parser.isSet(plain) ? "plain" : "quotation").toString();
         QJsonArray verses;
-        for (const auto &verse : passage.value("verses").toList()) verses.append(QJsonObject::fromVariantMap(verse.toMap()));
+        for (const auto &value : passage.value("verses").toList()) {
+            const auto verse = value.toMap();
+            verses.append(QJsonObject{{"book", verse.value("book").toString()}, {"chapter", verse.value("chapter").toInt()},
+                                      {"verse", verse.value("verse").toInt()}, {"text", verse.value("text").toString()}});
+        }
         QJsonObject row{{"reference", passage.value("reference").toString()}, {"translation", passage.value("abbreviation").toString()},
                         {"translationId", passage.value("versionId").toString()}, {"translationName", passage.value("name").toString()},
                         {"text", passage.value("plain").toString()}, {"quotation", passage.value("quotation").toString()}, {"verses", verses}};
@@ -360,6 +411,113 @@ int quote(const QStringList &arguments, QTextStream &out, QTextStream &err, QTex
     }
     if (p.parser.isSet(json)) out << CommandLine::json(array);
     else if (!texts.isEmpty()) out << printable(texts.join(QStringLiteral("\n\n"))) << '\n';
+    out.flush();
+    return status;
+}
+
+// A passage as OmaWord's reader lays it out: its title, then chapter titles
+// and section headings on lines of their own, paragraphs a blank line apart,
+// poem lines indented two spaces a level, verse numbers, and "[n]" where the
+// nth footnote is (its note added to `notes`); with color, bold titles and
+// headings, and the words of Jesus in red.
+QString readerText(const BibleBackend &bible, const QVariantMap &passage, bool color, QStringList *notes)
+{
+    const auto bold = [&](const QString &text) { return color ? QStringLiteral("\x1b[1m") + text + QStringLiteral("\x1b[22m") : text; };
+    const bool red = color && bible.wordsOfJesus();
+    QString text = bold(printable(passage.value("reference").toString() + " (" + passage.value("abbreviation").toString() + ')'));
+    int book = 0, chapter = 0;
+    bool poemEnd = false;
+    for (const auto &value : passage.value("verses").toList()) {
+        const auto verse = value.toMap();
+        const int number = verse.value("verse").toInt();
+        const auto levels = verse.value("indents").toList();
+        const QString heading = bible.showHeadings() ? verse.value("heading").toString() : QString();
+        const bool first = !book, newChapter = book && (verse.value("bookId").toInt() != book || verse.value("chapter").toInt() != chapter);
+        book = verse.value("bookId").toInt(); chapter = verse.value("chapter").toInt();
+        text += first || newChapter || !heading.isEmpty() ? QStringLiteral("\n\n")
+            : TextSelection::verseJoin(verse.value("paragraphStart").toBool(), poemEnd, !levels.isEmpty() && levels.first().toInt() > 0);
+        if (newChapter) text += bold(printable(bible.passageReference(book, chapter))) + "\n\n";
+        if (!heading.isEmpty()) text += bold(printable(heading)) + "\n\n";
+        poemEnd = !levels.isEmpty() && levels.last().toInt() > 0;
+        // Footnotes go before the character at their offset; the words of
+        // Jesus run from start to end.
+        const QString plain = printable(verse.value("text").toString());
+        auto footnotes = verse.value("footnotes").toList();
+        std::stable_sort(footnotes.begin(), footnotes.end(), [](const QVariant &a, const QVariant &b) {
+            return a.toMap().value("offset").toInt() < b.toMap().value("offset").toInt();
+        });
+        QList<QPair<int, QString>> markers;
+        for (const auto &note : std::as_const(footnotes)) {
+            *notes << printable(QStringLiteral("[%1] ").arg(notes->size() + 1) + bible.passageReference(book, chapter, number)
+                                + QStringLiteral(" \u2014 ") + note.toMap().value("text").toString());
+            markers.append({std::clamp(note.toMap().value("offset").toInt(), 0, int(plain.size())), QStringLiteral("[%1]").arg(notes->size())});
+        }
+        QSet<int> starts, ends;
+        if (red) for (const auto &span : verse.value("wordsOfJesus").toList()) {
+            starts.insert(span.toMap().value("start").toInt()); ends.insert(span.toMap().value("end").toInt());
+        }
+        const auto indent = [&](int line) { return QString(2 * levels.value(line).toInt(), ' '); };
+        text += indent(0) + (bible.showVerseNumbers() ? TextSelection::superscript(number) + ' ' : QString());
+        int line = 0;
+        qsizetype marker = 0;
+        for (int i = 0; i <= plain.size(); ++i) {
+            if (ends.contains(i)) text += QStringLiteral("\x1b[39m");
+            for (; marker < markers.size() && markers[marker].first == i; ++marker) text += markers[marker].second;
+            if (starts.contains(i)) text += QStringLiteral("\x1b[31m");
+            if (i == plain.size()) break;
+            text += plain[i];
+            if (plain[i] == '\n') text += indent(++line);
+        }
+    }
+    return text + '\n';
+}
+
+int read(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal)
+{
+    const QCommandLineOption footnotes(QStringLiteral("footnotes")), json(QStringLiteral("json"));
+    const QCommandLineOption colorOption(QStringLiteral("color"), {}, QStringLiteral("when"));
+    Parser p({footnotes, json, colorOption});
+    if (!p.parse(arguments)) return usage(err, "read", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("read")); return Success; }
+    if (p.parser.positionalArguments().isEmpty() && terminal.input) return usage(err, "read", "name a passage, such as: omaword read ps23");
+    bool color = false;
+    if (!colorWhen(p, colorOption, terminal, &color)) return usage(err, "read", "--color takes auto, always, or never.");
+    BibleBackend bible;
+    if (!useTranslation(bible, p.parser.value(p.translation), "read", err)) return Failure;
+    const QStringList items = passages(bible, p.parser.positionalArguments(), in, terminal);
+    if (items.isEmpty()) return usage(err, "read", "name a passage, such as: omaword read ps23");
+    QJsonArray array;
+    QStringList texts;
+    int status = Success;
+    for (const auto &item : std::as_const(items)) {
+        const auto passage = bible.readPassage(item);
+        if (passage.contains("error")) { failure(err, "read", item + ": " + passage.value("error").toString()); status = Failure; continue; }
+        if (passage.contains("note")) err << printable(passage.value("note").toString()) << '.' << Qt::endl;
+        QStringList notes;
+        texts << readerText(bible, passage, color, &notes);
+        if (p.parser.isSet(footnotes) && !notes.isEmpty()) texts.last() += '\n' + notes.join('\n') + '\n';
+        QJsonArray verses;
+        for (const auto &value : passage.value("verses").toList()) {
+            const auto verse = value.toMap();
+            QJsonArray levels, notesJson, words;
+            for (const auto &level : verse.value("indents").toList()) levels.append(level.toInt());
+            for (const auto &note : verse.value("footnotes").toList())
+                notesJson.append(QJsonObject{{"offset", note.toMap().value("offset").toInt()}, {"text", note.toMap().value("text").toString()}});
+            for (const auto &span : verse.value("wordsOfJesus").toList())
+                words.append(QJsonObject{{"start", span.toMap().value("start").toInt()}, {"end", span.toMap().value("end").toInt()}});
+            verses.append(QJsonObject{{"book", verse.value("book").toString()}, {"chapter", verse.value("chapter").toInt()},
+                                      {"verse", verse.value("verse").toInt()}, {"text", verse.value("text").toString()},
+                                      {"heading", verse.value("heading").toString()}, {"paragraphStart", verse.value("paragraphStart").toBool()},
+                                      {"levels", levels}, {"footnotes", notesJson}, {"wordsOfJesus", words}});
+        }
+        QJsonObject row{{"reference", passage.value("reference").toString()}, {"translation", passage.value("abbreviation").toString()},
+                        {"translationId", passage.value("versionId").toString()}, {"translationName", passage.value("name").toString()},
+                        {"verses", verses}};
+        if (passage.contains("note")) row.insert("note", passage.value("note").toString());
+        array.append(row);
+    }
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    else if (!texts.isEmpty()) out << wrapLines(texts.join('\n'), terminal.columns);
     out.flush();
     return status;
 }
@@ -393,9 +551,8 @@ int search(const QStringList &arguments, QTextStream &out, QTextStream &err, con
     bool number = true;
     const int count = p.parser.isSet(limit) ? p.parser.value(limit).toInt(&number) : (terminal.output ? 20 : 0);
     if (!number || count < 0) return usage(err, "search", "--limit takes a number (0: every match).");
-    const QString when = p.parser.isSet(colorOption) ? p.parser.value(colorOption) : QStringLiteral("auto");
-    if (!QStringList{"auto", "always", "never"}.contains(when)) return usage(err, "search", "--color takes auto, always, or never.");
-    const bool color = when == QStringLiteral("always") || (when == QStringLiteral("auto") && terminal.color);
+    bool color = false;
+    if (!colorWhen(p, colorOption, terminal, &color)) return usage(err, "search", "--color takes auto, always, or never.");
     BibleBackend bible;
     if (!useTranslation(bible, p.parser.value(p.translation), "search", err)) return Failure;
     // --in: a Testament, the Apocrypha (the books after them), or a book as
@@ -572,6 +729,7 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
         } else command = find(command->name + ' ' + command->defaultCommand);
     }
     const QString &name = command->name;
+    if (name == QStringLiteral("read")) return read(rest, out, err, in, terminal);
     if (name == QStringLiteral("quote")) return quote(rest, out, err, in, terminal);
     if (name == QStringLiteral("search")) return search(rest, out, err, terminal);
     if (name == QStringLiteral("translations list")) return translations(rest, out, err);

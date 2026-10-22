@@ -16,6 +16,13 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .RB [ \-t
 .IR name ]
 .br
+.B omaword read
+.IR passage ...
+.RB [ \-\-footnotes ]
+.RB [ \-\-json ]
+.RB [ \-t
+.IR name ]
+.br
 .B omaword quote
 .IR passage ...
 .RB [ \-\-plain ]
@@ -57,15 +64,13 @@ study Desk, following the Omarchy theme. Without arguments it starts, or
 brings forward the window you were reading; with a passage it opens it in a
 new window.
 .PP
-.BR quote ,
-.BR search ,
-.BR translations ,
-.BR link ,
-.BR completion ,
+Commands other than
+.BR open ,
+.BR lookup ,
 and
-.B help
-print and exit without a window, and never move your reading place. The other
-commands go to the running OmaWord, which starts if it is not running yet.
+.B import
+print and exit without a window, and never move your reading place. Those
+three go to the running OmaWord, which starts if it is not running yet.
 .PP
 Some commands come in groups named for what they work on, such as
 .BR "translations list" ;
@@ -113,6 +118,21 @@ binding; a window rule for its title,
 .RI \(lq "Look up \[pc] OmaWord" \(rq,
 can float and center it and turn off its animation
 .RB ( "float = true, center = true, no_anim = true" ).
+.TP
+.BI read " passage..."
+Prints each passage as OmaWord's reader shows it, under its reference and
+translation: section headings, paragraphs, poem lines indented by their level,
+verse numbers, and a numbered marker where a footnote is;
+.B \-\-footnotes
+prints the notes after the passage. Verse numbers, headings, and the words of
+Jesus in red follow OmaWord's settings. Lines wrap to the terminal's width,
+piped into a pager too.
+.BR \-\-color " auto|always|never"
+bolds titles and headings and colors the words of Jesus;
+.B \-\-json
+prints a JSON array with each verse's heading, paragraph, poem levels,
+footnotes, and words of Jesus. Passages come from standard input as for
+.BR quote .
 .TP
 .BI quote " passage..."
 Prints each passage as OmaWord copies it: the text in quotation marks, a
@@ -206,7 +226,9 @@ and browsers hand such links to OmaWord.
 .B NO_COLOR
 When set,
 .B search
-emphasizes nothing unless asked with
+and
+.B read
+color nothing unless asked with
 .BR "\-\-color always" .
 .SH FILES
 .TP
@@ -220,6 +242,7 @@ The search index, rebuilt whenever it is missing.
 nothing installed); 2 for a usage error.
 .SH EXAMPLES
 .nf
+omaword read ps23 \-\-footnotes
 omaword quote jn316
 omaword quote ps23 \-t KJV \-\-plain | wl\-copy
 omaword search '"living water"' \-\-all

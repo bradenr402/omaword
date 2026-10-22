@@ -23,6 +23,8 @@ inline QString verseJoin(bool paragraphStart, bool previousPoemEnd, bool poemSta
 {
     return paragraphStart ? QStringLiteral("\n\n") : previousPoemEnd || poemStart ? QStringLiteral("\n") : QStringLiteral(" ");
 }
+// A verse number as copies number verses: "¹⁶".
+QString superscript(int number);
 struct Position {
     int verse = 0;
     int offset = 0;

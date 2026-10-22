@@ -274,13 +274,14 @@ Bible versions, marks, the Desk, and History stay on this device, in `~/.local/s
 omaword "John 3:16"              # a new window at a passage
 omaword open jn316 --here        # the window you were reading, at a passage
 omaword lookup                   # look up a passage in a small window
+omaword read ps23                # read a passage as the reader lays it out
 omaword quote ps23 -t KJV        # print a passage as a quotation
 omaword search "living water"    # search the version you read
 omaword search grace --in nt     # only the New Testament (or ot, apocrypha, a book)
 omaword link jn316               # print an omaword: link to a passage
 ```
 
-`quote`, `search`, and `link` print without opening a window. Links like `omaword:John%203:16` (or `omaword:jn316?translation=KJV`) open where you were reading, from `xdg-open` or a browser. `omaword help` lists every command and `man omaword` has the manual; `bin/install` adds bash completion, and `omaword completion zsh` (or `fish`) prints the others.
+Commands other than `open`, `lookup`, and `import` print without opening a window. Links like `omaword:John%203:16` (or `omaword:jn316?translation=KJV`) open where you were reading, from `xdg-open` or a browser. `omaword help` lists every command and `man omaword` has the manual; `bin/install` adds bash completion, and `omaword completion zsh` (or `fish`) prints the others.
 
 `omaword lookup` suits a key binding; in Omarchy, add one, and a rule to float and center the window (it can be resized), to `~/.config/hypr/bindings.lua`:
 

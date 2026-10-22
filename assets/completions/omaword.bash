@@ -12,7 +12,7 @@ _omaword_subcommands()
 _omaword()
 {
     local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
-    local commands="open lookup quote search translations link import completion help"
+    local commands="open lookup read quote search translations link import completion help"
     case $prev in
         -t | --translation)
             COMPREPLY=($(compgen -W "$(omaword translations --names 2>/dev/null)" -- "$cur"))
@@ -48,6 +48,7 @@ _omaword()
     case $command in
         open) options="--here --translation --help" ;;
         lookup) options="--translation --help" ;;
+        read) options="--footnotes --json --color --translation --help" ;;
         quote) options="--plain --json --translation --help" ;;
         search) options="--all --in --limit --json --color --translation --help" ;;
         "translations list" | "versions list") options="--names --json --help" ;;

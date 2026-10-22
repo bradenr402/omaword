@@ -428,10 +428,12 @@ public:
     // passage in the version being read (a whole chapter for "John 3"),
     // without navigating, saving, or touching the clipboard: {reference,
     // versionId, abbreviation, name, plain, quotation (both laid out as
-    // copySelection() lays them out), verses [{book, chapter, verse, text}],
-    // scope {book, chapter, start, endBook, endChapter, end}, start and end 0
-    // for a whole chapter}, or {error}. Compact input (jn316) is read as the
-    // passage palette reads it, unless strict.
+    // copySelection() lays them out), verses [{book (its name), bookId,
+    // chapter, verse, text, and as the reader's rows have them heading,
+    // paragraphStart, indents, footnotes, wordsOfJesus}], scope {book,
+    // chapter, start, endBook, endChapter, end}, start and end 0 for a whole
+    // chapter}, or {error}. Compact input (jn316) is read as the passage
+    // palette reads it, unless strict.
     Q_INVOKABLE QVariantMap readPassage(const QString &text, bool strict = false);
     // The same passage by its scope (readPassage's), in the version being
     // read now, whatever another version calls its book: the lookup window

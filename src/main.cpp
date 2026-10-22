@@ -13,6 +13,7 @@
 #include <QMessageBox>
 #include <QTimer>
 #include <QTextStream>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 int main(int argc, char *argv[]) {
@@ -29,6 +30,11 @@ int main(int argc, char *argv[]) {
         terminal.output = isatty(STDOUT_FILENO);
         terminal.input = isatty(STDIN_FILENO);
         terminal.color = terminal.output && qEnvironmentVariableIsEmpty("NO_COLOR") && qgetenv("TERM") != "dumb";
+        // As man does, lines fit the terminal even when piped into a pager.
+        for (const int descriptor : {STDOUT_FILENO, STDERR_FILENO}) {
+            winsize size{};
+            if (isatty(descriptor) && ioctl(descriptor, TIOCGWINSZ, &size) == 0 && size.ws_col) { terminal.columns = size.ws_col; break; }
+        }
         return CommandLine::run(arguments, out, err, in, terminal);
     }
     QGuiApplication::setDesktopFileName(Brand::appId());

@@ -223,6 +223,83 @@ private slots:
         QVERIFY(!CommandLine::request({"--bogus\x1b[2J"}, &request, &error)); QCOMPARE(controls(error), 0);
         QCOMPARE(CommandLine::printable(QStringLiteral("a\tb\nc\rd\u0085e\u00a0f")), QStringLiteral("a\tb\nc\uFFFDd\uFFFDe\u00a0f"));
     }
+    // read lays a passage out as the reader does, with your settings for
+    // verse numbers, headings, and the words of Jesus in red.
+    void readLaysOutAsTheReader() {
+        const QString path = fixtures.filePath("eng_rdr_complete.json");
+        const auto poem = [](const QString &text, int level) { return QJsonObject{{"text", text}, {"poem", level}}; };
+        QVERIFY(AoFixture::write(path, AoFixture::complete("eng_rdr", {
+            AoFixture::book("PSA", 1, {AoFixture::chapter(23, {
+                QJsonObject{{"type", "heading"}, {"content", QJsonArray{"A song of trust"}}},
+                AoFixture::verse(1, {poem("The shepherd keeps me;", 1), poem("I lack nothing.", 2)}),
+                AoFixture::verse(2, {poem("He rests me in green fields;", 1), QJsonObject{{"noteId", 0}}, poem("he leads me by still water.", 2)})
+            }, {QJsonObject{{"noteId", 0}, {"caller", "+"}, {"text", "Or meadows"}}})}),
+            AoFixture::book("JHN", 2, {AoFixture::chapter(3, {
+                AoFixture::verse(16, {"For God so loved the world."}),
+                AoFixture::verse(17, {"Jesus said,", " ", QJsonObject{{"text", "Truly I tell you."}, {"wordsOfJesus", true}}}),
+                QJsonObject{{"type", "line_break"}},
+                AoFixture::verse(18, {"A new paragraph."})
+            }), AoFixture::chapter(4, {
+                QJsonObject{{"type", "heading"}, {"content", QJsonArray{"At the well"}}},
+                AoFixture::verse(1, {"Then he left."})
+            })})
+        }, "Reader fixture")));
+        install(path);
+        const QString psalm = QStringLiteral("Psalms 23 (eng_rdr)\n\nA song of trust\n\n"
+                                             "  \u00b9 The shepherd keeps me;\n    I lack nothing.\n"
+                                             "  \u00b2 He rests me in green fields;[1]\n    he leads me by still water.\n");
+        auto read = run({"read", "ps23", "-t", "eng_rdr"});
+        QCOMPARE(read.status, 0); QCOMPARE(read.out, psalm);
+        QCOMPARE(run({"read", "ps23", "-t", "eng_rdr", "--footnotes"}).out, psalm + "\n[1] Psalms 23:2 \u2014 Or meadows\n");
+        // Chapters and paragraphs, across a chapter.
+        QCOMPARE(run({"read", "John 3:16-4:1", "-t", "eng_rdr"}).out,
+                 QStringLiteral("John 3:16\u20134:1 (eng_rdr)\n\n\u00b9\u2076 For God so loved the world. \u00b9\u2077 Jesus said, Truly I tell you.\n\n"
+                                "\u00b9\u2078 A new paragraph.\n\nJohn 4\n\nAt the well\n\n\u00b9 Then he left.\n"));
+        // Several passages, a blank line apart; standard input as quote reads it.
+        QCOMPARE(run({"read", "-", "-t", "eng_rdr"}, "jn316\njn41\n").out,
+                 QStringLiteral("John 3:16 (eng_rdr)\n\n\u00b9\u2076 For God so loved the world.\n\n"
+                                "John 4:1 (eng_rdr)\n\nAt the well\n\n\u00b9 Then he left.\n"));
+        auto partly = run({"read", "jn316", "Nowhere 9", "-t", "eng_rdr"});
+        QCOMPARE(partly.status, 1); QVERIFY(partly.out.contains("loved")); QVERIFY(partly.err.contains("Nowhere 9"));
+        QCOMPARE(run({"read", "jn316", "--color", "sometimes"}).status, 2);
+        // Color: bold titles and headings; the words of Jesus in red where OmaWord shows them so.
+        QCOMPARE(run({"read", "jn317", "-t", "eng_rdr", "--color", "always"}).out,
+                 QStringLiteral("\x1b[1mJohn 3:17 (eng_rdr)\x1b[22m\n\n\u00b9\u2077 Jesus said, Truly I tell you.\n"));
+        {
+            BibleBackend settings; settings.setWordsOfJesus(true); settings.setShowVerseNumbers(false); settings.setShowHeadings(false);
+        }
+        QCOMPARE(run({"read", "jn317", "-t", "eng_rdr", "--color", "always"}).out,
+                 QStringLiteral("\x1b[1mJohn 3:17 (eng_rdr)\x1b[22m\n\nJesus said, \x1b[31mTruly I tell you.\x1b[39m\n"));
+        QVERIFY(!run({"read", "ps23", "-t", "eng_rdr"}).out.contains("A song of trust"));
+        {
+            BibleBackend settings; settings.setWordsOfJesus(false); settings.setShowVerseNumbers(true); settings.setShowHeadings(true);
+        }
+        // Lines wrap to the terminal's width, a poem line's parts indented past it.
+        QString out, err, in;
+        QTextStream outStream(&out), errStream(&err), inStream(&in);
+        CommandLine::Terminal narrow; narrow.columns = 24;
+        QCOMPARE(CommandLine::run({"read", "ps23", "-t", "eng_rdr"}, outStream, errStream, inStream, narrow), 0);
+        outStream.flush();
+        QCOMPARE(out, QStringLiteral("Psalms 23 (eng_rdr)\n\nA song of trust\n\n"
+                                     "  \u00b9 The shepherd keeps\n    me;\n    I lack nothing.\n"
+                                     "  \u00b2 He rests me in green\n    fields;[1]\n    he leads me by still\n      water.\n"));
+        // JSON: each verse with its heading, paragraph, poem levels, footnotes, and words of Jesus.
+        const auto json = QJsonDocument::fromJson(run({"read", "ps23", "jn317", "-t", "eng_rdr", "--json"}).out.toUtf8()).array();
+        QCOMPARE(json.size(), 2);
+        const auto first = json.first().toObject();
+        QCOMPARE(first["reference"].toString(), QString("Psalms 23")); QCOMPARE(first["translationId"].toString(), QString("eng_rdr"));
+        const auto verse = first["verses"].toArray().at(1).toObject();
+        QCOMPARE(verse["text"].toString(), QString("He rests me in green fields;\nhe leads me by still water."));
+        QCOMPARE(first["verses"].toArray().at(0).toObject()["heading"].toString(), QString("A song of trust"));
+        QVERIFY(first["verses"].toArray().at(0).toObject()["paragraphStart"].toBool()); QVERIFY(!verse["paragraphStart"].toBool());
+        QCOMPARE(verse["levels"].toArray(), QJsonArray({1, 2}));
+        QCOMPARE(verse["footnotes"].toArray(), QJsonArray({QJsonObject{{"offset", 28}, {"text", "Or meadows"}}}));
+        QCOMPARE(json.last().toObject()["verses"].toArray().first().toObject()["wordsOfJesus"].toArray(),
+                 QJsonArray({QJsonObject{{"start", 12}, {"end", 29}}}));
+        // quote's JSON keeps its verses as they were.
+        const auto quoted = QJsonDocument::fromJson(run({"quote", "jn317", "-t", "eng_rdr", "--json"}).out.toUtf8()).array();
+        QCOMPARE(quoted.first().toObject()["verses"].toArray().first().toObject().keys(), QStringList({"book", "chapter", "text", "verse"}));
+    }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.
     void joinedVerseNote() {

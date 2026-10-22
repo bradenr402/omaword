@@ -115,16 +115,17 @@ int runEnd(const Model &m, int k, bool big)
     while (k + 1 < m.size() && classOf(m, k + 1, big) == c) ++k;
     return k;
 }
+int firstInk(const QString &text) { int i = 0; while (i < text.size() && text.at(i).isSpace()) ++i; return i; }
+int lastInkEnd(const QString &text) { int i = text.size(); while (i > 0 && text.at(i - 1).isSpace()) --i; return i; }
+bool cutChar(QChar c) { return c.isSpace() || c.isPunct(); }
+}
+
 QString superscript(int number)
 {
     static const QString digits = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
     QString out;
     for (const QChar digit : QString::number(number)) out += digits[digit.digitValue()];
     return out;
-}
-int firstInk(const QString &text) { int i = 0; while (i < text.size() && text.at(i).isSpace()) ++i; return i; }
-int lastInkEnd(const QString &text) { int i = text.size(); while (i > 0 && text.at(i - 1).isSpace()) --i; return i; }
-bool cutChar(QChar c) { return c.isSpace() || c.isPunct(); }
 }
 
 Position clamp(const QList<Verse> &verses, Position at)

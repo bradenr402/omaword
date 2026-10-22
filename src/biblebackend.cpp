@@ -3984,8 +3984,10 @@ QVariantMap BibleBackend::passageAt(int start, int end, const QString &label, bo
         for (const auto &row : std::as_const(rows)) {
             const auto verse = row.toMap();
             const int index = absoluteVerse(atBook,atChapter,verse.value("number").toInt());
-            if (index >= start && index <= end)
-                verses.append(QVariantMap{{"book",name},{"chapter",atChapter},{"verse",verse.value("number")},{"text",verse.value("text")}});
+            if (index < start || index > end) continue;
+            QVariantMap entry{{"book",name},{"bookId",atBook},{"chapter",atChapter},{"verse",verse.value("number")},{"text",verse.value("text")}};
+            for (const char *key : {"heading","paragraphStart","indents","footnotes","wordsOfJesus"}) entry.insert(key,verse.value(key));
+            verses.append(entry);
         }
     }
     const QString plain = copyRange(start,end,label,true);
