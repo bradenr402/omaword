@@ -357,6 +357,27 @@ private slots:
         const auto nothing = run({"refs", "jn317", "-t", "NET"});
         QCOMPARE(nothing.status, 1); QVERIFY(nothing.out.isEmpty()); QVERIFY(nothing.err.contains("nothing for John 3:17"));
     }
+    void booksAndOutlines() {
+        QCOMPARE(run({"books", "-t", "OSF"}).out, QString("Genesis  1 chapter\nMatthew  1 chapter\nJohn     3 chapters\n"));
+        QCOMPARE(run({"books", "list", "-t", "OSF"}).out, run({"books", "-t", "OSF"}).out);
+        const auto books = QJsonDocument::fromJson(run({"books", "--json", "-t", "OSF"}).out.toUtf8()).array();
+        QCOMPARE(books.size(), 3);
+        QCOMPARE(books.last().toObject()["name"].toString(), QString("John")); QCOMPARE(books.last().toObject()["code"].toString(), QString("JHN"));
+        QCOMPARE(books.last().toObject()["chapters"].toInt(), 3);
+        QCOMPARE(run({"books", "John"}).status, 2);
+        // A book's headings chapter by chapter, or one chapter's (that of verses too).
+        const QString heading = QStringLiteral("  1    Study fixture heading\n");
+        QCOMPARE(run({"books", "outline", "John", "-t", "OSF"}).out, "John 1\n" + heading + "John 2\n" + heading + "John 3\n" + heading);
+        QCOMPARE(run({"books", "outline", "jn2", "-t", "OSF"}).out, "John 2\n" + heading);
+        QCOMPARE(run({"books", "outline", "John", "3:16", "-t", "OSF"}).out, "John 3\n" + heading);
+        const auto outline = QJsonDocument::fromJson(run({"books", "outline", "jn", "--json", "-t", "OSF"}).out.toUtf8()).array();
+        QCOMPARE(outline.size(), 3); QCOMPARE(outline.first().toObject()["title"].toString(), QString("John 1"));
+        QCOMPARE(outline.first().toObject()["headings"].toArray(), QJsonArray({QJsonObject{{"verse", 1}, {"text", "Study fixture heading"}}}));
+        QCOMPARE(run({"books", "outline", "-t", "OSF"}).status, 2);
+        const auto missing = run({"books", "outline", "Tobit", "-t", "OSF"});
+        QCOMPARE(missing.status, 1); QVERIFY2(missing.err.contains(QStringLiteral("OSF has no such book: \u201cTobit\u201d")), qPrintable(missing.err));
+        QCOMPARE(run({"books", "outline", "Nowhere", "-t", "OSF"}).status, 1);
+    }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.
     void joinedVerseNote() {

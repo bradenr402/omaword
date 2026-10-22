@@ -49,15 +49,27 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .IR n ]
 .RB [ \-\-json ]
 .br
-.B omaword translations
-.RB [ list ]
-.RB [ \-\-names ]
-.RB [ \-\-json ]
-.br
 .B omaword link
 .IR passage ...
 .RB [ \-t
 .IR name ]
+.br
+.B omaword books
+.RB [ list ]
+.RB [ \-\-json ]
+.RB [ \-t
+.IR name ]
+.br
+.B omaword books outline
+.IR book | chapter
+.RB [ \-\-json ]
+.RB [ \-t
+.IR name ]
+.br
+.B omaword translations
+.RB [ list ]
+.RB [ \-\-names ]
+.RB [ \-\-json ]
 .br
 .B omaword import
 .I file
@@ -205,6 +217,19 @@ emphasizes matched words;
 .B \-\-json
 prints a JSON array.
 .TP
+.BI link " passage..."
+Prints an
+.B omaword:
+link to each passage.
+.TP
+.B books \fR[\fPlist\fR]\fP
+Lists the translation's books, in its order, with how many chapters each has.
+.TP
+.BI "books outline" " book\fR|\fPchapter"
+Prints the section headings of a book, or of one of its chapters, as the
+whole-book view's outline has them: each chapter, then its headings after the
+verses they open.
+.TP
 .B translations \fR[\fPlist\fR]\fP
 Lists the installed translations;
 .B *
@@ -213,11 +238,6 @@ marks the one you read.
 prints the abbreviations alone.
 .RB ( "omaword versions"
 is the same.)
-.TP
-.BI link " passage..."
-Prints an
-.B omaword:
-link to each passage.
 .TP
 .BI import " file"
 Installs a translation from AO standard complete JSON.

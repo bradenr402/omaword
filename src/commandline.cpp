@@ -101,17 +101,27 @@ const QList<Command> &commands()
           {"    --json", "Print a JSON array: each match's reference, translation, text, and matched spans."}, helpOption},
          {"omaword search living water", "omaword search '\"the word became flesh\"' --all", "omaword search '/lov(e|ed) the world/'",
           "omaword search shepherd --in ot --in John", "omaword search grace --limit 0 | wc -l"}, true},
+        {"link", "<passage>... [-t <name>]", "Print an omaword: link to a passage",
+         "Prints a link that opens the passage in OmaWord, in the window you were reading: from a web page, a note "
+         "elsewhere, or a script. Links look like omaword:John%203:16, or omaword:John%203:16?translation=KJV for a "
+         "translation.",
+         {translationOption, helpOption}, {"omaword link jn316", "xdg-open \"$(omaword link ps23 -t KJV)\""}, true},
+        {"books", "", "List a translation's books, or a book's outline", "", {}, {}, true, "list"},
+        {"books list", "[--json] [-t <name>]", "List the translation's books",
+         "Lists the translation's books, in its order, with how many chapters each has.",
+         {translationOption, {"    --json", "Print a JSON array: each book's name, code, abbreviation, and chapters."}, helpOption},
+         {"omaword books", "omaword books -t KJV --json"}, true},
+        {"books outline", "<book|chapter> [--json] [-t <name>]", "Print a book's section headings",
+         "Prints the section headings of a book, or of one of its chapters, as the whole-book view's outline has "
+         "them: each chapter, then its headings after the verses they open.",
+         {translationOption, {"    --json", "Print a JSON array: each chapter's number, title, and headings."}, helpOption},
+         {"omaword books outline John", "omaword books outline \"Psalm 119\" -t KJV"}, true},
         {"translations", "", "List the installed translations",
          "omaword versions is the same.", {}, {}, true, "list"},
         {"translations list", "[--names] [--json]", "List the installed translations",
          "Lists the installed translations with their abbreviations and IDs; * marks the one you read.",
          {{"    --names", "Print the abbreviations alone, one per line."}, {"    --json", "Print a JSON array."}, helpOption},
          {"omaword translations"}, true},
-        {"link", "<passage>... [-t <name>]", "Print an omaword: link to a passage",
-         "Prints a link that opens the passage in OmaWord, in the window you were reading: from a web page, a note "
-         "elsewhere, or a script. Links look like omaword:John%203:16, or omaword:John%203:16?translation=KJV for a "
-         "translation.",
-         {translationOption, helpOption}, {"omaword link jn316", "xdg-open \"$(omaword link ps23 -t KJV)\""}, true},
         {"import", "<file>", "Install a translation from AO complete JSON",
          "Installs a translation, or replaces it with a newer copy, from AO standard complete JSON. "
          "Add version in OmaWord installs the catalog's translations directly.",
@@ -762,6 +772,76 @@ int translations(const QStringList &arguments, QTextStream &out, QTextStream &er
     return Success;
 }
 
+int books(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({json});
+    if (!p.parse(arguments)) return usage(err, "books list", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("books list")); return Success; }
+    if (!p.parser.positionalArguments().isEmpty()) return usage(err, "books list", "takes no arguments; omaword books outline <book> prints one's headings.");
+    BibleBackend bible;
+    if (!useTranslation(bible, p.parser.value(p.translation), "books list", err)) return Failure;
+    const auto rows = bible.books();
+    QJsonArray array;
+    int width = 0;
+    for (const auto &value : rows) width = std::max<int>(width, value.toMap().value("name").toString().size());
+    for (const auto &value : rows) {
+        const auto row = value.toMap();
+        const int chapters = row.value("chapters").toInt();
+        array.append(QJsonObject{{"name", row.value("name").toString()}, {"code", row.value("code").toString()},
+                                 {"abbreviation", row.value("abbreviation").toString()}, {"chapters", chapters}});
+        if (!p.parser.isSet(json))
+            out << printable(row.value("name").toString()).leftJustified(width + 2) << chapters << (chapters == 1 ? " chapter\n" : " chapters\n");
+    }
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    out.flush();
+    return Success;
+}
+
+int outline(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({json});
+    if (!p.parse(arguments)) return usage(err, "books outline", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("books outline")); return Success; }
+    const QString name = p.parser.positionalArguments().join(' ').trimmed();
+    if (name.isEmpty()) return usage(err, "books outline", "name a book or chapter, such as: omaword books outline John");
+    BibleBackend bible;
+    if (!useTranslation(bible, p.parser.value(p.translation), "books outline", err)) return Failure;
+    // A book's name, else a chapter (or the chapter of verses) as passages read.
+    int book = bible.resolveBook(name), chapter = 0;
+    if (!book) {
+        const auto passage = bible.readPassage(name);
+        if (passage.contains("error")) return failure(err, "books outline", name + ": " + passage.value("error").toString());
+        book = passage.value("scope").toMap().value("book").toInt();
+        chapter = passage.value("scope").toMap().value("chapter").toInt();
+    }
+    QVariantList chapters = bible.bookOutline(book);
+    if (chapters.isEmpty()) return failure(err, "books outline", bible.versionAbbreviation() + " has no such book: \u201c" + name + "\u201d.");
+    if (chapter)
+        chapters.erase(std::remove_if(chapters.begin(), chapters.end(), [&](const QVariant &value) {
+            return value.toMap().value("chapter").toInt() != chapter;
+        }), chapters.end());
+    QJsonArray array;
+    for (const auto &value : std::as_const(chapters)) {
+        const auto row = value.toMap();
+        QJsonArray headings;
+        if (!p.parser.isSet(json)) out << printable(row.value("title").toString()) << '\n';
+        for (const auto &heading : row.value("headings").toList()) {
+            const int verse = heading.toMap().value("verse").toInt();
+            const QString text = heading.toMap().value("text").toString();
+            headings.append(QJsonObject{{"verse", verse}, {"text", text}});
+            // A heading of several lines (a psalm's book and title) is several headings.
+            if (!p.parser.isSet(json))
+                for (const auto &line : text.split('\n')) out << "  " << QString::number(verse).leftJustified(5) << printable(line) << '\n';
+        }
+        array.append(QJsonObject{{"chapter", row.value("chapter").toInt()}, {"title", row.value("title").toString()}, {"headings", headings}});
+    }
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    out.flush();
+    return Success;
+}
+
 int links(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal)
 {
     Parser p;
@@ -853,6 +933,8 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     if (name == QStringLiteral("refs")) return refs(rest, out, err, in, terminal);
     if (name == QStringLiteral("search")) return search(rest, out, err, terminal);
     if (name == QStringLiteral("translations list")) return translations(rest, out, err);
+    if (name == QStringLiteral("books list")) return books(rest, out, err);
+    if (name == QStringLiteral("books outline")) return outline(rest, out, err);
     if (name == QStringLiteral("link")) return links(rest, out, err, in, terminal);
     if (name == QStringLiteral("completion")) return completion(rest, out, err);
     // open, lookup, or import with --help.

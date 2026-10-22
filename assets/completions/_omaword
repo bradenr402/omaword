@@ -11,6 +11,7 @@ _omaword_translations() {
 # A group's commands, its default one first.
 _omaword_subcommands() {
     case $1 in
+        books) reply=("list:list the translation's books" "outline:print a book's section headings") ;;
         translations|versions) reply=('list:list the installed translations') ;;
         *) reply=() ;;
     esac
@@ -25,8 +26,9 @@ _omaword() {
         'quote:print passages as quotations'
         'refs:print cross-references and passages tagged alike'
         'search:search the Bible'
-        'translations:list the installed translations'
         'link:print an omaword: link to a passage'
+        "books:list a translation's books, or a book's outline"
+        'translations:list the installed translations'
         'import:install a translation from AO complete JSON'
         'completion:print a shell completion script'
         'help:show help for OmaWord or a command'
@@ -64,6 +66,8 @@ _omaword() {
         search) _arguments $translation '--all[every installed translation]' '*--in=[only these books: ot, nt, apocrypha, or a book]:part:(ot nt apocrypha)' \
                     '--limit=[at most this many matches]:count:' \
                     '--json[JSON output]' '--color=[when to color]:when:(auto always never)' '(- *)'{-h,--help}'[show help]' '*:words:' ;;
+        'books list') _arguments $translation '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
+        'books outline') _arguments $translation '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ':book or chapter:' ;;
         'translations list'|'versions list') _arguments '--names[abbreviations only]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
         link) _arguments $translation '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
         import) _arguments '(- *)'{-h,--help}'[show help]' ':file:_files' ;;

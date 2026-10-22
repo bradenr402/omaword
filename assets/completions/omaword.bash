@@ -5,6 +5,7 @@
 _omaword_subcommands()
 {
     case $1 in
+        books) echo "list outline" ;;
         translations | versions) echo "list" ;;
     esac
 }
@@ -12,7 +13,7 @@ _omaword_subcommands()
 _omaword()
 {
     local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
-    local commands="open lookup read quote refs search translations link import completion help"
+    local commands="open lookup read quote refs search link books translations import completion help"
     case $prev in
         -t | --translation)
             COMPREPLY=($(compgen -W "$(omaword translations --names 2>/dev/null)" -- "$cur"))
@@ -52,6 +53,7 @@ _omaword()
         quote) options="--all --plain --json --translation --help" ;;
         refs) options="--quote --limit --json --color --translation --help" ;;
         search) options="--all --in --limit --json --color --translation --help" ;;
+        "books list" | "books outline") options="--json --translation --help" ;;
         "translations list" | "versions list") options="--names --json --help" ;;
         link) options="--translation --help" ;;
         completion) ((COMP_CWORD == 2)) && options="bash zsh fish" ;;
