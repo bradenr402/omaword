@@ -12,6 +12,11 @@ _omaword_translations() {
 _omaword_subcommands() {
     case $1 in
         books) reply=("list:list the translation's books" "outline:print a book's section headings") ;;
+        marks) reply=('list:list your marks' 'show:print the marks on a passage') ;;
+        tags) reply=('list:list your tags') ;;
+        desk) reply=('show:print the Desk') ;;
+        history) reply=('list:list the passages you visited') ;;
+        ribbon) reply=('show:print where the ribbon lies') ;;
         translations|versions) reply=('list:list the installed translations' "show:show a translation's source and rights") ;;
         *) reply=() ;;
     esac
@@ -28,7 +33,12 @@ _omaword() {
         'search:search the Bible'
         'link:print an omaword: link to a passage'
         "books:list a translation's books, or a book's outline"
-        'translations:list the installed translations'
+        'marks:list your highlights, notes, and tags'
+        'tags:list your tags'
+        'desk:print the Desk'
+        'history:list the passages you visited'
+        'ribbon:print where the ribbon lies'
+        'translations:list the installed translations, or show one'
         'import:install a translation from AO complete JSON'
         'completion:print a shell completion script'
         'help:show help for OmaWord or a command'
@@ -68,6 +78,11 @@ _omaword() {
                     '--json[JSON output]' '--color=[when to color]:when:(auto always never)' '(- *)'{-h,--help}'[show help]' '*:words:' ;;
         'books list') _arguments $translation '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
         'books outline') _arguments $translation '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ':book or chapter:' ;;
+        'marks list') _arguments '(--all)'$translation '(-t --translation)--all[every installed translation]' '*--tag=[only marks with a tag starting so]:tag:' \
+                          '--notes[only marks with a note]' '--highlights[only highlighted marks]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' '*:words:' ;;
+        'marks show') _arguments $translation '--json[JSON output]' '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
+        'tags list'|'history list'|'ribbon show') _arguments '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
+        'desk show') _arguments '(- *)'{-h,--help}'[show help]' ;;
         'translations list'|'versions list') _arguments '--names[abbreviations only]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
         'translations show'|'versions show') _arguments '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ':translation:_omaword_translations' ;;
         link) _arguments $translation '(- *)'{-h,--help}'[show help]' '*:passage:' ;;

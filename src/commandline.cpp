@@ -5,6 +5,7 @@
 #include "scripturesearch.h"
 
 #include <QCommandLineParser>
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -29,8 +30,10 @@ struct Command {
     QList<Option> options;
     QStringList examples;
     bool headless;
-    // A group: the command its name alone runs.
+    // A group: the command its name alone runs, and whether words after the
+    // name go to that command (omaword marks grace) rather than naming one.
     QString defaultCommand = {};
+    bool words = false;
 };
 const Option translationOption{QStringLiteral("-t, --translation <name>"),
     QStringLiteral("Use this translation: its abbreviation (NET) or ID (eng_net), in any case. Default: the one you read.")};
@@ -116,6 +119,43 @@ const QList<Command> &commands()
          "them: each chapter, then its headings after the verses they open.",
          {translationOption, {"    --json", "Print a JSON array: each chapter's number, title, and headings."}, helpOption},
          {"omaword books outline John", "omaword books outline \"Psalm 119\" -t KJV"}, true},
+        {"marks", "", "List your highlights, notes, and tags", "", {}, {}, true, "list", true},
+        {"marks list", "[<words>...] [--tag <name>]... [options]", "List your marks",
+         "Lists your marks (each passage you highlighted, wrote a note on, or tagged) in the translation you read, in "
+         "Bible order: its reference and translation, whether it is highlighted, and its tags, then its note on one "
+         "line, or its opening words without one. As in OmaWord's Marks, each word must match a mark's reference, "
+         "translation, note, tags, or text, ignoring case, and #name matches a tag starting with name, as --tag does. "
+         "The exit status is 1 when nothing matches.",
+         {translationOption, {"    --all", "List the marks in every installed translation."},
+          {"    --tag <name>", "Only marks with a tag starting with name. Repeat it to need more tags."},
+          {"    --notes", "Only marks with a note."}, {"    --highlights", "Only highlighted marks."},
+          {"    --json", "Print a JSON array: each mark's reference, translation, highlight, note, tags, text, and "
+                         "when it was made and changed."}, helpOption},
+         {"omaword marks", "omaword marks --tag grace --all", "omaword marks shepherd --notes"}, true},
+        {"marks show", "<passage> [--json] [-t <name>]", "Print the marks on a passage",
+         "Prints the marks on a passage or within it, in the translation you read, as marks list does but with each "
+         "note whole, as you wrote it. The exit status is 1 when there are none.",
+         {translationOption, {"    --json", "Print a JSON array, as marks list does."}, helpOption},
+         {"omaword marks show jn316", "omaword marks show \"Romans 8\""}, true},
+        {"tags", "", "List your tags", "", {}, {}, true, "list"},
+        {"tags list", "[--json]", "List your tags",
+         "Lists your tags by name, each with how many passages it marks; omaword marks --tag <name> --all lists them.",
+         {{"    --json", "Print a JSON array: each tag's name and count."}, helpOption}, {"omaword tags"}, true},
+        {"desk", "", "Print the Desk", "", {}, {}, true, "show"},
+        {"desk show", "", "Print the Desk",
+         "Prints the Desk, the Markdown page every window shares, as last saved.",
+         {helpOption}, {"omaword desk", "omaword desk > study.md"}, true},
+        {"history", "", "List the passages you visited", "", {}, {}, true, "list"},
+        {"history list", "[--json]", "List the passages you visited",
+         "Lists History, the passages you visited, newest first, each after when you did.",
+         {{"    --json", "Print a JSON array: each visit's reference, translation, and time."}, helpOption},
+         {"omaword history", "omaword history | head"}, true},
+        {"ribbon", "", "Print where the ribbon lies", "", {}, {}, true, "show"},
+        {"ribbon show", "[--json]", "Print where the ribbon lies",
+         "Prints the passage where the ribbon lies, the reading place you keep. The exit status is 1 when it lies "
+         "nowhere.",
+         {{"    --json", "Print a JSON object: its reference, translation, and when it was placed."}, helpOption},
+         {"omaword ribbon"}, true},
         {"translations", "", "List the installed translations, or show one",
          "omaword versions is the same.", {}, {}, true, "list"},
         {"translations list", "[--names] [--json]", "List the installed translations",
@@ -884,6 +924,205 @@ int outline(const QStringList &arguments, QTextStream &out, QTextStream &err)
     return Success;
 }
 
+// A stored UTC time in local time: "2026-10-22 14:03".
+QString localTime(const QString &utc)
+{
+    const auto time = QDateTime::fromString(utc, Qt::ISODateWithMs);
+    return time.isValid() ? time.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm")) : utc;
+}
+
+// A mark as marks list and marks show print it, as Marks shows it: its
+// reference and translation, highlight, and tags, then its note (on one
+// line, or whole) or, without one, its opening words.
+QString markText(const QVariantMap &mark, bool whole)
+{
+    QStringList head{mark.value("reference").toString() + " (" + mark.value("versionAbbreviation").toString() + ')'};
+    if (mark.value("highlight").toBool()) head << QStringLiteral("highlighted");
+    QStringList tags;
+    for (const auto &tag : mark.value("tags").toList()) tags << '#' + tag.toMap().value("name").toString();
+    if (!tags.isEmpty()) head << tags.join(' ');
+    const QString note = mark.value("note").toString();
+    QStringList lines{head.join(QStringLiteral(" \u00b7 "))};
+    for (const QString &line : (note.isEmpty() ? mark.value("excerpt").toString().simplified() : whole ? note : note.simplified()).split('\n'))
+        lines << (line.isEmpty() ? line : QStringLiteral("  ") + line);
+    return printable(lines.join('\n')) + '\n';
+}
+QJsonObject markJson(const QVariantMap &mark)
+{
+    QJsonArray tags;
+    for (const auto &tag : mark.value("tags").toList()) tags.append(tag.toMap().value("name").toString());
+    return {{"reference", mark.value("reference").toString()}, {"translation", mark.value("versionAbbreviation").toString()},
+            {"translationId", mark.value("versionId").toString()}, {"highlight", mark.value("highlight").toBool()},
+            {"note", mark.value("note").toString()}, {"tags", tags}, {"text", mark.value("excerpt").toString()},
+            {"created", mark.value("created").toString()}, {"updated", mark.value("updated").toString()}};
+}
+
+int marks(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption all(QStringLiteral("all")), tagOption(QStringLiteral("tag"), {}, QStringLiteral("name"));
+    const QCommandLineOption notes(QStringLiteral("notes")), highlights(QStringLiteral("highlights")), json(QStringLiteral("json"));
+    Parser p({all, tagOption, notes, highlights, json});
+    if (!p.parse(arguments)) return usage(err, "marks list", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("marks list")); return Success; }
+    if (p.parser.isSet(all) && p.parser.isSet(p.translation)) return usage(err, "marks list", "--all and --translation list different translations; use one.");
+    BibleBackend bible;
+    if (!useTranslation(bible, p.parser.value(p.translation), "marks list", err)) return Failure;
+    // As Marks filters them: every word must match, #name a tag starting so.
+    QStringList words = p.parser.positionalArguments().join(' ').split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    for (const auto &name : p.parser.values(tagOption)) words << '#' + name.trimmed();
+    QJsonArray array;
+    QString text;
+    for (const auto &value : bible.marks()) {
+        const auto mark = value.toMap();
+        if (!p.parser.isSet(all) && mark.value("versionId").toString() != bible.versionId()) continue;
+        if ((p.parser.isSet(notes) && mark.value("note").toString().isEmpty()) || (p.parser.isSet(highlights) && !mark.value("highlight").toBool())) continue;
+        QStringList tags;
+        for (const auto &tag : mark.value("tags").toList()) tags << tag.toMap().value("name").toString().toLower();
+        const QString fields = QStringList{mark.value("reference").toString(), mark.value("versionAbbreviation").toString(),
+                                           mark.value("note").toString(), tags.join('\n'), mark.value("excerpt").toString()}.join('\n').toLower();
+        const bool matches = std::all_of(words.cbegin(), words.cend(), [&](const QString &word) {
+            if (word.size() > 1 && word.startsWith('#'))
+                return std::any_of(tags.cbegin(), tags.cend(), [&](const QString &name) { return name.startsWith(word.mid(1).toLower()); });
+            return fields.contains(word.toLower());
+        });
+        if (!matches) continue;
+        array.append(markJson(mark));
+        text += markText(mark, false);
+    }
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    else out << text;
+    out.flush();
+    if (!array.isEmpty()) return Success;
+    const QString where = p.parser.isSet(all) ? QStringLiteral("any translation") : bible.versionAbbreviation();
+    if (words.isEmpty() && !p.parser.isSet(notes) && !p.parser.isSet(highlights)) { err << "No marks in " << printable(where) << " yet." << Qt::endl; return Success; }
+    return failure(err, "marks list", "no mark in " + where + " matches.");
+}
+
+int marksOn(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({json});
+    if (!p.parse(arguments)) return usage(err, "marks show", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("marks show")); return Success; }
+    const QString name = p.parser.positionalArguments().join(' ').trimmed();
+    if (name.isEmpty()) return usage(err, "marks show", "name a passage, such as: omaword marks show jn316");
+    BibleBackend bible;
+    if (!useTranslation(bible, p.parser.value(p.translation), "marks show", err)) return Failure;
+    const auto passage = bible.readPassage(name);
+    if (passage.contains("error")) return failure(err, "marks show", name + ": " + passage.value("error").toString());
+    if (passage.contains("note")) err << printable(passage.value("note").toString()) << '.' << Qt::endl;
+    // Bible order in this translation (its books', then chapters and verses);
+    // a whole chapter's scope runs from verse 0 to past its last.
+    QHash<int, int> order;
+    const auto books = bible.books();
+    for (int i = 0; i < books.size(); ++i) order.insert(books[i].toMap().value("id").toInt(), i);
+    const auto at = [&](const QVariantMap &scope, bool end) {
+        const int verse = scope.value(end ? "end" : "start").toInt();
+        return std::make_tuple(order.value(scope.value(end ? "endBook" : "book").toInt(), 1000),
+                               scope.value(end ? "endChapter" : "chapter").toInt(), end && !verse ? 1000 : verse);
+    };
+    const auto scope = passage.value("scope").toMap();
+    QJsonArray array;
+    QStringList texts;
+    for (const auto &value : bible.marks()) {
+        const auto mark = value.toMap();
+        if (mark.value("versionId") != passage.value("versionId") || at(mark, false) > at(scope, true) || at(scope, false) > at(mark, true)) continue;
+        array.append(markJson(mark));
+        texts << markText(mark, true);
+    }
+    if (array.isEmpty())
+        return failure(err, "marks show", "no marks on " + passage.value("reference").toString() + " in " + passage.value("abbreviation").toString() + '.');
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    else out << texts.join('\n');
+    out.flush();
+    return Success;
+}
+
+int tags(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({json});
+    if (!p.parse(arguments)) return usage(err, "tags list", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("tags list")); return Success; }
+    if (!p.parser.positionalArguments().isEmpty() || p.parser.isSet(p.translation)) return usage(err, "tags list", "takes no arguments.");
+    BibleBackend bible;
+    const auto rows = bible.tags();
+    QJsonArray array;
+    int width = 0;
+    for (const auto &value : rows) width = std::max<int>(width, value.toMap().value("name").toString().size());
+    for (const auto &value : rows) {
+        const auto row = value.toMap();
+        const int count = row.value("count").toInt();
+        array.append(QJsonObject{{"name", row.value("name").toString()}, {"count", count}});
+        if (!p.parser.isSet(json))
+            out << printable(row.value("name").toString()).leftJustified(width + 2) << count << (count == 1 ? " passage\n" : " passages\n");
+    }
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    out.flush();
+    if (rows.isEmpty() && !p.parser.isSet(json)) err << "No tags yet." << Qt::endl;
+    return Success;
+}
+
+int desk(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    Parser p;
+    if (!p.parse(arguments)) return usage(err, "desk show", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("desk show")); return Success; }
+    if (!p.parser.positionalArguments().isEmpty() || p.parser.isSet(p.translation)) return usage(err, "desk show", "takes no arguments.");
+    BibleBackend bible;
+    const QString page = bible.deskPage();
+    if (page.isEmpty()) { err << "The Desk is empty." << Qt::endl; return Success; }
+    out << printable(page) << (page.endsWith('\n') ? "" : "\n");
+    out.flush();
+    return Success;
+}
+
+int history(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({json});
+    if (!p.parse(arguments)) return usage(err, "history list", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("history list")); return Success; }
+    if (!p.parser.positionalArguments().isEmpty() || p.parser.isSet(p.translation)) return usage(err, "history list", "takes no arguments.");
+    BibleBackend bible;
+    const auto rows = bible.history();
+    QJsonArray array;
+    for (const auto &value : rows) {
+        const auto row = value.toMap();
+        array.append(QJsonObject{{"reference", row.value("reference").toString()}, {"translation", row.value("versionAbbreviation").toString()},
+                                 {"translationId", row.value("versionId").toString()}, {"visitedAt", row.value("visitedAt").toString()}});
+        if (!p.parser.isSet(json))
+            out << localTime(row.value("visitedAt").toString()) << "  "
+                << printable(row.value("reference").toString() + " (" + row.value("versionAbbreviation").toString() + ")\n");
+    }
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    out.flush();
+    if (!bible.historyEnabled()) err << "History is off in OmaWord, so it keeps nothing." << Qt::endl;
+    else if (rows.isEmpty() && !p.parser.isSet(json)) err << "History is empty." << Qt::endl;
+    return Success;
+}
+
+int ribbon(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({json});
+    if (!p.parse(arguments)) return usage(err, "ribbon show", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("ribbon show")); return Success; }
+    if (!p.parser.positionalArguments().isEmpty() || p.parser.isSet(p.translation)) return usage(err, "ribbon show", "takes no arguments.");
+    BibleBackend bible;
+    const auto ribbon = bible.ribbon();
+    if (ribbon.isEmpty()) return failure(err, "ribbon show", "the ribbon lies nowhere; place it in OmaWord.");
+    const QString id = ribbon.value("versionId").toString();
+    QString abbreviation = id;
+    for (const auto &value : bible.versions()) if (value.toMap().value("id").toString() == id) abbreviation = value.toMap().value("abbreviation").toString();
+    if (p.parser.isSet(json))
+        out << CommandLine::json(QJsonDocument(QJsonObject{{"reference", ribbon.value("reference").toString()}, {"translation", abbreviation},
+                                                           {"translationId", id}, {"placedAt", ribbon.value("placedAt").toString()}}));
+    else out << printable(ribbon.value("reference").toString() + " (" + abbreviation + ")\n");
+    out.flush();
+    return Success;
+}
+
 int links(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal)
 {
     Parser p;
@@ -963,7 +1202,7 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
         const QString next = rest.value(0);
         if (next == QStringLiteral("-h") || next == QStringLiteral("--help")) { printHelp(out, *command); return Success; }
         if (const auto *named = find(command->name + ' ' + next)) { command = named; rest.removeFirst(); }
-        else if (!next.isEmpty() && !next.startsWith('-')) {
+        else if (!command->words && !next.isEmpty() && !next.startsWith('-')) {
             QStringList names;
             for (const auto *subcommand : subcommands(*command)) names << subcommand->name.mid(command->name.size() + 1);
             return usage(err, command->name, "no command \u201c" + next + "\u201d; it has " + names.join(QStringLiteral(", ")) + '.');
@@ -978,6 +1217,12 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     if (name == QStringLiteral("translations show")) return translationDetails(rest, out, err);
     if (name == QStringLiteral("books list")) return books(rest, out, err);
     if (name == QStringLiteral("books outline")) return outline(rest, out, err);
+    if (name == QStringLiteral("marks list")) return marks(rest, out, err);
+    if (name == QStringLiteral("marks show")) return marksOn(rest, out, err);
+    if (name == QStringLiteral("tags list")) return tags(rest, out, err);
+    if (name == QStringLiteral("desk show")) return desk(rest, out, err);
+    if (name == QStringLiteral("history list")) return history(rest, out, err);
+    if (name == QStringLiteral("ribbon show")) return ribbon(rest, out, err);
     if (name == QStringLiteral("link")) return links(rest, out, err, in, terminal);
     if (name == QStringLiteral("completion")) return completion(rest, out, err);
     // open, lookup, or import with --help.

@@ -6,6 +6,9 @@ _omaword_subcommands()
 {
     case $1 in
         books) echo "list outline" ;;
+        marks) echo "list show" ;;
+        tags | history) echo "list" ;;
+        desk | ribbon) echo "show" ;;
         translations | versions) echo "list show" ;;
     esac
 }
@@ -13,7 +16,7 @@ _omaword_subcommands()
 _omaword()
 {
     local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
-    local commands="open lookup read quote refs search link books translations import completion help"
+    local commands="open lookup read quote refs search link books marks tags desk history ribbon translations import completion help"
     case $prev in
         -t | --translation)
             COMPREPLY=($(compgen -W "$(omaword translations --names 2>/dev/null)" -- "$cur"))
@@ -24,7 +27,7 @@ _omaword()
         --in)
             COMPREPLY=($(compgen -W "ot nt apocrypha" -- "$cur"))
             return ;;
-        --limit)
+        --limit | --tag)
             return ;;
         --import | import)
             compopt -o filenames 2>/dev/null
@@ -53,7 +56,10 @@ _omaword()
         quote) options="--all --plain --json --translation --help" ;;
         refs) options="--quote --limit --json --color --translation --help" ;;
         search) options="--all --in --limit --json --color --translation --help" ;;
-        "books list" | "books outline") options="--json --translation --help" ;;
+        "books list" | "books outline" | "marks show") options="--json --translation --help" ;;
+        "marks list") options="--tag --notes --highlights --all --json --translation --help" ;;
+        "tags list" | "history list" | "ribbon show") options="--json --help" ;;
+        "desk show") options="--help" ;;
         "translations list" | "versions list") options="--names --json --help" ;;
         "translations show" | "versions show")
             if [[ $cur == -* ]]; then options="--json --help"; else options=$(omaword translations --names 2>/dev/null); fi ;;

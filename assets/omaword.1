@@ -66,6 +66,38 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .RB [ \-t
 .IR name ]
 .br
+.B omaword marks
+.RB [ list ]
+.RI [ words ...]
+.RB [ \-\-tag
+.IR name ]...
+.RB [ \-\-notes ]
+.RB [ \-\-highlights ]
+.RB [ \-\-all " | " \-t
+.IR name ]
+.RB [ \-\-json ]
+.br
+.B omaword marks show
+.I passage
+.RB [ \-\-json ]
+.RB [ \-t
+.IR name ]
+.br
+.B omaword tags
+.RB [ list ]
+.RB [ \-\-json ]
+.br
+.B omaword desk
+.RB [ show ]
+.br
+.B omaword history
+.RB [ list ]
+.RB [ \-\-json ]
+.br
+.B omaword ribbon
+.RB [ show ]
+.RB [ \-\-json ]
+.br
 .B omaword translations
 .RB [ list ]
 .RB [ \-\-names ]
@@ -233,6 +265,44 @@ Lists the translation's books, in its order, with how many chapters each has.
 Prints the section headings of a book, or of one of its chapters, as the
 whole-book view's outline has them: each chapter, then its headings after the
 verses they open.
+.TP
+.B marks \fR[\fPlist\fR] [\fIwords\fR...]\fP
+Lists your marks (each passage you highlighted, wrote a note on, or tagged) in
+the translation you read, in Bible order: its reference and translation,
+whether it is highlighted, and its tags, then its note on one line, or its
+opening words without one. As in OmaWord's Marks, each word must match a
+mark's reference, translation, note, tags, or text, ignoring case, and
+.BI # name
+matches a tag starting with
+.IR name ,
+as
+.BI \-\-tag " name"
+does (repeat it to need more tags).
+.B \-\-notes
+and
+.B \-\-highlights
+keep only the marks with a note or a highlight;
+.B \-\-all
+lists every installed translation's. The exit status is 1 when nothing
+matches.
+.TP
+.BI "marks show" " passage"
+Prints the marks on a passage or within it, as
+.B marks list
+does but with each note whole, as you wrote it.
+.TP
+.B tags \fR[\fPlist\fR]\fP
+Lists your tags by name, each with how many passages it marks.
+.TP
+.B desk \fR[\fPshow\fR]\fP
+Prints the Desk, the Markdown page every window shares.
+.TP
+.B history \fR[\fPlist\fR]\fP
+Lists the passages you visited, newest first, each after when you did.
+.TP
+.B ribbon \fR[\fPshow\fR]\fP
+Prints the passage where the ribbon lies; the exit status is 1 when it lies
+nowhere.
 .TP
 .B translations \fR[\fPlist\fR]\fP
 Lists the installed translations;

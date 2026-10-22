@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QScopeGuard>
 #include <QTemporaryDir>
 #include "aofixture.h"
@@ -400,6 +401,66 @@ private slots:
         const auto unknown = run({"translations", "show", "XYZ"});
         QCOMPARE(unknown.status, 1); QVERIFY(unknown.err.contains("no installed translation") && unknown.err.contains("REV"));
         QCOMPARE(run({"translations", "show", "-t", "REV"}).status, 2);
+    }
+    // Your marks, the Desk, History, and the ribbon, read as the app saved them.
+    void marksAndPlaces() {
+        QCOMPARE(run({"marks"}).status, 0); QCOMPARE(run({"marks"}).err, QString("No marks in REV yet.\n"));
+        QCOMPARE(run({"desk"}).err, QString("The Desk is empty.\n")); QCOMPARE(run({"history"}).err, QString("History is empty.\n"));
+        const auto unplaced = run({"ribbon"});
+        QCOMPARE(unplaced.status, 1); QVERIFY(unplaced.err.contains("the ribbon lies nowhere"));
+        {
+            BibleBackend bible;
+            QVERIFY(bible.readVersion("eng_net")); QVERIFY(bible.navigate("John 3:16")); QVERIFY(bible.toggleHighlight());
+            const QVariantMap john{{"versionId", "eng_net"}, {"book", 43}, {"chapter", 3}, {"start", 16}, {"endBook", 43}, {"endChapter", 3}, {"end", 16}};
+            QVERIFY2(bible.setScopeNote(john, "Love\n\nGiven.", ""), qPrintable(bible.error()));
+            QVERIFY(!bible.createAndAssignTag(QVariantMap{{"versionId", "eng_net"}, {"book", 1}, {"chapter", 1}, {"start", 1},
+                                                          {"endBook", 1}, {"endChapter", 1}, {"end", 1}}, "creation").isEmpty());
+            QVERIFY(bible.setDeskPage("# Study\n\nGrace.", "")); QVERIFY(bible.recordHistory()); QVERIFY(bible.placeRibbon());
+        }
+        // marks: one line each, in Bible order, in the translation named or read.
+        const QString genesis = QStringLiteral("Genesis 1:1 (NET) \u00b7 #creation\n  In the beginning God created.\n");
+        const QString john = QStringLiteral("John 3:16 (NET) \u00b7 highlighted\n  Love Given.\n");
+        QCOMPARE(run({"marks", "-t", "NET"}).out, genesis + john);
+        QCOMPARE(run({"marks", "list", "-t", "NET"}).out, genesis + john);
+        QCOMPARE(run({"marks", "-t", "NET", "--notes"}).out, john);
+        QCOMPARE(run({"marks", "-t", "NET", "--highlights"}).out, john);
+        QCOMPARE(run({"marks", "-t", "NET", "love", "JOHN"}).out, john);
+        QCOMPARE(run({"marks", "-t", "NET", "--tag", "cre"}).out, genesis);
+        QCOMPARE(run({"marks", "-t", "NET", "#cre"}).out, genesis);
+        const auto none = run({"marks", "-t", "NET", "love", "--tag", "cre"});
+        QCOMPARE(none.status, 1); QCOMPARE(none.err, QString("omaword marks list: no mark in NET matches.\n"));
+        QCOMPARE(run({"marks", "--all", "--tag", "beginning"}).out.count(" (OSF) \u00b7 #beginning\n"), 2);
+        QVERIFY(run({"marks", "--all"}).out.contains(john));
+        QCOMPARE(run({"marks", "--all", "-t", "NET"}).status, 2);
+        const auto json = QJsonDocument::fromJson(run({"marks", "-t", "NET", "--json"}).out.toUtf8()).array();
+        QCOMPARE(json.size(), 2);
+        const auto mark = json.last().toObject();
+        QCOMPARE(mark["reference"].toString(), QString("John 3:16")); QCOMPARE(mark["translationId"].toString(), QString("eng_net"));
+        QVERIFY(mark["highlight"].toBool()); QCOMPARE(mark["note"].toString(), QString("Love\n\nGiven."));
+        QVERIFY(!mark["created"].toString().isEmpty()); QCOMPARE(json.first().toObject()["tags"].toArray(), QJsonArray({"creation"}));
+        // marks show: those on a passage or within it, notes whole.
+        const QString whole = QStringLiteral("John 3:16 (NET) \u00b7 highlighted\n  Love\n\n  Given.\n");
+        QCOMPARE(run({"marks", "show", "jn316", "-t", "NET"}).out, whole);
+        QCOMPARE(run({"marks", "show", "John", "3", "-t", "NET"}).out, whole);
+        QVERIFY(run({"marks", "show", "gen1:2", "-t", "OSF"}).out.startsWith(QStringLiteral("Genesis 1:1\u20132 (OSF) \u00b7 #word\n")));
+        const auto empty = run({"marks", "show", "jn317", "-t", "NET"});
+        QCOMPARE(empty.status, 1); QVERIFY(empty.err.contains("no marks on John 3:17 in NET"));
+        QCOMPARE(QJsonDocument::fromJson(run({"marks", "show", "jn316", "-t", "NET", "--json"}).out.toUtf8()).array().size(), 1);
+        // tags, by name, with how many passages each marks.
+        QCOMPARE(run({"tags"}).out, QString("beginning  2 passages\ncreation   1 passage\nword       2 passages\n"));
+        QCOMPARE(QJsonDocument::fromJson(run({"tags", "list", "--json"}).out.toUtf8()).array().first().toObject(),
+                 QJsonObject({{"name", "beginning"}, {"count", 2}}));
+        QCOMPARE(run({"tags", "grace"}).status, 2);
+        // The Desk, History, and the ribbon.
+        QCOMPARE(run({"desk"}).out, QString("# Study\n\nGrace.\n"));
+        const auto visited = run({"history"});
+        QVERIFY2(QRegularExpression("^\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d  John 3:16 \\(NET\\)\n$").match(visited.out).hasMatch(), qPrintable(visited.out));
+        QVERIFY(!QJsonDocument::fromJson(run({"history", "--json"}).out.toUtf8()).array().first().toObject()["visitedAt"].toString().isEmpty());
+        QCOMPARE(run({"ribbon"}).out, QString("John 3:16 (NET)\n"));
+        QCOMPARE(QJsonDocument::fromJson(run({"ribbon", "--json"}).out.toUtf8()).object()["translationId"].toString(), QString("eng_net"));
+        { BibleBackend bible; QVERIFY(bible.setHistoryEnabled(false)); }
+        QVERIFY(run({"history"}).err.contains("History is off"));
+        { BibleBackend bible; QVERIFY(bible.setHistoryEnabled(true)); }
     }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.
