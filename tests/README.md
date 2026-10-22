@@ -39,8 +39,8 @@ run offscreen with software rendering. Logs: `$BUILD_DIR/test-logs/<suite>.log`
 | `catalog` | Catalog validation, streamed downloads, cancellation, timeout, and retry |
 | `annotations` | Flowing documents built at once or in steps, annotation paint, geometry, hit tests, and copy mapping (`tst_blockannotations.cpp`, `blockannotations.pro`) |
 | `instance` | Lock/IPC bounds, hand-off, stale recovery, and executable replacement (`tst_singleinstance.cpp`, `singleinstance.pro`) |
-| `windows` | Reader isolation, peer changes, Follow, lookup, request routing, and offline QML engine |
-| `cli` | Headless commands, output/JSON, terminal escaping, and GUI request parsing |
+| `windows` | Reader isolation, peer changes (and another process's library changes), Follow, lookup, request routing, and offline QML engine |
+| `cli` | Headless commands (passages, books, marks, exports, catalog), output/JSON, terminal escaping, and GUI request parsing |
 
 Other suites use `tests/<selector>.pro` and `tests/tst_<selector>.cpp`.
 `bash tests/test-runner.sh` checks the runner itself with fake tools.

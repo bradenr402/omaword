@@ -166,6 +166,12 @@ user's real data for development or tests.
   desktop and sound are shared. Destroy windows before their contexts/backends.
 - Committed changes publish to peer readers without navigating them. Imports
   share a busy guard. Cross-window operations flush affected drafts first.
+- Another process's library changes (the command line's install, remove,
+  import) reach readers through a debounced watch on the data directory
+  (`noticeLibrary`, app only): when the installed IDs and files differ from
+  what `readVersions` last saw, a reader reloads as for a peer's commit, its
+  version again if replaced, another if removed. Until then Linux keeps an
+  unlinked generation readable for the reader that has it open.
 - Follow relays logical location plus top verse/offset, not raw scroll pixels.
   Updates coalesce once per frame and are suppressed while applying a peer's
   update or restoring. Same-chapter selection changes must not reload text.

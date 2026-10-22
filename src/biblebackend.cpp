@@ -444,6 +444,15 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
     }
     if (!initializeStore()) { m_store.close(); return; }
     m_storeReady = true;
+    // Windows notice what another process does to the library: its files
+    // come and go in the data directory.
+    if (qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+        m_libraryTimer.setSingleShot(true);
+        m_libraryTimer.setInterval(250);
+        connect(&m_libraryWatch, &QFileSystemWatcher::directoryChanged, &m_libraryTimer, qOverload<>(&QTimer::start));
+        connect(&m_libraryTimer, &QTimer::timeout, this, &BibleBackend::noticeLibrary);
+        m_libraryWatch.addPath(m_directory);
+    }
     if (!readVersions(&m_versions)) return;
     QSqlQuery active(m_store);
     if (!active.exec("SELECT active FROM library WHERE id=1") || !active.next()) {
@@ -2176,7 +2185,26 @@ bool BibleBackend::readVersions(QVariantList *result)
             {"wordsOfJesus",info.wordsOfJesus},{"revision",info.revision}});
     }
     if (q.lastError().isValid()) return setError("Cannot read installed versions: " + q.lastError().text());
+    m_library = librarySignature();
     *result = rows; return true;
+}
+
+QString BibleBackend::librarySignature() const
+{
+    QSqlQuery q(m_store);
+    QStringList rows;
+    if (q.exec("SELECT version_id,path FROM installed ORDER BY version_id"))
+        while (q.next()) rows << q.value(0).toString() + '\t' + q.value(1).toString();
+    return rows.join('\n');
+}
+
+void BibleBackend::noticeLibrary()
+{
+    if (!m_storeReady || librarySignature() == m_library) return;
+    // This process's own library changes reach its readers by themselves.
+    if (sharedMutationBusy()) { m_libraryTimer.start(); return; }
+    const bool replaced = !m_versionId.isEmpty() && installedPath(m_versionId) != m_bible.databaseName();
+    refreshShared(replaced ? m_versionId : QString(), true, false);
 }
 
 QString BibleBackend::versionIdFor(const QString &name) const

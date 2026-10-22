@@ -431,6 +431,29 @@ private slots:
         QCOMPARE(b->selectionReference(),selection); QCOMPARE(b->cursorVerse(),2);
         b->setNoteText("Fallback remains writable"); QCOMPARE(a->collection(),b->collection());
     }
+    // A library another process changes (omaword translations install,
+    // remove): every window reads the versions again; one reading a version
+    // replaced reads its new text, and one reading a version removed moves on.
+    void libraryChangedElsewhere() {
+        auto *a = windows->backendAt(0), *b = windows->backendAt(1);
+        QVERIFY(b->navigate("John 3:16"));
+        const auto elsewhere = [&](const QStringList &arguments) {
+            QProcess child;
+            child.start(QCoreApplication::applicationFilePath(), QStringList{"--library", session->path()} + arguments);
+            return child.waitForFinished(60000) && child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0;
+        };
+        QVERIFY(elsewhere({"import", structuredUsfm}));
+        QTRY_COMPARE(a->versions().size(), 2); QTRY_COMPARE(b->versions().size(), 2);
+        QCOMPARE(a->versionId(), QString("engnet")); QCOMPARE(b->versionId(), QString("engnet"));
+        const QString generation = b->textGeneration();
+        QVERIFY(elsewhere({"import", fixture}));
+        QTRY_VERIFY(b->textGeneration() != generation);
+        QCOMPARE(b->versionId(), QString("engnet")); QCOMPARE(b->selectionReference(), QString("John 3:16"));
+        QCOMPARE(b->readPassage("John 3:16").value("plain").toString(), QString("Original window fixture words JHN:3:16."));
+        QVERIFY(elsewhere({"remove", "engnet"}));
+        QTRY_COMPARE(b->versionId(), QString("window-original")); QTRY_COMPARE(a->versionId(), QString("window-original"));
+        QVERIFY(b->ready()); QCOMPARE(a->versions().size(), 1);
+    }
     void closingOneKeepsTheOther() {
         QPointer<QWindow> first(windows->windowAt(0));
         QPointer<BibleBackend> backend(windows->backendAt(0));
@@ -960,6 +983,18 @@ int main(int argc, char **argv)
             client.forward(request,[&](auto result) { app.exit(result.ok ? 0 : 1); });
         });
         return app.exec();
+    }
+    // Another process changing the library, as omaword translations install
+    // and remove do, in the data home given (each test process has its own):
+    // import a file, or remove a version (keeping its marks).
+    if (app.arguments().value(1) == "--library") {
+        qputenv("XDG_DATA_HOME", QFile::encodeName(app.arguments().value(2)));
+        BibleBackend bible;
+        if (app.arguments().value(3) == "import") {
+            bible.importAo(QUrl::fromLocalFile(app.arguments().value(4)));
+            while (bible.busy()) app.processEvents(QEventLoop::WaitForMoreEvents);
+        } else bible.removeVersion(app.arguments().value(4), false);
+        return bible.error().isEmpty() ? 0 : 1;
     }
     app.setQuitOnLastWindowClosed(false);
     WindowsTest test;

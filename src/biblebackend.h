@@ -4,6 +4,7 @@
 #include "aoimporter.h"
 #include "textselection.h"
 #include <QObject>
+#include <QFileSystemWatcher>
 #include <QFutureWatcher>
 #include <QHash>
 #include <QSqlDatabase>
@@ -546,6 +547,16 @@ private:
                        const QString &removedId = {}, bool deleteAnnotations = false, bool startup = false,
                        bool peerReload = false, const QVariantMap &targetScope = {});
     void refreshShared(const QString &versionId, bool library, bool preferences);
+    // A library another process changed (omaword translations install,
+    // remove): reloaded as another window's change is, the version read again
+    // when it was replaced, or another when it went. librarySignature: the
+    // installed versions' IDs and files, as readVersions last saw them in
+    // m_library.
+    void noticeLibrary();
+    QString librarySignature() const;
+    QFileSystemWatcher m_libraryWatch;
+    QTimer m_libraryTimer;
+    QString m_library;
     bool flushDrafts();
     // versionId: the version whose annotations changed (empty: the reading one).
     void publishAnnotations(const QString &versionId = QString());
