@@ -136,15 +136,6 @@ Window {
         versionMenu.x = Math.max(0, Math.round(at.x - versionMenu.width))
         versionMenu.currentIndex = Math.max(0, versionOrder.findIndex(function(row) { return row.id === lookup.backend.versionId }))
     }
-    // The passage as the reader shows it: a number before each verse where there are several.
-    function passageText(passage) {
-        const verses = Array.from(passage.verses || [])
-        if (verses.length < 2) return passage.plain
-        const digits = "⁰¹²³⁴⁵⁶⁷⁸⁹"
-        return verses.map(function(verse) {
-            return String(verse.verse).split("").map(function(digit) { return digits[Number(digit)] }).join("") + " " + verse.text
-        }).join(" ")
-    }
     function preview(row) {
         const passage = lookup.backend.readPassage(row.reference)
         return passage.error ? "" : passage.plain.replace(/\s+/g, " ")
@@ -393,7 +384,7 @@ Window {
                 id: passageText
                 objectName: "lookupText"
                 width: passageView.width
-                text: lookup.shown ? lookup.passageText(lookup.shown) : ""
+                text: lookup.shown ? lookup.shown.body : ""
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
                 color: lookup.theme.foreground

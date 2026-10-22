@@ -3996,7 +3996,9 @@ QVariantMap BibleBackend::passageAt(int start, int end, const QString &label, bo
         ? QVariantMap{{"book",a.book},{"chapter",a.chapter},{"start",0},{"endBook",a.book},{"endChapter",a.chapter},{"end",0}}
         : QVariantMap{{"book",a.book},{"chapter",a.chapter},{"start",a.verse},{"endBook",z.book},{"endChapter",z.chapter},{"end",z.verse}};
     return {{"reference",label},{"versionId",m_versionId},{"abbreviation",m_abbreviation},{"name",m_edition},
-            {"plain",plain},{"quotation",copyRange(start,end,label,false)},{"verses",verses},{"scope",scope}};
+            {"plain",plain},{"quotation",copyRange(start,end,label,false)},{"verses",verses},{"scope",scope},
+            // As the reader shows it: its lines and paragraphs, numbered where there are several verses.
+            {"body",verses.size() > 1 ? laidOut(start,end,true) : plain}};
 }
 
 QString BibleBackend::copyVerse(int number, bool plainText)
@@ -4017,6 +4019,13 @@ QString BibleBackend::copyVerse(int number, bool plainText)
 }
 
 QString BibleBackend::copyRange(int first, int last, const QString &label, bool plainText)
+{
+    const QString body = laidOut(first,last,!plainText);
+    if (body.isNull()) return {};
+    return plainText ? body : QStringLiteral("“") + body + QStringLiteral("”\n\n— ") + label;
+}
+
+QString BibleBackend::laidOut(int first, int last, bool numbered)
 {
     QString body;
     const QString digits = QStringLiteral("⁰¹²³⁴⁵⁶⁷⁸⁹");
@@ -4040,13 +4049,13 @@ QString BibleBackend::copyRange(int first, int last, const QString &label, bool 
                                                          previousPoemEnd, !levels.isEmpty() && levels.first().toInt() > 0);
                     QString superscript;
                     for (const QChar digit : QString::number(number)) superscript += digits[digit.digitValue()];
-                    body += plainText ? text : superscript + ' ' + text;
+                    body += numbered ? superscript + ' ' + text : text;
                     previousBook = b; previousChapter = c; previousPoemEnd = !levels.isEmpty() && levels.last().toInt() > 0;
                 }
             }
         }
     }
-    return plainText ? body : QStringLiteral("“") + body + QStringLiteral("”\n\n— ") + label;
+    return body.isNull() ? QStringLiteral("") : body;
 }
 
 void BibleBackend::copyText(QString text)

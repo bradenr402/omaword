@@ -619,6 +619,11 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(lookup,"copy",Q_ARG(QVariant,true)));
         QVERIFY(!QGuiApplication::clipboard()->text().contains(QStringLiteral("\u2014")));
         QCOMPARE(bible->selectionReference(),QString("John 3:2")); // Nothing moved.
+        // Several verses read as the reader lays them out (a passage's body).
+        windowObject(lookup,"lookupQuery")->setProperty("text","rom 8:1-3"); QVERIFY(QMetaObject::invokeMethod(lookup,"refresh"));
+        QVERIFY(QMetaObject::invokeMethod(lookup,"show",Q_ARG(QVariant,0)));
+        QCOMPARE(windowObject(lookup,"lookupTitle")->property("text").toString(),QString("Romans 8:1–3"));
+        QCOMPARE(windowObject(lookup,"lookupText")->property("text").toString(),bible->readPassage("Romans 8:1-3").value("body").toString());
         // A second lookup replaces it, afresh, at the size the first was given.
         {
             // (Once the window has heard of it: its size changes before its signals arrive.)

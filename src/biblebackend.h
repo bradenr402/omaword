@@ -518,6 +518,9 @@ private:
     bool loadPreferences();
     bool savePreference(const QString &key, const QVariant &value);
     QString copyRange(int first, int last, const QString &reference, bool plainText);
+    // Absolute verses first..last as copies lay them out (TextSelection::verseJoin),
+    // each numbered or not; null if a chapter cannot be read.
+    QString laidOut(int first, int last, bool numbered);
     // A chapter's verses for character selection (the chapter read's from its rows).
     QList<TextSelection::Verse> selectionChapter(int book, int chapter) const;
     struct Verse { int book = 0, chapter = 0, verse = 0; bool paragraphStart = false; };

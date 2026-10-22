@@ -364,6 +364,23 @@ private slots:
         const auto links = bible->passageLinks("See Genesis 6:14.");
         QCOMPARE(links.size(), 1); QCOMPARE(links.first().toMap()["reference"].toString(), QString("Genesis 6:14"));
     }
+    // A passage's body reads as the reader lays it out: a poem's lines on lines
+    // of their own, a paragraph after a blank line, verses numbered where there
+    // are several (the lookup window shows it).
+    void passageBodyKeepsItsLines() {
+        const auto path = session->filePath("poem.json");
+        const auto poem = [](const QString &first, const QString &second) {
+            return QJsonArray{QJsonObject{{"text", first}, {"poem", 1}}, QJsonObject{{"lineBreak", true}}, QJsonObject{{"text", second}, {"poem", 2}}};
+        };
+        QVERIFY(AoFixture::write(path, AoFixture::complete("engpoem", {AoFixture::book("PSA", 1, {AoFixture::chapter(23, {
+            AoFixture::verse(1, poem("A first line,", "and its pair.")), AoFixture::verse(2, poem("A second line,", "and its pair.")),
+            QJsonObject{{"type", "line_break"}}, AoFixture::verse(3, {"Prose after a break."}), AoFixture::verse(4, {"More prose."})})})})));
+        install(path);
+        QCOMPARE(bible->readPassage("Psalm 23:1-4").value("body").toString(),
+                 QStringLiteral("¹ A first line,\nand its pair.\n² A second line,\nand its pair.\n\n³ Prose after a break. ⁴ More prose."));
+        QCOMPARE(bible->readPassage("Psalm 23:1").value("body").toString(), QString("A first line,\nand its pair."));
+        QCOMPARE(bible->readPassage("Psalm 23").value("body").toString(), bible->readPassage("Psalm 23:1-4").value("body").toString());
+    }
     void aliasesAndPurePreview() {
         install(ojb);
         QVERIFY(bible->navigate("GEN 1:2")); QCOMPARE(bible->book(),1);

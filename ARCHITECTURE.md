@@ -188,7 +188,8 @@ user's real data for development or tests.
   Block runs lines together. Replacing a break with a space must preserve mapping.
   In Paragraph, and in copies (`TextSelection::verseJoin`), a poem line always
   has a line of its own: AO editions mark no paragraphs between poetry verses.
-  Copies use source paragraph starts and poetry breaks regardless of layout.
+  Copies use source paragraph starts and poetry breaks regardless of layout, and
+  so does the lookup window (a passage's `body`, `BibleBackend::laidOut`).
 - Verse steps inside a chapter only move selection: no reload or `versesChanged`.
   Annotation changes update existing rows/paint; avoid rebuilding all documents
   for a cursor move. Paragraph/Block marks (`AnnotationPaint`) cover only their
