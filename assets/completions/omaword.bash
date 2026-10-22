@@ -49,7 +49,7 @@ _omaword()
         open) options="--here --translation --help" ;;
         lookup) options="--translation --help" ;;
         read) options="--footnotes --json --color --translation --help" ;;
-        quote) options="--plain --json --translation --help" ;;
+        quote) options="--all --plain --json --translation --help" ;;
         search) options="--all --in --limit --json --color --translation --help" ;;
         "translations list" | "versions list") options="--names --json --help" ;;
         link) options="--translation --help" ;;

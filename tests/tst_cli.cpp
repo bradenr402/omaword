@@ -300,6 +300,24 @@ private slots:
         const auto quoted = QJsonDocument::fromJson(run({"quote", "jn317", "-t", "eng_rdr", "--json"}).out.toUtf8()).array();
         QCOMPARE(quoted.first().toObject()["verses"].toArray().first().toObject().keys(), QStringList({"book", "chapter", "text", "verse"}));
     }
+    // quote --all: each passage in every translation, the one you read first.
+    void quoteEveryTranslation() {
+        const auto every = run({"quote", "jn316", "jn317", "--all"});
+        QCOMPARE(every.status, 0); QVERIFY(every.err.isEmpty());
+        QVERIFY2(every.out.startsWith(QStringLiteral("\u201c\u00b9\u2076 For God so loved the world.\u201d\n\n\u2014 John 3:16 (eng_rdr)\n\n")), qPrintable(every.out));
+        QVERIFY(every.out.contains(QStringLiteral("\u201c\u00b9\u2076 For God so loved the world, that he gave.\u201d\n\n\u2014 John 3:16 (KJV)\n\n")));
+        for (const QString abbreviation : {"(eng_rdr)", "(NET)", "(KJV)", "(EB)"}) QCOMPARE(every.out.count("3:16 " + abbreviation), 1);
+        QVERIFY(every.out.lastIndexOf("3:16 (") < every.out.indexOf("3:17 ("));
+        const auto json = QJsonDocument::fromJson(run({"quote", "jn316", "--all", "--json"}).out.toUtf8()).array();
+        QCOMPARE(json.size(), 4); QCOMPARE(json.first().toObject()["translation"].toString(), QString("eng_rdr"));
+        // A passage some translation lacks is noted; one none has fails.
+        const auto psalm = run({"quote", "ps23:1", "--all"});
+        QCOMPARE(psalm.status, 0); QVERIFY(psalm.out.endsWith(QStringLiteral("\u2014 Psalms 23:1 (eng_rdr)\n")));
+        QVERIFY2(psalm.err.contains("ps23:1 (NET): ") && psalm.err.contains("ps23:1 (KJV): "), qPrintable(psalm.err));
+        QCOMPARE(run({"quote", "Nowhere 9", "--all"}).status, 1);
+        QCOMPARE(run({"quote", "jn316", "--all", "-t", "KJV"}).status, 2);
+        QCOMPARE(run({"quote", "jn316", "--all", "--plain"}).status, 2);
+    }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.
     void joinedVerseNote() {

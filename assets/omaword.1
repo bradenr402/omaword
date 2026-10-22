@@ -25,10 +25,10 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .br
 .B omaword quote
 .IR passage ...
+.RB [ \-\-all " | " \-t
+.IR name ]
 .RB [ \-\-plain ]
 .RB [ \-\-json ]
-.RB [ \-t
-.IR name ]
 .br
 .B omaword search
 .IR words ...
@@ -138,6 +138,10 @@ footnotes, and words of Jesus. Passages come from standard input as for
 Prints each passage as OmaWord copies it: the text in quotation marks, a
 number before each verse, and the reference after an em dash, a blank line
 between passages.
+.B \-\-all
+quotes each passage in every installed translation, the one you read first,
+each reference followed by the translation's abbreviation; one a translation
+lacks is noted, and only one none has fails.
 .B \-\-plain
 prints the text alone;
 .B \-\-json

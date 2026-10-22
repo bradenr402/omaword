@@ -66,15 +66,17 @@ const QList<Command> &commands()
           {"    --json", "Print a JSON array: each passage's reference, translation, and verses, with their headings, "
                          "paragraphs, poem levels, footnotes, and words of Jesus."}, helpOption},
          {"omaword read ps23", "omaword read \"John 3\" --footnotes -t KJV", "omaword read \"Romans 8\" | less"}, true},
-        {"quote", "<passage>... [--plain] [--json] [-t <name>]", "Print passages as quotations",
+        {"quote", "<passage>... [--all | -t <name>] [--plain] [--json]", "Print passages as quotations",
          "Prints each passage as OmaWord copies it: the text in quotation marks, a number before each verse, and the "
          "reference after an em dash, with a blank line between passages. Given \"-\" (or no passage while input is "
          "piped in), it reads passages from standard input, one per line. No window opens, and your reading place "
          "stays where it was.",
-         {translationOption, {"    --plain", "Print the text alone: no quotation marks, verse numbers, or reference."},
+         {translationOption, {"    --all", "Quote each passage in every installed translation, the one you read first, "
+                                         "each reference followed by the translation's abbreviation."},
+          {"    --plain", "Print the text alone: no quotation marks, verse numbers, or reference."},
           {"    --json", "Print a JSON array: each passage's reference, translation, text, and verses."}, helpOption},
          {"omaword quote jn316", "omaword quote ps23 -t KJV --plain | wl-copy", "omaword quote \"Genesis 1:1-3\" \"John 1:1-5\"",
-          "printf 'jn316\\nrom 8:28\\n' | omaword quote"}, true},
+          "omaword quote rom828 --all", "printf 'jn316\\nrom 8:28\\n' | omaword quote"}, true},
         {"search", "<words>... [--all | -t <name>] [--in <part>]... [--limit <n>]", "Search the Bible",
          "Searches as OmaWord's search does: every word in one verse, partial words included; a \"quoted phrase\" may "
          "run across verses. Words in slashes are a regular expression, as in chapter find, matched within one verse. "
@@ -379,38 +381,62 @@ QString wrapLines(const QString &text, int width)
 
 int quote(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal)
 {
-    const QCommandLineOption plain(QStringLiteral("plain")), json(QStringLiteral("json"));
-    Parser p({plain, json});
+    const QCommandLineOption plain(QStringLiteral("plain")), json(QStringLiteral("json")), all(QStringLiteral("all"));
+    Parser p({plain, json, all});
     if (!p.parse(arguments)) return usage(err, "quote", p.parser.errorText());
     if (p.parser.isSet(p.help)) { printHelp(out, *find("quote")); return Success; }
     if (p.parser.positionalArguments().isEmpty() && terminal.input) return usage(err, "quote", "name a passage, such as: omaword quote jn316");
+    if (p.parser.isSet(all) && p.parser.isSet(p.translation)) return usage(err, "quote", "--all and --translation quote different translations; use one.");
+    if (p.parser.isSet(all) && p.parser.isSet(plain)) return usage(err, "quote", "--plain names no translation, so it cannot go with --all.");
     BibleBackend bible;
     if (!useTranslation(bible, p.parser.value(p.translation), "quote", err)) return Failure;
     const QStringList items = passages(bible, p.parser.positionalArguments(), in, terminal);
     if (items.isEmpty()) return usage(err, "quote", "name a passage, such as: omaword quote jn316");
-    QJsonArray array;
-    QStringList texts;
-    int status = Success;
-    for (const auto &item : std::as_const(items)) {
-        const auto passage = bible.readPassage(item);
-        if (passage.contains("error")) { failure(err, "quote", item + ": " + passage.value("error").toString()); status = Failure; continue; }
-        // A verse the translation joined to another is quoted as the one holding it, and says so.
-        if (passage.contains("note")) err << printable(passage.value("note").toString()) << '.' << Qt::endl;
-        texts << passage.value(p.parser.isSet(plain) ? "plain" : "quotation").toString();
-        QJsonArray verses;
-        for (const auto &value : passage.value("verses").toList()) {
-            const auto verse = value.toMap();
-            verses.append(QJsonObject{{"book", verse.value("book").toString()}, {"chapter", verse.value("chapter").toInt()},
-                                      {"verse", verse.value("verse").toInt()}, {"text", verse.value("text").toString()}});
+    // --all: every installed translation, the one you read first, each read
+    // once; the quotations print by passage.
+    QStringList ids{bible.versionId()};
+    if (p.parser.isSet(all))
+        for (const auto &value : bible.versions())
+            if (!ids.contains(value.toMap().value("id").toString())) ids << value.toMap().value("id").toString();
+    QList<QJsonArray> rows(items.size());
+    QList<QStringList> texts(items.size()), errors(items.size());
+    for (const auto &id : std::as_const(ids)) {
+        if (!bible.readVersion(id)) return failure(err, "quote", bible.error());
+        for (qsizetype i = 0; i < items.size(); ++i) {
+            const auto passage = bible.readPassage(items[i]);
+            if (passage.contains("error")) {
+                errors[i] << items[i] + (ids.size() > 1 ? " (" + bible.versionAbbreviation() + ")" : QString()) + ": " + passage.value("error").toString();
+                continue;
+            }
+            // A verse the translation joined to another is quoted as the one holding it, and says so.
+            if (passage.contains("note")) err << printable(passage.value("note").toString()) << '.' << Qt::endl;
+            texts[i] << (p.parser.isSet(plain) ? passage.value("plain").toString()
+                         : passage.value("quotation").toString() + (ids.size() > 1 ? " (" + passage.value("abbreviation").toString() + ')' : QString()));
+            QJsonArray verses;
+            for (const auto &value : passage.value("verses").toList()) {
+                const auto verse = value.toMap();
+                verses.append(QJsonObject{{"book", verse.value("book").toString()}, {"chapter", verse.value("chapter").toInt()},
+                                          {"verse", verse.value("verse").toInt()}, {"text", verse.value("text").toString()}});
+            }
+            QJsonObject row{{"reference", passage.value("reference").toString()}, {"translation", passage.value("abbreviation").toString()},
+                            {"translationId", passage.value("versionId").toString()}, {"translationName", passage.value("name").toString()},
+                            {"text", passage.value("plain").toString()}, {"quotation", passage.value("quotation").toString()}, {"verses", verses}};
+            if (passage.contains("note")) row.insert("note", passage.value("note").toString());
+            rows[i].append(row);
         }
-        QJsonObject row{{"reference", passage.value("reference").toString()}, {"translation", passage.value("abbreviation").toString()},
-                        {"translationId", passage.value("versionId").toString()}, {"translationName", passage.value("name").toString()},
-                        {"text", passage.value("plain").toString()}, {"quotation", passage.value("quotation").toString()}, {"verses", verses}};
-        if (passage.contains("note")) row.insert("note", passage.value("note").toString());
-        array.append(row);
+    }
+    // A passage some translation lacks is noted; one none has fails.
+    QJsonArray array;
+    QStringList quoted;
+    int status = Success;
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        for (const auto &error : std::as_const(errors[i])) failure(err, "quote", error);
+        if (texts[i].isEmpty()) status = Failure;
+        else quoted << texts[i].join(QStringLiteral("\n\n"));
+        for (const auto &row : std::as_const(rows[i])) array.append(row);
     }
     if (p.parser.isSet(json)) out << CommandLine::json(array);
-    else if (!texts.isEmpty()) out << printable(texts.join(QStringLiteral("\n\n"))) << '\n';
+    else if (!quoted.isEmpty()) out << printable(quoted.join(QStringLiteral("\n\n"))) << '\n';
     out.flush();
     return status;
 }
