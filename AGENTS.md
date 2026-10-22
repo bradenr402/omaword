@@ -35,7 +35,14 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 - Run the suites your change touches, then all of them before calling work done: CI runs only on GitHub (`.github/workflows/ci.yml`).
 - A new suite needs `tests/<name>.pro` (with `../src/core.pri`, and `../qml/qml.pri` for QML), entries in `bin/test` and in both project lists of `tests/test-runner.sh`, a CI shard, and rows in `tests/README.md`.
 - Fixtures are small, original AO standard JSON made in temporary directories: never real Bible text or the network.
+- Each test process moves `HOME` and `XDG_*` to private directories before `main` (`tests/testenvironment.h`), so a child process meant to share the parent's data must be handed its data home (`tst_windows`' `--library` mode).
 - Never fix a flaky test with a longer sleep: find the condition it should wait for (motion tests step their animations).
+
+## Command line
+
+- Commands are the `commands()` table in `src/commandline.cpp`; a group (`marks`) names the command its name alone runs. `tst_cli` checks that every help page fits 80 columns.
+- Nothing generates the man page or completions: a command change updates `assets/omaword.1` and all three scripts in `assets/completions/` by hand.
+- The command line only reads, except the library (`translations install`, `remove`, `import`): keep it so, or settle with the user how a running app would learn of the change (`ARCHITECTURE.md`).
 
 ## Keybindings
 
