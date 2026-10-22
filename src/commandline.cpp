@@ -137,6 +137,15 @@ const QList<Command> &commands()
          "note whole, as you wrote it. The exit status is 1 when there are none.",
          {translationOption, {"    --json", "Print a JSON array, as marks list does."}, helpOption},
          {"omaword marks show jn316", "omaword marks show \"Romans 8\""}, true},
+        {"marks export", "[-o <file>]", "Print your marks as Markdown",
+         "Prints your marks as Markdown, as OmaWord's Export writes them: a section for each translation, then each "
+         "mark's reference, highlight, tags, and note. With -o it writes them to a file instead, readable by you alone.",
+         {{"-o, --output <file>", "Write them to this file."}, helpOption},
+         {"omaword marks export > notes.md", "omaword marks export -o ~/Documents/omaword-notes.md"}, true},
+        {"marks backup", "<file|->", "Back up your marks as JSON",
+         "Writes the backup OmaWord's Back up writes, which its Restore reads: every translation's marks and reading "
+         "place, your tags, and the Desk, in a file readable by you alone. Given -, it prints the backup instead.",
+         {helpOption}, {"omaword marks backup ~/omaword-backup.json", "omaword marks backup - | gzip > backup.json.gz"}, true},
         {"tags", "", "List your tags", "", {}, {}, true, "list"},
         {"tags list", "[--json]", "List your tags",
          "Lists your tags by name, each with how many passages it marks; omaword marks --tag <name> --all lists them.",
@@ -400,9 +409,9 @@ bool useTranslation(BibleBackend &bible, const QString &name, const QString &com
 // JSON as QJsonDocument writes it, but with DEL and the C1 controls, which
 // it leaves raw, escaped as well: the values read back exact, and no control
 // character reaches a terminal.
-QString json(const QJsonDocument &document)
+QString json(const QByteArray &bytes)
 {
-    const QString text = QString::fromUtf8(document.toJson(QJsonDocument::Indented));
+    const QString text = QString::fromUtf8(bytes);
     QString escaped;
     escaped.reserve(text.size());
     for (const QChar c : text) {
@@ -411,6 +420,7 @@ QString json(const QJsonDocument &document)
     }
     return escaped;
 }
+QString json(const QJsonDocument &document) { return json(document.toJson(QJsonDocument::Indented)); }
 QString json(const QJsonArray &array) { return json(QJsonDocument(array)); }
 
 // --color <when>: auto (a terminal, unless NO_COLOR is set), always, or
@@ -1038,6 +1048,43 @@ int marksOn(const QStringList &arguments, QTextStream &out, QTextStream &err)
     return Success;
 }
 
+int exportMarks(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption output({QStringLiteral("o"), QStringLiteral("output")}, {}, QStringLiteral("file"));
+    Parser p({output});
+    if (!p.parse(arguments)) return usage(err, "marks export", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("marks export")); return Success; }
+    if (!p.parser.positionalArguments().isEmpty() || p.parser.isSet(p.translation))
+        return usage(err, "marks export", "takes no arguments; name a file with -o, such as: omaword marks export -o notes.md");
+    BibleBackend bible;
+    if (!ready(bible, "marks export", err)) return Failure;
+    const QString markdown = bible.notesMarkdown();
+    if (!p.parser.isSet(output)) { out << printable(markdown); out.flush(); return Success; }
+    if (!bible.saveExport(QFileInfo(p.parser.value(output)).absoluteFilePath(), markdown.toUtf8())) return failure(err, "marks export", bible.error());
+    return Success;
+}
+
+int backup(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    Parser p;
+    if (!p.parse(arguments)) return usage(err, "marks backup", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("marks backup")); return Success; }
+    const QStringList positional = p.parser.positionalArguments();
+    if (positional.size() != 1 || p.parser.isSet(p.translation))
+        return usage(err, "marks backup", "name one file, or - to print it, such as: omaword marks backup omaword-backup.json");
+    BibleBackend bible;
+    if (!ready(bible, "marks backup", err)) return Failure;
+    if (positional.first() == QStringLiteral("-")) {
+        QByteArray bytes;
+        if (!bible.backupJson(&bytes)) return failure(err, "marks backup", bible.error());
+        out << CommandLine::json(bytes);
+        out.flush();
+        return Success;
+    }
+    if (!bible.exportBackup(QUrl::fromLocalFile(QFileInfo(positional.first()).absoluteFilePath()))) return failure(err, "marks backup", bible.error());
+    return Success;
+}
+
 int tags(const QStringList &arguments, QTextStream &out, QTextStream &err)
 {
     const QCommandLineOption json(QStringLiteral("json"));
@@ -1219,6 +1266,8 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     if (name == QStringLiteral("books outline")) return outline(rest, out, err);
     if (name == QStringLiteral("marks list")) return marks(rest, out, err);
     if (name == QStringLiteral("marks show")) return marksOn(rest, out, err);
+    if (name == QStringLiteral("marks export")) return exportMarks(rest, out, err);
+    if (name == QStringLiteral("marks backup")) return backup(rest, out, err);
     if (name == QStringLiteral("tags list")) return tags(rest, out, err);
     if (name == QStringLiteral("desk show")) return desk(rest, out, err);
     if (name == QStringLiteral("history list")) return history(rest, out, err);

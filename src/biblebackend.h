@@ -473,6 +473,14 @@ public:
     Q_INVOKABLE QString lastPrimarySelection() const { return m_primarySelection; }
     Q_INVOKABLE bool exportNotes(QUrl directory);
     Q_INVOKABLE bool exportBackup(QUrl file);
+    // What Export and Back up write (the command line prints them): the
+    // notes as Markdown, and the backup as JSON (false, with the error set,
+    // when it cannot be made). saveExport writes either to a file as they
+    // are written: never over a live database or through a symlink another
+    // user owns, replaced at once, and yours alone.
+    QString notesMarkdown() const;
+    bool backupJson(QByteArray *json);
+    bool saveExport(const QString &path, const QByteArray &bytes);
     Q_INVOKABLE bool importBackup(QUrl file);
     Q_INVOKABLE void refreshCollection();
     Q_INVOKABLE QString dataDirectory();

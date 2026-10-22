@@ -25,8 +25,12 @@ complete -c omaword -n "not __fish_seen_subcommand_from $given" -s v -l version 
 # A group's commands follow its name (after help too).
 complete -c omaword -n "__fish_seen_subcommand_from books; and not __fish_seen_subcommand_from list outline" -a list -d "List the translation's books"
 complete -c omaword -n "__fish_seen_subcommand_from books; and not __fish_seen_subcommand_from list outline" -a outline -d "Print a book's section headings"
-complete -c omaword -n "__fish_seen_subcommand_from marks; and not __fish_seen_subcommand_from list show" -a list -d 'List your marks'
-complete -c omaword -n "__fish_seen_subcommand_from marks; and not __fish_seen_subcommand_from list show" -a show -d 'Print the marks on a passage'
+complete -c omaword -n "__fish_seen_subcommand_from marks; and not __fish_seen_subcommand_from list show export backup" -a list -d 'List your marks'
+complete -c omaword -n "__fish_seen_subcommand_from marks; and not __fish_seen_subcommand_from list show export backup" -a show -d 'Print the marks on a passage'
+complete -c omaword -n "__fish_seen_subcommand_from marks; and not __fish_seen_subcommand_from list show export backup" -a export -d 'Print your marks as Markdown'
+complete -c omaword -n "__fish_seen_subcommand_from marks; and not __fish_seen_subcommand_from list show export backup" -a backup -d 'Back up your marks as JSON'
+complete -c omaword -n "__fish_seen_subcommand_from export" -s o -l output -r -F -d 'Write them to this file'
+complete -c omaword -n "__fish_seen_subcommand_from backup" -F
 complete -c omaword -n "__fish_seen_subcommand_from tags history; and not __fish_seen_subcommand_from list" -a list -d 'List them'
 complete -c omaword -n "__fish_seen_subcommand_from desk ribbon; and not __fish_seen_subcommand_from show" -a show -d 'Print it'
 complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from list show" -a list -d 'List the installed translations'

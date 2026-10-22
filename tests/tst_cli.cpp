@@ -462,6 +462,43 @@ private slots:
         QVERIFY(run({"history"}).err.contains("History is off"));
         { BibleBackend bible; QVERIFY(bible.setHistoryEnabled(true)); }
     }
+    // Export and Back up as the app writes them, printed or in a file of yours alone.
+    void exportsAndBackups() {
+        QTemporaryDir directory;
+        const auto markdown = run({"marks", "export"});
+        QCOMPARE(markdown.status, 0);
+        QVERIFY2(markdown.out.startsWith("# " + Brand::name() + " notes\n\n"), qPrintable(markdown.out));
+        for (const QString section : {"## Fixture (NET)\n\n", "### John 3:16\n\n*Highlight*\n\nLove\n\nGiven.\n\n", "### Genesis 1:1\n\nTags: creation\n\n"})
+            QVERIFY2(markdown.out.contains(section), qPrintable(markdown.out));
+        QString live;
+        {
+            BibleBackend bible;
+            QVERIFY(bible.exportNotes(QUrl::fromLocalFile(directory.path())));
+            QFile exported(directory.filePath("omaword-notes.md"));
+            QVERIFY(exported.open(QIODevice::ReadOnly)); QCOMPARE(QString::fromUtf8(exported.readAll()), markdown.out);
+            live = bible.dataDirectory() + "/personal.sqlite";
+        }
+        const auto privateFile = [](const QString &path) {
+            return QFileInfo(path).exists() && !(QFile::permissions(path) & (QFile::ReadGroup | QFile::WriteGroup | QFile::ReadOther | QFile::WriteOther));
+        };
+        const QString notes = directory.filePath("notes.md");
+        const auto written = run({"marks", "export", "-o", notes});
+        QCOMPARE(written.status, 0); QVERIFY(written.out.isEmpty()); QVERIFY(privateFile(notes));
+        QFile file(notes); QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(QString::fromUtf8(file.readAll()), markdown.out);
+        const auto onDatabase = run({"marks", "export", "-o", live});
+        QCOMPARE(onDatabase.status, 1); QVERIFY2(onDatabase.err.contains("outside the live database"), qPrintable(onDatabase.err));
+        QCOMPARE(run({"marks", "export", "notes.md"}).status, 2);
+        // The JSON backup Restore reads.
+        const QString backup = directory.filePath("backup.json");
+        QCOMPARE(run({"marks", "backup", backup}).status, 0); QVERIFY(privateFile(backup));
+        QFile saved(backup); QVERIFY(saved.open(QIODevice::ReadOnly));
+        const auto root = QJsonDocument::fromJson(saved.readAll()).object();
+        QCOMPARE(root["format"].toString(), QString("omaword-backup")); QCOMPARE(root["deskPage"].toString(), QString("# Study\n\nGrace."));
+        const auto printed = QJsonDocument::fromJson(run({"marks", "backup", "-"}).out.toUtf8()).object();
+        QCOMPARE(printed["versions"], root["versions"]); QCOMPARE(printed["tags"], root["tags"]);
+        QCOMPARE(run({"marks", "backup", live}).status, 1);
+        QCOMPARE(run({"marks", "backup"}).status, 2); QCOMPARE(run({"marks", "backup", "a.json", "b.json"}).status, 2);
+    }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.
     void joinedVerseNote() {

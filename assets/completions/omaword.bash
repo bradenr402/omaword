@@ -6,7 +6,7 @@ _omaword_subcommands()
 {
     case $1 in
         books) echo "list outline" ;;
-        marks) echo "list show" ;;
+        marks) echo "list show export backup" ;;
         tags | history) echo "list" ;;
         desk | ribbon) echo "show" ;;
         translations | versions) echo "list show" ;;
@@ -29,7 +29,7 @@ _omaword()
             return ;;
         --limit | --tag)
             return ;;
-        --import | import)
+        --import | import | -o | --output)
             compopt -o filenames 2>/dev/null
             COMPREPLY=($(compgen -f -- "$cur"))
             return ;;
@@ -60,6 +60,9 @@ _omaword()
         "marks list") options="--tag --notes --highlights --all --json --translation --help" ;;
         "tags list" | "history list" | "ribbon show") options="--json --help" ;;
         "desk show") options="--help" ;;
+        "marks export") options="--output --help" ;;
+        "marks backup")
+            if [[ $cur == -* ]]; then options="--help"; else compopt -o filenames 2>/dev/null; COMPREPLY=($(compgen -f -- "$cur")); return; fi ;;
         "translations list" | "versions list") options="--names --json --help" ;;
         "translations show" | "versions show")
             if [[ $cur == -* ]]; then options="--json --help"; else options=$(omaword translations --names 2>/dev/null); fi ;;

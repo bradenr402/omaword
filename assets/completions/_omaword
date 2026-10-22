@@ -12,7 +12,8 @@ _omaword_translations() {
 _omaword_subcommands() {
     case $1 in
         books) reply=("list:list the translation's books" "outline:print a book's section headings") ;;
-        marks) reply=('list:list your marks' 'show:print the marks on a passage') ;;
+        marks) reply=('list:list your marks' 'show:print the marks on a passage' 'export:print your marks as Markdown'
+                      'backup:back up your marks as JSON') ;;
         tags) reply=('list:list your tags') ;;
         desk) reply=('show:print the Desk') ;;
         history) reply=('list:list the passages you visited') ;;
@@ -81,6 +82,8 @@ _omaword() {
         'marks list') _arguments '(--all)'$translation '(-t --translation)--all[every installed translation]' '*--tag=[only marks with a tag starting so]:tag:' \
                           '--notes[only marks with a note]' '--highlights[only highlighted marks]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' '*:words:' ;;
         'marks show') _arguments $translation '--json[JSON output]' '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
+        'marks export') _arguments '(-o --output)'{-o+,--output=}'[write them to this file]:file:_files' '(- *)'{-h,--help}'[show help]' ;;
+        'marks backup') _arguments '(- *)'{-h,--help}'[show help]' ':file (- prints it):_files' ;;
         'tags list'|'history list'|'ribbon show') _arguments '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
         'desk show') _arguments '(- *)'{-h,--help}'[show help]' ;;
         'translations list'|'versions list') _arguments '--names[abbreviations only]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;

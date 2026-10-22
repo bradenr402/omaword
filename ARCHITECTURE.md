@@ -72,7 +72,9 @@ user's real data for development or tests.
 - Markdown export is `omaword-notes.md`, grouped by installed version, including
   tag-only ranges. Both exports use `QSaveFile`, create new files at 0600, retain
   replacement permissions, and reject live databases/sidecars and symlinks owned
-  by another user (`protectDestination`).
+  by another user (`protectDestination`). The command line prints the same
+  builders' output (`notesMarkdown`, `backupJson`) and writes files through
+  `saveExport`, under the same rules.
 
 ## Import and library lifecycle
 

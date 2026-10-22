@@ -83,6 +83,13 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .RB [ \-t
 .IR name ]
 .br
+.B omaword marks export
+.RB [ \-o
+.IR file ]
+.br
+.B omaword marks backup
+.IR file | \-
+.br
 .B omaword tags
 .RB [ list ]
 .RB [ \-\-json ]
@@ -290,6 +297,19 @@ matches.
 Prints the marks on a passage or within it, as
 .B marks list
 does but with each note whole, as you wrote it.
+.TP
+.B marks export
+Prints your marks as Markdown, as OmaWord's Export writes them: a section for
+each translation, then each mark's reference, highlight, tags, and note.
+.BI \-o " file"
+writes them to a file instead, readable by you alone.
+.TP
+.BI "marks backup" " file\fR|\fP\-"
+Writes the backup OmaWord's Back up writes, which its Restore reads: every
+translation's marks and reading place, your tags, and the Desk, in a file
+readable by you alone;
+.B \-
+prints it instead. Neither command writes over OmaWord's own databases.
 .TP
 .B tags \fR[\fPlist\fR]\fP
 Lists your tags by name, each with how many passages it marks.

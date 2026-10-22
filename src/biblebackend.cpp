@@ -4269,9 +4269,14 @@ bool BibleBackend::exportNotes(QUrl directory)
     const QString path = localPath(directory);
     if (path.isEmpty()) return false;
     if (!QFileInfo(path).isDir()) return setError("Choose an existing directory for the Markdown export.");
-    if (!protectDestination(QDir(path).filePath("omaword-notes.md"))) return false;
-    const auto rows = marks();
     // The export filename remains stable for existing scripts and consumers.
+    if (!saveExport(QDir(path).filePath("omaword-notes.md"),notesMarkdown().toUtf8())) return false;
+    clearError(); setStatus("Notes exported to " + QDir(path).filePath("omaword-notes.md")); return true;
+}
+
+QString BibleBackend::notesMarkdown() const
+{
+    const auto rows = marks();
     // One section per installed version with marks, in the library's order.
     QString markdown = "# " + Brand::name() + " notes\n\n";
     for (const auto &value : std::as_const(m_versions)) {
@@ -4290,10 +4295,15 @@ bool BibleBackend::exportNotes(QUrl directory)
         if (!section.isEmpty())
             markdown += "## " + markdownText(version.value("name").toString()) + " (" + markdownText(version.value("abbreviation").toString()) + ")\n\n" + section;
     }
+    return markdown;
+}
+
+bool BibleBackend::saveExport(const QString &path, const QByteArray &bytes)
+{
+    if (!protectDestination(path)) return false;
     QString error;
-    if (!writeAtomic(QDir(path).filePath("omaword-notes.md"),markdown.toUtf8(),&error))
-        return setError("Cannot export Markdown notes: " + error);
-    clearError(); setStatus("Notes exported to " + QDir(path).filePath("omaword-notes.md")); return true;
+    if (!writeAtomic(path,bytes,&error)) return setError("Cannot write " + path + ": " + error);
+    return true;
 }
 
 bool BibleBackend::protectDestination(const QString &path)
@@ -4350,7 +4360,13 @@ bool BibleBackend::exportBackup(QUrl file)
     if (!requireReady()) return false;
     if (!m_store.isOpen()) return setError("Your notes database is unavailable.");
     const QString path = localPath(file);
-    if (path.isEmpty() || !protectDestination(path)) return false;
+    QByteArray bytes;
+    if (path.isEmpty() || !backupJson(&bytes) || !saveExport(path,bytes)) return false;
+    clearError(); setStatus("Backup exported to " + path); return true;
+}
+
+bool BibleBackend::backupJson(QByteArray *json)
+{
     // Format 6: every installed version (marks kept for a removed one wait
     // for its reimport), read in one transaction.
     if (!m_store.transaction()) return setError("Cannot read a consistent backup: " + m_store.lastError().text());
@@ -4417,9 +4433,8 @@ bool BibleBackend::exportBackup(QUrl file)
         {"tags",tags},{"versions",versions},{"deskPage",deskPage}};
     const QByteArray bytes = QJsonDocument(root).toJson(QJsonDocument::Indented);
     if (bytes.size() > MaximumBackupSize) return setError("This backup exceeds the supported 32 MiB size. Export Markdown notes instead.");
-    QString error;
-    if (!writeAtomic(path,bytes,&error)) return setError("Cannot export backup: " + error);
-    clearError(); setStatus("Backup exported to " + path); return true;
+    *json = bytes;
+    return true;
 }
 
 bool BibleBackend::restoreTagDefinitions(const QMap<QString,QString> &definitions, QMap<QString,QString> *ids)
