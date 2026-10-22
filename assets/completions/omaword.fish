@@ -1,6 +1,6 @@
 # fish completion for omaword: `omaword completion fish > ~/.config/fish/completions/omaword.fish`.
 
-set -l commands open lookup read quote refs search link books marks tags desk history ribbon translations import completion help
+set -l commands open lookup read quote refs search link books marks tags desk history ribbon translations catalog import completion help
 set -l given $commands versions
 complete -c omaword -f
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a open -d 'Open a passage in a window'
@@ -17,6 +17,7 @@ complete -c omaword -n "not __fish_seen_subcommand_from $given" -a desk -d 'Prin
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a history -d 'List the passages you visited'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a ribbon -d 'Print where the ribbon lies'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a translations -d 'List the installed translations, or show one'
+complete -c omaword -n "not __fish_seen_subcommand_from $given" -a catalog -d "Browse AO Lab's catalog of translations"
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a import -d 'Install a translation from AO complete JSON'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a completion -d 'Print a shell completion script'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a help -d 'Show help for OmaWord or a command'
@@ -33,6 +34,11 @@ complete -c omaword -n "__fish_seen_subcommand_from export" -s o -l output -r -F
 complete -c omaword -n "__fish_seen_subcommand_from backup" -F
 complete -c omaword -n "__fish_seen_subcommand_from tags history; and not __fish_seen_subcommand_from list" -a list -d 'List them'
 complete -c omaword -n "__fish_seen_subcommand_from desk ribbon; and not __fish_seen_subcommand_from show" -a show -d 'Print it'
+complete -c omaword -n "__fish_seen_subcommand_from catalog; and not __fish_seen_subcommand_from list show refresh" -a list -d 'List the translations AO Lab offers'
+complete -c omaword -n "__fish_seen_subcommand_from catalog; and not __fish_seen_subcommand_from list show refresh" -a show -d "Show a translation in AO Lab's catalog"
+complete -c omaword -n "__fish_seen_subcommand_from catalog; and not __fish_seen_subcommand_from list show refresh" -a refresh -d "Download AO Lab's current catalog"
+complete -c omaword -n "__fish_seen_subcommand_from catalog" -l language -x -d "This language's, by its ISO 639-3 code"
+complete -c omaword -n "__fish_seen_subcommand_from catalog" -l all-languages -d "Every language's"
 complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from list show" -a list -d 'List the installed translations'
 complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from list show" -a show -d "Show a translation's source and rights"
 complete -c omaword -n "__fish_seen_subcommand_from translations versions; and __fish_seen_subcommand_from show" -x -a '(omaword translations --names 2>/dev/null)'
@@ -41,7 +47,7 @@ complete -c omaword -n "__fish_seen_subcommand_from open" -l here -d 'In the win
 complete -c omaword -n "__fish_seen_subcommand_from read" -l footnotes -d 'The footnotes after each passage'
 complete -c omaword -n "__fish_seen_subcommand_from quote" -l plain -d 'The text alone'
 complete -c omaword -n "__fish_seen_subcommand_from refs" -l quote -d 'Each passage in full'
-complete -c omaword -n "__fish_seen_subcommand_from read quote refs search books marks tags history ribbon translations versions" -l json -d 'JSON output'
+complete -c omaword -n "__fish_seen_subcommand_from read quote refs search books marks tags history ribbon translations versions catalog" -l json -d 'JSON output'
 complete -c omaword -n "__fish_seen_subcommand_from quote search marks" -l all -d 'Every installed translation'
 complete -c omaword -n "__fish_seen_subcommand_from marks" -l tag -x -d 'Only marks with a tag starting so'
 complete -c omaword -n "__fish_seen_subcommand_from marks" -l notes -d 'Only marks with a note'

@@ -6,6 +6,7 @@
 
 #include <QCommandLineParser>
 #include <QDateTime>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -177,6 +178,24 @@ const QList<Command> &commands()
          "which About & Attribution shows too.",
          {{"    --json", "Print a JSON object."}, helpOption},
          {"omaword translations show", "omaword translations show KJV"}, true},
+        {"catalog", "", "Browse AO Lab's catalog of translations", "", {}, {}, true, "list", true},
+        {"catalog list", "[<words>...] [--language <code> | --all-languages]", "List the translations AO Lab offers",
+         "Lists the translations in AO Lab's catalog, as last refreshed (else as OmaWord came with it), in English by "
+         "default: each one's abbreviation, name, and ID, and whether it is installed. Each word must match a "
+         "translation's name, English name, ID, or abbreviation, ignoring case. The exit status is 1 when none does.",
+         {{"    --language <code>", "List the translations in this language, by its ISO 639-3 code, such as spa."},
+          {"    --all-languages", "List the translations in every language."},
+          {"    --json", "Print a JSON array: each translation's ID, abbreviation, names, language, contents, and whether "
+                         "it is installed or can be."}, helpOption},
+         {"omaword catalog", "omaword catalog standard", "omaword catalog --language spa"}, true},
+        {"catalog show", "<id> [--json]", "Show a translation in AO Lab's catalog",
+         "Prints what AO Lab's catalog says of a translation, named by its ID or abbreviation: its name, language, "
+         "and contents, whether it is installed, and its terms and permissions, as Details & Attribution shows them.",
+         {{"    --json", "Print a JSON object."}, helpOption}, {"omaword catalog show eng_kjv", "omaword catalog show BSB"}, true},
+        {"catalog refresh", "", "Download AO Lab's current catalog",
+         "Downloads AO Lab's current catalog, which catalog list and show read from then on, as do the OmaWord "
+         "windows that open after it.",
+         {helpOption}, {"omaword catalog refresh"}, true},
         {"import", "<file>", "Install a translation from AO complete JSON",
          "Installs a translation, or replaces it with a newer copy, from AO standard complete JSON. "
          "Add version in OmaWord installs the catalog's translations directly.",
@@ -864,6 +883,135 @@ int translationDetails(const QStringList &arguments, QTextStream &out, QTextStre
     return Success;
 }
 
+// The catalog entry a name means: an ID in any case, else an abbreviation
+// (the English translation's, when several share it); {} with `error` else.
+QVariantMap catalogEntry(const QVariantList &entries, const QString &name, QString *error)
+{
+    for (const auto &value : entries) if (value.toMap().value("id").toString() == name) return value.toMap();
+    for (const auto &value : entries) if (value.toMap().value("id").toString().compare(name, Qt::CaseInsensitive) == 0) return value.toMap();
+    QVariantList matches, english;
+    for (const auto &value : entries) if (value.toMap().value("abbreviation").toString().compare(name, Qt::CaseInsensitive) == 0) matches << value;
+    for (const auto &value : std::as_const(matches)) if (value.toMap().value("language").toString() == QStringLiteral("eng")) english << value;
+    if (matches.size() == 1) return matches.first().toMap();
+    if (english.size() == 1) return english.first().toMap();
+    QStringList ids;
+    for (const auto &value : std::as_const(matches)) ids << value.toMap().value("id").toString();
+    *error = matches.isEmpty() ? "AO Lab's catalog has no translation \u201c" + name + "\u201d; omaword catalog lists them."
+                               : "several translations go by \u201c" + name + "\u201d (" + ids.join(", ") + "); name one by its ID.";
+    return {};
+}
+// Whether a catalog entry is installed, and whether AO Lab has another
+// revision of it (Versions offers to download it again).
+QString catalogState(const QVariantMap &entry, const QHash<QString, QString> &installed)
+{
+    const QString id = entry.value("id").toString(), revision = entry.value("sha256").toString();
+    if (installed.contains(id)) return !revision.isEmpty() && revision != installed.value(id) ? QStringLiteral("installed; AO Lab has another revision")
+                                                                                             : QStringLiteral("installed");
+    return entry.value("compatibilityReason").toString().isEmpty() ? QString() : QStringLiteral("cannot be installed");
+}
+QHash<QString, QString> installedRevisions()
+{
+    BibleBackend bible;
+    QHash<QString, QString> installed;
+    for (const auto &value : bible.versions()) installed.insert(value.toMap().value("id").toString(), value.toMap().value("revision").toString());
+    return installed;
+}
+QJsonObject catalogJson(const QVariantMap &entry, const QHash<QString, QString> &installed)
+{
+    const QString id = entry.value("id").toString();
+    return {{"id", id}, {"abbreviation", entry.value("abbreviation").toString()}, {"name", entry.value("name").toString()},
+            {"englishName", entry.value("englishName").toString()}, {"language", entry.value("language").toString()},
+            {"description", entry.value("description").toString()}, {"installed", installed.contains(id)},
+            {"installable", entry.value("compatibilityReason").toString().isEmpty()}, {"reason", entry.value("compatibilityReason").toString()},
+            {"revision", entry.value("sha256").toString()}, {"rights", entry.value("copyright").toString()},
+            {"permissions", entry.value("detailsUrl").toString()}};
+}
+
+int catalogList(const QStringList &arguments, QTextStream &out, QTextStream &err, const VersionCatalog::Dependencies &network)
+{
+    const QCommandLineOption language(QStringLiteral("language"), {}, QStringLiteral("code")), every(QStringLiteral("all-languages"));
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({language, every, json});
+    if (!p.parse(arguments)) return usage(err, "catalog list", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("catalog list")); return Success; }
+    if (p.parser.isSet(p.translation)) return usage(err, "catalog list", "--translation names an installed one; list them with omaword translations.");
+    if (p.parser.isSet(language) && p.parser.isSet(every)) return usage(err, "catalog list", "--language and --all-languages list different ones; use one.");
+    VersionCatalog catalog(network);
+    if (catalog.entries().isEmpty()) return failure(err, "catalog list", catalog.error());
+    const auto installed = installedRevisions();
+    // As Add version filters: one language (English unless named), every word in its names, ID, or abbreviation.
+    const QString code = p.parser.isSet(every) ? QString() : p.parser.isSet(language) ? p.parser.value(language).trimmed() : QStringLiteral("eng");
+    const QStringList words = p.parser.positionalArguments().join(' ').toLower().split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+    QVariantList shown;
+    for (const auto &value : catalog.entries()) {
+        const auto entry = value.toMap();
+        if (!code.isEmpty() && entry.value("language").toString() != code) continue;
+        const QString fields = QStringList{entry.value("name").toString(), entry.value("englishName").toString(),
+                                           entry.value("id").toString(), entry.value("abbreviation").toString()}.join('\n').toLower();
+        if (std::all_of(words.cbegin(), words.cend(), [&](const QString &word) { return fields.contains(word); })) shown << entry;
+    }
+    if (shown.isEmpty()) return failure(err, "catalog list", "no translation in AO Lab's catalog matches.");
+    QJsonArray array;
+    int width = 0;
+    for (const auto &value : std::as_const(shown)) width = std::max<int>(width, value.toMap().value("abbreviation").toString().size());
+    for (const auto &value : std::as_const(shown)) {
+        const auto entry = value.toMap();
+        array.append(catalogJson(entry, installed));
+        const QString state = catalogState(entry, installed);
+        if (!p.parser.isSet(json))
+            out << printable(entry.value("abbreviation").toString().leftJustified(width + 2) + entry.value("name").toString()
+                             + "  (" + entry.value("id").toString() + ')' + (state.isEmpty() ? QString() : QStringLiteral(" \u00b7 ") + state)) << '\n';
+    }
+    if (p.parser.isSet(json)) out << CommandLine::json(array);
+    out.flush();
+    return Success;
+}
+
+int catalogShow(const QStringList &arguments, QTextStream &out, QTextStream &err, const VersionCatalog::Dependencies &network)
+{
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({json});
+    if (!p.parse(arguments)) return usage(err, "catalog show", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("catalog show")); return Success; }
+    const QString name = p.parser.positionalArguments().join(' ').trimmed();
+    if (name.isEmpty() || p.parser.isSet(p.translation)) return usage(err, "catalog show", "name a translation by its ID, such as: omaword catalog show eng_kjv");
+    VersionCatalog catalog(network);
+    QString error;
+    const auto entry = catalogEntry(catalog.entries(), name, &error);
+    if (entry.isEmpty()) return failure(err, "catalog show", catalog.entries().isEmpty() ? catalog.error() : error);
+    const auto installed = installedRevisions();
+    if (p.parser.isSet(json)) { out << CommandLine::json(QJsonDocument(catalogJson(entry, installed))); out.flush(); return Success; }
+    QString language = entry.value("languageEnglishName").toString();
+    if (language.isEmpty()) language = entry.value("language").toString();
+    QString state = catalogState(entry, installed);
+    state = state.isEmpty() ? QStringLiteral("Not installed.")
+        : state == QStringLiteral("cannot be installed") ? "OmaWord cannot install it: " + entry.value("compatibilityReason").toString()
+        : state.left(1).toUpper() + state.mid(1) + '.';
+    QString text = entry.value("name").toString() + " (" + entry.value("abbreviation").toString() + ", " + entry.value("id").toString() + ")\n"
+                   + language + QStringLiteral(" \u00b7 ") + entry.value("description").toString() + '\n' + state + '\n';
+    if (!entry.value("detailsUrl").toString().isEmpty()) text += "Permissions: " + entry.value("detailsUrl").toString() + '\n';
+    if (!entry.value("copyright").toString().isEmpty()) text += '\n' + entry.value("copyright").toString() + '\n';
+    out << printable(text);
+    out.flush();
+    return Success;
+}
+
+int catalogRefresh(const QStringList &arguments, QTextStream &out, QTextStream &err, const VersionCatalog::Dependencies &network)
+{
+    Parser p;
+    if (!p.parse(arguments)) return usage(err, "catalog refresh", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("catalog refresh")); return Success; }
+    if (!p.parser.positionalArguments().isEmpty() || p.parser.isSet(p.translation)) return usage(err, "catalog refresh", "takes no arguments.");
+    VersionCatalog catalog(network);
+    QEventLoop loop;
+    QObject::connect(&catalog, &VersionCatalog::busyChanged, &loop, [&] { if (!catalog.busy()) loop.quit(); });
+    catalog.refresh();
+    if (catalog.busy()) loop.exec();
+    if (!catalog.error().isEmpty()) return failure(err, "catalog refresh", catalog.error());
+    out << "AO Lab's catalog lists " << catalog.entries().size() << " translations." << Qt::endl;
+    return Success;
+}
+
 int books(const QStringList &arguments, QTextStream &out, QTextStream &err)
 {
     const QCommandLineOption json(QStringLiteral("json"));
@@ -1231,7 +1379,8 @@ bool headless(const QStringList &arguments)
     return false;
 }
 
-int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal)
+int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal,
+        const VersionCatalog::Dependencies &network)
 {
     const QString first = arguments.value(0);
     if (first == QStringLiteral("-v") || first == QStringLiteral("--version")) { out << Brand::name() << ' ' << Brand::version() << Qt::endl; return Success; }
@@ -1262,6 +1411,9 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     if (name == QStringLiteral("search")) return search(rest, out, err, terminal);
     if (name == QStringLiteral("translations list")) return translations(rest, out, err);
     if (name == QStringLiteral("translations show")) return translationDetails(rest, out, err);
+    if (name == QStringLiteral("catalog list")) return catalogList(rest, out, err, network);
+    if (name == QStringLiteral("catalog show")) return catalogShow(rest, out, err, network);
+    if (name == QStringLiteral("catalog refresh")) return catalogRefresh(rest, out, err, network);
     if (name == QStringLiteral("books list")) return books(rest, out, err);
     if (name == QStringLiteral("books outline")) return outline(rest, out, err);
     if (name == QStringLiteral("marks list")) return marks(rest, out, err);

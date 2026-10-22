@@ -10,13 +10,14 @@ _omaword_subcommands()
         tags | history) echo "list" ;;
         desk | ribbon) echo "show" ;;
         translations | versions) echo "list show" ;;
+        catalog) echo "list show refresh" ;;
     esac
 }
 
 _omaword()
 {
     local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
-    local commands="open lookup read quote refs search link books marks tags desk history ribbon translations import completion help"
+    local commands="open lookup read quote refs search link books marks tags desk history ribbon translations catalog import completion help"
     case $prev in
         -t | --translation)
             COMPREPLY=($(compgen -W "$(omaword translations --names 2>/dev/null)" -- "$cur"))
@@ -27,7 +28,7 @@ _omaword()
         --in)
             COMPREPLY=($(compgen -W "ot nt apocrypha" -- "$cur"))
             return ;;
-        --limit | --tag)
+        --limit | --tag | --language)
             return ;;
         --import | import | -o | --output)
             compopt -o filenames 2>/dev/null
@@ -64,6 +65,9 @@ _omaword()
         "marks backup")
             if [[ $cur == -* ]]; then options="--help"; else compopt -o filenames 2>/dev/null; COMPREPLY=($(compgen -f -- "$cur")); return; fi ;;
         "translations list" | "versions list") options="--names --json --help" ;;
+        "catalog list") options="--language --all-languages --json --help" ;;
+        "catalog show") options="--json --help" ;;
+        "catalog refresh") options="--help" ;;
         "translations show" | "versions show")
             if [[ $cur == -* ]]; then options="--json --help"; else options=$(omaword translations --names 2>/dev/null); fi ;;
         link) options="--translation --help" ;;

@@ -114,6 +114,19 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .RI [ name ]
 .RB [ \-\-json ]
 .br
+.B omaword catalog
+.RB [ list ]
+.RI [ words ...]
+.RB [ \-\-language
+.IR code " | " \-\-all\-languages ]
+.RB [ \-\-json ]
+.br
+.B omaword catalog show
+.I id
+.RB [ \-\-json ]
+.br
+.B omaword catalog refresh
+.br
 .B omaword import
 .I file
 .br
@@ -337,6 +350,26 @@ is the same.)
 Prints what OmaWord knows of an installed translation, by default the one you
 read: its name, abbreviation, ID, language, and contents, AO's revision of it,
 and its rights as its source gives them, which About & Attribution shows too.
+.TP
+.B catalog \fR[\fPlist\fR] [\fIwords\fR...]\fP
+Lists the translations in AO Lab's catalog, as last refreshed (else as
+OmaWord came with it), in English by default: each one's abbreviation, name,
+and ID, and whether it is installed. Each word must match a translation's
+name, English name, ID, or abbreviation, ignoring case.
+.BI \-\-language " code"
+lists another language's, by its ISO 639-3 code;
+.B \-\-all\-languages
+lists every language's. The exit status is 1 when none matches.
+.TP
+.BI "catalog show" " id"
+Prints what AO Lab's catalog says of a translation, named by its ID or
+abbreviation: its name, language, and contents, whether it is installed, and
+its terms and permissions, as Details & Attribution shows them.
+.TP
+.B catalog refresh
+Downloads AO Lab's current catalog, which
+.B catalog
+reads from then on, as do the OmaWord windows that open after it.
 .TP
 .BI import " file"
 Installs a translation from AO standard complete JSON.

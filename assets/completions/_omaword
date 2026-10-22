@@ -19,6 +19,8 @@ _omaword_subcommands() {
         history) reply=('list:list the passages you visited') ;;
         ribbon) reply=('show:print where the ribbon lies') ;;
         translations|versions) reply=('list:list the installed translations' "show:show a translation's source and rights") ;;
+        catalog) reply=('list:list the translations AO Lab offers' "show:show a translation in AO Lab's catalog"
+                        "refresh:download AO Lab's current catalog") ;;
         *) reply=() ;;
     esac
 }
@@ -40,6 +42,7 @@ _omaword() {
         'history:list the passages you visited'
         'ribbon:print where the ribbon lies'
         'translations:list the installed translations, or show one'
+        "catalog:browse AO Lab's catalog of translations"
         'import:install a translation from AO complete JSON'
         'completion:print a shell completion script'
         'help:show help for OmaWord or a command'
@@ -87,6 +90,10 @@ _omaword() {
         'tags list'|'history list'|'ribbon show') _arguments '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
         'desk show') _arguments '(- *)'{-h,--help}'[show help]' ;;
         'translations list'|'versions list') _arguments '--names[abbreviations only]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
+        'catalog list') _arguments "(--all-languages)--language=[this language's, by its ISO 639-3 code]:code:" \
+                            "(--language)--all-languages[every language's]" '--json[JSON output]' '(- *)'{-h,--help}'[show help]' '*:words:' ;;
+        'catalog show') _arguments '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ':id:' ;;
+        'catalog refresh') _arguments '(- *)'{-h,--help}'[show help]' ;;
         'translations show'|'versions show') _arguments '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ':translation:_omaword_translations' ;;
         link) _arguments $translation '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
         import) _arguments '(- *)'{-h,--help}'[show help]' ':file:_files' ;;

@@ -6,10 +6,61 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QRegularExpression>
 #include <QScopeGuard>
 #include <QTemporaryDir>
+#include <QTimer>
+#include <cstring>
 #include "aofixture.h"
+
+// AO Lab, served from memory: each path's body, or 404.
+class FakeReply : public QNetworkReply
+{
+public:
+    FakeReply(const QNetworkRequest &request, const QByteArray &body, int status, QObject *parent)
+        : QNetworkReply(parent), m_body(body)
+    {
+        setRequest(request); setUrl(request.url()); setOperation(QNetworkAccessManager::GetOperation);
+        open(QIODevice::ReadOnly);
+        QTimer::singleShot(0, this, [this, status] {
+            setAttribute(QNetworkRequest::HttpStatusCodeAttribute, status);
+            setHeader(QNetworkRequest::ContentLengthHeader, m_body.size());
+            emit metaDataChanged();
+            if (isFinished()) return;
+            emit readyRead();
+            emit downloadProgress(m_body.size(), m_body.size());
+            setFinished(true);
+            emit finished();
+        });
+    }
+    void abort() override { if (!isFinished()) { setError(OperationCanceledError, "Canceled"); setFinished(true); emit finished(); } }
+    qint64 bytesAvailable() const override { return m_body.size() - m_offset + QNetworkReply::bytesAvailable(); }
+protected:
+    qint64 readData(char *data, qint64 maximum) override
+    {
+        const qint64 count = std::min<qint64>(maximum, m_body.size() - m_offset);
+        if (count <= 0) return isFinished() ? -1 : 0;
+        std::memcpy(data, m_body.constData() + m_offset, size_t(count));
+        m_offset += count;
+        return count;
+    }
+private:
+    QByteArray m_body;
+    qint64 m_offset = 0;
+};
+class FakeNetwork : public QNetworkAccessManager
+{
+public:
+    QHash<QString, QByteArray> bodies;
+protected:
+    QNetworkReply *createRequest(Operation, const QNetworkRequest &request, QIODevice *) override
+    {
+        const QString path = request.url().path();
+        return new FakeReply(request, bodies.value(path), bodies.contains(path) ? 200 : 404, this);
+    }
+};
 
 // The command line in process: the commands that print (CommandLine::run)
 // and the requests the running OmaWord takes (CommandLine::request).
@@ -35,11 +86,12 @@ class CliTest : public QObject
         QTRY_VERIFY_WITH_TIMEOUT(!bible.busy(), 30000);
         QVERIFY2(bible.ready() && bible.error().isEmpty(), qPrintable(bible.error()));
     }
-    static Output run(const QStringList &arguments, const QString &input = {}, bool terminal = false) {
+    static Output run(const QStringList &arguments, const QString &input = {}, bool terminal = false,
+                      const VersionCatalog::Dependencies &network = {}) {
         QString out, err, in = input;
         QTextStream outStream(&out), errStream(&err), inStream(&in);
         CommandLine::Terminal tty; tty.input = input.isEmpty() && terminal; tty.output = terminal;
-        const int status = CommandLine::run(arguments, outStream, errStream, inStream, tty);
+        const int status = CommandLine::run(arguments, outStream, errStream, inStream, tty, network);
         outStream.flush(); errStream.flush();
         return {status, out, err};
     }
@@ -498,6 +550,49 @@ private slots:
         QCOMPARE(printed["versions"], root["versions"]); QCOMPARE(printed["tags"], root["tags"]);
         QCOMPARE(run({"marks", "backup", live}).status, 1);
         QCOMPARE(run({"marks", "backup"}).status, 2); QCOMPARE(run({"marks", "backup", "a.json", "b.json"}).status, 2);
+    }
+    // AO Lab's catalog as OmaWord came with it, offline, and refreshed.
+    void catalogFromAoLab() {
+        const auto english = run({"catalog"});
+        QCOMPARE(english.status, 0); QCOMPARE(english.out.count('\n'), 51);
+        QVERIFY(english.out.contains("(eng_kjv) \u00b7 installed")); QVERIFY(!english.out.contains("(spa_"));
+        QVERIFY(run({"catalog", "--language", "spa"}).out.contains("(spa_r09)"));
+        QCOMPARE(run({"catalog", "list", "--all-languages"}).out.count('\n'), 1256);
+        QVERIFY(run({"catalog", "berean", "STANDARD"}).out.contains("BSB  Berean Standard Bible  (BSB)\n"));
+        QCOMPARE(run({"catalog", "nothing like this"}).status, 1);
+        QCOMPARE(run({"catalog", "--language", "spa", "--all-languages"}).status, 2);
+        QJsonObject kjv;
+        for (const auto &value : QJsonDocument::fromJson(run({"catalog", "--json"}).out.toUtf8()).array())
+            if (value.toObject()["id"] == "eng_kjv") kjv = value.toObject();
+        QVERIFY(kjv["installed"].toBool()); QVERIFY(kjv["installable"].toBool()); QCOMPARE(kjv["abbreviation"].toString(), QString("KJV"));
+        // One translation, by ID or abbreviation, as Details & Attribution shows it.
+        const auto shown = run({"catalog", "show", "eng_kjv"});
+        QVERIFY2(shown.out.startsWith(QStringLiteral("King James (Authorized) Version (KJV, eng_kjv)\nEnglish \u00b7 Book set unverified \u00b7 66 books")),
+                 qPrintable(shown.out));
+        QVERIFY(shown.out.contains("\nInstalled; AO Lab has another revision.\nPermissions: https://ebible.org/Scriptures/details.php?id=eng-kjv2006\n"));
+        QCOMPARE(run({"catalog", "show", "kjv"}).out, shown.out);
+        QVERIFY(run({"catalog", "show", "spa_r09"}).out.contains("OmaWord cannot install it: Language support not yet verified"));
+        QCOMPARE(run({"catalog", "show", "nope"}).status, 1); QCOMPARE(run({"catalog", "show"}).status, 2);
+        // Refreshed from AO Lab, it is the catalog read from then on.
+        FakeNetwork network;
+        QTemporaryDir data;
+        VersionCatalog::Dependencies dependencies;
+        dependencies.manager = &network; dependencies.dataDirectory = data.path(); dependencies.cacheDirectory = data.path();
+        const auto entry = [](const QString &id, const QString &name, const QString &language) {
+            return QJsonObject{{"id", id}, {"name", name}, {"shortName", id.toUpper()}, {"language", language}, {"textDirection", "ltr"},
+                               {"numberOfBooks", 66}, {"totalNumberOfChapters", 1189}, {"totalNumberOfVerses", 31102},
+                               {"completeTranslationApiLink", "/api/" + id + "/complete.json"}};
+        };
+        network.bodies["/api/available_translations.json"] = QJsonDocument(QJsonObject{{"translations", QJsonArray{
+            entry("eng_new", "New Original Fixture", "eng"), entry("spa_new", "Nueva", "spa")}}}).toJson();
+        const auto refreshed = run({"catalog", "refresh"}, {}, false, dependencies);
+        QCOMPARE(refreshed.status, 0); QCOMPARE(refreshed.out, QString("AO Lab's catalog lists 2 translations.\n"));
+        QCOMPARE(run({"catalog", "--all-languages"}, {}, false, dependencies).out,
+                 QStringLiteral("ENG_NEW  New Original Fixture  (eng_new)\nSPA_NEW  Nueva  (spa_new) \u00b7 cannot be installed\n"));
+        network.bodies.clear();
+        const auto failed = run({"catalog", "refresh"}, {}, false, dependencies);
+        QCOMPARE(failed.status, 1); QVERIFY2(failed.err.contains("HTTP 404"), qPrintable(failed.err));
+        QVERIFY(run({"catalog"}, {}, false, dependencies).out.contains("(eng_new)"));
     }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.

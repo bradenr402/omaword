@@ -1,6 +1,7 @@
 #pragma once
 
 #include "singleinstance.h"
+#include "versioncatalog.h"
 #include <QStringList>
 #include <QTextStream>
 
@@ -20,8 +21,10 @@ struct Terminal {
 bool headless(const QStringList &arguments);
 // Runs a command that needs no window and returns its exit status. `in` feeds
 // passages to `read`, `quote`, and `link`, one per line, when they are given
-// as "-" (or none are given and it is not a terminal).
-int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal);
+// as "-" (or none are given and it is not a terminal). `network` reaches AO
+// Lab's catalog (tests: a fake one).
+int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextStream &in, const Terminal &terminal,
+        const VersionCatalog::Dependencies &network = {});
 // The request for the running OmaWord, or false with `error` (exit status 2).
 bool request(const QStringList &arguments, SingleInstance::Request *request, QString *error);
 // omaword: links: `omaword:John%203:16`, `omaword:jn316?translation=KJV`,
