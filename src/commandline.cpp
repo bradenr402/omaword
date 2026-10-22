@@ -22,11 +22,15 @@ static void initCoreResources() { Q_INIT_RESOURCE(core); }
 namespace CommandLine {
 namespace {
 struct Option { QString flags, text; };
+// A command, a group of them named for what they manage (translations), or
+// one of a group's (translations list).
 struct Command {
     QString name, arguments, summary, description;
     QList<Option> options;
     QStringList examples;
     bool headless;
+    // A group: the command its name alone runs.
+    QString defaultCommand = {};
 };
 const Option translationOption{QStringLiteral("-t, --translation <name>"),
     QStringLiteral("Use this translation: its abbreviation (NET) or ID (eng_net), in any case. Default: the one you read.")};
@@ -47,7 +51,8 @@ const QList<Command> &commands()
          "It can be resized and opens at its last size. Suits a key binding; in Omarchy, in ~/.config/hypr/bindings.lua, "
          "with a rule that floats and centers it and shows and hides it at once, as Omarchy's menus do:\n"
          "  o.bind(\"SUPER + ALT + B\", \"Look up a passage\", \"omaword lookup\")\n"
-         "  o.window({ class = \"^omaword$\", title = \"^Look up · OmaWord$\" }, { float = true, center = true, no_anim = true })",
+         "  o.window({ class = \"^omaword$\", title = \"^Look up · OmaWord$\" },\n"
+         "           { float = true, center = true, no_anim = true })",
          {translationOption, helpOption}, {"omaword lookup", "omaword lookup rom 8", "omaword lookup -t KJV"}, false},
         {"quote", "<passage>... [--plain] [--json] [-t <name>]", "Print passages as quotations",
          "Prints each passage as OmaWord copies it: the text in quotation marks, a number before each verse, and the "
@@ -71,9 +76,10 @@ const QList<Command> &commands()
           {"    --json", "Print a JSON array: each match's reference, translation, text, and matched spans."}, helpOption},
          {"omaword search living water", "omaword search '\"the word became flesh\"' --all", "omaword search '/lov(e|ed) the world/'",
           "omaword search shepherd --in ot --in John", "omaword search grace --limit 0 | wc -l"}, true},
-        {"translations", "[--names] [--json]", "List the installed translations",
-         "Lists the installed translations with their abbreviations and IDs; * marks the one you read. "
-         "(omaword versions is the same.)",
+        {"translations", "", "List the installed translations",
+         "omaword versions is the same.", {}, {}, true, "list"},
+        {"translations list", "[--names] [--json]", "List the installed translations",
+         "Lists the installed translations with their abbreviations and IDs; * marks the one you read.",
          {{"    --names", "Print the abbreviations alone, one per line."}, {"    --json", "Print a JSON array."}, helpOption},
          {"omaword translations"}, true},
         {"link", "<passage>... [-t <name>]", "Print an omaword: link to a passage",
@@ -96,11 +102,18 @@ const QList<Command> &commands()
     return list;
 }
 
-const Command *find(const QString &name)
+const Command *find(QString name)
 {
-    const QString key = name == QStringLiteral("versions") ? QStringLiteral("translations") : name;
-    for (const auto &command : commands()) if (command.name == key) return &command;
+    if (name == QStringLiteral("versions") || name.startsWith(QStringLiteral("versions "))) name.replace(0, 8, QStringLiteral("translations"));
+    for (const auto &command : commands()) if (command.name == name) return &command;
     return nullptr;
+}
+// A group's commands, in the order listed.
+QList<const Command *> subcommands(const Command &group)
+{
+    QList<const Command *> list;
+    for (const auto &command : commands()) if (command.name.startsWith(group.name + ' ')) list << &command;
+    return list;
 }
 
 // What the command line prints names the command, its links, and the app as
@@ -140,7 +153,8 @@ void printHelp(QTextStream &out)
         + tableRow("omaword", "Start OmaWord, or bring it forward", 28) + '\n'
         + tableRow("omaword <passage>", "Open a passage in a new window", 28) + '\n'
         + tableRow("omaword <command> ...", "Run a command (below)", 28) + "\n\nCommands:\n";
-    for (const auto &command : commands()) text += tableRow(command.name, command.summary, 16) + '\n';
+    for (const auto &command : commands())
+        if (!command.name.contains(' ')) text += tableRow(command.name, command.summary, 16) + '\n';
     text += "\nOptions:\n"
         + tableRow(translationOption.flags, "The translation for open, quote, search, and link: its abbreviation or ID. "
                                             "Default: the one you read.", 28) + '\n'
@@ -159,12 +173,31 @@ void printHelp(QTextStream &out)
     out.flush();
 }
 
+// "omaword translations [list] [--names] [--json]": a group's default
+// command may go unnamed.
+QString usageLine(const Command &command)
+{
+    QString name = command.name;
+    if (const int space = name.indexOf(' '); space > 0 && find(name.left(space))->defaultCommand == name.mid(space + 1))
+        name = name.left(space) + QStringLiteral(" [") + name.mid(space + 1) + ']';
+    return "omaword " + name + (command.arguments.isEmpty() ? QString() : ' ' + command.arguments);
+}
+
 void printHelp(QTextStream &out, const Command &command)
 {
-    QString text = "omaword " + command.name + " \u2014 " + command.summary + "\n\nUsage:\n  omaword " + command.name;
-    if (!command.arguments.isEmpty()) text += ' ' + command.arguments;
-    text += '\n';
+    QString text = "omaword " + command.name + " \u2014 " + command.summary + "\n\nUsage:\n";
+    const auto list = subcommands(command);
+    if (list.isEmpty()) text += "  " + usageLine(command) + '\n';
+    for (const auto *subcommand : list) text += "  " + usageLine(*subcommand) + '\n';
     if (!command.description.isEmpty()) text += '\n' + wrap(command.description, 80, 0) + '\n';
+    if (!list.isEmpty()) {
+        text += "\nCommands:\n";
+        for (const auto *subcommand : list) {
+            const QString name = subcommand->name.mid(command.name.size() + 1);
+            text += tableRow(name, subcommand->summary + (name == command.defaultCommand ? " (the default)" : ""), 16) + '\n';
+        }
+        text += "\nRun 'omaword help " + command.name + " <command>' for a command's options.\n";
+    }
     if (!command.options.isEmpty()) {
         text += "\nOptions:\n";
         for (const auto &option : command.options) text += tableRow(option.flags, option.text, 30) + '\n';
@@ -209,7 +242,7 @@ QString suggestion(const QStringList &words)
 {
     if (words.isEmpty() || words.join(' ').contains(QRegularExpression(QStringLiteral("\\d"))) || words.first().size() < 4) return {};
     for (const auto &command : commands())
-        if (distance(words.first().toLower(), command.name) <= 2) return command.name;
+        if (!command.name.contains(' ') && distance(words.first().toLower(), command.name) <= 2) return command.name;
     return {};
 }
 
@@ -423,9 +456,9 @@ int translations(const QStringList &arguments, QTextStream &out, QTextStream &er
 {
     const QCommandLineOption names(QStringLiteral("names")), json(QStringLiteral("json"));
     Parser p({names, json});
-    if (!p.parse(arguments)) return usage(err, "translations", p.parser.errorText());
-    if (p.parser.isSet(p.help)) { printHelp(out, *find("translations")); return Success; }
-    if (!p.parser.positionalArguments().isEmpty() || p.parser.isSet(p.translation)) return usage(err, "translations", "takes no arguments.");
+    if (!p.parse(arguments)) return usage(err, "translations list", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("translations list")); return Success; }
+    if (!p.parser.positionalArguments().isEmpty() || p.parser.isSet(p.translation)) return usage(err, "translations list", "takes no arguments.");
     BibleBackend bible;
     const auto rows = bible.versions();
     if (p.parser.isSet(json)) {
@@ -519,20 +552,34 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     const QString first = arguments.value(0);
     if (first == QStringLiteral("-v") || first == QStringLiteral("--version")) { out << Brand::name() << ' ' << Brand::version() << Qt::endl; return Success; }
     if (first == QStringLiteral("-h") || first == QStringLiteral("--help")) { printHelp(out); return Success; }
-    const QStringList rest = arguments.mid(1);
+    QStringList rest = arguments.mid(1);
     if (first == QStringLiteral("help")) {
         if (rest.isEmpty()) { printHelp(out); return Success; }
-        if (const auto *command = find(rest.first())) { printHelp(out, *command); return Success; }
-        return usage(err, {}, "no command \u201c" + rest.first() + "\u201d.");
+        if (const auto *command = find(rest.join(' '))) { printHelp(out, *command); return Success; }
+        return usage(err, {}, "no command \u201c" + rest.join(' ') + "\u201d.");
     }
-    if (first == QStringLiteral("quote")) return quote(rest, out, err, in, terminal);
-    if (first == QStringLiteral("search")) return search(rest, out, err, terminal);
-    if (first == QStringLiteral("translations") || first == QStringLiteral("versions")) return translations(rest, out, err);
-    if (first == QStringLiteral("link")) return links(rest, out, err, in, terminal);
-    if (first == QStringLiteral("completion")) return completion(rest, out, err);
+    const Command *command = find(first);
+    if (!command) return usage(err, {}, "no command \u201c" + first + "\u201d.");
+    // A group runs the command named after it, else its default one.
+    if (!command->defaultCommand.isEmpty()) {
+        const QString next = rest.value(0);
+        if (next == QStringLiteral("-h") || next == QStringLiteral("--help")) { printHelp(out, *command); return Success; }
+        if (const auto *named = find(command->name + ' ' + next)) { command = named; rest.removeFirst(); }
+        else if (!next.isEmpty() && !next.startsWith('-')) {
+            QStringList names;
+            for (const auto *subcommand : subcommands(*command)) names << subcommand->name.mid(command->name.size() + 1);
+            return usage(err, command->name, "no command \u201c" + next + "\u201d; it has " + names.join(QStringLiteral(", ")) + '.');
+        } else command = find(command->name + ' ' + command->defaultCommand);
+    }
+    const QString &name = command->name;
+    if (name == QStringLiteral("quote")) return quote(rest, out, err, in, terminal);
+    if (name == QStringLiteral("search")) return search(rest, out, err, terminal);
+    if (name == QStringLiteral("translations list")) return translations(rest, out, err);
+    if (name == QStringLiteral("link")) return links(rest, out, err, in, terminal);
+    if (name == QStringLiteral("completion")) return completion(rest, out, err);
     // open, lookup, or import with --help.
-    if (const auto *command = find(first)) { printHelp(out, *command); return Success; }
-    return usage(err, {}, "no command \u201c" + first + "\u201d.");
+    printHelp(out, *command);
+    return Success;
 }
 
 bool request(const QStringList &arguments, SingleInstance::Request *request, QString *error)

@@ -63,8 +63,32 @@ private slots:
         QCOMPARE(run({"quote", "--help"}).out, quote.out);
         QCOMPARE(run({"versions", "--help"}).out, run({"help", "translations"}).out);
         QVERIFY(run({"open", "--help"}).out.contains("--here"));
-        // Every line fits 80 columns.
-        for (const auto &text : {help.out, quote.out, run({"help", "search"}).out})
+        // A group lists its commands; its name alone runs the default one.
+        const auto group = run({"translations", "--help"});
+        QVERIFY2(group.out.contains("omaword translations [list] [--names] [--json]\n"), qPrintable(group.out));
+        QVERIFY(group.out.contains("Commands:\n  list") && group.out.contains("(the default)"));
+        QCOMPARE(run({"translations", "list", "--help"}).out, run({"help", "translations", "list"}).out);
+        QCOMPARE(run({"help", "versions", "list"}).out, run({"help", "translations", "list"}).out);
+        auto unknownCommand = run({"translations", "shwo"});
+        QCOMPARE(unknownCommand.status, 2);
+        QVERIFY2(unknownCommand.err.contains(QStringLiteral("no command \u201cshwo\u201d; it has list")), qPrintable(unknownCommand.err));
+        // Every page fits 80 columns: the main one, each command's, and each of a group's commands'.
+        const auto commandsOn = [](const QString &page) {
+            QStringList names;
+            const auto lines = page.split('\n');
+            for (qsizetype i = lines.indexOf("Commands:") + 1; i > 0 && i < lines.size() && lines[i].startsWith("  "); ++i)
+                if (lines[i][2] != ' ') names << lines[i].trimmed().section(' ', 0, 0);
+            return names;
+        };
+        QStringList pages{help.out};
+        for (const auto &name : commandsOn(help.out)) {
+            const auto page = run({"help", name});
+            QVERIFY2(page.status == 0, qPrintable(name));
+            pages << page.out;
+            for (const auto &subcommand : commandsOn(page.out)) pages << run({"help", name, subcommand}).out;
+        }
+        QVERIFY(pages.size() > 10);
+        for (const auto &text : std::as_const(pages))
             for (const auto &line : text.split('\n')) QVERIFY2(line.size() <= 80, qPrintable(line));
         auto missing = run({"help", "nope"});
         QCOMPARE(missing.status, 2); QVERIFY(missing.err.contains("no command"));
@@ -111,6 +135,7 @@ private slots:
         auto list = run({"translations"});
         QCOMPARE(list.status, 0); QVERIFY(list.out.contains("* NET")); QVERIFY(list.out.contains("  KJV"));
         QCOMPARE(run({"translations", "--names"}).out, QString("NET\nKJV\n"));
+        QCOMPARE(run({"translations", "list", "--names"}).out, QString("NET\nKJV\n"));
         QCOMPARE(QJsonDocument::fromJson(run({"versions", "--json"}).out.toUtf8()).array().size(), 2);
         // search.
         auto found = run({"search", "loved"});

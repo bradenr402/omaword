@@ -34,6 +34,7 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .RB [ \-\-json ]
 .br
 .B omaword translations
+.RB [ list ]
 .RB [ \-\-names ]
 .RB [ \-\-json ]
 .br
@@ -65,6 +66,10 @@ and
 .B help
 print and exit without a window, and never move your reading place. The other
 commands go to the running OmaWord, which starts if it is not running yet.
+.PP
+Some commands come in groups named for what they work on, such as
+.BR "translations list" ;
+a group's name alone runs its first command.
 .SH PASSAGES
 Full or compact references, as the passage palette reads them:
 .IR "John 3:16" ,
@@ -152,7 +157,7 @@ emphasizes matched words;
 .B \-\-json
 prints a JSON array.
 .TP
-.B translations
+.B translations \fR[\fPlist\fR]\fP
 Lists the installed translations;
 .B *
 marks the one you read.

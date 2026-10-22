@@ -8,8 +8,16 @@ _omaword_translations() {
     _describe -t translations 'translation' names
 }
 
+# A group's commands, its default one first.
+_omaword_subcommands() {
+    case $1 in
+        translations|versions) reply=('list:list the installed translations') ;;
+        *) reply=() ;;
+    esac
+}
+
 _omaword() {
-    local -a commands
+    local -a commands reply
     commands=(
         'open:open a passage in a window'
         'lookup:look up a passage in a small window'
@@ -30,6 +38,19 @@ _omaword() {
     fi
     local command=$words[2]
     shift words; (( CURRENT-- ))
+    _omaword_subcommands $command
+    if (( $#reply )); then
+        if (( CURRENT == 2 )) && [[ $words[CURRENT] != -* ]]; then
+            _describe -t commands 'command' reply
+            return
+        fi
+        # The group's default command, unless another is named.
+        if (( ${reply[(I)$words[2]:*]} )); then
+            command+=" $words[2]"; shift words; (( CURRENT-- ))
+        else
+            command+=" ${reply[1]%%:*}"
+        fi
+    fi
     case $command in
         open) _arguments $translation '--here[in the window you were reading]' '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
         lookup) _arguments $translation '(- *)'{-h,--help}'[show help]' '*:text:' ;;
@@ -37,11 +58,16 @@ _omaword() {
         search) _arguments $translation '--all[every installed translation]' '*--in=[only these books: ot, nt, apocrypha, or a book]:part:(ot nt apocrypha)' \
                     '--limit=[at most this many matches]:count:' \
                     '--json[JSON output]' '--color=[when to color]:when:(auto always never)' '(- *)'{-h,--help}'[show help]' '*:words:' ;;
-        translations|versions) _arguments '--names[abbreviations only]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
+        'translations list'|'versions list') _arguments '--names[abbreviations only]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
         link) _arguments $translation '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
         import) _arguments '(- *)'{-h,--help}'[show help]' ':file:_files' ;;
         completion) _arguments ':shell:(bash zsh fish)' ;;
-        help) _describe -t commands 'command' commands ;;
+        help) if (( CURRENT == 2 )); then
+                  _describe -t commands 'command' commands
+              else
+                  _omaword_subcommands $words[2]
+                  (( $#reply )) && _describe -t commands 'command' reply
+              fi ;;
     esac
 }
 
