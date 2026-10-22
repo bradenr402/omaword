@@ -20,7 +20,9 @@ complete -c omaword -n "not __fish_seen_subcommand_from $given" -s v -l version 
 # A group's commands follow its name (after help too).
 complete -c omaword -n "__fish_seen_subcommand_from books; and not __fish_seen_subcommand_from list outline" -a list -d "List the translation's books"
 complete -c omaword -n "__fish_seen_subcommand_from books; and not __fish_seen_subcommand_from list outline" -a outline -d "Print a book's section headings"
-complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from list" -a list -d 'List the installed translations'
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from list show" -a list -d 'List the installed translations'
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from list show" -a show -d "Show a translation's source and rights"
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and __fish_seen_subcommand_from show" -x -a '(omaword translations --names 2>/dev/null)'
 complete -c omaword -n "__fish_seen_subcommand_from open lookup read quote refs search link books" -s t -l translation -x -a '(omaword translations --names 2>/dev/null)' -d 'Use a translation'
 complete -c omaword -n "__fish_seen_subcommand_from open" -l here -d 'In the window you were reading'
 complete -c omaword -n "__fish_seen_subcommand_from read" -l footnotes -d 'The footnotes after each passage'

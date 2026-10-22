@@ -6,7 +6,7 @@ _omaword_subcommands()
 {
     case $1 in
         books) echo "list outline" ;;
-        translations | versions) echo "list" ;;
+        translations | versions) echo "list show" ;;
     esac
 }
 
@@ -55,12 +55,14 @@ _omaword()
         search) options="--all --in --limit --json --color --translation --help" ;;
         "books list" | "books outline") options="--json --translation --help" ;;
         "translations list" | "versions list") options="--names --json --help" ;;
+        "translations show" | "versions show")
+            if [[ $cur == -* ]]; then options="--json --help"; else options=$(omaword translations --names 2>/dev/null); fi ;;
         link) options="--translation --help" ;;
         completion) ((COMP_CWORD == 2)) && options="bash zsh fish" ;;
         help) ((COMP_CWORD == 2)) && options="$commands"
               ((COMP_CWORD == 3)) && options=$(_omaword_subcommands "${COMP_WORDS[2]}") ;;
     esac
-    [[ $cur == -* || ${COMP_WORDS[1]} == completion || ${COMP_WORDS[1]} == help ]] &&
+    [[ $cur == -* || $command == completion || $command == help || $command == *" show" ]] &&
         COMPREPLY=($(compgen -W "$options" -- "$cur"))
 }
 complete -F _omaword omaword

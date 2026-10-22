@@ -12,7 +12,7 @@ _omaword_translations() {
 _omaword_subcommands() {
     case $1 in
         books) reply=("list:list the translation's books" "outline:print a book's section headings") ;;
-        translations|versions) reply=('list:list the installed translations') ;;
+        translations|versions) reply=('list:list the installed translations' "show:show a translation's source and rights") ;;
         *) reply=() ;;
     esac
 }
@@ -69,6 +69,7 @@ _omaword() {
         'books list') _arguments $translation '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
         'books outline') _arguments $translation '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ':book or chapter:' ;;
         'translations list'|'versions list') _arguments '--names[abbreviations only]' '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ;;
+        'translations show'|'versions show') _arguments '--json[JSON output]' '(- *)'{-h,--help}'[show help]' ':translation:_omaword_translations' ;;
         link) _arguments $translation '(- *)'{-h,--help}'[show help]' '*:passage:' ;;
         import) _arguments '(- *)'{-h,--help}'[show help]' ':file:_files' ;;
         completion) _arguments ':shell:(bash zsh fish)' ;;

@@ -2187,6 +2187,23 @@ QString BibleBackend::versionIdFor(const QString &name) const
     return {};
 }
 
+QVariantMap BibleBackend::versionDetails(const QString &id) const
+{
+    TagBible bible(installedPath(id),id);
+    if (!bible.db.isOpen()) return {};
+    QSqlQuery q(bible.db);
+    if (!q.exec("SELECT key,value FROM metadata")) return {};
+    QVariantMap metadata;
+    while (q.next()) metadata.insert(q.value(0).toString(),q.value(1));
+    const auto source = QJsonDocument::fromJson(metadata.value("ao_translation").toString().toUtf8()).object();
+    const QString language = source.value("languageEnglishName").toString();
+    return {{"id",id},{"name",metadata.value("edition")},{"abbreviation",metadata.value("abbreviation")},
+            {"copyright",metadata.value("copyright")},{"language",language.isEmpty() ? source.value("language").toString() : language},
+            {"books",metadata.value("book_count").toInt()},{"verses",metadata.value("verse_count").toInt()},
+            {"footnotes",metadata.value("note_count").toInt()},{"wordsOfJesus",metadata.value("words_of_jesus").toInt()},
+            {"revision",source.value("sha256").toString()}};
+}
+
 bool BibleBackend::readVersion(const QString &id)
 {
     if (id.isEmpty()) return setError("That Bible version is not installed.");

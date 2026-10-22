@@ -101,6 +101,7 @@ private slots:
         auto quote = run({"quote", "jn316"});
         QCOMPARE(quote.status, 1); QVERIFY(quote.err.contains("no translation is installed"));
         QCOMPARE(run({"translations"}).status, 0);
+        QCOMPARE(run({"translations", "show"}).status, 1);
     }
     void quoteSearchTranslationsAndLinks() {
         install(kjv); install(net);
@@ -377,6 +378,28 @@ private slots:
         const auto missing = run({"books", "outline", "Tobit", "-t", "OSF"});
         QCOMPARE(missing.status, 1); QVERIFY2(missing.err.contains(QStringLiteral("OSF has no such book: \u201cTobit\u201d")), qPrintable(missing.err));
         QCOMPARE(run({"books", "outline", "Nowhere", "-t", "OSF"}).status, 1);
+    }
+    void translationDetails() {
+        const QString path = fixtures.filePath("eng_rev_complete.json");
+        auto root = AoFixture::complete("eng_rev", {AoFixture::book("JHN", 1, {AoFixture::chapter(3, {
+            AoFixture::verse(16, {"He said,", QJsonObject{{"noteId", 0}}, " ", QJsonObject{{"text", "Follow me."}, {"wordsOfJesus", true}}})
+        }, {QJsonObject{{"noteId", 0}, {"caller", "+"}, {"text", "Or answered"}}})})}, "Revised fixture");
+        auto translation = root["translation"].toObject();
+        translation["shortName"] = "REV"; translation["sha256"] = "0123abcd"; translation["languageEnglishName"] = "English";
+        translation["licenseNotice"] = "Original fixture text, free to quote.";
+        root["translation"] = translation;
+        QVERIFY(AoFixture::write(path, root)); install(path);
+        const QString details = QStringLiteral("Revised fixture (REV, eng_rev)\nEnglish \u00b7 1 book \u00b7 1 verse \u00b7 1 footnote \u00b7 the words of Jesus marked\n"
+                                               "AO revision 0123abcd\n\nOriginal fixture text, free to quote.\n");
+        QCOMPARE(run({"translations", "show", "rev"}).out, details);
+        QCOMPARE(run({"translations", "show"}).out, details); // The one you read: the last installed.
+        QCOMPARE(run({"versions", "show", "eng_rev"}).out, details);
+        const auto json = QJsonDocument::fromJson(run({"translations", "show", "OSF", "--json"}).out.toUtf8()).object();
+        QCOMPARE(json["id"].toString(), QString("study")); QCOMPARE(json["books"].toInt(), 3); QCOMPARE(json["footnotes"].toInt(), 4);
+        QCOMPARE(json["wordsOfJesus"].toInt(), 1); QVERIFY(!json["active"].toBool()); QVERIFY(json["revision"].toString().isEmpty());
+        const auto unknown = run({"translations", "show", "XYZ"});
+        QCOMPARE(unknown.status, 1); QVERIFY(unknown.err.contains("no installed translation") && unknown.err.contains("REV"));
+        QCOMPARE(run({"translations", "show", "-t", "REV"}).status, 2);
     }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.

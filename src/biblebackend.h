@@ -106,6 +106,11 @@ public:
     QString versionAbbreviation() const { return m_abbreviation; }
     QString versionCopyright() const { return m_copyright; }
     QVariantList versions() const { return m_versions; }
+    // An installed version's details, from its text: {id, name, abbreviation,
+    // copyright (its rights as its source gives them), language, books,
+    // verses, footnotes, wordsOfJesus (counts), revision (AO's, as its
+    // catalog lists it)}; {} when it is not installed or cannot be read.
+    QVariantMap versionDetails(const QString &id) const;
     // The installed version a name means, by ID or abbreviation in any case
     // ("" for none): the command line's --translation.
     QString versionIdFor(const QString &name) const;

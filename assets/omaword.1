@@ -71,6 +71,10 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .RB [ \-\-names ]
 .RB [ \-\-json ]
 .br
+.B omaword translations show
+.RI [ name ]
+.RB [ \-\-json ]
+.br
 .B omaword import
 .I file
 .br
@@ -238,6 +242,11 @@ marks the one you read.
 prints the abbreviations alone.
 .RB ( "omaword versions"
 is the same.)
+.TP
+.BI "translations show" " \fR[\fPname\fR]\fP"
+Prints what OmaWord knows of an installed translation, by default the one you
+read: its name, abbreviation, ID, language, and contents, AO's revision of it,
+and its rights as its source gives them, which About & Attribution shows too.
 .TP
 .BI import " file"
 Installs a translation from AO standard complete JSON.

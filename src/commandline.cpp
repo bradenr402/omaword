@@ -116,12 +116,18 @@ const QList<Command> &commands()
          "them: each chapter, then its headings after the verses they open.",
          {translationOption, {"    --json", "Print a JSON array: each chapter's number, title, and headings."}, helpOption},
          {"omaword books outline John", "omaword books outline \"Psalm 119\" -t KJV"}, true},
-        {"translations", "", "List the installed translations",
+        {"translations", "", "List the installed translations, or show one",
          "omaword versions is the same.", {}, {}, true, "list"},
         {"translations list", "[--names] [--json]", "List the installed translations",
          "Lists the installed translations with their abbreviations and IDs; * marks the one you read.",
          {{"    --names", "Print the abbreviations alone, one per line."}, {"    --json", "Print a JSON array."}, helpOption},
          {"omaword translations"}, true},
+        {"translations show", "[<name>] [--json]", "Show a translation's source and rights",
+         "Prints what OmaWord knows of an installed translation, by default the one you read: its name, "
+         "abbreviation, ID, language, and contents, AO's revision of it, and its rights as its source gives them, "
+         "which About & Attribution shows too.",
+         {{"    --json", "Print a JSON object."}, helpOption},
+         {"omaword translations show", "omaword translations show KJV"}, true},
         {"import", "<file>", "Install a translation from AO complete JSON",
          "Installs a translation, or replaces it with a newer copy, from AO standard complete JSON. "
          "Add version in OmaWord installs the catalog's translations directly.",
@@ -354,9 +360,9 @@ bool useTranslation(BibleBackend &bible, const QString &name, const QString &com
 // JSON as QJsonDocument writes it, but with DEL and the C1 controls, which
 // it leaves raw, escaped as well: the values read back exact, and no control
 // character reaches a terminal.
-QString json(const QJsonArray &array)
+QString json(const QJsonDocument &document)
 {
-    const QString text = QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Indented));
+    const QString text = QString::fromUtf8(document.toJson(QJsonDocument::Indented));
     QString escaped;
     escaped.reserve(text.size());
     for (const QChar c : text) {
@@ -365,6 +371,7 @@ QString json(const QJsonArray &array)
     }
     return escaped;
 }
+QString json(const QJsonArray &array) { return json(QJsonDocument(array)); }
 
 // --color <when>: auto (a terminal, unless NO_COLOR is set), always, or
 // never; false for anything else.
@@ -772,6 +779,41 @@ int translations(const QStringList &arguments, QTextStream &out, QTextStream &er
     return Success;
 }
 
+int translationDetails(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption json(QStringLiteral("json"));
+    Parser p({json});
+    if (!p.parse(arguments)) return usage(err, "translations show", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("translations show")); return Success; }
+    if (p.parser.isSet(p.translation)) return usage(err, "translations show", "name the translation alone: omaword translations show KJV");
+    const QString name = p.parser.positionalArguments().join(' ').trimmed();
+    BibleBackend bible;
+    if (name.isEmpty() && !ready(bible, "translations show", err)) return Failure;
+    const QString id = name.isEmpty() ? bible.versionId() : bible.versionIdFor(name);
+    if (id.isEmpty()) return failure(err, "translations show", "no installed translation \u201c" + name + "\u201d (installed: " + translationList(bible) + ").");
+    const auto details = bible.versionDetails(id);
+    if (details.isEmpty()) return failure(err, "translations show", "cannot read " + id + "'s text.");
+    const auto count = [&](const char *key) { return details.value(key).toInt(); };
+    if (p.parser.isSet(json)) {
+        out << CommandLine::json(QJsonDocument(QJsonObject{{"id", id}, {"abbreviation", details.value("abbreviation").toString()},
+            {"name", details.value("name").toString()}, {"active", id == bible.versionId()}, {"language", details.value("language").toString()},
+            {"books", count("books")}, {"verses", count("verses")}, {"footnotes", count("footnotes")}, {"wordsOfJesus", count("wordsOfJesus")},
+            {"revision", details.value("revision").toString()}, {"rights", details.value("copyright").toString()}}));
+        out.flush();
+        return Success;
+    }
+    const auto counted = [](int n, const QString &noun) { return QString::number(n) + ' ' + noun + (n == 1 ? "" : "s"); };
+    QStringList contents{details.value("language").toString(), counted(count("books"), "book"), counted(count("verses"), "verse")};
+    if (count("footnotes")) contents << counted(count("footnotes"), "footnote");
+    if (count("wordsOfJesus")) contents << QStringLiteral("the words of Jesus marked");
+    out << printable(details.value("name").toString() + " (" + details.value("abbreviation").toString() + ", " + id + ")\n"
+                     + contents.join(QStringLiteral(" \u00b7 ")) + '\n');
+    if (!details.value("revision").toString().isEmpty()) out << "AO revision " << printable(details.value("revision").toString()) << '\n';
+    if (!details.value("copyright").toString().isEmpty()) out << '\n' << printable(details.value("copyright").toString()) << '\n';
+    out.flush();
+    return Success;
+}
+
 int books(const QStringList &arguments, QTextStream &out, QTextStream &err)
 {
     const QCommandLineOption json(QStringLiteral("json"));
@@ -933,6 +975,7 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     if (name == QStringLiteral("refs")) return refs(rest, out, err, in, terminal);
     if (name == QStringLiteral("search")) return search(rest, out, err, terminal);
     if (name == QStringLiteral("translations list")) return translations(rest, out, err);
+    if (name == QStringLiteral("translations show")) return translationDetails(rest, out, err);
     if (name == QStringLiteral("books list")) return books(rest, out, err);
     if (name == QStringLiteral("books outline")) return outline(rest, out, err);
     if (name == QStringLiteral("link")) return links(rest, out, err, in, terminal);
