@@ -7,13 +7,14 @@
 
 // The command line (`omaword help`). Most commands print and exit without a
 // window (see headless); the rest become a request to the running OmaWord
-// (open, lookup, import, an omaword: link, a bare passage), which starts if it
-// is not running yet.
+// (open, lookup, an omaword: link, a bare passage), which starts if it is not
+// running yet.
 namespace CommandLine {
 enum Exit { Success = 0, Failure = 1, Usage = 2 };
 struct Terminal {
     bool output = false;    // standard output is a terminal
     bool input = false;     // standard input is a terminal
+    bool errors = false;    // standard error is a terminal (progress shows there)
     bool color = false;     // colors allowed where asked for "auto" (a terminal, NO_COLOR unset)
     int columns = 0;        // the terminal's width, output piped (into a pager) or not; 0 without one
 };

@@ -284,9 +284,10 @@ omaword link jn316               # print an omaword: link to a passage
 omaword books outline John       # a book's section headings
 omaword marks --tag grace        # your marks, as Marks filters them
 omaword desk > study.md          # the Desk's Markdown
+omaword translations install BSB # a version from AO Lab (omaword catalog lists them)
 ```
 
-Commands other than `open`, `lookup`, and `import` print without opening a window. Links like `omaword:John%203:16` (or `omaword:jn316?translation=KJV`) open where you were reading, from `xdg-open` or a browser. `omaword help` lists every command and `man omaword` has the manual; `bin/install` adds bash completion, and `omaword completion zsh` (or `fish`) prints the others.
+Commands other than `open` and `lookup` run in the terminal without opening a window, and only `translations install`, `remove`, and `import` change anything; a running OmaWord follows. Links like `omaword:John%203:16` (or `omaword:jn316?translation=KJV`) open where you were reading, from `xdg-open` or a browser. `omaword help` lists every command and `man omaword` has the manual; `bin/install` adds bash completion, and `omaword completion zsh` (or `fish`) prints the others.
 
 `omaword lookup` suits a key binding; in Omarchy, add one, and a rule to float and center the window (it can be resized), to `~/.config/hypr/bindings.lua`:
 

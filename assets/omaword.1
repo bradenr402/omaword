@@ -114,6 +114,16 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .RI [ name ]
 .RB [ \-\-json ]
 .br
+.B omaword translations install
+.IR id ...
+.br
+.B omaword translations remove
+.IR name ...
+.RB [ \-\-delete\-marks ]
+.br
+.B omaword translations import
+.I file
+.br
 .B omaword catalog
 .RB [ list ]
 .RI [ words ...]
@@ -127,9 +137,6 @@ omaword \- a quiet, offline Bible reader for Omarchy
 .br
 .B omaword catalog refresh
 .br
-.B omaword import
-.I file
-.br
 .B omaword completion
 .BR bash | zsh | fish
 .br
@@ -142,12 +149,17 @@ brings forward the window you were reading; with a passage it opens it in a
 new window.
 .PP
 Commands other than
-.BR open ,
-.BR lookup ,
+.B open
+and
+.B lookup
+run without a window and never move your reading place; those two go to the
+running OmaWord, which starts if it is not running yet. Of the others, only
+.BR "translations install" ,
+.BR remove ,
 and
 .B import
-print and exit without a window, and never move your reading place. Those
-three go to the running OmaWord, which starts if it is not running yet.
+change anything: the library, as Versions does, which a running OmaWord's
+windows follow.
 .PP
 Some commands come in groups named for what they work on, such as
 .BR "translations list" ;
@@ -351,6 +363,24 @@ Prints what OmaWord knows of an installed translation, by default the one you
 read: its name, abbreviation, ID, language, and contents, AO's revision of it,
 and its rights as its source gives them, which About & Attribution shows too.
 .TP
+.BI "translations install" " id..."
+Downloads each translation from AO Lab, named by its ID or abbreviation in the
+catalog, checks it, and installs it, or replaces the installed copy, keeping
+your marks. Progress shows on a terminal; the exit status is 1 when one fails.
+.TP
+.BI "translations remove" " name..."
+Removes each installed translation. Your marks in it stay for when you install
+it again, unless
+.B \-\-delete\-marks
+deletes them too; your tags and the Desk stay either way.
+.TP
+.BI "translations import" " file"
+Installs a translation, or replaces the installed copy keeping your marks, from
+a file of AO standard complete JSON.
+.RB ( "omaword import"
+is the same.) Installing, removing, and importing leave the translation you
+read the one you read, unless none is installed yet.
+.TP
 .B catalog \fR[\fPlist\fR] [\fIwords\fR...]\fP
 Lists the translations in AO Lab's catalog, as last refreshed (else as
 OmaWord came with it), in English by default: each one's abbreviation, name,
@@ -370,9 +400,6 @@ its terms and permissions, as Details & Attribution shows them.
 Downloads AO Lab's current catalog, which
 .B catalog
 reads from then on, as do the OmaWord windows that open after it.
-.TP
-.BI import " file"
-Installs a translation from AO standard complete JSON.
 .TP
 .BI completion " shell"
 Prints the completion script for
@@ -430,5 +457,6 @@ omaword search '"living water"' \-\-all
 omaword search '/lov(e|ed) the world/'
 omaword search shepherd \-\-in ot \-\-in John
 omaword open "Romans 8" \-\-here
+omaword translations install BSB
 xdg\-open "$(omaword link jn316)"
 .fi

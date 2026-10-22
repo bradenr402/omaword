@@ -338,7 +338,10 @@ public:
     Q_INVOKABLE void closeUndoGroup() { m_undoGroup.clear(); }
 
     // expectedId (Re-import) rejects a file of another edition before importing.
-    Q_INVOKABLE void importAo(QUrl file, QString expectedId = QString());
+    // reading (Add version): the import becomes the version read; without it
+    // (the command line), it is read in this backend alone, as readVersion
+    // reads, and the version you read stays, unless none is installed.
+    Q_INVOKABLE void importAo(QUrl file, QString expectedId = QString(), bool reading = true);
     Q_INVOKABLE bool switchVersion(QString id);
     Q_INVOKABLE bool removeVersion(QString id, bool removeAnnotations);
     Q_INVOKABLE void clearError();
@@ -690,6 +693,7 @@ private:
 
     QString m_directory, m_error, m_status, m_note;
     QString m_versionId, m_edition, m_abbreviation, m_copyright, m_importTarget;
+    bool m_importReading = true;
     QString m_primarySelection;
     QVariantList m_versions;
     QVariantList m_books;

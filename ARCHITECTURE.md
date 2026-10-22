@@ -396,7 +396,11 @@ user's real data for development or tests.
 - `resources/crossrefs.bin` is **CC BY 4.0, not MIT**. `bin/crossrefs` converts
   OpenBible.info data; About, README, and packaging retain attribution/license.
   Imported version rights come from its source, not the catalog summary.
-- Headless CLI uses `QCoreApplication`, no window/clipboard/reading mutation.
+- Headless CLI uses `QCoreApplication`, no window or clipboard. It reads only,
+  except the library (`translations install`/`remove`/`import`), which it
+  changes as Versions does, an import read in its backend alone
+  (`importAo(..., reading=false)`, as `readVersion` reads), so the version you
+  read stays unless none is installed. Running readers follow (`noticeLibrary`).
   Bare passages open new readers; `omaword:` links use the active reader, even
   without a passage. Lookup uses a separate backend and opens into the last reader.
   Terminal output replaces C0/DEL/C1 controls except tabs/newlines; JSON preserves

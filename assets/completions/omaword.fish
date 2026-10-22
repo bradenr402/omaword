@@ -1,7 +1,7 @@
 # fish completion for omaword: `omaword completion fish > ~/.config/fish/completions/omaword.fish`.
 
-set -l commands open lookup read quote refs search link books marks tags desk history ribbon translations catalog import completion help
-set -l given $commands versions
+set -l commands open lookup read quote refs search link books marks tags desk history ribbon translations catalog completion help
+set -l given $commands versions import
 complete -c omaword -f
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a open -d 'Open a passage in a window'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a lookup -d 'Look up a passage in a small window'
@@ -16,9 +16,8 @@ complete -c omaword -n "not __fish_seen_subcommand_from $given" -a tags -d 'List
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a desk -d 'Print the Desk'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a history -d 'List the passages you visited'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a ribbon -d 'Print where the ribbon lies'
-complete -c omaword -n "not __fish_seen_subcommand_from $given" -a translations -d 'List the installed translations, or show one'
+complete -c omaword -n "not __fish_seen_subcommand_from $given" -a translations -d 'List, show, install, and remove translations'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a catalog -d "Browse AO Lab's catalog of translations"
-complete -c omaword -n "not __fish_seen_subcommand_from $given" -a import -d 'Install a translation from AO complete JSON'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a completion -d 'Print a shell completion script'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -a help -d 'Show help for OmaWord or a command'
 complete -c omaword -n "not __fish_seen_subcommand_from $given" -s h -l help -d 'Show help'
@@ -39,9 +38,14 @@ complete -c omaword -n "__fish_seen_subcommand_from catalog; and not __fish_seen
 complete -c omaword -n "__fish_seen_subcommand_from catalog; and not __fish_seen_subcommand_from list show refresh" -a refresh -d "Download AO Lab's current catalog"
 complete -c omaword -n "__fish_seen_subcommand_from catalog" -l language -x -d "This language's, by its ISO 639-3 code"
 complete -c omaword -n "__fish_seen_subcommand_from catalog" -l all-languages -d "Every language's"
-complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from list show" -a list -d 'List the installed translations'
-complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from list show" -a show -d "Show a translation's source and rights"
-complete -c omaword -n "__fish_seen_subcommand_from translations versions; and __fish_seen_subcommand_from show" -x -a '(omaword translations --names 2>/dev/null)'
+set -l translations list show install remove import
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from $translations" -a list -d 'List the installed translations'
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from $translations" -a show -d "Show a translation's source and rights"
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from $translations" -a install -d "Install translations from AO Lab's catalog"
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from $translations" -a remove -d 'Remove installed translations'
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and not __fish_seen_subcommand_from $translations" -a import -d 'Install a translation from AO complete JSON'
+complete -c omaword -n "__fish_seen_subcommand_from translations versions; and __fish_seen_subcommand_from show remove" -x -a '(omaword translations --names 2>/dev/null)'
+complete -c omaword -n "__fish_seen_subcommand_from remove" -l delete-marks -d 'Delete your marks in it too'
 complete -c omaword -n "__fish_seen_subcommand_from open lookup read quote refs search link books marks" -s t -l translation -x -a '(omaword translations --names 2>/dev/null)' -d 'Use a translation'
 complete -c omaword -n "__fish_seen_subcommand_from open" -l here -d 'In the window you were reading'
 complete -c omaword -n "__fish_seen_subcommand_from read" -l footnotes -d 'The footnotes after each passage'

@@ -594,6 +594,79 @@ private slots:
         QCOMPARE(failed.status, 1); QVERIFY2(failed.err.contains("HTTP 404"), qPrintable(failed.err));
         QVERIFY(run({"catalog"}, {}, false, dependencies).out.contains("(eng_new)"));
     }
+    // Installs, removals, and imports change the library as Versions does,
+    // the version you read staying the one you read.
+    void installRemoveAndImport() {
+        FakeNetwork network;
+        QTemporaryDir cache;
+        VersionCatalog::Dependencies dependencies;
+        dependencies.manager = &network; dependencies.cacheDirectory = cache.path(); dependencies.dataDirectory = cache.path();
+        auto asv = AoFixture::complete("eng_asv", {AoFixture::book("JHN", 1, {AoFixture::chapter(3, {AoFixture::verse(16, {"God loved the world so."})})})},
+                                       "Fixture Standard");
+        auto translation = asv["translation"].toObject(); translation["shortName"] = "ASV"; asv["translation"] = translation;
+        network.bodies["/api/eng_asv/complete.json"] = QJsonDocument(asv).toJson(QJsonDocument::Compact);
+        const auto reading = [] {
+            for (const auto &line : run({"translations"}).out.split('\n')) if (line.startsWith("* ")) return line;
+            return QString();
+        };
+        const QString before = reading();
+        QVERIFY(!before.isEmpty());
+        // From AO Lab's catalog, by abbreviation or ID; again, it replaces the copy, marks kept.
+        const auto installed = run({"translations", "install", "asv"}, {}, false, dependencies);
+        QCOMPARE(installed.status, 0); QCOMPARE(installed.out, QString("Installed ASV (eng_asv).\n")); QVERIFY(installed.err.isEmpty());
+        QCOMPARE(reading(), before);
+        QCOMPARE(run({"quote", "jn316", "-t", "ASV", "--plain"}).out, QString("God loved the world so.\n"));
+        {
+            BibleBackend bible;
+            QVERIFY(!bible.createAndAssignTag(QVariantMap{{"versionId", "eng_asv"}, {"book", 43}, {"chapter", 3}, {"start", 16},
+                                                          {"endBook", 43}, {"endChapter", 3}, {"end", 16}}, "kept").isEmpty());
+        }
+        QCOMPARE(run({"translations", "install", "eng_asv"}, {}, false, dependencies).out, QString("Replaced ASV (eng_asv).\n"));
+        QVERIFY(run({"marks", "-t", "ASV"}).out.contains("#kept"));
+        // Removed, its marks wait for it; with --delete-marks they go too.
+        const auto removed = run({"translations", "remove", "asv"});
+        QCOMPARE(removed.status, 0); QCOMPARE(removed.out, QString("Removed ASV (eng_asv); your marks in it stay for when you install it again.\n"));
+        QVERIFY(!run({"translations", "--names"}).out.contains("ASV"));
+        QCOMPARE(run({"translations", "install", "asv"}, {}, false, dependencies).status, 0);
+        QVERIFY(run({"marks", "-t", "ASV"}).out.contains("#kept"));
+        QCOMPARE(run({"translations", "remove", "ASV", "--delete-marks"}).out, QString("Removed ASV (eng_asv), and your marks in it.\n"));
+        QCOMPARE(run({"translations", "install", "asv"}, {}, false, dependencies).status, 0);
+        QCOMPARE(run({"marks", "-t", "ASV"}).err, QString("No marks in ASV yet.\n"));
+        QCOMPARE(reading(), before);
+        // Each that fails says why; the others install.
+        const auto failing = run({"translations", "install", "eng_bar", "nope", "spa_r09"}, {}, false, dependencies);
+        QCOMPARE(failing.status, 1); QVERIFY(failing.out.isEmpty());
+        QVERIFY2(failing.err.contains("eng_bar: Download failed (HTTP 404).") && failing.err.contains(QStringLiteral("no translation \u201cnope\u201d"))
+                 && failing.err.contains("spa_r09 cannot be installed"), qPrintable(failing.err));
+        QCOMPARE(run({"translations", "install"}).status, 2);
+        QCOMPARE(run({"translations", "remove", "nope"}).status, 1);
+        // Progress shows on a terminal, its line cleared when done.
+        QString out, err, in;
+        QTextStream outStream(&out), errStream(&err), inStream(&in);
+        CommandLine::Terminal terminal; terminal.errors = true;
+        QCOMPARE(CommandLine::run({"translations", "install", "asv"}, outStream, errStream, inStream, terminal, dependencies), 0);
+        errStream.flush();
+        QVERIFY2(err.contains(QStringLiteral("\rDownloading ASV\u2026 100%")) && err.contains(QStringLiteral("\rInstalling ASV\u2026 "))
+                 && err.endsWith("\r\x1b[K"), qPrintable(err));
+        // A file, as omaword import (the same) installs it.
+        const QString file = fixtures.filePath("eng_imp_complete.json");
+        QVERIFY(AoFixture::write(file, AoFixture::complete("eng_imp", {AoFixture::book("JHN", 1, {AoFixture::chapter(3, {
+            AoFixture::verse(16, {"Imported words."})})})}, "Imported fixture")));
+        QCOMPARE(run({"import", file}).out, QString("Installed eng_imp (eng_imp).\n"));
+        QCOMPARE(run({"translations", "import", file}).out, QString("Replaced eng_imp (eng_imp).\n"));
+        QCOMPARE(reading(), before);
+        const auto missing = run({"import", fixtures.filePath("missing.json")});
+        QCOMPARE(missing.status, 1); QVERIFY2(missing.err.contains("Cannot read the selected AO JSON file."), qPrintable(missing.err));
+        QCOMPARE(run({"import"}).status, 2);
+        QCOMPARE(run({"help", "import"}).out, run({"help", "translations", "import"}).out);
+        // With none installed, the first becomes the one you read.
+        QTemporaryDir home;
+        const QByteArray previous = qgetenv("XDG_DATA_HOME");
+        const auto restore = qScopeGuard([&] { qputenv("XDG_DATA_HOME", previous); });
+        qputenv("XDG_DATA_HOME", QFile::encodeName(home.path()));
+        QCOMPARE(run({"import", file}).status, 0);
+        QCOMPARE(run({"translations"}).out, QString("* eng_imp  Imported fixture  (eng_imp)\n"));
+    }
     // A verse the translation joined to another is quoted as the verse holding
     // it, which stderr names.
     void joinedVerseNote() {
@@ -618,6 +691,7 @@ private slots:
     void requestsForTheRunningApp() {
         QVERIFY(!CommandLine::headless({})); QVERIFY(!CommandLine::headless({"jn316"})); QVERIFY(!CommandLine::headless({"open", "jn316"}));
         QVERIFY(CommandLine::headless({"quote", "jn316"})); QVERIFY(CommandLine::headless({"open", "--help"})); QVERIFY(CommandLine::headless({"-v"}));
+        QVERIFY(CommandLine::headless({"import", "bible.json"})); QVERIFY(CommandLine::headless({"marks"}));
         SingleInstance::Request request; QString error;
         QVERIFY(CommandLine::request({"open", "--here", "-t", "KJV", "John", "3:16"}, &request, &error));
         QCOMPARE(request.reference, QString("John 3:16")); QVERIFY(!request.newWindow); QCOMPARE(request.translation, QString("KJV"));
@@ -627,14 +701,12 @@ private slots:
         QVERIFY(request.lookup); QCOMPARE(request.reference, QString("rom 8")); QVERIFY(!request.newWindow);
         QVERIFY(CommandLine::request({"omaword:John%203:16?translation=KJV"}, &request, &error));
         QCOMPARE(request.reference, QString("John 3:16")); QCOMPARE(request.translation, QString("KJV")); QVERIFY(!request.newWindow);
-        QVERIFY(CommandLine::request({"import", "bible.zip"}, &request, &error)); QVERIFY(QFileInfo(request.importPath).isAbsolute());
         QVERIFY(CommandLine::request({"--import", "bible.zip"}, &request, &error)); QVERIFY(request.importPath.endsWith("/bible.zip"));
         QVERIFY(!CommandLine::request({"open"}, &request, &error)); QVERIFY(error.contains("name a passage"));
         QVERIFY(!CommandLine::request({"qoute", "something"}, &request, &error)); QVERIFY(error.contains(QStringLiteral("Did you mean \u201cquote\u201d")));
         QVERIFY(!CommandLine::request({"--bogus"}, &request, &error)); QVERIFY(error.contains("bogus"));
         QVERIFY(!CommandLine::request({"jn316", "--here"}, &request, &error));
         QVERIFY(CommandLine::request({"lookup", "-t", "KJV"}, &request, &error)); QVERIFY(request.lookup); QCOMPARE(request.translation, QString("KJV"));
-        QVERIFY(!CommandLine::request({"import", "bible.zip", "-t", "KJV"}, &request, &error)); QVERIFY(error.contains("--translation goes with a passage"));
         // Links.
         QString reference, translation;
         QVERIFY(CommandLine::parseLink("omaword://John%203:16/", &reference, &translation)); QCOMPARE(reference, QString("John 3:16")); QVERIFY(translation.isEmpty());

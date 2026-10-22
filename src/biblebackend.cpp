@@ -426,7 +426,8 @@ BibleBackend::BibleBackend(QObject *parent) : QObject(parent)
         m_progressTimer.stop();
         const auto result = m_importWatcher.result();
         if (result.ok) {
-            if (flushDrafts() && changeVersion(result.edition.id,m_importTarget)) m_progress = 1;
+            // Read in this backend alone (peerReload) unless it is to be read everywhere.
+            if (flushDrafts() && changeVersion(result.edition.id,m_importTarget,{},false,false,!m_importReading && m_ready)) m_progress = 1;
             else removeOwnedBibleFiles(m_importTarget);
         } else {
             removeOwnedBibleFiles(m_importTarget);
@@ -2643,7 +2644,7 @@ QString BibleBackend::localPath(const QUrl &url)
     if (path.isEmpty() || !QFileInfo(path).isAbsolute()) { setError("Please choose an absolute local file path."); return {}; }
     return path;
 }
-void BibleBackend::importAo(QUrl file, QString expectedId)
+void BibleBackend::importAo(QUrl file, QString expectedId, bool reading)
 {
     if (sharedMutationBusy()) { setError("A shared library operation is already running."); return; }
     if (!m_storeReady || !m_store.isOpen()) { setError("Your notes database is unavailable. Check the data directory permissions."); return; }
@@ -2667,6 +2668,7 @@ void BibleBackend::importAo(QUrl file, QString expectedId)
     notifyBusy(); emit importProgressChanged();
     const QString target = m_directory + "/bible-" + connectionName() + ".sqlite";
     m_importTarget = target;
+    m_importReading = reading;
     const auto progress = m_importProgress;
     m_importWatcher.setFuture(QtConcurrent::run([path, target, progress, id = edition.id] {
         auto result = AoImporter::importFile(path, target, progress);

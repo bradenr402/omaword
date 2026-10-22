@@ -166,8 +166,10 @@ const QList<Command> &commands()
          "nowhere.",
          {{"    --json", "Print a JSON object: its reference, translation, and when it was placed."}, helpOption},
          {"omaword ribbon"}, true},
-        {"translations", "", "List the installed translations, or show one",
-         "omaword versions is the same.", {}, {}, true, "list"},
+        {"translations", "", "List, show, install, and remove translations",
+         "omaword versions is the same, and omaword import is translations import. Installing, removing, and importing "
+         "change the library as Versions does: a running OmaWord's windows follow, and the translation you read stays "
+         "the one you read, unless none is installed yet.", {}, {}, true, "list"},
         {"translations list", "[--names] [--json]", "List the installed translations",
          "Lists the installed translations with their abbreviations and IDs; * marks the one you read.",
          {{"    --names", "Print the abbreviations alone, one per line."}, {"    --json", "Print a JSON array."}, helpOption},
@@ -178,6 +180,20 @@ const QList<Command> &commands()
          "which About & Attribution shows too.",
          {{"    --json", "Print a JSON object."}, helpOption},
          {"omaword translations show", "omaword translations show KJV"}, true},
+        {"translations install", "<id>...", "Install translations from AO Lab's catalog",
+         "Downloads each translation from AO Lab, named by its ID or abbreviation in the catalog (omaword catalog lists "
+         "them), checks it, and installs it, or replaces the installed copy, keeping your marks. Progress shows on a "
+         "terminal. The exit status is 1 when one fails.",
+         {helpOption}, {"omaword translations install eng_kjv", "omaword translations install BSB eng_asv"}, true},
+        {"translations remove", "<name>... [--delete-marks]", "Remove installed translations",
+         "Removes each installed translation, by its abbreviation or ID. Your marks in it stay for when you install it "
+         "again, unless --delete-marks deletes them too; your tags and the Desk stay either way.",
+         {{"    --delete-marks", "Delete your marks in it as well."}, helpOption},
+         {"omaword translations remove ASV"}, true},
+        {"translations import", "<file>", "Install a translation from AO complete JSON",
+         "Installs a translation, or replaces the installed copy keeping your marks, from a file of AO standard "
+         "complete JSON. omaword import is the same.",
+         {helpOption}, {"omaword translations import ~/Downloads/eng_net_complete.json"}, true},
         {"catalog", "", "Browse AO Lab's catalog of translations", "", {}, {}, true, "list", true},
         {"catalog list", "[<words>...] [--language <code> | --all-languages]", "List the translations AO Lab offers",
          "Lists the translations in AO Lab's catalog, as last refreshed (else as OmaWord came with it), in English by "
@@ -196,10 +212,6 @@ const QList<Command> &commands()
          "Downloads AO Lab's current catalog, which catalog list and show read from then on, as do the OmaWord "
          "windows that open after it.",
          {helpOption}, {"omaword catalog refresh"}, true},
-        {"import", "<file>", "Install a translation from AO complete JSON",
-         "Installs a translation, or replaces it with a newer copy, from AO standard complete JSON. "
-         "Add version in OmaWord installs the catalog's translations directly.",
-         {helpOption}, {"omaword import ~/Downloads/eng_net_complete.json"}, false},
         {"completion", "<bash|zsh|fish>", "Print a shell completion script",
          "Prints the completion script for a shell; bin/install installs bash's. For zsh, save it in a directory on "
          "$fpath, such as ~/.zfunc (with fpath+=(~/.zfunc) before compinit in ~/.zshrc):\n"
@@ -214,6 +226,7 @@ const QList<Command> &commands()
 const Command *find(QString name)
 {
     if (name == QStringLiteral("versions") || name.startsWith(QStringLiteral("versions "))) name.replace(0, 8, QStringLiteral("translations"));
+    if (name == QStringLiteral("import")) name = QStringLiteral("translations import");
     for (const auto &command : commands()) if (command.name == name) return &command;
     return nullptr;
 }
@@ -405,7 +418,7 @@ bool ready(const BibleBackend &bible, const QString &command, QTextStream &err)
 {
     if (bible.ready()) return true;
     failure(err, command, bible.error().isEmpty() || bible.versions().isEmpty()
-        ? branded("no translation is installed yet. Add one in OmaWord (Add version) or with omaword import <file>.")
+        ? branded("no translation is installed yet. Add one in OmaWord (Add version) or with omaword translations install <id>.")
         : bible.error());
     return false;
 }
@@ -844,7 +857,7 @@ int translations(const QStringList &arguments, QTextStream &out, QTextStream &er
     }
     out.flush();
     if (rows.isEmpty() && !p.parser.isSet(names))
-        err << branded("No translation is installed yet. Add one in OmaWord (Add version) or with omaword import <file>.") << Qt::endl;
+        err << branded("No translation is installed yet. Add one in OmaWord (Add version) or with omaword translations install <id>.") << Qt::endl;
     return Success;
 }
 
@@ -1009,6 +1022,133 @@ int catalogRefresh(const QStringList &arguments, QTextStream &out, QTextStream &
     if (catalog.busy()) loop.exec();
     if (!catalog.error().isEmpty()) return failure(err, "catalog refresh", catalog.error());
     out << "AO Lab's catalog lists " << catalog.entries().size() << " translations." << Qt::endl;
+    return Success;
+}
+
+// Progress on a terminal's standard error ("Downloading KJV… 42%"), its line
+// cleared when done; nothing elsewhere.
+struct Progress {
+    QTextStream &err;
+    bool shown;
+    void show(const QString &what, double fraction)
+    {
+        if (!shown) return;
+        err << '\r' << printable(what) << QStringLiteral("\u2026 ") << qRound(fraction * 100) << "%\x1b[K";
+        err.flush();
+    }
+    void clear() { if (shown) { err << "\r\x1b[K"; err.flush(); } }
+};
+// A catalog translation downloaded and checked, waited for: its file, or
+// none (the catalog's error says why).
+QUrl download(VersionCatalog &catalog, const QString &id, const QString &name, Progress &progress)
+{
+    QUrl file;
+    QEventLoop loop;
+    QObject::connect(&catalog, &VersionCatalog::downloadFinished, &loop, [&](const QUrl &url) { file = url; });
+    QObject::connect(&catalog, &VersionCatalog::busyChanged, &loop, [&] { if (!catalog.busy()) loop.quit(); });
+    QObject::connect(&catalog, &VersionCatalog::progressChanged, &loop, [&] { progress.show("Downloading " + name, catalog.progress()); });
+    catalog.download(id);
+    if (catalog.busy()) loop.exec();
+    progress.clear();
+    return file;
+}
+// A file installed as the command line installs (the version you read
+// stays), waited for; false with bible's error.
+bool install(BibleBackend &bible, const QUrl &file, const QString &expectedId, const QString &name, Progress &progress)
+{
+    QEventLoop loop;
+    QObject::connect(&bible, &BibleBackend::busyChanged, &loop, [&] { if (!bible.busy()) loop.quit(); });
+    QObject::connect(&bible, &BibleBackend::importProgressChanged, &loop, [&] { progress.show("Installing " + name, bible.importProgress()); });
+    bible.importAo(file, expectedId, false);
+    if (bible.busy()) loop.exec();
+    progress.clear();
+    return bible.error().isEmpty();
+}
+bool installed(const BibleBackend &bible, const QString &id)
+{
+    for (const auto &value : bible.versions()) if (value.toMap().value("id").toString() == id) return true;
+    return false;
+}
+
+int installTranslations(const QStringList &arguments, QTextStream &out, QTextStream &err, const Terminal &terminal,
+                        const VersionCatalog::Dependencies &network)
+{
+    Parser p;
+    if (!p.parse(arguments)) return usage(err, "translations install", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("translations install")); return Success; }
+    const QStringList names = p.parser.positionalArguments();
+    if (names.isEmpty() || p.parser.isSet(p.translation))
+        return usage(err, "translations install", "name translations by their IDs, such as: omaword translations install eng_kjv");
+    VersionCatalog catalog(network);
+    BibleBackend bible;
+    Progress progress{err, terminal.errors};
+    int status = Success;
+    for (const auto &name : names) {
+        QString error;
+        const auto entry = catalogEntry(catalog.entries(), name, &error);
+        const QString id = entry.value("id").toString(), abbreviation = entry.value("abbreviation").toString();
+        if (entry.isEmpty()) error = catalog.entries().isEmpty() ? catalog.error() : error;
+        else if (!entry.value("compatibilityReason").toString().isEmpty())
+            error = id + " cannot be installed: " + entry.value("compatibilityReason").toString();
+        else {
+            const bool replacing = installed(bible, id);
+            const QUrl file = download(catalog, id, abbreviation, progress);
+            if (file.isEmpty()) error = id + ": " + catalog.error();
+            else if (!install(bible, file, id, abbreviation, progress)) error = id + ": " + bible.error();
+            else {
+                out << (replacing ? "Replaced " : "Installed ") << printable(bible.versionAbbreviation() + " (" + id + ").") << Qt::endl;
+                continue;
+            }
+        }
+        failure(err, "translations install", error);
+        status = Failure;
+    }
+    return status;
+}
+
+int removeTranslations(const QStringList &arguments, QTextStream &out, QTextStream &err)
+{
+    const QCommandLineOption marks(QStringLiteral("delete-marks"));
+    Parser p({marks});
+    if (!p.parse(arguments)) return usage(err, "translations remove", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("translations remove")); return Success; }
+    const QStringList names = p.parser.positionalArguments();
+    if (names.isEmpty() || p.parser.isSet(p.translation))
+        return usage(err, "translations remove", "name installed translations, such as: omaword translations remove ASV");
+    BibleBackend bible;
+    int status = Success;
+    for (const auto &name : names) {
+        const QString id = bible.versionIdFor(name);
+        if (id.isEmpty()) {
+            failure(err, "translations remove", "no installed translation \u201c" + name + "\u201d (installed: " + translationList(bible) + ").");
+            status = Failure;
+            continue;
+        }
+        QString abbreviation = id;
+        for (const auto &value : bible.versions()) if (value.toMap().value("id").toString() == id) abbreviation = value.toMap().value("abbreviation").toString();
+        if (!bible.removeVersion(id, p.parser.isSet(marks))) { failure(err, "translations remove", abbreviation + ": " + bible.error()); status = Failure; continue; }
+        out << "Removed " << printable(abbreviation + " (" + id + ")")
+            << (p.parser.isSet(marks) ? ", and your marks in it." : "; your marks in it stay for when you install it again.") << Qt::endl;
+    }
+    return status;
+}
+
+int importTranslation(const QStringList &arguments, QTextStream &out, QTextStream &err, const Terminal &terminal)
+{
+    Parser p;
+    if (!p.parse(arguments)) return usage(err, "translations import", p.parser.errorText());
+    if (p.parser.isSet(p.help)) { printHelp(out, *find("translations import")); return Success; }
+    const QStringList positional = p.parser.positionalArguments();
+    if (positional.size() != 1 || p.parser.isSet(p.translation))
+        return usage(err, "translations import", "name one AO complete JSON file, such as: omaword import eng_net_complete.json");
+    const QFileInfo file(positional.first());
+    BibleBackend bible;
+    QStringList ids;
+    for (const auto &value : bible.versions()) ids << value.toMap().value("id").toString();
+    Progress progress{err, terminal.errors};
+    if (!install(bible, QUrl::fromLocalFile(file.absoluteFilePath()), {}, file.fileName(), progress))
+        return failure(err, "translations import", bible.error());
+    out << (ids.contains(bible.versionId()) ? "Replaced " : "Installed ") << printable(bible.versionAbbreviation() + " (" + bible.versionId() + ").") << Qt::endl;
     return Success;
 }
 
@@ -1411,6 +1551,9 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     if (name == QStringLiteral("search")) return search(rest, out, err, terminal);
     if (name == QStringLiteral("translations list")) return translations(rest, out, err);
     if (name == QStringLiteral("translations show")) return translationDetails(rest, out, err);
+    if (name == QStringLiteral("translations install")) return installTranslations(rest, out, err, terminal, network);
+    if (name == QStringLiteral("translations remove")) return removeTranslations(rest, out, err);
+    if (name == QStringLiteral("translations import")) return importTranslation(rest, out, err, terminal);
     if (name == QStringLiteral("catalog list")) return catalogList(rest, out, err, network);
     if (name == QStringLiteral("catalog show")) return catalogShow(rest, out, err, network);
     if (name == QStringLiteral("catalog refresh")) return catalogRefresh(rest, out, err, network);
@@ -1426,7 +1569,7 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QTextS
     if (name == QStringLiteral("ribbon show")) return ribbon(rest, out, err);
     if (name == QStringLiteral("link")) return links(rest, out, err, in, terminal);
     if (name == QStringLiteral("completion")) return completion(rest, out, err);
-    // open, lookup, or import with --help.
+    // open or lookup with --help.
     printHelp(out, *command);
     return Success;
 }
@@ -1435,7 +1578,7 @@ bool request(const QStringList &arguments, SingleInstance::Request *request, QSt
 {
     QStringList words = arguments;
     QString command;
-    if (!words.isEmpty() && QStringList{"open", "lookup", "import"}.contains(words.first())) command = words.takeFirst();
+    if (!words.isEmpty() && QStringList{"open", "lookup"}.contains(words.first())) command = words.takeFirst();
     QCommandLineParser parser;
     const QCommandLineOption importOption(QStringLiteral("import"), {}, QStringLiteral("file")), here(QStringLiteral("here"));
     const QCommandLineOption translationOption({QStringLiteral("t"), QStringLiteral("translation")}, {}, QStringLiteral("name"));
@@ -1450,8 +1593,6 @@ bool request(const QStringList &arguments, SingleInstance::Request *request, QSt
     *request = SingleInstance::Request::fromArguments({}, parser.value(importOption), parser.isSet(importOption));
     request->translation = parser.value(translationOption);
     if (parser.isSet(here) && command != QStringLiteral("open")) return fail("--here goes with open: omaword open <passage> --here");
-    if (parser.isSet(translationOption) && command == QStringLiteral("import"))
-        return fail("--translation goes with a passage: omaword open <passage> -t <name>");
     if (command == QStringLiteral("open")) {
         if (positional.isEmpty()) return fail("name a passage, such as: omaword open jn316");
         request->reference = positional.join(' ');
@@ -1459,10 +1600,6 @@ bool request(const QStringList &arguments, SingleInstance::Request *request, QSt
     } else if (command == QStringLiteral("lookup")) {
         request->reference = positional.join(' ');
         request->lookup = true;
-        request->newWindow = false;
-    } else if (command == QStringLiteral("import")) {
-        if (positional.size() != 1) return fail("name one AO complete JSON file, such as: omaword import eng_net_complete.json");
-        request->importPath = QFileInfo(positional.first()).absoluteFilePath();
         request->newWindow = false;
     } else if (positional.size() == 1 && parseLink(positional.first(), &request->reference, &request->translation)) {
         // Even a link naming no passage goes to the reader you were using

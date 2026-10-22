@@ -29,6 +29,7 @@ int main(int argc, char *argv[]) {
         CommandLine::Terminal terminal;
         terminal.output = isatty(STDOUT_FILENO);
         terminal.input = isatty(STDIN_FILENO);
+        terminal.errors = isatty(STDERR_FILENO);
         terminal.color = terminal.output && qEnvironmentVariableIsEmpty("NO_COLOR") && qgetenv("TERM") != "dumb";
         // As man does, lines fit the terminal even when piped into a pager.
         for (const int descriptor : {STDOUT_FILENO, STDERR_FILENO}) {
