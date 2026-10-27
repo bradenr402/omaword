@@ -14,7 +14,8 @@ libraries shared by the app and tests:
   in `src/core.qrc`.
 - `qml/qml.pro`: `resources.qrc` (ahead-of-time compiled QML/JS) and
   `OmaWord.Reader` types, linked whole to retain static registrations.
-- `app/app.pro`: executable. `branding.env` generates `Brand::` and desktop assets.
+- `app/app.pro`: executable and its `make install`. `branding.env` generates
+  `Brand::` and desktop assets.
 
 | Area | Start here |
 | --- | --- |
@@ -422,3 +423,15 @@ user's real data for development or tests.
 - Sound uses per-cue PipeWire streams, follows the default output, retries after
   server failure, and idles after draining. Offscreen and `OMAWORD_SOUND=0` never
   open PipeWire. Sound/reduced-motion preferences use shared `QSettings`.
+
+## Packaging and releases
+
+- `make install` (`app/app.pro`) installs what `bin/install` does, plus zsh's and
+  fish's completions, under `PREFIX` (default `/usr/local`), named and branded
+  alike: an installed file goes in both. Omarchy's package (`pkgbuilds/omaword`
+  in `omacom/omarchy-pkgs`) runs `qmake6 PREFIX=/usr`, `make`, and
+  `make INSTALL_ROOT=<staging> install`, then adds the license. The recipe lists
+  the dependencies, so a new one needs a pull request there.
+- QML compiled ahead of time links `Qt_6_PRIVATE_API` symbols of `libQt6Qml`,
+  which a Qt update can break: the package declares `rebuild_on` `qt6-base` and
+  `qt6-declarative`, so Omarchy rebuilds it whenever either moves.
