@@ -79,3 +79,4 @@ Every action is in the `actions` catalog in `qml/Main.qml`, which feeds Keybindi
 
 - Small commits, each a working state, with imperative, capitalized titles that describe the user-visible behavior (they may run long), no prefix or period. Wrap code in backticks.
 - End every Git commit message with a `Co-authored by:` trailer naming the model you run as (`Co-authored by: Claude Opus 5.5 <noreply@anthropic.com>`).
+- A release: you bump `BRAND_VERSION` in `branding.env` and commit; the user tags `vX.Y.Z` to match (CI checks) and publishes the GitHub Release, which Omarchy's package follows (`ARCHITECTURE.md`).

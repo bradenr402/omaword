@@ -24,10 +24,23 @@ jobs:
           pacman -Syu --noconfirm --needed base-devel git qt6-base qt6-declarative \
             libpipewire fontconfig ttf-dejavu python
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Release tag matches BRAND_VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          source branding.env
+          if [[ $GITHUB_REF_NAME != "v$BRAND_VERSION" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match BRAND_VERSION $BRAND_VERSION in branding.env" >&2
+            exit 1
+          fi
       - name: README shortcuts are current
         run: bin/shortcuts --check
       - name: Build
         run: bin/build
+      - name: Stage make install
+        # Packages install through these rules; a renamed or missing file fails here.
+        run: |
+          make -C build install INSTALL_ROOT="$PWD/build/stage"
+          find build/stage -type f | sort
       - name: Test runner checks
         run: bash tests/test-runner.sh
       - name: Fast test suites

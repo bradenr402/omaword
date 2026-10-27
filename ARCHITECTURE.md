@@ -440,3 +440,6 @@ user's real data for development or tests.
 - QML compiled ahead of time links `Qt_6_PRIVATE_API` symbols of `libQt6Qml`,
   which a Qt update can break: the package declares `rebuild_on` `qt6-base` and
   `qt6-declarative`, so Omarchy rebuilds it whenever either moves.
+- A release is the GitHub Release of a tag `vX.Y.Z` equal to `BRAND_VERSION`
+  (CI checks the tag); Omarchy's bot turns each into a package update. CI also
+  stages `make install` on every push, so a renamed or missing file fails there.
