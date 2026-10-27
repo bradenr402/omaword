@@ -27,7 +27,7 @@ Notes for coding agents working on OmaWord, a keyboard-first Bible reader for Om
 - A new QML or JS file must be listed in `resources.qrc` or it won't load. Data the C++ core reads goes in `src/core.qrc`, so suites linking only the core have it.
 - Use `Brand::` (from `branding.env`) for the app's name and storage ID, never a literal.
 - Personal DB, text DB, and backup format versions are in `ARCHITECTURE.md`; bumping one needs a migration, tests, and an update there.
-- The user runs the installed app (`~/.local/bin/omaword`), not your builds. Once a feature, or a group that belongs together, passes its suites, run `bin/build` and `bin/install` and say so; install a fix the user is waiting on at once. OmaWord is single-instance (a launch opens a window in the running process) and runs its old build until every window, on every workspace, is closed: never stop it yourself, and pass on `bin/install`'s note naming a process still on the previous build.
+- The user runs the installed app (`~/.local/bin/omaword`), not your builds. Once a feature, or a group that belongs together, passes its suites, run `bin/build` and `bin/install` and say so; install a fix the user is waiting on at once. OmaWord is single-instance (a launch opens a window in the running process) and runs its old build until every window, on every workspace, is closed: never stop it yourself, and pass on `bin/install`'s notes naming a process on the previous build or another one, or another `omaword` first on PATH. Omarchy's PATH puts `~/.local/bin` after `/usr/bin`, so an `omaword` package there would take terminal and keybinding launches: keep the package off this machine.
 
 ## Tests
 

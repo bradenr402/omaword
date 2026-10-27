@@ -423,6 +423,11 @@ user's real data for development or tests.
 - Sound uses per-cue PipeWire streams, follows the default output, retries after
   server failure, and idles after draining. Offscreen and `OMAWORD_SOUND=0` never
   open PipeWire. Sound/reduced-motion preferences use shared `QSettings`.
+- Omarchy's PATH puts `~/.local/bin` after `/usr/bin`, so with an OmaWord package
+  installed a bare `omaword` starts the package's build, which then takes every
+  launch (single instance). `bin/install` writes its launcher entry's `Exec` lines
+  with its binary's path, and says when a terminal, or a running OmaWord, would
+  reach another build.
 
 ## Packaging and releases
 

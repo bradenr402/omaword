@@ -23,8 +23,18 @@ trap 'if [[ -n $temporary ]]; then rm -f -- "$temporary"; fi; rm -rf -- "$genera
 "$build_dir/$BRAND_ID" completion bash > "$generated/completion.bash"
 sed -e "s/OMAWORD/${BRAND_ID^^}/g; s/OmaWord/$BRAND_NAME/g; s/omaword/$BRAND_ID/g" \
     "$root/assets/omaword.1" > "$generated/$BRAND_ID.1"
+# The launcher runs this install by path: Omarchy's PATH puts ~/.local/bin
+# after /usr/bin, so a bare name would start a packaged OmaWord there instead.
+executable=$HOME/.local/bin/$BRAND_ID
+[[ $executable =~ ^[[:alnum:]/._-]+$ ]] || executable="\"$executable\""
+while IFS= read -r line; do
+    if [[ $line == "Exec=$BRAND_ID" || $line == "Exec=$BRAND_ID "* ]]; then
+        line="Exec=$executable${line#"Exec=$BRAND_ID"}"
+    fi
+    printf '%s\n' "$line"
+done < "$build_dir/$BRAND_ID.desktop" > "$generated/$BRAND_ID.desktop"
 
-sources=("$build_dir/$BRAND_ID" "$build_dir/$BRAND_ID.desktop"
+sources=("$build_dir/$BRAND_ID" "$generated/$BRAND_ID.desktop"
     "$root/assets/app.svg" "$root/assets/app-symbolic.svg"
     "$generated/completion.bash" "$generated/$BRAND_ID.1")
 destinations=("$HOME/.local/bin/$BRAND_ID" "$data_home/applications/$BRAND_ID.desktop"
@@ -116,14 +126,23 @@ fi
 if [[ -f $data_home/icons/hicolor/index.theme ]] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -f "$data_home/icons/hicolor"
 fi
-printf 'Installed %s to %s/.local/bin/%s\nEnsure %s/.local/bin is on PATH for the desktop launcher.\n' "$BRAND_NAME" "$HOME" "$BRAND_ID" "$HOME"
+printf 'Installed %s to %s\n' "$BRAND_NAME" "${destinations[0]}"
+on_path=$(command -v -- "$BRAND_ID" || true)
+if [[ -z $on_path ]]; then
+    printf 'Add %s to PATH to run %s in a terminal; the launcher runs it by path.\n' "${destinations[0]%/*}" "$BRAND_ID"
+elif [[ ! $on_path -ef ${destinations[0]} ]]; then
+    printf '%s in a terminal runs %s, earlier on PATH: remove it to run this install there. The launcher runs this one.\n' "$BRAND_ID" "$on_path"
+fi
 if [[ -d $data_home/$BRAND_ID/install-backups ]]; then
     printf 'Older installs kept backups in %s; nothing uses them now, so you can delete it.\n' "$data_home/$BRAND_ID/install-backups"
 fi
 # A running OmaWord keeps the build it started with, and every launch opens
 # its window in that process: say so, or the new build looks missing.
 for pid in $(pgrep -x -- "$BRAND_ID" 2>/dev/null); do
-    if [[ $(readlink -- "/proc/$pid/exe" 2>/dev/null) == "${destinations[0]} (deleted)" ]]; then
+    running=$(readlink -- "/proc/$pid/exe" 2>/dev/null) || continue
+    if [[ $running == "${destinations[0]} (deleted)" ]]; then
         printf '%s is still running the previous build (PID %s): close every %s window to run this one.\n' "$BRAND_NAME" "$pid" "$BRAND_NAME"
+    elif [[ $running != "${destinations[0]}" ]]; then
+        printf '%s is running from %s (PID %s), and launches open in it: close every %s window to run this install.\n' "$BRAND_NAME" "$running" "$pid" "$BRAND_NAME"
     fi
 done
