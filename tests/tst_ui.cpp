@@ -3827,7 +3827,6 @@ private slots:
         bible->setShowHeadings(false);
         bible->setNoteText("Closest packed marker");
         QVERIFY(!bible->createAndAssignTag(bible->tagScope(),"Packed").isEmpty());
-        QTest::qWait(80);
         auto geometry = [&]() {
             QVariantList result;
             for (int number : {31,32}) {
@@ -3843,6 +3842,17 @@ private slots:
             }
             return result;
         };
+        // The new text size and window width reach the rows a frame or more
+        // later (more on a slow machine): measure once they hold still.
+        QSignalSpy frames(window,&QQuickWindow::frameSwapped);
+        const auto settled = [&] {
+            const auto at = geometry();
+            const int count = frames.count();
+            window->update();
+            if (!QTest::qWaitFor([&] { return frames.count() > count; },1000)) return false;
+            return !window->property("restoringPosition").toBool() && at == geometry();
+        };
+        QTRY_VERIFY(settled());
         const auto before = geometry();
         for (int number : {31,32}) {
             bible->selectVerses(number,number);
