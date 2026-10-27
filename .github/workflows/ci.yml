@@ -58,8 +58,12 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm --needed base-devel git qt6-base qt6-declarative \
-            libpipewire fontconfig ttf-dejavu python
+            libpipewire fontconfig ttf-liberation ttf-jetbrains-mono-nerd python
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Use Omarchy's fonts
+        # The tests' layouts assume them. DejaVu stays out, so the tests' `DejaVu
+        # Sans` falls back to Liberation Sans, as it does on Omarchy.
+        run: cp .github/omarchy-fonts.conf /etc/fonts/conf.d/50-omarchy.conf
       - name: Run
         env:
           SHARD: ${{ matrix.shard }}

@@ -65,6 +65,10 @@ Other suites use `tests/<selector>.pro` and `tests/tst_<selector>.cpp`.
 - Some geometry suites load QML directly from the source tree. Don't edit QML
   during a run. Wait for layout conditions rather than extending sleeps;
   motion tests step animation time explicitly.
+- GUI suites assume Omarchy's fonts (`monospace` is JetBrainsMono Nerd Font,
+  `sans-serif` and `serif` are Liberation): other fonts move the geometry they
+  check. CI's GUI job installs them with Omarchy's mapping
+  (`.github/omarchy-fonts.conf`).
 
 New-suite registration and required checks are in [AGENTS.md](../AGENTS.md).
 Behavior contracts and format versions are in [ARCHITECTURE.md](../ARCHITECTURE.md).
