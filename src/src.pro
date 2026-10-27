@@ -1,6 +1,6 @@
 # Everything but main() and the QML's own C++ types (qml.pro), compiled once
 # for the app and every test suite.
-QT += core gui widgets qml quick quickcontrols2 sql concurrent dbus network multimedia
+QT += core gui widgets qml quick quickcontrols2 sql concurrent dbus network
 CONFIG += c++17 link_pkgconfig staticlib
 PKGCONFIG += fontconfig libpipewire-0.3
 include(../branding.pri)
