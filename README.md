@@ -33,7 +33,7 @@ bin/install
 
 Launch **OmaWord** from the application launcher, or run `omaword`. Choose **Add version** to install an English Bible from AO Lab (NET, KJV, BSB, and more) or import AO standard complete JSON; after that, everything works offline. The searchable catalog is bundled; manual refreshes persist across restarts and updates. Other languages are discoverable but not yet supported.
 
-To update, `git pull`, run `bin/build` and `bin/install` again, and close every OmaWord window. To install it as an Arch package instead, run `makepkg -si` in `packaging/`.
+To update, `git pull`, run `bin/build` and `bin/install` again, and close every OmaWord window.
 
 ## Shortcuts
 

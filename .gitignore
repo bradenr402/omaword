@@ -7,15 +7,6 @@
 moc_*.cpp
 qrc_*.cpp
 
-# Arch packaging output (packaging/src is makepkg's work directory,
-# packaging/omaword its clone of the source)
-/packaging/src/
-/packaging/pkg/
-/packaging/omaword/
-*.pkg.tar.*
-*.src.tar.*
-*.log
-
 # User-provided Bible content and local data
 *_complete.json
 complete.json
