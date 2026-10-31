@@ -27,7 +27,7 @@ jobs:
       - name: Release tag matches BRAND_VERSION
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          source branding.env
+          . ./branding.env
           if [[ $GITHUB_REF_NAME != "v$BRAND_VERSION" ]]; then
             echo "Tag $GITHUB_REF_NAME does not match BRAND_VERSION $BRAND_VERSION in branding.env" >&2
             exit 1
