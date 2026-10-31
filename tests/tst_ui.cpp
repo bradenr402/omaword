@@ -5670,7 +5670,8 @@ private slots:
         QTRY_VERIFY(!prop("textPopover","visible").toBool()); QCOMPARE(bible->selectionReference(),selected);
         click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
         click(item("savedControl")); QTRY_VERIFY(!prop("textPopover","visible").toBool()); QVERIFY(!window->property("marksOpen").toBool());
-        key(Qt::Key_D,Qt::ShiftModifier); QTRY_VERIFY(window->property("deskOpen").toBool());
+        // The Desk counts as open as it starts to slide in: click it once it's in place.
+        key(Qt::Key_D,Qt::ShiftModifier); QTRY_VERIFY(prop("notesDrawer","opened").toBool()); QVERIFY(window->property("deskOpen").toBool());
         key(Qt::Key_W,Qt::ControlModifier); QTRY_VERIFY(window->activeFocusItem() == item("readerSurface"));
         click(aa); QTRY_VERIFY(prop("textPopover","opened").toBool());
         click(item("deskEditor")); QTRY_VERIFY(!prop("textPopover","visible").toBool());
