@@ -551,6 +551,8 @@ private slots:
         key(Qt::Key_Home); QTRY_COMPARE(contentY("settingsScroll"), 0.0);
         key(Qt::Key_PageDown); QTRY_VERIFY(contentY("settingsScroll") > 0);
         key(Qt::Key_Home); QTRY_COMPARE(contentY("settingsScroll"), 0.0);
+        // Focus reveals the slider where the dialog has it then: let its layout land first.
+        QVERIFY(QQuickTest::qWaitForPolish(window));
         auto line = item("lineHeightSlider"); line->forceActiveFocus(); QCoreApplication::processEvents();
         const auto slider = line->mapRectToItem(item("settingsScroll"), line->boundingRect());
         QVERIFY2(slider.top() >= -1 && slider.bottom() <= item("settingsScroll")->height() + 1, qPrintable(QString::number(slider.top())));
